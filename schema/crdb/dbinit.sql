@@ -3128,7 +3128,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo (
     --
     -- Because the system version is embedded in the repo's artifacts.json,
     -- each system version is associated with exactly one checksum.
-    system_version STRING(64) NOT NULL,
+    system_version STRING(128) NOT NULL,
 
     -- For debugging only:
     -- Filename provided by the user.
@@ -3373,13 +3373,25 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_host_inf
 
 CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_ereports (
     bundle_id UUID NOT NULL,
-    start_time TIMESTAMPTZ,
-    end_time TIMESTAMPTZ,
     only_serials TEXT[] NOT NULL DEFAULT ARRAY[],
     only_classes TEXT[] NOT NULL DEFAULT ARRAY[],
 
+    PRIMARY KEY (bundle_id)
+);
+
+-- Bundle-wide time range applied to time-bounded categories (host-info logs
+-- and ereports) at collection time. Row existence indicates a range was set,
+-- and a persisted range always carries a start bound (stamped at bundle
+-- creation).
+CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_time_range (
+    bundle_id UUID NOT NULL,
+    start_time TIMESTAMPTZ NOT NULL,
+    end_time TIMESTAMPTZ,
+
     PRIMARY KEY (bundle_id),
-    CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
+    CONSTRAINT start_before_end CHECK (
+        end_time IS NULL OR start_time <= end_time
+    )
 );
 
 /*******************************************************************/
@@ -4292,6 +4304,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_service_processor (
     hubris_archive_id TEXT NOT NULL,
     power_state omicron.public.hw_power_state NOT NULL,
 
+    -- the rack ID that this SP was found in (determined based on which MGS
+    -- reported it)
+    rack_id UUID NOT NULL,
+
     PRIMARY KEY (inv_collection_id, hw_baseboard_id)
 );
 
@@ -4464,6 +4480,19 @@ CREATE TYPE IF NOT EXISTS omicron.public.inv_zone_manifest_source AS ENUM (
     'sled-agent'
 );
 
+-- A sled's update disposition in inventory.
+--
+-- This is analogous to the `sled_update_availability` enum used as a part of
+-- storing update disposition in blueprints. We use a separate enum (despite
+-- currently having identical variants) because there are separate Rust
+-- types, and it allows the two to evolve independently.
+CREATE TYPE IF NOT EXISTS omicron.public.inv_sled_update_disposition AS ENUM (
+    -- Available for use for all provisions.
+    'available',
+    -- Disallowed for all use + migratable instances are being evacuated.
+    'evacuating'
+);
+
 -- observations from and about sled agents
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- where this observation came from
@@ -4547,19 +4576,37 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     --
     -- The path to the boot disk file
     measurement_manifest_boot_disk_path TEXT NOT NULL,
-    -- The source of the measurement manifest on the boot disk: from installinator or
-    -- sled-agent (synthetic). NULL means there is an error reading the measurement manifest.
+    -- The source of the measurement manifest on the boot disk: from
+    -- installinator or sled-agent (synthetic). NULL means there is an error
+    -- reading the measurement manifest.
     measurement_manifest_source omicron.public.inv_zone_manifest_source,
-    -- The mupdate ID that created the measurement manifest if this is from installinator. If
-    -- this is NULL, then either the measurement manifest is synthetic or there was an
-    -- error reading the measurement manifest.
+    -- The mupdate ID that created the measurement manifest if this is from
+    -- installinator. If this is NULL, then either the measurement manifest is
+    -- synthetic or there was an error reading the measurement manifest.
     measurement_manifest_mupdate_id UUID,
-    -- Message describing the status of the measurement manifest on the boot disk. If
-    -- this is NULL, then the measurement manifest was successfully read, and the
-    -- inv_zone_manifest_measurement table has entries corresponding to the zone
-    -- manifest.
+    -- Message describing the status of the measurement manifest on the boot
+    -- disk. If this is NULL, then the measurement manifest was successfully
+    -- read, and the inv_zone_manifest_measurement table has entries
+    -- corresponding to the zone manifest.
     measurement_manifest_boot_disk_error TEXT,
 
+    -- Columns making up the instance manager status on this sled
+    --
+    -- The update disposition as observed (and acted upon) by the instance
+    -- manager. This should usually match the update disposition in the
+    -- most-recently-ledgered config, but there can be a lag between the
+    -- ledgered config updating and the instance manager being aware of it if
+    -- the instance manager is busy.
+    --
+    -- NULL in this column maps to
+    -- `CurrentUpdateDisposition::ConfigNotAvailable`. A non-`NULL` value maps
+    -- to `CurrentUpdateDisposition::Known(the_disposition)`.
+    instance_manager_update_disposition omicron.public.inv_sled_update_disposition,
+    -- Number of VMMs currently registered with the instance manager.
+    instance_manager_num_registered_vmms INT8 NOT NULL CHECK (instance_manager_num_registered_vmms >= 0),
+
+    -- ID of the row in the `rack` table that corresponds to this sled's rack
+    rack_id UUID NOT NULL,
 
     CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
         (reconciler_status_kind = 'running'
@@ -4861,19 +4908,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
     -- - The sled reporting the disk
     -- - The name of this dataset
     PRIMARY KEY (inv_collection_id, sled_id, name)
-);
-
--- A sled's update disposition in inventory.
---
--- This is analogous to the `sled_update_availability` enum used as a part of
--- storing update disposition in blueprints. We use a separate enum (despite
--- currently having identical variants) because there are separate Rust
--- types, and it allows the two to evolve independently.
-CREATE TYPE IF NOT EXISTS omicron.public.inv_sled_update_disposition AS ENUM (
-    -- Available for use for all provisions.
-    'available',
-    -- Disallowed for all use + migratable instances are being evacuated.
-    'evacuating'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
@@ -5540,6 +5574,131 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_fmd_resource (
     PRIMARY KEY (inv_collection_id, sled_id, resource_id)
 );
 
+
+-- Description of the presence or absence of a component, as reported by a SP.
+--
+--  The presence of some components may vary based on the power state of the
+-- sled (e.g., components that time out or appear unavailable if the sled is in
+-- A2 may become present when the sled moves to A0).
+CREATE TYPE IF NOT EXISTS omicron.public.sp_component_presence AS ENUM (
+    -- The component is present.
+    'present',
+    -- The component is not present.
+    'not_present',
+    -- The component is present but in a failed or faulty state.
+    'failed',
+    -- The SP is unable to determine the presence of the component.
+    'unavailable',
+    -- The SP's attempt to determine the presence of the component timed out.
+    'timeout',
+    -- The SP's attempt to determine the presence of the component failed.
+    'error'
+);
+
+-- The location of a power supply unit (PSU) in a power shelf.
+--
+-- This is determined from the SP-reported component ID, and can be converted
+-- back into that value when requesting additional data from that SP.
+CREATE TYPE IF NOT EXISTS omicron.public.inv_psu_slot AS ENUM (
+    'PSU0',
+    'PSU1',
+    'PSU2',
+    'PSU3',
+    'PSU4',
+    'PSU5'
+);
+
+
+-- inventory table for power supply units (PSUs) in a power shelf
+CREATE TABLE IF NOT EXISTS omicron.public.inv_power_shelf_psu (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- which MGS instance reported this data
+    source TEXT NOT NULL,
+    -- baseboard of the power shelf controller which told us about this PSU
+    -- (foreign key into `hw_baseboard_id` table)
+    psc_baseboard_id UUID NOT NULL,
+
+    -- which slot in the power shelf this record represents. this is determined
+    -- based on the SP component ID reported by the SP's inventory response.
+    location omicron.public.inv_psu_slot NOT NULL,
+
+    -- the SP-reported presence value for this PSU.
+    presence omicron.public.sp_component_presence NOT NULL,
+
+    -- the Hubris device type string reported by the SP's inventory.
+    --
+    -- this identifies which Hubris driver is used to communicate with the PSU,
+    -- and is a property of the SP's Hubris image, not a value reported by the
+    -- PSU itself.
+    hubris_device_type TEXT NOT NULL,
+
+    -- PMBus vital product data reported by the PSU. these fields are present
+    -- when the VPD was collected successfully, and are null if it was not, or
+    -- if the PSU is not present.
+    mfr_id TEXT,
+    mfr_model TEXT,
+    mfr_location TEXT,
+    -- the value of the PMBus "MFR_REVISION" command. This is used by Murata to
+    -- represent the firmware revisions of the PSU's primary and secondary MCUs.
+    mfr_revision TEXT,
+    mfr_date TEXT,
+    mfr_serial TEXT,
+
+    -- an error that occurred while reading PMBus VPD. this is NULL if the VPD
+    -- fields are present or if the PSU is not present, and is set if the
+    -- VPD fields are NULL because an attempt to read the VPD failed.
+    vpd_error TEXT,
+
+    CONSTRAINT vpd_result_valid CHECK (
+        (
+            presence != 'not_present'
+            AND vpd_error IS NULL
+            AND mfr_id IS NOT NULL
+            AND mfr_model IS NOT NULL
+            AND mfr_revision IS NOT NULL
+            AND mfr_location IS NOT NULL
+            AND mfr_date IS NOT NULL
+            AND mfr_serial IS NOT NULL
+        ) OR (
+            presence != 'not_present'
+            AND vpd_error IS NOT NULL
+            AND mfr_id IS NULL
+            AND mfr_model IS NULL
+            AND mfr_revision IS NULL
+            AND mfr_location IS NULL
+            AND mfr_date IS NULL
+            AND mfr_serial IS NULL
+        ) OR (
+            presence = 'not_present'
+            AND vpd_error IS NULL
+            AND mfr_id IS NULL
+            AND mfr_model IS NULL
+            AND mfr_revision IS NULL
+            AND mfr_location IS NULL
+            AND mfr_date IS NULL
+            AND mfr_serial IS NULL
+        )
+    ),
+
+
+    PRIMARY KEY (inv_collection_id, psc_baseboard_id, location)
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.reconfigurator_disruption_policy AS ENUM (
+    'terminate',
+    'migrate_or_terminate',
+    'migrate_only'
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.sled_update_reboot_policy AS ENUM (
+    'immediate_no_evacuation',
+    'evacuate'
+);
+
 /*
  * Various runtime configuration switches for reconfigurator
  *
@@ -5549,12 +5708,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_fmd_resource (
  *
  * See https://github.com/oxidecomputer/omicron/issues/8253 for more details.
  */
-CREATE TYPE IF NOT EXISTS omicron.public.reconfigurator_disruption_policy AS ENUM (
-    'terminate',
-    'migrate_or_terminate',
-    'migrate_only'
-);
-
 CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     -- Monotonically increasing version for all bp_targets
     version INT8 PRIMARY KEY,
@@ -5575,7 +5728,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     blueprint_pruner_enabled BOOL NOT NULL,
 
     -- Number of recent target blueprints that the blueprint pruner keeps
-    blueprint_pruner_nkeep INT8 NOT NULL
+    blueprint_pruner_nkeep INT8 NOT NULL,
+
+    -- How the planner schedules updates that induce sled reboots
+    sled_update_reboot_policy omicron.public.sled_update_reboot_policy NOT NULL
 );
 
 /*
@@ -6336,8 +6492,11 @@ CREATE TYPE IF NOT EXISTS omicron.public.sled_bp_availability AS ENUM (
  * Per-sled provisioning availability as of the target blueprint.
  *
  * This is a Reconfigurator rendezvous table reflecting which sleds the
- * target blueprint considers available for provisioning. Once wired up, the
- * instance-start allocation path will consult this table alongside `sled`.
+ * target blueprint considers available for provisioning. VMM placement
+ * consults this table alongside `sled`.
+ *
+ * The table is seeded at rack initialization and maintained by the
+ * blueprint_rendezvous background task.
  *
  * Unlike the other rendezvous tables, sled availability is not monotonic: a sled
  * becomes unavailable while evacuated for an update, then available again
@@ -6404,6 +6563,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_sled_bp_availability (
 CREATE INDEX IF NOT EXISTS lookup_available_sled
     ON omicron.public.rendezvous_sled_bp_availability (sled_id)
     WHERE bp_availability = 'available';
+
+/* Add an index which lets us find unavailable sleds */
+CREATE INDEX IF NOT EXISTS lookup_unavailable_sled
+    ON omicron.public.rendezvous_sled_bp_availability (sled_id)
+    WHERE bp_availability = 'unavailable';
 
 /*******************************************************************/
 
@@ -6574,11 +6738,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
      */
     stop_for_update_disposition_generation INT8,
 
-    -- If a VMM is in the 'failed' state, it must have a failure reason; if it
-    -- is not in the failed state, it must not have a failure reason.
-    CONSTRAINT failure_reason_iff_failed CHECK (
-        (state = 'failed' AND failure_reason IS NOT NULL)
-            OR (state != 'failed' AND failure_reason IS NULL)
+    -- If a VMM is in the 'failed' state, it must have a failure reason; VMMs
+    -- not in the 'failed' state are allowed to keep a stale reason from an
+    -- earlier failure.
+    CONSTRAINT failure_reason_if_failed CHECK (
+        state != 'failed' OR failure_reason IS NOT NULL
     )
 );
 
@@ -8606,13 +8770,24 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selecti
 CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selection_ereports (
     sitrep_id UUID NOT NULL,
     request_id UUID NOT NULL,
-    start_time TIMESTAMPTZ,
-    end_time TIMESTAMPTZ,
     only_serials TEXT[] NOT NULL DEFAULT ARRAY[],
     only_classes TEXT[] NOT NULL DEFAULT ARRAY[],
 
+    PRIMARY KEY (sitrep_id, request_id)
+);
+
+-- Bundle-wide time range applied to time-bounded categories (host-info logs
+-- and ereports) at collection time. Row existence indicates a range was set.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selection_time_range (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
+
     PRIMARY KEY (sitrep_id, request_id),
-    CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
+    CONSTRAINT start_before_end CHECK (
+        start_time IS NULL OR end_time IS NULL OR start_time <= end_time
+    )
 );
 
 -- Marker written by `SitrepGuardedInsert` atomically with a corresponding
@@ -9565,7 +9740,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '300.0.0', NULL)
+    (TRUE, NOW(), NOW(), '309.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

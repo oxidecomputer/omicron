@@ -143,6 +143,9 @@ mod probes {
     ) {
     }
 
+    /// Fires just after failing to send a packet.
+    fn packet__send__failed(addr: &str, kind: &str, message: &str) {}
+
     /// Fires just after we finish sending a packet.
     fn packet__send__done(addr: &str) {}
 
@@ -158,7 +161,7 @@ mod probes {
     fn disconnected(addr: &str) {}
 
     /// Emitted when we receive an unrecognized packet, with the kind and the
-    /// length of the discarded buffer.
+    /// length of the unprocessed buffer.
     fn unrecognized__server__packet(addr: &str, kind: u64, len: usize) {}
 
     /// Emitted when we receive an unexpected packet, based on the messages we've
@@ -166,8 +169,14 @@ mod probes {
     fn unexpected__server__packet(addr: &str, kind: &str) {}
 
     /// Emitted when we receive an invalid packet, with the kind we think it is
-    /// supposed to be and the length of the discarded buffer.
+    /// supposed to be and the length of the unprocessed buffer.
     fn invalid__packet(addr: &str, kind: &str, len: usize) {}
+
+    /// Emitted when we fail to decode a message frame from the server.
+    fn decode__failed(addr: &str, message: &str) {}
+
+    /// Emitted when there is a generic protocol error.
+    fn protocol__error(addr: &str, message: &str) {}
 }
 
 /// An error interacting ClickHouse over the native protocol.
@@ -250,6 +259,9 @@ pub enum Error {
         "A query unexpectedly resulted in an empty data block; query: {query}"
     )]
     UnexpectedEmptyBlock { query: String },
+
+    #[error("TCP connection to the ClickHouse server is poisoned")]
+    Poisoned,
 }
 
 impl Error {
@@ -276,4 +288,18 @@ impl Error {
 pub mod errors {
     pub const UNKNOWN_TABLE: i32 = 60;
     pub const UNKNOWN_DATABASE: i32 = 81;
+    /// A write or DDL query was rejected because the user's profile is in
+    /// read-only mode (`readonly=1` or `readonly=2`), or a `SET` tried to lower
+    /// `readonly` itself.
+    pub const READONLY: i32 = 164;
+    /// A query was rejected because DDL is disabled, e.g. `SET allow_ddl=1` when
+    /// the profile sets `allow_ddl=0`, or a DDL statement from a user who holds
+    /// the DDL grant but whose profile forbids it.
+    pub const QUERY_IS_PROHIBITED: i32 = 392;
+    /// A `SET` was rejected because it violates a `<constraints>` bound, e.g.
+    /// changing a setting frozen with `<readonly/>` (such as
+    /// `max_execution_time`).
+    pub const SETTING_CONSTRAINT_VIOLATION: i32 = 452;
+    /// A query was rejected because the user lacks the required grant.
+    pub const ACCESS_DENIED: i32 = 497;
 }

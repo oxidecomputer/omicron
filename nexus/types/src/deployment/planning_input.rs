@@ -936,6 +936,11 @@ pub enum SledFilter {
     QueryDuringInventory,
 
     /// Sleds on which reservations can be created.
+    ///
+    /// This only considers the status of the sled in the `sled` table. VMM
+    /// placement also requires the sled to be marked available in the
+    /// `rendezvous_sled_bp_availability` table, reflecting the blueprint's
+    /// update disposition for that sled (RFD 666).
     ReservationCreate,
 
     /// Sleds which should be sent OPTE V2P mappings and Routing rules.

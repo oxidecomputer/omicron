@@ -233,7 +233,6 @@ pub static DEMO_SILO_CREATE: LazyLock<silo::SiloCreate> =
             description: String::from(""),
         },
         quotas: silo::SiloQuotasCreate::arbitrarily_high_default(),
-        discoverable: true,
         identity_mode: silo::SiloIdentityMode::SamlJit,
         admin_group_name: None,
         tls_certificates: vec![],
@@ -316,6 +315,7 @@ pub static DEMO_PROJECT_CREATE: LazyLock<project::ProjectCreate> =
             name: DEMO_PROJECT_NAME.clone(),
             description: String::from(""),
         },
+        defaults: None,
     });
 
 // VPC used for testing
@@ -341,6 +341,7 @@ pub static DEMO_VPC_CREATE: LazyLock<vpc::VpcCreate> =
         },
         ipv6_prefix: None,
         dns_name: DEMO_VPC_NAME.clone(),
+        defaults: None,
     });
 
 // VPC Subnet used for testing
@@ -869,6 +870,10 @@ pub static DEMO_CERTIFICATE_NAME: LazyLock<Name> =
 pub const DEMO_CERTIFICATES_URL: &'static str = "/v1/certificates";
 pub const DEMO_CERTIFICATE_URL: &'static str =
     "/v1/certificates/demo-certificate";
+pub const DEMO_SYSTEM_CERTIFICATES_URL: &'static str =
+    "/v1/system/certificates?silo=demo-silo";
+pub const DEMO_SYSTEM_CERTIFICATE_URL: &'static str =
+    "/v1/system/certificates/demo-certificate?silo=demo-silo";
 pub static DEMO_CERTIFICATE: LazyLock<CertificateChain> = LazyLock::new(|| {
     CertificateChain::new(format!("*.sys.{DNS_ZONE_EXTERNAL_TESTING}"))
 });
@@ -3325,6 +3330,29 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             },
             VerifyEndpoint {
                 url: &DEMO_CERTIFICATE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SYSTEM_CERTIFICATES_URL,
+                // Like the SAML identity provider endpoints, these refer to a
+                // non-default Silo that unprivileged users can't see.
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_CERTIFICATE_CREATE)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SYSTEM_CERTIFICATE_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![

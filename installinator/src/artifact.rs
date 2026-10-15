@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use omicron_common::http_client::internal_http_client_builder;
 use std::{net::SocketAddr, time::Duration};
 
 use anyhow::{Context, Result, bail};
@@ -118,7 +119,7 @@ impl ArtifactClient {
         // by the fetch loop. (Why is the read timeout handled by the fetch
         // loop? So that it can also apply to the mock peer backend, and logic
         // shared across both.)
-        let client = reqwest::ClientBuilder::new()
+        let client = internal_http_client_builder()
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(5 * 60))
             .build()

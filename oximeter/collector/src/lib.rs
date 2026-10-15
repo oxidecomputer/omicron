@@ -16,6 +16,7 @@ use omicron_common::address::DNS_PORT;
 use omicron_common::address::get_internal_dns_server_addresses;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::backoff;
+use omicron_common::http_client::internal_http_client;
 use qorb::backend;
 use qorb::resolver::BoxedResolver;
 use qorb::resolvers::dns::DnsResolver;
@@ -160,12 +161,6 @@ pub struct DbConfig {
     /// Interval on which to insert data into the database, regardless of the number of collected
     /// samples. Value is in seconds.
     pub batch_interval: u64,
-
-    // TODO (https://github.com/oxidecomputer/omicron/issues/4148): This field
-    // should be removed if single node functionality is removed.
-    /// Whether ClickHouse is running as a replicated cluster or
-    /// single-node server.
-    pub replicated: bool,
 }
 
 impl DbConfig {
@@ -177,16 +172,12 @@ impl DbConfig {
     /// ClickHouse.
     pub const DEFAULT_BATCH_INTERVAL: u64 = 5;
 
-    /// Default ClickHouse topology.
-    pub const DEFAULT_REPLICATED: bool = false;
-
     // Construct config with an address, using the defaults for other fields
     fn with_address(address: SocketAddr) -> Self {
         Self {
             address: Some(address),
             batch_size: Self::DEFAULT_BATCH_SIZE,
             batch_interval: Self::DEFAULT_BATCH_INTERVAL,
-            replicated: Self::DEFAULT_REPLICATED,
         }
     }
 }
@@ -247,8 +238,9 @@ impl backend::Connector for NexusConnector {
         &self,
         backend: &backend::Backend,
     ) -> Result<Self::Connection, backend::Error> {
-        Ok(nexus_client::Client::new(
+        Ok(nexus_client::Client::new_with_client(
             &format!("http://{}", backend.address),
+            internal_http_client(),
             self.log.clone(),
         ))
     }
@@ -343,7 +335,6 @@ impl Oximeter {
                     resolver,
                     cluster_resolver,
                     &log,
-                    config.db.replicated,
                 )
                 .await?,
             ))

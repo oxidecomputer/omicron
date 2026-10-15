@@ -499,7 +499,7 @@ mod test {
     };
     use omicron_debug_dropbox::DebugDropbox;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::{OmicronZoneUuid, RackUuid};
     use std::collections::BTreeMap;
 
     type ControlPlaneTestContext =
@@ -528,7 +528,11 @@ mod test {
         // Spin up the inventory collector background task.
         let resolver = internal_dns_resolver::Resolver::new_from_addrs(
             log.clone(),
-            &[cptestctx.internal_dns.dns_server.local_address()],
+            &cptestctx
+                .internal_dns
+                .dns_server
+                .local_addresses()
+                .collect::<Vec<_>>(),
         )
         .expect("can't start resolver");
         let mut collector = InventoryCollector::new(
@@ -538,6 +542,7 @@ mod test {
             "test_planner",
             1,
             false,
+            RackUuid::nil(),
         );
         collector.activate(&opctx).await;
 

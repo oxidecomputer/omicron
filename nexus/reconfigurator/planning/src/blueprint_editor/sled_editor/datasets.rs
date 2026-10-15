@@ -15,7 +15,8 @@ use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::disk::CompressionAlgorithm;
-use sled_agent_types::disk::GzipLevel;
+use sled_agent_types::disk::PerDiskDatasetKind;
+use sled_agent_types::disk::SharedDatasetConfig;
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 use std::net::SocketAddrV6;
@@ -61,27 +62,20 @@ impl PartialDatasetConfig {
         self.name.pool()
     }
 
-    pub fn for_debug(zpool: ZpoolName) -> Self {
-        const DEBUG_QUOTA_SIZE_GB: u32 = 100;
-
+    /// Construct the config for one of the datasets every in-service disk
+    /// has.
+    pub fn for_per_disk_dataset(
+        zpool: ZpoolName,
+        kind: PerDiskDatasetKind,
+    ) -> Self {
+        let SharedDatasetConfig { compression, quota, reservation } =
+            kind.config();
         Self {
-            name: DatasetName::new(zpool, DatasetKind::Debug),
+            name: DatasetName::new(zpool, kind.into()),
             address: None,
-            quota: Some(ByteCount::from_gibibytes_u32(DEBUG_QUOTA_SIZE_GB)),
-            reservation: None,
-            compression: CompressionAlgorithm::GzipN {
-                level: GzipLevel::new::<9>(),
-            },
-        }
-    }
-
-    pub fn for_transient_zone_root(zpool: ZpoolName) -> Self {
-        Self {
-            name: DatasetName::new(zpool, DatasetKind::TransientZoneRoot),
-            address: None,
-            quota: None,
-            reservation: None,
-            compression: CompressionAlgorithm::Off,
+            quota,
+            reservation,
+            compression,
         }
     }
 
@@ -107,26 +101,6 @@ impl PartialDatasetConfig {
         Self {
             name: DatasetName::new(zpool, kind),
             address,
-            quota: None,
-            reservation: None,
-            compression: CompressionAlgorithm::Off,
-        }
-    }
-
-    pub fn for_local_storage(zpool: ZpoolName) -> Self {
-        Self {
-            name: DatasetName::new(zpool, DatasetKind::LocalStorage),
-            address: None,
-            quota: None,
-            reservation: None,
-            compression: CompressionAlgorithm::Off,
-        }
-    }
-
-    pub fn for_local_storage_unencrypted(zpool: ZpoolName) -> Self {
-        Self {
-            name: DatasetName::new(zpool, DatasetKind::LocalStorageUnencrypted),
-            address: None,
             quota: None,
             reservation: None,
             compression: CompressionAlgorithm::Off,

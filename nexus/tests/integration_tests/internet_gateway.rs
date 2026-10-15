@@ -402,8 +402,7 @@ async fn test_vpc_create_attaches_all_default_pools_to_igw(
 
     // Create a silo and link both pools as silo defaults.
     let silo =
-        create_silo(client, "test-silo", true, SiloIdentityMode::LocalOnly)
-            .await;
+        create_silo(client, "test-silo", SiloIdentityMode::LocalOnly).await;
     link_ip_pool(client, "pool-v4", &silo.identity.id, true).await;
     link_ip_pool(client, "pool-v6", &silo.identity.id, true).await;
 
@@ -434,6 +433,7 @@ async fn test_vpc_create_attaches_all_default_pools_to_igw(
                 name: "test-project".parse().unwrap(),
                 description: "".to_string(),
             },
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(user.id))
@@ -450,6 +450,7 @@ async fn test_vpc_create_attaches_all_default_pools_to_igw(
             },
             ipv6_prefix: None,
             dns_name: "test-vpc".parse().unwrap(),
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(user.id))
@@ -543,8 +544,7 @@ async fn test_vpc_create_attaches_only_ipv4_default_pool_to_igw(
 
     // Create a silo and link both pools, but only the IPv4 pool as a default.
     let silo =
-        create_silo(client, "test-silo", true, SiloIdentityMode::LocalOnly)
-            .await;
+        create_silo(client, "test-silo", SiloIdentityMode::LocalOnly).await;
     link_ip_pool(client, "pool-v4", &silo.identity.id, true).await;
     link_ip_pool(client, "pool-v6", &silo.identity.id, false).await;
 
@@ -575,6 +575,7 @@ async fn test_vpc_create_attaches_only_ipv4_default_pool_to_igw(
                 name: "test-project".parse().unwrap(),
                 description: "".to_string(),
             },
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(user.id))
@@ -591,6 +592,7 @@ async fn test_vpc_create_attaches_only_ipv4_default_pool_to_igw(
             },
             ipv6_prefix: None,
             dns_name: "test-vpc".parse().unwrap(),
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(user.id))

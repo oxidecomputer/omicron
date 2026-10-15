@@ -13,7 +13,7 @@ use dropshot::{
     Body, ConfigDropshot, FreeformBody, HttpError, HttpResponseOk, HttpServer,
     Path, RequestContext, ServerBuilder,
 };
-use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::ArtifactConfigGeneration;
 use repo_depot_api::*;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit, Semaphore, watch};
 
@@ -37,7 +37,7 @@ pub struct SimArtifactStorage {
 
     // Watch channel to be able to await on the delete reconciler completing in
     // integration tests.
-    delete_done: watch::Sender<Generation>,
+    delete_done: watch::Sender<ArtifactConfigGeneration>,
 }
 
 impl SimArtifactStorage {
@@ -78,7 +78,7 @@ impl DatasetsManager for SimArtifactStorage {
         }
     }
 
-    fn signal_delete_done(&self, generation: Generation) {
+    fn signal_delete_done(&self, generation: ArtifactConfigGeneration) {
         self.delete_done.send_if_modified(|old| {
             let modified = *old != generation;
             *old = generation;
@@ -135,7 +135,9 @@ impl ArtifactStore<SimArtifactStorage> {
         self.storage.write_semaphore.close();
     }
 
-    pub fn subscribe_delete_done(&self) -> watch::Receiver<Generation> {
+    pub fn subscribe_delete_done(
+        &self,
+    ) -> watch::Receiver<ArtifactConfigGeneration> {
         self.storage.delete_done.subscribe()
     }
 }

@@ -218,6 +218,7 @@ async fn create_resources_in_test_suite_silo(
                 name: test_project_name.parse().unwrap(),
                 description: String::new(),
             },
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(user1.id))

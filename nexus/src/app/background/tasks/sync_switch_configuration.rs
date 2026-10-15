@@ -6,6 +6,7 @@
 //! to the bootstore via sled-agent
 
 use crate::app::background::LoadedTargetBlueprint;
+use omicron_common::http_client::internal_http_client;
 
 use nexus_db_model::{BootstoreConfig, NETWORK_KEY};
 use nexus_types::deployment::SledFilter;
@@ -102,8 +103,9 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     .into_iter()
                     .filter(|s| s.is_scrimlet())
                     .map(|s| {
-                        sled_agent_client::Client::new(
+                        sled_agent_client::Client::new_with_client(
                             &format!("http://{}", s.address()),
+                            internal_http_client(),
                             log.clone(),
                         )
                     });

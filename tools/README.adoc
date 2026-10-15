@@ -13,7 +13,7 @@ source of truth is always the tools themselves: That said, if you notice
 anything out of date, incorrect, or otherwise confusing, please file an issue
 (or fix it!).
 
-= Top-Level Directories
+== Top-Level Directories
 
 There are several top-level directories, including:
 
@@ -24,12 +24,12 @@ There are several top-level directories, including:
 - `scrimlet/`: related to the setup of `softnpu`
 
 
-= Miscellaneous Scripts
+== Miscellaneous Scripts
 
 There are a fair number of scripts in the root directory, but many of them are
 related to (or literally dependent on) each other.
 
-== Dependency Management
+=== Dependency Management
 
 One class of scripts is related to downloading miscellaneous dependencies. These
 dependencies are not Rust dependencies, but instead various binaries depended
@@ -55,10 +55,10 @@ naming. At a high-level:
   some kind, for running or deploying Omicron. A current example is
   `install_prerequisites.sh` and the associated
    `install_{builder,runner}_prerequisites.sh` pair.  See
-  xref:docs/how-to-run.adoc[] for details.
+  xref:../docs/how-to-run.adoc[] for details.
 
 
-=== Updating Depedencies (Rust or otherwise)
+==== Updating Depedencies (Rust or otherwise)
 
 The `update_*.sh` scripts are intended to help update the current supported
 version of a specific dependency. Some of these operate on Rust dependencies
@@ -66,9 +66,9 @@ version of a specific dependency. Some of these operate on Rust dependencies
 https://github.com/oxidecomputer/crucible[crucible]), while others are related
 to the binaries downloaded by the `cargo xtask download` scripts.
 
-== "Virtual Hardware" Management
+=== "Virtual Hardware" Management
 
 Another class of scripts is related to the setup and teardown of "virtual
 hardware", which can be useful when deploying omicron with a real sled agent.
 Current examples includes the `cargo xtask virtual-hardware` task.
-See xref:docs/how-to-run.adoc[] for details.
+See xref:../docs/how-to-run.adoc[] for details.

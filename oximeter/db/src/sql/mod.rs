@@ -980,7 +980,7 @@ impl RestrictedQuery {
                 "Query must select from a single named table, with no database"
             );
         }
-        if let Some(from) = select.from.iter_mut().next() {
+        if let Some(from) = select.from.first_mut() {
             timeseries.extend(Self::process_table_factor(&mut from.relation)?);
             for join in from.joins.iter_mut() {
                 let op = match &join.join_operator {

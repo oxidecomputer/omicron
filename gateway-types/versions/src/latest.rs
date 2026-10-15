@@ -46,6 +46,22 @@ pub mod component_details {
     pub use crate::v1::component_details::UnsupportedComponentDetails;
 }
 
+pub mod component_vpd {
+    pub use crate::v4::component_vpd::Barcode;
+    pub use crate::v4::component_vpd::ComponentVpd;
+    pub use crate::v4::component_vpd::Mpn1Barcode;
+    pub use crate::v4::component_vpd::OxideBarcode;
+    pub use crate::v4::component_vpd::PmbusDevice;
+    pub use crate::v4::component_vpd::SledFanTray;
+    pub use crate::v4::component_vpd::Tmp11x;
+
+    // These error types are not part of the actual API, and are therefore not
+    // versioned. They are returned by `TryFrom` and similar.
+    pub use crate::impls::component_vpd::InvalidAssemblyBarcode;
+    pub use crate::impls::component_vpd::InvalidComponentVpd;
+    pub use crate::impls::component_vpd::ParseBarcodeError;
+}
+
 pub mod host {
     pub use crate::v1::host::ComponentFirmwareHashStatus;
     pub use crate::v1::host::HostStartupOptions;
@@ -86,11 +102,16 @@ pub mod task_dump {
 
 pub mod update {
     pub use crate::v1::update::ComponentUpdateIdSlot;
-    pub use crate::v1::update::HostPhase2Progress;
-    pub use crate::v1::update::HostPhase2RecoveryImageId;
-    pub use crate::v1::update::InstallinatorImageId;
     pub use crate::v1::update::SpComponentResetError;
     pub use crate::v1::update::SpUpdateStatus;
     pub use crate::v1::update::UpdateAbortBody;
     pub use crate::v1::update::UpdatePreparationProgress;
+
+    pub use crate::v6::update::HostPhase2Progress;
+    pub use crate::v6::update::HostPhase2RecoveryImageId;
+    pub use crate::v6::update::InstallinatorImageId;
+}
+
+pub mod local {
+    pub use crate::v5::local::RackId;
 }

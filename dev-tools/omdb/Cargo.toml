@@ -55,6 +55,7 @@ nexus-db-lookup.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
 nexus-db-schema.workspace = true
+nexus-fm-slippy.workspace = true
 nexus-inventory.workspace = true
 nexus-lockstep-client.workspace = true
 nexus-networking.workspace = true
@@ -95,6 +96,7 @@ strum.workspace = true
 support-bundle-collection.workspace = true
 support-bundle-viewer.workspace = true
 supports-color.workspace = true
+swrite.workspace = true
 tabled.workspace = true
 textwrap.workspace = true
 tokio = { workspace = true, features = ["full"] }

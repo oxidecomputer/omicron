@@ -24,9 +24,10 @@ use nexus_types::deployment::{
     BlueprintSledConfig, BlueprintSledUpdateDisposition, BlueprintSource,
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneImageSource,
     BlueprintZoneType, CockroachDbPreserveDowngrade,
-    OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
-    OmicronZoneExternalSnatIp, OximeterReadMode, PendingMgsUpdates,
-    blueprint_zone_type,
+    OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingAddrs,
+    OmicronZoneExternalFloatingIp, OmicronZoneExternalFloatingIps,
+    OmicronZoneExternalSnat, OmicronZoneExternalSnatIp, OximeterReadMode,
+    PendingMgsUpdates, blueprint_zone_type,
 };
 use nexus_types::external_api::sled::SledState;
 use omicron_common::address::{
@@ -44,6 +45,7 @@ use omicron_common::backoff::{
     BackoffError, retry_notify_ext, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::{DatasetKind, DatasetName};
+use omicron_common::http_client::internal_http_client_builder;
 use omicron_common::policy::{
     BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY,
     CRUCIBLE_PANTRY_REDUNDANCY, INTERNAL_DNS_REDUNDANCY, NEXUS_REDUNDANCY,
@@ -66,6 +68,7 @@ use sled_agent_client::{
 use sled_agent_types::disk::CompressionAlgorithm;
 use sled_agent_types::disk::DatasetConfig;
 use sled_agent_types::disk::DiskVariant;
+use sled_agent_types::disk::PerDiskDatasetKind;
 use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
@@ -79,6 +82,7 @@ use slog_error_chain::SlogInlineError;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::num::Wrapping;
+use strum::IntoEnumIterator;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -129,9 +133,6 @@ pub enum PlanError {
 
     #[error("Ran out of sleds / U2 storage pools")]
     NotEnoughSleds,
-
-    #[error("Unexpected dataset kind: {0}")]
-    UnexpectedDataset(String),
 
     #[error("invalid private IP configuration")]
     InvalidPrivateIpConfig(#[from] PrivateIpConfigError),
@@ -276,7 +277,7 @@ impl ServicePlan {
         address: SocketAddrV6,
     ) -> Result<Inventory, PlanError> {
         let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
+        let client = internal_http_client_builder()
             .connect_timeout(dur)
             .timeout(dur)
             .build()
@@ -393,70 +394,17 @@ impl ServicePlan {
                 .map(|disk| ZpoolName::new_external(disk.pool_id))
                 .collect();
 
-            // Add all non-discretionary datasets, self-provisioned on the U.2,
-            // to the blueprint.
+            // Add the datasets that every U.2 has to the blueprint. After RSS,
+            // the Reconfigurator planner maintains these same datasets.
             for zpool in &sled_info.u2_zpools {
-                for intrinsic_dataset in
-                    sled_storage::dataset::U2_EXPECTED_DATASETS
-                {
-                    let name = intrinsic_dataset.get_name();
-                    let kind = match name {
-                        sled_storage::dataset::ZONE_DATASET => {
-                            DatasetKind::TransientZoneRoot
-                        }
-                        sled_storage::dataset::U2_DEBUG_DATASET => {
-                            DatasetKind::Debug
-                        }
-                        _ => {
-                            return Err(PlanError::UnexpectedDataset(
-                                name.to_string(),
-                            ));
-                        }
-                    };
-
+                for kind in PerDiskDatasetKind::iter() {
                     let config = DatasetConfig {
                         id: DatasetUuid::new_v4(),
-                        name: DatasetName::new(*zpool, kind),
-                        inner: SharedDatasetConfig {
-                            compression: intrinsic_dataset.get_compression(),
-                            quota: intrinsic_dataset.get_quota(),
-                            reservation: None,
-                        },
+                        name: DatasetName::new(*zpool, kind.into()),
+                        inner: kind.config(),
                     };
                     sled_info.request.datasets.insert(config.id, config);
                 }
-
-                // Both types of LocalStorage are not in the
-                // U2_EXPECTED_DATASETS list, add them here. We expect Nexus to
-                // take over after RSS and not need to make any changes to the
-                // resulting current target blueprint - note the
-                // `rss_blueprint_is_blippy_clean` test will fail if this isn't
-                // true.
-
-                let config = DatasetConfig {
-                    id: DatasetUuid::new_v4(),
-                    name: DatasetName::new(*zpool, DatasetKind::LocalStorage),
-                    inner: SharedDatasetConfig {
-                        compression: CompressionAlgorithm::Off,
-                        quota: None,
-                        reservation: None,
-                    },
-                };
-                sled_info.request.datasets.insert(config.id, config);
-
-                let config = DatasetConfig {
-                    id: DatasetUuid::new_v4(),
-                    name: DatasetName::new(
-                        *zpool,
-                        DatasetKind::LocalStorageUnencrypted,
-                    ),
-                    inner: SharedDatasetConfig {
-                        compression: CompressionAlgorithm::Off,
-                        quota: None,
-                        reservation: None,
-                    },
-                };
-                sled_info.request.datasets.insert(config.id, config);
             }
         }
 
@@ -600,7 +548,10 @@ impl ServicePlan {
                                 pool_name: *dataset_name.pool(),
                             },
                             http_address,
-                            dns_address,
+                            dns_addresses:
+                                OmicronZoneExternalFloatingAddrs::from_single(
+                                    dns_address,
+                                ),
                             nic,
                         },
                     ),
@@ -634,9 +585,12 @@ impl ServicePlan {
                         blueprint_zone_type::Nexus {
                             internal_address,
                             lockstep_port: NEXUS_LOCKSTEP_PORT,
-                            external_ip: from_ipaddr_to_external_floating_ip(
-                                external_ip,
-                            ),
+                            external_ips:
+                                OmicronZoneExternalFloatingIps::from_single(
+                                    from_ipaddr_to_external_floating_ip(
+                                        external_ip,
+                                    ),
+                                ),
                             nic,
                             // Tell Nexus to use TLS if and only if the caller
                             // provided TLS certificates.  This effectively
@@ -824,10 +778,11 @@ impl ServicePlan {
                             dns_servers: config.dns_servers.clone(),
                             domain: None,
                             nic,
-                            external_ip:
+                            external_ip: OmicronZoneExternalSnat::from_single(
                                 from_source_nat_config_to_external_snat_ip(
                                     snat_cfg,
                                 ),
+                            ),
                         },
                     ),
                     ServiceName::BoundaryNtp,
@@ -1396,6 +1351,7 @@ mod tests {
     use sled_agent_types::early_networking::UplinkPorts;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
     use sled_agent_types::inventory::FmdInventory;
+    use sled_agent_types::inventory::InstanceManagerStatus;
     use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
@@ -1615,6 +1571,7 @@ mod tests {
                 ledgered_sled_config: None,
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
+                instance_manager_status: InstanceManagerStatus::available(0),
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
                 smf_services_enabled_not_online:

@@ -486,11 +486,17 @@ impl SupportBundleCollector {
         bundle: &SupportBundle,
         dir: Utf8TempDir,
     ) -> anyhow::Result<()> {
-        // Create the zipfile as a temporary file
-        let mut zipfile = tokio::fs::File::from_std(bundle_to_zipfile(
-            &dir,
-            Utf8Path::new(TEMPDIR),
-        )?);
+        // Create the zipfile as a temporary file.
+        //
+        // Zipping compresses every file in the bundle, so it runs on a
+        // blocking thread.
+        let zip_log = log.clone();
+        let zipfile = tokio::task::spawn_blocking(move || {
+            bundle_to_zipfile(dir, Utf8Path::new(TEMPDIR), &zip_log)
+        })
+        .await
+        .with_context(|| "Zipping the support bundle panicked")??;
+        let mut zipfile = tokio::fs::File::from_std(zipfile);
         let total_len = zipfile.metadata().await?.len();
 
         // Collect the hash locally before we send it over the network
@@ -574,7 +580,7 @@ impl SupportBundleCollector {
                 &zpool,
                 &dataset,
                 &support_bundle,
-                &hash.to_string(),
+                &hash.0.into(),
             )
             .await
             .with_context(|| "Failed to finalize bundle")?;
@@ -2113,7 +2119,8 @@ mod test {
             .unwrap();
         std::fs::write(dir.path().join("file-b"), "more data").unwrap();
 
-        let zipfile = bundle_to_zipfile(&dir, tempdir_for_zip.path())
+        let log = slog::Logger::root(slog::Discard, slog::o!());
+        let zipfile = bundle_to_zipfile(dir, tempdir_for_zip.path(), &log)
             .expect("Should have been able to bundle zipfile");
         let archive = zip::read::ZipArchive::new(zipfile).unwrap();
 

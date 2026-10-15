@@ -15,16 +15,7 @@ progenitor::generate_api!(
     interface = Positional,
     derives = [schemars::JsonSchema, PartialEq],
     inner_type = slog::Logger,
-    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-        slog::debug!(log, "client request";
-            "method" => %request.method(),
-            "uri" => %request.url(),
-            "body" => ?&request.body(),
-        );
-    }),
-    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-        slog::debug!(log, "client response"; "result" => ?result);
-    }),
+    hooks = Expected,
     crates = {
         "iddqd" = "*",
         "omicron-generation-kinds" = "*",
@@ -66,6 +57,10 @@ progenitor::generate_api!(
         NetworkInterface = sled_agent_types::inventory::NetworkInterface,
         NetworkInterfaceKind = sled_agent_types::inventory::NetworkInterfaceKind,
         NewPasswordHash = omicron_passwords::NewPasswordHash,
+        OmicronZoneExternalFloatingAddr =
+            nexus_types::deployment::OmicronZoneExternalFloatingAddr,
+        OmicronZoneExternalFloatingIp =
+            nexus_types::deployment::OmicronZoneExternalFloatingIp,
         OximeterReadMode = nexus_types::deployment::OximeterReadMode,
         OximeterReadPolicy = nexus_types::deployment::OximeterReadPolicy,
         PendingMgsUpdate = nexus_types::deployment::PendingMgsUpdate,
@@ -94,6 +89,8 @@ progenitor::generate_api!(
         Baseboard = { derives = [PartialEq, Eq] }
     }
 );
+
+progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
 
 impl IdOrdItem for types::PendingSagaInfo {
     type Key<'a> = Uuid;
@@ -148,15 +145,6 @@ impl From<omicron_common::address::Ipv4Range> for types::Ipv4Range {
 impl From<omicron_common::address::Ipv6Range> for types::Ipv6Range {
     fn from(r: omicron_common::address::Ipv6Range) -> Self {
         Self { first: r.first, last: r.last }
-    }
-}
-
-impl From<&sled_agent_types::inventory::SourceNatConfigGeneric>
-    for types::SourceNatConfigGeneric
-{
-    fn from(r: &sled_agent_types::inventory::SourceNatConfigGeneric) -> Self {
-        let (first_port, last_port) = r.port_range_raw();
-        Self { ip: r.ip, first_port, last_port }
     }
 }
 

@@ -479,7 +479,7 @@ impl FmAnalysis {
                     opctx,
                     Some(ServiceKind::Nexus),
                     &PaginatedBy::Id(p.current_pagparams()),
-                    false,
+                    None,
                 )
                 .await
                 .context("failed to list certificates")?;

@@ -62,6 +62,7 @@ async fn create_group_via_instance_join(
             name: project_name.parse().unwrap(),
             description: format!("Project for {group_name}"),
         },
+        defaults: None,
     };
 
     NexusRequest::new(
@@ -231,6 +232,7 @@ async fn test_silo_user_multicast_permissions(
             name: "second-project".parse().unwrap(),
             description: "Second project for testing".to_string(),
         },
+        defaults: None,
     };
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::POST, "/v1/projects")
@@ -874,7 +876,6 @@ async fn test_cross_silo_multicast_isolation(
             description: "First silo for cross-silo auth testing".to_string(),
         },
         quotas: SiloQuotasCreate::empty(),
-        discoverable: false,
         identity_mode: SiloIdentityMode::LocalOnly,
         admin_group_name: None,
         tls_certificates: vec![],
@@ -901,7 +902,6 @@ async fn test_cross_silo_multicast_isolation(
             description: "Second silo for cross-silo auth testing".to_string(),
         },
         quotas: SiloQuotasCreate::empty(),
-        discoverable: false,
         identity_mode: SiloIdentityMode::LocalOnly,
         admin_group_name: None,
         tls_certificates: vec![],
@@ -930,7 +930,6 @@ async fn test_cross_silo_multicast_isolation(
             description: "Silo without multicast pool linked".to_string(),
         },
         quotas: SiloQuotasCreate::empty(),
-        discoverable: false,
         identity_mode: SiloIdentityMode::LocalOnly,
         admin_group_name: None,
         tls_certificates: vec![],
@@ -1067,6 +1066,7 @@ async fn test_cross_silo_multicast_isolation(
             name: "project-silo-a".parse().unwrap(),
             description: "Project in Silo A".to_string(),
         },
+        defaults: None,
     };
 
     NexusRequest::new(
@@ -1085,6 +1085,7 @@ async fn test_cross_silo_multicast_isolation(
             name: "project-silo-b".parse().unwrap(),
             description: "Project in Silo B".to_string(),
         },
+        defaults: None,
     };
 
     NexusRequest::new(
@@ -1324,6 +1325,7 @@ async fn test_cross_silo_multicast_isolation(
             name: "project-silo-c".parse().unwrap(),
             description: "Project in Silo C".to_string(),
         },
+        defaults: None,
     };
 
     NexusRequest::new(

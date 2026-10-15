@@ -76,7 +76,7 @@ use nexus_types::internal_api::background::{
     TufArtifactReplicationCounters, TufArtifactReplicationOperation,
     TufArtifactReplicationRequest, TufArtifactReplicationStatus,
 };
-use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::ArtifactConfigGeneration;
 use omicron_uuid_kinds::SledUuid;
 use rand::seq::{IndexedRandom, SliceRandom};
 use serde_json::json;
@@ -250,7 +250,7 @@ impl<'a> Requests<'a> {
     fn into_stream(
         self,
         log: &'a slog::Logger,
-        generation: Generation,
+        generation: ArtifactConfigGeneration,
     ) -> impl Stream<
         Item = impl Future<Output = TufArtifactReplicationRequest> + use<'a>,
     > + use<'a> {
@@ -323,7 +323,7 @@ impl Request<'_> {
     async fn execute(
         self,
         log: &slog::Logger,
-        generation: Generation,
+        generation: ArtifactConfigGeneration,
         _permit: Option<OwnedSemaphorePermit>,
     ) -> TufArtifactReplicationRequest {
         let err: Option<Box<dyn std::error::Error>> = async {
@@ -331,7 +331,7 @@ impl Request<'_> {
                 Request::Put { sled, handle, hash } => {
                     sled.client
                         .artifact_put(
-                            &hash.to_string(),
+                            &hash.0.into(),
                             &generation,
                             reqwest::Body::wrap_stream(handle.stream().await?),
                         )
@@ -341,7 +341,7 @@ impl Request<'_> {
                     target_sled
                     .client
                     .artifact_copy_from_depot(
-                        &hash.to_string(),
+                        &hash.0.into(),
                         &generation,
                         &sled_agent_client::types::ArtifactCopyFromDepotBody {
                             depot_base_url: source_sled.depot_base_url.clone(),

@@ -16,12 +16,13 @@ use wicketd_commission_api::{
 };
 use wicketd_commission_types::inventory::{
     BaseboardId, GetBootstrapSledsResponse, Inventory, InventoryParams,
-    LocationInfo, SpIdentifier, SpType, SwitchSlot,
+    LocationInfo, SpType, SwitchSlot,
 };
 use wicketd_commission_types::rack_setup::{
     BgpAuthKey, BgpAuthKeyPath, CertificatePem, CertificateUploadResponse,
-    PrivateKeyPem, PutRecoveryUserPasswordHash, PutRssUserConfigInsensitive,
-    RackSetupStatus, RunRackSetupResponse, SetBgpAuthKeyStatus,
+    MultirackJoinRequest, PrivateKeyPem, PutRecoveryUserPasswordHash,
+    PutRssUserConfigInsensitive, RackSetupStatus, RunMultirackJoinResponse,
+    RunRackSetupResponse, SetBgpAuthKeyStatus,
 };
 use wicketd_commission_types::update::{
     ClearUpdateStateParams, ClearUpdateStateResponse,
@@ -246,23 +247,13 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         let ctx = rqctx.context();
         let event_reports = ctx.update_tracker.event_reports().await;
 
-        // event_reports is keyed by (sp_type, slot), so the derived
-        // SpIdentifiers are unique by construction.
-        //
-        // TODO: once rkdeploy is on the published API, we can make
-        // `event_reports` be an IdOrdMap and make this much simpler.
         let mut sps = IdOrdMap::new();
-        for (sp_type, slots) in event_reports {
-            for (slot, report) in slots {
-                sps.insert_unique(progress::sp_update_progress(
-                    SpIdentifier { typ: sp_type, slot },
-                    report,
-                ))
-                .expect(
-                    "event_reports is keyed by (sp_type, slot), so SP ids \
-                     are unique",
-                );
-            }
+        for report in event_reports {
+            sps.insert_unique(progress::sp_update_progress(
+                report.sp,
+                report.event_report,
+            ))
+            .expect("event_reports is keyed by SpIdentifier");
         }
 
         Ok(HttpResponseOk(GetUpdateProgressResponse { sps }))
@@ -459,5 +450,35 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
             .into_inner();
 
         Ok(HttpResponseOk(RunRackSetupResponse { id }))
+    }
+
+    async fn post_run_multirack_join(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<MultirackJoinRequest>,
+    ) -> Result<HttpResponseOk<RunMultirackJoinResponse>, HttpError> {
+        let ctx = rqctx.context();
+
+        let client = ba_lockstep_client(ctx);
+        let MultirackJoinRequest { trust_quorum_peers, rack_network_config } =
+            body.into_inner();
+
+        slog::info!(
+            ctx.log,
+            "Sending multirack join request to {}",
+            client.baseurl()
+        );
+
+        let id = client
+            .multirack_join(
+                &bootstrap_agent_lockstep_types::MultirackJoinRequest {
+                    trust_quorum_peers,
+                    rack_network_config,
+                },
+            )
+            .await
+            .map_err(|err| ba_lockstep_error_to_http(err, "multirack join"))?
+            .into_inner();
+
+        Ok(HttpResponseOk(RunMultirackJoinResponse { id }))
     }
 }
