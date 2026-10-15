@@ -513,10 +513,15 @@ impl Nexus {
                 return Err("expected at least 1 external DNS server".into());
             }
 
-            Arc::new(external_dns::Resolver::new(
-                &config.deployment.external_dns_servers,
-                external_ip_policy,
-            ))
+            Arc::new(
+                external_dns::Resolver::new(
+                    &config.deployment.external_dns_servers,
+                    external_ip_policy,
+                )
+                .map_err(|e| {
+                    format!("failed to create external DNS resolver: {e}")
+                })?,
+            )
         };
 
         // The webhook delivery HTTP client will send requests to endpoints

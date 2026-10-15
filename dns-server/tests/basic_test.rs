@@ -6,22 +6,17 @@ use anyhow::{Context, Result};
 use camino_tempfile::Utf8TempDir;
 use dns_service_client::Client;
 use dropshot::{HandlerTaskMode, test_util::LogContext};
-use hickory_client::client::Client as HickoryClient;
-use hickory_client::{ClientError, client::ClientHandle};
-use hickory_proto::rr::RData;
-use hickory_proto::runtime::TokioRuntimeProvider;
-use hickory_proto::udp::UdpClientStream;
-use hickory_proto::xfer::Protocol;
-use hickory_resolver::ResolveErrorKind;
-use hickory_resolver::TokioResolver;
-use hickory_resolver::name_server::TokioConnectionProvider;
+use futures::StreamExt;
 use hickory_resolver::{
-    ResolveError,
+    TokioResolver,
     config::{NameServerConfig, ResolverConfig, ResolverOpts},
+    net::{
+        DnsError, NetError, NoRecords, client::Client as HickoryClient,
+        runtime::TokioRuntimeProvider, udp::UdpClientStream, xfer::DnsHandle,
+    },
     proto::{
-        op::ResponseCode,
-        rr::{DNSClass, Name, RecordType, rdata::AAAA},
-        xfer::DnsResponse,
+        op::{DnsRequestOptions, DnsResponse, Query, ResponseCode},
+        rr::{Name, RData, RecordType, rdata::AAAA},
     },
 };
 use internal_dns_types::{
@@ -76,8 +71,8 @@ pub async fn a_crud() -> Result<(), anyhow::Error> {
     .await
     .expect("can issue DNS query");
 
-    assert!(raw_response.authoritative());
-    assert_eq!(raw_response.answers().len(), 1);
+    assert!(raw_response.authoritative);
+    assert_eq!(raw_response.answers.len(), 1);
 
     test_ctx.cleanup().await;
     Ok(())
@@ -121,8 +116,8 @@ pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
     .await
     .expect("can issue DNS query");
 
-    assert!(raw_response.authoritative());
-    assert_eq!(raw_response.answers().len(), 1);
+    assert!(raw_response.authoritative);
+    assert_eq!(raw_response.answers.len(), 1);
 
     test_ctx.cleanup().await;
     Ok(())
@@ -175,10 +170,10 @@ pub async fn answers_match_question() -> Result<(), anyhow::Error> {
     //   an A query, but does not currently.
     // * authoritative: the nameserver we've queried is the source of truth for
     //   this name (and zone!)
-    assert_eq!(raw_response.header().response_code(), ResponseCode::NoError);
-    assert_eq!(raw_response.answers(), &[]);
-    assert_eq!(raw_response.additionals(), &[]);
-    assert!(raw_response.authoritative());
+    assert_eq!(raw_response.metadata.response_code, ResponseCode::NoError);
+    assert_eq!(raw_response.answers, &[]);
+    assert_eq!(raw_response.additionals, &[]);
+    assert!(raw_response.authoritative);
 
     test_ctx.cleanup().await;
     Ok(())
@@ -228,21 +223,35 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
     //   the exact DNS response has the answers/additionals sections as we'd
     //   expect it to be
     let response = resolver.srv_lookup(&test_fqdn).await?;
-    let srvr = response.iter().next().expect("no srv records returned!");
-    assert_eq!(srvr.priority(), srv.prio);
-    assert_eq!(srvr.weight(), srv.weight);
-    assert_eq!(srvr.port(), srv.port);
-    assert_eq!(srvr.target().to_string(), srv.target + ".");
-    let mut aaaa_records = response.ip_iter().collect::<Vec<_>>();
+    let srvr = response
+        .answers()
+        .iter()
+        .find_map(|record| match &record.data {
+            RData::SRV(srv) => Some(srv),
+            _ => None,
+        })
+        .expect("no srv records returned!");
+    assert_eq!(srvr.priority, srv.prio);
+    assert_eq!(srvr.weight, srv.weight);
+    assert_eq!(srvr.port, srv.port);
+    assert_eq!(srvr.target.to_string(), srv.target + ".");
+    let mut aaaa_records = response
+        .additionals()
+        .iter()
+        .filter_map(|record| match record.data {
+            RData::AAAA(aaaa) => Some(aaaa.0),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     aaaa_records.sort();
-    assert_eq!(aaaa_records, [IpAddr::from(addr1), IpAddr::from(addr2)]);
+    assert_eq!(aaaa_records, [addr1, addr2]);
 
     // OK, through `hickory_resolver` everything looks right. now double-check
     // that the additional records really do come back in the "Additionals"
     // section of the response.
 
-    let name = hickory_proto::rr::domain::Name::from_ascii(&test_fqdn)
-        .expect("can construct name for query");
+    let name =
+        Name::from_ascii(&test_fqdn).expect("can construct name for query");
 
     let response = raw_dns_client_query(
         test_ctx.dns_server.sole_local_address().expect("exactly one address"),
@@ -251,13 +260,13 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
     )
     .await
     .expect("test query is ok");
-    assert_eq!(response.header().response_code(), ResponseCode::NoError);
-    assert_eq!(response.answers().len(), 1);
-    assert_eq!(response.answers()[0].record_type(), RecordType::SRV);
-    assert_eq!(response.additionals().len(), 2);
-    assert_eq!(response.additionals()[0].record_type(), RecordType::AAAA);
-    assert_eq!(response.additionals()[1].record_type(), RecordType::AAAA);
-    assert!(response.authoritative());
+    assert_eq!(response.metadata.response_code, ResponseCode::NoError);
+    assert_eq!(response.answers.len(), 1);
+    assert_eq!(response.answers[0].record_type(), RecordType::SRV);
+    assert_eq!(response.additionals.len(), 2);
+    assert_eq!(response.additionals[0].record_type(), RecordType::AAAA);
+    assert_eq!(response.additionals[1].record_type(), RecordType::AAAA);
+    assert!(response.authoritative);
 
     test_ctx.cleanup().await;
     Ok(())
@@ -327,13 +336,13 @@ async fn lookup_ip_expect_error_code(
     let raw_response =
         raw_query_expect_err(server_addr, name, RecordType::A).await;
 
-    assert_eq!(raw_response.authoritative(), expected_authoritativeness);
-    assert_eq!(raw_response.response_code(), expected_code);
+    assert_eq!(raw_response.authoritative, expected_authoritativeness);
+    assert_eq!(raw_response.metadata.response_code, expected_code);
 
     let raw_response =
         raw_query_expect_err(server_addr, name, RecordType::AAAA).await;
-    assert_eq!(raw_response.authoritative(), expected_authoritativeness);
-    assert_eq!(raw_response.response_code(), expected_code);
+    assert_eq!(raw_response.authoritative, expected_authoritativeness);
+    assert_eq!(raw_response.metadata.response_code, expected_code);
 }
 
 async fn raw_query_expect_err(
@@ -349,45 +358,35 @@ async fn raw_query_expect_err(
 
     // The caller may have a specific error in mind, but we know that the
     // response definitely should be that there was *some* kind of error.
-    assert_ne!(raw_response.response_code(), ResponseCode::NoError);
+    assert_ne!(raw_response.metadata.response_code, ResponseCode::NoError);
 
     // We do not currently return answers or additionals for any errors.
-    assert!(raw_response.answers().is_empty());
-    assert!(raw_response.additionals().is_empty());
+    assert!(raw_response.answers.is_empty());
+    assert!(raw_response.additionals.is_empty());
 
     // Optionally, the DNS server is permitted to return SOA records with
     // negative answers as a guide for how long to cache the result. We don't do
     // that right now, so test that there are no name servers in the answer.
     // This should change if the DNS server is changed.
-    assert!(raw_response.name_servers().is_empty());
+    assert!(raw_response.authorities.is_empty());
 
     raw_response
 }
 
 #[track_caller]
-fn expect_no_records_error_code(
-    err: &ResolveError,
-    expected_code: ResponseCode,
-) {
-    if let ResolveErrorKind::Proto(proto_err) = err.kind() {
-        if let hickory_proto::ProtoErrorKind::NoRecordsFound {
+fn expect_no_records_error_code(err: &NetError, expected_code: ResponseCode) {
+    match err {
+        NetError::Dns(DnsError::NoRecordsFound(NoRecords {
             response_code,
             ..
-        } = proto_err.kind()
+        }))
+        | NetError::Dns(DnsError::ResponseCode(response_code))
+            if response_code == &expected_code =>
         {
-            if response_code == &expected_code {
-                // Error matches on all the conditions we're checking. No
-                // issues.
-                return;
-            }
-
-            panic!(
-                "Expected {expected_code}, got response code {response_code:?}"
-            );
+            return;
         }
+        _ => panic!("Expected {expected_code}, got {err:?}"),
     }
-    let unexpected = err.kind();
-    panic!("Expected {expected_code}, got error {unexpected:?}");
 }
 
 // Verify that the part of a name that's under the zone name can contain the
@@ -506,32 +505,36 @@ pub async fn soa() -> Result<(), anyhow::Error> {
 
     // Now the NS records should exist, and so should an SOA.
     let soa_answer = resolver.soa_lookup(TEST_ZONE).await?;
-
-    let soa_records: Vec<&hickory_proto::rr::rdata::soa::SOA> =
-        soa_answer.iter().collect();
+    let soa_records = soa_answer
+        .answers()
+        .iter()
+        .filter_map(|record| match &record.data {
+            RData::SOA(soa) => Some(soa),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
 
     assert_eq!(soa_records.len(), 1);
     // As an implementation detail, we return the lowest-numbered name server
     // for the zone as the primary name server.
-    assert_eq!(soa_records[0].mname().to_utf8(), ns1_name);
+    assert_eq!(soa_records[0].mname.to_utf8(), ns1_name);
 
     // We should be able to query nameservers for the zone.
     let zone_ns_answer = resolver.ns_lookup(TEST_ZONE).await?;
-    let has_ns_record =
-        zone_ns_answer.as_lookup().records().iter().any(|record| {
-            if let RData::NS(nsdname) = record.data() {
-                nsdname.0.to_utf8().as_str() == &ns1_name
-            } else {
-                false
-            }
-        });
+    let has_ns_record = zone_ns_answer.answers().iter().any(|record| {
+        if let RData::NS(nsdname) = &record.data {
+            nsdname.0.to_utf8().as_str() == &ns1_name
+        } else {
+            false
+        }
+    });
     assert!(has_ns_record);
 
     // The nameserver's AAAA record should be in additionals.
     let has_aaaa_additional =
-        zone_ns_answer.as_lookup().records().iter().any(|record| {
-            if let RData::AAAA(AAAA(addr)) = record.data() {
-                addr == &ns1_addr
+        zone_ns_answer.additionals().iter().any(|record| {
+            if let RData::AAAA(AAAA(addr)) = record.data {
+                addr == ns1_addr
             } else {
                 false
             }
@@ -540,7 +543,7 @@ pub async fn soa() -> Result<(), anyhow::Error> {
 
     // And we should be able to directly query the SOA record's primary server
     let soa_ns_aaaa_answer =
-        resolver.lookup_ip(soa_records[0].mname().to_owned()).await?;
+        resolver.lookup_ip(soa_records[0].mname.to_owned()).await?;
     assert_eq!(soa_ns_aaaa_answer.iter().collect::<Vec<_>>(), vec![ns1_addr]);
 
     // SOA queries under the zone we now know we are authoritative for should
@@ -560,8 +563,8 @@ pub async fn soa() -> Result<(), anyhow::Error> {
     )
     .await;
 
-    assert!(raw_response.authoritative());
-    assert_eq!(raw_response.response_code(), ResponseCode::NXDomain);
+    assert!(raw_response.authoritative);
+    assert_eq!(raw_response.metadata.response_code, ResponseCode::NXDomain);
 
     // If the zone has no ns1 for some reason, we ought to see an SOA record
     // referencing the next lowest-numbered name server.
@@ -571,11 +574,18 @@ pub async fn soa() -> Result<(), anyhow::Error> {
 
     dns_records_create(client, TEST_ZONE, records).await?;
 
-    let soa_records: Vec<hickory_proto::rr::rdata::soa::SOA> =
-        resolver.soa_lookup(TEST_ZONE).await?.into_iter().collect();
+    let soa_lookup = resolver.soa_lookup(TEST_ZONE).await?;
+    let soa_records = soa_lookup
+        .answers()
+        .iter()
+        .filter_map(|record| match &record.data {
+            RData::SOA(soa) => Some(soa),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
 
     assert_eq!(soa_records.len(), 1);
-    assert_eq!(soa_records[0].mname().to_utf8(), ns2_name);
+    assert_eq!(soa_records[0].mname.to_utf8(), ns2_name);
 
     test_ctx.cleanup().await;
     Ok(())
@@ -683,18 +693,18 @@ pub async fn receives_on_multiple_sockets() -> Result<(), anyhow::Error> {
         .await
         .with_context(|| format!("querying bound socket {bind_addr}"))?;
         assert!(
-            response.authoritative(),
+            response.authoritative,
             "response from {bind_addr} was not authoritative"
         );
         assert_eq!(
-            response.answers().len(),
+            response.answers.len(),
             1,
             "expected exactly one answer from {bind_addr}"
         );
         // Every socket is backed by the same store, so they must all return
         // the same answer records. Records each have a unique ID, so only look
         // at the answer section.
-        let answers = response.answers().to_vec();
+        let answers = response.answers.clone();
         match &first_answers {
             None => first_answers = Some(answers),
             Some(first) => assert_eq!(
@@ -764,21 +774,24 @@ async fn init_client_server_with_bind_addresses(
     )
     .await?;
 
-    let mut resolver_config = ResolverConfig::new();
-    resolver_config.add_name_server(NameServerConfig::new(
-        dns_server.local_addresses().next().expect("at least one address"),
-        Protocol::Udp,
-    ));
+    let addr =
+        dns_server.local_addresses().next().expect("at least one address");
+    let mut ns_config = NameServerConfig::udp(addr.ip());
+    for conn in &mut ns_config.connections {
+        conn.port = addr.port();
+    }
+    let mut resolver_config = ResolverConfig::default();
+    resolver_config.add_name_server(ns_config);
     let mut resolver_opts = ResolverOpts::default();
     // Enable edns for potentially larger records
     resolver_opts.edns0 = true;
 
     let resolver = TokioResolver::builder_with_config(
         resolver_config,
-        TokioConnectionProvider::default(),
+        TokioRuntimeProvider::new(),
     )
     .with_options(resolver_opts)
-    .build();
+    .build()?;
     let client =
         Client::new(&format!("http://{}", dropshot_server.local_addr()), log);
 
@@ -883,18 +896,23 @@ async fn dns_records_list(
 /// elsewhere to handle DNS responses in Omicron. However, it is slightly
 /// higher-level than the actual wire response we produce from the DNS server in
 /// this same crate; to assert on responses we send on the wire, this issues a
-/// query using `hickory-client` and returns the corresponding `DnsResponse`.
+/// query using `hickory-net` and returns the corresponding `DnsResponse`.
 async fn raw_dns_client_query(
     resolver_addr: std::net::SocketAddr,
     name: Name,
     record_ty: RecordType,
-) -> Result<DnsResponse, ClientError> {
+) -> Result<DnsResponse, NetError> {
     let stream =
         UdpClientStream::builder(resolver_addr, TokioRuntimeProvider::new())
             .build();
-    let (mut trust_client, bg) = HickoryClient::connect(stream).await.unwrap();
+    let (client, bg) =
+        HickoryClient::<TokioRuntimeProvider>::from_sender(stream);
 
     tokio::spawn(bg);
 
-    trust_client.query(name, DNSClass::IN, record_ty).await
+    client
+        .lookup(Query::query(name, record_ty), DnsRequestOptions::default())
+        .next()
+        .await
+        .expect("expected DNS response from stream")
 }
