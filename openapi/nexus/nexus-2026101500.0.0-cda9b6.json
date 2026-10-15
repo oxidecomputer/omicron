@@ -1971,8 +1971,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "List TLS certificates for the current silo",
-        "description": "Returns a list of TLS certificates for the current silo, sorted by creation date with the most recent certificates appearing first.",
+        "summary": "List TLS certificates in current silo",
         "operationId": "certificate_list",
         "parameters": [
           {
@@ -2029,7 +2028,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "Create TLS certificate for the current silo",
+        "summary": "Create TLS certificate in current silo",
         "description": "This certificate is automatically used by the Oxide control plane to serve API requests.",
         "operationId": "certificate_create",
         "requestBody": {
@@ -2067,8 +2066,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "Fetch TLS certificate within the current silo",
-        "description": "Returns the details of a specific certificate.",
+        "summary": "Fetch TLS certificate in current silo",
         "operationId": "certificate_view",
         "parameters": [
           {
@@ -2104,8 +2102,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "Delete TLS certificate within the current silo",
-        "description": "Permanently delete a certificate. This operation cannot be undone.",
+        "summary": "Delete TLS certificate in current silo",
         "operationId": "certificate_delete",
         "parameters": [
           {
@@ -7422,9 +7419,8 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "List TLS certificates for the specified silo",
-        "description": "Returns a list of TLS certificates for the specified silo, sorted by creation date with the most recent certificates appearing first.",
-        "operationId": "system_certificate_list",
+        "summary": "List TLS certificates in silo",
+        "operationId": "silo_certificate_list",
         "parameters": [
           {
             "in": "query",
@@ -7490,9 +7486,9 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "Create TLS certificate for the specified silo",
+        "summary": "Create TLS certificate in silo",
         "description": "This certificate is automatically used by the Oxide control plane to serve API requests.",
-        "operationId": "system_certificate_create",
+        "operationId": "silo_certificate_create",
         "parameters": [
           {
             "in": "query",
@@ -7539,9 +7535,9 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "Fetch TLS certificate for the specified silo",
-        "description": "Returns the details of a specific certificate.",
-        "operationId": "system_certificate_view",
+        "summary": "Fetch TLS certificate in silo",
+        "description": "The silo must be specified if the certificate is specified by name, and must not be specified if the certificate is specified by ID.",
+        "operationId": "silo_certificate_view",
         "parameters": [
           {
             "in": "path",
@@ -7584,9 +7580,9 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "Delete TLS certificate for the specified silo",
-        "description": "Permanently delete a certificate. This operation cannot be undone.\n\nThe silo must be specified if the certificate is specified by name, and must not be specified if the certificate is specified by ID.",
-        "operationId": "system_certificate_delete",
+        "summary": "Delete TLS certificate in silo",
+        "description": "The silo must be specified if the certificate is specified by name, and must not be specified if the certificate is specified by ID.",
+        "operationId": "silo_certificate_delete",
         "parameters": [
           {
             "in": "path",

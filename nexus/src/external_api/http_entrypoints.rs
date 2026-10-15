@@ -4013,7 +4013,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         .await
     }
 
-    async fn system_certificate_list(
+    async fn silo_certificate_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId<silo::SiloSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<Certificate>>, HttpError> {
@@ -4029,7 +4029,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let silo_lookup =
                 nexus.silo_lookup(&opctx, scan_params.selector.silo.clone())?;
             let certs = nexus
-                .system_certificates_list(&opctx, &silo_lookup, &paginated_by)
+                .silo_certificates_list(&opctx, &silo_lookup, &paginated_by)
                 .await?
                 .into_iter()
                 .map(|d| d.try_into())
@@ -4047,7 +4047,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn system_certificate_create(
+    async fn silo_certificate_create(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<silo::SiloSelector>,
         new_cert: TypedBody<certificate::CertificateCreate>,
@@ -4057,18 +4057,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let new_cert_params = new_cert.into_inner();
             let silo_lookup = nexus.silo_lookup(&opctx, query.silo)?;
             let cert = nexus
-                .system_certificate_create(
-                    &opctx,
-                    &silo_lookup,
-                    new_cert_params,
-                )
+                .silo_certificate_create(&opctx, &silo_lookup, new_cert_params)
                 .await?;
             Ok(HttpResponseCreated(cert.try_into()?))
         })
         .await
     }
 
-    async fn system_certificate_view(
+    async fn silo_certificate_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<path_params::CertificatePath>,
         query_params: Query<silo::OptionalSiloSelector>,
@@ -4081,11 +4077,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let (.., cert) = nexus
-                .system_certificate_lookup(
-                    &opctx,
-                    query.silo,
-                    path.certificate,
-                )?
+                .silo_certificate_lookup(&opctx, query.silo, path.certificate)?
                 .fetch()
                 .await?;
             Ok(HttpResponseOk(cert.try_into()?))
@@ -4097,7 +4089,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn system_certificate_delete(
+    async fn silo_certificate_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<path_params::CertificatePath>,
         query_params: Query<silo::OptionalSiloSelector>,
@@ -4106,11 +4098,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
             let (.., authz_cert, db_cert) = nexus
-                .system_certificate_lookup(
-                    &opctx,
-                    query.silo,
-                    path.certificate,
-                )?
+                .silo_certificate_lookup(&opctx, query.silo, path.certificate)?
                 .fetch_for(authz::Action::Delete)
                 .await?;
             nexus.certificate_delete(&opctx, &authz_cert, &db_cert).await?;

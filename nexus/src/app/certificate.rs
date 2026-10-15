@@ -64,7 +64,7 @@ impl super::Nexus {
     ///
     /// The silo must be provided if `certificate` is a name, and must not be
     /// provided if `certificate` is an ID.
-    pub fn system_certificate_lookup<'a>(
+    pub fn silo_certificate_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         silo: Option<NameOrId>,
@@ -103,7 +103,7 @@ impl super::Nexus {
     }
 
     /// Create a certificate in the specified silo
-    pub(crate) async fn system_certificate_create(
+    pub(crate) async fn silo_certificate_create(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -182,7 +182,7 @@ impl super::Nexus {
             .await
     }
 
-    pub(crate) async fn system_certificates_list(
+    pub(crate) async fn silo_certificates_list(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,

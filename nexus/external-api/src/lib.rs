@@ -5079,10 +5079,7 @@ pub trait NexusExternalApi {
 
     // Certificates
 
-    /// List TLS certificates for the current silo
-    ///
-    /// Returns a list of TLS certificates for the current silo, sorted by creation
-    /// date with the most recent certificates appearing first.
+    /// List TLS certificates in current silo
     #[endpoint {
         method = GET,
         path = "/v1/certificates",
@@ -5096,7 +5093,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Create TLS certificate for the current silo
+    /// Create TLS certificate in current silo
     ///
     /// This certificate is automatically used by the Oxide control plane to serve
     /// API requests.
@@ -5110,9 +5107,7 @@ pub trait NexusExternalApi {
         new_cert: TypedBody<latest::certificate::CertificateCreate>,
     ) -> Result<HttpResponseCreated<latest::certificate::Certificate>, HttpError>;
 
-    /// Fetch TLS certificate within the current silo
-    ///
-    /// Returns the details of a specific certificate.
+    /// Fetch TLS certificate in current silo
     #[endpoint {
         method = GET,
         path = "/v1/certificates/{certificate}",
@@ -5123,9 +5118,7 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::CertificatePath>,
     ) -> Result<HttpResponseOk<latest::certificate::Certificate>, HttpError>;
 
-    /// Delete TLS certificate within the current silo
-    ///
-    /// Permanently delete a certificate. This operation cannot be undone.
+    /// Delete TLS certificate in current silo
     #[endpoint {
         method = DELETE,
         path = "/v1/certificates/{certificate}",
@@ -5136,17 +5129,14 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::CertificatePath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// List TLS certificates for the specified silo
-    ///
-    /// Returns a list of TLS certificates for the specified silo, sorted by
-    /// creation date with the most recent certificates appearing first.
+    /// List TLS certificates in silo
     #[endpoint {
         method = GET,
         path = "/v1/system/certificates",
         tags = ["system/silos"],
         versions = VERSION_SYSTEM_CERTIFICATES..,
     }]
-    async fn system_certificate_list(
+    async fn silo_certificate_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId<latest::silo::SiloSelector>>,
     ) -> Result<
@@ -5154,7 +5144,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Create TLS certificate for the specified silo
+    /// Create TLS certificate in silo
     ///
     /// This certificate is automatically used by the Oxide control plane to serve
     /// API requests.
@@ -5164,30 +5154,29 @@ pub trait NexusExternalApi {
         tags = ["system/silos"],
         versions = VERSION_SYSTEM_CERTIFICATES..,
     }]
-    async fn system_certificate_create(
+    async fn silo_certificate_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::silo::SiloSelector>,
         new_cert: TypedBody<latest::certificate::CertificateCreate>,
     ) -> Result<HttpResponseCreated<latest::certificate::Certificate>, HttpError>;
 
-    /// Fetch TLS certificate for the specified silo
+    /// Fetch TLS certificate in silo
     ///
-    /// Returns the details of a specific certificate.
+    /// The silo must be specified if the certificate is specified by name, and
+    /// must not be specified if the certificate is specified by ID.
     #[endpoint {
         method = GET,
         path = "/v1/system/certificates/{certificate}",
         tags = ["system/silos"],
         versions = VERSION_SYSTEM_CERTIFICATES..,
     }]
-    async fn system_certificate_view(
+    async fn silo_certificate_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::CertificatePath>,
         query_params: Query<latest::silo::OptionalSiloSelector>,
     ) -> Result<HttpResponseOk<latest::certificate::Certificate>, HttpError>;
 
-    /// Delete TLS certificate for the specified silo
-    ///
-    /// Permanently delete a certificate. This operation cannot be undone.
+    /// Delete TLS certificate in silo
     ///
     /// The silo must be specified if the certificate is specified by name, and
     /// must not be specified if the certificate is specified by ID.
@@ -5197,7 +5186,7 @@ pub trait NexusExternalApi {
         tags = ["system/silos"],
         versions = VERSION_SYSTEM_CERTIFICATES..,
     }]
-    async fn system_certificate_delete(
+    async fn silo_certificate_delete(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::CertificatePath>,
         query_params: Query<latest::silo::OptionalSiloSelector>,
