@@ -321,7 +321,6 @@ impl BackgroundTasksInitializer {
         let resolver = args.resolver;
         let sagas = args.saga_starter;
         let producer_registry = &args.producer_registry;
-        let nexus = args.nexus;
 
         // This "let" construction helps catch mistakes where someone forgets to
         // wire up an activator to its corresponding background task.
@@ -1370,7 +1369,8 @@ impl BackgroundTasksInitializer {
                 update",
             period: config.vmm_stop_for_update.period_secs,
             task_impl: Box::new(vmm_stop_for_update::VmmStopForUpdate::new(
-                datastore, nexus,
+                datastore,
+                sagas.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
             // Like the vmm_mark_stop_for_update task, this task will be
@@ -1406,8 +1406,6 @@ pub struct BackgroundTasksData {
     pub producer_registry: ProducerRegistry,
     /// Helpers for saga recovery
     pub saga_recovery: saga_recovery::SagaRecoveryHelpers<Arc<Nexus>>,
-    /// Handle to `Nexus`
-    pub nexus: Arc<Nexus>,
     /// Channel for TUF repository artifacts to be replicated out to sleds
     pub tuf_artifact_replication_rx: mpsc::Receiver<Repository>,
     /// Channel for exposing the latest loaded blueprint

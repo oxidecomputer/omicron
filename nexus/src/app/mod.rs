@@ -728,7 +728,6 @@ impl Nexus {
                         sagas_started_rx: saga_recovery_rx,
                         quiesce: task_nexus.quiesce.sagas(),
                     },
-                    nexus: task_nexus.clone(),
                     tuf_artifact_replication_rx,
                     mgs_updates_tx,
                     blueprint_load_tx,
