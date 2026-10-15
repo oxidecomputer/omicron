@@ -12,6 +12,7 @@ use camino_tempfile::tempdir_in;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
+use nexus_config::SupportBundleCollectorConfig;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
@@ -95,7 +96,8 @@ impl SupportBundleCollector {
             disable,
             nexus_id,
             transfer_chunk_size: CHUNK_SIZE,
-            size_limit_bytes,
+            size_limit_bytes: size_limit_bytes
+                .min(SupportBundleCollectorConfig::MAX_SIZE_LIMIT_BYTES),
         }
     }
 
@@ -726,7 +728,6 @@ mod test {
 
     use crate::app::support_bundles::SupportBundleQueryType;
     use http_body_util::BodyExt;
-    use nexus_config::SupportBundleCollectorConfig;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::RendezvousDebugDataset;
@@ -790,6 +791,22 @@ mod test {
             .expect("Cleanup should succeed with no work to do");
 
         assert_eq!(report, SupportBundleCleanupReport::default());
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_size_limit_capped(cptestctx: &ControlPlaneTestContext) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let collector = SupportBundleCollector::new(
+            nexus.datastore().clone(),
+            nexus.resolver().clone(),
+            false,
+            nexus.id(),
+            u64::MAX,
+        );
+        assert_eq!(
+            collector.size_limit_bytes,
+            SupportBundleCollectorConfig::MAX_SIZE_LIMIT_BYTES
+        );
     }
 
     // If there are no bundles in need of collection, the collection task should

@@ -621,7 +621,9 @@ pub struct SupportBundleCollectorConfig {
     #[serde(default)]
     pub disable: bool,
 
-    /// Size, in bytes, at which support bundle collection stops.
+    /// Size, in bytes, at which support bundle collection stops. Values above
+    /// [`SupportBundleCollectorConfig::MAX_SIZE_LIMIT_BYTES`] are lowered to
+    /// it.
     ///
     /// Default: [`SupportBundleCollectorConfig::DEFAULT_SIZE_LIMIT_BYTES`]
     #[serde(
@@ -633,6 +635,10 @@ pub struct SupportBundleCollectorConfig {
 impl SupportBundleCollectorConfig {
     /// The default size limit for support bundles: 16 GiB.
     pub const DEFAULT_SIZE_LIMIT_BYTES: u64 = 16 << 30;
+
+    /// The largest size limit Nexus allows: 32 GiB. Larger bundles risk
+    /// destabilizing Nexus.
+    pub const MAX_SIZE_LIMIT_BYTES: u64 = 32 << 30;
 
     fn default_size_limit_bytes() -> u64 {
         Self::DEFAULT_SIZE_LIMIT_BYTES
