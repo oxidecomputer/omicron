@@ -463,6 +463,7 @@ impl Builder {
                     )
                 })
                 .collect(),
+            config: Some(fm::analysis_reports::ConfigReport::from(&config)),
         };
 
         // Determine which cases must be copied forwards into the next sitrep.

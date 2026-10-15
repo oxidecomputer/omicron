@@ -3192,6 +3192,7 @@ mod tests {
             in_service_disks: Default::default(),
             observed_sagas: Default::default(),
             observed_silo_certificates: Default::default(),
+            config: None,
         };
         let analysis_report = AnalysisReport {
             log: Default::default(),
@@ -3829,6 +3830,7 @@ mod tests {
                 in_service_disks: Default::default(),
                 observed_sagas: Default::default(),
                 observed_silo_certificates: Default::default(),
+                config: None,
             };
             let analysis_report = AnalysisReport {
                 log: Default::default(),

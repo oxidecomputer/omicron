@@ -5,6 +5,7 @@
 //! Human-readable reports summarizing what occurred during fault management
 //! analysis.
 
+use super::FmConfig;
 use super::case;
 use super::display;
 use super::ereport::EreportId;
@@ -19,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
+use std::num::NonZeroU32;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -534,9 +536,47 @@ pub struct InputReport {
     /// the diagnosis engines for this analysis pass. Keyed by silo ID.
     #[serde(default)]
     pub observed_silo_certificates: BTreeMap<Uuid, SiloCertificatesReport>,
+    /// The fault management configuration diagnosis engines ran with. `None`
+    /// only for reports written before this field existed.
+    #[serde(default)]
+    pub config: Option<ConfigReport>,
     // Reports are serialized to the database, so any new field here should
     // be `#[serde(default)]` (or `Option`al) to keep reports written before
     // the field existed parseable.
+}
+
+/// The configuration settings diagnosis engines consumed during an analysis
+/// pass, as recorded in an [`InputReport`].
+///
+/// Each setting is recorded as the concrete value that was in effect, rather
+/// than as an [`FmConfig`] [`Setting`](super::Setting). A setting left at its
+/// default means "whatever this release's default is", which a later release
+/// may define differently, so recording it as-is would not let a reader of the
+/// report recover the value analysis actually used.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConfigReport {
+    /// See [`FmConfig::certificate_expiry_warning_days`].
+    pub certificate_expiry_warning_days: NonZeroU32,
+}
+
+impl From<&FmConfig> for ConfigReport {
+    fn from(config: &FmConfig) -> Self {
+        // Destructure exhaustively, so that adding a setting to `FmConfig`
+        // forces a decision about whether it belongs in the report.
+        let FmConfig {
+            // These settings govern whether and how often analysis runs, and
+            // how sitrep history is retained. They are not inputs to any
+            // diagnosis engine, so they can't change what analysis decides.
+            analysis_enabled: _,
+            sitrep_limit: _,
+            history_pruning_threshold: _,
+            certificate_expiry_warning_days,
+        } = *config;
+        Self {
+            certificate_expiry_warning_days: certificate_expiry_warning_days
+                .value(),
+        }
+    }
 }
 
 /// Summary of one non-terminal saga in an [`InputReport`].
@@ -618,6 +658,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     in_service_disks,
                     observed_sagas,
                     observed_silo_certificates,
+                    config,
                 },
             indent,
             colored,
@@ -681,6 +722,24 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                 "{:indent$}{}: <not recorded>",
                 "",
                 heading.style("reference time")
+            )?,
+        }
+
+        match config {
+            Some(ConfigReport { certificate_expiry_warning_days }) => {
+                writeln!(f, "{:indent$}{}:", "", heading.style("config"))?;
+                writeln!(
+                    f,
+                    "{:indent$}  certificate expiry warning window: \
+                     {certificate_expiry_warning_days} days",
+                    "",
+                )?;
+            }
+            None => writeln!(
+                f,
+                "{:indent$}{}: <not recorded>",
+                "",
+                heading.style("config")
             )?,
         }
 
@@ -1113,6 +1172,9 @@ mod tests {
             in_service_disks,
             observed_sagas,
             observed_silo_certificates,
+            config: Some(ConfigReport {
+                certificate_expiry_warning_days: NonZeroU32::new(30).unwrap(),
+            }),
         }
     }
 
@@ -1188,6 +1250,7 @@ mod tests {
             in_service_disks: BTreeSet::new(),
             observed_sagas: BTreeMap::new(),
             observed_silo_certificates: BTreeMap::new(),
+            config: None,
         }
     }
 
@@ -1211,7 +1274,33 @@ mod tests {
             in_service_disks: BTreeSet::new(),
             observed_sagas: BTreeMap::new(),
             observed_silo_certificates: BTreeMap::new(),
+            config: Some(ConfigReport {
+                certificate_expiry_warning_days: NonZeroU32::new(60).unwrap(),
+            }),
         }
+    }
+
+    #[test]
+    fn config_report_resolves_settings() {
+        // A setting left at its default is recorded as the default's concrete
+        // value, not as "default".
+        let report = ConfigReport::from(&FmConfig::default());
+        assert_eq!(
+            report.certificate_expiry_warning_days,
+            FmConfig::DEFAULT_CERTIFICATE_EXPIRY_WARNING_DAYS,
+        );
+
+        let config = FmConfig {
+            certificate_expiry_warning_days: super::super::Setting::new(
+                NonZeroU32::new(60).unwrap(),
+            ),
+            ..FmConfig::default()
+        };
+        let report = ConfigReport::from(&config);
+        assert_eq!(
+            report.certificate_expiry_warning_days,
+            NonZeroU32::new(60).unwrap(),
+        );
     }
 
     // Note: the example report includes the `/!\ WEIRD` warning, so
