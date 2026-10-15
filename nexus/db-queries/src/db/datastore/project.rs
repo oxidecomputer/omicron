@@ -51,7 +51,7 @@ use ref_cast::RefCast;
 // exists in the project. Otherwise, it is assumbed to be a "Uuid" named "id".
 macro_rules! generate_fn_to_ensure_none_in_project {
     ($i:ident, $label:ident, $label_ty:ty) => {
-        ::paste::paste! {
+        ::pastey::paste! {
             async fn [<ensure_no_ $i s_in_project>](
                 &self,
                 opctx: &OpContext,

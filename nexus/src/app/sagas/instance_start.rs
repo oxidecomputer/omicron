@@ -39,7 +39,7 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use paste::paste;
+use pastey::paste;
 use progenitor_extras::retry::{
     GoneCheckResult, retry_operation_while_indefinitely,
 };

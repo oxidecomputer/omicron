@@ -221,7 +221,7 @@ macro_rules! __stringify_ident {
 
 macro_rules! __emit_action {
     ($node:ident, $output:literal) => {
-        paste::paste! {
+        pastey::paste! {
             #[allow(dead_code)]
             fn [<$node:lower _action>]() -> ::steno::Node {
                 ::steno::Node::action(
@@ -236,7 +236,7 @@ macro_rules! __emit_action {
 
 macro_rules! __action_name {
     ($saga:ident, $node:ident) => {
-        paste::paste! {
+        pastey::paste! {
             concat!(
                 stringify!($saga),
                 ".",
@@ -351,7 +351,7 @@ macro_rules! declare_saga_actions {
     //  }
     //
     (S = $saga:ident $($nodes:ident),* <> $node:ident ($repeat:literal, $($repeat_tail:literal),*) -> $out:literal { + $a:ident - $u:ident } $($tail:tt)*) => {
-        paste::paste! {
+        pastey::paste! {
             static [<$node _ $repeat>]: ::std::sync::LazyLock<crate::app::sagas::NexusAction> =
                 ::std::sync::LazyLock::new(|| {
                     ::steno::new_action_noop_undo(
@@ -384,7 +384,7 @@ macro_rules! declare_saga_actions {
         }
     };
     (S = $saga:ident $($nodes:ident),* <> $node:ident ($repeat:literal) -> $out:literal { + $a:ident - $u:ident } $($tail:tt)*) => {
-        paste::paste! {
+        pastey::paste! {
             static [<$node _ $repeat>]: ::std::sync::LazyLock<crate::app::sagas::NexusAction> =
                 ::std::sync::LazyLock::new(|| {
                     ::steno::new_action_noop_undo(
@@ -418,7 +418,7 @@ macro_rules! declare_saga_actions {
     };
     // Same as the prior match, but without the undo action.
     (S = $saga:ident $($nodes:ident),* <> $node:ident ($repeat:literal, $($repeat_tail:literal),*) -> $out:literal { + $a:ident } $($tail:tt)*) => {
-        paste::paste! {
+        pastey::paste! {
             static [<$node _ $repeat>]: ::std::sync::LazyLock<crate::app::sagas::NexusAction> =
                 ::std::sync::LazyLock::new(|| {
                     ::steno::new_action_noop_undo(
@@ -450,7 +450,7 @@ macro_rules! declare_saga_actions {
         }
     };
     (S = $saga:ident $($nodes:ident),* <> $node:ident ($repeat:literal) -> $out:literal { + $a:ident } $($tail:tt)*) => {
-        paste::paste! {
+        pastey::paste! {
             static [<$node _ $repeat>]: ::std::sync::LazyLock<crate::app::sagas::NexusAction> =
                 ::std::sync::LazyLock::new(|| {
                     ::steno::new_action_noop_undo(
@@ -488,7 +488,7 @@ macro_rules! declare_saga_actions {
     // implemented, and "make_saga_dag" is not being generated through this
     // macro.
     (S = $saga:ident $($nodes:ident),* <>) => {
-        paste::paste! {
+        pastey::paste! {
             fn [<$saga _register_actions>](registry: &mut crate::app::sagas::ActionRegistry) {
                 $(
                     registry.register(::std::sync::Arc::clone(&* $nodes ));
