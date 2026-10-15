@@ -3036,7 +3036,7 @@ impl ServiceManager {
         let runtime = self
             .initialize_zone(
                 ZoneArgs::Omicron(zone),
-                zone_root_path.path,
+                zone_root_path.into_path(),
                 // filesystems=
                 &[],
                 // data_links=

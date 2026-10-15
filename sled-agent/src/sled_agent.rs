@@ -1469,7 +1469,7 @@ impl SledAgent {
             .all_mounted_local_storage_unencrypted_datasets()
             .into_iter()
             .any(|path_in_pool| {
-                path_in_pool.pool == ZpoolName::External(zpool_id)
+                path_in_pool.pool() == ZpoolName::External(zpool_id)
             });
 
         if !present {
@@ -1546,7 +1546,7 @@ impl SledAgent {
                 .all_mounted_local_storage_datasets()
                 .into_iter()
                 .any(|path_in_pool| {
-                    path_in_pool.pool == ZpoolName::External(zpool_id)
+                    path_in_pool.pool() == ZpoolName::External(zpool_id)
                 });
 
             if !present {
@@ -1569,7 +1569,7 @@ impl SledAgent {
                 .all_mounted_local_storage_unencrypted_datasets()
                 .into_iter()
                 .any(|path_in_pool| {
-                    path_in_pool.pool == ZpoolName::External(zpool_id)
+                    path_in_pool.pool() == ZpoolName::External(zpool_id)
                 });
 
             if !present {

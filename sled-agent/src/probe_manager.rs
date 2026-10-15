@@ -23,7 +23,6 @@ use omicron_common::api::external::{
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, ProbeUuid};
 use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
-use sled_agent_config_reconciler::PathInPool;
 use sled_agent_config_reconciler::{
     AvailableDatasetsReceiver, CurrentlyManagedZpools,
     CurrentlyManagedZpoolsReceiver,
@@ -321,7 +320,7 @@ impl ProbeManagerInner {
     /// boots the probe zone.
     async fn add_probe(&mut self, probe: &ProbeState) -> Result<()> {
         let mut rng = rand::rngs::StdRng::from_os_rng();
-        let PathInPool { pool: zpool, path: zone_root_path } = self
+        let zone_root_path = self
             .available_datasets_rx
             .all_mounted_zone_root_datasets()
             .into_iter()
@@ -381,11 +380,12 @@ impl ProbeManagerInner {
             mtu: None,
         })?;
 
+        let zpool = zone_root_path.pool();
         let installed_zone = ZoneBuilderFactory::new()
             .builder()
             .with_log(self.log.clone())
             .with_underlay_vnic_allocator(&self.vnic_allocator)
-            .with_zone_root_path(zone_root_path)
+            .with_zone_root_path(zone_root_path.into_path())
             .with_file_source(&ramdisk_file_source("probe"))
             .with_zone_type("probe")
             .with_unique_name(OmicronZoneUuid::from_untyped_uuid(

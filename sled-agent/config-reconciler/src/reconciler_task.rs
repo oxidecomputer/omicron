@@ -41,7 +41,6 @@ use tokio::sync::watch;
 use trust_quorum_types::types::Epoch;
 
 use crate::InternalDisksReceiver;
-use crate::PathInPool;
 use crate::SledAgentArtifactStore;
 use crate::TimeSyncConfig;
 use crate::dataset_serialization_task::DatasetRekeyInfo;
@@ -61,6 +60,7 @@ use self::datasets::OmicronDatasets;
 use self::external_disks::ExternalDisks;
 use self::zones::OmicronZones;
 
+pub use self::datasets::PathInPool;
 pub use self::external_disks::CurrentlyManagedZpools;
 pub use self::external_disks::CurrentlyManagedZpoolsReceiver;
 pub use self::zones::TimeSyncError;
@@ -286,13 +286,8 @@ impl LatestReconciliationResult {
             })
             // Filter down to matching dataset kinds
             .filter(move |config| *config.name.kind() == kind)
-            .map(|config| {
-                let pool = *config.name.pool();
-                PathInPool {
-                    pool,
-                    path: pool
-                        .dataset_mountpoint(&mount_config.root, mountpoint),
-                }
+            .map(move |config| {
+                PathInPool::new(*config.name.pool(), &mount_config, mountpoint)
             })
     }
 }
