@@ -770,7 +770,7 @@ mod test {
     use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::{RackUuid, ZpoolUuid};
+    use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::disk::DiskVariant;
     use sled_agent_types::inventory::{
@@ -1311,7 +1311,7 @@ mod test {
         let collection = builder.build();
         let collection_id = collection.id;
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
 
@@ -1527,7 +1527,7 @@ mod test {
         let collection = builder.build();
         let collection_id = collection.id;
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
 
@@ -1687,7 +1687,7 @@ mod test {
         let collection = builder.build();
         let collection_id = collection.id;
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
 
@@ -1739,7 +1739,7 @@ mod test {
         let collection_id = collection.id;
 
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
 

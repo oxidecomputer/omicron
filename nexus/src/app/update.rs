@@ -1069,7 +1069,7 @@ mod test {
         let collection =
             fake_collection_with_ids(sled_id(), zpools, smf_services);
         datastore
-            .inventory_insert_collection(opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(opctx, &collection)
             .await
             .expect("inserted inventory collection");
     }
