@@ -435,8 +435,6 @@ mod test {
         }
     }
 
-    // Adding context to a step's error keeps whether the bundle reached its
-    // size limit, and adds the context to any other error.
     #[test]
     fn test_context_keeps_size_limit_exceeded() {
         use crate::step::StepResultExt;
@@ -454,9 +452,8 @@ mod test {
         assert_eq!(format!("{err:#}"), "writing a file: the disk broke");
     }
 
-    // Many threads charging the budget at once never take it past its limit,
-    // and it counts exactly the bytes it accepted. The write it blames for
-    // exceeding the limit is one it refused, rather than one it accepted.
+    // The budget never goes past its limit, counts exactly what it accepted,
+    // and blames a write it refused.
     #[test]
     fn test_concurrent_charges() {
         const LIMIT: u64 = 10_000;
@@ -521,8 +518,7 @@ mod test {
         assert!(!stop.is_cancelled());
     }
 
-    // Once a write is refused, the budget stops collection, and refuses all
-    // later writes, even those which would fit.
+    // Later writes are refused, even ones that would fit.
     #[tokio::test]
     async fn test_write_exceeding_limit_trips_budget() {
         let (dir, output, stop) = output_with_limit(Some(10));
@@ -555,8 +551,7 @@ mod test {
         assert_eq!(output.budget.used(), data.len() as u64);
     }
 
-    // A stream that exceeds the limit partway through is removed, and the
-    // bytes already written for it are returned to the budget.
+    // Bytes already charged are refunded.
     #[tokio::test]
     async fn test_write_stream_exceeding_limit_removes_partial_file() {
         let (dir, output, stop) = output_with_limit(Some(1 << 20));
@@ -571,8 +566,7 @@ mod test {
         assert_eq!(output.budget.exceeded().unwrap().path, "stream");
     }
 
-    // A stream that fails for reasons other than the size limit is removed,
-    // and returned to the budget, without tripping it.
+    // Refunded, without tripping the budget.
     #[tokio::test]
     async fn test_write_stream_read_error_removes_partial_file() {
         let (dir, output, stop) = output_with_limit(Some(1 << 20));
@@ -600,8 +594,7 @@ mod test {
         tokio_util::io::StreamReader::new(futures::stream::iter(chunks))
     }
 
-    // Once the bundle has reached its limit, a stream is refused before its
-    // file is created or its reader is read, even if the stream is empty.
+    // Refused before creating the file or reading, even if empty.
     #[tokio::test]
     async fn test_write_stream_after_limit_exceeded() {
         let (dir, output, _stop) = output_with_limit(Some(1));
@@ -645,8 +638,7 @@ mod test {
         assert_eq!(output.budget.used(), 7);
     }
 
-    // When the size limit is exceeded, `write_with` reports that, rather than
-    // the error its closure made of the failed write, and removes the file.
+    // Reports the size limit, not the closure's error.
     #[tokio::test]
     async fn test_write_with_exceeding_limit_removes_partial_file() {
         let (dir, output, stop) = output_with_limit(Some(1 << 20));
@@ -664,10 +656,7 @@ mod test {
         assert_eq!(output.budget.exceeded().unwrap().path, "big.json");
     }
 
-    // When `f` fails for reasons other than the size limit, the bytes it left
-    // buffered are discarded rather than written. Writing them could exceed
-    // the limit for a file that's about to be removed anyway, stopping the
-    // collection and hiding the real error.
+    // Flushing what's buffered would trip the limit and hide `f`'s error.
     #[tokio::test]
     async fn test_write_with_error_discards_buffered_bytes() {
         let (dir, output, stop) = output_with_limit(Some(50));
@@ -686,8 +675,6 @@ mod test {
         assert!(!stop.is_cancelled());
     }
 
-    // A closure that ignores a refused write, and returns Ok, still has its
-    // write reported as refused, and its truncated file removed.
     #[tokio::test]
     async fn test_write_with_ignored_refusal() {
         let (dir, output, stop) = output_with_limit(Some(1000));
@@ -706,8 +693,7 @@ mod test {
         assert!(stop.is_cancelled());
     }
 
-    // Once the bundle has reached its limit, `write_with` is refused without
-    // running `f`, even if `f` would write nothing.
+    // Refused without running `f`.
     #[tokio::test]
     async fn test_write_with_after_limit_exceeded() {
         let (dir, output, _stop) = output_with_limit(Some(1));
