@@ -16,6 +16,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::model::ActiveProblemView;
 use nexus_types::external_api::active_problem as api;
 use nexus_types::external_api::active_problem::ActiveProblemSelector;
+use nexus_types::external_api::alert;
 use nexus_types::external_api::support_bundle::SupportBundleInfo;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::ListResultVec;
@@ -90,6 +91,20 @@ impl Nexus {
             problem_lookup.lookup_for(authz::Action::ListChildren).await?;
         // TODO(eliza): actually add a way to associate active problems and
         // support bundles...
+        Ok(Vec::new())
+    }
+
+    /// Lists alerts associated with the requested Active Problem.
+    pub async fn active_problem_alert_list(
+        &self,
+        problem_lookup: &lookup::ActiveProblem<'_>,
+        _params: &alert::AlertListParams,
+        _pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
+    ) -> ListResultVec<alert::Alert> {
+        let (.., _authz_problem) =
+            problem_lookup.lookup_for(authz::Action::ListChildren).await?;
+        // TODO(eliza): actually add a way to associate active problems and
+        // alerts...
         Ok(Vec::new())
     }
 }
