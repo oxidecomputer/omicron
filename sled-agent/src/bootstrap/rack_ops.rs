@@ -47,6 +47,8 @@ pub enum RssAccessError {
     MultirackJoinCompleted,
     #[error("Membership cannot be changed anymore")]
     MembershipChangeNoLongerAllowed,
+    #[error("Rack subnet cannot be changed after initial configuration")]
+    RackSubnetChangeNotAllowed,
     #[error("Multirack join has not yet started")]
     MultirackJoinNotYetStarted,
     #[error("Multirack join task exited unexpectedly")]
@@ -72,6 +74,9 @@ impl RssAccessError {
             RssAccessError::MultirackJoinCompleted => "MultirackJoinCompleted",
             RssAccessError::MembershipChangeNoLongerAllowed => {
                 "MembershipChangeNoLongerAllowed"
+            }
+            RssAccessError::RackSubnetChangeNotAllowed => {
+                "RackSubnetChangeNotAllowed"
             }
             RssAccessError::MultirackJoinNotYetStarted => {
                 "MultirackJoinNotYetStarted"
@@ -104,11 +109,23 @@ impl From<RssAccessError> for HttpError {
             RssAccessError::MultirackJoinTaskExitedUnexpectedly => {
                 HttpError::for_internal_error(err.to_string())
             }
-            _ => HttpError::for_client_error(
-                Some(err.error_code().to_string()),
-                dropshot::ClientErrorStatusCode::CONFLICT,
-                err.to_string(),
-            ),
+            RssAccessError::StillInitializing
+            | RssAccessError::InitializationFailed { .. }
+            | RssAccessError::InitializationPanicked
+            | RssAccessError::AlreadyInitialized
+            | RssAccessError::MultirackJoinInProgress
+            | RssAccessError::MultirackJoinFailed { .. }
+            | RssAccessError::MultirackJoinPanicked
+            | RssAccessError::MultirackJoinCompleted
+            | RssAccessError::MembershipChangeNoLongerAllowed
+            | RssAccessError::RackSubnetChangeNotAllowed
+            | RssAccessError::MultirackJoinNotYetStarted => {
+                HttpError::for_client_error(
+                    Some(err.error_code().to_string()),
+                    dropshot::ClientErrorStatusCode::CONFLICT,
+                    err.to_string(),
+                )
+            }
         }
     }
 }
@@ -457,6 +474,7 @@ impl RssAccess {
                 // We allow updating the input so that we don't always require a
                 // clean slate like in RSS.
                 let mut invalid_membership_change = false;
+                let mut invalid_rack_subnet_change = false;
                 input_tx.send_if_modified(|saved| {
                     if &request != saved {
                         // After trust quorum initializes we no longer allow
@@ -470,6 +488,12 @@ impl RssAccess {
                             invalid_membership_change = true;
                             return false;
                         }
+                        if saved.rack_network_config.rack_subnet
+                            != request.rack_network_config.rack_subnet
+                        {
+                            invalid_rack_subnet_change = true;
+                            return false;
+                        }
                         *saved = request;
                         true
                     } else {
@@ -478,6 +502,8 @@ impl RssAccess {
                 });
                 if invalid_membership_change {
                     Err(RssAccessError::MembershipChangeNoLongerAllowed)
+                } else if invalid_rack_subnet_change {
+                    Err(RssAccessError::RackSubnetChangeNotAllowed)
                 } else {
                     Ok(*id)
                 }

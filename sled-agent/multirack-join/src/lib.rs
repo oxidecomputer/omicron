@@ -355,7 +355,17 @@ impl MultirackJoinServiceTask {
         rack_id: RackUuid,
     ) -> Result<(), MultirackJoinServiceError> {
         info!(self.log, "Starting Sled agents");
-        let req = self.input_rx.borrow_and_update().clone();
+        // We don't call `borrow_and_update` here because we don't want to
+        // consume the notification for any updates to networking state that
+        // may come in after the initial call to `configure_networking` and the
+        // `changed` select branch in `wait_for_completion`.
+        //
+        // For example, we could have consumed a first version of the network
+        // config in `configure_networking`. Then an update to the network
+        // config could come in right before this call. We'd miss that update in
+        // `wait_for_networking` if we called `borrow_and_update` here, because
+        // `changed()` wouldn't fire.
+        let req = self.input_rx.borrow().clone();
         let tq_members = req.trust_quorum_peers.clone();
         let status = StartSledAgentsStatus::assign_ids_and_subnets(req);
         self.output_tx.send_modify(|state| {
