@@ -33,15 +33,14 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio_util::sync::CancellationToken;
 
-/// The reason a write is refused because the bundle has reached its size
-/// limit. Writes return it as `StepError::SizeLimitExceeded`.
+/// A write refused because the bundle reached its size limit.
 #[derive(Debug, thiserror::Error)]
 #[error("bundle reached its size limit of {limit} bytes")]
 pub struct SizeLimitExceeded {
     limit: u64,
 }
 
-/// Records when, and on which file, a bundle exceeded its size limit.
+/// When, and on which file, a bundle exceeded its size limit.
 #[derive(Clone, Debug)]
 pub struct Exceeded {
     pub at: DateTime<Utc>,
@@ -73,8 +72,6 @@ impl SizeBudget {
         self.used.load(Ordering::Relaxed)
     }
 
-    /// Returns when, and on which file, the limit was exceeded, if it has
-    /// been.
     pub fn exceeded(&self) -> Option<&Exceeded> {
         self.exceeded.get()
     }
@@ -95,9 +92,9 @@ impl SizeBudget {
         if self.is_exceeded() {
             return Err(SizeLimitExceeded { limit });
         }
-        // Add the bytes only if they fit, in one atomic step, so that `used`
-        // never counts a write that's refused. Otherwise, a concurrent write
-        // could see those bytes, and be refused, and blamed, in its place.
+        // Check and add in one step, so `used` never includes a refused
+        // write. Otherwise a concurrent write could be refused, and blamed,
+        // instead.
         let fits = self.used.try_update(
             Ordering::Relaxed,
             Ordering::Relaxed,
@@ -122,9 +119,9 @@ impl SizeBudget {
 
 /// A directory within a bundle, into which steps write their data.
 ///
-/// All writes are charged against the bundle's [`SizeBudget`]. A write that
-/// fails, for any reason, removes its partial file, and is not charged for it.
-/// A partial file that cannot be removed is logged, and stays charged.
+/// Writes are charged against the bundle's [`SizeBudget`]. A failed write
+/// removes its partial file and is refunded. If removal fails, it's logged
+/// and stays charged.
 #[derive(Clone)]
 pub struct BundleOutput {
     // The root of the collected bundle directory.
@@ -216,9 +213,6 @@ impl BundleOutput {
     /// directory, creating any missing parent directories. Returns the number
     /// of bytes copied.
     ///
-    /// Bytes are charged as they are copied, so the budget is enforced even
-    /// when the size of the data is not known upfront.
-    ///
     /// # Cancel safety
     ///
     /// Cancel-**unsafe**: if dropped, a partial file may be left behind.
@@ -233,10 +227,8 @@ impl BundleOutput {
         const BUF_SIZE: usize = 64 * 1024;
 
         let (path, rel) = self.resolve(name.as_ref());
-        // Refuse upfront if the bundle has already reached its limit. Without
-        // this, a stream would only be refused at its first charge: after
-        // creating its file, and waiting for data, and an empty stream would
-        // never be refused at all.
+        // Refuse before creating the file if the limit was already reached.
+        // Otherwise an empty stream would never be refused.
         self.budget.charge(&rel, 0)?;
         let mut charged = 0;
         let result = async {
@@ -273,10 +265,8 @@ impl BundleOutput {
     /// Runs `f` on a blocking thread, to write the file `name` within this
     /// directory, creating any missing parent directories.
     ///
-    /// The writer given to `f` is buffered. Bytes are charged as they are
-    /// written, and once the bundle reaches its size limit, writes fail. This
-    /// returns `StepError::SizeLimitExceeded` in that case, rather than
-    /// whatever error `f` made of it, and even if `f` ignored it.
+    /// `f` gets a buffered writer. If a write exceeds the size limit, this
+    /// returns `StepError::SizeLimitExceeded`, whatever `f` returned.
     ///
     /// # Cancel safety
     ///
@@ -291,9 +281,7 @@ impl BundleOutput {
         F: FnOnce(&mut dyn Write) -> anyhow::Result<()> + Send + 'static,
     {
         let (path, rel) = self.resolve(name.as_ref());
-        // As in `write_stream`, refuse upfront if the bundle has already
-        // reached its limit, so that `f` doesn't run, and a file it writes
-        // nothing to isn't added to a bundle that has stopped.
+        // Refuse before running `f`, as in `write_stream`.
         self.budget.charge(&rel, 0)?;
         let budget = self.budget.clone();
         let log = self.log.clone();
@@ -318,15 +306,13 @@ impl BundleOutput {
                 let result = f(&mut w).and_then(|()| {
                     w.flush().with_context(|| format!("failed to flush {path}"))
                 });
-                // Drop the writer without writing what it still holds, which
-                // `BufWriter`'s own `Drop` would do. After a failure the file
-                // is removed anyway, and writing it could exceed the size
-                // limit for nothing, hiding the real error.
+                // Discard buffered bytes instead of flushing them on drop.
+                // After a failure the file is removed, and flushing could
+                // trip the limit and hide the real error.
                 let _ = w.into_parts();
                 result
             })();
-            // A refused write fails the whole file, even if `f` ignored the
-            // error and returned Ok.
+            // A refused write fails the file, even if `f` returned Ok.
             let err = match (refused.take(), result) {
                 (None, Ok(())) => return Ok(()),
                 (Some(exceeded), _) => StepError::SizeLimitExceeded(exceeded),
@@ -389,16 +375,12 @@ async fn create_parent_dir(path: &Utf8Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-// Removes a file left by a failed write, returning true if it is gone.
-//
-// This is best-effort: a file that cannot be removed is logged, stays in the
-// bundle, and stays charged against its budget.
+// Removes a failed write's partial file. Returns whether it's gone.
 async fn remove_partial_file(log: &Logger, path: &Utf8Path) -> bool {
     is_removed(log, path, tokio::fs::remove_file(path).await)
 }
 
-// Returns true if `result`, of removing the partial file `path`, left it gone,
-// logging why not otherwise.
+// Returns whether `path` is gone after `result`. Logs if not.
 fn is_removed(
     log: &Logger,
     path: &Utf8Path,

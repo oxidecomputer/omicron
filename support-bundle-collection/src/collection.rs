@@ -78,8 +78,8 @@ pub struct BundleCollection {
     bundle: BundleInfo,
     // Cancelled by the caller, to abandon the bundle.
     cancellation_token: CancellationToken,
-    // A child of `cancellation_token`, which is also cancelled when the bundle
-    // reaches its size limit. This is what steps observe.
+    // Child of `cancellation_token`, also cancelled at the size limit. Steps
+    // watch this one.
     stop_token: CancellationToken,
     size_budget: Arc<SizeBudget>,
 }
@@ -334,9 +334,8 @@ impl BundleCollection {
 
         // Write trace and report files before returning.
         //
-        // These, like the size limit marker, are not charged against the
-        // bundle's size limit: they're small, and describe the rest of the
-        // bundle, so they must be present even if it reached its limit.
+        // Not charged against the size limit, like the size limit marker.
+        // These are small, and must be present even if the limit was reached.
         if let Some(exceeded) = &report.size_limit_exceeded {
             if let Err(err) =
                 self.write_size_limit_exceeded_file(output, exceeded).await

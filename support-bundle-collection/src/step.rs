@@ -21,15 +21,12 @@ use std::sync::Arc;
 
 /// The error returned by a collection step, and by writes to the bundle.
 ///
-/// Running out of space is kept apart from other failures, so that the step
-/// framework can report a step that reached the bundle's size limit as cut
-/// short, rather than as failed.
+/// The size limit is kept apart from other failures, so a step that hits it
+/// is reported as cut short, not failed.
 ///
-/// This deliberately does not implement `std::error::Error`. If it did, `?`
-/// into an `anyhow::Result`, or anyhow's `Context`, would turn it into an
-/// `anyhow::Error`, and a later `?` would make that `StepError::Other`, losing
-/// the fact that the size limit was reached. Instead, the compiler rejects
-/// both, and [`StepResultExt`] adds context while keeping the variant.
+/// Deliberately not `std::error::Error`: otherwise `?` or anyhow's `Context`
+/// could turn it into an `anyhow::Error`, losing the size limit variant. Use
+/// [`StepResultExt`] to add context.
 #[derive(Debug)]
 pub enum StepError {
     /// A write was refused because the bundle reached its size limit.
@@ -60,11 +57,8 @@ impl From<anyhow::Error> for StepError {
     }
 }
 
-/// Adds context to a [`StepError`], like anyhow's `Context`, without losing
-/// whether the bundle reached its size limit.
-///
-/// Context is added only to [`StepError::Other`]. Reaching the size limit is
-/// reported once for the whole bundle, rather than with each step's context.
+/// Like anyhow's `Context`, but only adds context to [`StepError::Other`],
+/// keeping the size limit variant as-is.
 pub trait StepResultExt<T> {
     fn context<C>(self, context: C) -> Result<T, StepError>
     where
