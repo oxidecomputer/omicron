@@ -12,7 +12,6 @@ use camino_tempfile::tempdir_in;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
-use nexus_config::SupportBundleCollectorConfig;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
@@ -20,6 +19,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
+use nexus_types::support_bundle::SupportBundleSizeLimit;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
@@ -79,7 +79,7 @@ pub struct SupportBundleCollector {
     disable: bool,
     nexus_id: OmicronZoneUuid,
     transfer_chunk_size: NonZeroU64,
-    size_limit_bytes: u64,
+    size_limit: SupportBundleSizeLimit,
 }
 
 impl SupportBundleCollector {
@@ -88,7 +88,7 @@ impl SupportBundleCollector {
         resolver: Resolver,
         disable: bool,
         nexus_id: OmicronZoneUuid,
-        size_limit_bytes: u64,
+        size_limit: SupportBundleSizeLimit,
     ) -> Self {
         SupportBundleCollector {
             datastore,
@@ -96,8 +96,7 @@ impl SupportBundleCollector {
             disable,
             nexus_id,
             transfer_chunk_size: CHUNK_SIZE,
-            size_limit_bytes: size_limit_bytes
-                .min(SupportBundleCollectorConfig::MAX_SIZE_LIMIT_BYTES),
+            size_limit,
         }
     }
 
@@ -408,7 +407,7 @@ impl SupportBundleCollector {
                     reason_for_creation: bundle.reason_for_creation.clone(),
                 },
             )
-            .with_size_limit(Some(self.size_limit_bytes)),
+            .with_size_limit(Some(self.size_limit.bytes())),
         );
 
         // Spawn a task that periodically polls the `support_bundle` row's
@@ -760,9 +759,6 @@ mod test {
     use support_bundle_collection::perfetto;
     use uuid::Uuid;
 
-    const DEFAULT_SIZE_LIMIT_BYTES: u64 =
-        SupportBundleCollectorConfig::DEFAULT_SIZE_LIMIT_BYTES;
-
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
@@ -782,7 +778,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
-            DEFAULT_SIZE_LIMIT_BYTES,
+            SupportBundleSizeLimit::DEFAULT,
         );
 
         let report = collector
@@ -791,22 +787,6 @@ mod test {
             .expect("Cleanup should succeed with no work to do");
 
         assert_eq!(report, SupportBundleCleanupReport::default());
-    }
-
-    #[nexus_test(server = crate::Server)]
-    async fn test_size_limit_capped(cptestctx: &ControlPlaneTestContext) {
-        let nexus = &cptestctx.server.server_context().nexus;
-        let collector = SupportBundleCollector::new(
-            nexus.datastore().clone(),
-            nexus.resolver().clone(),
-            false,
-            nexus.id(),
-            u64::MAX,
-        );
-        assert_eq!(
-            collector.size_limit_bytes,
-            SupportBundleCollectorConfig::MAX_SIZE_LIMIT_BYTES
-        );
     }
 
     // If there are no bundles in need of collection, the collection task should
@@ -825,7 +805,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
-            DEFAULT_SIZE_LIMIT_BYTES,
+            SupportBundleSizeLimit::DEFAULT,
         );
 
         let report = collector
@@ -1150,7 +1130,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
-            DEFAULT_SIZE_LIMIT_BYTES,
+            SupportBundleSizeLimit::DEFAULT,
         );
 
         // The bundle collection should complete successfully.
@@ -1246,7 +1226,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
-            DEFAULT_SIZE_LIMIT_BYTES,
+            SupportBundleSizeLimit::DEFAULT,
         );
 
         // Collect the bundle
@@ -1388,7 +1368,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
-            SIZE_LIMIT_BYTES,
+            SupportBundleSizeLimit::new(SIZE_LIMIT_BYTES).unwrap(),
         );
 
         let report = collector
@@ -1500,7 +1480,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
-            DEFAULT_SIZE_LIMIT_BYTES,
+            SupportBundleSizeLimit::DEFAULT,
         )
         .with_transfer_chunk_size(NonZeroU64::new(16).unwrap());
 
@@ -1606,7 +1586,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
-            DEFAULT_SIZE_LIMIT_BYTES,
+            SupportBundleSizeLimit::DEFAULT,
         );
 
         // Each time we call "collect_bundle", we collect a SINGLE bundle.
@@ -1722,7 +1702,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
-            DEFAULT_SIZE_LIMIT_BYTES,
+            SupportBundleSizeLimit::DEFAULT,
         );
 
         let report = collector
@@ -1780,7 +1760,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
-            DEFAULT_SIZE_LIMIT_BYTES,
+            SupportBundleSizeLimit::DEFAULT,
         );
         let report = collector
             .collect_bundle(&opctx)
@@ -1881,7 +1861,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
-            DEFAULT_SIZE_LIMIT_BYTES,
+            SupportBundleSizeLimit::DEFAULT,
         );
 
         let report = collector
@@ -1942,7 +1922,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
-            DEFAULT_SIZE_LIMIT_BYTES,
+            SupportBundleSizeLimit::DEFAULT,
         );
         let report = collector
             .collect_bundle(&opctx)
@@ -2030,7 +2010,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
-            DEFAULT_SIZE_LIMIT_BYTES,
+            SupportBundleSizeLimit::DEFAULT,
         );
         let report = collector
             .collect_bundle(&opctx)
@@ -2117,7 +2097,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
-            DEFAULT_SIZE_LIMIT_BYTES,
+            SupportBundleSizeLimit::DEFAULT,
         );
 
         // Collect the bundle
@@ -2221,7 +2201,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
-            DEFAULT_SIZE_LIMIT_BYTES,
+            SupportBundleSizeLimit::DEFAULT,
         );
 
         let report = collector

@@ -10,6 +10,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use nexus_types::deployment::ReconfiguratorConfig;
+use nexus_types::support_bundle::SupportBundleSizeLimit;
 use omicron_common::address::Ipv6Subnet;
 pub use omicron_common::address::MAX_VPC_IPV4_SUBNET_PREFIX_LENGTH;
 pub use omicron_common::address::MIN_VPC_IPV4_SUBNET_PREFIX_LENGTH;
@@ -621,27 +622,16 @@ pub struct SupportBundleCollectorConfig {
     #[serde(default)]
     pub disable: bool,
 
-    /// Size, in bytes, at which support bundle collection stops. Values above
-    /// [`SupportBundleCollectorConfig::MAX_SIZE_LIMIT_BYTES`] are lowered to
-    /// it.
+    /// Size, in bytes, at which support bundle collection stops.
     ///
-    /// Default: [`SupportBundleCollectorConfig::DEFAULT_SIZE_LIMIT_BYTES`]
-    #[serde(
-        default = "SupportBundleCollectorConfig::default_size_limit_bytes"
-    )]
-    pub size_limit_bytes: u64,
+    /// Default: [`SupportBundleSizeLimit::DEFAULT`]
+    #[serde(default = "SupportBundleCollectorConfig::default_size_limit")]
+    pub size_limit_bytes: SupportBundleSizeLimit,
 }
 
 impl SupportBundleCollectorConfig {
-    /// The default size limit for support bundles: 16 GiB.
-    pub const DEFAULT_SIZE_LIMIT_BYTES: u64 = 16 << 30;
-
-    /// The largest size limit Nexus allows: 32 GiB. Larger bundles risk
-    /// destabilizing Nexus.
-    pub const MAX_SIZE_LIMIT_BYTES: u64 = 32 << 30;
-
-    fn default_size_limit_bytes() -> u64 {
-        Self::DEFAULT_SIZE_LIMIT_BYTES
+    fn default_size_limit() -> SupportBundleSizeLimit {
+        SupportBundleSizeLimit::DEFAULT
     }
 }
 
@@ -1594,7 +1584,7 @@ mod test {
                                 period_secs: Duration::from_secs(30),
                                 disable: false,
                                 size_limit_bytes:
-                                    SupportBundleCollectorConfig::DEFAULT_SIZE_LIMIT_BYTES,
+                                    SupportBundleSizeLimit::DEFAULT,
                             },
                         physical_disk_adoption: PhysicalDiskAdoptionConfig {
                             period_secs: Duration::from_secs(30),

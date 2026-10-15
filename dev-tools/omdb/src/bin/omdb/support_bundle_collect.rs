@@ -24,13 +24,13 @@ use camino_tempfile::tempdir_in;
 use clap::Args;
 use clap::Subcommand;
 use clap::ValueEnum;
-use nexus_config::SupportBundleCollectorConfig;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::fm::ereport::EreportFilters;
 use nexus_types::support_bundle::BundleDataCategory;
 use nexus_types::support_bundle::BundleDataSelection;
 use nexus_types::support_bundle::BundleTimeRange;
+use nexus_types::support_bundle::SupportBundleSizeLimit;
 use omicron_uuid_kinds::SupportBundleUuid;
 use std::io::Write;
 use std::sync::Arc;
@@ -96,7 +96,7 @@ struct CollectArgs {
     /// Stop collecting once the bundle reaches this many bytes.
     #[clap(
         long,
-        default_value_t = SupportBundleCollectorConfig::DEFAULT_SIZE_LIMIT_BYTES
+        default_value_t = SupportBundleSizeLimit::DEFAULT.bytes()
     )]
     size_limit_bytes: u64,
 }
