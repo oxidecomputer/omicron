@@ -38,7 +38,7 @@ use tokio::io::AsyncWriteExt;
 use tokio_util::sync::CancellationToken;
 
 /// The reason a write is refused because the bundle has reached its size
-/// limit. Writes return it as [`StepError::SizeLimitExceeded`].
+/// limit. Writes return it as `StepError::SizeLimitExceeded`.
 #[derive(Debug, thiserror::Error)]
 #[error("bundle reached its size limit of {limit} bytes")]
 pub struct SizeLimitExceeded {
@@ -279,7 +279,7 @@ impl BundleOutput {
     ///
     /// The writer given to `f` is buffered. Bytes are charged as they are
     /// written, and once the bundle reaches its size limit, writes fail. This
-    /// returns [`StepError::SizeLimitExceeded`] in that case, rather than
+    /// returns `StepError::SizeLimitExceeded` in that case, rather than
     /// whatever error `f` made of it, and even if `f` ignored it.
     ///
     /// # Cancel safety
