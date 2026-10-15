@@ -548,11 +548,11 @@ pub struct InputReport {
 /// The configuration settings diagnosis engines consumed during an analysis
 /// pass, as recorded in an [`InputReport`].
 ///
-/// Each setting is recorded as the concrete value that was in effect, rather
-/// than as an [`FmConfig`] [`Setting`](super::Setting). A setting left at its
-/// default means "whatever this release's default is", which a later release
-/// may define differently, so recording it as-is would not let a reader of the
-/// report recover the value analysis actually used.
+/// Settings are recorded as plain values, not as
+/// [`Setting`](super::Setting)s. A `Setting::Default` serializes without a
+/// value and means "this release's default", which may change across releases;
+/// a report read after an upgrade could then misstate the value analysis
+/// actually used.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConfigReport {
     /// See [`FmConfig::certificate_expiry_warning_days`].
