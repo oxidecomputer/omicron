@@ -6,6 +6,7 @@
 //! stopped for a sled update.
 
 use crate::app::background::BackgroundTask;
+use crate::app::instance;
 use crate::app::instance::SledAgentInstanceError;
 use crate::app::saga::StartSaga;
 use futures::future::BoxFuture;
@@ -131,6 +132,31 @@ impl VmmStopForUpdate {
     ) -> VmmStopForUpdateResult {
         let mut result = VmmStopForUpdateResult::new();
 
+        // Build the reqwest client beforehand to avoid building a new one per
+        // sled below.
+        let reqwest_client =
+            match nexus_networking::default_reqwest_client_builder().build() {
+                Ok(client) => client,
+                Err(e) => {
+                    let err = InlineErrorChain::new(&e);
+
+                    slog::error!(
+                        opctx.log,
+                        "Failed to build the HTTP client";
+                        &err,
+                    );
+
+                    result.errors.push(Error::InternalError {
+                        internal_message: format!(
+                            "failed to build the HTTP client: {}",
+                            err
+                        ),
+                    });
+
+                    return result;
+                }
+            };
+
         for VmmsBySled { sled_id, vmm_ids } in &vmms_by_sled {
             slog::info!(
                 opctx.log,
@@ -142,11 +168,12 @@ impl VmmStopForUpdate {
             // Since we're using IdOrdMap, each sled id will only appear once
             // per batch of VMMs. Because of this, it's ok to start a new sled
             // agent client per sled id.
-            let sled_client = match nexus_networking::sled_client(
+            let sled_client = match nexus_networking::sled_client_ext(
                 &self.datastore,
                 &opctx,
                 *sled_id,
                 &opctx.log,
+                reqwest_client.clone(),
             )
             .await
             {
@@ -154,7 +181,7 @@ impl VmmStopForUpdate {
                 Err(e) => {
                     slog::error!(
                         opctx.log,
-                        "Failed to create sled agent client";
+                        "Failed to create the sled agent client";
                         "sled_id" => %sled_id,
                         InlineErrorChain::new(&e),
                     );
@@ -213,7 +240,7 @@ impl VmmStopForUpdate {
                         // We attempt to write the new VMM state to the db.
                         // This will reduce the time it takes for an instance
                         // to be reported as `Stopped`.
-                        match crate::app::instance::process_vmm_update(
+                        match instance::process_vmm_update(
                             &self.datastore,
                             opctx,
                             *id,
