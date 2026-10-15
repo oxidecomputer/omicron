@@ -1021,6 +1021,7 @@ pub trait SledAgentApi {
 
     /// Fetch basic information about this sled
     #[endpoint {
+        operation_id = "inventory",
         method = GET,
         path = "/inventory",
         versions = VERSION_ADD_INSTANCE_MANAGER_STATUS_TO_INVENTORY..VERSION_ADD_RACK_ID_TO_INVENTORY,
