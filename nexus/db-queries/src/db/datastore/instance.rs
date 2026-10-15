@@ -464,6 +464,16 @@ impl DataStore {
                     )
                     .await
             }
+            ReincarnationReason::SledEvacuation => {
+                // The instance must be in the SledEvacuating state.
+                q.filter(dsl::state.eq(InstanceState::SledEvacuating))
+                    .filter(dsl::active_propolis_id.is_null())
+                    .select(Instance::as_select())
+                    .load_async::<Instance>(
+                        &*self.pool_connection_authorized(opctx).await?,
+                    )
+                    .await
+            }
         }
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
