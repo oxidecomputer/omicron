@@ -648,6 +648,57 @@ async fn test_system_certificates_authz(cptestctx: &ControlPlaneTestContext) {
         .await;
     }
 
+    // A silo collaborator can read their own silo, so these get past the silo
+    // lookup, but they still can't list, create, view, or delete certificates.
+    let collaborator_id = create_local_user(
+        client,
+        &silo,
+        &"collaborator".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await
+    .id;
+    grant_iam(
+        client,
+        &format!("/v1/system/silos/{silo_name}"),
+        SiloRole::Collaborator,
+        collaborator_id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    let collaborator = AuthnMode::SiloUser(collaborator_id);
+    expect_status(
+        client,
+        collaborator.clone(),
+        Method::GET,
+        &url,
+        None,
+        StatusCode::FORBIDDEN,
+    )
+    .await;
+    expect_status(
+        client,
+        collaborator.clone(),
+        Method::POST,
+        &url,
+        Some(&params),
+        StatusCode::FORBIDDEN,
+    )
+    .await;
+    for url in [&by_name_url, &by_id_url] {
+        for method in [Method::GET, Method::DELETE] {
+            expect_status(
+                client,
+                collaborator.clone(),
+                method,
+                url,
+                None,
+                StatusCode::NOT_FOUND,
+            )
+            .await;
+        }
+    }
+
     // Certificates in the silo can't be accessed by other silos' users.
     for method in [Method::GET, Method::DELETE] {
         expect_status(
