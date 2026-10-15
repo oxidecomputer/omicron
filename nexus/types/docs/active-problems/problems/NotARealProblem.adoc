@@ -1,0 +1,28 @@
+:showtitle:
+:toc: left
+:icons: font
+// attributes passed in when the document is rendered:
+// - the problem code
+:problem-code:
+// - the problem title
+:problem-title:
+// - the problem class
+:problem-class:
+// - the version in which this problem code was added
+:problem-version-added:
+// - the version in which this problem was retired (set only if it's retired)
+:problem-version-retired:
+
+
+= {problem-title} ifdef::problem-version-retired[(retired)]
+
+**Problem Code**: {problem-code}
+**Class**: `{problem-class}`
+**Added in**: `{problem-version-added}`
+ifdef::problem-version-retired[**Retired in**: {problem-version-retired}]
+
+== Description
+
+== Action Required
+
+== Automated Response

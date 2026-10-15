@@ -25,15 +25,6 @@ use omicron_common::api::external::Error;
 /// which is unnecessary given that each problem code has its own versioning
 /// information.
 ///
-/// # Adding New Problem Codes
-///
-/// In order to define a new problem code, add a new variant to this `enum`.
-/// This will require adding a new match arm to [`ProblemCode::description()`]
-/// for the new variant, and in turn, defining a [`ProblemCodeDescription`] for
-/// the the newly-defined code. The [`ProblemCodeDescription`] struct defines
-/// documentation for each problem code and other properties (such as the
-/// problem's class) which are determined by the problem code.
-///
 /// [§7.2 RFD 699]: https://rfd.shared.oxide.computer/rfd/0699#problem-codes
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, strum::VariantArray, strum::FromRepr,
@@ -45,28 +36,54 @@ pub enum ProblemCode {
     NotARealProblem = 0,
 }
 
-impl ProblemCode {
-    pub fn description(&self) -> &'static ProblemCodeDescription {
-        match self {
-            ProblemCode::NotARealProblem => {
-                const NOT_A_REAL_PROBLEM: &'static ProblemCodeDescription =
-                    &ProblemCodeDescription {
-                        title: "Not a Real Problem",
-                        class: ProblemClass::System,
-                        description: "This is not a real problem. It only \
-                             exists due to an unfortunate Rust language \
-                             quirk and can be safely ignored.",
-                        action_required: "If you encounter this problem in \
-                             real life, this is a bug. Please contact Oxide \
-                             support. But, everything is fine and no other \
-                             action is required.",
-                        added_in: semver::Version::new(24, 0, 0),
-                        retired_in: Some(semver::Version::new(24, 0, 0)),
-                    };
-                &NOT_A_REAL_PROBLEM
+macro_rules! problem_descriptions {
+    ($(
+        $Variant:ident {
+            title: $title:literal,
+            class: $class:ident,
+            added_in: $added_in:expr,
+            retired_in: $retired_in:expr,
+        }
+    ),+) => {
+        impl ProblemCode {
+            pub fn description(&self) -> &'static ProblemCodeDescription {
+                match self {
+                    $(
+                        ProblemCode::$Variant => {
+                            #[allow(non_upper_case_globals)]
+                            const $Variant: &'static ProblemCodeDescription =
+                                &ProblemCodeDescription {
+                                    title: $title,
+                                    class: ProblemClass::$class,
+                                    docs_path: concat!(
+                                        env!("CARGO_MANIFEST_DIR"),
+                                        "docs/active-problems/problems/",
+                                        stringify!($Variant),
+                                        ".adoc",
+                                    ),
+                                    added_in: $added_in,
+                                    retired_in: $retired_in,
+                                };
+                            $Variant
+                        }
+                    )*
+                }
             }
         }
+    };
+}
+
+problem_descriptions! {
+    NotARealProblem {
+        title: "Not a Real Problem",
+        class: System,
+        added_in: semver::Version::new(24, 0, 0),
+        retired_in: Some(semver::Version::new(24, 0, 0)),
     }
+}
+
+impl ProblemCode {
+    pub const ALL: &[ProblemCode] = <Self as strum::VariantArray>::VARIANTS;
 }
 
 impl TryFrom<u32> for ProblemCode {
@@ -137,16 +154,8 @@ pub struct ProblemCodeDescription {
 
     /// A one-line, human-readable title for this problem code's documentation.
     pub title: &'static str,
-    /// A human-readable description, potentially spanning multiple paragraphs,
-    /// which describes the general nature of the problem.
-    pub description: &'static str,
-    /// A human-readable description of any actions an operator must perform to
-    /// resolve this problem.
-    ///
-    /// Depending on the nature of the problem, the "action required" may be
-    /// "contact Oxide support" or "do nothing and wait for automated response
-    /// to complete". q
-    pub action_required: &'static str,
+
+    pub docs_path: &'static str,
 
     /// The Oxide system software version in which this problem code was added.
     pub added_in: semver::Version,
@@ -166,4 +175,55 @@ impl ProblemCodeDescription {
 
     // TODO(eliza): there should be a way to squirt out the problem as ASCIIDoc
     // or something for use on the docs site!
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use camino::Utf8Path;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn problem_code_docs_exist() {
+        let mut errors = Vec::new();
+        let mut paths = BTreeMap::new();
+        for problem in ProblemCode::ALL {
+            let code = u32::from(*problem);
+            let description = problem.description();
+            let path = Utf8Path::new(description.docs_path);
+            if !path.exists() {
+                errors.push(format!(
+                    "error: no documentation file exists for problem code \
+                    {problem:?} ({code:04})\n path: {path}",
+                ));
+            }
+
+            if let Some(prev) = paths.insert(path, problem) {
+                if prev != problem {
+                    // this shouldn't happen, but may as well check for it!
+                    errors.push(format!(
+                        "error: problem code {problem:?} ({code:04}'s docs \
+                         path collides with {prev:?} ({:04})\n path: {path}",
+                        u32::from(*prev)
+                    ));
+                }
+            }
+
+            // TODO(eliza): we could eventually add an `asciidoctor -v` check
+            // here, but that means adding ASCIIDoctor as a build dependency...
+        }
+
+        if !errors.is_empty() {
+            let msg = errors.join("\n");
+            panic!(
+                "found {} error{} checking problem code documentation:\n{msg}\n\n\
+                 if you have added or edited any problem codes, please ensure \
+                 that the documentation for these problems exists! see \
+                 nexus/types/docs/active-problems/README.md for details \n\
+                 on authoring Active Problem documentation.\n",
+                errors.len(),
+                if errors.len() == 1 { "" } else { "s" }
+            )
+        }
+    }
 }
