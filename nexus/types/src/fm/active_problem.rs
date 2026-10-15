@@ -219,7 +219,7 @@ mod tests {
                 "found {} error{} checking problem code documentation:\n{msg}\n\n\
                  if you have added or edited any problem codes, please ensure \
                  that the documentation for these problems exists! see \
-                 nexus/types/docs/active-problems/README.md for details \n\
+                 nexus/types/docs/active-problems/README.adoc for details \n\
                  on authoring Active Problem documentation.\n",
                 errors.len(),
                 if errors.len() == 1 { "" } else { "s" }
