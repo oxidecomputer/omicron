@@ -7,6 +7,7 @@
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
+use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::model::Name;
@@ -24,18 +25,39 @@ use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl super::Nexus {
-    pub fn certificate_lookup<'a>(
-        &'a self,
-        opctx: &'a OpContext,
-        certificate: &'a NameOrId,
-    ) -> lookup::Certificate<'a> {
-        match certificate {
+    /// Fetch a certificate in the current user's silo
+    ///
+    /// `Certificate` is `visible_outside_silo` so that fleet admins can reach
+    /// other silos' certificates by ID through `/v1/system/certificates`. That
+    /// turns off the check that lookups of silo-scoped resources normally do
+    /// against the caller's silo, so a lookup by ID can find a certificate in
+    /// any silo the caller is authorized to see. The `/v1/certificates`
+    /// endpoints are scoped to the caller's silo, so they still need that
+    /// check: without it, a fleet admin could view or delete another silo's
+    /// certificate by ID through them. This does the check here instead.
+    pub(crate) async fn current_silo_certificate_fetch_for(
+        &self,
+        opctx: &OpContext,
+        certificate: &NameOrId,
+        action: authz::Action,
+    ) -> LookupResult<(authz::Certificate, db::model::Certificate)> {
+        let current_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("looking up Certificate")?;
+        let lookup = match certificate {
             NameOrId::Id(id) => {
                 LookupPath::new(opctx, &self.db_datastore).certificate_id(*id)
             }
             NameOrId::Name(name) => LookupPath::new(opctx, &self.db_datastore)
                 .certificate_name(Name::ref_cast(name)),
+        };
+        let (authz_silo, authz_cert, db_cert) =
+            lookup.fetch_for(action).await?;
+        if authz_silo.id() != current_silo.id() {
+            return Err(authz_cert.not_found());
         }
+        Ok((authz_cert, db_cert))
     }
 
     /// Look up a certificate in any silo
@@ -175,11 +197,10 @@ impl super::Nexus {
     pub(crate) async fn certificate_delete(
         &self,
         opctx: &OpContext,
-        certificate_lookup: lookup::Certificate<'_>,
+        authz_cert: &authz::Certificate,
+        db_cert: &db::model::Certificate,
     ) -> DeleteResult {
-        let (.., authz_cert, db_cert) =
-            certificate_lookup.fetch_for(authz::Action::Delete).await?;
-        self.db_datastore.certificate_delete(opctx, &authz_cert).await?;
+        self.db_datastore.certificate_delete(opctx, authz_cert).await?;
         match db_cert.service {
             ServiceKind::Nexus => {
                 // See the comment in certificate_create() above.

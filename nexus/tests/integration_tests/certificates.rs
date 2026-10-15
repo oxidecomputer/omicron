@@ -419,6 +419,16 @@ async fn test_system_certificates_crud(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(fetched.identity.id, created.identity.id);
     }
 
+    // The current-silo endpoints can't reach the other silo's certificate by
+    // ID, even for a fleet admin who can manage it through the system
+    // endpoints.
+    let current_silo_by_id_url =
+        format!("/v1/certificates/{}", created.identity.id);
+    object_get_error(client, &current_silo_by_id_url, StatusCode::NOT_FOUND)
+        .await;
+    object_delete_error(client, &current_silo_by_id_url, StatusCode::NOT_FOUND)
+        .await;
+
     // The silo must be given with a name and must not be given with an ID.
     for (url, expected) in [
         (

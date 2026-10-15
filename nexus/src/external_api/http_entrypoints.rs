@@ -3978,9 +3978,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let (.., cert) = nexus
-                .certificate_lookup(&opctx, &path.certificate)
-                .fetch()
+            let (_, cert) = nexus
+                .current_silo_certificate_fetch_for(
+                    &opctx,
+                    &path.certificate,
+                    authz::Action::Read,
+                )
                 .await?;
             Ok(HttpResponseOk(cert.try_into()?))
         };
@@ -3997,12 +4000,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<HttpResponseDeleted, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
-            nexus
-                .certificate_delete(
+            let (authz_cert, db_cert) = nexus
+                .current_silo_certificate_fetch_for(
                     &opctx,
-                    nexus.certificate_lookup(&opctx, &path.certificate),
+                    &path.certificate,
+                    authz::Action::Delete,
                 )
                 .await?;
+            nexus.certificate_delete(&opctx, &authz_cert, &db_cert).await?;
             Ok(HttpResponseDeleted())
         })
         .await
@@ -4100,12 +4105,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
-            let certificate_lookup = nexus.system_certificate_lookup(
-                &opctx,
-                query.silo,
-                path.certificate,
-            )?;
-            nexus.certificate_delete(&opctx, certificate_lookup).await?;
+            let (.., authz_cert, db_cert) = nexus
+                .system_certificate_lookup(
+                    &opctx,
+                    query.silo,
+                    path.certificate,
+                )?
+                .fetch_for(authz::Action::Delete)
+                .await?;
+            nexus.certificate_delete(&opctx, &authz_cert, &db_cert).await?;
             Ok(HttpResponseDeleted())
         })
         .await

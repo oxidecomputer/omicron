@@ -875,6 +875,9 @@ lookup_resource! {
     primary_key_columns = [ { column_name = "id", uuid_kind = BuiltInUserKind } ]
 }
 
+// Visible outside the silo so fleet admins can manage any silo's certificates
+// by ID. Lookups on behalf of the current silo must check the silo themselves
+// (see `current_silo_certificate_fetch_for` in Nexus).
 lookup_resource! {
     name = "Certificate",
     ancestors = [ "Silo" ],
