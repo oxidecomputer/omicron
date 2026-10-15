@@ -141,7 +141,6 @@ impl BundleCollection {
         &self.bundle
     }
 
-    /// Returns the budget against which the bundle's size is tracked.
     pub fn size_budget(&self) -> &SizeBudget {
         &self.size_budget
     }
@@ -315,8 +314,7 @@ impl BundleCollection {
             return report;
         }
 
-        // If the bundle reached its size limit, any steps left (including
-        // those spawned by steps we drained) never ran.
+        // At the size limit, steps still queued never ran.
         if let Some(exceeded) = self.size_budget.exceeded() {
             incomplete_steps.sort();
             let mut skipped_steps: Vec<String> =
