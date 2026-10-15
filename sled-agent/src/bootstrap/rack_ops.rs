@@ -469,12 +469,14 @@ impl RssAccess {
                 id,
                 input_tx,
                 membership_change_still_possible,
+                rack_join_successful_tx,
                 ..
             } => {
                 // We allow updating the input so that we don't always require a
                 // clean slate like in RSS.
                 let mut invalid_membership_change = false;
                 let mut invalid_rack_subnet_change = false;
+                let mut multirack_join_completed = false;
                 input_tx.send_if_modified(|saved| {
                     if &request != saved {
                         // After trust quorum initializes we no longer allow
@@ -499,6 +501,14 @@ impl RssAccess {
                                 return false;
                             }
                         }
+                        if rack_join_successful_tx.is_none() {
+                            // `complete_multirack_join` has already been
+                            // called, but we haven't witnessed the multirack
+                            // join task exit yet. It's racy to accept changes
+                            // after this point and so we reject them.
+                            multirack_join_completed = true;
+                            return false;
+                        }
                         *saved = request;
                         true
                     } else {
@@ -509,6 +519,8 @@ impl RssAccess {
                     Err(RssAccessError::MembershipChangeNoLongerAllowed)
                 } else if invalid_rack_subnet_change {
                     Err(RssAccessError::RackSubnetChangeNotAllowed)
+                } else if multirack_join_completed {
+                    Err(RssAccessError::MultirackJoinCompleted)
                 } else {
                     Ok(*id)
                 }
