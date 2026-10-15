@@ -194,6 +194,31 @@ impl super::Nexus {
     pub(crate) async fn certificate_delete(
         &self,
         opctx: &OpContext,
+        certificate: &NameOrId,
+    ) -> DeleteResult {
+        let (authz_cert, db_cert) = self
+            .current_silo_certificate_fetch_for(
+                opctx,
+                certificate,
+                authz::Action::Delete,
+            )
+            .await?;
+        self.certificate_delete_inner(opctx, &authz_cert, &db_cert).await
+    }
+
+    pub(crate) async fn silo_certificate_delete(
+        &self,
+        opctx: &OpContext,
+        certificate_lookup: &lookup::Certificate<'_>,
+    ) -> DeleteResult {
+        let (.., authz_cert, db_cert) =
+            certificate_lookup.fetch_for(authz::Action::Delete).await?;
+        self.certificate_delete_inner(opctx, &authz_cert, &db_cert).await
+    }
+
+    async fn certificate_delete_inner(
+        &self,
+        opctx: &OpContext,
         authz_cert: &authz::Certificate,
         db_cert: &db::model::Certificate,
     ) -> DeleteResult {

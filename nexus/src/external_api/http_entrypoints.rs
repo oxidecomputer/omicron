@@ -4000,14 +4000,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<HttpResponseDeleted, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
-            let (authz_cert, db_cert) = nexus
-                .current_silo_certificate_fetch_for(
-                    &opctx,
-                    &path.certificate,
-                    authz::Action::Delete,
-                )
-                .await?;
-            nexus.certificate_delete(&opctx, &authz_cert, &db_cert).await?;
+            nexus.certificate_delete(&opctx, &path.certificate).await?;
             Ok(HttpResponseDeleted())
         })
         .await
@@ -4097,11 +4090,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
-            let (.., authz_cert, db_cert) = nexus
-                .silo_certificate_lookup(&opctx, query.silo, path.certificate)?
-                .fetch_for(authz::Action::Delete)
-                .await?;
-            nexus.certificate_delete(&opctx, &authz_cert, &db_cert).await?;
+            let certificate_lookup = nexus.silo_certificate_lookup(
+                &opctx,
+                query.silo,
+                path.certificate,
+            )?;
+            nexus.silo_certificate_delete(&opctx, &certificate_lookup).await?;
             Ok(HttpResponseDeleted())
         })
         .await
