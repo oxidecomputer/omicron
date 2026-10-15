@@ -49,6 +49,8 @@ pub enum RssAccessError {
     MembershipChangeNoLongerAllowed,
     #[error("Multirack join has not yet started")]
     MultirackJoinNotYetStarted,
+    #[error("Multirack join task exited unexpectedly")]
+    MultirackJoinTaskExitedUnexpectedly,
 }
 
 impl RssAccessError {
@@ -74,13 +76,16 @@ impl RssAccessError {
             RssAccessError::MultirackJoinNotYetStarted => {
                 "MultirackJoinNotYetStarted"
             }
+            RssAccessError::MultirackJoinTaskExitedUnexpectedly => {
+                "MultirackJoinTaskExitedUnexpectedly"
+            }
         }
     }
 }
 
 impl From<RssAccessError> for HttpError {
     fn from(err: RssAccessError) -> Self {
-        // All variants of RssAccessError report states that conflict with the
+        // Most variants of RssAccessError report states that conflict with the
         // requested rack operation in some fashion:
         //
         // * `StillInitializing`/`MultirackJoinInProgress` mean that an
@@ -95,11 +100,16 @@ impl From<RssAccessError> for HttpError {
         //
         // We map all of these states to 409 Conflict errors, and (since this is
         // an internal API) expose the error text to the client.
-        HttpError::for_client_error(
-            Some(err.error_code().to_string()),
-            dropshot::ClientErrorStatusCode::CONFLICT,
-            err.to_string(),
-        )
+        match err {
+            RssAccessError::MultirackJoinTaskExitedUnexpectedly => {
+                HttpError::for_internal_error(err.to_string())
+            }
+            _ => HttpError::for_client_error(
+                Some(err.error_code().to_string()),
+                dropshot::ClientErrorStatusCode::CONFLICT,
+                err.to_string(),
+            ),
+        }
     }
 }
 
@@ -134,12 +144,16 @@ impl MultirackJoinCompleter {
     // to inventory.
     #[expect(unused)]
     pub fn is_multirack_join_in_progress(&self) -> bool {
-        if let RssStatus::MultirackJoinInProgress { .. } =
-            &*self.0.status.lock().unwrap()
-        {
-            true
-        } else {
-            false
+        match &*self.0.status.lock().unwrap() {
+            RssStatus::MultirackJoinInProgress { .. } => true,
+            RssStatus::Uninitialized
+            | RssStatus::Initialized { .. }
+            | RssStatus::Initializing { .. }
+            | RssStatus::InitializationFailed { .. }
+            | RssStatus::InitializationPanicked { .. }
+            | RssStatus::MultirackJoinCompleted { .. }
+            | RssStatus::MultirackJoinFailed { .. }
+            | RssStatus::MultirackJoinPanicked { .. } => false,
         }
     }
 }
@@ -351,7 +365,9 @@ impl RssAccess {
 
                 // We haven't sent the completion signal yet.
                 if let Some(tx) = rack_join_successful_tx.take() {
-                    tx.send(()).expect("join task should not have completed.");
+                    tx.send(()).map_err(|_| {
+                        RssAccessError::MultirackJoinTaskExitedUnexpectedly
+                    })?;
                 }
 
                 // We've either sent the completion signal this time, or we did
