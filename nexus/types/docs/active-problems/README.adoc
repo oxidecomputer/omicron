@@ -1,0 +1,12 @@
+:showtitle:
+
+= Documentation for Active Problems
+
+The ASCIIDoc files in this directory define operator-facing documentation for
+problem codes (see
+link:https://rfd.shared.oxide.computer/rfd/0699#problem-codes[§7.2 RFD 699])
+emitted by the control plane's fault management subsystem.
+These ASCIIDoc files are used to generate documentation included in the docs
+site (docs.oxide.computer) and in the Nexus's external API.
+
+// TODO(eliza): add docs explaining how to add a new problem code...
