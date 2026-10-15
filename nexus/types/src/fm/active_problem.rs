@@ -10,6 +10,31 @@
 use omicron_common::api::external::Error;
 
 /// A structured internal representation of problem codes.
+///
+/// See [§7.2 RFD 699] for details on problem codes.
+///
+/// This type is intended to be used within the fault management subsystem, such
+/// as when creating or updating Active Problems in a sitrep. Using the enum
+/// ensures that only defined problem codes are used, and they can be referenced
+/// using semantically meaningful names rather than the integer code.
+///
+/// In the external API, problem codes are represented as a `u32` rather than a
+/// `ProblemCode` enum. This type should *not* be included in the external API,
+/// since any change to the set of problem codes would therefore require a new
+/// API version and machinery between converting between the new and old enums,
+/// which is unnecessary given that each problem code has its own versioning
+/// information.
+///
+/// # Adding New Problem Codes
+///
+/// In order to define a new problem code, add a new variant to this `enum`.
+/// This will require adding a new match arm to [`ProblemCode::description()`]
+/// for the new variant, and in turn, defining a [`ProblemCodeDescription`] for
+/// the the newly-defined code. The [`ProblemCodeDescription`] struct defines
+/// documentation for each problem code and other properties (such as the
+/// problem's class) which are determined by the problem code.
+///
+/// [§7.2 RFD 699]: https://rfd.shared.oxide.computer/rfd/0699#problem-codes
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, strum::VariantArray, strum::FromRepr,
 )]
@@ -67,6 +92,11 @@ impl From<ProblemCode> for u32 {
     }
 }
 
+/// A structured internal representation of an Active Problem's class string.
+///
+/// See [§7.3 RFD 699] for details on problem classes.
+///
+/// [§7.3 RFD 699]: https://rfd.shared.oxide.computer/rfd/0699#problem-classes
 #[derive(
     Copy,
     Clone,
@@ -94,11 +124,28 @@ pub enum ProblemClass {
     // This list is *incomplete*. You can help by expanding it.
 }
 
+/// A static description of a problem code, used to represent the problem code's
+/// documentation and other properties.
+///
+/// See [§7.4 RFD 699] for details on Active Problem documentation.
+///
+/// [§7.4 RFD 699]: https://rfd.shared.oxide.computer/rfd/0699#oxide-hosted-docs
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct ProblemCodeDescription {
-    pub title: &'static str,
+    /// The [`ProblemClass`] to which all problems with this code belong.
     pub class: ProblemClass,
+
+    /// A one-line, human-readable title for this problem code's documentation.
+    pub title: &'static str,
+    /// A human-readable description, potentially spanning multiple paragraphs,
+    /// which describes the general nature of the problem.
     pub description: &'static str,
+    /// A human-readable description of any actions an operator must perform to
+    /// resolve this problem.
+    ///
+    /// Depending on the nature of the problem, the "action required" may be
+    /// "contact Oxide support" or "do nothing and wait for automated response
+    /// to complete". q
     pub action_required: &'static str,
 
     /// The Oxide system software version in which this problem code was added.
