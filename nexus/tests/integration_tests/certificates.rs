@@ -16,7 +16,6 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
-use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_certificate;
 use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::create_silo;
@@ -482,18 +481,36 @@ async fn test_system_certificates_crud(cptestctx: &ControlPlaneTestContext) {
 /// Make a request as `authn` and check that it fails with `status`
 async fn expect_status(
     client: &ClientTestContext,
-    authn: AuthnMode,
+    authn: &AuthnMode,
     method: Method,
     url: &str,
-    body: Option<&CertificateCreate>,
-    status: StatusCode,
+    status: u16,
 ) {
-    NexusRequest::new(
-        RequestBuilder::new(client, method, url)
-            .body(body)
-            .expect_status(Some(status)),
+    let status = StatusCode::from_u16(status).unwrap();
+    NexusRequest::expect_failure(client, status, method, url)
+        .authn_as(authn.clone())
+        .execute()
+        .await
+        .unwrap();
+}
+
+/// Make a POST as `authn` and check that it fails with `status`
+async fn expect_post_status(
+    client: &ClientTestContext,
+    authn: &AuthnMode,
+    url: &str,
+    body: &CertificateCreate,
+    status: u16,
+) {
+    let status = StatusCode::from_u16(status).unwrap();
+    NexusRequest::expect_failure_with_body(
+        client,
+        status,
+        Method::POST,
+        url,
+        body,
     )
-    .authn_as(authn)
+    .authn_as(authn.clone())
     .execute()
     .await
     .unwrap();
@@ -587,15 +604,7 @@ async fn test_system_certificates_authz(cptestctx: &ControlPlaneTestContext) {
     }
 
     // But not in another silo, whether by silo, by name, or by ID.
-    expect_status(
-        client,
-        admin.clone(),
-        Method::POST,
-        &other_url,
-        Some(&params),
-        StatusCode::NOT_FOUND,
-    )
-    .await;
+    expect_post_status(client, &admin, &other_url, &params, 404).await;
     let other_by_name_url =
         format!("/v1/system/certificates/{CERT_NAME}?silo={other_silo_name}");
     let other_by_id_url =
@@ -607,15 +616,7 @@ async fn test_system_certificates_authz(cptestctx: &ControlPlaneTestContext) {
         (Method::GET, &other_by_id_url),
         (Method::DELETE, &other_by_id_url),
     ] {
-        expect_status(
-            client,
-            admin.clone(),
-            method,
-            url,
-            None,
-            StatusCode::NOT_FOUND,
-        )
-        .await;
+        expect_status(client, &admin, method, url, 404).await;
     }
 
     // A fleet viewer can't create certificates. This must fail on
@@ -627,39 +628,13 @@ async fn test_system_certificates_authz(cptestctx: &ControlPlaneTestContext) {
         key: bad_chain.end_cert_private_key_as_pem(),
         ..params.clone()
     };
-    for params in [&params, &bad_params] {
-        expect_status(
-            client,
-            viewer.clone(),
-            Method::POST,
-            &other_url,
-            Some(params),
-            StatusCode::FORBIDDEN,
-        )
-        .await;
-    }
+    expect_post_status(client, &viewer, &other_url, &params, 403).await;
+    expect_post_status(client, &viewer, &other_url, &bad_params, 403).await;
 
     // A fleet viewer can't list, view, or delete certificates either.
-    expect_status(
-        client,
-        viewer.clone(),
-        Method::GET,
-        &other_url,
-        None,
-        StatusCode::FORBIDDEN,
-    )
-    .await;
-    for method in [Method::GET, Method::DELETE] {
-        expect_status(
-            client,
-            viewer.clone(),
-            method,
-            &other_by_id_url,
-            None,
-            StatusCode::NOT_FOUND,
-        )
-        .await;
-    }
+    expect_status(client, &viewer, Method::GET, &other_url, 403).await;
+    expect_status(client, &viewer, Method::GET, &other_by_id_url, 404).await;
+    expect_status(client, &viewer, Method::DELETE, &other_by_id_url, 404).await;
 
     // A silo collaborator can read their own silo, so these get past the silo
     // lookup, but they still can't list, create, view, or delete certificates.
@@ -680,50 +655,18 @@ async fn test_system_certificates_authz(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
     let collaborator = AuthnMode::SiloUser(collaborator_id);
-    expect_status(
-        client,
-        collaborator.clone(),
-        Method::GET,
-        &url,
-        None,
-        StatusCode::FORBIDDEN,
-    )
-    .await;
-    expect_status(
-        client,
-        collaborator.clone(),
-        Method::POST,
-        &url,
-        Some(&params),
-        StatusCode::FORBIDDEN,
-    )
-    .await;
-    for url in [&by_name_url, &by_id_url] {
-        for method in [Method::GET, Method::DELETE] {
-            expect_status(
-                client,
-                collaborator.clone(),
-                method,
-                url,
-                None,
-                StatusCode::NOT_FOUND,
-            )
-            .await;
-        }
-    }
+    expect_status(client, &collaborator, Method::GET, &url, 403).await;
+    expect_post_status(client, &collaborator, &url, &params, 403).await;
+    expect_status(client, &collaborator, Method::GET, &by_name_url, 404).await;
+    expect_status(client, &collaborator, Method::DELETE, &by_name_url, 404)
+        .await;
+    expect_status(client, &collaborator, Method::GET, &by_id_url, 404).await;
+    expect_status(client, &collaborator, Method::DELETE, &by_id_url, 404).await;
 
     // Certificates in the silo can't be accessed by other silos' users.
-    for method in [Method::GET, Method::DELETE] {
-        expect_status(
-            client,
-            AuthnMode::UnprivilegedUser,
-            method,
-            &by_id_url,
-            None,
-            StatusCode::NOT_FOUND,
-        )
-        .await;
-    }
+    let unprivileged = AuthnMode::UnprivilegedUser;
+    expect_status(client, &unprivileged, Method::GET, &by_id_url, 404).await;
+    expect_status(client, &unprivileged, Method::DELETE, &by_id_url, 404).await;
     NexusRequest::object_delete(client, &by_id_url)
         .authn_as(admin)
         .execute()
