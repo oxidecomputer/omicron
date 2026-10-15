@@ -80,6 +80,34 @@ fn extract_link_kstats(
             Sample::new_with_timestamp(snapshot_time, target, &metric)
                 .map_err(Error::Sample)
         }))
+    } else if *name == "fec_high_symbol_errors" {
+        Some(value.as_u32().map(|v| v != 0).and_then(|x| {
+            let metric = sled_data_link::FecHighSymbolErrors { datum: x };
+            Sample::new_with_timestamp(snapshot_time, target, &metric)
+                .map_err(Error::Sample)
+        }))
+    } else if *name == "fec_sync_aligned" {
+        Some(value.as_u32().map(|v| v != 0).and_then(|x| {
+            let metric = sled_data_link::FecSyncAligned { datum: x };
+            Sample::new_with_timestamp(snapshot_time, target, &metric)
+                .map_err(Error::Sample)
+        }))
+    } else if *name == "fec_corrected_blocks" {
+        Some(value.as_u64().and_then(|x| {
+            let metric = sled_data_link::FecCorrectedBlocks {
+                datum: Cumulative::with_start_time(creation_time, x),
+            };
+            Sample::new_with_timestamp(snapshot_time, target, &metric)
+                .map_err(Error::Sample)
+        }))
+    } else if *name == "fec_uncorrected_blocks" {
+        Some(value.as_u64().and_then(|x| {
+            let metric = sled_data_link::FecUncorrectedBlocks {
+                datum: Cumulative::with_start_time(creation_time, x),
+            };
+            Sample::new_with_timestamp(snapshot_time, target, &metric)
+                .map_err(Error::Sample)
+        }))
     } else {
         None
     }
@@ -224,6 +252,13 @@ mod tests {
         }
     }
 
+    fn bool_value(sample: &Sample) -> bool {
+        match sample.measurement.datum() {
+            Datum::Bool(value) => *value,
+            other => panic!("expected a Bool, found {other:?}"),
+        }
+    }
+
     #[test]
     fn test_to_samples() {
         let link = data_link("opte0");
@@ -234,26 +269,49 @@ mod tests {
             Named { name: "opackets64", value: NamedData::UInt64(4) },
             Named { name: "ierrors", value: NamedData::UInt32(5) },
             Named { name: "oerrors", value: NamedData::UInt32(6) },
+            Named {
+                name: "fec_high_symbol_errors",
+                value: NamedData::UInt32(0),
+            },
+            Named {
+                name: "fec_sync_aligned",
+                value: NamedData::UInt32(1),
+            },
             Named { name: "unmatched", value: NamedData::UInt32(7) },
         ]);
         let kstat = Kstat::with_null_kstat("link", 0, "opte0");
         let samples = link.to_samples(&[(Utc::now(), kstat, data)]).unwrap();
-        let values: Vec<_> = samples
+        let names: Vec<_> = samples
             .iter()
-            .map(|s| (s.timeseries_name.to_string(), cumulative_value(s)))
+            .map(|s| s.timeseries_name.to_string())
             .collect();
-
         assert_eq!(
-            values,
+            names,
             [
-                ("sled_data_link:bytes_received".to_string(), 1),
-                ("sled_data_link:bytes_sent".to_string(), 2),
-                ("sled_data_link:packets_received".to_string(), 3),
-                ("sled_data_link:packets_sent".to_string(), 4),
-                ("sled_data_link:errors_received".to_string(), 5),
-                ("sled_data_link:errors_sent".to_string(), 6),
+                "sled_data_link:bytes_received".to_string(),
+                "sled_data_link:bytes_sent".to_string(),
+                "sled_data_link:packets_received".to_string(),
+                "sled_data_link:packets_sent".to_string(),
+                "sled_data_link:errors_received".to_string(),
+                "sled_data_link:errors_sent".to_string(),
+                "sled_data_link:fec_high_symbol_errors".to_string(),
+                "sled_data_link:fec_sync_aligned".to_string(),
             ]
         );
+
+        let cumulative: Vec<u64> = samples
+            .iter()
+            .filter(|s| !s.timeseries_name.as_str().starts_with("sled_data_link:fec"))
+            .map(cumulative_value)
+            .collect();
+        assert_eq!(cumulative, [1, 2, 3, 4, 5, 6]);
+
+        let bools: Vec<bool> = samples
+            .iter()
+            .filter(|s| s.timeseries_name.as_str().starts_with("sled_data_link:fec"))
+            .map(bool_value)
+            .collect();
+        assert_eq!(bools, [false, true]);
     }
 }
 
