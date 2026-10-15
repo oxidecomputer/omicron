@@ -24,32 +24,14 @@ called `all()`. Some of these steps may themselves spawn additional steps,
 such as `STEP_SPAWN_SLEDS`, which spawns a per-sled step to query the sled
 host OS itself.
 
-### Writing data, and the size limit
+### Writing data
 
-Steps write their data through the `BundleOutput` they are given, rather than
-to the filesystem directly. Every byte written that way is charged against the
-bundle's size limit. Once a write would take the bundle past its limit, the
-write is refused with a `SizeLimitExceeded` error, and collection stops: steps
-in flight are stopped through the `BundleCollection::stop_token`, and steps not
-yet started never run. The bundle keeps whatever was written before then, and
-records what was left out in `meta/report.json` and
-`meta/SIZE_LIMIT_EXCEEDED.txt`.
-
-Steps don't need to do anything special to support this, beyond what they do
-for cancellation: stop promptly once the stop token is cancelled.
-
-Steps, and writes to `BundleOutput`, return a `StepError`, which keeps
-`StepError::SizeLimitExceeded` apart from every other failure
-(`StepError::Other`). A step can return a refused write with `?`; the framework
-reports the step as cut short by the size limit, rather than as failed. A step
-that records its own errors, rather than returning them, should match on
-`StepError::Other`, so that running out of space isn't also reported as one of
-its errors.
-
-`StepError` does not implement `std::error::Error`, so that it cannot be turned
-into an `anyhow::Error` by mistake, losing the size limit variant. To add
-context to it, use `StepResultExt::context` or `StepResultExt::with_context`,
-rather than anyhow's.
+Steps write through the `BundleOutput` they are given, not directly to the
+filesystem, so that writes count against the bundle's size limit. A write
+past the limit fails with `StepError::SizeLimitExceeded`, and the framework
+stops collection and records what was left out. Steps can return that error
+with `?`; beyond honoring the stop token, they need nothing special. See
+`StepError` for details.
 
 ### Tracing
 

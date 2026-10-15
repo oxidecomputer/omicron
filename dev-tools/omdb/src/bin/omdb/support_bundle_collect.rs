@@ -92,8 +92,8 @@ struct CollectArgs {
     #[clap(long, value_parser = humantime::parse_duration)]
     until: Option<std::time::Duration>,
 
-    /// Stop collecting once the bundle reaches this many bytes, keeping what
-    /// was collected up to that point. By default, bundles are unlimited.
+    /// Stop collecting once the bundle reaches this many bytes. Unlimited by
+    /// default.
     #[clap(long)]
     size_limit_bytes: Option<u64>,
 }

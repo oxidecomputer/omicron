@@ -4,18 +4,14 @@
 
 //! Writing collected data into a bundle, within a size limit.
 //!
-//! Every file a step writes into the bundle goes through a [`BundleOutput`],
-//! which charges its bytes against a [`SizeBudget`] shared by the whole
-//! collection. When a write would take the bundle past its limit, the write is
-//! refused and the budget is exceeded: from then on, every write is refused,
-//! and the collection's stop token is cancelled, so that in-flight steps wind
-//! down and no new ones start. Whatever was written before then stays in the
-//! bundle.
+//! Steps write files through a [`BundleOutput`], which charges them against
+//! a [`SizeBudget`] shared by the whole collection. The first write that
+//! doesn't fit is refused, along with every write after it, and the stop
+//! token is cancelled.
 //!
-//! The limit applies to the collected directory, rather than to the zip it
-//! becomes. Data that is already compressed (zone logs, SP task dumps) is
-//! stored in the zip as-is, and everything else is deflated, so the zip is no
-//! larger than the directory, other than a small header for each entry.
+//! The limit applies to the collected directory, not the zip. Compressed
+//! data (zone logs, SP dumps) is stored as-is and the rest is deflated, so
+//! the zip is no larger than the directory, plus small per-entry headers.
 
 use crate::step::StepError;
 use anyhow::Context;

@@ -15,19 +15,17 @@
 //!
 //! # Stopping early
 //!
-//! Collection can stop before every step has run, for one of two reasons:
+//! Collection stops before every step has run if:
 //!
 //! - The caller cancels it, through [`BundleCollection::cancellation_token`].
 //!   The bundle is abandoned, and [`BundleCollection::collect_bundle_locally`]
 //!   returns an error.
 //! - The bundle reaches its size limit (see
-//!   [`BundleCollection::with_size_limit`]). Collection stops, but the bundle
-//!   keeps whatever was collected before then, along with a record of what was
-//!   left out: in the collection report, and in the file
-//!   [`SIZE_LIMIT_EXCEEDED_FILE`].
+//!   [`BundleCollection::with_size_limit`]). The bundle keeps what was
+//!   collected, and records what was left out in the collection report and
+//!   in [`SIZE_LIMIT_EXCEEDED_FILE`].
 //!
-//! Either way, steps observe the same signal: the
-//! [`BundleCollection::stop_token`].
+//! Either way, steps see [`BundleCollection::stop_token`] cancelled.
 
 use crate::cache::Cache;
 use crate::output::BundleOutput;
@@ -111,12 +109,8 @@ impl BundleCollection {
         }
     }
 
-    /// Limits the bundle to `limit` bytes, or removes the limit if `limit`
-    /// is `None`. By default, bundles are unlimited.
-    ///
-    /// Once the bundle reaches its limit, collection stops, and the bundle
-    /// keeps what was collected before then. See the [module
-    /// documentation](self#stopping-early).
+    /// Limits the bundle to `limit` bytes, or no limit if `None` (the
+    /// default). See [Stopping early](self#stopping-early).
     pub fn with_size_limit(mut self, limit: Option<u64>) -> Self {
         self.size_budget =
             Arc::new(SizeBudget::new(limit, self.stop_token.clone()));

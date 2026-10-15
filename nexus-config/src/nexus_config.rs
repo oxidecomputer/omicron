@@ -621,10 +621,7 @@ pub struct SupportBundleCollectorConfig {
     #[serde(default)]
     pub disable: bool,
 
-    /// The size, in bytes, at which collection of a support bundle stops.
-    ///
-    /// A bundle that reaches this size keeps what was collected up to that
-    /// point, along with a record of what was left out.
+    /// Size, in bytes, at which support bundle collection stops.
     ///
     /// Default: [`SupportBundleCollectorConfig::DEFAULT_SIZE_LIMIT_BYTES`]
     #[serde(
