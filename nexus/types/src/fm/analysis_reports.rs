@@ -564,13 +564,14 @@ impl From<&FmConfig> for ConfigReport {
         // Destructure exhaustively, so that adding a setting to `FmConfig`
         // forces a decision about whether it belongs in the report.
         let FmConfig {
-            // These settings govern whether and how often analysis runs, and
-            // how sitrep history is retained. They are not inputs to any
+            // Recorded: an input to the certificate diagnosis engine.
+            certificate_expiry_warning_days,
+            // Not recorded: these govern whether and how often analysis runs,
+            // and how sitrep history is retained. They are not inputs to any
             // diagnosis engine, so they can't change what analysis decides.
             analysis_enabled: _,
             sitrep_limit: _,
             history_pruning_threshold: _,
-            certificate_expiry_warning_days,
         } = *config;
         Self {
             certificate_expiry_warning_days: certificate_expiry_warning_days
