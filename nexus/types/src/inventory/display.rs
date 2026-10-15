@@ -677,9 +677,18 @@ fn display_sleds(
     include_racks: &CollectionDisplayIncludeRacks,
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
+    let mut sled_agent_sort_order: Vec<_> = collection
+        .sled_agents
+        .iter()
+        .map(|sa| (&sa.rack_id, &sa.sled_id))
+        .collect();
+    sled_agent_sort_order.sort();
+
     let mut f = f;
     writeln!(f, "SLED AGENTS")?;
-    for sled in &collection.sled_agents {
+    for (_rack_id, sled_id) in sled_agent_sort_order {
+        // Safe to unwrap since `sled_id` came from a map key right above here
+        let sled = &collection.sled_agents.get(sled_id).unwrap();
         let SledAgent {
             time_collected,
             source,
