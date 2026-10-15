@@ -561,24 +561,33 @@ mod test {
         let dir_path = dir.path().to_owned();
         let locked = dir_path.join("dir-a");
         // Without write permission on its directory, "dir-a/file-a" cannot be
-        // removed (unless we're root, in which case this test proves less but
-        // still passes).
+        // removed. Root ignores those permissions, so when this test runs as
+        // root it only checks that zipping succeeds, not that removal fails.
         std::fs::set_permissions(
             &locked,
             std::fs::Permissions::from_mode(0o555),
         )
         .unwrap();
+        let ignores_permissions =
+            std::fs::File::create(locked.join("probe")).is_ok();
+        if ignores_permissions {
+            std::fs::remove_file(locked.join("probe")).unwrap();
+        }
 
         let tempdir_for_zip = tempdir().unwrap();
         let result =
             bundle_to_zipfile(dir, tempdir_for_zip.path(), &test_log());
 
-        // Clean up what the bundle directory's removal could not.
-        std::fs::set_permissions(
+        if !ignores_permissions {
+            assert!(locked.join("file-a").exists());
+        }
+
+        // Clean up what the bundle directory's removal could not. If the
+        // removal succeeded, there is nothing left to clean up.
+        let _ = std::fs::set_permissions(
             &locked,
             std::fs::Permissions::from_mode(0o755),
-        )
-        .unwrap();
+        );
         let _ = std::fs::remove_dir_all(&dir_path);
 
         let archive = ::zip::read::ZipArchive::new(result.unwrap()).unwrap();
