@@ -134,8 +134,7 @@ impl CollectionStep {
 
         let output = match (self.step_fn)(collection, output).await {
             Ok(output) => output,
-            // Running out of space is not a failure of the step: the
-            // scheduler reports it, for every step it cut short.
+            // Not a step failure; the scheduler reports the size limit.
             Err(StepError::SizeLimitExceeded(_)) => CollectionStepOutput::None,
             Err(StepError::Other(err)) => {
                 warn!(

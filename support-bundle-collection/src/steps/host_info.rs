@@ -224,9 +224,6 @@ async fn collect_data_from_sled(
         // Log that we failed to write the diag command output to a
         // file but don't return early as we wish to get as much
         // information as we can.
-        //
-        // Running out of space is reported by the step framework, rather
-        // than for each file that didn't fit.
         if let Err(StepError::Other(e)) = result {
             error!(
                 log,
@@ -364,10 +361,8 @@ async fn save_zone_log_zip_or_error(
             if let Err(err) =
                 save_zone_log_zip(res.into_inner(), &output_dir).await
             {
-                // Leave an error in the bundle in place of the logs, rather
-                // than a zip that could not be saved. A bundle that's out of
-                // space has no room for the error either, and records what it
-                // left out elsewhere.
+                // Replace the failed zip with an error file. If the size
+                // limit was reached, there's no room for one.
                 if let StepError::Other(err) = &err {
                     let err_string =
                         InlineErrorChain::new(err.as_ref()).to_string();

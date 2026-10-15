@@ -48,8 +48,6 @@ pub async fn collect(
     .await
     {
         Ok(()) => {}
-        // Running out of space is reported by the step framework, rather than
-        // as an error collecting ereports.
         Err(StepError::SizeLimitExceeded(_)) => {}
         Err(StepError::Other(err)) => {
             warn!(
