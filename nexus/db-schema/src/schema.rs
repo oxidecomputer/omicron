@@ -3561,6 +3561,32 @@ table! {
 }
 
 table! {
+    active_problem (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        current_revision -> Int8,
+    }
+}
+
+table! {
+    active_problem_revision (problem_id, revision) {
+        problem_id -> Uuid,
+        revision -> Int8,
+        time_created -> Timestamptz,
+        time_resolved -> Nullable<Timestamptz>,
+        code -> Int8,
+        summary -> Text,
+        description -> Text,
+        action_required -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(active_problem, active_problem_revision);
+joinable!(active_problem_revision -> active_problem (problem_id));
+
+table! {
     trust_quorum_configuration (rack_id, epoch) {
         rack_id -> Uuid,
         epoch -> Int8,

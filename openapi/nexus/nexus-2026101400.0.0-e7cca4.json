@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026101300.0.0"
+    "version": "2026101400.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -7333,6 +7333,480 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
+        }
+      }
+    },
+    "/v1/system/active-problems": {
+      "get": {
+        "tags": [
+          "system/active-problems"
+        ],
+        "summary": "List Active Problems",
+        "operationId": "active_problem_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveProblemResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/system/active-problems/{problem_id}": {
+      "get": {
+        "tags": [
+          "system/active-problems"
+        ],
+        "summary": "Fetch Active Problem",
+        "operationId": "active_problem_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "problem_id",
+            "description": "ID of the Active Problem",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveProblem"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/active-problems/{problem_id}/alerts": {
+      "get": {
+        "tags": [
+          "system/active-problems"
+        ],
+        "summary": "List alerts for Active Problem",
+        "description": "Lists alerts associated with the requested Active Problem. Alerts may be filtered by alert class or alert class glob and by an inclusive creation time range.",
+        "operationId": "active_problem_alert_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "problem_id",
+            "description": "ID of the Active Problem",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "alert_class",
+            "description": "Optional alert class or glob pattern used to filter alerts.\n\nIf this is included, only alerts with the specified class or matching the glob pattern (as appropriate) will be returned. Otherwise, alerts of all classes will be returned.\n\nSee the guide-level documentation on alerts for details on alert classes and alert class glob patterns.",
+            "schema": {
+              "$ref": "#/components/schemas/AlertSubscription"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_time",
+            "description": "Inclusive upper bound on the alert creation time\n\nIf this is included, only alerts created at or before this time will be returned.",
+            "schema": {
+              "nullable": true,
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/TimeAndIdSortMode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_time",
+            "description": "Inclusive lower bound on the alert creation time.\n\nIf this is included, only alerts created at or after this time will be returned.",
+            "schema": {
+              "nullable": true,
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/system/active-problems/{problem_id}/causes": {
+      "get": {
+        "tags": [
+          "system/active-problems"
+        ],
+        "summary": "List Active Problem's causes",
+        "description": "Returns any other Active Problems which are the causes of the specified Active Problem. If the specified Active Problem has no causes, this list may be empty.",
+        "operationId": "active_problem_causes_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "problem_id",
+            "description": "ID of the Active Problem",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelatedActiveProblemResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/system/active-problems/{problem_id}/consequences": {
+      "get": {
+        "tags": [
+          "system/active-problems"
+        ],
+        "summary": "List Active Problem's consequences",
+        "description": "Returns any other Active Problems which are caused by the specified Active Problem. If no other Active Problem is caused by the specified Active Problem, then this list may be empty.",
+        "operationId": "active_problem_consequences_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "problem_id",
+            "description": "ID of the Active Problem",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelatedActiveProblemResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/system/active-problems/{problem_id}/impacts": {
+      "get": {
+        "tags": [
+          "system/active-problems"
+        ],
+        "summary": "List resources impacted by Active Problem",
+        "operationId": "active_problem_impact_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "problem_id",
+            "description": "ID of the Active Problem",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveProblemImpactResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/system/active-problems/{problem_id}/support-bundles": {
+      "get": {
+        "tags": [
+          "system/active-problems"
+        ],
+        "summary": "List support bundles attached to Active Problem",
+        "operationId": "active_problem_support_bundles_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "problem_id",
+            "description": "ID of the Active Problem",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/TimeAndIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfoResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
         }
       }
     },
@@ -15676,6 +16150,187 @@
   },
   "components": {
     "schemas": {
+      "ActiveProblem": {
+        "description": "An Active Problem.\n\nActive Problems describe conditions detected by the fault management subsystem in which some aspect of the system's operation is degraded. This includes both ongoing problems and historical data describing resolved problems.\n\nThe `time_created` field records when the problem was detected, and the `time_modified` field records the time of its most recent revision.",
+        "type": "object",
+        "properties": {
+          "action_required": {
+            "description": "A description of any actions an operator should take in response to this Active Problem.\n\nThis may change as the problem progresses.",
+            "type": "string"
+          },
+          "class": {
+            "description": "The class of component affected by this problem.\n\nProblem classes are dot-separated strings, such as `hardware.power_shelf`, in which each segment is more specific than the last. The class is determined by the problem code.",
+            "type": "string"
+          },
+          "code": {
+            "description": "The problem code describing this Active Problem.\n\nProblem codes are opaque numeric identifiers that indicate the nature of the issue an Active Problem represents. They may be used to reference documentation and service instructions for that particular kind of problem, and to communicate with Oxide support. The problem code may change if the diagnosis of the problem is refined, which creates a new revision.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "description": {
+            "description": "A longer human-readable description of the problem.\n\nThis may change as the problem progresses.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "description": "The current revision number of this Active Problem.\n\nThe revision number is incremented each time the Active Problem is updated. Changes to an Active Problem's impact list, description, and relationships with other Active Problems all increment the revision number.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "state": {
+            "description": "The current state of this Active Problem.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActiveProblemState"
+              }
+            ]
+          },
+          "summary": {
+            "description": "A brief, human-readable summary of the problem.\n\nThis is short enough to be used as a title. It is intended for display to humans, and is not a stable identifier. For a machine-consumable identifier, use the problem code field.",
+            "type": "string"
+          },
+          "time_created": {
+            "description": "Timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "Timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "action_required",
+          "class",
+          "code",
+          "description",
+          "id",
+          "revision",
+          "state",
+          "summary",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "ActiveProblemImpact": {
+        "description": "A resource impacted by an Active Problem.",
+        "type": "object",
+        "properties": {
+          "reason": {
+            "description": "A human-readable summary of how this resource is impacted by the problem.",
+            "type": "string"
+          },
+          "resource": {
+            "description": "The impacted resource.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImpactedResource"
+              }
+            ]
+          },
+          "revision_added": {
+            "description": "The revision of the Active Problem in which this impact was added.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "reason",
+          "resource",
+          "revision_added"
+        ]
+      },
+      "ActiveProblemImpactResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActiveProblemImpact"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "ActiveProblemResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActiveProblem"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "ActiveProblemState": {
+        "description": "The state of an Active Problem.",
+        "oneOf": [
+          {
+            "description": "The condition represented by the Active Problem still exists.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "active"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The system has determined that the problem no longer exists.\n\nA resolved Active Problem never becomes active again. If the same condition is detected again, a new Active Problem with a new ID is created.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "resolved"
+                ]
+              },
+              "time_resolved": {
+                "description": "The time at which the problem was resolved.",
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "state",
+              "time_resolved"
+            ]
+          }
+        ]
+      },
       "Address": {
         "description": "An address tied to an address lot.",
         "type": "object",
@@ -22823,6 +23478,171 @@
           }
         ]
       },
+      "ImpactedResource": {
+        "description": "API resource types which may be impacted by an Active Problem.",
+        "oneOf": [
+          {
+            "description": "A sled.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "resource_type": {
+                "type": "string",
+                "enum": [
+                  "sled"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "resource_type"
+            ]
+          },
+          {
+            "description": "A switch.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "resource_type": {
+                "type": "string",
+                "enum": [
+                  "switch"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "resource_type"
+            ]
+          },
+          {
+            "description": "A switch port.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "resource_type": {
+                "type": "string",
+                "enum": [
+                  "switch_port"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "resource_type"
+            ]
+          },
+          {
+            "description": "A physical disk.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "resource_type": {
+                "type": "string",
+                "enum": [
+                  "physical_disk"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "resource_type"
+            ]
+          },
+          {
+            "description": "A virtual machine instance.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "resource_type": {
+                "type": "string",
+                "enum": [
+                  "instance"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "resource_type"
+            ]
+          },
+          {
+            "description": "A virtual disk.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "resource_type": {
+                "type": "string",
+                "enum": [
+                  "disk"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "resource_type"
+            ]
+          },
+          {
+            "description": "An image.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "resource_type": {
+                "type": "string",
+                "enum": [
+                  "image"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "resource_type"
+            ]
+          },
+          {
+            "description": "A disk snapshot.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "resource_type": {
+                "type": "string",
+                "enum": [
+                  "snapshot"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "resource_type"
+            ]
+          }
+        ]
+      },
       "ImportBlocksBulkWrite": {
         "description": "Parameters for importing blocks with a bulk write",
         "type": "object",
@@ -26845,6 +27665,53 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Rack"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "RelatedActiveProblem": {
+        "description": "An Active Problem that is a cause or consequence of another Active Problem",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "ID of the related Active Problem",
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "description": "A human-readable summary of why the problems are related.",
+            "type": "string"
+          },
+          "revision_added": {
+            "description": "The revision of the requested Active Problem in which this relationship was added.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "id",
+          "reason",
+          "revision_added"
+        ]
+      },
+      "RelatedActiveProblemResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RelatedActiveProblem"
             }
           },
           "next_page": {
@@ -32461,6 +33328,13 @@
       "description": "Subnet pools are collections of external subnets that can be allocated and attached to instances.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/subnet-pools"
+      }
+    },
+    {
+      "name": "system/active-problems",
+      "description": "Problems detected by the fault management subsystem.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/active-problems"
       }
     },
     {

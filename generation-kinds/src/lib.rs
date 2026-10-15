@@ -39,6 +39,7 @@ impl_typed_generation_kinds! {
         },
     },
     kinds = {
+        ActiveProblem = {},
         Alert = {},
         ArtifactConfig = {},
         InstanceState = {},
