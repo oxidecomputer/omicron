@@ -9636,6 +9636,9 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/system/active-problems/{problem_id}/support-bundles",
+        // XXX(eliza): it would be nice if this could also have the
+        // `system/support-bundles` tag, but only one tag is allowed per
+        // endpoint (why is it an array, then?)...
         tags = ["system/active-problems"],
         versions = VERSION_ACTIVE_PROBLEMS..,
     }]
@@ -9647,6 +9650,25 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<latest::support_bundle::SupportBundleInfo>>,
         HttpError,
     >;
+
+    /// List alerts for Active Problem
+    ///
+    /// Lists alerts associated with the requested Active Problem.
+    /// Alerts may be filtered by alert class or alert class glob and
+    /// by an inclusive creation time range.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/active-problems/{problem_id}/alerts",
+        // XXX(eliza): it would be nice if this could also have the
+        // `system/alerts` tag, but only one tag is allowed per endpoint...
+        tags = ["system/active-problems"],
+        versions = VERSION_ACTIVE_PROBLEMS..,
+    }]
+    async fn active_problem_alert_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::active_problem::ActiveProblemSelector>,
+        pagination: Query<PaginatedByTimeAndId<latest::alert::AlertListParams>>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::alert::Alert>>, HttpError>;
 
     // Alerts
 
