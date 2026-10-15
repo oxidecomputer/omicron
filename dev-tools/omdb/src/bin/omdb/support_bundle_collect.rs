@@ -24,6 +24,7 @@ use camino_tempfile::tempdir_in;
 use clap::Args;
 use clap::Subcommand;
 use clap::ValueEnum;
+use nexus_config::SupportBundleCollectorConfig;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::fm::ereport::EreportFilters;
@@ -92,10 +93,12 @@ struct CollectArgs {
     #[clap(long, value_parser = humantime::parse_duration)]
     until: Option<std::time::Duration>,
 
-    /// Stop collecting once the bundle reaches this many bytes. Unlimited by
-    /// default.
-    #[clap(long)]
-    size_limit_bytes: Option<u64>,
+    /// Stop collecting once the bundle reaches this many bytes.
+    #[clap(
+        long,
+        default_value_t = SupportBundleCollectorConfig::DEFAULT_SIZE_LIMIT_BYTES
+    )]
+    size_limit_bytes: u64,
 }
 
 impl CollectArgs {
@@ -206,7 +209,7 @@ impl CollectArgs {
                 data_selection,
                 bundle,
             )
-            .with_size_limit(self.size_limit_bytes),
+            .with_size_limit(Some(self.size_limit_bytes)),
         );
 
         // Wire Ctrl-C to cancel the in-flight collection.
