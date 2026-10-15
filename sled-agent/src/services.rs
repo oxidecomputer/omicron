@@ -50,7 +50,6 @@ use illumos_utils::smf_helper::Service as _;
 use illumos_utils::smf_helper::SmfHelper;
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
-use illumos_utils::zpool::ZpoolName;
 use illumos_utils::{PFEXEC, execute};
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
@@ -246,16 +245,6 @@ pub enum Error {
     #[error("Error migrating old-format services ledger")]
     ServicesMigration(#[source] anyhow::Error),
 
-    #[error(
-        "Invalid filesystem_pool in new zone config: \
-         for zone {zone_id}, expected pool {expected_pool} but got {got_pool}"
-    )]
-    InvalidFilesystemPoolZoneConfig {
-        zone_id: OmicronZoneUuid,
-        expected_pool: ZpoolName,
-        got_pool: ZpoolName,
-    },
-
     #[error("failed to read mupdate override info, not starting zones")]
     MupdateOverrideRead(#[source] MupdateOverrideReadError),
 
@@ -287,8 +276,7 @@ impl Error {
 impl From<Error> for omicron_common::api::external::Error {
     fn from(err: Error) -> Self {
         match err {
-            Error::RequestedConfigConflicts(_)
-            | Error::InvalidFilesystemPoolZoneConfig { .. } => {
+            Error::RequestedConfigConflicts(_) => {
                 omicron_common::api::external::Error::invalid_request(
                     &InlineErrorChain::new(&err).to_string(),
                 )
