@@ -10,7 +10,7 @@ versions = [
 
 [fields.nexus_id]
 type = "uuid"
-description = "ID of the Nexus reporting the sample"
+description = "ID of the Nexus reporting the sample. We emit quota metrics from each Nexus, so aggregate over Nexus instances by mean or max, but not sum, to avoid double-counting."
 
 [fields.silo_id]
 type = "uuid"
@@ -18,7 +18,7 @@ description = "ID of the silo"
 
 [[metrics]]
 name = "memory_capacity"
-description = "Quota limit for provisioned memory"
+description = "Quota capacity for provisioned memory"
 units = "bytes"
 datum_type = "u64"
 versions = [
@@ -36,7 +36,7 @@ versions = [
 
 [[metrics]]
 name = "cpu_capacity"
-description = "Quota limit for provisioned vCPUs"
+description = "Quota capacity for provisioned vCPUs"
 units = "count"
 datum_type = "u64"
 versions = [
@@ -53,8 +53,8 @@ versions = [
 ]
 
 [[metrics]]
-name = "disk_capacity"
-description = "Quota limit for provisioned disk and snapshot storage"
+name = "storage_capacity"
+description = "Quota capacity for provisioned disk and snapshot storage"
 units = "bytes"
 datum_type = "u64"
 versions = [
@@ -62,8 +62,8 @@ versions = [
 ]
 
 [[metrics]]
-name = "disk_provisioned"
-description = "Provisioned disk charged against the quota"
+name = "storage_provisioned"
+description = "Provisioned disk and snapshot storage charged against the quota"
 units = "bytes"
 datum_type = "u64"
 versions = [

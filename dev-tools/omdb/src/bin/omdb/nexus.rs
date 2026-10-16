@@ -61,6 +61,7 @@ use nexus_types::internal_api::background::AuditLogTimeoutIncompleteStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintPrunerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
+use nexus_types::internal_api::background::CapacityMetricsStatus;
 use nexus_types::internal_api::background::DatasetRendezvousOutcome;
 use nexus_types::internal_api::background::DatasetRendezvousStats;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
@@ -2236,16 +2237,9 @@ fn print_task_instance_updater(details: &serde_json::Value) {
 }
 
 fn print_task_capacity_metrics(details: &serde_json::Value) {
-    #[derive(Deserialize)]
-    struct CapacityMetricsStatus {
-        /// Number of samples queued.
-        samples_queued: usize,
-    }
-
     match serde_json::from_value::<CapacityMetricsStatus>(details.clone()) {
         Err(error) => eprintln!(
-            "warning: failed to interpret task details: {:?}: {:?}",
-            error, details
+            "warning: failed to interpret task details: {error:?}: {details:?}",
         ),
         Ok(status) => {
             println!("    samples queued: {}", status.samples_queued);

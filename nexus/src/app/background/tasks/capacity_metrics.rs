@@ -4,8 +4,8 @@
 
 //! Background task that collects and emits silo quota metrics:
 //!
-//! * silo_quota:{memory,cpu,disk}_capacity: resource limits set on the silo.
-//! * silo_quota:{memory,cpu,disk}_provisioned: resources charged against the
+//! * silo_quota:{memory,cpu,storage}_capacity: resource limits set on the silo.
+//! * silo_quota:{memory,cpu,storage}_provisioned: resources charged against the
 //!   silo.
 //!
 //! Note: because background tasks run on each Nexus instance, these metrics are
@@ -14,23 +14,28 @@
 //! deduplicate.
 //!
 //! Note: the `silo_quota` metrics are related to, but distinct from, the
-//! `collection_target` metric. The `silo_quota` metrics are emitted on a
-//! regular interval, and labeled by silo ID. Meanwhile, `collection_target` is
-//! emitted when silo utilization changes, resulting in a sparse timeseries, and
-//! only covers utilization. Users who wish to show quota utilization ratios
+//! `collection_target` metric. The `silo_quota` metrics are emitted on a regular
+//! interval, and labeled by silo ID. Meanwhile, `collection_target` is currently
+//! emitted only when silo utilization changes, resulting in a sparse timeseries,
+//! and only covers utilization. Users who wish to show quota utilization ratios
 //! (i.e. utilization divided by capacity), or who require regular timeseries,
 //! should use the `silo_quota` metrics.
 
 use crate::app::background::BackgroundTask;
+use dropshot::PaginationOrder;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use nexus_auth::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use omicron_common::api::external::DataPageParams;
+use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
+use nexus_db_queries::db::pagination::Paginator;
+use nexus_types::internal_api::background::CapacityMetricsStatus;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use oximeter::MetricsError;
 use oximeter::Sample;
+use oximeter::queue::BoundedQueue;
 use oximeter::types::ProducerRegistry;
 use std::sync::{Arc, Mutex};
 
@@ -38,9 +43,11 @@ oximeter::use_timeseries!("silo-quota.toml");
 
 use silo_quota::SiloQuota;
 
+const QUEUE_SIZE: usize = 8192;
+
 pub(crate) struct CapacityMetrics {
     datastore: Arc<DataStore>,
-    metrics: Arc<Mutex<metrics::Metrics>>,
+    metrics: Arc<Mutex<BoundedQueue<Sample>>>,
     nexus_id: OmicronZoneUuid,
 }
 
@@ -50,10 +57,8 @@ impl CapacityMetrics {
         producer_registry: &ProducerRegistry,
         nexus_id: OmicronZoneUuid,
     ) -> Self {
-        let metrics = Arc::new(Mutex::new(metrics::Metrics::default()));
-        producer_registry
-            .register_producer(metrics::Producer(metrics.clone()))
-            .unwrap();
+        let metrics = Arc::new(Mutex::new(BoundedQueue::new(QUEUE_SIZE)));
+        producer_registry.register_producer(Producer(metrics.clone())).unwrap();
         Self { datastore, metrics, nexus_id }
     }
 
@@ -65,66 +70,84 @@ impl CapacityMetrics {
         let now = chrono::Utc::now();
         let nexus_id = nexus_id.into_untyped_uuid();
 
-        let silo_utils = self
-            .datastore
-            .silo_utilization_list(
-                opctx,
-                &PaginatedBy::Id(DataPageParams::max_page()),
-            )
-            .await?;
+        let mut paginator =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Ascending);
+        let mut samples = Vec::<Sample>::new();
+
+        while let Some(p) = paginator.next() {
+            let silo_utils = self
+                .datastore
+                .silo_utilization_list(
+                    opctx,
+                    &PaginatedBy::Id(p.current_pagparams()),
+                )
+                .await?;
+            paginator = p.found_batch(&silo_utils, &|util| util.silo_id);
+
+            for util in silo_utils {
+                let target = SiloQuota { silo_id: util.silo_id, nexus_id };
+                samples.extend([
+                    Sample::new_with_timestamp(
+                        now,
+                        &target,
+                        &silo_quota::MemoryCapacity {
+                            datum: util.memory_allocated.to_bytes(),
+                        },
+                    )?,
+                    Sample::new_with_timestamp(
+                        now,
+                        &target,
+                        &silo_quota::MemoryProvisioned {
+                            datum: util.memory_provisioned.to_bytes(),
+                        },
+                    )?,
+                    Sample::new_with_timestamp(
+                        now,
+                        &target,
+                        &silo_quota::CpuCapacity {
+                            datum: u64::try_from(util.cpus_allocated)?,
+                        },
+                    )?,
+                    Sample::new_with_timestamp(
+                        now,
+                        &target,
+                        &silo_quota::CpuProvisioned {
+                            datum: u64::try_from(util.cpus_provisioned)?,
+                        },
+                    )?,
+                    Sample::new_with_timestamp(
+                        now,
+                        &target,
+                        &silo_quota::StorageCapacity {
+                            datum: util.storage_allocated.to_bytes(),
+                        },
+                    )?,
+                    Sample::new_with_timestamp(
+                        now,
+                        &target,
+                        &silo_quota::StorageProvisioned {
+                            datum: util.storage_provisioned.to_bytes(),
+                        },
+                    )?,
+                ]);
+            }
+        }
 
         let mut metrics = self.metrics.lock().unwrap();
-        let mut sample_count = 0;
-        for util in silo_utils {
-            let target = SiloQuota { silo_id: util.silo_id, nexus_id };
-            let samples = vec![
-                Sample::new_with_timestamp(
-                    now,
-                    &target,
-                    &silo_quota::MemoryCapacity {
-                        datum: util.memory_allocated.to_bytes(),
-                    },
-                )?,
-                Sample::new_with_timestamp(
-                    now,
-                    &target,
-                    &silo_quota::MemoryProvisioned {
-                        datum: util.memory_provisioned.to_bytes(),
-                    },
-                )?,
-                Sample::new_with_timestamp(
-                    now,
-                    &target,
-                    &silo_quota::CpuCapacity {
-                        datum: util.cpus_allocated.cast_unsigned(),
-                    },
-                )?,
-                Sample::new_with_timestamp(
-                    now,
-                    &target,
-                    &silo_quota::CpuProvisioned {
-                        datum: util.cpus_provisioned.cast_unsigned(),
-                    },
-                )?,
-                Sample::new_with_timestamp(
-                    now,
-                    &target,
-                    &silo_quota::DiskCapacity {
-                        datum: util.storage_allocated.to_bytes(),
-                    },
-                )?,
-                Sample::new_with_timestamp(
-                    now,
-                    &target,
-                    &silo_quota::DiskProvisioned {
-                        datum: util.storage_provisioned.to_bytes(),
-                    },
-                )?,
-            ];
-            sample_count += samples.len();
-            metrics.push_samples(samples);
+        let n_new_samples = samples.len();
+        let n_current_samples = metrics.len();
+        let n_dropped_samples = metrics.extend(samples);
+        if n_dropped_samples > 0 {
+            slog::warn!(
+                opctx.log,
+                "sample queue is too full, dropping oldest samples";
+                "n_new_samples" => n_new_samples,
+                "n_current_samples" => n_current_samples,
+                "n_dropped_samples" => n_dropped_samples,
+            );
         }
-        Ok(sample_count)
+
+        Ok(n_new_samples.min(QUEUE_SIZE))
     }
 }
 
@@ -136,7 +159,9 @@ impl BackgroundTask for CapacityMetrics {
         async move {
             match self.fetch_samples(opctx, self.nexus_id).await {
                 Ok(sample_count) => {
-                    serde_json::json!({"samples_queued": sample_count})
+                    serde_json::json!(CapacityMetricsStatus {
+                        samples_queued: sample_count,
+                    })
                 }
                 Err(error) => {
                     serde_json::json!({"error": format!("{error:#}")})
@@ -147,32 +172,15 @@ impl BackgroundTask for CapacityMetrics {
     }
 }
 
-mod metrics {
-    use std::sync::{Arc, Mutex};
+#[derive(Debug)]
+struct Producer(Arc<Mutex<BoundedQueue<Sample>>>);
 
-    use oximeter::{MetricsError, Sample};
-
-    #[derive(Debug)]
-    pub(super) struct Producer(pub(super) Arc<Mutex<Metrics>>);
-
-    #[derive(Debug, Default)]
-    pub(super) struct Metrics {
-        samples: Vec<Sample>,
-    }
-
-    impl Metrics {
-        pub(crate) fn push_samples(&mut self, samples: Vec<Sample>) {
-            self.samples.extend(samples);
-        }
-    }
-
-    impl oximeter::Producer for Producer {
-        fn produce(
-            &mut self,
-        ) -> Result<Box<dyn Iterator<Item = Sample>>, MetricsError> {
-            let samples = std::mem::take(&mut self.0.lock().unwrap().samples);
-            Ok(Box::new(samples.into_iter()))
-        }
+impl oximeter::Producer for Producer {
+    fn produce(
+        &mut self,
+    ) -> Result<Box<dyn Iterator<Item = Sample>>, MetricsError> {
+        let samples = self.0.lock().unwrap().drain();
+        Ok(Box::new(samples.into_iter()))
     }
 }
 
@@ -180,11 +188,15 @@ mod metrics {
 mod tests {
     use super::*;
     use nexus_auth::{authn, authz};
-    use nexus_db_lookup::LookupPath;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::Project;
     use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
+    use nexus_test_utils::http_testing::AuthnMode;
+    use nexus_test_utils::resource_helpers::{
+        create_local_user, grant_iam, test_params,
+    };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::policy::SiloRole;
     use nexus_types::external_api::project::ProjectCreate;
     use nexus_types::external_api::silo::{
         SiloCreate, SiloIdentityMode, SiloQuotasCreate,
@@ -259,17 +271,32 @@ mod tests {
         }
         let populated_silo = silos[0].id();
         let empty_silo = silos[1].id();
+        let client = &cptestctx.external_client;
+        let admin_user = create_local_user(
+            client,
+            &silos[0].clone().try_into().unwrap(),
+            &"admin".parse().unwrap(),
+            test_params::UserPassword::LoginDisallowed,
+        )
+        .await;
+        grant_iam(
+            client,
+            &format!("/v1/system/silos/{populated_silo}"),
+            SiloRole::Admin,
+            admin_user.id,
+            AuthnMode::PrivilegedUser,
+        )
+        .await;
         let setup_opctx = OpContext::for_background(
             opctx.log.clone(),
             Arc::new(authz::Authz::new(&opctx.log)),
-            authn::Context::internal_db_init(),
+            authn::Context::for_test_user(
+                admin_user.id,
+                populated_silo,
+                authn::SiloAuthnPolicy::try_from(&silos[0]).unwrap(),
+            ),
             datastore.clone(),
         );
-        let (authz_silo,) = LookupPath::new(&setup_opctx, datastore)
-            .silo_id(populated_silo)
-            .lookup_for(authz::Action::CreateChild)
-            .await
-            .unwrap();
         let project = Project::new(
             populated_silo,
             ProjectCreate {
@@ -280,10 +307,8 @@ mod tests {
                 defaults: None,
             },
         );
-        let (_, project) = datastore
-            .project_create_in_silo(&setup_opctx, project, &authz_silo)
-            .await
-            .unwrap();
+        let (_, project) =
+            datastore.project_create(&setup_opctx, project).await.unwrap();
         let project_id = project.id();
 
         datastore
@@ -321,7 +346,7 @@ mod tests {
         assert_eq!(samples.len(), 12);
 
         let mut expected = BTreeMap::new();
-        for (silo_id, kind, cpu, memory, disk) in [
+        for (silo_id, kind, cpu, memory, storage) in [
             (populated_silo, "capacity", 32, 128, 1024),
             (populated_silo, "provisioned", 4, 16, 100),
             (empty_silo, "capacity", 8, 32, 256),
@@ -330,7 +355,7 @@ mod tests {
             for (metric, value) in [
                 ("cpu", cpu),
                 ("memory", ByteCount::from_gibibytes_u32(memory).to_bytes()),
-                ("disk", ByteCount::from_gibibytes_u32(disk).to_bytes()),
+                ("storage", ByteCount::from_gibibytes_u32(storage).to_bytes()),
             ] {
                 expected.insert(
                     (silo_id, format!("silo_quota:{metric}_{kind}")),
