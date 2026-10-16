@@ -119,17 +119,20 @@ WITH
       LIMIT
         1
     ),
+  updated_project
+    AS (
+      UPDATE
+        project
+      SET
+        time_modified = now(), rcgen = rcgen + 1
+      WHERE
+        id = $10 AND time_deleted IS NULL
+      RETURNING
+        1
+    ),
   project_is_not_deleted
     AS MATERIALIZED (
-      SELECT
-        CAST(
-          IF(
-            EXISTS(SELECT 1 FROM project WHERE id = $10 AND time_deleted IS NULL LIMIT 1),
-            'true',
-            'project-deleted'
-          )
-            AS BOOL
-        )
+      SELECT CAST(IF(EXISTS(SELECT 1 FROM updated_project), 'true', 'project-deleted') AS BOOL)
     ),
   silo_is_not_deleted
     AS MATERIALIZED (
