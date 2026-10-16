@@ -6,14 +6,16 @@
 
 use crate::cache::Cache;
 use crate::collection::BundleCollection;
+use crate::output::BundleOutput;
 use crate::step::CollectionStep;
 use crate::step::CollectionStepOutput;
+use crate::step::StepError;
+use crate::step::StepResultExt;
 use crate::steps;
 
 use anyhow::Context;
 use anyhow::bail;
 use base64::Engine;
-use camino::Utf8Path;
 use futures::FutureExt;
 use gateway_client::Client as MgsClient;
 use gateway_types::component::SpIdentifier;
@@ -21,8 +23,8 @@ use gateway_types::component::SpIdentifier;
 pub async fn spawn_collection_steps(
     collection: &BundleCollection,
     cache: &Cache,
-    dir: &Utf8Path,
-) -> anyhow::Result<CollectionStepOutput> {
+    output: &BundleOutput,
+) -> Result<CollectionStepOutput, StepError> {
     if !collection.data_selection().contains_sp_dumps() {
         return Ok(CollectionStepOutput::Skipped);
     }
@@ -37,14 +39,12 @@ pub async fn spawn_collection_steps(
         Ok::<_, anyhow::Error>((mgs_client, sps))
     };
     let (mgs_client, available_sps) = tokio::select! {
-        _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
+        _ = collection.stopped() => return Ok(CollectionStepOutput::None),
         result = init_future => result?,
     };
 
-    let sp_dumps_dir = dir.join("sp_task_dumps");
-    tokio::fs::create_dir_all(&sp_dumps_dir).await.with_context(|| {
-        format!("Failed to create SP task dump directory {sp_dumps_dir}")
-    })?;
+    let sp_dumps_dir = output.join("sp_task_dumps");
+    sp_dumps_dir.create_dir_all().await?;
 
     let mut extra_steps: Vec<CollectionStep> = vec![];
     for sp in available_sps {
@@ -52,7 +52,7 @@ pub async fn spawn_collection_steps(
         let sp_dumps_dir = sp_dumps_dir.clone();
         extra_steps.push(CollectionStep::new(
             format!("SP dump for {:?}", sp),
-            Box::new(move |collection, _dir| {
+            Box::new(move |collection, _output| {
                 async move {
                     collect_sp_dump(collection, &mgs_client, sp, &sp_dumps_dir)
                         .await
@@ -69,8 +69,8 @@ async fn collect_sp_dump(
     collection: &BundleCollection,
     mgs_client: &MgsClient,
     sp: SpIdentifier,
-    dir: &Utf8Path,
-) -> anyhow::Result<CollectionStepOutput> {
+    dir: &BundleOutput,
+) -> Result<CollectionStepOutput, StepError> {
     if !collection.data_selection().contains_sp_dumps() {
         return Ok(CollectionStepOutput::Skipped);
     }
@@ -86,14 +86,14 @@ async fn collect_sp_dump(
 //
 // # Cancel safety
 //
-// Cancel-**unsafe**: writes to the filesystem via `tokio::fs`.
+// Cancel-**unsafe**: writes to the bundle.
 // HTTP requests to MGS are eagerly cancelled via `select!`.
 async fn save_sp_dumps(
     collection: &BundleCollection,
     mgs_client: &MgsClient,
     sp: SpIdentifier,
-    sp_dumps_dir: &Utf8Path,
-) -> anyhow::Result<()> {
+    sp_dumps_dir: &BundleOutput,
+) -> Result<(), StepError> {
     let fetch_dumps = async {
         let dump_count = mgs_client
             .sp_task_dump_count(&sp.typ, sp.slot)
@@ -119,17 +119,16 @@ async fn save_sp_dumps(
         Ok::<_, anyhow::Error>(dumps)
     };
     let dumps = tokio::select! {
-        _ = collection.cancelled() => return Ok(()),
+        _ = collection.stopped() => return Ok(()),
         result = fetch_dumps => result?,
     };
 
     let output_dir = sp_dumps_dir.join(format!("{}_{}", sp.typ, sp.slot));
-    tokio::fs::create_dir_all(&output_dir).await.with_context(|| {
-        format!("Failed to create output directory {output_dir}")
-    })?;
+    output_dir.create_dir_all().await?;
 
     for (i, zip_bytes) in dumps {
-        tokio::fs::write(output_dir.join(format!("dump-{i}.zip")), zip_bytes)
+        output_dir
+            .write(format!("dump-{i}.zip"), zip_bytes)
             .await
             .context("failed to write SP task dump zip to disk")?;
     }

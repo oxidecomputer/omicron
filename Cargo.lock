@@ -15556,6 +15556,7 @@ dependencies = [
  "sled-agent-client",
  "slog",
  "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-util",
  "uuid",

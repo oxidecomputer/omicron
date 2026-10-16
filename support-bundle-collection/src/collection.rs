@@ -12,8 +12,24 @@
 //! This layer never reads the `support_bundle` table, never transfers
 //! data to a sled-agent's bundle storage endpoints, and never polls
 //! bundle state. Those responsibilities belong to the caller.
+//!
+//! # Stopping early
+//!
+//! Collection stops before every step has run if:
+//!
+//! - The caller cancels it, through [`BundleCollection::cancellation_token`].
+//!   The bundle is abandoned, and [`BundleCollection::collect_bundle_locally`]
+//!   returns an error.
+//! - The bundle reaches its size limit (see
+//!   [`BundleCollection::with_size_limit`]). The bundle keeps what was
+//!   collected, and records what was left out in the collection report and
+//!   in [`SIZE_LIMIT_EXCEEDED_FILE`].
+//!
+//! Either way, steps see [`BundleCollection::stop_token`] cancelled.
 
 use crate::cache::Cache;
+use crate::output::BundleOutput;
+use crate::output::SizeBudget;
 use crate::perfetto;
 use crate::step::CollectionStep;
 use crate::steps;
@@ -25,6 +41,7 @@ use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
+use nexus_types::internal_api::background::SupportBundleSizeLimitExceeded;
 use omicron_uuid_kinds::SupportBundleUuid;
 use parallel_task_set::ParallelTaskSet;
 use serde_json::json;
@@ -34,6 +51,12 @@ use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
+
+/// The path of the file, relative to the root of a bundle, which describes what
+/// was left out of a bundle that reached its size limit.
+///
+/// This file is only present in bundles that reached their limit.
+pub const SIZE_LIMIT_EXCEEDED_FILE: &str = "meta/SIZE_LIMIT_EXCEEDED.txt";
 
 /// Minimal bundle metadata needed by the mechanism layer.
 ///
@@ -53,7 +76,12 @@ pub struct BundleCollection {
     opctx: OpContext,
     data_selection: BundleDataSelection,
     bundle: BundleInfo,
+    // Cancelled by the caller, to abandon the bundle.
     cancellation_token: CancellationToken,
+    // Child of `cancellation_token`, also cancelled at the size limit. Steps
+    // watch this one.
+    stop_token: CancellationToken,
+    size_budget: Arc<SizeBudget>,
 }
 
 impl BundleCollection {
@@ -65,6 +93,9 @@ impl BundleCollection {
         data_selection: BundleDataSelection,
         bundle: BundleInfo,
     ) -> Self {
+        let cancellation_token = CancellationToken::new();
+        let stop_token = cancellation_token.child_token();
+        let size_budget = Arc::new(SizeBudget::new(None, stop_token.clone()));
         Self {
             datastore,
             resolver,
@@ -72,8 +103,18 @@ impl BundleCollection {
             opctx,
             data_selection,
             bundle,
-            cancellation_token: CancellationToken::new(),
+            cancellation_token,
+            stop_token,
+            size_budget,
         }
+    }
+
+    /// Limits the bundle to `limit` bytes, or no limit if `None` (the
+    /// default). See [Stopping early](self#stopping-early).
+    pub fn with_size_limit(mut self, limit: Option<u64>) -> Self {
+        self.size_budget =
+            Arc::new(SizeBudget::new(limit, self.stop_token.clone()));
+        self
     }
 
     pub fn datastore(&self) -> &Arc<DataStore> {
@@ -100,28 +141,43 @@ impl BundleCollection {
         &self.bundle
     }
 
-    /// Returns true if this bundle collection has been cancelled.
-    ///
-    /// Use for cooperative cancellation checks before cancel-unsafe
-    /// operations (filesystem writes, `spawn_blocking`).
-    pub fn is_cancelled(&self) -> bool {
-        self.cancellation_token.is_cancelled()
+    pub fn size_budget(&self) -> &SizeBudget {
+        &self.size_budget
     }
 
     /// Returns a reference to the cancellation token.
     ///
-    /// Cancellation is driven by the caller; this type only observes
-    /// the token.
+    /// Cancellation is driven by the caller, and abandons the bundle. Steps
+    /// should observe [`BundleCollection::stop_token`] instead.
     pub fn cancellation_token(&self) -> &CancellationToken {
         &self.cancellation_token
     }
 
-    /// Returns a future that completes when cancellation is requested.
+    fn is_cancelled(&self) -> bool {
+        self.cancellation_token.is_cancelled()
+    }
+
+    /// Returns the token which is cancelled when collection should stop:
+    /// either because the caller cancelled it, or because the bundle
+    /// reached its size limit.
+    pub fn stop_token(&self) -> &CancellationToken {
+        &self.stop_token
+    }
+
+    /// Returns true if collection should stop.
+    ///
+    /// Use for cooperative checks before cancel-unsafe operations (filesystem
+    /// writes, `spawn_blocking`).
+    pub fn is_stopped(&self) -> bool {
+        self.stop_token.is_cancelled()
+    }
+
+    /// Returns a future that completes when collection should stop.
     ///
     /// Use in `tokio::select!` with cancel-safe operations (HTTP requests,
-    /// DB queries) for immediate cancellation at await points.
-    pub async fn cancelled(&self) {
-        self.cancellation_token.cancelled().await
+    /// DB queries) to stop immediately at await points.
+    pub async fn stopped(&self) {
+        self.stop_token.cancelled().await
     }
 
     /// Collect the bundle into the supplied temporary directory.
@@ -154,14 +210,14 @@ impl BundleCollection {
         report
     }
 
-    // Cancellation is hybrid:
+    // Cancellation (and stopping at the size limit) is hybrid:
     //
     // - Cancel-safe operations (HTTP requests, DB queries) use
     //   `tokio::select!` with the token for immediate cancellation.
     //   Dropping these futures is safe — no local side effects.
     //
     // - Cancel-unsafe operations (filesystem writes via `tokio::fs`,
-    //   `spawn_blocking`) use cooperative `is_cancelled()` checks.
+    //   `spawn_blocking`) use cooperative `is_stopped()` checks.
     //   These are never dropped mid-flight, ensuring all
     //   `spawn_blocking` work completes before the output directory
     //   is dropped.
@@ -176,6 +232,12 @@ impl BundleCollection {
         mut steps: Vec<CollectionStep>,
     ) -> SupportBundleCollectionReport {
         let mut report = SupportBundleCollectionReport::new(self.bundle.id);
+        let bundle_output = BundleOutput::new(
+            output.path(),
+            self.size_budget.clone(),
+            self.log.clone(),
+        );
+        let mut incomplete_steps = vec![];
 
         const MAX_CONCURRENT_STEPS: usize = 16;
         let mut tasks =
@@ -183,38 +245,46 @@ impl BundleCollection {
 
         loop {
             // Check for cancellation before spawning new work.
-            if self.is_cancelled() {
+            if self.is_stopped() {
                 info!(
                     &self.log,
-                    "Cancellation detected — draining in-flight steps";
+                    "Collection stopped — draining in-flight steps";
                     "bundle" => %self.bundle.id,
+                    "cancelled" => self.is_cancelled(),
+                    "size_limit_exceeded" => self.size_budget.is_exceeded(),
                 );
                 break;
             }
 
             // Process all the currently-planned steps
-            while let Some(step) = steps.pop() {
+            while !self.is_stopped()
+                && let Some(step) = steps.pop()
+            {
                 let previous_result = tasks
                     .spawn({
                         let collection = self.clone();
-                        let dir = output.path().to_path_buf();
+                        let bundle_output = bundle_output.clone();
                         let log = self.log.clone();
                         async move {
                             debug!(log, "Running step"; "step" => &step.name);
-                            step.run(&collection, dir.as_path(), &log).await
+                            step.run(&collection, &bundle_output, &log).await
                         }
                     })
                     .await;
 
                 if let Some(output) = previous_result {
-                    output.process(&mut report, &mut steps);
+                    output.process(
+                        &mut report,
+                        &mut steps,
+                        &mut incomplete_steps,
+                    );
                 };
             }
 
             // If we've run out of tasks to spawn, join any of the previously
             // spawned tasks, if any exist.
             if let Some(output) = tasks.join_next().await {
-                output.process(&mut report, &mut steps);
+                output.process(&mut report, &mut steps, &mut incomplete_steps);
 
                 // As soon as any task completes, see if we can spawn more work
                 // immediately. This ensures that the ParallelTaskSet is
@@ -227,23 +297,7 @@ impl BundleCollection {
             // Only finish if we've exhausted all possible steps and joined
             // all spawned work.
             if steps.is_empty() {
-                // Write trace and report files before returning.
-                if let Err(err) = self.write_trace_file(output, &report).await {
-                    warn!(
-                        self.log,
-                        "Failed to write trace file";
-                        InlineErrorChain::new(err.as_ref())
-                    );
-                }
-                if let Err(err) = self.write_report_file(output, &report).await
-                {
-                    warn!(
-                        self.log,
-                        "Failed to write report file";
-                        InlineErrorChain::new(err.as_ref())
-                    );
-                }
-                return report;
+                break;
             }
         }
 
@@ -251,12 +305,123 @@ impl BundleCollection {
         // (which internally use spawn_blocking) complete before we return,
         // so the TempDir can be safely dropped by our caller.
         while let Some(output) = tasks.join_next().await {
-            output.process(&mut report, &mut steps);
-            // Ignore newly-spawned steps from drained tasks — we're
-            // stopping.
+            output.process(&mut report, &mut steps, &mut incomplete_steps);
         }
 
+        // If the caller cancelled collection, the bundle is being abandoned,
+        // so there's no point in describing it.
+        if self.is_cancelled() {
+            return report;
+        }
+
+        // At the size limit, steps still queued never ran.
+        if let Some(exceeded) = self.size_budget.exceeded() {
+            incomplete_steps.sort();
+            let mut skipped_steps: Vec<String> =
+                steps.into_iter().map(|step| step.name).collect();
+            skipped_steps.sort();
+            report.size_limit_exceeded = Some(SupportBundleSizeLimitExceeded {
+                limit_bytes: self.size_budget.limit().unwrap_or(u64::MAX),
+                used_bytes: self.size_budget.used(),
+                exceeded_at: exceeded.at,
+                refused_paths: exceeded
+                    .paths
+                    .iter()
+                    .map(|path| path.to_string())
+                    .collect(),
+                incomplete_steps,
+                skipped_steps,
+            });
+        }
+
+        // Write trace and report files before returning.
+        //
+        // Not charged against the size limit, like the size limit marker.
+        // These are small, and must be present even if the limit was reached.
+        if let Some(exceeded) = &report.size_limit_exceeded {
+            if let Err(err) =
+                self.write_size_limit_exceeded_file(output, exceeded).await
+            {
+                warn!(
+                    self.log,
+                    "Failed to write size limit marker file";
+                    InlineErrorChain::new(err.as_ref())
+                );
+            }
+        }
+        if let Err(err) = self.write_trace_file(output, &report).await {
+            warn!(
+                self.log,
+                "Failed to write trace file";
+                InlineErrorChain::new(err.as_ref())
+            );
+        }
+        if let Err(err) = self.write_report_file(output, &report).await {
+            warn!(
+                self.log,
+                "Failed to write report file";
+                InlineErrorChain::new(err.as_ref())
+            );
+        }
         report
+    }
+
+    // Write a human-readable description of what was left out of a bundle
+    // that reached its size limit.
+    async fn write_size_limit_exceeded_file(
+        &self,
+        output: &Utf8TempDir,
+        exceeded: &SupportBundleSizeLimitExceeded,
+    ) -> anyhow::Result<()> {
+        let path = output.path().join(SIZE_LIMIT_EXCEEDED_FILE);
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await.with_context(|| {
+                format!("failed to create directory {parent}")
+            })?;
+        }
+        let mut contents = format!(
+            "This support bundle is incomplete. Collection stopped when the \
+             bundle reached\n\
+             its size limit of {} bytes.\n\
+             \n\
+             Limit reached at: {}\n",
+            exceeded.limit_bytes, exceeded.exceeded_at,
+        );
+        for (title, items) in [
+            (
+                "Files left out because they would exceed the limit:",
+                &exceeded.refused_paths,
+            ),
+            (
+                "Steps which were running, and may be incomplete:",
+                &exceeded.incomplete_steps,
+            ),
+            ("Steps which never started:", &exceeded.skipped_steps),
+        ] {
+            if items.is_empty() {
+                continue;
+            }
+            contents.push_str(&format!("\n{title}\n"));
+            for item in items {
+                contents.push_str(&format!("  - {item}\n"));
+            }
+        }
+        contents.push_str("\nSee meta/report.json for details.\n");
+
+        tokio::fs::write(&path, contents)
+            .await
+            .with_context(|| format!("failed to write {path}"))?;
+
+        info!(
+            self.log,
+            "Bundle reached its size limit";
+            "limit_bytes" => exceeded.limit_bytes,
+            "used_bytes" => exceeded.used_bytes,
+            "refused_paths" => exceeded.refused_paths.len(),
+            "incomplete_steps" => exceeded.incomplete_steps.len(),
+            "skipped_steps" => exceeded.skipped_steps.len(),
+        );
+        Ok(())
     }
 
     // Write a Perfetto Event format JSON file for visualization
@@ -375,8 +540,8 @@ impl BundleCollection {
     // will prevent the support bundle from being collected altogether.
     //
     // Cancellation is hybrid: cancel-safe operations (HTTP, DB) use
-    // `select!` with the token for immediate cancellation; cancel-unsafe
-    // operations (filesystem writes) use cooperative `is_cancelled()`.
+    // `select!` with the stop token for immediate cancellation; cancel-unsafe
+    // operations (filesystem writes) use cooperative `is_stopped()`.
     // In-flight work is drained before returning.
     async fn collect_bundle_as_file(
         self: &Arc<Self>,

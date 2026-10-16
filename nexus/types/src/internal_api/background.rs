@@ -284,6 +284,29 @@ pub struct SupportBundleCollectionReport {
     /// All steps taken, alongside their timing information, when collecting the
     /// bundle.
     pub steps: Vec<SupportBundleCollectionStep>,
+
+    /// Set if collection stopped at the bundle's size limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_limit_exceeded: Option<SupportBundleSizeLimitExceeded>,
+}
+
+/// Describes a support bundle collection that stopped early because the
+/// bundle reached its size limit.
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SupportBundleSizeLimitExceeded {
+    /// The bundle's size limit, in bytes.
+    pub limit_bytes: u64,
+    /// The number of bytes collected into the bundle.
+    pub used_bytes: u64,
+    /// When the limit was first reached.
+    pub exceeded_at: DateTime<Utc>,
+    /// Files refused because they would exceed the limit, relative to the
+    /// bundle's root, in the order refused.
+    pub refused_paths: Vec<String>,
+    /// Steps running when the limit was reached. These may be incomplete.
+    pub incomplete_steps: Vec<String>,
+    /// Steps which never started because the limit was reached.
+    pub skipped_steps: Vec<String>,
 }
 
 /// Pairs a [`SupportBundleCollectionReport`] with facts known only after
@@ -365,7 +388,7 @@ pub struct SupportBundleEreportStatus {
 
 impl SupportBundleCollectionReport {
     pub fn new(bundle: SupportBundleUuid) -> Self {
-        Self { bundle, steps: vec![] }
+        Self { bundle, steps: vec![], size_limit_exceeded: None }
     }
 }
 

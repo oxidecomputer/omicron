@@ -19,6 +19,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
+use nexus_types::support_bundle::SupportBundleSizeLimit;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
@@ -78,6 +79,7 @@ pub struct SupportBundleCollector {
     disable: bool,
     nexus_id: OmicronZoneUuid,
     transfer_chunk_size: NonZeroU64,
+    size_limit: SupportBundleSizeLimit,
 }
 
 impl SupportBundleCollector {
@@ -86,6 +88,7 @@ impl SupportBundleCollector {
         resolver: Resolver,
         disable: bool,
         nexus_id: OmicronZoneUuid,
+        size_limit: SupportBundleSizeLimit,
     ) -> Self {
         SupportBundleCollector {
             datastore,
@@ -93,6 +96,7 @@ impl SupportBundleCollector {
             disable,
             nexus_id,
             transfer_chunk_size: CHUNK_SIZE,
+            size_limit,
         }
     }
 
@@ -391,17 +395,20 @@ impl SupportBundleCollector {
 
         let bundle_log =
             opctx.log.new(slog::o!("bundle" => bundle.id.to_string()));
-        let collection = Arc::new(BundleCollection::new(
-            self.datastore.clone(),
-            self.resolver.clone(),
-            bundle_log.clone(),
-            opctx.child(std::collections::BTreeMap::new()),
-            data_selection,
-            BundleInfo {
-                id: bundle.id.into(),
-                reason_for_creation: bundle.reason_for_creation.clone(),
-            },
-        ));
+        let collection = Arc::new(
+            BundleCollection::new(
+                self.datastore.clone(),
+                self.resolver.clone(),
+                bundle_log.clone(),
+                opctx.child(std::collections::BTreeMap::new()),
+                data_selection,
+                BundleInfo {
+                    id: bundle.id.into(),
+                    reason_for_creation: bundle.reason_for_creation.clone(),
+                },
+            )
+            .with_size_limit(Some(self.size_limit.bytes())),
+        );
 
         // Spawn a task that periodically polls the `support_bundle` row's
         // state. If the bundle has been cancelled (or removed), it cancels
@@ -726,6 +733,7 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::fm::ereport::{EreportData, Reporter};
     use nexus_types::identity::Asset;
+    use nexus_types::internal_api::background::SupportBundleCollectionReport;
     use nexus_types::internal_api::background::SupportBundleCollectionStep;
     use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
     use nexus_types::internal_api::background::SupportBundleEreportStatus;
@@ -744,6 +752,7 @@ mod test {
     use sled_agent_types::disk::SharedDatasetConfig;
     use sled_agent_types::inventory::ZpoolHealth;
     use std::num::NonZeroU64;
+    use support_bundle_collection::SIZE_LIMIT_EXCEEDED_FILE;
     use support_bundle_collection::perfetto;
     use uuid::Uuid;
 
@@ -766,6 +775,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
         );
 
         let report = collector
@@ -792,6 +802,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
         );
 
         let report = collector
@@ -1116,6 +1127,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
         );
 
         // The bundle collection should complete successfully.
@@ -1125,6 +1137,7 @@ mod test {
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
         assert_eq!(report.collection.bundle, bundle.id.into());
+        assert_eq!(report.collection.size_limit_exceeded, None);
         // Verify that we spawned steps to query sleds and SPs
         let step_names: Vec<_> =
             report.collection.steps.iter().map(|s| s.name.as_str()).collect();
@@ -1210,6 +1223,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
         );
 
         // Collect the bundle
@@ -1288,6 +1302,148 @@ mod test {
         );
     }
 
+    // Downloads the file at `path` from a collected bundle.
+    async fn download_bundle_file(
+        nexus: &crate::Nexus,
+        opctx: &OpContext,
+        bundle_id: SupportBundleUuid,
+        path: &str,
+    ) -> Result<bytes::Bytes, Error> {
+        let head = false;
+        let range = None;
+        let response = nexus
+            .support_bundle_download(
+                opctx,
+                bundle_id,
+                SupportBundleQueryType::Path { file_path: path.to_string() },
+                head,
+                range,
+            )
+            .await?;
+        Ok(response.into_body().collect().await.unwrap().to_bytes())
+    }
+
+    // A bundle that reaches its size limit is still collected and activated,
+    // with whatever fit, and a record of what didn't.
+    #[nexus_test(server = crate::Server)]
+    async fn test_collect_size_limit_exceeded(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        // Before we can create any bundles, we need to create the
+        // space for them to be provisioned.
+        let _datasets =
+            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+        make_fake_ereports(&datastore, &opctx).await;
+
+        let bundle = datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "For size limit testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
+            )
+            .await
+            .expect("Couldn't allocate a support bundle");
+
+        // Use a limit too small for any of the bundle's data files, so that
+        // the first of them to be written exceeds it.
+        const SIZE_LIMIT_BYTES: u64 = 1;
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+            SupportBundleSizeLimit::new(SIZE_LIMIT_BYTES).unwrap(),
+        );
+
+        let report = collector
+            .collect_bundle(&opctx)
+            .await
+            .expect("Collection should have succeeded")
+            .expect("Should have generated a report");
+        assert!(report.activated_in_db_ok);
+        let observed_bundle = datastore
+            .support_bundle_get(&opctx, bundle.id.into())
+            .await
+            .expect("Bundle should be in the db");
+        assert_eq!(observed_bundle.state, SupportBundleState::Active);
+
+        let exceeded = report
+            .collection
+            .size_limit_exceeded
+            .as_ref()
+            .expect("Bundle should have exceeded its size limit");
+        assert_eq!(exceeded.limit_bytes, SIZE_LIMIT_BYTES);
+        assert_eq!(exceeded.used_bytes, 0);
+        assert!(!exceeded.refused_paths.is_empty());
+
+        // Running out of space is not a step failure.
+        for step in &report.collection.steps {
+            assert!(
+                !matches!(
+                    step.status,
+                    SupportBundleCollectionStepStatus::Failed(_)
+                ),
+                "step {} failed: {}",
+                step.name,
+                step.status,
+            );
+        }
+
+        // The bundle describes what was left out, both for people and in the
+        // report.
+        let marker = download_bundle_file(
+            nexus,
+            &opctx,
+            bundle.id.into(),
+            SIZE_LIMIT_EXCEEDED_FILE,
+        )
+        .await
+        .expect("Should be able to download the size limit marker");
+        let marker = std::str::from_utf8(&marker).unwrap();
+        for path in &exceeded.refused_paths {
+            assert!(
+                marker.contains(path),
+                "marker should name {path}, which was left out: {marker}"
+            );
+        }
+
+        let report_json = download_bundle_file(
+            nexus,
+            &opctx,
+            bundle.id.into(),
+            "meta/report.json",
+        )
+        .await
+        .expect("Should be able to download the report");
+        let bundled_report: SupportBundleCollectionReport =
+            serde_json::from_slice(&report_json)
+                .expect("report.json should deserialize");
+        assert_eq!(bundled_report, report.collection);
+
+        // Data which didn't fit is not in the bundle.
+        download_bundle_file(
+            nexus,
+            &opctx,
+            bundle.id.into(),
+            "reconfigurator_state.json",
+        )
+        .await
+        .expect_err("reconfigurator state should not fit in the bundle");
+    }
+
     #[nexus_test(server = crate::Server)]
     async fn test_collect_chunked(cptestctx: &ControlPlaneTestContext) {
         let nexus = &cptestctx.server.server_context().nexus;
@@ -1323,6 +1479,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
         )
         .with_transfer_chunk_size(NonZeroU64::new(16).unwrap());
 
@@ -1428,6 +1585,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
         );
 
         // Each time we call "collect_bundle", we collect a SINGLE bundle.
@@ -1543,6 +1701,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
         );
 
         let report = collector
@@ -1600,6 +1759,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
         );
         let report = collector
             .collect_bundle(&opctx)
@@ -1700,6 +1860,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
         );
 
         let report = collector
@@ -1760,6 +1921,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
         );
         let report = collector
             .collect_bundle(&opctx)
@@ -1847,6 +2009,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
         );
         let report = collector
             .collect_bundle(&opctx)
@@ -1933,6 +2096,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
         );
 
         // Collect the bundle
@@ -2036,6 +2200,7 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
         );
 
         let report = collector

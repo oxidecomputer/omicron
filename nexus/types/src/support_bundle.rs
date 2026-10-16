@@ -447,6 +447,55 @@ impl fmt::Display for DisplaySledSelection<'_> {
     }
 }
 
+/// A support bundle size limit, in bytes, no larger than
+/// [`SupportBundleSizeLimit::MAX`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "u64", into = "u64")]
+pub struct SupportBundleSizeLimit(u64);
+
+impl SupportBundleSizeLimit {
+    /// The default limit.
+    pub const DEFAULT: Self = Self(16 << 30);
+
+    /// The largest limit allowed. Larger bundles risk destabilizing Nexus.
+    pub const MAX: Self = Self(32 << 30);
+
+    pub fn new(bytes: u64) -> Result<Self, SupportBundleSizeLimitTooLarge> {
+        if bytes > Self::MAX.0 {
+            return Err(SupportBundleSizeLimitTooLarge { bytes });
+        }
+        Ok(Self(bytes))
+    }
+
+    pub fn bytes(self) -> u64 {
+        self.0
+    }
+}
+
+impl TryFrom<u64> for SupportBundleSizeLimit {
+    type Error = SupportBundleSizeLimitTooLarge;
+
+    fn try_from(bytes: u64) -> Result<Self, Self::Error> {
+        Self::new(bytes)
+    }
+}
+
+impl From<SupportBundleSizeLimit> for u64 {
+    fn from(limit: SupportBundleSizeLimit) -> Self {
+        limit.0
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "support bundle size limit of {bytes} bytes exceeds the maximum of {} \
+     bytes",
+    SupportBundleSizeLimit::MAX.0
+)]
+pub struct SupportBundleSizeLimitTooLarge {
+    bytes: u64,
+}
+
 #[cfg(test)]
 pub(crate) mod test_utils {
     use super::*;
@@ -509,6 +558,19 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
     use test_strategy::proptest;
+
+    #[test]
+    fn size_limit_rejects_above_max() {
+        let max = SupportBundleSizeLimit::MAX.bytes();
+        assert_eq!(SupportBundleSizeLimit::new(max).unwrap().bytes(), max);
+        SupportBundleSizeLimit::new(max + 1).unwrap_err();
+
+        let limit: SupportBundleSizeLimit =
+            serde_json::from_str(&max.to_string()).unwrap();
+        assert_eq!(limit, SupportBundleSizeLimit::MAX);
+        serde_json::from_str::<SupportBundleSizeLimit>(&(max + 1).to_string())
+            .unwrap_err();
+    }
 
     #[proptest]
     fn bundle_data_selection_serde_round_trip(selection: BundleDataSelection) {

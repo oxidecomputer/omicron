@@ -6,14 +6,15 @@
 
 use crate::cache::Cache;
 use crate::collection::BundleCollection;
+use crate::output::BundleOutput;
 use crate::step::CollectionStep;
 use crate::step::CollectionStepOutput;
+use crate::step::StepError;
+use crate::step::StepResultExt;
 use crate::zip::MERGE_ZIP_SUFFIX;
 
 use anyhow::Context;
-use anyhow::bail;
-use camino::Utf8Path;
-use camino::Utf8PathBuf;
+use anyhow::anyhow;
 use futures::FutureExt;
 use futures::StreamExt;
 use futures::future::Future;
@@ -24,9 +25,7 @@ use nexus_types::support_bundle::BundleTimeRange;
 use slog::Logger;
 use slog::error;
 use slog::info;
-use slog::warn;
 use slog_error_chain::InlineErrorChain;
-use tokio::io::AsyncWriteExt;
 use tokio_util::sync::CancellationToken;
 
 /// The maximum number of concurrent requests to a single sled-agent
@@ -37,7 +36,7 @@ const MAX_CONCURRENT_SLED_AGENT_REQUESTS: usize = 10;
 pub async fn spawn_query_all_sleds(
     collection: &BundleCollection,
     cache: &Cache,
-) -> anyhow::Result<CollectionStepOutput> {
+) -> Result<CollectionStepOutput, StepError> {
     let Some(sled_selection) = collection.data_selection().sled_selection()
     else {
         return Ok(CollectionStepOutput::Skipped);
@@ -45,12 +44,12 @@ pub async fn spawn_query_all_sleds(
     let time_range = collection.data_selection().time_range().clone();
 
     let all_sleds = tokio::select! {
-        _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
+        _ = collection.stopped() => return Ok(CollectionStepOutput::None),
         result = cache.get_or_initialize_all_sleds(collection) => result,
     };
 
     let Some(all_sleds) = all_sleds else {
-        bail!("Could not read list of sleds");
+        return Err(anyhow!("Could not read list of sleds").into());
     };
 
     let mut extra_steps: Vec<CollectionStep> = vec![];
@@ -64,10 +63,10 @@ pub async fn spawn_query_all_sleds(
         extra_steps.push(CollectionStep::new(
             format!("sled data for sled {}", sled.id()),
             Box::new({
-                move |collection, dir| {
+                move |collection, output| {
                     async move {
                         collect_data_from_sled(
-                            collection, sled, time_range, dir,
+                            collection, sled, time_range, output,
                         )
                         .await
                     }
@@ -85,8 +84,7 @@ pub async fn spawn_query_all_sleds(
 //
 // - "sled" is the sled from which we should collect data.
 // - "time_range" bounds which zone logs are collected, by file mtime.
-// - "dir" is a directory where data can be stored, to be turned
-// into a bundle after collection completes.
+// - "output" is the bundle directory where data can be stored.
 //
 // # Cancel safety
 //
@@ -97,8 +95,8 @@ async fn collect_data_from_sled(
     collection: &BundleCollection,
     sled: Sled,
     time_range: BundleTimeRange,
-    dir: &Utf8Path,
-) -> anyhow::Result<CollectionStepOutput> {
+    output: &BundleOutput,
+) -> Result<CollectionStepOutput, StepError> {
     let (log, opctx, datastore) =
         (collection.log(), collection.opctx(), collection.datastore());
 
@@ -113,31 +111,25 @@ async fn collect_data_from_sled(
     info!(log, "Collecting bundle info from sled"; "sled" => %sled.id());
 
     let sled_client_result = tokio::select! {
-        _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
+        _ = collection.stopped() => return Ok(CollectionStepOutput::None),
         result = nexus_networking::sled_client(
             &datastore, &opctx, sled.id(), log,
         ) => result,
     };
 
-    let sled_path = dir
-        .join("rack")
-        .join(sled.rack_id.to_string())
-        .join("sled")
-        .join(sled.id().to_string());
-    tokio::fs::create_dir_all(&sled_path).await?;
-    tokio::fs::write(sled_path.join("sled.txt"), format!("{sled:?}")).await?;
+    let sled_path =
+        output.join(format!("rack/{}/sled/{}", sled.rack_id, sled.id()));
+    sled_path.write("sled.txt", format!("{sled:?}")).await?;
 
     let sled_client = match sled_client_result {
         Ok(client) => client,
         Err(err) => {
-            tokio::fs::write(
-                sled_path.join("error.txt"),
-                "Could not contact sled",
-            )
-            .await.with_context(|| {
+            sled_path
+                .write("error.txt", "Could not contact sled")
+                .await.with_context(|| {
                 format!("Failed to save 'error.txt' to bundle when recording error: {err}")
             })?;
-            bail!("Could not contact sled: {err}");
+            return Err(anyhow!("Could not contact sled: {err}").into());
         }
     };
 
@@ -150,7 +142,7 @@ async fn collect_data_from_sled(
     // NB: As new sled-diagnostic commands are added they should
     // be added to this array so that their output can be saved
     // within the support bundle.
-    let cancellation_token = collection.cancellation_token();
+    let cancellation_token = collection.stop_token();
     let mut diag_cmds = futures::stream::iter([
         save_diag_cmd_output_or_error(
             &sled_path,
@@ -232,7 +224,7 @@ async fn collect_data_from_sled(
         // Log that we failed to write the diag command output to a
         // file but don't return early as we wish to get as much
         // information as we can.
-        if let Err(e) = result {
+        if let Err(StepError::Other(e)) = result {
             error!(
                 log,
                 "failed to write diagnostic command output to \
@@ -242,8 +234,10 @@ async fn collect_data_from_sled(
     }
 
     let zones = tokio::select! {
-        _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
-        result = sled_client.support_logs() => result?.into_inner(),
+        _ = collection.stopped() => return Ok(CollectionStepOutput::None),
+        result = sled_client.support_logs() => {
+            result.context("failed to list zone logs")?.into_inner()
+        }
     };
 
     // For each zone we fire off a request to its sled-agent to collect
@@ -274,7 +268,7 @@ async fn collect_data_from_sled(
     while let Some(log_collection_result) = log_futs.next().await {
         // We log any errors saving the zip file to disk and
         // continue on.
-        if let Err(e) = log_collection_result {
+        if let Err(StepError::Other(e)) = log_collection_result {
             error!(
                 log,
                 "failed to write logs output";
@@ -289,16 +283,16 @@ async fn collect_data_from_sled(
 //
 // # Cancel safety
 //
-// Cancel-**unsafe**: writes to the filesystem via `tokio::fs`.
+// Cancel-**unsafe**: writes to the bundle.
 // The `future` argument must be cancel-safe (it is dropped via `select!`
 // if cancellation occurs before the HTTP response arrives). The future
 // return by this function must not be dropped mid-flight.
 async fn save_diag_cmd_output_or_error<F, S: serde::Serialize>(
-    path: &Utf8Path,
+    path: &BundleOutput,
     command: &str,
     future: F,
     cancellation_token: &CancellationToken,
-) -> anyhow::Result<()>
+) -> Result<(), StepError>
 where
     F: Future<
             Output = Result<
@@ -318,19 +312,13 @@ where
             let json = serde_json::to_string(&output).with_context(|| {
                 format!("failed to serialize {command} output as json")
             })?;
-            tokio::fs::write(path.join(format!("{command}.json")), json)
-                .await
-                .with_context(|| {
-                    format!("failed to write output of {command} to file")
-                })?;
+            path.write(format!("{command}.json"), json).await.with_context(
+                || format!("failed to write output of {command} to file"),
+            )?;
         }
         Err(err) => {
             let err_string = InlineErrorChain::new(&err).to_string();
-            tokio::fs::write(
-                path.join(format!("{command}_err.txt")),
-                err_string,
-            )
-            .await?;
+            path.write(format!("{command}_err.txt"), err_string).await?;
         }
     }
     Ok(())
@@ -340,17 +328,17 @@ where
 //
 // # Cancel safety
 //
-// Cancel-**unsafe**: writes to the filesystem.
+// Cancel-**unsafe**: writes to the bundle.
 // The initial HTTP download is cancel-safe and uses `select!` internally.
 // All filesystem operations after the download must not be dropped.
 async fn save_zone_log_zip_or_error(
     log: &Logger,
     client: &sled_agent_client::Client,
     zone: &str,
-    path: &Utf8Path,
+    path: &BundleOutput,
     time_range: &BundleTimeRange,
     cancellation_token: &CancellationToken,
-) -> anyhow::Result<()> {
+) -> Result<(), StepError> {
     // Bind with names so the positional Progenitor call below can't
     // accidentally swap start and end: query parameters are supplied in
     // alphabetical order, which is why "end time" comes before
@@ -371,13 +359,15 @@ async fn save_zone_log_zip_or_error(
         Ok(res) => {
             let output_dir = path.join(format!("logs/{zone}"));
             if let Err(err) =
-                save_zone_log_zip(log, res.into_inner(), &output_dir).await
+                save_zone_log_zip(res.into_inner(), &output_dir).await
             {
-                // Leave an error in the bundle in place of the logs, rather
-                // than a zip that could not be saved.
-                let err_string =
-                    InlineErrorChain::new(err.as_ref()).to_string();
-                save_zone_log_error(log, zone, path, err_string).await;
+                // Replace the failed zip with an error file. If the size
+                // limit was reached, there's no room for one.
+                if let StepError::Other(err) = &err {
+                    let err_string =
+                        InlineErrorChain::new(err.as_ref()).to_string();
+                    save_zone_log_error(log, zone, path, err_string).await;
+                }
                 return Err(err);
             }
         }
@@ -397,28 +387,20 @@ async fn save_zone_log_zip_or_error(
 async fn save_zone_log_error(
     log: &Logger,
     zone: &str,
-    path: &Utf8Path,
+    path: &BundleOutput,
     err_string: String,
 ) {
-    let err_path = path.join(format!("{zone}.logs.err"));
-    if let Err(write_err) = tokio::fs::write(&err_path, &err_string).await {
+    let err_name = format!("{zone}.logs.err");
+    if let Err(write_err) = path.write(&err_name, &err_string).await {
         error!(
             log,
             "failed to save zone log error to bundle";
             "zone" => zone,
-            "path" => %err_path,
+            "file" => %err_name,
             "error" => %err_string,
-            "write_error" => InlineErrorChain::new(&write_err),
+            "write_error" => InlineErrorChain::new(write_err.as_error()),
         );
     }
-}
-
-// The path of a zone's log zip within its logs directory.
-//
-// The name marks the zip for merging, so that the bundle includes its entries,
-// as-is, rather than the zip itself.
-fn zone_log_zip_path(output_dir: &Utf8Path) -> Utf8PathBuf {
-    output_dir.join(format!("logs{MERGE_ZIP_SUFFIX}"))
 }
 
 // Stream a zone's log zip to `output_dir`.
@@ -431,52 +413,20 @@ fn zone_log_zip_path(output_dir: &Utf8Path) -> Utf8PathBuf {
 // Cancel-**unsafe**: if dropped, a partial zip may be left in the bundle
 // without being cleaned up.
 async fn save_zone_log_zip(
-    log: &Logger,
     bytestream: sled_agent_client::ByteStream,
-    output_dir: &Utf8Path,
-) -> anyhow::Result<()> {
-    let zipfile_path = zone_log_zip_path(output_dir);
-
-    let result = async {
-        // Ensure the logs output directory exists.
-        tokio::fs::create_dir_all(&output_dir).await.with_context(|| {
-            format!("failed to create output directory: {output_dir}")
-        })?;
-
-        // Stream the log zip file to disk.
-        let mut file =
-            tokio::fs::File::create(&zipfile_path).await.with_context(
-                || format!("failed to create log zip file: {zipfile_path}"),
-            )?;
-
-        let stream = bytestream
-            .into_inner()
-            .map(|chunk| chunk.map_err(|e| std::io::Error::other(e)));
-        let mut reader = tokio_util::io::StreamReader::new(stream);
-        let _nbytes =
-            tokio::io::copy(&mut reader, &mut file).await.with_context(
-                || format!("failed to download log zip: {zipfile_path}"),
-            )?;
-        file.flush().await?;
-        Ok::<_, anyhow::Error>(())
-    }
-    .await;
+    output_dir: &BundleOutput,
+) -> Result<(), StepError> {
+    let stream = bytestream
+        .into_inner()
+        .map(|chunk| chunk.map_err(|e| std::io::Error::other(e)));
+    let reader = tokio_util::io::StreamReader::new(stream);
+    let result = output_dir
+        .write_stream(format!("logs{MERGE_ZIP_SUFFIX}"), reader)
+        .await
+        .context("failed to download log zip");
 
     if result.is_err() {
-        // This is best-effort: if removal fails, the bundle skips whatever it
-        // cannot read of the partial zip, and records what it skipped.
-        if let Err(err) = tokio::fs::remove_file(&zipfile_path).await
-            && err.kind() != std::io::ErrorKind::NotFound
-        {
-            warn!(
-                log,
-                "failed to remove partial zone log zip";
-                "path" => %zipfile_path,
-                InlineErrorChain::new(&err),
-            );
-        }
-        // Fails, leaving the directory alone, unless it is empty.
-        let _ = tokio::fs::remove_dir(output_dir).await;
+        output_dir.remove_dir_if_empty().await;
     }
     result
 }

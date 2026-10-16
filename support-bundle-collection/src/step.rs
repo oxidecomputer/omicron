@@ -5,8 +5,9 @@
 //! Support bundle collection step execution framework
 
 use crate::collection::BundleCollection;
+use crate::output::BundleOutput;
+use crate::output::SizeLimitExceeded;
 
-use camino::Utf8Path;
 use chrono::DateTime;
 use chrono::Utc;
 use futures::future::BoxFuture;
@@ -15,22 +16,95 @@ use nexus_types::internal_api::background::SupportBundleCollectionStep;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
+use std::fmt::Display;
 use std::sync::Arc;
+
+/// The error returned by a collection step, and by writes to the bundle.
+///
+/// The size limit is kept apart from other failures, so a step that hits it
+/// is reported as cut short, not failed.
+///
+/// Deliberately not `std::error::Error`: otherwise `?` or anyhow's `Context`
+/// could turn it into an `anyhow::Error`, losing the size limit variant. Use
+/// [`StepResultExt`] to add context.
+#[derive(Debug)]
+pub enum StepError {
+    /// A write was refused because the bundle reached its size limit.
+    SizeLimitExceeded(SizeLimitExceeded),
+    /// Any other failure.
+    Other(anyhow::Error),
+}
+
+impl StepError {
+    /// Returns this error as a `std::error::Error`, for logging.
+    pub fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+        match self {
+            StepError::SizeLimitExceeded(err) => err,
+            StepError::Other(err) => err.as_ref(),
+        }
+    }
+}
+
+impl From<SizeLimitExceeded> for StepError {
+    fn from(err: SizeLimitExceeded) -> Self {
+        StepError::SizeLimitExceeded(err)
+    }
+}
+
+impl From<anyhow::Error> for StepError {
+    fn from(err: anyhow::Error) -> Self {
+        StepError::Other(err)
+    }
+}
+
+/// Like anyhow's `Context`, but only adds context to [`StepError::Other`],
+/// keeping the size limit variant as-is.
+pub trait StepResultExt<T> {
+    fn context<C>(self, context: C) -> Result<T, StepError>
+    where
+        C: Display + Send + Sync + 'static;
+
+    fn with_context<C, F>(self, f: F) -> Result<T, StepError>
+    where
+        C: Display + Send + Sync + 'static,
+        F: FnOnce() -> C;
+}
+
+impl<T> StepResultExt<T> for Result<T, StepError> {
+    fn context<C>(self, context: C) -> Result<T, StepError>
+    where
+        C: Display + Send + Sync + 'static,
+    {
+        self.with_context(|| context)
+    }
+
+    fn with_context<C, F>(self, f: F) -> Result<T, StepError>
+    where
+        C: Display + Send + Sync + 'static,
+        F: FnOnce() -> C,
+    {
+        self.map_err(|err| match err {
+            StepError::Other(err) => StepError::Other(err.context(f())),
+            err @ StepError::SizeLimitExceeded(_) => err,
+        })
+    }
+}
 
 // This type describes a single step in the Support Bundle collection.
 //
 // - All steps have access to the "BundleCollection", which includes
 // tools for actually acquiring data.
-// - All steps have access to an output directory where they can store
-// serialized data to a file.
+// - All steps have access to the bundle's output directory, where they can
+// store serialized data to files. Everything written there is charged against
+// the bundle's size limit.
 // - Finally, all steps can emit a "CollectionStepOutput", which can either
 // update the collection report, or generate more steps.
 pub type CollectionStepFn = Box<
     dyn for<'b> FnOnce(
             &'b Arc<BundleCollection>,
-            &'b Utf8Path,
+            &'b BundleOutput,
         )
-            -> BoxFuture<'b, anyhow::Result<CollectionStepOutput>>
+            -> BoxFuture<'b, Result<CollectionStepOutput, StepError>>
         + Send,
 >;
 
@@ -47,26 +121,40 @@ impl CollectionStep {
     pub async fn run(
         self,
         collection: &Arc<BundleCollection>,
-        output: &Utf8Path,
+        output: &BundleOutput,
         log: &slog::Logger,
     ) -> CompletedCollectionStep {
         let start = Utc::now();
 
-        let output = (self.step_fn)(collection, output)
-            .await
-            .inspect_err(|err| {
+        let output = match (self.step_fn)(collection, output).await {
+            Ok(output) => output,
+            // Not a step failure; the scheduler reports the size limit.
+            Err(StepError::SizeLimitExceeded(_)) => CollectionStepOutput::None,
+            Err(StepError::Other(err)) => {
                 warn!(
                     log,
                     "Step failed";
                     "step" => &self.name,
                     InlineErrorChain::new(err.as_ref()),
                 );
-            })
-            .unwrap_or_else(|err| CollectionStepOutput::Failed(err));
+                CollectionStepOutput::Failed(err)
+            }
+        };
 
         let end = Utc::now();
 
-        CompletedCollectionStep { name: self.name, start, end, output }
+        // A step still running once the size limit was exceeded may have been
+        // stopped before collecting everything it would have otherwise.
+        let stopped_by_size_limit = collection.size_budget().is_exceeded()
+            && !matches!(output, CollectionStepOutput::Skipped);
+
+        CompletedCollectionStep {
+            name: self.name,
+            start,
+            end,
+            output,
+            stopped_by_size_limit,
+        }
     }
 }
 
@@ -75,17 +163,26 @@ pub struct CompletedCollectionStep {
     pub start: DateTime<Utc>,
     pub end: DateTime<Utc>,
     pub output: CollectionStepOutput,
+    pub stopped_by_size_limit: bool,
 }
 
 impl CompletedCollectionStep {
     // Updates the collection report based on the output of a collection step,
     // and possibly extends the set of all steps to be executed.
+    //
+    // If the step was stopped by the bundle's size limit, its name is added to
+    // `incomplete_steps`.
     pub fn process(
         self,
         report: &mut SupportBundleCollectionReport,
         steps: &mut Vec<CollectionStep>,
+        incomplete_steps: &mut Vec<String>,
     ) {
         use SupportBundleCollectionStepStatus as Status;
+
+        if self.stopped_by_size_limit {
+            incomplete_steps.push(self.name.clone());
+        }
 
         let mut details = None;
         let status = match self.output {
