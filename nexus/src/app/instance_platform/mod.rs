@@ -67,6 +67,8 @@
 //! backends, this is easily done by using component IDs as backend names, as
 //! described above.
 
+#![allow(unused_imports, dead_code)] // commented-out vsock for migration test
+
 // CPU platforms are broken out only because they're wordy.
 mod cpu_platform;
 
@@ -392,6 +394,7 @@ impl Default for Components {
                 component_names::PVPANIC,
                 Component::QemuPvpanic(QemuPvpanic { enable_isa: true }),
             ),
+            /*
             (
                 component_names::VSOCK,
                 Component::VirtioSocket(VirtioSocket {
@@ -400,6 +403,7 @@ impl Default for Components {
                         .expect("vsock bdf (0, 25, 0)"),
                 }),
             ),
+            */
         ]
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v))
