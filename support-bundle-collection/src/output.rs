@@ -220,8 +220,7 @@ impl BundleOutput {
     }
 
     /// Copies everything from `reader` to the file `name` within this
-    /// directory, creating any missing parent directories. Returns the number
-    /// of bytes copied.
+    /// directory, creating any missing parent directories.
     ///
     /// # Cancel safety
     ///
@@ -230,7 +229,7 @@ impl BundleOutput {
         &self,
         name: impl AsRef<Utf8Path>,
         mut reader: R,
-    ) -> Result<u64, StepError> {
+    ) -> Result<(), StepError> {
         // Many streams may be copied at once, each with its own buffer, so this
         // is kept modest.
         const BUF_SIZE: usize = 64 * 1024;
@@ -259,7 +258,7 @@ impl BundleOutput {
             file.flush()
                 .await
                 .with_context(|| format!("failed to flush {path}"))?;
-            Ok::<_, StepError>(charged)
+            Ok::<_, StepError>(())
         }
         .await;
         if result.is_err() && remove_partial_file(&self.log, &path).await {
@@ -560,8 +559,7 @@ mod test {
     async fn test_write_stream() {
         let (dir, output, _stop) = output_with_limit(Some(1 << 20));
         let data = vec![7u8; 600 * 1024];
-        let n = output.write_stream("stream", &data[..]).await.unwrap();
-        assert_eq!(n, data.len() as u64);
+        output.write_stream("stream", &data[..]).await.unwrap();
         assert_eq!(std::fs::read(dir.path().join("stream")).unwrap(), data);
         assert_eq!(output.budget.used(), data.len() as u64);
     }
@@ -640,7 +638,7 @@ mod test {
 
         tx.unbounded_send(Ok(&b"abcdefghij"[..])).unwrap();
         drop(tx);
-        assert_eq!(stream.await.unwrap().unwrap(), 20);
+        stream.await.unwrap().unwrap();
         assert_eq!(
             std::fs::read(dir.path().join("stream")).unwrap(),
             b"0123456789abcdefghij"

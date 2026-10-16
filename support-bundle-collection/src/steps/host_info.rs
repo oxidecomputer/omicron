@@ -428,5 +428,5 @@ async fn save_zone_log_zip(
     if result.is_err() {
         output_dir.remove_dir_if_empty().await;
     }
-    result.map(|_nbytes| ())
+    result
 }
