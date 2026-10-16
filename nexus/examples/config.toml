@@ -222,6 +222,7 @@ populate_switch_ports.period_secs = 30
 # every 300s. Therefore, this task doesn't need to run more often. In addition,
 # every time the blueprint rendezvous task runs, this task is also activated.
 vmm_mark_stop_for_update.period_secs = 300
+local_storage_delete.period_secs = 30
 
 [default_region_allocation_strategy]
 # allocate region on 3 random distinct zpools, on 3 random distinct sleds.
