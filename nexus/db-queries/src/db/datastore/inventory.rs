@@ -4254,7 +4254,7 @@ impl DataStore {
                 })
                 .transpose()?;
             let mut config_with_id = omicron_sled_configs
-                .get_mut(&z.sled_config_id)
+                .get_mut(z.sled_config_id.into())
                 .ok_or_else(|| {
                     // This error means that we found a row in
                     // inv_omicron_sled_config_zone with no associated record in
@@ -4315,7 +4315,7 @@ impl DataStore {
 
                 for row in batch {
                     let mut config_with_id = omicron_sled_configs
-                        .get_mut(&row.sled_config_id)
+                        .get_mut(row.sled_config_id.into())
                         .ok_or_else(|| {
                             Error::internal_error(&format!(
                                 "dataset config {:?}: unknown config ID: {:?}",
@@ -4356,7 +4356,7 @@ impl DataStore {
 
                 for row in batch {
                     let mut config_with_id = omicron_sled_configs
-                        .get_mut(&row.sled_config_id)
+                        .get_mut(row.sled_config_id.into())
                         .ok_or_else(|| {
                             Error::internal_error(&format!(
                                 "disk config {:?}: unknown config ID: {:?}",

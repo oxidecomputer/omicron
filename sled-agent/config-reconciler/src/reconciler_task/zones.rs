@@ -280,12 +280,12 @@ impl OmicronZones {
         for (zone_id, result) in shutdown_results {
             match result {
                 Ok(()) => {
-                    self.zones.remove(&zone_id);
+                    self.zones.remove(zone_id);
                 }
                 Err((state, err)) => {
                     nfailed += 1;
                     self.zones
-                        .get_mut(&zone_id)
+                        .get_mut(zone_id)
                         .expect("shutdown task operates on existing zone")
                         .state = ZoneState::PartiallyShutDown { state, err };
                 }

@@ -203,7 +203,7 @@ impl OmicronDatasets {
 
         // Actually remove the gone-from-config datasets
         for dataset_id in datasets_to_remove {
-            self.datasets.remove(&dataset_id);
+            self.datasets.remove(dataset_id);
         }
 
         // Check against the filesystem for any orphaned datasets and attempt to
