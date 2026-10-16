@@ -454,11 +454,10 @@ impl fmt::Display for DisplaySledSelection<'_> {
 pub struct SupportBundleSizeLimit(u64);
 
 impl SupportBundleSizeLimit {
-    /// The default limit: 16 GiB.
+    /// The default limit.
     pub const DEFAULT: Self = Self(16 << 30);
 
-    /// The largest limit allowed: 32 GiB. Larger bundles risk destabilizing
-    /// Nexus.
+    /// The largest limit allowed. Larger bundles risk destabilizing Nexus.
     pub const MAX: Self = Self(32 << 30);
 
     pub fn new(bytes: u64) -> Result<Self, SupportBundleSizeLimitTooLarge> {
