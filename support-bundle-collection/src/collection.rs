@@ -324,7 +324,11 @@ impl BundleCollection {
                 limit_bytes: self.size_budget.limit().unwrap_or(u64::MAX),
                 used_bytes: self.size_budget.used(),
                 exceeded_at: exceeded.at,
-                exceeded_by_path: exceeded.path.to_string(),
+                refused_paths: exceeded
+                    .paths
+                    .iter()
+                    .map(|path| path.to_string())
+                    .collect(),
                 incomplete_steps,
                 skipped_steps,
             });
@@ -380,25 +384,26 @@ impl BundleCollection {
              bundle reached\n\
              its size limit of {} bytes.\n\
              \n\
-             Limit reached at: {}\n\
-             Left out:         {}\n",
-            exceeded.limit_bytes,
-            exceeded.exceeded_at,
-            exceeded.exceeded_by_path,
+             Limit reached at: {}\n",
+            exceeded.limit_bytes, exceeded.exceeded_at,
         );
-        for (title, steps) in [
+        for (title, items) in [
+            (
+                "Files left out because they would exceed the limit:",
+                &exceeded.refused_paths,
+            ),
             (
                 "Steps which were running, and may be incomplete:",
                 &exceeded.incomplete_steps,
             ),
             ("Steps which never started:", &exceeded.skipped_steps),
         ] {
-            if steps.is_empty() {
+            if items.is_empty() {
                 continue;
             }
             contents.push_str(&format!("\n{title}\n"));
-            for step in steps {
-                contents.push_str(&format!("  - {step}\n"));
+            for item in items {
+                contents.push_str(&format!("  - {item}\n"));
             }
         }
         contents.push_str("\nSee meta/report.json for details.\n");
@@ -412,7 +417,7 @@ impl BundleCollection {
             "Bundle reached its size limit";
             "limit_bytes" => exceeded.limit_bytes,
             "used_bytes" => exceeded.used_bytes,
-            "exceeded_by_path" => &exceeded.exceeded_by_path,
+            "refused_paths" => exceeded.refused_paths.len(),
             "incomplete_steps" => exceeded.incomplete_steps.len(),
             "skipped_steps" => exceeded.skipped_steps.len(),
         );

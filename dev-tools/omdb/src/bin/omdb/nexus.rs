@@ -3154,17 +3154,14 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                         "        reached at:       {}",
                         exceeded.exceeded_at
                     );
-                    println!(
-                        "        left out:         {}",
-                        exceeded.exceeded_by_path
-                    );
-                    for (title, steps) in [
+                    for (title, items) in [
+                        ("refused files", &exceeded.refused_paths),
                         ("incomplete steps", &exceeded.incomplete_steps),
                         ("skipped steps", &exceeded.skipped_steps),
                     ] {
-                        println!("        {title}: {}", steps.len());
-                        for step in steps {
-                            println!("          {step}");
+                        println!("        {title}: {}", items.len());
+                        for item in items {
+                            println!("          {item}");
                         }
                     }
                 }

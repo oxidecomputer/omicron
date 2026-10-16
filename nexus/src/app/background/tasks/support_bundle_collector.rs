@@ -1390,7 +1390,7 @@ mod test {
             .expect("Bundle should have exceeded its size limit");
         assert_eq!(exceeded.limit_bytes, SIZE_LIMIT_BYTES);
         assert_eq!(exceeded.used_bytes, 0);
-        assert!(!exceeded.exceeded_by_path.is_empty());
+        assert!(!exceeded.refused_paths.is_empty());
 
         // Running out of space is not a step failure.
         for step in &report.collection.steps {
@@ -1416,10 +1416,12 @@ mod test {
         .await
         .expect("Should be able to download the size limit marker");
         let marker = std::str::from_utf8(&marker).unwrap();
-        assert!(
-            marker.contains(&exceeded.exceeded_by_path),
-            "marker should name the file left out: {marker}"
-        );
+        for path in &exceeded.refused_paths {
+            assert!(
+                marker.contains(path),
+                "marker should name {path}, which was left out: {marker}"
+            );
+        }
 
         let report_json = download_bundle_file(
             nexus,

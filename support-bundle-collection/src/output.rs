@@ -5,9 +5,10 @@
 //! Writing collected data into a bundle, within a size limit.
 //!
 //! Steps write files through a [`BundleOutput`], which charges them against
-//! a [`SizeBudget`] shared by the whole collection. The first write that
-//! doesn't fit is refused, along with every write after it, and the stop
-//! token is cancelled.
+//! a [`SizeBudget`] shared by the whole collection. A write is accepted only
+//! if it fits under the limit. The first refusal cancels the stop token, so
+//! no new steps start, but writes already in progress continue while they
+//! fit.
 //!
 //! The limit applies to the collected directory, not the zip. Compressed
 //! data (zone logs, SP dumps) is stored as-is and the rest is deflated, so
@@ -25,7 +26,7 @@ use slog_error_chain::InlineErrorChain;
 use std::cell::Cell;
 use std::io::Write;
 use std::sync::Arc;
-use std::sync::OnceLock;
+use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use tokio::io::AsyncRead;
@@ -33,34 +34,40 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio_util::sync::CancellationToken;
 
-/// A write refused because the bundle reached its size limit.
-#[derive(Debug, thiserror::Error)]
-#[error("bundle reached its size limit of {limit} bytes")]
+/// A write refused because it would exceed the bundle's size limit.
+#[derive(Clone, Copy, Debug, thiserror::Error)]
+#[error("write would exceed the bundle's size limit of {limit} bytes")]
 pub struct SizeLimitExceeded {
     limit: u64,
 }
 
-/// When, and on which file, a bundle exceeded its size limit.
+/// When a bundle first exceeded its size limit, and which files were refused.
 #[derive(Clone, Debug)]
 pub struct Exceeded {
     pub at: DateTime<Utc>,
-    /// The file whose write was refused, relative to the bundle's root.
-    pub path: Utf8PathBuf,
+    /// Files whose writes were refused, relative to the bundle's root, in the
+    /// order refused.
+    pub paths: Vec<Utf8PathBuf>,
 }
 
 /// Tracks the bytes written to a bundle against its size limit.
 pub struct SizeBudget {
     limit: Option<u64>,
     used: AtomicU64,
-    exceeded: OnceLock<Exceeded>,
+    exceeded: Mutex<Option<Exceeded>>,
     stop: CancellationToken,
 }
 
 impl SizeBudget {
     /// Creates a budget of `limit` bytes, or an unlimited one if `limit` is
-    /// `None`. `stop` is cancelled when the limit is exceeded.
+    /// `None`. `stop` is cancelled when a write is first refused.
     pub fn new(limit: Option<u64>, stop: CancellationToken) -> Self {
-        Self { limit, used: AtomicU64::new(0), exceeded: OnceLock::new(), stop }
+        Self {
+            limit,
+            used: AtomicU64::new(0),
+            exceeded: Mutex::new(None),
+            stop,
+        }
     }
 
     pub fn limit(&self) -> Option<u64> {
@@ -72,26 +79,23 @@ impl SizeBudget {
         self.used.load(Ordering::Relaxed)
     }
 
-    pub fn exceeded(&self) -> Option<&Exceeded> {
-        self.exceeded.get()
+    pub fn exceeded(&self) -> Option<Exceeded> {
+        self.exceeded.lock().unwrap().clone()
     }
 
     pub fn is_exceeded(&self) -> bool {
-        self.exceeded.get().is_some()
+        self.exceeded.lock().unwrap().is_some()
     }
 
     /// Charges `n` bytes, written to `path`, against the budget.
     ///
-    /// Fails, without charging anything, if the limit has already been
-    /// exceeded, or if these bytes would exceed it.
+    /// Fails, without charging anything, if these bytes would exceed the
+    /// limit. Each refusal records `path`, and cancels the stop token.
     fn charge(&self, path: &Utf8Path, n: u64) -> Result<(), SizeLimitExceeded> {
         let Some(limit) = self.limit else {
             self.used.fetch_add(n, Ordering::Relaxed);
             return Ok(());
         };
-        if self.is_exceeded() {
-            return Err(SizeLimitExceeded { limit });
-        }
         // Check and add in one step, so `used` never includes a refused
         // write. Otherwise a concurrent write could be refused, and blamed,
         // instead.
@@ -101,9 +105,15 @@ impl SizeBudget {
             |used| used.checked_add(n).filter(|&total| total <= limit),
         );
         if fits.is_err() {
-            let _ = self
-                .exceeded
-                .set(Exceeded { at: Utc::now(), path: path.to_owned() });
+            self.exceeded
+                .lock()
+                .unwrap()
+                .get_or_insert_with(|| Exceeded {
+                    at: Utc::now(),
+                    paths: Vec::new(),
+                })
+                .paths
+                .push(path.to_owned());
             self.stop.cancel();
             return Err(SizeLimitExceeded { limit });
         }
@@ -227,9 +237,6 @@ impl BundleOutput {
         const BUF_SIZE: usize = 64 * 1024;
 
         let (path, rel) = self.resolve(name.as_ref());
-        // Refuse before creating the file if the limit was already reached.
-        // Otherwise an empty stream would never be refused.
-        self.budget.charge(&rel, 0)?;
         let mut charged = 0;
         let result = async {
             create_parent_dir(&path).await?;
@@ -281,8 +288,6 @@ impl BundleOutput {
         F: FnOnce(&mut dyn Write) -> anyhow::Result<()> + Send + 'static,
     {
         let (path, rel) = self.resolve(name.as_ref());
-        // Refuse before running `f`, as in `write_stream`.
-        self.budget.charge(&rel, 0)?;
         let budget = self.budget.clone();
         let log = self.log.clone();
         tokio::task::spawn_blocking(move || {
@@ -342,6 +347,10 @@ struct BudgetedWriter<'a> {
 
 impl Write for BudgetedWriter<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        // Once refused, the file will be removed, so stop charging for it.
+        if let Some(exceeded) = self.refused.get() {
+            return Err(std::io::Error::other(exceeded.to_string()));
+        }
         let len = buf.len() as u64;
         if let Err(exceeded) = self.budget.charge(self.rel, len) {
             let err = std::io::Error::other(exceeded.to_string());
@@ -453,7 +462,7 @@ mod test {
     }
 
     // The budget never goes past its limit, counts exactly what it accepted,
-    // and blames a write it refused.
+    // and records exactly the writes it refused.
     #[test]
     fn test_concurrent_charges() {
         const LIMIT: u64 = 10_000;
@@ -489,11 +498,15 @@ mod test {
         assert!(accepted <= LIMIT);
 
         let exceeded = budget.exceeded().expect("limit should be exceeded");
-        let blamed = results
-            .iter()
-            .find(|(path, _, _)| *path == exceeded.path)
-            .expect("blamed path should be one that was charged");
-        assert!(!blamed.2, "blamed {} for a write that was accepted", blamed.0);
+        let mut recorded = exceeded.paths;
+        recorded.sort();
+        let mut refused: Vec<Utf8PathBuf> = results
+            .into_iter()
+            .filter(|(_, _, ok)| !ok)
+            .map(|(path, _, _)| path)
+            .collect();
+        refused.sort();
+        assert_eq!(recorded, refused);
     }
 
     #[tokio::test]
@@ -518,7 +531,8 @@ mod test {
         assert!(!stop.is_cancelled());
     }
 
-    // Later writes are refused, even ones that would fit.
+    // After a refusal, writes that fit still succeed. Every refusal is
+    // recorded, in order.
     #[tokio::test]
     async fn test_write_exceeding_limit_trips_budget() {
         let (dir, output, stop) = output_with_limit(Some(10));
@@ -530,15 +544,17 @@ mod test {
         assert!(!dir.path().join("sub/second").exists());
         assert_eq!(output.budget.used(), 5);
         assert!(stop.is_cancelled());
-        let exceeded = output.budget.exceeded().unwrap();
-        assert_eq!(exceeded.path, "sub/second");
+        let at = output.budget.exceeded().unwrap().at;
 
-        let err = output.write("third", "1").await.unwrap_err();
+        output.write("third", "1").await.unwrap();
+        assert_eq!(output.budget.used(), 6);
+
+        let err = output.write("fourth", "12345").await.unwrap_err();
         assert_size_limit_exceeded(&err);
-        assert!(!dir.path().join("third").exists());
-        assert_eq!(output.budget.used(), 5);
-        // The first file to exceed the limit is the one recorded.
-        assert_eq!(output.budget.exceeded().unwrap().path, "sub/second");
+        assert!(!dir.path().join("fourth").exists());
+        let exceeded = output.budget.exceeded().unwrap();
+        assert_eq!(exceeded.at, at);
+        assert_eq!(exceeded.paths, ["sub/second", "fourth"]);
     }
 
     #[tokio::test]
@@ -563,7 +579,7 @@ mod test {
         assert!(!dir.path().join("stream").exists());
         assert_eq!(output.budget.used(), 5);
         assert!(stop.is_cancelled());
-        assert_eq!(output.budget.exceeded().unwrap().path, "stream");
+        assert_eq!(output.budget.exceeded().unwrap().paths, ["stream"]);
     }
 
     // Refunded, without tripping the budget.
@@ -594,31 +610,44 @@ mod test {
         tokio_util::io::StreamReader::new(futures::stream::iter(chunks))
     }
 
-    // Refused before creating the file or reading, even if empty.
+    // A stream in progress when another write is refused finishes, if it
+    // fits.
     #[tokio::test]
-    async fn test_write_stream_after_limit_exceeded() {
-        let (dir, output, _stop) = output_with_limit(Some(1));
+    async fn test_write_stream_continues_after_refusal() {
+        let (dir, output, stop) = output_with_limit(Some(100));
+        let (tx, rx) = futures::channel::mpsc::unbounded::<
+            std::io::Result<&'static [u8]>,
+        >();
+        let stream = tokio::spawn({
+            let output = output.clone();
+            async move {
+                output
+                    .write_stream(
+                        "stream",
+                        tokio_util::io::StreamReader::new(rx),
+                    )
+                    .await
+            }
+        });
+
+        tx.unbounded_send(Ok(&b"0123456789"[..])).unwrap();
+        while output.budget.used() < 10 {
+            tokio::task::yield_now().await;
+        }
         assert_size_limit_exceeded(
-            &output.write("big", "12").await.unwrap_err(),
+            &output.write("big", [0; 100]).await.unwrap_err(),
         );
+        assert!(stop.is_cancelled());
 
-        let err = output
-            .join("sub")
-            .write_stream("empty", tokio::io::empty())
-            .await
-            .unwrap_err();
-        assert_size_limit_exceeded(&err);
-        assert!(!dir.path().join("sub").exists());
-
-        // A reader which would fail the test if it were read.
-        let err = output
-            .write_stream("never", failing_reader(b"", "reader was read"))
-            .await
-            .unwrap_err();
-        assert_size_limit_exceeded(&err);
-        assert!(!dir.path().join("never").exists());
-        assert_eq!(output.budget.used(), 0);
-        assert_eq!(output.budget.exceeded().unwrap().path, "big");
+        tx.unbounded_send(Ok(&b"abcdefghij"[..])).unwrap();
+        drop(tx);
+        assert_eq!(stream.await.unwrap().unwrap(), 20);
+        assert_eq!(
+            std::fs::read(dir.path().join("stream")).unwrap(),
+            b"0123456789abcdefghij"
+        );
+        assert_eq!(output.budget.used(), 20);
+        assert_eq!(output.budget.exceeded().unwrap().paths, ["big"]);
     }
 
     #[tokio::test]
@@ -653,7 +682,7 @@ mod test {
         assert!(!dir.path().join("big.json").exists());
         assert_eq!(output.budget.used(), 0);
         assert!(stop.is_cancelled());
-        assert_eq!(output.budget.exceeded().unwrap().path, "big.json");
+        assert_eq!(output.budget.exceeded().unwrap().paths, ["big.json"]);
     }
 
     // Flushing what's buffered would trip the limit and hide `f`'s error.
@@ -675,6 +704,7 @@ mod test {
         assert!(!stop.is_cancelled());
     }
 
+    // Later writes to a refused file are refused too, even if they'd fit.
     #[tokio::test]
     async fn test_write_with_ignored_refusal() {
         let (dir, output, stop) = output_with_limit(Some(1000));
@@ -683,6 +713,9 @@ mod test {
                 // Larger than the writer's buffer, so it goes straight to the
                 // budget, which refuses it.
                 let _ = w.write_all(&[0; 16 * 1024]);
+                // Buffered, then refused when flushed.
+                w.write_all(&[0; 10]).unwrap();
+                assert!(w.flush().is_err());
                 Ok(())
             })
             .await
@@ -691,25 +724,7 @@ mod test {
         assert!(!dir.path().join("file").exists());
         assert_eq!(output.budget.used(), 0);
         assert!(stop.is_cancelled());
-    }
-
-    // Refused without running `f`.
-    #[tokio::test]
-    async fn test_write_with_after_limit_exceeded() {
-        let (dir, output, _stop) = output_with_limit(Some(1));
-        assert_size_limit_exceeded(
-            &output.write("big", "12").await.unwrap_err(),
-        );
-
-        let err = output
-            .join("sub")
-            .write_with("empty", |_w| panic!("f should not run"))
-            .await
-            .unwrap_err();
-        assert_size_limit_exceeded(&err);
-        assert!(!dir.path().join("sub").exists());
-        assert_eq!(output.budget.used(), 0);
-        assert_eq!(output.budget.exceeded().unwrap().path, "big");
+        assert_eq!(output.budget.exceeded().unwrap().paths, ["file"]);
     }
 
     #[tokio::test]

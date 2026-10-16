@@ -298,11 +298,11 @@ pub struct SupportBundleSizeLimitExceeded {
     pub limit_bytes: u64,
     /// The number of bytes collected into the bundle.
     pub used_bytes: u64,
-    /// When the limit was reached.
+    /// When the limit was first reached.
     pub exceeded_at: DateTime<Utc>,
-    /// The file, relative to the bundle's root, that exceeded the limit and
-    /// was left out.
-    pub exceeded_by_path: String,
+    /// Files refused because they would exceed the limit, relative to the
+    /// bundle's root, in the order refused.
+    pub refused_paths: Vec<String>,
     /// Steps running when the limit was reached. These may be incomplete.
     pub incomplete_steps: Vec<String>,
     /// Steps which never started because the limit was reached.
