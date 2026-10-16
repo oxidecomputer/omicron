@@ -405,9 +405,6 @@ async fn save_zone_log_error(
 
 // Stream a zone's log zip to `output_dir`.
 //
-// The zip's name marks it for merging, so that the bundle includes its
-// entries, as-is, rather than the zip itself.
-//
 // On failure, removes what it wrote, so that neither a partial zip nor an
 // empty directory for it ends up in the bundle.
 //
