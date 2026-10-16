@@ -1382,8 +1382,7 @@
             "name": "saga_id",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/SagaId"
             }
           }
         ],
@@ -4159,8 +4158,7 @@
             "$ref": "#/components/schemas/DemoSagaUuid"
           },
           "saga_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/SagaId"
           }
         },
         "required": [
@@ -7632,8 +7630,7 @@
             "type": "boolean"
           },
           "saga_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/SagaId"
           },
           "saga_name": {
             "type": "string"
@@ -9485,8 +9482,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/SagaId"
           },
           "state": {
             "$ref": "#/components/schemas/SagaState"
@@ -9584,6 +9580,15 @@
             ]
           }
         ]
+      },
+      "SagaId": {
+        "x-rust-type": {
+          "crate": "steno",
+          "path": "steno::SagaId",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "SagaQuiesceStatus": {
         "type": "object",
