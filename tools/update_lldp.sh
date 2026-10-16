@@ -24,7 +24,8 @@ PACKAGES=(
 )
 
 CRATES=(
-  "lldp"
+  "lldpd_client"
+  "lldp_protocol"
 )
 
 REPO="oxidecomputer/lldp"

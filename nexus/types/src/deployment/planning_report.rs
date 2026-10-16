@@ -500,7 +500,6 @@ pub enum PlanningNoopImageSourceSkipZoneReason {
         error: String,
     },
     ArtifactNotInRepo {
-        #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
         artifact_hash: ArtifactHash,
         zone_kind: String,
         file_name: String,

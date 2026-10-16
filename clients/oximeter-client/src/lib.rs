@@ -8,17 +8,10 @@ progenitor::generate_api!(
     spec = "../../openapi/oximeter/oximeter-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
-    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-        slog::debug!(log, "client request";
-            "method" => %request.method(),
-            "uri" => %request.url(),
-            "body" => ?&request.body(),
-        );
-    }),
-    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-        slog::debug!(log, "client response"; "result" => ?result);
-    }),
+    hooks = Expected,
 );
+
+progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
 
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {

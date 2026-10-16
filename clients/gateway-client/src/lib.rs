@@ -49,16 +49,7 @@ progenitor::generate_api!(
     spec = "../../openapi/gateway/gateway-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
-    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-        slog::debug!(log, "client request";
-            "method" => %request.method(),
-            "uri" => %request.url(),
-            "body" => ?&request.body(),
-        );
-    }),
-    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-        slog::debug!(log, "client response"; "result" => ?result);
-    }),
+    hooks = Expected,
     derives = [schemars::JsonSchema],
     patch = {
         ComponentFirmwareHashStatus = { derives = [PartialEq, Eq, PartialOrd, Ord] },
@@ -71,6 +62,7 @@ progenitor::generate_api!(
         UpdatePreparationProgress = { derives = [PartialEq, Hash, Eq] },
     },
     crates = {
+        "byte-wrapper" = "*",
         "omicron-uuid-kinds" = "*",
     },
 
@@ -88,6 +80,7 @@ progenitor::generate_api!(
         Ena = ereport_types::Ena,
         Ereport = ereport_types::Ereport,
         Ereports = ereport_types::Ereports,
+        SpComponentPresence = gateway_types::component::SpComponentPresence,
         SpIdentifier = gateway_types::component::SpIdentifier,
         SpIgnition = gateway_types::ignition::SpIgnition,
         SpIgnitionSystemType = gateway_types::ignition::SpIgnitionSystemType,
@@ -96,6 +89,8 @@ progenitor::generate_api!(
         TaskDump = gateway_types::task_dump::TaskDump,
     },
 );
+
+progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
 
 #[derive(Debug, thiserror::Error)]
 pub enum HostPhase1HashError {

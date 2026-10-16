@@ -4,8 +4,8 @@
 
 //! API for controlling multiple instances on a sled.
 
+use crate::instance;
 use crate::instance::Instance;
-use crate::instance::VmmStateOwner;
 use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClient;
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
@@ -118,6 +118,7 @@ pub(crate) struct InstanceManagerServices {
     pub zone_builder_factory: ZoneBuilderFactory,
     pub metrics_queue: MetricsRequestQueue,
     pub available_datasets_rx: AvailableDatasetsReceiver,
+    pub currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
 }
 
 // Describes the internals of the "InstanceManager", though most of the
@@ -266,7 +267,14 @@ impl InstanceManager {
             })
             .await
             .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
-        rx.await?
+        let updated_runtime = match rx.await? {
+            // No VMM with the requested `propolis_id` was found, so send an
+            // empty state back.
+            None => None,
+            // We got the instance terminator, wait for it to complete.
+            Some(terminator) => Some(terminator.terminated().await),
+        };
+        Ok(VmmUnregisterResponse { updated_runtime })
     }
 
     pub async fn ensure_state(
@@ -522,7 +530,11 @@ enum InstanceManagerRequest {
     },
     EnsureUnregistered {
         propolis_id: PropolisUuid,
-        tx: oneshot::Sender<Result<VmmUnregisterResponse, Error>>,
+        // The response to the `EnsureUnregistered` request is either the
+        // instance's `Terminator`, which can be used to await the completion of
+        // the termination request, or `None`, if no VMM with the targeted
+        // `propolis_id` exists.
+        tx: oneshot::Sender<Option<Arc<instance::Terminator>>>,
     },
     EnsureState {
         propolis_id: PropolisUuid,
@@ -654,25 +666,6 @@ impl InstanceManagerRunner {
                             warn!(self.log, "InstanceManager's 'instance terminate' channel closed; shutting down");
                             break;
                         },
-                    }
-                }
-
-                // If the set of currently-managed zpools has changed, shut down
-                // any instances due to disks that have disappeared out from
-                // under them.
-                result = self.currently_managed_zpools_rx.changed() => {
-                    match result {
-                        Ok(()) => {
-                            self.use_only_currently_managed_zpools().await;
-                        }
-                        Err(_) => {
-                            warn!(
-                                self.log,
-                                "InstanceManager's 'current zpools' channel \
-                                 closed; shutting down",
-                            );
-                            break;
-                        }
                     }
                 }
 
@@ -862,6 +855,9 @@ impl InstanceManagerRunner {
                     zone_builder_factory: self.zone_builder_factory.clone(),
                     metrics_queue: self.metrics_queue.clone(),
                     available_datasets_rx: self.available_datasets_rx.clone(),
+                    currently_managed_zpools_rx: self
+                        .currently_managed_zpools_rx
+                        .clone(),
                 };
 
                 let state = crate::instance::InstanceInitialState {
@@ -915,19 +911,20 @@ impl InstanceManagerRunner {
     /// zone is rudely terminated.
     fn ensure_unregistered(
         &mut self,
-        tx: oneshot::Sender<Result<VmmUnregisterResponse, Error>>,
+        tx: oneshot::Sender<Option<Arc<instance::Terminator>>>,
         propolis_id: PropolisUuid,
     ) -> Result<(), Error> {
-        // If the instance does not exist, we response immediately.
+        // If the instance does not exist, we respond immediately.
         let Some(instance) = self.get_propolis(propolis_id) else {
-            tx.send(Ok(VmmUnregisterResponse { updated_runtime: None }))
-                .map_err(|_| Error::FailedSendClientClosed)?;
+            tx.send(None).map_err(|_| Error::FailedSendClientClosed)?;
             return Ok(());
         };
 
-        // Otherwise, we pipeline the request, and send it to the instance,
-        // where it can receive an appropriate response.
-        instance.terminate(tx, VmmStateOwner::Nexus)?;
+        // Otherwise, request that the instance terminate, and send back the
+        // terminator so that the caller can wait for the instance to finish
+        // terminating.
+        let terminator = instance.request_termination(&self.log).clone();
+        tx.send(Some(terminator)).map_err(|_| Error::FailedSendClientClosed)?;
         Ok(())
     }
 
@@ -1069,51 +1066,6 @@ impl InstanceManagerRunner {
         };
         instance.current_state(tx)?;
         Ok(())
-    }
-
-    async fn use_only_currently_managed_zpools(&mut self) {
-        let current_zpools =
-            self.currently_managed_zpools_rx.current_and_update();
-        for (id, instance) in self.jobs.iter() {
-            // If we can read the filesystem pool, consider it. Otherwise, move
-            // on, to prevent blocking the cleanup of other instances.
-            // TODO(eliza): clone each instance and spawn a task to handle it,
-            // so that a single misbehaving instance cannot block the instance
-            // manager's run loop...
-            let (tx, rx) = oneshot::channel();
-            // This will fail if the tx has been dropped, which we just...don't do.
-            let _ = instance.get_filesystem_zpool(tx);
-            let Ok(Ok(Some(filesystem_pool))) = rx.await else {
-                info!(self.log, "use_only_these_disks: Cannot read filesystem pool"; "instance_id" => ?id);
-                continue;
-            };
-            if !current_zpools.contains(&filesystem_pool) {
-                info!(
-                    self.log,
-                    "use_only_these_disks: Terminating instance";
-                    "instance_id" => ?id,
-                );
-                let (tx, rx) = oneshot::channel();
-                if let Err(e) = instance.terminate(tx, VmmStateOwner::Runner) {
-                    warn!(
-                        self.log,
-                        "use_only_these_disks: \
-                         Failed to request instance termination";
-                        InlineErrorChain::new(&e),
-                    );
-                    continue;
-                }
-
-                if let Err(e) = rx.await {
-                    warn!(
-                        self.log,
-                        "use_only_these_disks: \
-                         Failed while terminating instance";
-                        InlineErrorChain::new(&e),
-                    );
-                }
-            }
-        }
     }
 
     fn set_attached_subnets(

@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use omicron_common::backoff::{self, BackoffError};
+use omicron_common::http_client::internal_http_client;
 use omicron_uuid_kinds::RackUuid;
 use parallel_task_set::ParallelTaskSet;
 use slog::{Logger, o};
@@ -31,7 +32,11 @@ impl GatewayClient {
         let url = format!("http://{addr}");
         let log = log
             .new(o!("gateway_url" => url.clone(), "addr" => addr.to_string()));
-        let client = gateway_client::Client::new(&url, log);
+        let client = gateway_client::Client::new_with_client(
+            &url,
+            internal_http_client(),
+            log,
+        );
         GatewayClient { addr, client }
     }
 

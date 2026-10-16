@@ -10,6 +10,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
+use omicron_common::http_client::internal_http_client_builder;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_client::Client as SledAgentClient;
@@ -29,7 +30,7 @@ pub fn sled_lookup<'a>(
 
 pub fn default_reqwest_client_builder() -> reqwest::ClientBuilder {
     let dur = std::time::Duration::from_secs(60);
-    reqwest::ClientBuilder::new().connect_timeout(dur).timeout(dur)
+    internal_http_client_builder().connect_timeout(dur).timeout(dur)
 }
 
 pub async fn sled_client(

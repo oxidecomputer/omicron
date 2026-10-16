@@ -15,16 +15,7 @@ progenitor::generate_api!(
     interface = Positional,
     derives = [schemars::JsonSchema, PartialEq],
     inner_type = slog::Logger,
-    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-        slog::debug!(log, "client request";
-            "method" => %request.method(),
-            "uri" => %request.url(),
-            "body" => ?&request.body(),
-        );
-    }),
-    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-        slog::debug!(log, "client response"; "result" => ?result);
-    }),
+    hooks = Expected,
     crates = {
         "iddqd" = "*",
         "omicron-generation-kinds" = "*",
@@ -98,6 +89,8 @@ progenitor::generate_api!(
         Baseboard = { derives = [PartialEq, Eq] }
     }
 );
+
+progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
 
 impl IdOrdItem for types::PendingSagaInfo {
     type Key<'a> = Uuid;
