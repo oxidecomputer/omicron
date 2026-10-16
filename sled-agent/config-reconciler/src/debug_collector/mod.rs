@@ -10,8 +10,9 @@
 //! The consumer (sled agent) interacts with this subsystem in basically two
 //! ways:
 //!
-//! - As the set of internal and external disks change, the consumer updates a
-//!   pair of watch channels so that this subsystem can respond appropriately.
+//! - As the set of internal disks and ensured external debug datasets change,
+//!   the consumer updates a pair of watch channels so that this subsystem can
+//!   respond appropriately.
 //!
 //! - When needed, the consumer requests immediate archival of debug data on
 //!   a former zone root filesystem and waits for this to finish.
@@ -33,17 +34,19 @@
 //!    archival of debug data from former zone roots).
 //!
 //! The consumer sets up the debug collector by invoking [`spawn()`] with the
-//! watch channels that store the information about internal and external disks.
+//! watch channels that store the information about internal disks and external
+//! debug datasets.
 //! `spawn()` returns a [`FormerZoneRootArchiver`] that the consumer uses when
 //! it wants to archive former zone root filesystems.  Internally, `spawn()`
 //! creates:
 //!
 //!   - a `DebugCollectorTask`.  This runs in its own tokio task.  Its sole job
 //!     is to notice when the watch channels containing the set of current
-//!     internal and external disks change and propagate that information to the
-//!     `DebugCollectorWorker` (via the `DebugCollector`).  (In the future,
-//!     these watch channels could probably be plumbed directly to the worker,
-//!     eliminating the `DebugCollectorTask` and its tokio task altogether.)
+//!     internal disks and external debug datasets change and propagate that
+//!     information to the `DebugCollectorWorker` (via the `DebugCollector`).
+//!     (In the future, these watch channels could probably be plumbed
+//!     directly to the worker, eliminating the `DebugCollectorTask` and its
+//!     tokio task altogether.)
 //!
 //!   - the `DebugCollector` (see above), which itself creates the
 //!     `DebugCollectorWorker` (see above).
@@ -57,8 +60,8 @@
 //!        |
 //!        | either:
 //!        |
-//!        | 1. change to the set of internal/external disks available
-//!        |    (stored in watch channels)
+//!        | 1. change to the set of internal disks or external debug
+//!        |    datasets available (stored in watch channels)
 //!        |
 //!        | 2. request to archive debug data from former zone root filesystem
 //!        |

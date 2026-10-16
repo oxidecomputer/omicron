@@ -1160,6 +1160,12 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseOk<Attestation>, HttpError> {
         method_unimplemented()
     }
+
+    async fn multirack_join_complete(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
 }
 
 fn method_unimplemented<T>() -> Result<T, HttpError> {

@@ -16,6 +16,7 @@ use omicron_common::address::DNS_PORT;
 use omicron_common::address::get_internal_dns_server_addresses;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::backoff;
+use omicron_common::http_client::internal_http_client;
 use qorb::backend;
 use qorb::resolver::BoxedResolver;
 use qorb::resolvers::dns::DnsResolver;
@@ -237,8 +238,9 @@ impl backend::Connector for NexusConnector {
         &self,
         backend: &backend::Backend,
     ) -> Result<Self::Connection, backend::Error> {
-        Ok(nexus_client::Client::new(
+        Ok(nexus_client::Client::new_with_client(
             &format!("http://{}", backend.address),
+            internal_http_client(),
             self.log.clone(),
         ))
     }

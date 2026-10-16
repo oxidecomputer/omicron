@@ -219,8 +219,13 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
         "/device/success",
         "/device/verify",
         "/images",
+        "/images/irrelevant-path",
         "/utilization",
         "/access",
+        "/users",
+        "/users/irrelevant-path",
+        "/groups",
+        "/groups/irrelevant-path",
         "/lookup/",
         "/lookup/abc",
     ];

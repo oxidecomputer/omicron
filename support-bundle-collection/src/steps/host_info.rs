@@ -24,6 +24,7 @@ use nexus_types::support_bundle::BundleTimeRange;
 use slog::Logger;
 use slog::error;
 use slog::info;
+use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use tokio::io::AsyncWriteExt;
 use tokio_util::sync::CancellationToken;
@@ -370,7 +371,7 @@ async fn save_zone_log_zip_or_error(
         Ok(res) => {
             let output_dir = path.join(format!("logs/{zone}"));
             if let Err(err) =
-                save_zone_log_zip(res.into_inner(), &output_dir).await
+                save_zone_log_zip(log, res.into_inner(), &output_dir).await
             {
                 // Leave an error in the bundle in place of the logs, rather
                 // than a zip that could not be saved.
@@ -424,7 +425,13 @@ fn zone_log_zip_path(output_dir: &Utf8Path) -> Utf8PathBuf {
 //
 // On failure, removes what it wrote, so that neither a partial zip nor an
 // empty directory for it ends up in the bundle.
+//
+// # Cancel safety
+//
+// Cancel-**unsafe**: if dropped, a partial zip may be left in the bundle
+// without being cleaned up.
 async fn save_zone_log_zip(
+    log: &Logger,
     bytestream: sled_agent_client::ByteStream,
     output_dir: &Utf8Path,
 ) -> anyhow::Result<()> {
@@ -458,7 +465,16 @@ async fn save_zone_log_zip(
     if result.is_err() {
         // This is best-effort: if removal fails, the bundle skips whatever it
         // cannot read of the partial zip, and records what it skipped.
-        let _ = tokio::fs::remove_file(&zipfile_path).await;
+        if let Err(err) = tokio::fs::remove_file(&zipfile_path).await
+            && err.kind() != std::io::ErrorKind::NotFound
+        {
+            warn!(
+                log,
+                "failed to remove partial zone log zip";
+                "path" => %zipfile_path,
+                InlineErrorChain::new(&err),
+            );
+        }
         // Fails, leaving the directory alone, unless it is empty.
         let _ = tokio::fs::remove_dir(output_dir).await;
     }

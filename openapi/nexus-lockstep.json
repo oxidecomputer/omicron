@@ -1382,8 +1382,7 @@
             "name": "saga_id",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/SagaId"
             }
           }
         ],
@@ -2324,8 +2323,15 @@
             "type": "object",
             "properties": {
               "hash": {
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.1.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "type": {
                 "type": "string",
@@ -2619,8 +2625,15 @@
         "type": "object",
         "properties": {
           "hash": {
+            "x-rust-type": {
+              "crate": "byte-wrapper",
+              "path": "byte_wrapper::HexArray::<32>",
+              "version": "0.1.0"
+            },
             "type": "string",
-            "format": "hex string (32 bytes)"
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "minLength": 64,
+            "maxLength": 64
           },
           "version": {
             "$ref": "#/components/schemas/BlueprintArtifactVersion"
@@ -3093,8 +3106,15 @@
             "type": "object",
             "properties": {
               "hash": {
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.1.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "type": {
                 "type": "string",
@@ -4138,8 +4158,7 @@
             "$ref": "#/components/schemas/DemoSagaUuid"
           },
           "saga_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/SagaId"
           }
         },
         "required": [
@@ -7286,8 +7305,15 @@
         "properties": {
           "artifact_hash": {
             "description": "which artifact to apply to this device",
+            "x-rust-type": {
+              "crate": "byte-wrapper",
+              "path": "byte_wrapper::HexArray::<32>",
+              "version": "0.1.0"
+            },
             "type": "string",
-            "format": "hex string (32 bytes)"
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "minLength": 64,
+            "maxLength": 64
           },
           "artifact_version": {
             "$ref": "#/components/schemas/ArtifactVersion"
@@ -7463,8 +7489,15 @@
               },
               "expected_active_phase_1_hash": {
                 "description": "The hash of the phase 1 slot specified by `expected_active_phase_1_hash`.\n\nWe should always be able to fetch this. Even if the phase 1 contents themselves have been corrupted (very scary for the active slot!), the SP can still hash those contents.",
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.1.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "expected_active_phase_1_slot": {
                 "description": "Which slot is currently active according to the SP.\n\nThis controls which slot will be used the next time the sled boots; it will _usually_ match `boot_disk`, but differs in the window of time between telling the SP to change which slot to use and the host OS rebooting to actually use that slot.",
@@ -7476,8 +7509,15 @@
               },
               "expected_active_phase_2_hash": {
                 "description": "The hash of the currently-active phase 2 artifact.\n\nIt's possible sled-agent won't be able to report this value, but that would indicate that we don't know the version currently running. The planner wouldn't stage an update without knowing the current version, so if something has gone wrong in the meantime we won't proceede either.",
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.1.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "expected_boot_disk": {
                 "description": "Which slot the host OS most recently booted from.",
@@ -7489,13 +7529,27 @@
               },
               "expected_inactive_phase_1_hash": {
                 "description": "The hash of the phase 1 slot specified by toggling `expected_active_phase_1_slot` to the other slot.\n\nWe should always be able to fetch this. Even if the phase 1 contents of the inactive slot are entirely bogus, the SP can still hash those contents.",
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.1.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "expected_inactive_phase_2_hash": {
                 "description": "The hash of the currently-inactive phase 2 artifact.\n\nIt's entirely possible that a sled needing a host OS update has no valid artifact in its inactive slot. However, a precondition for us performing a phase 1 update is that `sled-agent` on the target sled has already written the paired phase 2 artifact to the inactive slot; therefore, we don't need to be able to represent an invalid inactive slot.",
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.1.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "sled_agent_address": {
                 "description": "Address for contacting sled-agent to check phase 2 contents.",
@@ -7576,8 +7630,7 @@
             "type": "boolean"
           },
           "saga_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/SagaId"
           },
           "saga_name": {
             "type": "string"
@@ -8296,8 +8349,15 @@
             "type": "object",
             "properties": {
               "artifact_hash": {
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.1.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "file_name": {
                 "type": "string"
@@ -9422,8 +9482,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/SagaId"
           },
           "state": {
             "$ref": "#/components/schemas/SagaState"
@@ -9521,6 +9580,15 @@
             ]
           }
         ]
+      },
+      "SagaId": {
+        "x-rust-type": {
+          "crate": "steno",
+          "path": "steno::SagaId",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "SagaQuiesceStatus": {
         "type": "object",

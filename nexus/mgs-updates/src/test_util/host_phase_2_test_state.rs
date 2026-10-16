@@ -1141,5 +1141,11 @@ mod api_impl {
         {
             unimplemented!()
         }
+
+        async fn multirack_join_complete(
+            _request_context: RequestContext<Self::Context>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
     }
 }

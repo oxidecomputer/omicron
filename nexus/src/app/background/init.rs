@@ -524,6 +524,7 @@ impl BackgroundTasksInitializer {
                 &nexus_id.to_string(),
                 config.inventory.nkeep,
                 config.inventory.disable_collect,
+                rack_id,
             );
             let inventory_watcher = collector.watcher();
             driver.register(TaskDefinition {
@@ -794,7 +795,7 @@ impl BackgroundTasksInitializer {
                 producer_registry,
                 resolver.clone(),
                 inventory_load_watcher.clone(),
-                instance_watcher::WatcherIdentity { nexus_id, rack_id },
+                nexus_id,
             );
             driver.register(TaskDefinition {
                 name: "instance_watcher",
@@ -1117,7 +1118,6 @@ impl BackgroundTasksInitializer {
                 datastore.clone(),
                 resolver.clone(),
                 nexus_id,
-                rack_id,
                 task_fm_analysis.clone(),
                 config.sp_ereport_ingester.disable,
             )),
@@ -1503,7 +1503,6 @@ pub mod test {
     use std::sync::atomic::AtomicU64;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
-    use uuid::Uuid;
 
     /// Used by various tests of tasks that kick off sagas
     pub(crate) struct NoopStartSaga {
@@ -1530,7 +1529,7 @@ pub mod test {
             async {
                 // We've not actually started a real saga, so just make
                 // something up.
-                Ok(steno::SagaId(Uuid::new_v4()))
+                Ok(steno::SagaId::new_v4())
             }
             .boxed()
         }
@@ -1544,7 +1543,7 @@ pub mod test {
         > {
             let _ = self.count.fetch_add(1, Ordering::SeqCst);
             async {
-                let id = steno::SagaId(Uuid::new_v4());
+                let id = steno::SagaId::new_v4();
                 // No-op sagas complete immediately.
                 let completed = async { Ok(()) }.boxed();
                 Ok((id, completed))

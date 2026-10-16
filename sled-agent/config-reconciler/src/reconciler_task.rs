@@ -29,7 +29,6 @@ use sled_storage::dataset::LOCAL_STORAGE_DATASET;
 use sled_storage::dataset::LOCAL_STORAGE_UNENCRYPTED_DATASET;
 use sled_storage::dataset::U2_DEBUG_DATASET;
 use sled_storage::dataset::ZONE_DATASET;
-use sled_storage::disk::Disk;
 use slog::Logger;
 use slog::debug;
 use slog::error;
@@ -37,7 +36,6 @@ use slog::info;
 use slog::warn;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -79,7 +77,6 @@ pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
     internal_disks_rx: InternalDisksReceiver,
-    external_disks_tx: watch::Sender<HashSet<Disk>>,
     former_zone_root_archiver: FormerZoneRootArchiver,
     raw_disks_rx: RawDisksReceiver,
     committed_epoch_rx: watch::Receiver<Option<Epoch>>,
@@ -90,8 +87,6 @@ pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
     let external_disks = ExternalDisks::new(
         Arc::clone(&mount_config),
         currently_managed_zpools_tx,
-        external_disks_tx,
-        former_zone_root_archiver.clone(),
     );
     let datasets = OmicronDatasets::new(dataset_task);
     let zones = OmicronZones::new(mount_config, time_sync_config);

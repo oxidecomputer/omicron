@@ -19,7 +19,7 @@ use omicron_common::api::internal::shared::{
 use sled_agent_types_versions::{
     latest, v1, v11, v14, v18, v20, v22, v24, v25, v26, v28, v29, v30, v31,
     v32, v33, v34, v37, v39, v40, v41, v42, v43, v46, v47, v48, v49, v50, v51,
-    v53,
+    v52, v53, v55,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -36,7 +36,9 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (55, ADD_DISK_LOCATION_TO_INVENTORY),
+    (57, ADD_DISK_LOCATION_TO_INVENTORY),
+    (56, ADD_MULTIRACK_JOIN_COMPLETE),
+    (55, ARTIFACT_HASH_SCHEMA),
     (54, ADD_LOG_TIME_RANGE),
     (53, ADD_INSTANCE_MANAGER_STATUS_TO_INVENTORY),
     (52, TYPED_ARTIFACT_CONFIG_GENERATION),
@@ -264,7 +266,8 @@ pub trait SledAgentApi {
     /// Otherwise, an error is returned.
     #[endpoint {
         method = POST,
-        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/finalize"
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/finalize",
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
     }]
     async fn support_bundle_finalize(
         rqctx: RequestContext<Self::Context>,
@@ -276,6 +279,29 @@ pub trait SledAgentApi {
         HttpResponseCreated<latest::support_bundle::SupportBundleMetadata>,
         HttpError,
     >;
+
+    #[endpoint {
+        method = POST,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/finalize",
+        versions = ..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn support_bundle_finalize_v1(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::support_bundle::SupportBundlePathParam>,
+        query_params: Query<
+            v1::support_bundle::SupportBundleFinalizeQueryParams,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v1::support_bundle::SupportBundleMetadata>,
+        HttpError,
+    > {
+        Self::support_bundle_finalize(
+            rqctx,
+            path_params,
+            query_params.map(Into::into),
+        )
+        .await
+    }
 
     /// Fetch a support bundle from a particular dataset
     #[endpoint {
@@ -356,12 +382,24 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/omicron-config",
-        versions = VERSION_MULTIPLE_ZONE_EXTERNAL_IPS..,
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
     }]
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<latest::inventory::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/omicron-config",
+        versions = VERSION_MULTIPLE_ZONE_EXTERNAL_IPS..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn omicron_config_put_v51(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v51::inventory::OmicronSledConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::omicron_config_put(rqctx, body.map(Into::into)).await
+    }
 
     #[endpoint {
         method = PUT,
@@ -372,7 +410,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v50::inventory::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::omicron_config_put(rqctx, body.map(Into::into)).await
+        Self::omicron_config_put_v51(rqctx, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -627,7 +665,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = POST,
         path = "/artifacts/{sha256}/copy-from-depot",
-        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
     }]
     async fn artifact_copy_from_depot(
         rqctx: RequestContext<Self::Context>,
@@ -638,6 +676,29 @@ pub trait SledAgentApi {
         HttpResponseAccepted<latest::artifact::ArtifactCopyFromDepotResponse>,
         HttpError,
     >;
+
+    #[endpoint {
+        method = POST,
+        path = "/artifacts/{sha256}/copy-from-depot",
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn artifact_copy_from_depot_v52(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::artifact::ArtifactPathParam>,
+        query_params: Query<v52::artifact::ArtifactQueryParam>,
+        body: TypedBody<v1::artifact::ArtifactCopyFromDepotBody>,
+    ) -> Result<
+        HttpResponseAccepted<v1::artifact::ArtifactCopyFromDepotResponse>,
+        HttpError,
+    > {
+        Self::artifact_copy_from_depot(
+            rqctx,
+            path_params.map(Into::into),
+            query_params,
+            body,
+        )
+        .await
+    }
 
     #[endpoint {
         operation_id = "artifact_copy_from_depot",
@@ -654,7 +715,7 @@ pub trait SledAgentApi {
         HttpResponseAccepted<v1::artifact::ArtifactCopyFromDepotResponse>,
         HttpError,
     > {
-        Self::artifact_copy_from_depot(
+        Self::artifact_copy_from_depot_v52(
             rqctx,
             path_params,
             query_params.map(Into::into),
@@ -667,7 +728,7 @@ pub trait SledAgentApi {
         method = PUT,
         path = "/artifacts/{sha256}",
         request_body_max_bytes = UPDATE_ARTIFACT_MAX_BYTES,
-        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
     }]
     async fn artifact_put(
         rqctx: RequestContext<Self::Context>,
@@ -675,6 +736,28 @@ pub trait SledAgentApi {
         query_params: Query<latest::artifact::ArtifactQueryParam>,
         body: StreamingBody,
     ) -> Result<HttpResponseOk<latest::artifact::ArtifactPutResponse>, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/artifacts/{sha256}",
+        request_body_max_bytes = UPDATE_ARTIFACT_MAX_BYTES,
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn artifact_put_v52(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::artifact::ArtifactPathParam>,
+        query_params: Query<v52::artifact::ArtifactQueryParam>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseOk<v1::artifact::ArtifactPutResponse>, HttpError>
+    {
+        Self::artifact_put(
+            rqctx,
+            path_params.map(Into::into),
+            query_params,
+            body,
+        )
+        .await
+    }
 
     #[endpoint {
         operation_id = "artifact_put",
@@ -690,7 +773,7 @@ pub trait SledAgentApi {
         body: StreamingBody,
     ) -> Result<HttpResponseOk<v1::artifact::ArtifactPutResponse>, HttpError>
     {
-        Self::artifact_put(
+        Self::artifact_put_v52(
             rqctx,
             path_params,
             query_params.map(Into::into),
@@ -1024,12 +1107,27 @@ pub trait SledAgentApi {
         operation_id = "inventory",
         method = GET,
         path = "/inventory",
-        versions = VERSION_ADD_INSTANCE_MANAGER_STATUS_TO_INVENTORY..VERSION_ADD_DISK_LOCATION_TO_INVENTORY,
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..VERSION_ADD_DISK_LOCATION_TO_INVENTORY,
+    }]
+    async fn inventory_v55(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v55::inventory::Inventory>, HttpError> {
+        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v55::inventory::Inventory::from(inv))
+        })
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_ADD_INSTANCE_MANAGER_STATUS_TO_INVENTORY..VERSION_ARTIFACT_HASH_SCHEMA,
     }]
     async fn inventory_v53(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v53::inventory::Inventory>, HttpError> {
-        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+        Self::inventory_v55(rqctx).await.map(|HttpResponseOk(inv)| {
             HttpResponseOk(v53::inventory::Inventory::from(inv))
         })
     }
@@ -1634,4 +1732,16 @@ pub trait SledAgentApi {
         path_params: Path<latest::rot::RotPathParams>,
         body: TypedBody<latest::rot::Nonce>,
     ) -> Result<HttpResponseOk<latest::rot::Attestation>, HttpError>;
+
+    /// Report that this sled's multirack join is complete.
+    ///
+    /// Sent by Nexus once it has observed this sled on the underlay network.
+    #[endpoint {
+        method = PUT,
+        path = "/multirack-join-complete",
+        versions = VERSION_ADD_MULTIRACK_JOIN_COMPLETE..,
+    }]
+    async fn multirack_join_complete(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }

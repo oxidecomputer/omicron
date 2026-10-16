@@ -1036,10 +1036,9 @@ mod tests {
     fn example_observed_sagas() -> BTreeMap<steno::SagaId, ObservedSagaReport> {
         let mut observed_sagas = BTreeMap::new();
         observed_sagas.insert(
-            steno::SagaId(
-                uuid::Uuid::from_str("5a9a0001-5a9a-45a9-85a9-5a9a5a9a5a9a")
-                    .unwrap(),
-            ),
+            "5a9a0001-5a9a-45a9-85a9-5a9a5a9a5a9a"
+                .parse::<steno::SagaId>()
+                .unwrap(),
             ObservedSagaReport {
                 saga_name: "fake-saga".to_string(),
                 saga_state: ObservedSagaState::Unwinding,
@@ -1048,10 +1047,9 @@ mod tests {
             },
         );
         observed_sagas.insert(
-            steno::SagaId(
-                uuid::Uuid::from_str("5a9a0002-5a9a-45a9-85a9-5a9a5a9a5a9a")
-                    .unwrap(),
-            ),
+            "5a9a0002-5a9a-45a9-85a9-5a9a5a9a5a9a"
+                .parse::<steno::SagaId>()
+                .unwrap(),
             ObservedSagaReport {
                 saga_name: "another-fake-saga".to_string(),
                 saga_state: ObservedSagaState::Abandoned(SagaAbandonInfo {

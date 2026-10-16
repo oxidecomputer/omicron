@@ -10,6 +10,7 @@ use std::{
     sync::LazyLock,
 };
 
+use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::DateTime;
 use chrono::Utc;
@@ -802,9 +803,6 @@ fn write_log_to_zip<W: Write + Seek>(
         })
         .unwrap_or_else(zip::DateTime::default);
 
-    // Each log is stored in the zip as a standalone zstd file, rather than as
-    // a zstd-compressed zip entry: any unzip tool can extract it, and the
-    // result can be read with standard zstd tools.
     let zip_path = format!("{service}/{logtype}/{log_name}.zst");
     zip.start_file_from_path(
         zip_path,
@@ -830,7 +828,7 @@ fn write_log_to_zip<W: Write + Seek>(
             "Failed to write service log to zip file";
             "service" => %service,
             "log" => %snapshot_logfile,
-            InlineErrorChain::new(&e)
+            InlineErrorChain::new(e.as_ref())
         );
     };
 
@@ -841,14 +839,20 @@ fn write_log_to_zip<W: Write + Seek>(
 ///
 /// The frame records the size of `src`, so tools such as `zstd -l` can report
 /// it, and a checksum, as the `zstd` CLI does by default.
-fn write_zstd(src: &mut File, dst: &mut impl Write) -> std::io::Result<()> {
-    let mut encoder = zstd::Encoder::new(dst, LOG_ZSTD_LEVEL)?;
-    encoder.include_checksum(true)?;
+fn write_zstd(src: &mut File, dst: &mut impl Write) -> anyhow::Result<()> {
+    let mut encoder = zstd::Encoder::new(dst, LOG_ZSTD_LEVEL)
+        .context("failed to create zstd encoder")?;
+    encoder.include_checksum(true).context("failed to enable zstd checksum")?;
     // Logs are read from a snapshot, so their size cannot change while they
     // are compressed.
-    encoder.set_pledged_src_size(Some(src.metadata()?.len()))?;
-    std::io::copy(src, &mut encoder)?;
-    encoder.finish()?;
+    let src_size =
+        src.metadata().context("failed to read log file metadata")?.len();
+    encoder
+        .set_pledged_src_size(Some(src_size))
+        .context("failed to set zstd pledged source size")?;
+    std::io::copy(src, &mut encoder)
+        .context("failed to copy log contents into zstd encoder")?;
+    encoder.finish().context("failed to finish zstd frame")?;
     Ok(())
 }
 

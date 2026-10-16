@@ -15,17 +15,16 @@ use sled_hardware_types::{BaseboardId, SledCpuFamily};
 use crate::v1;
 use crate::v1::disk::{DiskIdentity, DiskVariant};
 use crate::v1::inventory::{InventoryDataset, SledRole};
-use crate::v14::inventory::OmicronFileSourceResolverInventory;
 use crate::v16::inventory::SingleMeasurementInventory;
 use crate::v24::inventory::InventoryZpool;
 use crate::v40::inventory::{FmdInventory, FmdInventoryError};
 use crate::v46::inventory::SvcsEnabledNotOnlineResult;
-use crate::v51::inventory::{
-    ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
-    OmicronSledConfig,
-};
-use crate::v53;
 use crate::v53::inventory::InstanceManagerStatus;
+use crate::v55;
+use crate::v55::inventory::{
+    ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
+    OmicronFileSourceResolverInventory, OmicronSledConfig,
+};
 
 /// Identifies information about disks which may be attached to Sleds.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -113,7 +112,7 @@ pub struct Inventory {
     pub fmd: Result<FmdInventory, FmdInventoryError>,
 }
 
-impl From<Inventory> for v53::inventory::Inventory {
+impl From<Inventory> for v55::inventory::Inventory {
     fn from(new: Inventory) -> Self {
         let Inventory {
             sled_id,
