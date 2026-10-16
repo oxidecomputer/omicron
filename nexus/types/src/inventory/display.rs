@@ -497,7 +497,6 @@ fn display_devices(
         writeln!(f, "    rack ID:  {}", sp.rack_id)?;
         write!(f, "    MGS slot: {:?} {}", sp.sp_type, sp.sp_slot)?;
         writeln!(f, "")?;
-        writeln!(f, "    rack ID:  {}", sp.rack_id)?;
         writeln!(
             f,
             "    found at: {} from {}",
