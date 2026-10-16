@@ -784,10 +784,8 @@ impl ExpectedUpdates {
 
                 // We should also have a corresponding phase 2 change for this
                 // phase 1 update.
-                let expected_phase2 = self
-                    .phase2
-                    .remove(sp_slot)
-                    .expect("missing phase2 update");
+                let expected_phase2 =
+                    self.phase2.remove(sp_slot).expect("missing phase2 update");
                 let (actual_phase2_slot, actual_phase2_contents) =
                     pending_host_phase_2_changes
                         .remove(&expected_phase2.sled_id)

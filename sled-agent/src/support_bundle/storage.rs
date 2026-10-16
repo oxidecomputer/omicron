@@ -218,7 +218,9 @@ impl LocalStorage for ConfigReconcilerHandle {
         let sled_config =
             self.ledgered_sled_config().map_err(Error::LedgeredSledConfig)?;
         sled_config
-            .and_then(|mut sled_config| sled_config.datasets.remove(*dataset_id))
+            .and_then(|mut sled_config| {
+                sled_config.datasets.remove(*dataset_id)
+            })
             .ok_or(Error::DatasetNotFound)
     }
 

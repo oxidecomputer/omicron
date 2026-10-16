@@ -2879,11 +2879,8 @@ fn test_zones_marked_ready_for_cleanup_based_on_inventory() {
 
     eprintln!("planning with config ledgered but not reconciled...");
     sim.inventory_edit_latest_raw("ledger sled config", |collection| {
-        collection
-            .sled_agents
-            .get_mut(sled_id)
-            .unwrap()
-            .ledgered_sled_config = Some(bp2_sled_config.clone());
+        collection.sled_agents.get_mut(sled_id).unwrap().ledgered_sled_config =
+            Some(bp2_sled_config.clone());
         Ok(())
     })
     .unwrap();
@@ -2894,11 +2891,8 @@ fn test_zones_marked_ready_for_cleanup_based_on_inventory() {
 
     eprintln!("planning with config ledgered but zones failed to shut down...");
     sim.inventory_edit_latest_raw("ledger sled config", |collection| {
-        collection
-            .sled_agents
-            .get_mut(sled_id)
-            .unwrap()
-            .ledgered_sled_config = Some(bp2_sled_config.clone());
+        collection.sled_agents.get_mut(sled_id).unwrap().ledgered_sled_config =
+            Some(bp2_sled_config.clone());
         let mut reconciliation =
             ConfigReconcilerInventory::debug_assume_success(
                 bp2_sled_config.clone(),
