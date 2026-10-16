@@ -4,7 +4,7 @@
 
 //! Support bundle data selection types.
 //!
-//! These types specify what data to collect in a support bundle, and how much.
+//! These types specify what data to collect in a support bundle.
 //! They are shared between the support bundle collector and FM case types.
 
 use crate::fm::ereport::EreportFilters;
