@@ -1248,8 +1248,6 @@ mod tests {
 
     use anyhow::anyhow;
     use chrono::{DateTime, Utc};
-    use hickory_resolver::ResolveErrorKind;
-    use hickory_resolver::proto::ProtoErrorKind;
     use iddqd::IdOrdMap;
     use internal_dns_resolver::QorbResolver;
     use internal_dns_resolver::ResolveError;
@@ -1676,37 +1674,28 @@ mod tests {
                         );
                     }
                     (Err(e), Err(QueryError::NoRecordsFound)) => {
-                        // "No records found" is returned as a hickory ProtoError.
-                        if let ResolveError::Resolve(resolve_error) = &e {
-                            if let ResolveErrorKind::Proto(proto_error) =
-                                resolve_error.kind()
-                            {
-                                if let ProtoErrorKind::NoRecordsFound {
-                                    ..
-                                } = proto_error.kind()
-                                {
-                                    // This is the expected error case.
-                                    eprintln!(
-                                        "*** no records found as expected"
-                                    )
-                                } else {
-                                    mismatched.insert(
-                                        service,
-                                        anyhow!(
-                                            "expected NoRecordsFound error, \
-                                             but got a different proto error: {e:?}"
-                                        ),
-                                    );
-                                }
+                        // "No records found" is returned as a hickory NetError.
+                        if let ResolveError::Resolve(err) = &e {
+                            if err.is_no_records_found() {
+                                // This is the expected error case.
+                                eprintln!("*** no records found as expected")
                             } else {
                                 mismatched.insert(
                                     service,
                                     anyhow!(
-                                        "expected Proto error with NoRecordsFound, \
-                                        but got a different resolve error: {e:?}"
+                                        "expected NoRecordsFound error, \
+                                         but got a different net error: {e:?}"
                                     ),
                                 );
                             }
+                        } else {
+                            mismatched.insert(
+                                service,
+                                anyhow!(
+                                    "expected NetError with NoRecordsFound, \
+                                    but got a different resolve error: {e:?}"
+                                ),
+                            );
                         }
                     }
                     (_, Err(QueryError::PacketFragmented)) => {

@@ -11,7 +11,7 @@ use hickory_resolver::TokioResolver;
 use hickory_resolver::config::NameServerConfig;
 use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
-use hickory_resolver::name_server::TokioConnectionProvider;
+use hickory_resolver::net::runtime::TokioRuntimeProvider;
 use internal_dns_types::config::DnsConfigParams;
 use slog::o;
 use std::net::SocketAddr;
@@ -85,21 +85,23 @@ impl TransientDnsServer {
     }
 
     pub async fn resolver(&self) -> Result<TokioResolver, anyhow::Error> {
-        let mut resolver_config = ResolverConfig::new();
-        resolver_config.add_name_server(NameServerConfig::new(
-            self.dns_server.sole_local_address()?,
-            hickory_proto::xfer::Protocol::Udp,
-        ));
+        let address = self.dns_server.sole_local_address()?;
+        let mut ns_config = NameServerConfig::udp(address.ip());
+        for conn in &mut ns_config.connections {
+            conn.port = address.port();
+        }
+        let mut resolver_config = ResolverConfig::default();
+        resolver_config.add_name_server(ns_config);
         let mut resolver_opts = ResolverOpts::default();
         // Enable edns for potentially larger records.
         resolver_opts.edns0 = true;
 
         let resolver = TokioResolver::builder_with_config(
             resolver_config,
-            TokioConnectionProvider::default(),
+            TokioRuntimeProvider::new(),
         )
         .with_options(resolver_opts)
-        .build();
+        .build()?;
 
         Ok(resolver)
     }

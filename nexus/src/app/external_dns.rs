@@ -11,8 +11,8 @@ use hickory_resolver::config::NameServerConfig;
 use hickory_resolver::config::ResolveHosts;
 use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
-use hickory_resolver::name_server::TokioConnectionProvider;
-use hickory_resolver::proto::xfer::Protocol;
+use hickory_resolver::net::NetError;
+use hickory_resolver::net::runtime::TokioRuntimeProvider;
 use omicron_common::address::DNS_PORT;
 use reqwest::dns::Name;
 
@@ -30,7 +30,7 @@ impl Resolver {
     pub fn new(
         dns_servers: &[IpAddr],
         ip_policy: ExternalIpPolicy,
-    ) -> Resolver {
+    ) -> Result<Resolver, NetError> {
         let addrs =
             dns_servers.iter().map(|&addr| SocketAddr::new(addr, DNS_PORT));
         Self::new_from_addrs(addrs, ip_policy)
@@ -48,18 +48,21 @@ impl Resolver {
     pub fn new_from_addr(
         dns_server: SocketAddr,
         ip_policy: ExternalIpPolicy,
-    ) -> Resolver {
+    ) -> Result<Resolver, NetError> {
         Self::new_from_addrs(std::iter::once(dns_server), ip_policy)
     }
 
     fn new_from_addrs(
         dns_servers: impl IntoIterator<Item = SocketAddr>,
         ip_policy: ExternalIpPolicy,
-    ) -> Resolver {
-        let mut rc = ResolverConfig::new();
+    ) -> Result<Resolver, NetError> {
+        let mut rc = ResolverConfig::default();
         let mut n_dns_servers = 0;
         for addr in dns_servers {
-            let mut ns_config = NameServerConfig::new(addr, Protocol::Udp);
+            let mut ns_config = NameServerConfig::udp(addr.ip());
+            for conn in &mut ns_config.connections {
+                conn.port = addr.port();
+            }
             // Explicltly set `trust_negative_responses` to false here to avoid
             // some churn.  It reasonably could be `true` here.
             //
@@ -97,19 +100,17 @@ impl Resolver {
         opts.use_hosts_file = ResolveHosts::Never;
         // Do as many requests in parallel as we have configured servers
         opts.num_concurrent_reqs = n_dns_servers;
-        Resolver {
+        Ok(Resolver {
             resolver: TokioResolver::builder_with_config(
                 rc,
-                TokioConnectionProvider::default(),
+                TokioRuntimeProvider::new(),
             )
             .with_options(opts)
-            .build(),
+            .build()?,
             ip_policy,
-        }
+        })
     }
-}
 
-impl Resolver {
     /// Returns the [`ExternalIpPolicy`] this resolver enforces on resolved
     /// addresses.
     pub fn ip_policy(&self) -> &ExternalIpPolicy {

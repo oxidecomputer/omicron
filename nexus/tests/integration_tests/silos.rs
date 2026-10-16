@@ -4,6 +4,7 @@
 
 use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
 use dropshot::ResultsPage;
+use hickory_resolver::proto::rr::RData;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::authn::silos::AuthenticatedSubject;
 use nexus_db_queries::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
@@ -46,8 +47,6 @@ use std::fmt::Write;
 use std::str::FromStr;
 
 use base64::Engine;
-use hickory_resolver::ResolveErrorKind;
-use hickory_resolver::proto::ProtoErrorKind;
 use http::StatusCode;
 use http::method::Method;
 use httptest::{Expectation, Server, matchers::*, responders::*};
@@ -2218,22 +2217,32 @@ pub async fn verify_silo_dns_name(
                 .await
             {
                 Ok(result) => {
-                    let addrs: Vec<_> = result.iter().map(|a| &a.0).collect();
+                    let addrs: Vec<_> = result
+                        .answers()
+                        .iter()
+                        .filter_map(|record| match record.data {
+                            RData::A(a) => Some(a.0),
+                            _ => None,
+                        })
+                        .collect();
                     if addrs.is_empty() {
                         false
                     } else {
-                        assert_eq!(addrs, [&nexus_ip]);
+                        assert_eq!(addrs, [nexus_ip]);
                         true
                     }
                 }
-                Err(error) => match resolve_error_proto_kind(&error) {
-                    Some(ProtoErrorKind::NoRecordsFound { .. }) => false,
-                    _ => panic!(
-                        "unexpected error querying external \
+                Err(error) => {
+                    if error.is_no_records_found() {
+                        false
+                    } else {
+                        panic!(
+                            "unexpected error querying external \
                             DNS server for Silo DNS name {:?}: {:#}",
-                        dns_name, error
-                    ),
-                },
+                            dns_name, error
+                        );
+                    }
+                }
             };
 
             if should_exist == found {
@@ -2249,13 +2258,6 @@ pub async fn verify_silo_dns_name(
     )
     .await
     .expect("failed to verify external DNS configuration");
-}
-
-fn resolve_error_proto_kind(
-    e: &hickory_resolver::ResolveError,
-) -> Option<&ProtoErrorKind> {
-    let ResolveErrorKind::Proto(proto_error) = e.kind() else { return None };
-    Some(proto_error.kind())
 }
 
 // Test the basic behavior of the Silo-level IAM policy that supports

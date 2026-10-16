@@ -15,11 +15,13 @@ use dpd_client::types::PortSettings;
 use dpd_client::types::PortSpeed as DpdPortSpeed;
 use either::Either;
 use hickory_resolver::TokioResolver;
-use hickory_resolver::config::NameServerConfigGroup;
+use hickory_resolver::config::NameServerConfig;
 use hickory_resolver::config::ResolveHosts;
 use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
-use hickory_resolver::name_server::TokioConnectionProvider;
+use hickory_resolver::net::NetError;
+use hickory_resolver::net::runtime::TokioRuntimeProvider;
+use hickory_resolver::proto::rr::RData;
 use illumos_utils::PFEXEC;
 use illumos_utils::zone::SVCCFG;
 use omicron_common::OMICRON_DPD_TAG;
@@ -57,8 +59,6 @@ use wicket_common::preflight_check::UplinkPreflightTerminalError;
 use wicketd_commission_types::rack_setup::UplinkPortConfig;
 use wicketd_commission_types::rack_setup::UserSpecifiedPortConfig;
 use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
-
-const DNS_PORT: u16 = 53;
 
 // DNS name we'll use to query DNS servers. We don't care to actually get a
 // useful answer back (e.g., if we're talking to a DNS server that is not
@@ -1022,7 +1022,7 @@ impl DnsLookupStep {
         };
 
         'dns_servers: for &dns_ip in dns_servers {
-            let resolver = self.build_resolver(dns_ip);
+            let Ok(resolver) = self.build_resolver(dns_ip) else { continue };
 
             // Attempt to resolve any NTP servers that aren't IP addresses.
             for &ntp_name in &ntp_names_to_resolve {
@@ -1136,7 +1136,12 @@ impl DnsLookupStep {
                     "A",
                     resolver.ipv4_lookup(name).await.map(|records| {
                         Either::Left(
-                            records.into_iter().map(|x| IpAddr::V4(x.into())),
+                            records.answers().to_vec().into_iter().filter_map(
+                                |x| match x.data {
+                                    RData::A(a) => Some(IpAddr::V4(a.0)),
+                                    _ => None,
+                                },
+                            ),
                         )
                     }),
                 )
@@ -1145,7 +1150,14 @@ impl DnsLookupStep {
                     "AAAA",
                     resolver.ipv6_lookup(name).await.map(|records| {
                         Either::Right(
-                            records.into_iter().map(|x| IpAddr::V6(x.into())),
+                            records.answers().to_vec().into_iter().filter_map(
+                                |x| match x.data {
+                                    RData::AAAA(aaaa) => {
+                                        Some(IpAddr::V6(aaaa.0))
+                                    }
+                                    _ => None,
+                                },
+                            ),
                         )
                     }),
                 )
@@ -1248,7 +1260,10 @@ impl DnsLookupStep {
     ///
     /// If building it fails, we'll append to our internal `warnings` and return
     /// `None`.
-    fn build_resolver(&mut self, dns_ip: IpAddr) -> TokioResolver {
+    fn build_resolver(
+        &mut self,
+        dns_ip: IpAddr,
+    ) -> Result<TokioResolver, NetError> {
         let mut options = ResolverOpts::default();
 
         // Enable edns for potentially larger records
@@ -1277,13 +1292,9 @@ impl DnsLookupStep {
             ResolverConfig::from_parts(
                 None,
                 vec![],
-                NameServerConfigGroup::from_ips_clear(
-                    &[dns_ip],
-                    DNS_PORT,
-                    true,
-                ),
+                vec![NameServerConfig::udp_and_tcp(dns_ip)],
             ),
-            TokioConnectionProvider::default(),
+            TokioRuntimeProvider::new(),
         )
         .with_options(options)
         .build()
