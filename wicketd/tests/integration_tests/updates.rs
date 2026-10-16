@@ -17,7 +17,7 @@ use clap::Parser;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
 use http::StatusCode;
-use iddqd::IdOrdMap;
+use iddqd::{IdOrdMap, id_ord_map};
 use installinator::HOST_PHASE_2_FILE_NAME;
 use maplit::btreeset;
 use omicron_common::update::{
@@ -37,11 +37,10 @@ use tokio::sync::oneshot;
 use tufaceous::{Repository, edit::RepositoryEditor};
 use tufaceous_artifact::KnownArtifactTags;
 use wicket::OutputKind;
+use wicket_cli_types::rack_update::{RackUpdateStateRollup, RackUpdateStatus};
 use wicket_common::{
     inventory::{SpIdentifier, SpType},
-    rack_update::{
-        ExitMessage, RackUpdateStatus, StartUpdateOptions, UpdateState,
-    },
+    rack_update::StartUpdateOptions,
     update_events::{StepEventKind, UpdateComponent},
 };
 use wicketd::{RunningUpdateState, StartUpdateError};
@@ -52,6 +51,7 @@ use wicketd_commission_types_versions::latest::update::{
     self, ClearUpdateStateParams, ClearUpdateStateResponse, StepOutcome,
     UpdateStepStatus, UpdateTargets,
 };
+use wicketd_commission_types_versions::{v1, v4};
 
 /// The list of zone file names defined in Tufaceous's `FAKE_ZONES`.
 static FAKE_NON_SEMVER_ZONE_FILE_NAMES: &[&str] = &[
@@ -92,18 +92,6 @@ async fn test_updates() {
         .await
         .expect("bytes read and archived");
 
-    // List out the artifacts in the repository.
-    let expected_artifact_ids = {
-        let mut response = wicketd_testctx
-            .wicketd_client
-            .get_artifacts_and_event_reports()
-            .await
-            .expect("get_artifacts_and_event_reports succeeded")
-            .into_inner();
-        response.artifacts.sort_unstable();
-        response.artifacts
-    };
-
     let target_sp = SpIdentifier { typ: SpType::Sled, slot: 0 };
 
     // Ensure wicketd knows our target_sp (which is simulated) is online and
@@ -139,25 +127,28 @@ async fn test_updates() {
         }
     }
 
+    let expected_repository = v1::update::RepositoryDescription {
+        system_version: Some(Version::new(1, 0, 0)),
+    };
+
     {
-        // Before starting, all artifacts should be present, no components should be present,
-        // and the state should be NotStarted.
-        let mut status = get_rack_update_status(&wicketd_testctx, &[])
+        // Before starting, the repository should be present, no SP should
+        // have progress, and the state should be NotStarted.
+        let status = get_rack_update_status(&wicketd_testctx, &[])
             .await
             .expect_exit_code(EXIT_CODE_NOT_STARTED);
-        status.artifacts.sort_unstable();
         assert_eq!(
-            expected_artifact_ids, status.artifacts,
-            "all uploaded artifacts appear in status"
+            status.update_progress.repository, expected_repository,
+            "the uploaded repository's system version appears in status"
         );
         assert_eq!(
-            status.state,
-            UpdateState::NotStarted,
+            status.rollup(),
+            RackUpdateStateRollup::NotStarted,
             "no update started yet"
         );
         assert!(
-            status.components.is_empty(),
-            "no component events before update starts"
+            status.update_progress.sps.is_empty(),
+            "no SP progress before update starts"
         );
     }
 
@@ -177,21 +168,22 @@ async fn test_updates() {
 
     let terminal_event = 'outer: loop {
         let output = get_rack_update_status(&wicketd_testctx, &[]).await;
-        let state = output.status.state;
-        let expected_exit_code = match state {
+        let rollup = output.status.rollup();
+        let expected_exit_code = match rollup {
             // wicketd puts an empty event buffer in place before
             // post_start_update returns, so an early poll can legitimately
             // report `NotStarted`. This is a transient state.
-            UpdateState::NotStarted => EXIT_CODE_NOT_STARTED,
-            UpdateState::InProgress => EXIT_CODE_IN_PROGRESS,
-            UpdateState::Failed => EXIT_CODE_FAILED,
-            UpdateState::Completed | UpdateState::Aborted => {
-                panic!("unexpected state during update: {state:?}")
+            RackUpdateStateRollup::NotStarted => EXIT_CODE_NOT_STARTED,
+            RackUpdateStateRollup::InProgress => EXIT_CODE_IN_PROGRESS,
+            RackUpdateStateRollup::Failed => EXIT_CODE_FAILED,
+            RackUpdateStateRollup::Completed
+            | RackUpdateStateRollup::Aborted => {
+                panic!("unexpected rollup during update: {rollup:?}")
             }
         };
         output.expect_exit_code(expected_exit_code);
 
-        if state == UpdateState::NotStarted {
+        if rollup == RackUpdateStateRollup::NotStarted {
             tokio::time::sleep(POLL_INTERVAL).await;
             continue;
         }
@@ -230,24 +222,53 @@ async fn test_updates() {
         let status = get_rack_update_status(&wicketd_testctx, &[])
             .await
             .expect_exit_code(EXIT_CODE_FAILED);
-        assert_eq!(status.state, UpdateState::Failed);
+        assert_eq!(status.rollup(), RackUpdateStateRollup::Failed);
         let sled0 = status
-            .components
-            .iter()
-            .find(|c| c.id == target_sp)
-            .expect("sled 0 should appear in components");
-        assert_eq!(sled0.state, UpdateState::Failed);
-        let ExitMessage { message, causes } = sled0
-            .exit_message
-            .as_ref()
-            .expect("a failed component carries an exit message");
-        // TODO: The message should also carry the step name here.
+            .update_progress
+            .sps
+            .get(&target_sp)
+            .expect("sled 0 should appear in update progress");
+        let v4::update::UpdateState::Failed { message, elapsed } =
+            &sled0.progress.state
+        else {
+            panic!("sled 0 should be Failed: {:?}", sled0.progress.state);
+        };
         assert_eq!(
-            message, "Unknown host type i86pc",
-            "the failed component carries the operator-facing message",
+            message, "Get host type: Unknown host type i86pc",
+            "the failed SP carries the folded operator-facing message",
+        );
+        assert!(
+            elapsed.is_some(),
+            "a failure reported by the engine (not inferred) records elapsed time",
+        );
+
+        let (description, step_message, step_causes) = sled0
+            .progress
+            .steps
+            .iter()
+            .find_map(|step| match &step.status {
+                v1::update::UpdateStepStatus::Failed { message, causes } => {
+                    Some((&step.description, message, causes))
+                }
+                v1::update::UpdateStepStatus::NotStarted
+                | v1::update::UpdateStepStatus::Running { progress: _ }
+                | v1::update::UpdateStepStatus::Completed { outcome: _ }
+                | v1::update::UpdateStepStatus::Aborted { message: _ }
+                | v1::update::UpdateStepStatus::WillNotBeRun { reason: _ } => {
+                    None
+                }
+            })
+            .expect("a failed SP has a failed top-level step");
+        assert_eq!(
+            description, "Get host type",
+            "the failed step is the one named in the rollup message",
         );
         assert_eq!(
-            causes,
+            step_message, "Unknown host type i86pc",
+            "the failed step carries the error on its own",
+        );
+        assert_eq!(
+            step_causes,
             &Vec::<String>::new(),
             "this failure has no causes below the message",
         );
@@ -257,17 +278,33 @@ async fn test_updates() {
             get_rack_update_status(&wicketd_testctx, &["--sled", "0"])
                 .await
                 .expect_exit_code(EXIT_CODE_FAILED);
-        assert_eq!(filtered.state, UpdateState::Failed);
-        assert_eq!(filtered.components.len(), 1);
-        assert_eq!(filtered.components[0].state, UpdateState::Failed);
+        assert_eq!(
+            filtered.rollup(),
+            RackUpdateStateRollup::Failed,
+            "selecting the failed sled still reports a failed rack update",
+        );
+        assert_eq!(
+            filtered.update_progress.sps,
+            id_ord_map! { sled0.clone() },
+            "selecting sled 0 leaves exactly sled 0's (terminal, so unchanged) \
+             progress",
+        );
 
-        // If we filter to sled 1 (not part of the update), show NotStarted and no components.
+        // If we filter to sled 1 (not part of the update), show NotStarted and
+        // no SP progress.
         let filtered =
             get_rack_update_status(&wicketd_testctx, &["--sled", "1"])
                 .await
                 .expect_exit_code(EXIT_CODE_NOT_STARTED);
-        assert_eq!(filtered.state, UpdateState::NotStarted);
-        assert!(filtered.components.is_empty());
+        assert_eq!(
+            filtered.rollup(),
+            RackUpdateStateRollup::NotStarted,
+            "a sled with no update of its own rolls up to not started",
+        );
+        assert!(
+            filtered.update_progress.sps.is_empty(),
+            "sled 1 was never updated, so no progress survives the selection",
+        );
     }
 
     // The commission API will report this as a Failed progress entry carrying a
@@ -356,24 +393,23 @@ async fn test_updates() {
     }
 
     {
-        // After clearing, status should show NotStarted and no components.
-        // Uploaded artifacts should be unaffected by the clear.
-        let mut status = get_rack_update_status(&wicketd_testctx, &[])
+        // After clearing, status should show NotStarted and no SP progress. The
+        // uploaded repository should be unaffected by the clear.
+        let status = get_rack_update_status(&wicketd_testctx, &[])
             .await
             .expect_exit_code(EXIT_CODE_NOT_STARTED);
         assert_eq!(
-            status.state,
-            UpdateState::NotStarted,
+            status.rollup(),
+            RackUpdateStateRollup::NotStarted,
             "update state cleared"
         );
         assert!(
-            status.components.is_empty(),
-            "no components should be present"
+            status.update_progress.sps.is_empty(),
+            "no SP progress should be present"
         );
-        status.artifacts.sort_unstable();
         assert_eq!(
-            expected_artifact_ids, status.artifacts,
-            "artifacts should be unaffected by clear"
+            status.update_progress.repository, expected_repository,
+            "the repository should be unaffected by the clear"
         );
     }
 
@@ -435,8 +471,10 @@ async fn get_rack_update_status(
         wicket::exec_with_args(wicketd_testctx.wicketd_addrs, args, output)
             .await
             .expect("wicket rack-update status ran");
-    let status = serde_json::from_slice(&stdout)
-        .expect("rack-update status --json output is valid JSON");
+    let status =
+        oxide_versioned_envelope::read_json::<RackUpdateStatus>(&stdout)
+            .expect("rack-update status --json output is a rack-update status")
+            .into_value();
     RackUpdateStatusOutput { exit_code, status }
 }
 
@@ -963,8 +1001,8 @@ async fn test_update_races() {
             .await
             .expect_exit_code(EXIT_CODE_COMPLETED);
         assert_eq!(
-            status.state,
-            UpdateState::Completed,
+            status.rollup(),
+            RackUpdateStateRollup::Completed,
             "the completed fake update rolls up to completed",
         );
     }
