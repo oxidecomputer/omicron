@@ -231,9 +231,8 @@ impl BundleOutput {
         name: impl AsRef<Utf8Path>,
         mut reader: R,
     ) -> Result<u64, StepError> {
-        // Many streams may be copied at once (zone log downloads from every
-        // sled being collected), each with its own buffer, so this is kept
-        // modest. Reads from a network stream rarely fill a larger one anyway.
+        // Many streams may be copied at once, each with its own buffer, so this
+        // is kept modest.
         const BUF_SIZE: usize = 64 * 1024;
 
         let (path, rel) = self.resolve(name.as_ref());
