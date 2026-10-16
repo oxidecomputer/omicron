@@ -121,6 +121,11 @@ pub struct TufRepo {
     // This is a slight abuse of `ArtifactHash`, since that's the hash of
     // individual artifacts within the repository. However, we use it here for
     // convenience.
+    //
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub hash: ArtifactHash,
 
     /// The system version for this repository

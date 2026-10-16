@@ -24,7 +24,7 @@ use slog_error_chain::SlogInlineError;
 use sprockets_tls::keys::SprocketsConfig;
 use sprockets_tls::server::SprocketsAcceptor;
 use std::collections::BTreeSet;
-use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::{self, AbortHandle, JoinSet};
@@ -255,6 +255,21 @@ pub struct ConnMgrStatus {
     pub connections: Vec<ConnInfo>,
     pub num_conn_tasks: u64,
     pub total_tasks_spawned: u64,
+}
+
+impl ConnMgrStatus {
+    pub fn connected_peers(&self) -> Vec<(BaseboardId, Ipv6Addr)> {
+        self.connections
+            .iter()
+            .filter_map(|c| {
+                if let ConnState::Established(id) = &c.state {
+                    Some((id.clone(), *c.addr.ip()))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
 }
 
 /// The state of a proxy connection

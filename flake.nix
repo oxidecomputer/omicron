@@ -103,7 +103,8 @@
             prefix = "${upperName}=\"";
           in
           trivial.pipe shas [
-            (lists.findFirst (strings.hasPrefix prefix) "")
+            (lists.findFirst (strings.hasPrefix prefix)
+              (throw "findSha: no '${upperName}' entry found in the provided checksums -- add it to the corresponding tools/*_checksums file"))
             (strings.removePrefix prefix)
             (strings.removeSuffix "\"")
           ]);
@@ -422,10 +423,16 @@
           }
           {
             inherit buildInputs;
+
+            # The test suite finds all of these on the PATH (see
+            # `test-utils/src/dev/{db,clickhouse,dendrite,maghemite}.rs`, which
+            # spawn them by bare name). Placing them in `nativeBuildInputs`
+            # ensures that the versions we just stuck in the Nix store are
+            # always on the PATH.
             nativeBuildInputs = nativeBuildInputs ++ [
-              # Dendrite and maghemite, for running tests.
               dendrite-stub
               mgd
+              mgDdmd
               clickhouse
               cockroachdb
             ];
@@ -436,26 +443,12 @@
             OPENSSL_DIR = "${openssl.dev}";
             OPENSSL_LIB_DIR = "${openssl.out}/lib";
 
+            # Needed so `pq-sys` uses Nix's `libpq` instead of the host's.
+            PQ_LIB_DIR = "${postgresql.lib}/lib";
+
             # Needed by rustfmt-wrapper, see:
             # https://github.com/oxidecomputer/rustfmt-wrapper/blob/main/src/lib.rs
             RUSTFMT = "${rustToolchain}/bin/rustfmt";
-
-            shellHook = ''
-              rm out/mgd
-              rm out/dendrite-stub
-              rm -r out/clickhouse
-              rm -r out/cockroachdb
-
-              mkdir -p out/clickhouse
-              mkdir -p out/cockroachdb/
-
-              ln -s ${mgd.out} -T out/mgd
-              ln -s ${mgDdmd.out} -T out/mg-ddm
-              ln -s ${dendrite-stub.out} -T out/dendrite-stub
-              ln -s ${clickhouse.out}/bin/clickhouse out/clickhouse/clickhouse
-              ln -s ${clickhouse.out}/etc/config.xml out/clickhouse
-              ln -s ${cockroachdb.out}/bin out/cockroachdb/bin
-            '';
           };
     };
 }

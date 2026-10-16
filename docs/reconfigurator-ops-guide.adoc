@@ -631,6 +631,9 @@ Other Reconfigurator-related tasks include:
 |tuf_repo_pruner
 |Marks TUF repositories for automatic removal once they're no longer needed.  Check here if the system is out of space for new TUF repositories or if some repository's artifacts are unexpectedly missing.
 
+|blueprint_pruner
+|Removes old blueprints from the database
+
 |===
 
 Here's an example from the `tuf_repo_pruner` explaining the choices it's made about which repos to keep:
@@ -1719,7 +1722,9 @@ blueprint auto-planning disabled because current blueprint count >= limit (5000)
 
 That means the system is refusing to create another blueprint because there are too many in the database.  This should never happen.
 
-**Is the blueprint planner in a loop, creating the same blueprint (or same sequence of blueprints)?**  Check <<task-check-reconfigurator-history,`omdb reconfigurator history`>> to see if the recent blueprints appear to be the same.  For example, you could see dozens of lines like this:
+**Is the blueprint pruner stuck?**  <<task-check-background-tasks,Check the `blueprint_pruner` background task to see if it's reporting errors.>>  If so, resolving these should allow the pruner to continue removing old blueprints, making space for new ones.
+
+If the pruner is not stuck, it's possible that blueprints are being created faster than the pruner is cleaning them up.  **Is the blueprint planner in a loop, creating the same blueprint (or same sequence of blueprints)?**  Check <<task-check-reconfigurator-history,`omdb reconfigurator history`>> to see if the recent blueprints appear to be the same.  For example, you could see dozens of lines like this:
 
 ```
 ...
@@ -1732,9 +1737,7 @@ That means the system is refusing to create another blueprint because there are 
 
 or it's possible that they say something after `enabled:` that's the same for all blueprints.  If you see dozens, hundreds, or thousands like this, then this is almost certainly a planner bug.  You can use `omdb nexus blueprints diff` on any of these blueprints to see what's actually different.  To root-cause, see <<#debug-bad-choice>>.
 
-In terms of the live system, your options depend on the nature of the problem.  The worst-case is that you <<task-disable-planner,disable the planner>>, wait for a release with the fix to be available, and MUPdate to it.  Depending on what's causing the planner to generate these blueprints, there may be some other change you can make to the system to stop the planner doing this, or you may be able to <<task-override-plan,override the planner>>.
-
-**If the planner does _not_ appear to be in a loop like this, then are some of the blueprints very old and unrelated to the current activity?**  Use the `--limit` option with `omdb reconfigurator history` to look back further than it does by default.  If these blueprints look normal (i.e., not a loop like the above) but are just old, then it sounds like somebody is not cleaning up the old blueprints.  Old blueprints are supposed to be cleaned up regularly (by a person) with each self-service update.  You can do it by hand with `omdb reconfigurator archive`, but look for the documented procedure because you'll want to save the resulting file in case you need it for future debugging.
+In terms of the live system, your options depend on the nature of the problem.  You should generally be able to <<task-disable-planner,disable the planner>> and let the pruner clean up a bunch of old blueprints (or use `omdb reconfigurator archive` to do this yourself).  Then you could re-enable the planner.  However, if it's stuck in a loop, this might not help much.  In that case, you may have to disable the planner, wait for a release with the fix to be available, and MUPdate to it.  Depending on what's causing the planner to generate these blueprints, there may be some other change you can make to the system to stop the planner doing this, or you may be able to <<task-override-plan,override the planner>>.
 
 [#debug-planner-blocked]
 === Debugging why the planner is blocked

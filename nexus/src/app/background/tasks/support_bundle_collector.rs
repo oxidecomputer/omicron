@@ -486,11 +486,17 @@ impl SupportBundleCollector {
         bundle: &SupportBundle,
         dir: Utf8TempDir,
     ) -> anyhow::Result<()> {
-        // Create the zipfile as a temporary file
-        let mut zipfile = tokio::fs::File::from_std(bundle_to_zipfile(
-            &dir,
-            Utf8Path::new(TEMPDIR),
-        )?);
+        // Create the zipfile as a temporary file.
+        //
+        // Zipping compresses every file in the bundle, so it runs on a
+        // blocking thread.
+        let zip_log = log.clone();
+        let zipfile = tokio::task::spawn_blocking(move || {
+            bundle_to_zipfile(dir, Utf8Path::new(TEMPDIR), &zip_log)
+        })
+        .await
+        .with_context(|| "Zipping the support bundle panicked")??;
+        let mut zipfile = tokio::fs::File::from_std(zipfile);
         let total_len = zipfile.metadata().await?.len();
 
         // Collect the hash locally before we send it over the network
@@ -574,7 +580,7 @@ impl SupportBundleCollector {
                 &zpool,
                 &dataset,
                 &support_bundle,
-                &hash.to_string(),
+                &hash.0.into(),
             )
             .await
             .with_context(|| "Failed to finalize bundle")?;
@@ -727,16 +733,15 @@ mod test {
     use nexus_types::support_bundle::BundleDataSelection;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::DatasetKind;
-    use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetName;
-    use omicron_common::disk::DatasetsConfig;
-    use omicron_common::disk::SharedDatasetConfig;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::{
         BlueprintUuid, DatasetUuid, EreporterRestartUuid, OmicronZoneUuid,
-        PhysicalDiskUuid, SledUuid,
+        PhysicalDiskUuid, RackUuid, SledUuid,
     };
+    use sled_agent_types::disk::DatasetConfig;
+    use sled_agent_types::disk::SharedDatasetConfig;
     use sled_agent_types::inventory::ZpoolHealth;
     use std::num::NonZeroU64;
     use support_bundle_collection::perfetto;
@@ -862,7 +867,8 @@ mod test {
         let sp_restart_id = EreporterRestartUuid::new_v4();
         let time_collected = chrono::Utc::now();
         let collector_id = OmicronZoneUuid::new_v4();
-        datastore.ereports_insert(&opctx, sp_restart_id, time_collected, collector_id, Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
+        let rack_id = RackUuid::new_v4();
+        datastore.ereports_insert(&opctx, sp_restart_id, time_collected, collector_id, rack_id, Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
             (ereport_types::Ena(1), EreportData {
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
@@ -887,6 +893,7 @@ mod test {
                 sp_restart_id2,
                 time_collected,
                 collector_id,
+                rack_id,
                 Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT },
                 vec![(
                     ereport_types::Ena(1),
@@ -912,6 +919,7 @@ mod test {
                 sp2_restart_id,
                 time_collected,
                 OmicronZoneUuid::new_v4(),
+                rack_id,
                 Reporter::Sp { sp_type: SpType::Switch, slot: 1 },
                 vec![(
                     ereport_types::Ena(1),
@@ -935,6 +943,7 @@ mod test {
                 sled1_restart_id,
                 time_collected,
                 collector_id,
+                rack_id,
                 Reporter::HostOs {
                     sled: SledUuid::new_v4(),
                     slot: Some(SLED_SLOT),
@@ -972,6 +981,7 @@ mod test {
                 sled2_restart_id,
                 time_collected,
                 OmicronZoneUuid::new_v4(),
+                rack_id,
                 Reporter::HostOs { sled: SledUuid::new_v4(), slot: Some(SLED_SLOT) },
                 vec![
                     (ereport_types::Ena(1), EreportData {
@@ -1036,41 +1046,27 @@ mod test {
                 disks.push(Self { zpool_id, dataset_id })
             }
 
-            // Create a configuration for the sled agent consisting of all these
+            // Update the configuration of the sled agent to include all these
             // debug datasets.
-            let datasets = disks
-                .iter()
-                .map(|TestDataset { zpool_id, dataset_id }| {
-                    (
-                        *dataset_id,
-                        DatasetConfig {
-                            id: *dataset_id,
-                            name: DatasetName::new(
-                                ZpoolName::new_external(*zpool_id),
-                                DatasetKind::Debug,
-                            ),
-                            inner: SharedDatasetConfig::default(),
-                        },
-                    )
-                })
-                .collect();
-
-            // Read current sled config generation from zones (this will change
-            // slightly once the simulator knows how to keep the unified config
-            // and be a little less weird)
-            let current_generation =
-                cptestctx.first_sled_agent().omicron_zones_list().generation;
-
-            let dataset_config = DatasetsConfig {
-                generation: current_generation.next(),
-                datasets,
-            };
-
-            let res = cptestctx
+            let mut config = cptestctx
                 .first_sled_agent()
-                .datasets_ensure(dataset_config)
-                .unwrap();
-            assert!(!res.has_error());
+                .omicron_sled_config()
+                .unwrap_or_default();
+            for TestDataset { zpool_id, dataset_id } in &disks {
+                config.datasets.insert_overwrite(DatasetConfig {
+                    id: *dataset_id,
+                    name: DatasetName::new(
+                        ZpoolName::new_external(*zpool_id),
+                        DatasetKind::Debug,
+                    ),
+                    inner: SharedDatasetConfig::default(),
+                });
+            }
+            config.generation = config.generation.next();
+            cptestctx
+                .first_sled_agent()
+                .set_omicron_config(config)
+                .expect("updated sled config");
 
             disks
         }
@@ -2123,7 +2119,8 @@ mod test {
             .unwrap();
         std::fs::write(dir.path().join("file-b"), "more data").unwrap();
 
-        let zipfile = bundle_to_zipfile(&dir, tempdir_for_zip.path())
+        let log = slog::Logger::root(slog::Discard, slog::o!());
+        let zipfile = bundle_to_zipfile(dir, tempdir_for_zip.path(), &log)
             .expect("Should have been able to bundle zipfile");
         let archive = zip::read::ZipArchive::new(zipfile).unwrap();
 

@@ -8,7 +8,7 @@
 use super::config::{LogConfig, LogLevel};
 use crate::v1;
 use camino::Utf8PathBuf;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::Ipv6Addr;

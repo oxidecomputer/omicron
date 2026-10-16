@@ -4,12 +4,10 @@
 
 //! Shared helpers for OxQL benchmarks.
 
-// Copyright 2026 Oxide Computer Company
-
 use criterion::measurement::WallTime;
 use criterion::{BenchmarkGroup, BenchmarkId};
-use oximeter_db::Client;
 use oximeter_db::oxql::query::QueryAuthzScope;
+use oximeter_db::{Client, User};
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -58,7 +56,7 @@ pub fn get_client(rt: &tokio::runtime::Runtime) -> Arc<Client> {
     let log = slog::Logger::root(slog::Discard, slog::o!());
 
     rt.block_on(async {
-        let client = Arc::new(Client::new(addr, &log));
+        let client = Arc::new(Client::new(User::Admin, addr, &log));
         client.ping().await.unwrap();
         client
     })

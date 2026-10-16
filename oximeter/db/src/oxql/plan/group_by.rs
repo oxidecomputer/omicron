@@ -4,8 +4,6 @@
 
 //! OxQL query plan node for grouping data by fields.
 
-// Copyright 2024 Oxide Computer Company
-
 use crate::oxql::ast::table_ops::group_by;
 use crate::oxql::plan::plan::TableOpData;
 use crate::oxql::plan::plan::TableOpInput;

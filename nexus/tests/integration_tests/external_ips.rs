@@ -349,6 +349,7 @@ async fn test_floating_ip_create_non_admin(
                 name: PROJECT_NAME.parse().unwrap(),
                 description: "floating ip project".to_string(),
             },
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(user.id))
@@ -430,13 +431,9 @@ async fn test_floating_ip_create_fails_in_other_silo_pool(
     let project = create_project(client, PROJECT_NAME).await;
 
     // Create other silo and pool linked to that silo
-    let other_silo = create_silo(
-        &client,
-        "not-my-silo",
-        true,
-        silo::SiloIdentityMode::SamlJit,
-    )
-    .await;
+    let other_silo =
+        create_silo(&client, "not-my-silo", silo::SiloIdentityMode::SamlJit)
+            .await;
     let other_pool_range = IpRange::V4(
         Ipv4Range::new(Ipv4Addr::new(10, 2, 0, 1), Ipv4Addr::new(10, 2, 0, 5))
             .unwrap(),
@@ -778,7 +775,7 @@ async fn test_floating_ip_create_attachment(
     .await;
     assert_eq!(
         error.message,
-        format!("Floating IP cannot be deleted while attached to an instance"),
+        "Floating IP cannot be deleted while attached to an instance",
     );
 
     // Stop and delete the instance.
@@ -1957,7 +1954,7 @@ async fn can_list_instance_snat_ip(cptestctx: &ControlPlaneTestContext) {
         ..
     }) = &range.items[0].range
     else {
-        panic!("Expected IPv4 range, found {:?}", &range.items[0]);
+        panic!("Expected IPv4 range, found {:?}", range.items[0]);
     };
     let expected_v4_ip = IpAddr::V4(*first);
 
@@ -1977,7 +1974,7 @@ async fn can_list_instance_snat_ip(cptestctx: &ControlPlaneTestContext) {
         ..
     }) = &range.items[0].range
     else {
-        panic!("Expected IPv6 range, found {:?}", &range.items[0]);
+        panic!("Expected IPv6 range, found {:?}", range.items[0]);
     };
 
     // Create a running instance with only an SNAT IP address, for each IP
@@ -2074,7 +2071,7 @@ async fn can_create_instance_with_ephemeral_ipv6_address(
         ..
     }) = &range.items[0].range
     else {
-        panic!("Expected IPv6 range, found {:?}", &range.items[0]);
+        panic!("Expected IPv6 range, found {:?}", range.items[0]);
     };
 
     // Create a running instance with an Ephemeral IPv6 address.
@@ -2164,7 +2161,7 @@ async fn can_create_instance_with_floating_ipv6_address(
         ..
     }) = &range.items[0].range
     else {
-        panic!("Expected IPv6 range, found {:?}", &range.items[0]);
+        panic!("Expected IPv6 range, found {:?}", range.items[0]);
     };
     let expected_ip = IpAddr::V6(*first);
 
@@ -2238,7 +2235,7 @@ async fn can_create_instance_with_floating_ipv6_address(
         ..
     } = ip
     else {
-        panic!("Expected a Floating external IP, found {:?}", &ips[1]);
+        panic!("Expected a Floating external IP, found {:?}", ips[1]);
     };
     assert_eq!(id, &fip.identity.id);
     assert_eq!(instance_id, &Some(instance.identity.id));

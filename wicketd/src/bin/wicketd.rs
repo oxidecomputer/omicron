@@ -11,12 +11,12 @@ use omicron_common::{
     address::Ipv6Subnet,
     cmd::{CmdError, fatal},
 };
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use std::net::{Ipv6Addr, SocketAddrV6};
-use std::path::PathBuf;
 use wicketd::{Config, Server, SmfConfigValues};
 
 #[derive(Debug, Parser)]
+#[allow(clippy::large_enum_variant)]
 #[clap(name = "wicketd", about = "See README.adoc for more information")]
 enum Args {
     /// Start a wicketd server
@@ -32,6 +32,11 @@ enum Args {
         #[clap(long, action)]
         artifact_address: SocketAddrV6,
 
+        /// The address (expected to be on localhost) for the stable
+        /// commissioning API server
+        #[clap(long, action)]
+        commission_address: SocketAddrV6,
+
         /// The address (expected to be on localhost) for MGS
         #[clap(long, action)]
         mgs_address: SocketAddrV6,
@@ -41,9 +46,17 @@ enum Args {
         #[clap(long, action)]
         nexus_proxy_address: SocketAddrV6,
 
-        /// Path to a file containing our baseboard information
+        /// The part number of our baseboard
         #[clap(long)]
-        baseboard_file: Option<PathBuf>,
+        baseboard_part: String,
+
+        /// The serial number of our baseboard
+        #[clap(long)]
+        baseboard_serial: String,
+
+        /// The address of the bootstrap agent lockstep server
+        #[clap(long, action)]
+        bootstrap_agent_lockstep_address: SocketAddrV6,
 
         /// Read dynamic properties from our SMF config instead of passing them
         /// on the command line
@@ -84,30 +97,18 @@ async fn do_run() -> Result<(), CmdError> {
             config_file_path,
             address,
             artifact_address,
+            commission_address,
             mgs_address,
             nexus_proxy_address,
-            baseboard_file,
+            baseboard_part,
+            baseboard_serial,
             read_smf_config,
             rack_subnet,
+            bootstrap_agent_lockstep_address,
         } => {
-            let baseboard = if let Some(baseboard_file) = baseboard_file {
-                let baseboard_file = std::fs::read_to_string(baseboard_file)
-                    .map_err(|e| CmdError::Failure(anyhow!(e)))?;
-                let baseboard: Baseboard =
-                    serde_json::from_str(&baseboard_file)
-                        .map_err(|e| CmdError::Failure(anyhow!(e)))?;
-
-                // TODO-correctness `Baseboard::unknown()` is slated for removal
-                // after some refactoring in sled-agent, at which point we'll
-                // need a different way for sled-agent to tell us it doesn't
-                // know our baseboard.
-                if matches!(baseboard, Baseboard::Unknown) {
-                    None
-                } else {
-                    Some(baseboard)
-                }
-            } else {
-                None
+            let baseboard_id = BaseboardId {
+                part_number: baseboard_part,
+                serial_number: baseboard_serial,
             };
 
             let config = Config::from_file(&config_file_path)
@@ -127,10 +128,12 @@ async fn do_run() -> Result<(), CmdError> {
             let args = wicketd::Args {
                 address,
                 artifact_address,
+                commission_address,
                 mgs_address,
                 nexus_proxy_address,
-                baseboard,
+                baseboard_id,
                 rack_subnet,
+                bootstrap_agent_lockstep_address,
             };
             let log = config
                 .log

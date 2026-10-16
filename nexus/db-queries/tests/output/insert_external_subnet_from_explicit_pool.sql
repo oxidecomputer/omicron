@@ -55,8 +55,8 @@ WITH
             '255.255.255.254'::INET,
             'ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffe'::INET
           )
-          + 1
         )
+        + 1
         END
           AS gap_start,
         CASE

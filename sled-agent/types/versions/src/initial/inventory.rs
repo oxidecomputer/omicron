@@ -4,7 +4,6 @@
 
 //! Inventory types for Sled Agent API versions 1-3.
 
-use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
 
@@ -16,38 +15,85 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::Vni;
-use omicron_common::disk::{
-    DatasetConfig, DatasetName, DiskVariant, M2Slot, OmicronPhysicalDiskConfig,
-};
+use omicron_common::disk::DatasetName;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
 use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::{
     DatasetUuid, InternalZpoolUuid, MupdateOverrideUuid, OmicronZoneUuid,
-    PhysicalDiskUuid, SledUuid, ZpoolUuid,
+    ZpoolUuid,
 };
 use oxnet::IpNet;
 use schemars::schema::{Schema, SchemaObject};
 use schemars::{JsonSchema, r#gen::SchemaGenerator};
 use serde::{Deserialize, Serialize};
-// Export these types for convenience -- this way, dependents don't have to
+// Export this type for convenience -- this way, dependents don't have to
 // depend on sled-hardware-types.
-pub use sled_hardware_types::{Baseboard, SledCpuFamily};
+pub use sled_hardware_types::SledCpuFamily;
 use strum::EnumIter;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
+use super::disk::DatasetConfig;
+use super::disk::DiskIdentity;
+use super::disk::DiskVariant;
+use super::disk::M2Slot;
+use super::disk::OmicronPhysicalDiskConfig;
 use crate::impls::inventory::SourceNatConfigError;
+
+/// Describes properties that should uniquely identify a Gimlet.
+///
+/// This is the frozen, original form of the baseboard as published by Sled
+/// Agent API versions 1 through 39. Newer versions report a [`BaseboardId`]
+/// instead. The `Unknown` variant is retained here solely to preserve the
+/// blessed schema of these older versions; it is no longer produced.
+///
+/// [`BaseboardId`]: sled_hardware_types::BaseboardId
+#[derive(
+    Clone,
+    Debug,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Baseboard {
+    Gimlet { identifier: String, model: String, revision: u32 },
+
+    Unknown,
+
+    Pc { identifier: String, model: String },
+}
+
+impl From<sled_hardware_types::Baseboard> for Baseboard {
+    fn from(value: sled_hardware_types::Baseboard) -> Self {
+        match value {
+            sled_hardware_types::Baseboard::Gimlet {
+                identifier,
+                model,
+                revision,
+            } => Baseboard::Gimlet { identifier, model, revision },
+            sled_hardware_types::Baseboard::Pc { identifier, model } => {
+                Baseboard::Pc { identifier, model }
+            }
+        }
+    }
+}
 
 /// Identifies information about disks which may be attached to Sleds.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct InventoryDisk {
-    pub identity: omicron_common::disk::DiskIdentity,
+    pub identity: DiskIdentity,
     pub variant: DiskVariant,
     pub slot: i64,
     // Today we only have NVMe disks so we embedded the firmware metadata here.
@@ -130,7 +176,13 @@ pub enum HostPhase2DesiredContents {
     /// Set the phase 2 slot to the given artifact.
     ///
     /// The artifact will come from an unpacked and distributed TUF repo.
-    Artifact { hash: ArtifactHash },
+    Artifact {
+        // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+        // wire-compatible but perceived as different by drift. Continue using
+        // the old schema in this API version.
+        #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
+        hash: ArtifactHash,
+    },
 }
 
 /// Describes the desired contents for both host phase 2 slots.
@@ -139,6 +191,18 @@ pub enum HostPhase2DesiredContents {
 pub struct HostPhase2DesiredSlots {
     pub slot_a: HostPhase2DesiredContents,
     pub slot_b: HostPhase2DesiredContents,
+}
+
+impl HostPhase2DesiredSlots {
+    /// Return a `HostPhase2DesiredSlots` with both slots set to
+    /// [`HostPhase2DesiredContents::CurrentContents`]; i.e., "make no changes
+    /// to the current contents of either slot".
+    pub const fn current_contents() -> Self {
+        Self {
+            slot_a: HostPhase2DesiredContents::CurrentContents,
+            slot_b: HostPhase2DesiredContents::CurrentContents,
+        }
+    }
 }
 
 /// Describes a persistent ZFS dataset associated with an Omicron zone
@@ -179,6 +243,10 @@ pub struct BootPartitionContents {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct BootPartitionDetails {
     pub header: BootImageHeader,
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub artifact_hash: ArtifactHash,
     pub artifact_size: usize,
 }
@@ -333,6 +401,10 @@ pub struct ZoneArtifactInventory {
     pub expected_size: u64,
 
     /// The expected digest of the file's contents.
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub expected_hash: ArtifactHash,
 
     /// The status of the artifact.
@@ -496,7 +568,13 @@ pub enum OmicronZoneImageSource {
     ///
     /// This originates from TUF repos uploaded to Nexus which are then
     /// replicated out to all sleds.
-    Artifact { hash: ArtifactHash },
+    Artifact {
+        // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+        // wire-compatible but perceived as different by drift. Continue using
+        // the old schema in this API version.
+        #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
+        hash: ArtifactHash,
+    },
 }
 
 impl OmicronZoneImageSource {
@@ -576,26 +654,6 @@ fn path_schema(generator: &mut SchemaGenerator) -> Schema {
     let mut schema: SchemaObject = <String>::json_schema(generator).into();
     schema.format = Some("Utf8PathBuf".to_owned());
     schema.into()
-}
-
-/// Identity and basic status information about this sled agent
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct Inventory {
-    pub sled_id: SledUuid,
-    pub sled_agent_address: SocketAddrV6,
-    pub sled_role: SledRole,
-    pub baseboard: Baseboard,
-    pub usable_hardware_threads: u32,
-    pub usable_physical_ram: ByteCount,
-    pub cpu_family: SledCpuFamily,
-    pub reservoir_size: ByteCount,
-    pub disks: Vec<InventoryDisk>,
-    pub zpools: Vec<InventoryZpool>,
-    pub datasets: Vec<InventoryDataset>,
-    pub ledgered_sled_config: Option<OmicronSledConfig>,
-    pub reconciler_status: ConfigReconcilerInventoryStatus,
-    pub last_reconciliation: Option<ConfigReconcilerInventory>,
-    pub zone_image_resolver: ZoneImageResolverInventory,
 }
 
 /// Describes the set of Reconfigurator-managed configuration elements of a sled
@@ -744,24 +802,6 @@ pub enum OmicronZoneType {
     },
 }
 
-/// Describes the last attempt made by the sled-agent-config-reconciler to
-/// reconcile the current sled config against the actual state of the sled.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub struct ConfigReconcilerInventory {
-    pub last_reconciled_config: OmicronSledConfig,
-    pub external_disks:
-        BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult>,
-    pub datasets: BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
-    pub orphaned_datasets: IdOrdMap<OrphanedDataset>,
-    pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
-    pub boot_partitions: BootPartitionContents,
-    /// The result of removing the mupdate override file on disk.
-    ///
-    /// `None` if `remove_mupdate_override` was not provided in the sled config.
-    pub remove_mupdate_override: Option<RemoveMupdateOverrideInventory>,
-}
-
 /// Status of the sled-agent-config-reconciler task.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
@@ -780,27 +820,8 @@ pub enum ConfigReconcilerInventoryStatus {
     ///
     /// This variant does not include the `OmicronSledConfig` used in the last
     /// attempt, because that's always available via
-    /// [`ConfigReconcilerInventory::last_reconciled_config`].
+    /// `ConfigReconcilerInventory::last_reconciled_config`.
     Idle { completed_at: DateTime<Utc>, ran_for: Duration },
-}
-
-/// Describes the set of Omicron-managed zones running on a sled
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-pub struct OmicronZonesConfig {
-    /// generation number of this configuration
-    ///
-    /// This generation number is owned by the control plane (i.e., RSS or
-    /// Nexus, depending on whether RSS-to-Nexus handoff has happened).  It
-    /// should not be bumped within Sled Agent.
-    ///
-    /// Sled Agent rejects attempts to set the configuration to a generation
-    /// older than the one it's currently running.
-    pub generation: Generation,
-
-    /// list of running zones
-    pub zones: Vec<OmicronZoneConfig>,
 }
 
 /// An IP address and port range used for source NAT, i.e., making

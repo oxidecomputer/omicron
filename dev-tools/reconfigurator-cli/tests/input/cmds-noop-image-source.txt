@@ -9,9 +9,9 @@ sled-list
 # Create a TUF repository from a fake manifest. (The output TUF repo is
 # written to a temporary directory that this invocation of `reconfigurator-cli`
 # is running out of as its working directory.)
-tuf-assemble ../../update-common/manifests/fake.toml
+generate-fake-repo 1.0.0
 # Create a second TUF repository from a different fake manifest.
-tuf-assemble ../../update-common/manifests/fake-non-semver.toml --allow-non-semver
+generate-fake-repo 2.0.0
 
 # Load the target release from the first TUF repository.
 set target-release repo-1.0.0.zip

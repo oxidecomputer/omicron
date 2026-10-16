@@ -11,32 +11,27 @@ use super::instance::{self, SimInstance};
 use super::storage::CrucibleData;
 use super::storage::Storage;
 use crate::artifact_store::ArtifactStore;
+use crate::instance_manager::VmmRegistrationDisallowedReason;
 use crate::nexus::NexusClient;
 use crate::sim::SimulatedUpstairs;
 use crate::sim::simulatable::Simulatable;
 use crate::support_bundle::storage::SupportBundleQueryType;
-use crate::updates::UpdateManager;
 use anyhow::Context;
 use anyhow::bail;
 use bootstore::schemes::v0 as bootstore;
+use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus;
 use bytes::Bytes;
 use chrono::Utc;
 use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
 use iddqd::IdOrdMap;
-use omicron_common::api::external::{
-    ByteCount, Error, Generation, ResourceType,
-};
-use omicron_common::api::internal::nexus::DiskRuntimeState;
+use omicron_common::api::external::{ByteCount, Error, ResourceType};
 use omicron_common::api::internal::shared::{
     ResolvedVpcRoute, ResolvedVpcRouteSet, ResolvedVpcRouteState, RouterId,
     RouterKind, RouterVersion, VirtualNetworkInterfaceHost,
 };
-use omicron_common::disk::{
-    DatasetsConfig, DatasetsManagementResult, DiskIdentity, DiskVariant,
-    DisksManagementResult, OmicronPhysicalDisksConfig,
-};
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::{
     DatasetUuid, GenericUuid, PhysicalDiskUuid, PropolisUuid, SledUuid,
     SupportBundleUuid, ZpoolUuid,
@@ -49,11 +44,18 @@ use propolis_client::{
 };
 use range_requests::PotentialRange;
 use sled_agent_health_monitor::HealthMonitorHandle;
+use sled_agent_scrimlet_reconcilers::{
+    ScrimletReconcilers, ScrimletReconcilersMode, ScrimletStatus,
+    SledAgentNetworkingInfo,
+};
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
-use sled_agent_types::disk::DiskStateRequested;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::DiskVariant;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
+use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::early_networking::UplinkPorts;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
     MigrationRuntimeState, MigrationState, SledVmmState, VmmPutStateResponse,
@@ -61,21 +63,23 @@ use sled_agent_types::instance::{
 };
 use sled_agent_types::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-    ConfigReconcilerInventoryStatus, FmdInventory, HostPhase2DesiredSlots,
-    Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
-    OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZonesConfig,
-    SingleMeasurementInventory, SledRole, ZpoolHealth,
+    ConfigReconcilerInventoryStatus, CurrentUpdateDisposition, FmdInventory,
+    InstanceManagerStatus, Inventory, InventoryDataset, InventoryDisk,
+    InventoryZpool, OmicronFileSourceResolverInventory, OmicronSledConfig,
+    OmicronSledUpdateDisposition, SingleMeasurementInventory, ZpoolHealth,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
+use tokio::sync::watch;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
@@ -92,7 +96,6 @@ pub struct SledAgent {
     /// collection of simulated VMMs, indexed by Propolis uuid
     vmms: Arc<SimCollection<SimInstance>>,
     storage: Storage,
-    updates: UpdateManager,
     pub nexus_client: Arc<NexusClient>,
     pub simulated_upstairs: Arc<SimulatedUpstairs>,
     pub v2p_mappings: Mutex<HashSet<VirtualNetworkInterfaceHost>>,
@@ -110,17 +113,35 @@ pub struct SledAgent {
         Mutex<HashMap<PropolisUuid, HashSet<InstanceMulticastMembership>>>,
     pub vpc_routes: Mutex<HashMap<RouterId, RouteSet>>,
     config: Config,
-    fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
     /// Number of remaining local storage operation failures to inject.
     /// When > 0, local storage ensure/delete operations decrement this
     /// counter and return 503 Service Unavailable.
     local_storage_error_count: AtomicU32,
-    pub bootstore_network_config: Mutex<bootstore::NetworkConfig>,
-    pub(super) repo_depot:
-        dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
+    bootstore_network_config: watch::Sender<bootstore::NetworkConfig>,
+    pub repo_depot: dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
     health_monitor: HealthMonitorHandle,
+    /// synthetic zone log files served by the support-logs endpoints,
+    /// keyed by zone name
+    pub(super) support_logs: Mutex<HashMap<String, Vec<SimLogEntry>>>,
+    /// Watch channel that sends the deserialized [`SystemNetworkingConfig`]
+    /// whenever Nexus writes a new bootstore config. Present on all sim sleds;
+    /// only scrimlet sleds subscribe to it via [`Self::start_scrimlet_reconcilers`].
+    network_config_tx: watch::Sender<SystemNetworkingConfig>,
+    /// Keeps the scrimlet reconcilers alive.
+    scrimlet_reconcilers: ScrimletReconcilers,
+}
+
+/// A synthetic log file injected into the simulated sled-agent by tests,
+/// served back by the support-logs download endpoint.
+#[derive(Clone, Debug)]
+pub struct SimLogEntry {
+    /// The file's path within the zone's log zip.
+    pub filename: String,
+    pub contents: Vec<u8>,
+    /// The simulated file mtime that time-window filtering applies to.
+    pub mtime: chrono::DateTime<Utc>,
 }
 
 impl SledAgent {
@@ -141,23 +162,31 @@ impl SledAgent {
         let instance_log = log.new(o!("kind" => "instances"));
         let storage_log = log.new(o!("kind" => "storage"));
 
-        let bootstore_network_config = Mutex::new(
-            EarlyNetworkConfigEnvelope::from(&SystemNetworkingConfig {
-                rack_network_config: RackNetworkConfig {
-                    rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
-                        .unwrap(),
-                    infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    ports: Vec::new(),
-                    bgp: Vec::new(),
-                    bfd: Vec::new(),
-                },
-                // TODO-correctness Can we fill this in for the simulated
-                // sled-agent?
-                blueprint_external_networking_config: None,
-            })
-            .serialize_to_bootstore_with_generation(0),
-        );
+        let sys_net_config = SystemNetworkingConfig {
+            rack_network_config: RackNetworkConfig {
+                rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56).unwrap(),
+                infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                // The simulated sled-agent doesn't do real uplink setup,
+                // but `UplinkPorts` must be non-empty, so use a single
+                // placeholder port.
+                ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
+                    "qsfp0",
+                )])
+                .expect("placeholder port list is non-empty"),
+                bgp: Vec::new(),
+                bfd: Vec::new(),
+            },
+            // TODO-correctness Can we fill this in for the simulated
+            // sled-agent?
+            blueprint_external_networking_config: None,
+        };
+
+        let initial_bootstore =
+            EarlyNetworkConfigEnvelope::from(&sys_net_config)
+                .serialize_to_bootstore_with_generation(0);
+
+        let (bootstore_network_config, _) = watch::channel(initial_bootstore);
 
         let storage = Storage::new(
             id.into_untyped_uuid(),
@@ -175,6 +204,16 @@ impl SledAgent {
 
         let health_monitor = HealthMonitorHandle::stub();
 
+        let (network_config_tx, _) = watch::channel(sys_net_config);
+
+        tokio::spawn(forward_network_config_to_reconcilers(
+            bootstore_network_config.subscribe(),
+            network_config_tx.clone(),
+            log.clone(),
+        ));
+
+        let scrimlet_reconcilers = ScrimletReconcilers::new(&log);
+
         Arc::new(SledAgent {
             id,
             ip: config.dropshot.bind_address.ip(),
@@ -184,7 +223,6 @@ impl SledAgent {
                 sim_mode,
             )),
             storage,
-            updates: UpdateManager::new(config.updates.clone()),
             nexus_client,
             simulated_upstairs,
             v2p_mappings: Mutex::new(HashSet::new()),
@@ -194,24 +232,69 @@ impl SledAgent {
             vpc_routes: Mutex::new(HashMap::new()),
             mock_propolis: futures::lock::Mutex::new(None),
             config: config.clone(),
-            fake_zones: Mutex::new(OmicronZonesConfig {
-                generation: Generation::new(),
-                zones: vec![],
-            }),
             instance_ensure_state_error: Mutex::new(None),
             local_storage_error_count: AtomicU32::new(0),
             repo_depot,
             log,
             bootstore_network_config,
             health_monitor,
+            support_logs: Mutex::new(HashMap::new()),
+            network_config_tx,
+            scrimlet_reconcilers,
         })
+    }
+
+    /// Injects a synthetic zone log file to be served by the support-logs
+    /// endpoints.
+    pub fn insert_support_log(&self, zone: &str, entry: SimLogEntry) {
+        self.support_logs
+            .lock()
+            .unwrap()
+            .entry(zone.to_string())
+            .or_default()
+            .push(entry);
+    }
+
+    /// Returns the names of zones with injected support logs.
+    pub(super) fn support_log_zones(&self) -> Vec<String> {
+        self.support_logs.lock().unwrap().keys().cloned().collect()
+    }
+
+    pub fn current_bootstore_network_config(&self) -> bootstore::NetworkConfig {
+        self.bootstore_network_config.borrow().clone()
+    }
+
+    pub(super) fn set_bootstore_network_config(
+        &self,
+        config: bootstore::NetworkConfig,
+    ) {
+        self.bootstore_network_config.send_modify(|c| *c = config);
+    }
+
+    /// Start the scrimlet reconcilers pointing at the given switch zone service
+    /// addresses. Must only be called once and only on scrimlet sleds.
+    pub fn start_scrimlet_reconcilers(&self, mode: ScrimletReconcilersMode) {
+        // Reconcilers already exist; just provide networking info and mark as
+        // scrimlet.
+        self.scrimlet_reconcilers.set_sled_agent_networking_info_once(
+            SledAgentNetworkingInfo {
+                system_networking_config_rx: self.network_config_tx.subscribe(),
+                mode,
+            },
+        );
+        self.scrimlet_reconcilers.set_scrimlet_status(ScrimletStatus::Scrimlet);
+    }
+
+    /// Returns the current status of the scrimlet reconcilers.
+    pub fn scrimlet_reconcilers_status(&self) -> ScrimletReconcilersStatus {
+        self.scrimlet_reconcilers.status()
     }
 
     pub async fn instance_register(
         self: &Arc<Self>,
         propolis_id: PropolisUuid,
         instance: InstanceEnsureBody,
-    ) -> Result<SledVmmState, Error> {
+    ) -> Result<SledVmmState, HttpError> {
         let InstanceEnsureBody {
             vmm_spec,
             local_config,
@@ -226,10 +309,31 @@ impl SledAgent {
         // with more than 16 CPUs.
         let ncpus = spec.board.cpus;
         if ncpus > 16 {
-            return Err(Error::internal_error(
-                "could not allocate an instance: ran out of CPUs!",
+            return Err(HttpError::for_internal_error(
+                "could not allocate an instance: ran out of CPUs!".to_owned(),
             ));
         };
+
+        // Respond with a fake 503 failure if we're evacuating. This is
+        // less-than-fully-faithful to real sled-agent in at least one way: real
+        // sled-agent will also return a 503 if it has no config. We don't do
+        // that here because sim-sled-agent never gets a config if it isn't
+        // explicitly given one.
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+            if let Some(config) = self.omicron_sled_config() {
+                match config.update_disposition {
+                    OmicronSledUpdateDisposition::Available => (),
+                    OmicronSledUpdateDisposition::Evacuating => {
+                        let reason =
+                            VmmRegistrationDisallowedReason::SledEvacuating;
+                        return Err(HttpError::for_unavail(
+                            Some(reason.http_error_code().to_string()),
+                            "sim sled-agent is evacuating".to_owned(),
+                        ));
+                    }
+                }
+            }
+        }
 
         // Make sure each file backend was ensured before changing any state
         for (_id, disk) in vmm_spec.file_backends() {
@@ -343,7 +447,12 @@ impl SledAgent {
                 unreachable!("already verified Crucible disks have UUID keys");
             };
 
-            let vcr = serde_json::from_str(&disk_request.request_json)?;
+            let vcr = serde_json::from_str(&disk_request.request_json)
+                .map_err(|err| {
+                    HttpError::for_internal_error(
+                        InlineErrorChain::new(&err).to_string(),
+                    )
+                })?;
             self.simulated_upstairs.map_id_to_vcr(*id, &vcr);
         }
 
@@ -522,7 +631,7 @@ impl SledAgent {
     }
 
     pub(super) fn check_local_storage_error(&self) -> Result<(), HttpError> {
-        let prev = self.local_storage_error_count.fetch_update(
+        let prev = self.local_storage_error_count.try_update(
             Ordering::Relaxed,
             Ordering::Relaxed,
             |n| {
@@ -544,19 +653,6 @@ impl SledAgent {
             ));
         }
         Ok(())
-    }
-
-    pub async fn disk_ensure(
-        self: &Arc<Self>,
-        _disk_id: Uuid,
-        _initial_state: DiskRuntimeState,
-        _target: DiskStateRequested,
-    ) -> Result<DiskRuntimeState, Error> {
-        unimplemented!("Disk attachment not yet implemented");
-    }
-
-    pub fn updates(&self) -> &UpdateManager {
-        &self.updates
     }
 
     pub fn artifact_store(&self) -> &ArtifactStore<SimArtifactStorage> {
@@ -875,7 +971,10 @@ impl SledAgent {
         Ok(addr)
     }
 
-    pub fn inventory(&self, addr: SocketAddr) -> anyhow::Result<Inventory> {
+    pub async fn inventory(
+        &self,
+        addr: SocketAddr,
+    ) -> anyhow::Result<Inventory> {
         let sled_agent_address = match addr {
             SocketAddr::V4(_) => {
                 bail!("sled_agent_ip must be v6 for inventory")
@@ -883,25 +982,19 @@ impl SledAgent {
             SocketAddr::V6(v6) => v6,
         };
 
+        // TODO-correctness Unlike real sled-agent, the `InstanceManagerStatus`
+        // we report view is _not_ atomic - we acquire separate locks to fill
+        // the number of VMMs and the update disposition. If that becomes
+        // problematic in tests, we'll need to combine these (probably by moving
+        // the disposition into `self.vmms`, which is how sled-agent proper
+        // handles this).
+        let num_registered_vmms = self.vmms.size().await;
+
         let storage = self.storage.lock();
 
-        let disks_config =
-            storage.omicron_physical_disks_list().unwrap_or_default();
-        let datasets_config =
-            storage.datasets_config_list().unwrap_or_default();
-        let zones_config = self.fake_zones.lock().unwrap().clone();
+        let maybe_sled_config = storage.omicron_sled_config();
         let smf_services_enabled_not_online =
             self.health_monitor.to_inventory();
-
-        let sled_config = OmicronSledConfig {
-            generation: zones_config.generation,
-            disks: disks_config.disks.into_iter().collect(),
-            datasets: datasets_config.datasets.into_values().collect(),
-            zones: zones_config.zones.into_iter().collect(),
-            remove_mupdate_override: None,
-            host_phase_2: HostPhase2DesiredSlots::current_contents(),
-            measurements: Default::default(),
-        };
 
         let reference_measurements = vec![
             SingleMeasurementInventory {
@@ -918,11 +1011,24 @@ impl SledAgent {
         .into_iter()
         .collect();
 
+        let instance_manager_status = InstanceManagerStatus {
+            update_disposition: match maybe_sled_config
+                .as_ref()
+                .map(|c| c.update_disposition)
+            {
+                Some(disposition) => {
+                    CurrentUpdateDisposition::Known(disposition)
+                }
+                None => CurrentUpdateDisposition::ConfigNotAvailable,
+            },
+            num_registered_vmms,
+        };
+
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,
-            sled_role: SledRole::Scrimlet,
-            baseboard: self.config.hardware.baseboard.clone(),
+            sled_role: self.config.sled_role,
+            baseboard_id: self.config.hardware.baseboard.clone().into(),
             usable_hardware_threads: self.config.hardware.hardware_threads,
             usable_physical_ram: ByteCount::try_from(
                 self.config.hardware.physical_ram,
@@ -963,14 +1069,14 @@ impl SledAgent {
             // to lie here, but this information should be taken with a
             // particularly careful grain-of-salt -- it's supposed to
             // represent the "real" datasets the sled agent can observe.
-            datasets: storage
-                .datasets_config_list()
-                .map(|config| {
-                    config
+            datasets: maybe_sled_config.as_ref().map_or(
+                Vec::new(),
+                |sled_config| {
+                    sled_config
                         .datasets
-                        .into_iter()
-                        .map(|(id, config)| InventoryDataset {
-                            id: Some(id),
+                        .iter()
+                        .map(|config| InventoryDataset {
+                            id: Some(config.id),
                             name: config.name.full_name(),
                             available: ByteCount::from_kibibytes_u32(0),
                             used: ByteCount::from_kibibytes_u32(0),
@@ -978,17 +1084,17 @@ impl SledAgent {
                             reservation: config.inner.reservation,
                             compression: config.inner.compression.to_string(),
                         })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_else(|_| vec![]),
-            ledgered_sled_config: Some(sled_config.clone()),
+                        .collect()
+                },
+            ),
+            ledgered_sled_config: maybe_sled_config.clone(),
             reconciler_status: ConfigReconcilerInventoryStatus::Idle {
                 completed_at: Utc::now() - Duration::from_secs(10),
                 ran_for: Duration::from_secs(3),
             },
-            last_reconciliation: Some(
-                ConfigReconcilerInventory::debug_assume_success(sled_config),
-            ),
+            last_reconciliation: maybe_sled_config
+                .map(ConfigReconcilerInventory::debug_assume_success),
+            instance_manager_status,
             // TODO: simulate the file source resolver with greater fidelity
             file_source_resolver: OmicronFileSourceResolverInventory::new_fake(
             ),
@@ -1095,64 +1201,20 @@ impl SledAgent {
             .map_err(|err| err.into())
     }
 
-    pub fn datasets_ensure(
-        &self,
-        config: DatasetsConfig,
-    ) -> Result<DatasetsManagementResult, HttpError> {
-        self.storage.lock().datasets_ensure(config)
-    }
-
-    pub fn datasets_config_list(&self) -> Result<DatasetsConfig, HttpError> {
-        self.storage.lock().datasets_config_list()
-    }
-
-    pub fn omicron_physical_disks_list(
-        &self,
-    ) -> Result<OmicronPhysicalDisksConfig, HttpError> {
-        self.storage.lock().omicron_physical_disks_list()
-    }
-
-    pub fn omicron_physical_disks_ensure(
-        &self,
-        config: OmicronPhysicalDisksConfig,
-    ) -> Result<DisksManagementResult, HttpError> {
-        self.storage.lock().omicron_physical_disks_ensure(config)
-    }
-
     pub fn set_omicron_config(
         &self,
         config: OmicronSledConfig,
     ) -> Result<(), HttpError> {
-        // TODO Update the simulator to work on `OmicronSledConfig` instead of
-        // the three separate legacy configs
-        let disks_config = OmicronPhysicalDisksConfig {
-            generation: config.generation,
-            disks: config.disks.into_iter().collect(),
-        };
-        let datasets_config = DatasetsConfig {
-            generation: config.generation,
-            datasets: config.datasets.into_iter().map(|d| (d.id, d)).collect(),
-        };
-        let zones_config = OmicronZonesConfig {
-            generation: config.generation,
-            zones: config.zones.into_iter().collect(),
-        };
-
-        let mut storage = self.storage.lock();
-        let _ = storage.omicron_physical_disks_ensure(disks_config)?;
-        let _ = storage.datasets_ensure(datasets_config)?;
-        *self.fake_zones.lock().unwrap() = zones_config;
-        //*self.sled_config.lock().unwrap() = Some(config);
-
-        Ok(())
+        // It's a little weird that `self.storage` holds the full
+        // `OmicronSledConfig` (including zones); this is largely an artifact of
+        // history (when sim-sled-agent was originally written, we had separate
+        // zone / storage configs; after unifying them, it was simplest to keep
+        // the full config inside the sim storage system).
+        self.storage.lock().set_omicron_config(config)
     }
 
-    pub fn omicron_zones_list(&self) -> OmicronZonesConfig {
-        self.fake_zones.lock().unwrap().clone()
-    }
-
-    pub fn omicron_zones_ensure(&self, requested_zones: OmicronZonesConfig) {
-        *self.fake_zones.lock().unwrap() = requested_zones;
+    pub fn omicron_sled_config(&self) -> Option<OmicronSledConfig> {
+        self.storage.lock().omicron_sled_config()
     }
 
     pub fn drop_dataset(&self, zpool_id: ZpoolUuid, dataset_id: DatasetUuid) {
@@ -1211,6 +1273,46 @@ impl SledAgent {
             request.dataset_id,
             request,
         );
+    }
+}
+
+/// Watches `bootstore_rx` for changes and forwards deserialized
+/// [`SystemNetworkingConfig`] values to `network_config_tx`.
+async fn forward_network_config_to_reconcilers(
+    mut bootstore_rx: watch::Receiver<bootstore::NetworkConfig>,
+    network_config_tx: watch::Sender<SystemNetworkingConfig>,
+    log: slog::Logger,
+) {
+    loop {
+        if bootstore_rx.changed().await.is_err() {
+            slog::error!(
+                log,
+                "bootstore_network_config sender dropped - \
+                 bridge task exiting",
+            );
+            return;
+        }
+        let config = bootstore_rx.borrow_and_update().clone();
+        match EarlyNetworkConfigEnvelope::deserialize_from_bootstore(&config)
+            .and_then(|e| e.deserialize_body())
+        {
+            Ok(system_config) => {
+                slog::info!(
+                    log,
+                    "received new network config from bootstore";
+                    "generation" => %config.generation,
+                );
+                network_config_tx.send_modify(|c| *c = system_config);
+            }
+            Err(e) => {
+                slog::error!(
+                    log,
+                    "failed to deserialize bootstore config; \
+                     will wait for new config then try again";
+                    "error" => %e,
+                );
+            }
+        }
     }
 }
 

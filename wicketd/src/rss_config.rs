@@ -18,35 +18,41 @@ use bootstrap_agent_lockstep_client::types::Name;
 use bootstrap_agent_lockstep_client::types::RackInitializeRequest;
 use bootstrap_agent_lockstep_client::types::RecoverySiloConfig;
 use bootstrap_agent_lockstep_client::types::UserId;
+use bootstrap_agent_lockstep_types::ServiceIpPoolConfig;
 use display_error_chain::DisplayErrorChain;
+use iddqd::IdOrdMap;
 use omicron_certificates::CertificateError;
-use omicron_common::address;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::AllowedSourceIps;
 use oxnet::Ipv6Net;
+use sled_agent_types::early_networking::AddressFamilyMismatchError;
+use sled_agent_types::early_networking::NumberedRouter;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
-use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UnnumberedRouter;
 use sled_agent_types::early_networking::UplinkAddress;
-use sled_hardware_types::Baseboard;
+use sled_agent_types::early_networking::UplinkPorts;
+use sled_hardware_types::BaseboardId;
 use slog::warn;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use wicket_common::inventory::MgsV1Inventory;
-use wicket_common::rack_setup::BgpAuthKey;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
-use wicket_common::rack_setup::ManualPortConfig;
-use wicket_common::rack_setup::PutRssUserConfigInsensitive;
-use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
-use wicket_common::rack_setup::UserSpecifiedRouterPeerAddr;
-use wicketd_api::CertificateUploadResponse;
 use wicketd_api::CurrentRssUserConfig;
 use wicketd_api::CurrentRssUserConfigSensitive;
+use wicketd_commission_types::rack_setup::BgpAuthKey;
+use wicketd_commission_types::rack_setup::CertificatePem;
+use wicketd_commission_types::rack_setup::CertificateUploadResponse;
+use wicketd_commission_types::rack_setup::PrivateKeyPem;
+use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
+use wicketd_commission_types::rack_setup::UserSpecifiedPortConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedRouterPeerAddr;
 
 const RECOVERY_SILO_NAME: &str = "recovery";
 const RECOVERY_SILO_USERNAME: &str = "recovery";
@@ -64,7 +70,7 @@ pub(crate) struct CurrentRssConfig {
     pub common: RssOrMultirackJoinConfigCommon,
     ntp_servers: Vec<String>,
     dns_servers: Vec<IpAddr>,
-    internal_services_ip_pool_ranges: Vec<address::IpRange>,
+    service_ip_pools: IdOrdMap<ServiceIpPoolConfig>,
     external_dns_ips: Vec<IpAddr>,
     external_dns_zone_name: String,
     external_certificates: Vec<Certificate>,
@@ -113,8 +119,8 @@ impl CurrentRssConfig {
         if self.dns_servers.is_empty() {
             bail!("at least one DNS server is required");
         }
-        if self.internal_services_ip_pool_ranges.is_empty() {
-            bail!("at least one internal services IP pool range is required");
+        if self.service_ip_pools.is_empty() {
+            bail!("at least one service IP pool is required");
         }
         if self.external_dns_ips.is_empty() {
             bail!("at least one external DNS IP address is required");
@@ -164,12 +170,13 @@ impl CurrentRssConfig {
         let known_bootstrap_sleds = bootstrap_peers.sleds();
         let mut bootstrap_ips = Vec::new();
         for sled in &self.common.bootstrap_sleds {
-            let Some(ip) = known_bootstrap_sleds.get(&sled.baseboard).copied()
+            let Some(ip) =
+                known_bootstrap_sleds.get(&sled.baseboard_id).copied()
             else {
                 bail!(
                     "IP address not (yet?) known for sled {} ({:?})",
                     sled.id.slot,
-                    sled.baseboard,
+                    sled.baseboard_id,
                 );
             };
             bootstrap_ips.push(ip);
@@ -181,13 +188,13 @@ impl CurrentRssConfig {
         // a small rack cluster that does not support trust quorum.
         // https://github.com/oxidecomputer/omicron/issues/3690
         const TRUST_QUORUM_MIN_SIZE: usize = 3;
-        let trust_quorum_peers: Option<Vec<Baseboard>> =
+        let trust_quorum_peers: Option<Vec<BaseboardId>> =
             if self.common.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
                 Some(
                     self.common
                         .bootstrap_sleds
                         .iter()
-                        .map(|sled| sled.baseboard.clone())
+                        .map(|sled| sled.baseboard_id.clone())
                         .collect(),
                 )
             } else {
@@ -204,25 +211,8 @@ impl CurrentRssConfig {
             bootstrap_agent_lockstep_client::types::NewPasswordHash(
                 recovery_silo_password_hash.to_string(),
             );
-        let internal_services_ip_pool_ranges = self
-            .internal_services_ip_pool_ranges
-            .iter()
-            .map(|pool| {
-                use bootstrap_agent_lockstep_client::types::IpRange;
-                use bootstrap_agent_lockstep_client::types::Ipv4Range;
-                use bootstrap_agent_lockstep_client::types::Ipv6Range;
-                match pool {
-                    address::IpRange::V4(range) => IpRange::V4(Ipv4Range {
-                        first: range.first,
-                        last: range.last,
-                    }),
-                    address::IpRange::V6(range) => IpRange::V6(Ipv6Range {
-                        first: range.first,
-                        last: range.last,
-                    }),
-                }
-            })
-            .collect();
+
+        let service_ip_pools = self.service_ip_pools.clone();
 
         let request = RackInitializeRequest {
             trust_quorum_peers,
@@ -231,7 +221,7 @@ impl CurrentRssConfig {
             ),
             ntp_servers: self.ntp_servers.clone(),
             dns_servers: self.dns_servers.clone(),
-            internal_services_ip_pool_ranges,
+            service_ip_pools,
             external_dns_ips: self.external_dns_ips.clone(),
             external_dns_zone_name: self.external_dns_zone_name.clone(),
             external_certificates: self.external_certificates.clone(),
@@ -261,17 +251,17 @@ impl CurrentRssConfig {
 
     pub(crate) fn push_cert(
         &mut self,
-        cert: String,
+        cert: CertificatePem,
     ) -> Result<CertificateUploadResponse, String> {
-        self.partial_external_certificate.cert = Some(cert);
+        self.partial_external_certificate.cert = Some(cert.0);
         self.maybe_promote_external_certificate()
     }
 
     pub(crate) fn push_key(
         &mut self,
-        key: String,
+        key: PrivateKeyPem,
     ) -> Result<CertificateUploadResponse, String> {
-        self.partial_external_certificate.key = Some(key);
+        self.partial_external_certificate.key = Some(key.0.to_string());
         self.maybe_promote_external_certificate()
     }
 
@@ -319,10 +309,19 @@ impl CurrentRssConfig {
         // Cert and key appear to be valid; steal them out of
         // `partial_external_certificate` and promote them to
         // `external_certificates`.
-        self.external_certificates.push(Certificate {
-            cert: self.partial_external_certificate.cert.take().unwrap(),
-            key: self.partial_external_certificate.key.take().unwrap(),
-        });
+        let cert = self.partial_external_certificate.cert.take().unwrap();
+        let key = self.partial_external_certificate.key.take().unwrap();
+
+        // Byte-identical re-uploads (maybe an operator retry?) are
+        // deduplicated.
+        if self
+            .external_certificates
+            .iter()
+            .any(|existing| existing.cert == cert && existing.key == key)
+        {
+            return Ok(CertificateUploadResponse::CertKeyDuplicateIgnored);
+        }
+        self.external_certificates.push(Certificate { cert, key });
 
         Ok(CertificateUploadResponse::CertKeyAccepted)
     }
@@ -330,9 +329,9 @@ impl CurrentRssConfig {
     pub(crate) fn update(
         &mut self,
         config: PutRssUserConfigInsensitive,
-        our_baseboard: Option<&Baseboard>,
+        our_baseboard: &BaseboardId,
         inventory: &MgsV1Inventory,
-        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        ddm_discovered_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
         log: &slog::Logger,
     ) -> Result<(), String> {
         self.common.update(
@@ -343,10 +342,10 @@ impl CurrentRssConfig {
             ddm_discovered_sleds,
             log,
         )?;
+
         self.ntp_servers = config.ntp_servers;
         self.dns_servers = config.dns_servers;
-        self.internal_services_ip_pool_ranges =
-            config.internal_services_ip_pool_ranges;
+        self.service_ip_pools = config.service_ip_pools;
         self.external_dns_ips = config.external_dns_ips;
         self.external_dns_zone_name = config.external_dns_zone_name;
         self.allowed_source_ips = Some(config.allowed_source_ips);
@@ -388,9 +387,7 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
                 bootstrap_sleds,
                 ntp_servers: rss.ntp_servers.clone(),
                 dns_servers: rss.dns_servers.clone(),
-                internal_services_ip_pool_ranges: rss
-                    .internal_services_ip_pool_ranges
-                    .clone(),
+                service_ip_pools: rss.service_ip_pools.clone(),
                 external_dns_ips: rss.external_dns_ips.clone(),
                 external_dns_zone_name: rss.external_dns_zone_name.clone(),
                 rack_network_config: rss.rack_network_config.clone(),
@@ -469,6 +466,45 @@ fn validate_rack_network_config(
                 }
             }
         }
+
+        // Check that the src_addr is only specified for numbered peers and
+        // that the address families for addr and src_addr match
+        for peer in &port_config.bgp_peers {
+            match peer.addr {
+                UserSpecifiedRouterPeerAddr::Unnumbered => {
+                    if peer.src_addr.is_some() {
+                        let port = &peer.port;
+                        bail!(
+                            "unnumbered BGP peer for {port} specifies a \
+                             src_addr, but src_addr is only supported \
+                             for numbered BGP peers"
+                        );
+                    }
+                }
+                UserSpecifiedRouterPeerAddr::Numbered(ip) => {
+                    if let Some(src_addr) = peer.src_addr {
+                        match (src_addr.is_ipv4(), ip.is_ipv4()) {
+                            (true, false) => {
+                                bail!(
+                                    "numbered BGP peer {ip} specifies \
+                                    an IPv4 src_addr when it should be \
+                                    IPv6"
+                                );
+                            }
+                            (false, true) => {
+                                bail!(
+                                    "numbered BGP peer {ip} specifies \
+                                    an IPv6 src_addr when it should be \
+                                    IPv4"
+                                );
+                            }
+                            (true, true) => (),
+                            (false, false) => (),
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Check that all auth keys are present.
@@ -485,16 +521,31 @@ fn validate_rack_network_config(
 
     // TODO Add more client side checks on `rack_network_config` contents?
 
+    let ports = match config
+        .iter_port_configs()
+        .map(|(switch, port, config)| {
+            build_port_config(switch, port, &config, bgp_auth_keys)
+        })
+        .collect::<Result<Vec<_>, AddressFamilyMismatchError>>()
+    {
+        Ok(v) => v,
+        Err(e) => bail!(e),
+    };
+
+    // We only want to run this check in RSS, because it's not necessarily true
+    // that joining multiracks will each have an uplink. Therfore we don't make
+    // it part of the `UplinkPorts` constructor .
+    if !ports.iter().any(|p| !p.allow_ddm_traffic) {
+        bail!("rack network config must specify at least one uplink port");
+    }
+
+    let ports = UplinkPorts::new(ports).expect("ports not empty");
+
     Ok(bootstrap_agent_lockstep_client::types::RackNetworkConfig {
         rack_subnet,
         infra_ip_first: config.infra_ip_first,
         infra_ip_last: config.infra_ip_last,
-        ports: config
-            .iter_uplinks()
-            .map(|(switch, port, config)| {
-                build_port_config(switch, port, config, bgp_auth_keys)
-            })
-            .collect(),
+        ports,
         bgp: config
             .bgp
             .iter()
@@ -555,56 +606,49 @@ pub fn validate_rack_subnet(
 }
 
 /// Builds a [`PortConfig`] from a
-/// [`wicket_common::rack_setup::UserSpecifiedPortConfig`].
+/// [`wicketd_commission_types::rack_setup::UserSpecifiedPortConfig`].
 ///
 /// Assumes that all auth keys are present in `bgp_auth_keys`.
 fn build_port_config(
     switch: SwitchSlot,
     port: &str,
-    config: &ManualPortConfig,
+    config: &UserSpecifiedPortConfig,
     bgp_auth_keys: &BgpAuthKeys,
-) -> PortConfig {
+) -> Result<PortConfig, AddressFamilyMismatchError> {
     use sled_agent_types::early_networking::BgpPeerConfig;
 
-    PortConfig {
-        port: port.to_owned(),
-        routes: config.routes.clone(),
-        addresses: config.addresses.iter().copied().map(From::from).collect(),
-        bgp_peers: config
-            .bgp_peers
-            .iter()
-            .map(|p| {
-                let md5_auth_key = p.auth_key_id.as_ref().map(|key_id| {
-                    let BgpAuthKey::TcpMd5 { key } = bgp_auth_keys
-                        .get(key_id)
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "invariant violation: auth key ID {} exists",
-                                key_id
-                            )
-                        })
-                        .clone()
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "invariant violation: auth key ID {} has a key",
-                                key_id
-                            )
-                        });
-                    key
+    let port_config = match config {
+        UserSpecifiedPortConfig::Uplink(uplink_config) => {
+            let mut bgp_peers = vec![];
+            for p in &uplink_config.bgp_peers {
+                let md5_auth_key =
+                    p.auth_key_id.as_ref().map(|key_id| {
+                        let BgpAuthKey::TcpMd5 { key } = bgp_auth_keys
+                .get(key_id)
+                .unwrap_or_else(|| {
+                    panic!("invariant violation: auth key ID {} exists", key_id)
+                })
+                .clone()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "invariant violation: auth key ID {} has a key",
+                        key_id
+                    )
                 });
+                        key
+                    });
 
                 let addr = match p.addr {
                     UserSpecifiedRouterPeerAddr::Unnumbered => {
-                        RouterPeerType::Unnumbered {
-                            router_lifetime: p.router_lifetime,
-                        }
+                        UnnumberedRouter { router_lifetime: p.router_lifetime }
+                            .into()
                     }
                     UserSpecifiedRouterPeerAddr::Numbered(ip) => {
-                        RouterPeerType::Numbered { ip }
+                        NumberedRouter::new(ip, p.src_addr)?.into()
                     }
                 };
 
-                BgpPeerConfig {
+                let config = BgpPeerConfig {
                     addr,
                     asn: p.asn,
                     port: p.port.clone(),
@@ -623,16 +667,46 @@ fn build_port_config(
                     allowed_export: p.allowed_export.clone().into(),
                     allowed_import: p.allowed_import.clone().into(),
                     vlan_id: p.vlan_id,
-                }
-            })
-            .collect(),
-        switch,
-        uplink_port_speed: config.uplink_port_speed,
-        uplink_port_fec: config.uplink_port_fec,
-        autoneg: config.autoneg,
-        lldp: config.lldp.clone(),
-        tx_eq: config.tx_eq,
-    }
+                };
+
+                bgp_peers.push(config);
+            }
+
+            PortConfig {
+                port: port.to_owned(),
+                routes: uplink_config.routes.clone(),
+                addresses: uplink_config
+                    .addresses
+                    .iter()
+                    .copied()
+                    .map(From::from)
+                    .collect(),
+                bgp_peers,
+                switch,
+                uplink_port_speed: uplink_config.uplink_port_speed,
+                uplink_port_fec: uplink_config.uplink_port_fec,
+                autoneg: uplink_config.autoneg,
+                lldp: uplink_config.lldp.clone(),
+                tx_eq: uplink_config.tx_eq,
+                allow_ddm_traffic: false,
+            }
+        }
+        UserSpecifiedPortConfig::Ddm(l1_config) => PortConfig {
+            port: port.to_owned(),
+            routes: Vec::new(),
+            addresses: Vec::new(),
+            bgp_peers: Vec::new(),
+            switch,
+            uplink_port_speed: l1_config.speed,
+            uplink_port_fec: l1_config.fec,
+            autoneg: l1_config.autoneg,
+            lldp: l1_config.lldp.clone(),
+            tx_eq: l1_config.tx_eq,
+            allow_ddm_traffic: true,
+        },
+    };
+
+    Ok(port_config)
 }
 
 // Thin wrapper around an `omicron_certificates::CertificateValidator` that we
@@ -681,11 +755,14 @@ impl CertificateValidator {
 #[cfg(test)]
 mod tests {
     use crate::bgp_auth_keys::BgpAuthKeyError;
+    use omicron_test_utils::certificates::CertificateChain;
     use omicron_test_utils::dev;
     use wicket_common::example::ExampleRackSetupData;
-    use wicket_common::rack_setup::BgpAuthKeyId;
+    use wicket_common::rack_setup::BgpAuthKeyInfo;
     use wicket_common::rack_setup::BgpAuthKeyStatus;
-    use wicketd_api::SetBgpAuthKeyStatus;
+    use wicketd_commission_types::rack_setup::BgpAuthKeyId;
+    use wicketd_commission_types::rack_setup::SetBgpAuthKeyStatus;
+    use zeroize::Zeroizing;
 
     use super::*;
 
@@ -712,7 +789,7 @@ mod tests {
                 .first_key_value()
                 .expect("at least one switch0 port")
                 .1
-                .manual()
+                .uplink()
                 .unwrap()
                 .bgp_peers
                 .is_empty()
@@ -726,7 +803,7 @@ mod tests {
                 .first_entry()
                 .unwrap()
                 .into_mut()
-                .manual_mut()
+                .uplink_mut()
                 .unwrap()
                 .bgp_peers
                 .get_mut(0)
@@ -746,7 +823,7 @@ mod tests {
                 .first_entry()
                 .unwrap()
                 .into_mut()
-                .manual_mut()
+                .uplink_mut()
                 .unwrap()
                 .bgp_peers
                 .get_mut(0)
@@ -774,7 +851,7 @@ mod tests {
                 .first_entry()
                 .unwrap()
                 .into_mut()
-                .manual_mut()
+                .uplink_mut()
                 .unwrap()
                 .bgp_peers
                 .get_mut(0)
@@ -783,6 +860,93 @@ mod tests {
         }
         validate_rack_network_config(&valid_router_lifetime, &bgp_auth_keys)
             .expect("numbered with zero router_lifetime is ok");
+    }
+
+    // An upload must be treated as atomic -- either fully accepted or fully
+    // rejected.
+    #[test]
+    fn rejected_update_is_all_or_nothing() {
+        let logctx = dev::test_setup_log("rejected_update_is_all_or_nothing");
+        let example = ExampleRackSetupData::non_empty();
+
+        let mut config = CurrentRssConfig::default();
+        config
+            .update(
+                example.put_insensitive.clone(),
+                &example.our_baseboard_id,
+                &example.inventory,
+                &example.ddm_discovered_sleds,
+                &logctx.log,
+            )
+            .expect("config A accepted");
+
+        for key_id in &example.bgp_auth_keys {
+            config
+                .common
+                .set_bgp_auth_key(
+                    key_id.clone(),
+                    BgpAuthKey::TcpMd5 { key: "dummy".to_owned() },
+                )
+                .expect("key uploaded for config A");
+        }
+
+        // Snapshot the full user-visible config and inventory.
+        let before = CurrentRssUserConfig::from(&config);
+        let inventory_before = config.common.inventory.clone();
+
+        // Now attempt to upload a new config with a bunch of issues that should
+        // cause the config to be rejected:
+        //
+        // * drop all BGP peers
+        // * reference a bootstrap sled that's not in inventory
+        //
+        // These changes don't fail deserialization but do fail post-deserialize
+        // validation.
+        let mut config_b = example.put_insensitive.clone();
+        config_b.ntp_servers = vec!["ntp.config-b.example.com".to_owned()];
+        for (_, _, port) in config_b.rack_network_config.iter_uplinks_mut() {
+            if let Some(uplink) = port.uplink_mut() {
+                uplink.bgp_peers.clear();
+            }
+        }
+        config_b.bootstrap_sleds.insert(999);
+
+        let err = config
+            .update(
+                config_b,
+                &example.our_baseboard_id,
+                &example.inventory,
+                &example.ddm_discovered_sleds,
+                &logctx.log,
+            )
+            .expect_err("config B rejected");
+        assert!(
+            err.contains("cannot add unknown sled 999 to bootstrap_sleds"),
+            "unexpected error: {err}"
+        );
+
+        // Ensure the config was unchanged.
+        assert_eq!(
+            CurrentRssUserConfig::from(&config),
+            before,
+            "stored config unchanged by the rejected upload"
+        );
+        assert_eq!(
+            config.common.inventory, inventory_before,
+            "stored sled inventory unchanged by the rejected upload"
+        );
+
+        validate_rack_network_config(
+            before
+                .insensitive
+                .rack_network_config
+                .as_ref()
+                .expect("config A stored a rack network config"),
+            &config.common.bgp_auth_keys,
+        )
+        .expect("stored config A still validates against the key map");
+
+        logctx.cleanup_successful();
     }
 
     #[test]
@@ -795,7 +959,7 @@ mod tests {
         current_config
             .update(
                 example.put_insensitive.clone(),
-                example.our_baseboard.as_ref(),
+                &example.our_baseboard_id,
                 &example.inventory,
                 &example.ddm_discovered_sleds,
                 &logctx.log,
@@ -828,7 +992,9 @@ mod tests {
             let key_data = current_config.common.get_bgp_auth_key_data();
             assert_eq!(
                 key_data.get(&key1),
-                Some(&BgpAuthKeyStatus::Set { info: shared_key.info() })
+                Some(&BgpAuthKeyStatus::Set {
+                    info: BgpAuthKeyInfo::for_key(&shared_key)
+                })
             );
         }
 
@@ -842,7 +1008,9 @@ mod tests {
             let key_data = current_config.common.get_bgp_auth_key_data();
             assert_eq!(
                 key_data.get(&key1),
-                Some(&BgpAuthKeyStatus::Set { info: shared_key.info() })
+                Some(&BgpAuthKeyStatus::Set {
+                    info: BgpAuthKeyInfo::for_key(&shared_key)
+                })
             );
         }
 
@@ -856,7 +1024,9 @@ mod tests {
             let key_data = current_config.common.get_bgp_auth_key_data();
             assert_eq!(
                 key_data.get(&key1),
-                Some(&BgpAuthKeyStatus::Set { info: new_key.info() })
+                Some(&BgpAuthKeyStatus::Set {
+                    info: BgpAuthKeyInfo::for_key(&new_key)
+                })
             );
         }
 
@@ -896,7 +1066,9 @@ mod tests {
 
             assert_eq!(
                 key_data.get(&key2),
-                Some(&BgpAuthKeyStatus::Set { info: shared_key.info() })
+                Some(&BgpAuthKeyStatus::Set {
+                    info: BgpAuthKeyInfo::for_key(&shared_key)
+                })
             );
         }
 
@@ -905,7 +1077,7 @@ mod tests {
         current_config
             .update(
                 example_data_2.put_insensitive,
-                example_data_2.our_baseboard.as_ref(),
+                &example_data_2.our_baseboard_id,
                 &example_data_2.inventory,
                 &example_data_2.ddm_discovered_sleds,
                 &logctx.log,
@@ -917,7 +1089,9 @@ mod tests {
         assert_eq!(key_data.len(), 1);
         assert_eq!(
             key_data.get(&key1),
-            Some(&BgpAuthKeyStatus::Set { info: new_key.info() })
+            Some(&BgpAuthKeyStatus::Set {
+                info: BgpAuthKeyInfo::for_key(&new_key)
+            })
         );
         assert_eq!(key_data.get(&key2), None, "key2 should have been dropped",);
 
@@ -925,7 +1099,7 @@ mod tests {
         current_config
             .update(
                 example.put_insensitive,
-                example.our_baseboard.as_ref(),
+                &example.our_baseboard_id,
                 &example.inventory,
                 &example.ddm_discovered_sleds,
                 &logctx.log,
@@ -937,7 +1111,9 @@ mod tests {
         assert_eq!(key_data.len(), 2);
         assert_eq!(
             key_data.get(&key1),
-            Some(&BgpAuthKeyStatus::Set { info: new_key.info() })
+            Some(&BgpAuthKeyStatus::Set {
+                info: BgpAuthKeyInfo::for_key(&new_key)
+            })
         );
         assert_eq!(key_data.get(&key2), Some(&BgpAuthKeyStatus::Unset));
 
@@ -955,5 +1131,63 @@ mod tests {
                 assert_eq!(valid_keys, expected_valid_keys);
             }
         }
+    }
+
+    #[test]
+    fn duplicate_external_certificate_uploads_are_deduplicated() {
+        let chain = CertificateChain::new("test-cert.example.com");
+        let cert = chain.cert_chain_as_pem();
+        let key = chain.end_cert_private_key_as_pem();
+
+        let mut config = CurrentRssConfig::default();
+
+        assert_eq!(
+            config.push_cert(CertificatePem(cert.clone())).unwrap(),
+            CertificateUploadResponse::WaitingOnKey,
+        );
+        assert_eq!(
+            config
+                .push_key(PrivateKeyPem(Zeroizing::new(key.clone())))
+                .unwrap(),
+            CertificateUploadResponse::CertKeyAccepted,
+        );
+        assert_eq!(config.external_certificates.len(), 1);
+
+        // Re-uploading the same pair reports CertKeyDuplicateIgnored and adds
+        // no second entry.
+        assert_eq!(
+            config.push_cert(CertificatePem(cert.clone())).unwrap(),
+            CertificateUploadResponse::WaitingOnKey,
+        );
+        assert_eq!(
+            config
+                .push_key(PrivateKeyPem(Zeroizing::new(key.clone())))
+                .unwrap(),
+            CertificateUploadResponse::CertKeyDuplicateIgnored,
+        );
+        assert_eq!(config.external_certificates.len(), 1);
+        assert_eq!(config.external_certificates[0].cert, cert);
+        assert_eq!(config.external_certificates[0].key, key);
+
+        // A different certificate is accepted.
+        let other = CertificateChain::new("other-cert.example.com");
+        let other_cert = other.cert_chain_as_pem();
+        let other_key = other.end_cert_private_key_as_pem();
+        assert_ne!(other_cert, cert);
+        assert_eq!(
+            config.push_cert(CertificatePem(other_cert.clone())).unwrap(),
+            CertificateUploadResponse::WaitingOnKey,
+        );
+        assert_eq!(
+            config
+                .push_key(PrivateKeyPem(Zeroizing::new(other_key.clone())))
+                .unwrap(),
+            CertificateUploadResponse::CertKeyAccepted,
+        );
+        assert_eq!(config.external_certificates.len(), 2);
+        assert_eq!(config.external_certificates[0].cert, cert);
+        assert_eq!(config.external_certificates[0].key, key);
+        assert_eq!(config.external_certificates[1].cert, other_cert);
+        assert_eq!(config.external_certificates[1].key, other_key);
     }
 }

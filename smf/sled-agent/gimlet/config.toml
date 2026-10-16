@@ -1,18 +1,9 @@
 # Sled Agent Configuration
 
-# Identifies whether sled agent treats itself as a scrimlet or a gimlet.
-#
-# If this is set to "scrimlet", the sled agent treats itself as a scrimlet.
-# If this is set to "gimlet", the sled agent treats itself as a gimlet.
-# If this is set to "auto":
-# - On illumos, the sled automatically detects whether or not it is a scrimlet.
-# - On all other platforms, the sled assumes it is a gimlet.
-sled_mode = "auto"
-
-# Identifies the revision of the sidecar that is attached, if one is attached.
-# TODO: This field should be removed once Gimlets have the ability to auto-detect
-# this information.
-sidecar_revision.physical = "b"
+# Oxide rack. The hardware monitor detects the Tofino ASIC and the sled runs
+# as a scrimlet when one is present. The sidecar board revision defaults to
+# "b".
+deployment = { kind = "production" }
 
 # An optional data link from which we extract a MAC address.
 # This is used as a unique identifier for the bootstrap address.
@@ -47,7 +38,7 @@ control_plane_memory_earmark_mb = 45056
 #
 # We expect this should be higher, but currently a lack of long-uptime
 # varied-usage measurements leads us to be cautious.
-vmm_reservoir_percentage = 86.3
+vmm_reservoir_percentage = 91.0
 
 # Swap device size for the system. The device is a sparsely allocated zvol on
 # the internal zpool of the M.2 that we booted from.
@@ -58,6 +49,9 @@ vmm_reservoir_percentage = 86.3
 # We pick 256 GiB somewhat arbitrarily, since the device is sparsely
 # allocated.
 swap_device_size_gb = 256
+
+[external_disks]
+kind = "detect_physical"
 
 [data_links]
 kind = "physical"
@@ -75,3 +69,4 @@ if_exists = "append"
 resolve = { which = "ipcc" }
 attest = { which = "ipcc" }
 roots = ["/usr/share/oxide/idcerts/staging.pem", "/usr/share/oxide/idcerts/production.pem"]
+enforce = "Enforced"

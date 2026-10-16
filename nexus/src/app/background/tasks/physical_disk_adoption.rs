@@ -25,17 +25,17 @@ use nexus_types::inventory::Collection;
 use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio::sync::watch;
-use uuid::Uuid;
 
 pub struct PhysicalDiskAdoption {
     datastore: Arc<DataStore>,
     disable: bool,
-    rack_id: Uuid,
+    rack_id: RackUuid,
     rx_inventory_collection: watch::Receiver<Option<Arc<Collection>>>,
 }
 
@@ -44,7 +44,7 @@ impl PhysicalDiskAdoption {
         datastore: Arc<DataStore>,
         rx_inventory_collection: watch::Receiver<Option<Arc<Collection>>>,
         disable: bool,
-        rack_id: Uuid,
+        rack_id: RackUuid,
     ) -> Self {
         PhysicalDiskAdoption {
             datastore,
@@ -162,7 +162,7 @@ impl BackgroundTask for PhysicalDiskAdoption {
                 .await;
             match result {
                 Ok(racks) => {
-                    if !racks.iter().any(|r| r.identity().id == self.rack_id) {
+                    if !racks.iter().any(|r| r.id() == self.rack_id) {
                         info!(
                             &opctx.log,
                             "Physical Disk Adoption: Rack not yet initialized";

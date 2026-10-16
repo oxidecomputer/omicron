@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use anyhow::Error;
 use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
@@ -215,7 +219,6 @@ async fn setup_silo_with_quota(
                 description: "".into(),
             },
             quotas,
-            discoverable: true,
             identity_mode: SiloIdentityMode::LocalOnly,
             admin_group_name: None,
             tls_certificates: vec![],
@@ -258,6 +261,7 @@ async fn setup_silo_with_quota(
                 name: "project".parse().unwrap(),
                 description: "".into(),
             },
+            defaults: None,
         },
     )
     .authn_as(auth_mode.clone())
@@ -434,7 +438,6 @@ async fn test_negative_quota(cptestctx: &ControlPlaneTestContext) {
                 description: "".into(),
             },
             quotas,
-            discoverable: true,
             identity_mode: SiloIdentityMode::LocalOnly,
             admin_group_name: None,
             tls_certificates: vec![],

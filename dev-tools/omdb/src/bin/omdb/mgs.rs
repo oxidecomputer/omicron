@@ -8,14 +8,15 @@ use crate::Omdb;
 use crate::db::option_impl_display;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use anyhow::Context;
+use anyhow::bail;
 use clap::Args;
 use clap::Subcommand;
 use futures::StreamExt;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpComponentInfo;
-use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpIgnitionInfo;
 use gateway_types::component::PowerState;
+use gateway_types::component::SpIdentifier;
 use gateway_types::component::SpState;
 use gateway_types::ignition::SpIgnition;
 use gateway_types::ignition::SpIgnitionSystemType;
@@ -83,7 +84,7 @@ impl MgsArgs {
                 format!("http://{}", addr)
             }
         };
-        eprintln!("note: using MGS URL {}", &mgs_url);
+        eprintln!("note: using MGS URL {}", mgs_url);
         Ok(gateway_client::Client::new(&mgs_url, log.clone()))
     }
 
@@ -138,6 +139,7 @@ async fn cmd_mgs_inventory(
 
     // Print basic state about each SP that's visible to ignition.
     println!("SERVICE PROCESSOR STATES\n");
+    let mut nfailed = 0usize;
     let mgs_client = std::sync::Arc::new(mgs_client);
     let c = &mgs_client;
     let mut sp_infos =
@@ -153,7 +155,7 @@ async fn cmd_mgs_inventory(
             }
         }))
         .then(async move |sp_id| {
-            c.sp_get(&sp_id.type_, sp_id.slot)
+            c.sp_get(&sp_id.typ, sp_id.slot)
                 .await
                 .with_context(|| format!("fetching info about SP {:?}", sp_id))
                 .map(|s| (sp_id, s))
@@ -165,6 +167,7 @@ async fn cmd_mgs_inventory(
             Ok((sp_id, v)) => Some((sp_id, v.into_inner())),
             Err(error) => {
                 eprintln!("error: {:?}", error);
+                nfailed += 1;
                 None
             }
         })
@@ -175,10 +178,23 @@ async fn cmd_mgs_inventory(
 
     // Print detailed information about each SP that we've found so far.
     for (sp_id, sp_state) in &sp_infos {
-        show_sp_details(&mgs_client, sp_id, sp_state).await?;
+        match show_sp_details(&mgs_client, sp_id, sp_state).await? {
+            ShowSpDetailsOutcome::Complete => {}
+            ShowSpDetailsOutcome::ComponentsUnavailable => nfailed += 1,
+        }
+    }
+
+    if nfailed > 0 {
+        bail!("failed to collect complete details for {nfailed} SP(s)");
     }
 
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ShowSpDetailsOutcome {
+    Complete,
+    ComponentsUnavailable,
 }
 
 fn sp_type_to_str(s: &SpType) -> &'static str {
@@ -190,7 +206,7 @@ fn sp_type_to_str(s: &SpType) -> &'static str {
 }
 
 fn sp_to_string(s: &SpIdentifier) -> String {
-    format!("{} {}", sp_type_to_str(&s.type_), s.slot)
+    format!("{} {}", sp_type_to_str(&s.typ), s.slot)
 }
 
 fn show_sp_ids(sp_ids: &[SpIdentifier]) -> Result<(), anyhow::Error> {
@@ -204,7 +220,7 @@ fn show_sp_ids(sp_ids: &[SpIdentifier]) -> Result<(), anyhow::Error> {
 
     impl From<&SpIdentifier> for SpIdRow {
         fn from(id: &SpIdentifier) -> Self {
-            SpIdRow { type_: sp_type_to_str(&id.type_), slot: id.slot }
+            SpIdRow { type_: sp_type_to_str(&id.typ), slot: id.slot }
         }
     }
 
@@ -250,7 +266,7 @@ fn show_sps_from_ignition(
                 }
             };
             IgnitionRow {
-                type_: sp_type_to_str(&value.id.type_),
+                type_: sp_type_to_str(&value.id.typ),
                 slot: value.id.slot,
                 system_type,
                 power,
@@ -287,7 +303,7 @@ fn show_sp_states(
     impl<'a> From<&'a (SpIdentifier, SpState)> for SpStateRow<'a> {
         fn from((id, v): &'a (SpIdentifier, SpState)) -> Self {
             SpStateRow {
-                type_: sp_type_to_str(&id.type_),
+                type_: sp_type_to_str(&id.typ),
                 slot: id.slot,
                 model: v.model.clone(),
                 serial: v.serial_number.clone(),
@@ -334,10 +350,10 @@ async fn show_sp_details(
     mgs_client: &gateway_client::Client,
     sp_id: &SpIdentifier,
     sp_state: &SpState,
-) -> Result<(), anyhow::Error> {
+) -> Result<ShowSpDetailsOutcome, anyhow::Error> {
     println!(
         "SP DETAILS: type {:?} slot {}\n",
-        sp_type_to_str(&sp_id.type_),
+        sp_type_to_str(&sp_id.typ),
         sp_id.slot
     );
 
@@ -485,14 +501,14 @@ async fn show_sp_details(
     }
 
     let component_list = mgs_client
-        .sp_component_list(&sp_id.type_, sp_id.slot)
+        .sp_component_list(&sp_id.typ, sp_id.slot)
         .await
         .with_context(|| format!("fetching components for SP {:?}", sp_id));
     let list = match component_list {
-        Ok(l) => l.into_inner(),
-        Err(e) => {
-            eprintln!("error: {:#}", e);
-            return Ok(());
+        Ok(list) => list.into_inner(),
+        Err(error) => {
+            eprintln!("error: {:#}", error);
+            return Ok(ShowSpDetailsOutcome::ComponentsUnavailable);
         }
     };
 
@@ -520,7 +536,7 @@ async fn show_sp_details(
 
     if list.components.is_empty() {
         println!("    COMPONENTS: none found\n");
-        return Ok(());
+        return Ok(ShowSpDetailsOutcome::Complete);
     }
 
     let table_rows = list.components.iter().map(SpComponentRow::from);
@@ -574,7 +590,7 @@ async fn show_sp_details(
         for i in 0..1 {
             let r = mgs_client
                 .sp_component_caboose_get(
-                    &sp_id.type_,
+                    &sp_id.typ,
                     sp_id.slot,
                     &c.component,
                     i,
@@ -584,7 +600,7 @@ async fn show_sp_details(
                     format!(
                         "get caboose for sp type {:?} sp slot {} \
                         component {:?} slot {}",
-                        sp_id.type_, sp_id.slot, &c.component, i
+                        sp_id.typ, sp_id.slot, c.component, i
                     )
                 });
             match r {
@@ -600,7 +616,7 @@ async fn show_sp_details(
 
     if cabooses.is_empty() {
         println!("    CABOOSES: none found\n");
-        return Ok(());
+        return Ok(ShowSpDetailsOutcome::Complete);
     }
 
     let table = tabled::Table::new(cabooses)
@@ -611,5 +627,5 @@ async fn show_sp_details(
     println!("{}", textwrap::indent(&table.to_string(), "        "));
     println!("");
 
-    Ok(())
+    Ok(ShowSpDetailsOutcome::Complete)
 }

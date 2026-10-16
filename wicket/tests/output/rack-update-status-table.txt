@@ -1,0 +1,21 @@
+State: failed
+
+System version: 1.0.0
+TAGS                       VERSION      
+kind=gimlet_sp             1.0.0        
+kind=zone,zone-name=nexus  1.0.0-nexus  
+
+TYPE    SLOT  STATE        PROGRESS  ELAPSED   
+sled    0     completed    12/12     00:12:34  
+sled    1     failed       4/12      00:01:02  
+switch  1     in progress  3/9       01:01:01  
+power   0     aborted      2/9       -         
+power   1     not started  -/9       -         
+
+1 completed, 1 failed, 1 aborted, 1 in progress, 1 not started
+
+sled 1 (failed): Get host type: Unknown host type i86pc
+  caused by: unknown model string "i86pc"
+  caused by: expected one of gimlet, cosmo
+
+power 0 (aborted): aborted by operator

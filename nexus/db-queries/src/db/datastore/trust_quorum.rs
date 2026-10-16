@@ -10,6 +10,7 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
+use crate::db::model::to_db_sled_policy;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -25,6 +26,7 @@ use nexus_db_model::DbTypedUuid;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::TrustQuorumConfiguration as DbTrustQuorumConfiguration;
 use nexus_db_model::TrustQuorumMember as DbTrustQuorumMember;
+use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::trust_quorum::IsLrtqUpgrade;
 use nexus_types::trust_quorum::ProposedTrustQuorumConfig;
 use nexus_types::trust_quorum::{
@@ -147,7 +149,7 @@ impl DataStore {
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz_tq).await?;
 
-        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
+        let rack_id = authz_tq.rack().id();
         let initial_config = TrustQuorumConfig::new_rss_committed_config(
             rack_id,
             initial_members,
@@ -167,7 +169,7 @@ impl DataStore {
     ) -> OptionalLookupResult<TrustQuorumConfig> {
         opctx.authorize(authz::Action::Read, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
-        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
+        let rack_id = authz_tq.rack().id();
 
         Self::tq_get_latest_config_with_members_conn(conn, rack_id)
             .await
@@ -183,7 +185,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
-        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
+        let rack_id = authz_tq.rack().id();
         use nexus_db_schema::schema::trust_quorum_configuration::dsl;
         paginated(dsl::trust_quorum_configuration, dsl::epoch, pagparams)
             .filter(dsl::rack_id.eq(DbTypedUuid::<RackKind>::from(rack_id)))
@@ -202,9 +204,28 @@ impl DataStore {
     ) -> OptionalLookupResult<TrustQuorumConfig> {
         opctx.authorize(authz::Action::Read, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
-        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
+        let rack_id = authz_tq.rack().id();
 
         Self::tq_get_config_with_members_from_epoch_conn(conn, rack_id, epoch)
+            .await
+            .map_err(|err| err.into_public_ignore_retries())
+    }
+
+    /// Return the `BaseboardId` of every member that is `Committed` in the
+    /// latest configuration for this rack but has no corresponding sled on this
+    /// rack that is both present and not expunged.
+    ///
+    /// Returns an empty set if the rack has no trust quorum configuration.
+    pub async fn tq_get_committed_members_without_active_sled(
+        &self,
+        opctx: &OpContext,
+        authz_tq: authz::TrustQuorumConfig,
+    ) -> Result<BTreeSet<BaseboardId>, Error> {
+        opctx.authorize(authz::Action::Read, &authz_tq).await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+        let rack_id = authz_tq.rack().id();
+
+        Self::tq_get_committed_members_without_active_sled_conn(conn, rack_id)
             .await
             .map_err(|err| err.into_public_ignore_retries())
     }
@@ -802,7 +823,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
-        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
+        let rack_id = authz_tq.rack().id();
         let epoch = epoch_to_i64(epoch)?;
 
         let err = OptionalError::new();
@@ -907,7 +928,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
-        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
+        let rack_id = authz_tq.rack().id();
         let epoch = epoch_to_i64(epoch)?;
 
         let err = OptionalError::new();
@@ -1450,18 +1471,72 @@ impl DataStore {
 
         Ok(members)
     }
+
+    async fn tq_get_committed_members_without_active_sled_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        rack_id: RackUuid,
+    ) -> Result<BTreeSet<BaseboardId>, TransactionError<Error>> {
+        use nexus_db_schema::schema::hw_baseboard_id::dsl as hw_dsl;
+        use nexus_db_schema::schema::sled::dsl as sled_dsl;
+        use nexus_db_schema::schema::trust_quorum_member::dsl;
+
+        let Some(latest) =
+            Self::tq_get_latest_config_conn(conn, rack_id).await?
+        else {
+            return Ok(BTreeSet::new());
+        };
+
+        let rows: Vec<(String, String)> = dsl::trust_quorum_member
+            .filter(dsl::rack_id.eq(DbTypedUuid::<RackKind>::from(rack_id)))
+            .filter(dsl::epoch.eq(latest.epoch))
+            .filter(dsl::state.eq(DbTrustQuorumMemberState::Committed))
+            .inner_join(
+                hw_dsl::hw_baseboard_id.on(hw_dsl::id.eq(dsl::hw_baseboard_id)),
+            )
+            .filter(diesel::dsl::not(diesel::dsl::exists(
+                sled_dsl::sled
+                    .filter(sled_dsl::part_number.eq(hw_dsl::part_number))
+                    .filter(sled_dsl::serial_number.eq(hw_dsl::serial_number))
+                    .filter(sled_dsl::rack_id.eq(rack_id.into_untyped_uuid()))
+                    .filter(sled_dsl::time_deleted.is_null())
+                    .filter(
+                        sled_dsl::sled_policy
+                            .ne(to_db_sled_policy(SledPolicy::Expunged)),
+                    ),
+            )))
+            .select((hw_dsl::part_number, hw_dsl::serial_number))
+            .load_async(conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(part_number, serial_number)| BaseboardId {
+                part_number,
+                serial_number,
+            })
+            .collect())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::SledSystemHardwareBuilder;
+    use nexus_db_model::Generation;
     use nexus_db_model::HwBaseboardId;
+    use nexus_db_model::SledBaseboard;
+    use nexus_db_model::SledState;
+    use nexus_db_model::SledUpdate;
+    use nexus_types::external_api::sled::SledProvisionPolicy;
     use nexus_types::trust_quorum::{
         IsLrtqUpgrade, TrustQuorumConfigState, TrustQuorumMemberState,
     };
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::RackUuid;
+    use omicron_uuid_kinds::SledUuid;
+    use std::net::{Ipv6Addr, SocketAddrV6};
     use uuid::Uuid;
 
     fn make_authz_tq(rack_id: RackUuid) -> authz::TrustQuorumConfig {
@@ -1495,6 +1570,33 @@ mod tests {
             .unwrap();
 
         hw_baseboard_ids
+    }
+
+    /// Insert a sled whose baseboard matches `hw`.
+    ///
+    /// `SledUpdateBuilder` always uses `sled_baseboard_for_test()`, so build the
+    /// `SledUpdate` directly to control the part number and serial.
+    async fn insert_sled_for_baseboard(
+        datastore: &DataStore,
+        rack_id: RackUuid,
+        hw: &HwBaseboardId,
+    ) -> SledUuid {
+        let sled_id = SledUuid::new_v4();
+        let update = SledUpdate::new(
+            sled_id,
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+            0,
+            SledBaseboard {
+                serial_number: hw.serial_number.clone(),
+                part_number: hw.part_number.clone(),
+                revision: 1,
+            },
+            SledSystemHardwareBuilder::new().build(),
+            rack_id,
+            Generation::new(),
+        );
+        datastore.sled_upsert(update).await.unwrap();
+        sled_id
     }
 
     #[tokio::test]
@@ -2345,6 +2447,134 @@ mod tests {
 
         // The epoch should be the latest that exists
         assert_eq!(values[&rack_id2], Epoch(2));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_tq_get_committed_members_without_active_sled() {
+        let logctx =
+            test_setup_log("test_tq_get_committed_members_without_active_sled");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        use nexus_db_schema::schema::sled::dsl as sled_dsl;
+
+        let hw_ids = insert_hw_baseboard_ids(&db).await;
+        let rack_id = RackUuid::new_v4();
+        let members: BTreeSet<_> =
+            hw_ids.iter().cloned().map(BaseboardId::from).collect();
+        let coordinator = members.first().unwrap().clone();
+
+        let missing_members = || async {
+            datastore
+                .tq_get_committed_members_without_active_sled(
+                    opctx,
+                    make_authz_tq(rack_id),
+                )
+                .await
+                .unwrap()
+        };
+
+        // A rack with no configuration at all reports nothing.
+        assert!(missing_members().await.is_empty());
+
+        // This inserts a configuration in which every member is `Committed`.
+        DataStore::tq_insert_rss_config_after_handoff(
+            opctx,
+            &conn,
+            make_authz_tq(rack_id),
+            members.clone(),
+            coordinator,
+        )
+        .await
+        .unwrap();
+
+        // No sleds exist yet, so every committed member is missing one.
+        assert_eq!(missing_members().await, members);
+
+        // Give the first 8 baseboards a sled.
+        let mut sled_ids = Vec::new();
+        for hw in &hw_ids[..8] {
+            sled_ids
+                .push(insert_sled_for_baseboard(datastore, rack_id, hw).await);
+        }
+
+        let mut expected: BTreeSet<_> =
+            hw_ids[8..].iter().cloned().map(BaseboardId::from).collect();
+        assert_eq!(missing_members().await, expected);
+
+        // Expunging a sled makes its member missing again.
+        diesel::update(sled_dsl::sled)
+            .filter(sled_dsl::id.eq(sled_ids[0].into_untyped_uuid()))
+            .set(
+                sled_dsl::sled_policy
+                    .eq(to_db_sled_policy(SledPolicy::Expunged)),
+            )
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+        expected.insert(hw_ids[0].clone().into());
+        assert_eq!(missing_members().await, expected);
+
+        // So does soft-deleting one.
+        diesel::update(sled_dsl::sled)
+            .filter(sled_dsl::id.eq(sled_ids[1].into_untyped_uuid()))
+            .set(sled_dsl::time_deleted.eq(Some(Utc::now())))
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+        expected.insert(hw_ids[1].clone().into());
+        assert_eq!(missing_members().await, expected);
+
+        // A sled for the right baseboard but on a different rack does not
+        // count as present.
+        let sled9 = insert_sled_for_baseboard(
+            datastore,
+            RackUuid::new_v4(),
+            &hw_ids[9],
+        )
+        .await;
+        assert_eq!(missing_members().await, expected);
+
+        // Prepare for next test: reset sleds 0 and 1 to their prior states
+        diesel::update(sled_dsl::sled)
+            .filter(sled_dsl::id.eq(sled_ids[0].into_untyped_uuid()))
+            .set(sled_dsl::sled_policy.eq(to_db_sled_policy(
+                SledPolicy::InService {
+                    provision_policy: SledProvisionPolicy::Provisionable,
+                },
+            )))
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+        diesel::update(sled_dsl::sled)
+            .filter(sled_dsl::id.eq(sled_ids[1].into_untyped_uuid()))
+            .set(
+                sled_dsl::time_deleted
+                    .eq(Option::<chrono::DateTime<Utc>>::None),
+            )
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        // Prepare for next test: decommission sled 9
+        diesel::update(sled_dsl::sled)
+            .filter(sled_dsl::id.eq(sled9.into_untyped_uuid()))
+            .set(sled_dsl::sled_state.eq(SledState::Decommissioned))
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        // All sleds having sled rows means missing_members() is empty
+        for hw in &hw_ids[8..] {
+            sled_ids
+                .push(insert_sled_for_baseboard(datastore, rack_id, hw).await);
+        }
+        let expected = BTreeSet::new();
+        assert_eq!(missing_members().await, expected);
 
         db.terminate().await;
         logctx.cleanup_successful();

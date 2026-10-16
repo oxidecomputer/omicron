@@ -182,6 +182,7 @@ async fn test_sled_move_updates_multicast_port_mapping(
     let mut builder = nexus_inventory::CollectionBuilder::new("sled-move-test");
     builder.found_sp_state(
         "test-sp",
+        nexus_test_utils::RACK_UUID,
         SpType::Sled,
         new_slot,
         SpState {
@@ -208,7 +209,10 @@ async fn test_sled_move_updates_multicast_port_mapping(
     // Activate the inventory loader to update the watch channel with the new
     // collection, then activate the reconciler which will detect the sled
     // location change and invalidate caches.
-    activate_inventory_loader(&cptestctx.lockstep_client).await;
+    nexus_test_utils::background::run_inventory_loader(
+        &cptestctx.lockstep_client,
+    )
+    .await;
     nexus.invalidate_multicast_caches();
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
@@ -446,6 +450,7 @@ async fn test_cache_ttl_behavior() {
         nexus_inventory::CollectionBuilder::new("ttl-refresh-test");
     builder.found_sp_state(
         "test-sp",
+        nexus_test_utils::RACK_UUID,
         SpType::Sled,
         new_slot,
         SpState {

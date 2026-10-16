@@ -10,7 +10,6 @@ use crate::DropshotServer;
 use crate::app::background::BackgroundTasksData;
 use crate::app::background::CurrentSitrep;
 use crate::app::background::SagaRecoveryHelpers;
-use crate::app::background::resolve_mgd_clients;
 use crate::app::update::UpdateStatusHandle;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
@@ -33,11 +32,15 @@ use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ReconfiguratorConfigParam;
-
 use omicron_common::address::MGS_PORT;
+use omicron_common::address::UnderlaySubnets;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
+use omicron_common::http_client::internal_http_client;
+use omicron_common::http_client::internal_http_client_builder;
+use omicron_debug_dropbox::DebugDropbox;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use oximeter_producer::Server as ProducerServer;
 use sagas::common_storage::PooledPantryClient;
 use sagas::common_storage::make_pantry_connection_pool;
@@ -52,7 +55,7 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use update_common::artifacts::ArtifactsWithPlan;
+use tufaceous::Repository;
 use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
@@ -70,6 +73,7 @@ pub mod crucible;
 mod deployment;
 mod device_auth;
 mod disk;
+pub(crate) mod external_client;
 mod external_dns;
 pub(crate) mod external_endpoints;
 mod external_ip;
@@ -96,7 +100,7 @@ pub(crate) mod saga;
 mod scim;
 mod session;
 mod silo;
-mod sled;
+pub(crate) mod sled;
 mod sled_instance;
 mod snapshot;
 mod ssh_key;
@@ -123,6 +127,7 @@ pub(crate) mod sagas;
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.
 
+pub(crate) use self::deployment::BlueprintDebugAction;
 pub(crate) use self::deployment::SetTargetReleaseIntent;
 use crate::app::quiesce::NexusQuiesceHandle;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
@@ -181,13 +186,16 @@ pub const MAX_SSH_KEYS_PER_INSTANCE: u32 = 100;
 pub const CONTROL_PLANE_STORAGE_BUFFER: ByteCount =
     ByteCount::from_gibibytes_u32(250);
 
+/// Name of the Debug Dropbox producer for Reconfiguator
+pub const DEBUG_DROPBOX_PRODUCER_RECONFIGURATOR: &str = "reconfigurator";
+
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
     /// uuid for this nexus instance.
     id: OmicronZoneUuid,
 
     /// uuid for this rack
-    rack_id: Uuid,
+    rack_id: RackUuid,
 
     /// general server log
     log: Logger,
@@ -201,8 +209,14 @@ pub struct Nexus {
     /// saga execution coordinator (SEC)
     sagas: Arc<SagaExecutor>,
 
-    /// External dropshot servers
-    external_server: std::sync::Mutex<Option<DropshotServer>>,
+    /// External dropshot servers.
+    ///
+    /// The external API is always served on at least one external address, but
+    /// may be served on more to support IPv4 / IPv6 dual-stack deployments.
+    /// Servers are created, stored, and closed in the order they're defined in
+    /// the provided configuration, with the primary server first, then one
+    /// server for each additional address.
+    external_servers: std::sync::Mutex<Vec<DropshotServer>>,
 
     /// External dropshot server that listens on the internal network to allow
     /// connections from the tech port; see RFD 431.
@@ -235,7 +249,7 @@ pub struct Nexus {
     /// This lives on the Nexus struct as we would like to use the same client
     /// pool for the webhook deliverator background task and the webhook probe
     /// API.
-    webhook_delivery_client: reqwest::Client,
+    webhook_delivery_client: external_client::ExternalHttpClient,
 
     /// The tunable parameters from a configuration file
     tunables: Tunables,
@@ -272,6 +286,9 @@ pub struct Nexus {
     // https://github.com/oxidecomputer/omicron/issues/3732
     external_dns_servers: Vec<IpAddr>,
 
+    /// Configuration for external HTTP clients.
+    external_http_client_config: nexus_config::ExternalHttpClientConfig,
+
     /// Background task driver
     background_tasks_driver: OnceLock<background::Driver>,
 
@@ -289,7 +306,7 @@ pub struct Nexus {
 
     /// Sender for TUF repository artifacts temporarily stored in this zone to
     /// be replicated out to sleds in the background
-    tuf_artifact_replication_tx: mpsc::Sender<ArtifactsWithPlan>,
+    tuf_artifact_replication_tx: mpsc::Sender<Repository>,
 
     /// reports status of pending MGS-managed updates
     mgs_update_status_rx: watch::Receiver<MgsUpdateDriverStatus>,
@@ -315,6 +332,14 @@ pub struct Nexus {
 
     /// state of overall Nexus quiesce activity
     quiesce: NexusQuiesceHandle,
+
+    /// dropbox producer for Reconfigurator
+    debug_dropbox_reconfigurator: Arc<omicron_debug_dropbox::Producer>,
+
+    /// the underlay subnets (rack and AZ), set once they have been loaded, or
+    /// once the rack has been initialized (if RSS has not already finished when
+    /// this Nexus process starts).
+    underlay_subnets: Arc<OnceLock<UnderlaySubnets>>,
 }
 
 impl Nexus {
@@ -324,7 +349,7 @@ impl Nexus {
     // TODO-polish revisit rack metadata
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn new_with_id(
-        rack_id: Uuid,
+        rack_id: RackUuid,
         log: Logger,
         resolver: internal_dns_resolver::Resolver,
         qorb_resolver: internal_dns_resolver::QorbResolver,
@@ -332,6 +357,7 @@ impl Nexus {
         producer_registry: &ProducerRegistry,
         config: &NexusConfig,
         authz: Arc<authz::Authz>,
+        debug_dropbox: DebugDropbox,
     ) -> Result<Arc<Nexus>, String> {
         let all_versions = config
             .pkg
@@ -422,7 +448,7 @@ impl Nexus {
         let (tuf_artifact_replication_tx, tuf_artifact_replication_rx) =
             mpsc::channel(16);
 
-        let reqwest_client = reqwest::ClientBuilder::new()
+        let reqwest_client = internal_http_client_builder()
             .connect_timeout(std::time::Duration::from_secs(15))
             .timeout(std::time::Duration::from_secs(15))
             .build()
@@ -434,12 +460,17 @@ impl Nexus {
                 let native_resolver =
                     qorb_resolver.for_service(ServiceName::OximeterReader);
                 oximeter_db::Client::new_with_resolver(
+                    oximeter_db::User::Reader,
                     native_resolver,
                     "nexus-oximeter-reader",
                     &log,
                 )
             }
-            Some(address) => oximeter_db::Client::new(*address, &log),
+            Some(address) => oximeter_db::Client::new(
+                oximeter_db::User::Reader,
+                *address,
+                &log,
+            ),
         };
 
         // TODO-cleanup We may want to make the populator a first-class
@@ -471,30 +502,38 @@ impl Nexus {
             background_tasks_internal,
         ) = background::BackgroundTasksInitializer::new();
 
+        let underlay_subnets = Arc::new(OnceLock::new());
+        // The IP policy is shared by the external DNS resolver (which applies
+        // it to resolved addresses) and any `ExternalHttpClient` (which
+        // applies it to IP literals in URLs).
+        let external_ip_policy = external_client::ExternalIpPolicy::new(
+            underlay_subnets.clone(),
+            config.deployment.external_http_clients.treat_loopback_as_external,
+        );
         let external_resolver = {
             if config.deployment.external_dns_servers.is_empty() {
                 return Err("expected at least 1 external DNS server".into());
             }
+
             Arc::new(external_dns::Resolver::new(
                 &config.deployment.external_dns_servers,
+                external_ip_policy,
             ))
         };
 
-        let webhook_delivery_client = {
-            // The webhook delivery HTTP client will send requests to endpoints
-            // external to the rack, so apply the configuration for external
-            // HTTP clients.
-            let builder = external_http_client_builder(
-                &config.deployment.external_http_clients,
-                &external_resolver,
-            );
-            webhook::delivery_client(builder).map_err(|e| {
-                format!(
-                    "failed to build webhook delivery client: {}",
-                    InlineErrorChain::new(&e)
-                )
-            })?
-        };
+        // The webhook delivery HTTP client will send requests to endpoints
+        // external to the rack, so apply the configuration for external
+        // HTTP clients.
+        let webhook_delivery_client = webhook::delivery_client(
+            &config.deployment.external_http_clients,
+            &external_resolver,
+        )
+        .map_err(|e| {
+            format!(
+                "failed to build webhook delivery client: {}",
+                InlineErrorChain::new(&e)
+            )
+        })?;
 
         let mut mgs_resolver =
             qorb_resolver.for_service(ServiceName::ManagementGatewayService);
@@ -518,6 +557,18 @@ impl Nexus {
 
         let (sitrep_load_tx, sitrep_load_rx) = watch::channel(None);
 
+        let debug_dropbox_reconfigurator = Arc::new(
+            debug_dropbox
+                .initialize_producer(DEBUG_DROPBOX_PRODUCER_RECONFIGURATOR)
+                .await
+                .map_err(|message| {
+                    format!(
+                        "failed to create reconfigurator dropbox \
+                         producer: {message}"
+                    )
+                })?,
+        );
+
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,
@@ -525,7 +576,7 @@ impl Nexus {
             db_datastore: Arc::clone(&db_datastore),
             authz: Arc::clone(&authz),
             sagas,
-            external_server: std::sync::Mutex::new(None),
+            external_servers: std::sync::Mutex::new(vec![]),
             techport_external_server: std::sync::Mutex::new(None),
             internal_server: std::sync::Mutex::new(None),
             lockstep_server: std::sync::Mutex::new(None),
@@ -564,6 +615,10 @@ impl Nexus {
                 .deployment
                 .external_dns_servers
                 .clone(),
+            external_http_client_config: config
+                .deployment
+                .external_http_clients
+                .clone(),
             background_tasks_driver: OnceLock::new(),
             background_tasks,
             background_tasks_internal,
@@ -581,6 +636,8 @@ impl Nexus {
             update_status: UpdateStatusHandle::new(blueprint_load_rx),
             quiesce,
             sitrep_load_rx,
+            debug_dropbox_reconfigurator: debug_dropbox_reconfigurator.clone(),
+            underlay_subnets,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -677,6 +734,7 @@ impl Nexus {
                     mgs_updates_tx,
                     blueprint_load_tx,
                     sitrep_load_tx,
+                    debug_dropbox_reconfigurator,
                     console_session_absolute_timeout,
                 },
             );
@@ -695,7 +753,7 @@ impl Nexus {
     }
 
     /// Return the rack ID for this Nexus instance.
-    pub fn rack_id(&self) -> Uuid {
+    pub fn rack_id(&self) -> RackUuid {
         self.rack_id
     }
 
@@ -775,7 +833,7 @@ impl Nexus {
     // Called to hand off management of external servers to Nexus.
     pub(crate) async fn set_servers(
         &self,
-        external_server: DropshotServer,
+        external_servers: Vec<DropshotServer>,
         techport_external_server: DropshotServer,
         internal_server: DropshotServer,
         lockstep_server: DropshotServer,
@@ -785,7 +843,7 @@ impl Nexus {
         let _ = self.close_servers().await;
 
         // Insert the new servers.
-        self.external_server.lock().unwrap().replace(external_server);
+        *self.external_servers.lock().unwrap() = external_servers;
         self.techport_external_server
             .lock()
             .unwrap()
@@ -812,7 +870,8 @@ impl Nexus {
         // NOTE: All these take the lock and swap out of the option immediately,
         // because they are synchronous mutexes, which cannot be held across the
         // await point these `close()` methods expose.
-        let external_server = self.external_server.lock().unwrap().take();
+        let external_servers =
+            std::mem::take(&mut *self.external_servers.lock().unwrap());
         let mut res = Ok(());
 
         let extend_err =
@@ -826,7 +885,7 @@ impl Nexus {
                 }
             };
 
-        if let Some(server) = external_server {
+        for server in external_servers.into_iter() {
             extend_err(&mut res, server.close().await);
         }
         let techport_external_server =
@@ -873,14 +932,23 @@ impl Nexus {
         Ok(())
     }
 
-    pub(crate) fn get_external_server_address(
+    /// This returns all addresses for the external API servers.
+    ///
+    /// If the servers have not been started yet, then `None` is returned. If
+    /// they have been started, then `Some(_)` is returned, where the contained
+    /// vector has at least one element. `Some(vec![])`, with a contained empty
+    /// vector, is never returned.
+    pub(crate) fn get_all_external_server_addresses(
         &self,
-    ) -> Option<std::net::SocketAddr> {
-        self.external_server
+    ) -> Option<Vec<std::net::SocketAddr>> {
+        let addrs: Vec<_> = self
+            .external_servers
             .lock()
             .unwrap()
-            .as_ref()
+            .iter()
             .map(|server| server.local_addr())
+            .collect();
+        if addrs.is_empty() { None } else { Some(addrs) }
     }
 
     pub(crate) fn get_techport_server_address(
@@ -1154,7 +1222,7 @@ impl Nexus {
 
     pub(crate) async fn lldpd_clients(
         &self,
-        rack_id: Uuid,
+        rack_id: RackUuid,
     ) -> Result<HashMap<SwitchSlot, lldpd_client::Client>, String> {
         let resolver = self.resolver();
         lldpd_clients(resolver, rack_id, &self.log).await
@@ -1174,7 +1242,48 @@ impl Nexus {
         &self,
     ) -> Result<HashMap<SwitchSlot, mg_admin_client::Client>, ResolveError>
     {
-        resolve_mgd_clients(self.resolver(), &self.log).await
+        let mgd_addrs =
+            self.resolver().lookup_all_socket_v6(ServiceName::Mgd).await?;
+        let mut clients = HashMap::new();
+        for addr in mgd_addrs {
+            let client = mg_admin_client::Client::new_with_client(
+                &format!("http://{addr}"),
+                internal_http_client(),
+                self.log.clone(),
+            );
+            let switch_slot = match client.switch_identifiers().await {
+                Ok(response) => match response.slot {
+                    Some(0) => SwitchSlot::Switch0,
+                    Some(1) => SwitchSlot::Switch1,
+                    Some(n) => {
+                        warn!(
+                            self.log, "failed to determine switch slot for mgd";
+                            "addr" => %addr,
+                            "error" => format!("mgd returned unknown slot {n}"),
+                        );
+                        continue;
+                    }
+                    None => {
+                        warn!(
+                            self.log, "failed to determine switch slot for mgd";
+                            "addr" => %addr,
+                            "error" => "mgd does not yet know its switch slot",
+                        );
+                        continue;
+                    }
+                },
+                Err(err) => {
+                    warn!(
+                        self.log, "failed to determine switch slot for mgd";
+                        "addr" => %addr,
+                        InlineErrorChain::new(&err),
+                    );
+                    continue;
+                }
+            };
+            clients.insert(switch_slot, client);
+        }
+        Ok(clients)
     }
 
     pub(crate) fn demo_sagas(
@@ -1261,8 +1370,9 @@ pub(crate) async fn dpd_clients(
                 )),
             };
 
-            let client = dpd_client::Client::new(
+            let client = dpd_client::Client::new_with_client(
                 &format!("http://{socket_addr}"),
+                internal_http_client(),
                 client_state,
             );
 
@@ -1311,7 +1421,7 @@ pub(crate) async fn dpd_clients(
 /// of SwitchSlot -> Zone Underlay Address, we omit an entry for that client.
 pub(crate) async fn lldpd_clients(
     resolver: &internal_dns_resolver::Resolver,
-    _rack_id: Uuid,
+    _rack_id: RackUuid,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchSlot, lldpd_client::Client>, String> {
     let mappings = switch_zone_address_mappings(resolver, log).await?;
@@ -1320,8 +1430,9 @@ pub(crate) async fn lldpd_clients(
     let clients: HashMap<SwitchSlot, lldpd_client::Client> = mappings
         .iter()
         .map(|(location, addr)| {
-            let lldpd_client = lldpd_client::Client::new(
+            let lldpd_client = lldpd_client::Client::new_with_client(
                 &format!("http://[{addr}]:{port}"),
+                internal_http_client(),
                 log.clone(),
             );
             (*location, lldpd_client)
@@ -1401,8 +1512,9 @@ async fn map_switch_zone_addrs(
             }
         };
 
-        let mgs_client = MgsClient::new(
+        let mgs_client = MgsClient::new_with_client(
             &format!("http://[{}]:{}", addr, port),
+            internal_http_client(),
             log.new(o!("component" => "MgsClient")),
         );
 
@@ -1451,29 +1563,4 @@ async fn map_switch_zone_addrs(
     );
 
     switch_zone_addrs
-}
-
-/// Begin configuring an external HTTP client, returning a
-/// `reqwest::ClientBuilder`.
-pub(crate) fn external_http_client_builder(
-    config: &nexus_config::ExternalHttpClientConfig,
-    resolver: &Arc<external_dns::Resolver>,
-) -> reqwest::ClientBuilder {
-    let mut builder = reqwest::ClientBuilder::new();
-
-    builder = builder.dns_resolver(resolver.clone());
-
-    // If we are configured to only bind external TCP connections on a specific interface, do so.
-    #[cfg(any(
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "illumos",
-    ))]
-    {
-        if let Some(ref interface) = config.interface {
-            builder = builder.interface(interface);
-        }
-    }
-
-    builder
 }

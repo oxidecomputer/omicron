@@ -37,6 +37,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::COCKROACH_ADMIN_PORT;
+use omicron_common::http_client::internal_http_client;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
 use std::net::SocketAddrV6;
@@ -180,8 +181,11 @@ async fn ensure_node_id_known(
 
     // We don't know the address; contact the admin server and ask if it knows.
     let admin_url = format!("http://{admin_addr}");
-    let admin_client =
-        cockroach_admin_client::Client::new(&admin_url, opctx.log.clone());
+    let admin_client = cockroach_admin_client::Client::new_with_client(
+        &admin_url,
+        internal_http_client(),
+        opctx.log.clone(),
+    );
     let node = admin_client
         .local_node_id()
         .await
@@ -242,7 +246,7 @@ mod tests {
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::SledConfigGeneration;
     use omicron_test_utils::dev;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
@@ -313,7 +317,7 @@ mod tests {
                 expected.insert((zone.id, addr));
             } else {
                 zone.disposition = BlueprintZoneDisposition::Expunged {
-                    as_of_generation: Generation::new(),
+                    as_of_generation: SledConfigGeneration::new(),
                     ready_for_cleanup: false,
                 };
             }

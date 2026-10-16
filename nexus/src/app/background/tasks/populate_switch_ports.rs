@@ -93,15 +93,15 @@ use nexus_types::internal_api::background::SwitchPortPopulatorStatus;
 use nexus_types::internal_api::background::SwitchPortPopulatorStatusKind;
 use omicron_common::api::external;
 use omicron_common::api::external::Name;
+use omicron_uuid_kinds::RackUuid;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::sync::Arc;
-use uuid::Uuid;
 
 pub struct SwitchPortPopulator {
-    rack_id: Uuid,
+    rack_id: RackUuid,
     datastore: Arc<DataStore>,
     resolver: Resolver,
     populated_switches: BTreeSet<SwitchSlot>,
@@ -109,7 +109,7 @@ pub struct SwitchPortPopulator {
 
 impl SwitchPortPopulator {
     pub fn new(
-        rack_id: Uuid,
+        rack_id: RackUuid,
         datastore: Arc<DataStore>,
         resolver: Resolver,
     ) -> Self {

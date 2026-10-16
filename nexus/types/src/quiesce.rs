@@ -10,7 +10,7 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use iddqd::IdOrdMap;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::SagaReassignmentGeneration;
 use omicron_uuid_kinds::BlueprintUuid;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -133,7 +133,7 @@ pub struct SagaQuiesceStatus {
     /// This gets bumped whenever a saga reassignment operation completes that
     /// may have re-assigned us some sagas.  It's used to keep track of when
     /// we've recovered all sagas that could be assigned to us.
-    reassignment_generation: Generation,
+    reassignment_generation: SagaReassignmentGeneration,
 
     /// blueprint id associated with last successful saga reassignment
     ///
@@ -154,7 +154,7 @@ pub struct SagaQuiesceStatus {
     /// This is used with `reassignment_generation` to help us know when we've
     /// recovered all the sagas that may have been assigned to us during a
     /// given reassignment pass.  See `reassignment_done()` for details.
-    recovered_reassignment_generation: Generation,
+    recovered_reassignment_generation: SagaReassignmentGeneration,
 
     /// blueprint id that saga recovery has "caught up to"
     ///
@@ -192,20 +192,21 @@ pub struct SagaQuiesceStatus {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 struct PendingRecovery {
     /// what `reassignment_generation` was when this recovery started
-    generation: Generation,
+    generation: SagaReassignmentGeneration,
     /// which blueprint id we'd be fully caught up to upon completion
     blueprint_id: Option<BlueprintUuid>,
 }
 
 impl SagaQuiesceHandle {
     pub fn new(log: Logger) -> SagaQuiesceHandle {
+        let initial_generation = SagaReassignmentGeneration::new();
         let (inner, _) = watch::channel(SagaQuiesceStatus {
             new_sagas_allowed: SagasAllowed::DisallowedUnknown,
             sagas_pending: IdOrdMap::new(),
             first_recovery_complete: false,
-            reassignment_generation: Generation::new(),
+            reassignment_generation: initial_generation,
             reassignment_pending: false,
-            recovered_reassignment_generation: Generation::new(),
+            recovered_reassignment_generation: initial_generation,
             recovery_pending: None,
             reassignment_blueprint_id: None,
             recovered_blueprint_id: None,

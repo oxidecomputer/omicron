@@ -16,7 +16,7 @@ use base64::Engine;
 use camino::Utf8Path;
 use futures::FutureExt;
 use gateway_client::Client as MgsClient;
-use gateway_client::types::SpIdentifier;
+use gateway_types::component::SpIdentifier;
 
 pub async fn spawn_collection_steps(
     collection: &BundleCollection,
@@ -76,7 +76,7 @@ async fn collect_sp_dump(
     }
 
     save_sp_dumps(collection, mgs_client, sp, dir).await.with_context(
-        || format!("failed to save SP dump from: {} {}", sp.type_, sp.slot),
+        || format!("failed to save SP dump from: {} {}", sp.typ, sp.slot),
     )?;
 
     Ok(CollectionStepOutput::None)
@@ -96,7 +96,7 @@ async fn save_sp_dumps(
 ) -> anyhow::Result<()> {
     let fetch_dumps = async {
         let dump_count = mgs_client
-            .sp_task_dump_count(&sp.type_, sp.slot)
+            .sp_task_dump_count(&sp.typ, sp.slot)
             .await
             .context("failed to get task dump count from SP")?
             .into_inner();
@@ -104,7 +104,7 @@ async fn save_sp_dumps(
         let mut dumps = Vec::with_capacity(dump_count as usize);
         for i in 0..dump_count {
             let task_dump = mgs_client
-                .sp_task_dump_get(&sp.type_, sp.slot, i)
+                .sp_task_dump_get(&sp.typ, sp.slot, i)
                 .await
                 .with_context(|| {
                     format!("failed to get task dump {i} from SP")
@@ -123,7 +123,7 @@ async fn save_sp_dumps(
         result = fetch_dumps => result?,
     };
 
-    let output_dir = sp_dumps_dir.join(format!("{}_{}", sp.type_, sp.slot));
+    let output_dir = sp_dumps_dir.join(format!("{}_{}", sp.typ, sp.slot));
     tokio::fs::create_dir_all(&output_dir).await.with_context(|| {
         format!("Failed to create output directory {output_dir}")
     })?;

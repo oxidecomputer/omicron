@@ -26,10 +26,10 @@ use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::inventory::SpType;
-use omicron_common::disk::M2Slot;
 use omicron_repl_utils::run_repl_on_stdin;
 use qorb::resolver::Resolver;
 use qorb::resolvers::fixed::FixedResolver;
+use sled_agent_types::disk::M2Slot;
 use sled_hardware_types::BaseboardId;
 use slog::{info, o, warn};
 use std::collections::BTreeMap;
@@ -219,10 +219,10 @@ impl Inventory {
             }),
         )
         .then(async move |sp_id| {
-            c.sp_get(&sp_id.type_, sp_id.slot)
+            c.sp_get(&sp_id.typ, sp_id.slot)
                 .await
                 .with_context(|| format!("fetching info about SP {:?}", sp_id))
-                .map(|s| (sp_id.type_, sp_id.slot, s))
+                .map(|s| (sp_id.typ, sp_id.slot, s))
         })
         .collect::<Vec<Result<_, _>>>()
         .await

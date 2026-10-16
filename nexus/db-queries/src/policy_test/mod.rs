@@ -87,7 +87,6 @@ async fn test_iam_prep(
                     description: "".into(),
                 },
                 quotas: silo_types::SiloQuotasCreate::empty(),
-                discoverable: true,
                 identity_mode: silo_types::SiloIdentityMode::LocalOnly,
                 admin_group_name: None,
                 tls_certificates: vec![],
@@ -345,7 +344,7 @@ async fn authorize_one_resource(
 
         for ctx_tuple in user_contexts.iter() {
             let (ref username, ref opctx) = **ctx_tuple;
-            write!(out, "  {:32}", &username)?;
+            write!(out, "  {:32}", username)?;
             for action in authz::Action::iter() {
                 let result = resource.do_authorize(opctx, action).await;
                 trace!(

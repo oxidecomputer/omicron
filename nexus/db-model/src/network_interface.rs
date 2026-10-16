@@ -17,6 +17,7 @@ use itertools::Itertools;
 use nexus_db_schema::schema::instance_network_interface;
 use nexus_db_schema::schema::network_interface;
 use nexus_db_schema::schema::service_network_interface;
+use nexus_types::deployment::OmicronZoneNicIp;
 use nexus_types::external_api::instance::InstanceNetworkInterfaceUpdate;
 use nexus_types::external_api::instance::PrivateIpStackCreate;
 use nexus_types::identity::Resource;
@@ -271,38 +272,29 @@ impl ServiceNetworkInterface {
     }
 }
 
-/// Errors converting from a ServiceNetworkInterface.
 #[derive(Debug, thiserror::Error)]
-pub enum ServiceNicError {
-    #[error(
-        "Service NIC {nic_id} has no IP addresses at all, which \
-        ought to be impossible and enforced by the database constraints"
-    )]
-    NoIps { nic_id: Uuid },
-
-    // TODO-remove: Remove this when we support dual-stack service NICs. See
-    // https://github.com/oxidecomputer/omicron/issues/9314.
-    #[error(
-        "Service NIC {nic_id} is dual-stack, \
-        only a single IPv4 or IPv6 address is supported"
-    )]
-    DualStack { nic_id: Uuid },
+#[error(
+    "Service NIC {nic_id} has no IP addresses at all, which \
+    ought to be impossible and enforced by the database constraints"
+)]
+pub struct ServiceNicHasNoIpsError {
+    pub nic_id: Uuid,
 }
 
 impl TryFrom<&'_ ServiceNetworkInterface>
     for nexus_types::deployment::OmicronZoneNic
 {
-    type Error = ServiceNicError;
+    type Error = ServiceNicHasNoIpsError;
 
     fn try_from(nic: &ServiceNetworkInterface) -> Result<Self, Self::Error> {
         let ip = match (nic.ipv4, nic.ipv6) {
             (None, None) => {
-                return Err(ServiceNicError::NoIps { nic_id: nic.id() });
+                return Err(ServiceNicHasNoIpsError { nic_id: nic.id() });
             }
-            (None, Some(ip)) => ip.into(),
-            (Some(ip), None) => ip.into(),
-            (Some(_), Some(_)) => {
-                return Err(ServiceNicError::DualStack { nic_id: nic.id() });
+            (Some(v4), None) => OmicronZoneNicIp::Ipv4Only(*v4),
+            (None, Some(v6)) => OmicronZoneNicIp::Ipv6Only(*v6),
+            (Some(v4), Some(v6)) => {
+                OmicronZoneNicIp::DualStack { v4: *v4, v6: *v6 }
             }
         };
         Ok(Self {

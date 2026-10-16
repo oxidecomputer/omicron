@@ -4,8 +4,6 @@
 
 //! The oximeter agent handles collection tasks for each producer.
 
-// Copyright 2025 Oxide Computer Company
-
 use crate::DbConfig;
 use crate::Error;
 use crate::ProducerEndpoint;
@@ -23,8 +21,10 @@ use nexus_client::Client as NexusClient;
 use nexus_client::types::IdSortMode;
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
+use oximeter::Sample;
+use oximeter::types::ProducerResultsItem;
 use oximeter_db::Client;
-use oximeter_db::DbWrite;
+use oximeter_db::User;
 use oximeter_types::producer::ProducerDetails;
 use qorb::claim::Handle;
 use qorb::policy::Policy;
@@ -47,6 +47,7 @@ use std::sync::Mutex;
 use std::sync::MutexGuard;
 use std::time::Duration;
 use tokio::sync::mpsc;
+use tokio::time::interval;
 use uuid::Uuid;
 
 /// The internal agent the oximeter server uses to collect metrics from producers.
@@ -85,7 +86,6 @@ impl OximeterAgent {
         // cluster as well as a single-node installation.
         cluster_resolver: BoxedResolver,
         log: &Logger,
-        replicated: bool,
     ) -> Result<Self, Error> {
         let collection_task_wrapper = CollectionTaskWrapper::new();
 
@@ -95,43 +95,29 @@ impl OximeterAgent {
             "collector_ip" => address.ip().to_string(),
         ));
         let insertion_log = log.new(o!("component" => "results-sink"));
-        let instertion_log_cluster =
+        let insertion_log_cluster =
             log.new(o!("component" => "results-sink-cluster"));
 
-        // Determine the version of the database.
+        // Check that the database is present and at the expected version.
         //
-        // There are three cases
-        //
-        // - The database exists and is at the expected version. Continue in
-        // this case.
-        //
-        // - The database exists and is at a lower-than-expected version. We
-        // fail back to the caller here, which will retry indefinitely until the
-        // DB has been updated.
-        //
-        // - The DB doesn't exist at all. This reports a version number of 0. We
-        // need to create the DB here, at the latest version. This is used in
-        // fresh installations and tests.
+        // The `writer` user here doesn't have permission to create the
+        // database, so this will always require that someone else do that.
+        // That's the `clickhouse-admin` server in production. The standalone
+        // constructor _will_ do the initialization.
         let client = Client::new_with_resolver(
+            User::Writer,
             native_resolver,
             "clickhouse-inserter",
             &log,
         );
-        match client.check_db_is_at_expected_version().await {
-            Ok(_) => {}
-            Err(oximeter_db::Error::DatabaseVersionMismatch {
-                found: 0,
-                ..
-            }) => {
-                debug!(log, "oximeter database does not exist, creating");
-                client
-                    .initialize_db_with_version(
-                        replicated,
-                        oximeter_db::OXIMETER_VERSION,
-                    )
-                    .await?;
-            }
-            Err(e) => return Err(Error::from(e)),
+        if let Err(err) = client.check_db_is_at_expected_version().await {
+            warn!(
+                log,
+                "oximeter database is not present or not at the \
+                expected version";
+                "error" => InlineErrorChain::new(&err),
+            );
+            return Err(Error::from(err));
         }
 
         // Set up tracking of statistics about ourselves.
@@ -141,17 +127,23 @@ impl OximeterAgent {
             collector_port: address.port(),
         };
 
+        let collector_stats = self_stats::CollectorStats::new(Utc::now());
+
         // Spawn the task for aggregating and inserting all metrics to a
         // single node ClickHouse installation.
-        tokio::spawn(async move {
-            crate::results_sink::database_batcher(
-                insertion_log,
-                client,
-                db_config.batch_size,
-                Duration::from_secs(db_config.batch_interval),
-                collection_task_wrapper.single_rx,
-            )
-            .await
+        tokio::spawn({
+            let sink_stats = collector_stats.single_stats.clone();
+            async move {
+                crate::results_sink::database_batcher(
+                    insertion_log,
+                    client,
+                    db_config.batch_size,
+                    Duration::from_secs(db_config.batch_interval),
+                    collection_task_wrapper.single_rx,
+                    sink_stats,
+                )
+                .await
+            }
         });
 
         // Our internal testing rack will be running a ClickHouse cluster
@@ -178,6 +170,7 @@ impl OximeterAgent {
         };
 
         let cluster_client = Client::new_with_pool_policy(
+            User::Writer,
             cluster_resolver,
             "replicated-clickhouse-inserter",
             claim_policy,
@@ -186,27 +179,34 @@ impl OximeterAgent {
 
         // Spawn the task for aggregating and inserting all metrics to a
         // replicated cluster ClickHouse installation
-        tokio::spawn(async move {
+        tokio::spawn({
             results_sink::database_batcher(
-                instertion_log_cluster,
+                insertion_log_cluster,
                 cluster_client,
                 db_config.batch_size,
                 Duration::from_secs(db_config.batch_interval),
                 collection_task_wrapper.cluster_rx,
+                collector_stats.cluster_stats.clone(),
             )
-            .await
         });
 
         let self_ = Self {
             id,
-            log,
+            log: log.clone(),
             collection_target,
-            result_sender: collection_task_wrapper.wrapper_tx,
+            result_sender: collection_task_wrapper.wrapper_tx.clone(),
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
             refresh_task: Arc::new(Mutex::new(None)),
             last_refresh_time: Arc::new(Mutex::new(None)),
         };
+
+        tokio::spawn(emit_self_stats(
+            collector_stats,
+            collection_target,
+            collection_task_wrapper.wrapper_tx,
+            log,
+        ));
 
         Ok(self_)
     }
@@ -263,13 +263,29 @@ impl OximeterAgent {
                     "Must provide explicit IP address in standalone mode"
                 )));
             };
-            let client = Client::new(address, &log);
-            let replicated = client.is_oximeter_cluster().await?;
-            if !replicated {
-                client.init_single_node_db().await?;
-            } else {
-                client.init_replicated_db().await?;
-            }
+            // Standalone bootstraps its own schema. The `writer` user is
+            // insert-only, so create and version the database as the admin user.
+            // This relies on standalone running against a local ClickHouse, since
+            // the admin user is restricted to loopback in the server config. We
+            // use `initialize_db_with_version` (rather than `init_*_db`) so the
+            // database records its version, matching how clickhouse-admin
+            // initializes it in production.
+            let admin = Client::new(User::Admin, address, &log);
+            let replicated = admin.is_oximeter_cluster().await?;
+            admin
+                .initialize_db_with_version(
+                    replicated,
+                    oximeter_db::OXIMETER_VERSION,
+                )
+                .await?;
+
+            // Insert data as the (insert-only) writer, matching production.
+            let client = Client::new(User::Writer, address, &log);
+
+            let sink_stats = Arc::new(self_stats::CollectorSinkStats::new(
+                "standalone".into(),
+                Utc::now(),
+            ));
 
             // Spawn the task for aggregating and inserting all metrics
             tokio::spawn(async move {
@@ -279,6 +295,7 @@ impl OximeterAgent {
                     db_config.batch_size,
                     Duration::from_secs(db_config.batch_interval),
                     collection_task_wrapper.single_rx,
+                    sink_stats,
                 )
                 .await
             });
@@ -296,11 +313,6 @@ impl OximeterAgent {
             collector_port: address.port(),
         };
 
-        // We don't spawn the task to periodically refresh producers when run
-        // in standalone mode. We can just pretend we registered once, and
-        // that's it.
-        let last_refresh_time = Arc::new(Mutex::new(Some(Utc::now())));
-
         Ok(Self {
             id,
             log,
@@ -309,7 +321,7 @@ impl OximeterAgent {
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
             refresh_task: Arc::new(Mutex::new(None)),
-            last_refresh_time,
+            last_refresh_time: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -526,6 +538,55 @@ impl CollectionTaskSenderWrapper {
     }
 }
 
+// Emit stats about the collector agent.
+//
+// Note: If oximeter isn't able to write metrics to ClickHouse,
+// self-stats about oximeter's inability to write metrics will
+// also never reach ClickHouse. However, we may still be able to
+// emit these metrics if the write path to ClickHouse is partially
+// degraded. And because the relevant counters live in oximeter's
+// memory, even if ClickHouse becomes fully unavailable and then
+// recovers, the metrics will also eventually reach the database.
+//
+// TODO(#10552): Emit a metric about failed database writes as well.
+async fn emit_self_stats(
+    collector_stats: self_stats::CollectorStats,
+    collection_target: self_stats::OximeterCollector,
+    wrapper_tx: CollectionTaskSenderWrapper,
+    log: Logger,
+) {
+    let mut sink_stats_ticker = interval(self_stats::COLLECTION_INTERVAL);
+    loop {
+        sink_stats_ticker.tick().await;
+
+        let mut samples: Vec<Sample> = Vec::new();
+
+        for sink_stats in
+            [&collector_stats.single_stats, &collector_stats.cluster_stats]
+        {
+            match sink_stats.samples(&collection_target) {
+                Ok(s) => samples.extend(s),
+                Err(e) => error!(
+                    log,
+                    "failed to build database sink self-stats";
+                    "sink" => sink_stats.label.clone(),
+                    InlineErrorChain::new(&e),
+                ),
+            };
+        }
+
+        let _ = wrapper_tx
+            .send(
+                CollectionTaskOutput {
+                    results: vec![ProducerResultsItem::Ok(samples)],
+                    was_forced_collection: false,
+                },
+                &log,
+            )
+            .await;
+    }
+}
+
 #[derive(Debug)]
 pub struct CollectionTaskWrapper {
     wrapper_tx: CollectionTaskSenderWrapper,
@@ -677,6 +738,7 @@ async fn claim_nexus_with_backoff(
 mod tests {
     use super::OximeterAgent;
     use super::ProducerEndpoint;
+    use crate::DbConfig;
     use crate::self_stats::FailureReason;
     use chrono::Utc;
     use dropshot::HttpError;
@@ -685,12 +747,18 @@ mod tests {
     use dropshot::RequestContext;
     use dropshot::ServerBuilder;
     use omicron_common::api::internal::nexus::ProducerKind;
+    use omicron_test_utils::dev::clickhouse::ClickHouseDeployment;
     use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::poll::wait_for_condition;
     use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
     use omicron_test_utils::dev::test_setup_log;
+    use oximeter::Sample;
     use oximeter::types::ProducerResults;
+    use oximeter::types::ProducerResultsItem;
+    use oximeter_db::Client;
+    use oximeter_db::User;
     use oximeter_types::producer::ProducerDetails;
+    use qorb::resolvers::fixed::FixedResolver;
     use reqwest::StatusCode;
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;
@@ -788,10 +856,7 @@ mod tests {
     async fn run_n_collections(collector: &OximeterAgent, id: Uuid, n: u64) {
         let mut details_rx = details_watcher(collector, id);
         for i in 1..=n {
-            // The first collection happens automatically, so skip over it here.
-            if i > 1 {
-                force_collect(collector, id);
-            }
+            force_collect(collector, id);
             wait_for_details(
                 &mut details_rx,
                 |details| details.n_collections + details.n_failures >= i,
@@ -843,6 +908,35 @@ mod tests {
         }
     }
 
+    /// A producer that always responds successfully with two samples.
+    struct LiveProducer;
+
+    impl ProducerApi for LiveProducer {
+        type Context = Arc<AtomicUsize>;
+
+        async fn collect(
+            request_context: RequestContext<Self::Context>,
+            _: Path<IdPath>,
+        ) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
+            request_context.context().fetch_add(1, Ordering::SeqCst);
+
+            #[derive(oximeter::Target)]
+            struct TestTarget {
+                id: Uuid,
+            }
+            #[derive(oximeter::Metric)]
+            struct TestMetric {
+                datum: u64,
+            }
+
+            let target = TestTarget { id: Uuid::nil() };
+            Ok(HttpResponseOk(vec![ProducerResultsItem::Ok(vec![
+                Sample::new(&target, &TestMetric { datum: 1 }).unwrap(),
+                Sample::new(&target, &TestMetric { datum: 2 }).unwrap(),
+            ])]))
+        }
+    }
+
     /// A producer that always responds with a 500.
     struct DedProducer;
 
@@ -876,16 +970,16 @@ mod tests {
         .await
         .unwrap();
 
-        // Spawn the mock server that always reports empty statistics.
+        // Spawn the mock server that always reports dummy statistics.
         let collection_count = Arc::new(AtomicUsize::new(0));
         let server = ServerBuilder::new(
-            producer_api_mod::api_description::<EmptyProducer>().unwrap(),
+            producer_api_mod::api_description::<LiveProducer>().unwrap(),
             collection_count.clone(),
             log.new(slog::o!("component" => "dropshot")),
         )
         .config(Default::default())
         .start()
-        .expect("failed to spawn empty dropshot server");
+        .expect("failed to spawn live producer server");
 
         // Register the dummy producer.
         let endpoint = ProducerEndpoint {
@@ -911,6 +1005,7 @@ mod tests {
             .statistics();
         let stats = rx.await.unwrap();
         let count = stats.collections.datum.value() as usize;
+        let samples_collected = stats.samples_collected.datum.value();
 
         // Exactly `N_COLLECTIONS` collections ran: nothing is in flight when
         // `run_n_collections` returns, and the long collection interval
@@ -924,6 +1019,16 @@ mod tests {
             producer server itself ({server_count})"
         );
         assert!(stats.failed_collections.is_empty());
+
+        let producer_samples_collected = 2 * N_COLLECTIONS;
+        assert_eq!(
+            samples_collected, producer_samples_collected,
+            "number of samples collected by the collection \
+            task ({samples_collected}) differs from the expected count of \
+            {producer_samples_collected}; the dummy producer produces two \
+            samples per collection"
+        );
+
         logctx.cleanup_successful();
     }
 
@@ -1101,8 +1206,9 @@ mod tests {
 
         // We don't manipulate time manually here, since this is pretty short
         // and we want to assert things about the actual timing in the test
-        // below. The first collection is triggered by the interval timer,
-        // which fires once immediately.
+        // below. We force the first collection to avoid waiting for its
+        // jittered offset.
+        force_collect(&collector, id);
         wait_for_condition(
             || async {
                 // We need to check if the server has had a collection
@@ -1248,6 +1354,204 @@ mod tests {
         assert_eq!(details.address, server.local_addr());
         assert!(details.n_collections > 0);
         assert!(collection_count.load(Ordering::SeqCst) > 0);
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_standalone_integration() {
+        usdt::register_probes().unwrap();
+        let logctx = test_setup_log("test_standalone_integration");
+        let log = &logctx.log;
+
+        // Start the standalone nexus to register and list producers.
+        let nexus = crate::standalone::Server::new(
+            SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0)),
+            slog::Level::Error,
+        )
+        .expect("failed to start standalone nexus");
+
+        // Spawn the mock server that always reports dummy statistics.
+        let collection_count = Arc::new(AtomicUsize::new(0));
+        let producer = ServerBuilder::new(
+            producer_api_mod::api_description::<LiveProducer>().unwrap(),
+            collection_count.clone(),
+            log.new(slog::o!("component" => "producer")),
+        )
+        .config(Default::default())
+        .start()
+        .expect("failed to spawn live producer server");
+
+        // Spawn the standalone oximeter, using the standalone nexus to track producers.
+        let args = crate::OximeterArguments {
+            id: Uuid::new_v4(),
+            address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+        };
+        let collector = crate::Oximeter::new_standalone(
+            log,
+            &args,
+            nexus.local_addr(),
+            None,
+            // Refresh often so the test doesn't wait the 15s production
+            // default for the collector to discover the producer.
+            Duration::from_millis(100),
+        )
+        .await
+        .expect("failed to start standalone collector");
+
+        // Register the producer with the standalone nexus.
+        let producer_id = Uuid::new_v4();
+        let endpoint = ProducerEndpoint {
+            id: producer_id,
+            kind: ProducerKind::Service,
+            address: producer.local_addr(),
+            interval: COLLECTION_INTERVAL,
+        };
+        reqwest::Client::new()
+            .post(format!("http://{}/metrics/producers", nexus.local_addr()))
+            .json(&endpoint)
+            .send()
+            .await
+            .expect("failed to register producer")
+            .error_for_status()
+            .expect("producer registration returned an error");
+
+        // Assert that the producer with the expected uuid was registered.
+        wait_for_condition(
+            || async {
+                if collector
+                    .list_producers(None, 10)
+                    .iter()
+                    .any(|p| p.id == producer_id)
+                {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet { status: None })
+                }
+            },
+            &POLL_INTERVAL,
+            &COLLECTION_TIMEOUT,
+        )
+        .await
+        .expect("collector discovered the dummy producer");
+
+        // Assert that the collector collects at least one sample.
+        collector.try_force_collect().expect("forced collection enqueued");
+        wait_for_condition(
+            || async {
+                if collection_count.load(Ordering::SeqCst) >= 1 {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet { status: None })
+                }
+            },
+            &POLL_INTERVAL,
+            &COLLECTION_TIMEOUT,
+        )
+        .await
+        .expect("collector collected >0 samples");
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_with_id_requires_external_db_init() {
+        let logctx = test_setup_log("test_with_id_requires_external_db_init");
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
+            .await
+            .expect("Failed to start ClickHouse");
+        let native: SocketAddr = db.native_address().into();
+        let db_config = DbConfig {
+            address: Some(native),
+            batch_size: 1000,
+            batch_interval: 1,
+        };
+
+        // The database has not been created yet.
+        //
+        // In production, the agent is the `writer` user, which means it can't
+        // create the DB. Assert that we fail here.
+        OximeterAgent::with_id(
+            Uuid::new_v4(),
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+            crate::default_refresh_interval(),
+            db_config,
+            Box::new(FixedResolver::new([native])),
+            Box::new(FixedResolver::new([native])),
+            &logctx.log,
+        )
+        .await
+        .expect_err("agent should refuse to start before the DB is created");
+
+        // The failed construction must not have created the database itself.
+        let admin = Client::new(User::Admin, native, &logctx.log);
+        admin
+            .check_db_is_at_expected_version()
+            .await
+            .expect_err("the collector must not create the database itself");
+
+        // clickhouse-admin normally does this, so pretend to be it for the
+        // test. Now the agent should build fine.
+        admin
+            .initialize_db_with_version(false, oximeter_db::OXIMETER_VERSION)
+            .await
+            .expect("admin should be able to initialize the database");
+        OximeterAgent::with_id(
+            Uuid::new_v4(),
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+            crate::default_refresh_interval(),
+            db_config,
+            Box::new(FixedResolver::new([native])),
+            Box::new(FixedResolver::new([native])),
+            &logctx.log,
+        )
+        .await
+        .expect("agent should start once the DB has been initialized");
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_standalone_initializes_db_on_startup() {
+        let logctx =
+            test_setup_log("test_standalone_initializes_db_on_startup");
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
+            .await
+            .expect("Failed to start ClickHouse");
+        let native: SocketAddr = db.native_address().into();
+
+        // The database does not exist yet.
+        let admin = Client::new(User::Admin, native, &logctx.log);
+        admin
+            .check_db_is_at_expected_version()
+            .await
+            .expect_err("database should not exist before standalone starts");
+
+        // Starting the standalone collector with a database configuration
+        // initializes the database right away, since it uses the `admin` user
+        // for that part.
+        let db_config = DbConfig {
+            address: Some(native),
+            batch_size: 1000,
+            batch_interval: 1,
+        };
+        let _collector = OximeterAgent::new_standalone(
+            Uuid::new_v4(),
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+            crate::default_refresh_interval(),
+            Some(db_config),
+            &logctx.log,
+        )
+        .await
+        .expect("standalone collector should start");
+
+        // The database is now present at the expected version.
+        admin
+            .check_db_is_at_expected_version()
+            .await
+            .expect("standalone should have initialized the database");
+
+        db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
 }

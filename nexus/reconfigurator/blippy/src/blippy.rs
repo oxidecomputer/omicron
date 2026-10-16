@@ -16,19 +16,20 @@ use nexus_types::deployment::PlanningInput;
 use nexus_types::inventory::ZpoolName;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
-use omicron_common::api::external::Generation;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::api::external::MacAddr;
 use omicron_common::disk::DatasetKind;
-use omicron_common::disk::M2Slot;
+use omicron_generation_kinds::{Generation, NexusGeneration};
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::disk::M2Slot;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
+use strum::EnumDiscriminants;
 use tufaceous_artifact::ArtifactHash;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,7 +38,7 @@ pub struct Note {
     pub kind: Kind,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
     /// Indicates an issue with a blueprint that should be corrected by a future
     /// planning run.
@@ -55,7 +56,7 @@ impl fmt::Display for Severity {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind {
     Blueprint(BlueprintKind),
     Sled { sled_id: SledUuid, kind: Box<SledKind> },
@@ -110,12 +111,42 @@ impl Kind {
             Kind::PlanningInput(kind) => Subkind::PlanningInput(kind),
         }
     }
+
+    /// Returns a value that can be used to sort notes by kind
+    pub fn as_ord(&self) -> KindOrd {
+        match self {
+            Kind::Blueprint(kind) => KindOrd::Blueprint(kind.into()),
+            Kind::Sled { sled_id, kind } => {
+                KindOrd::Sled(*sled_id, (&**kind).into())
+            }
+            Kind::PlanningInput(kind) => KindOrd::PlanningInput(kind.into()),
+        }
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// Describes the sort order of a [`Kind`]
+///
+/// For sorting notes by kind, we want an ordering on `Kind`.  We cannot impl
+/// `Ord` on `Kind` itself because its variants include data that does not impl
+/// `Ord`.  We could impl `Ord` by hand and ignore that data, but `Ord` requires
+/// that two values compare equal exactly when `Eq` says they are equal, and
+/// that data does matter for `Eq`.  It just doesn't matter for sorting notes.
+/// So we instead provide this type, which contains only the parts of a `Kind`
+/// that determine its sort order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum KindOrd {
+    // The order of these variants determines how notes about different
+    // components sort relative to each other.
+    Blueprint(BlueprintKindDiscriminants),
+    Sled(SledUuid, SledKindDiscriminants),
+    PlanningInput(PlanningInputKindDiscriminants),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, EnumDiscriminants)]
+#[strum_discriminants(derive(Ord, PartialOrd))]
 pub enum BlueprintKind {
     /// No zones exist in the blueprint using the active Nexus generation
-    NoZonesWithActiveNexusGeneration(Generation),
+    NoZonesWithActiveNexusGeneration(NexusGeneration),
 }
 
 impl fmt::Display for BlueprintKind {
@@ -128,7 +159,8 @@ impl fmt::Display for BlueprintKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, EnumDiscriminants, Eq, PartialEq)]
+#[strum_discriminants(derive(Ord, PartialOrd))]
 pub enum SledKind {
     /// Two running zones have the same underlay IP address.
     DuplicateUnderlayIp {
@@ -138,7 +170,7 @@ pub enum SledKind {
     /// A sled has a zone with an IP that isn't a member of its subnet.
     UnderlayIpOnWrongSubnet {
         zone: BlueprintZoneConfig,
-        subnet: Ipv6Subnet<SLED_PREFIX>,
+        subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     },
     /// A sled has a zone with an IP that is above the sled's overall "last
     /// allocated IP" value.
@@ -149,7 +181,7 @@ pub enum SledKind {
     /// Two sleds are using the same sled subnet.
     ConflictingSledSubnets {
         other_sled: SledUuid,
-        subnet: Ipv6Subnet<SLED_PREFIX>,
+        subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     },
     /// An internal DNS zone has an IP that is not one of the expected rack DNS
     /// subnets.
@@ -242,15 +274,15 @@ pub enum SledKind {
     /// A Nexus zone exists which is too new, relative to the "active
     /// generation".
     NexusZoneGenerationTooNew {
-        active_generation: Generation,
-        zone_generation: Generation,
+        active_generation: NexusGeneration,
+        zone_generation: NexusGeneration,
         id: OmicronZoneUuid,
     },
     /// Nexus zones with the same generation have different image sources.
     NexusZoneGenerationImageSourceMismatch {
         zone1: BlueprintZoneConfig,
         zone2: BlueprintZoneConfig,
-        generation: Generation,
+        generation: NexusGeneration,
     },
 }
 
@@ -527,7 +559,8 @@ impl fmt::Display for SledKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, EnumDiscriminants)]
+#[strum_discriminants(derive(Ord, PartialOrd))]
 pub enum PlanningInputKind {
     IpNotInBlueprint(OmicronZoneExternalIp),
     NicMacNotInBluperint(OmicronZoneNicEntry),

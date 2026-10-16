@@ -8,6 +8,7 @@
 //! parts of `cargo xtask` do not.
 
 use anyhow::{Context, Result, bail};
+use byte_wrapper::HexArray;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
 use clap::ValueEnum;
@@ -15,7 +16,8 @@ use flate2::bufread::GzDecoder;
 use futures::StreamExt;
 use sha2::Digest;
 use slog::{Drain, Logger, info, o, warn};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, btree_map};
+use std::fmt;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::OnceLock;
@@ -31,6 +33,7 @@ const BUILDOMAT_URL: &'static str =
     "https://buildomat.eng.oxide.computer/public/file";
 const CARGO_HACK_URL: &'static str =
     "https://github.com/taiki-e/cargo-hack/releases/download";
+const MACOS_AARCH64_SERIES: &'static str = "macos-aarch64";
 
 const RETRY_ATTEMPTS: usize = 3;
 
@@ -202,6 +205,58 @@ fn arch() -> Result<Arch> {
     Ok(arch)
 }
 
+/// An Oxide repository at `revision`.
+///
+/// This assumes that the repo URL is `github.com/oxidecomputer/{name}`.
+#[derive(Clone, Copy)]
+struct OxideRepoRevision {
+    name: &'static str,
+    revision: GitCommitHash,
+}
+
+/// Represents a file that needs to be retrieved from Buildomat.
+///
+/// This assumes that:
+///
+/// * The repo URL is `github.com/oxidecomputer/{name}`.
+/// * The file is hosted in Buildomat, under
+///   `{BUILDOMAT_URL}/oxidecomputer/{name}/{series}`.
+/// * The file is published for `revision`, at `{revision}/{filename}`.
+/// * The SHA2-256 checksum for the file is also published.
+struct OxideBuildomatFile {
+    repo: OxideRepoRevision,
+    series: &'static str,
+    filename: &'static str,
+    sha2: Sha256Digest,
+}
+
+impl OxideBuildomatFile {
+    fn url(&self) -> String {
+        let Self {
+            repo: OxideRepoRevision { name, revision },
+            series,
+            filename,
+            sha2: _,
+        } = self;
+        format!(
+            "{BUILDOMAT_URL}/oxidecomputer/{name}/{series}/{revision}/{filename}"
+        )
+    }
+}
+
+/// A binary that needs to be downloaded on a non-illumos platform.
+///
+/// On illumos, the image tarball (i.e., with series `image`) already provides
+/// all binaries.
+struct HostNativeBinary {
+    name: &'static str,
+    /// If downloading the binary for Linux, the SHA2-256 checksum of the file.
+    x86_64_linux_sha2: Sha256Digest,
+    /// If downloading the binary for aarch64 macOS, the SHA2-256 checksum of
+    /// the file.
+    aarch64_macos_sha2: Sha256Digest,
+}
+
 struct Downloader<'a> {
     log: Logger,
 
@@ -220,152 +275,96 @@ impl<'a> Downloader<'a> {
     ) -> Self {
         Self { log, output_dir, versions_dir }
     }
-
-    /// Build a binary from a git repository at a specific commit.
-    ///
-    /// This function:
-    /// 1. Checks for cached binaries at `out/.build-cache/{project}/{commit}/`
-    /// 2. If not cached, shallow clones the repo to a temp directory
-    /// 3. Builds the specified binaries with cargo
-    /// 4. Caches the built binaries
-    /// 5. Returns paths to the cached binaries
-    async fn build_from_git(
-        &self,
-        project: &str,
-        commit: &str,
-        binaries: &[(&str, &[&str])], // (binary_name, cargo_args)
-    ) -> Result<Vec<Utf8PathBuf>> {
-        let cache_dir =
-            self.output_dir.join(".build-cache").join(project).join(commit);
-
-        // Check if all binaries are already cached
-        let mut cached_paths = Vec::new();
-        let mut all_cached = true;
-        for (binary_name, _) in binaries {
-            let cached_path = cache_dir.join(binary_name);
-            if !cached_path.exists() {
-                all_cached = false;
-                break;
-            }
-            cached_paths.push(cached_path);
-        }
-
-        if all_cached {
-            info!(self.log, "Found cached binaries for {project} at {commit}"; "cache_dir" => %cache_dir);
-            return Ok(cached_paths);
-        }
-
-        // Need to build - create temp directory
-        info!(self.log, "Building {project} from source at commit {commit}");
-        let temp_dir = tempfile::tempdir()?;
-        let temp_path = Utf8PathBuf::try_from(temp_dir.path().to_path_buf())?;
-
-        // Clone and checkout the specific commit
-        let repo_url = format!("https://github.com/oxidecomputer/{}", project);
-        info!(self.log, "Cloning {repo_url}");
-        let mut clone_cmd = Command::new("git");
-        clone_cmd
-            .arg("clone")
-            .arg("--filter=blob:none")
-            .arg(&repo_url)
-            .arg(&temp_path);
-
-        let clone_output = clone_cmd.output().await?;
-        if !clone_output.status.success() {
-            let stderr = String::from_utf8_lossy(&clone_output.stderr);
-            bail!("Failed to clone {repo_url}: {stderr}");
-        }
-
-        // Checkout the specific commit
-        info!(self.log, "Checking out commit {commit}");
-        let mut checkout_cmd = Command::new("git");
-        checkout_cmd.arg("checkout").arg(commit).current_dir(&temp_path);
-
-        let checkout_output = checkout_cmd.output().await?;
-        if !checkout_output.status.success() {
-            let stderr = String::from_utf8_lossy(&checkout_output.stderr);
-            bail!("Failed to checkout {commit}: {stderr}");
-        }
-
-        // Build each binary
-        tokio::fs::create_dir_all(&cache_dir).await?;
-        let mut result_paths = Vec::new();
-
-        for (binary_name, cargo_args) in binaries {
-            info!(self.log, "Building {binary_name}"; "args" => ?cargo_args);
-
-            let mut build_cmd = Command::new("cargo");
-            build_cmd
-                .arg("build")
-                .arg("--release")
-                .arg("--bin")
-                .arg(binary_name)
-                .args(*cargo_args)
-                .current_dir(&temp_path);
-
-            let build_output = build_cmd.output().await?;
-            if !build_output.status.success() {
-                let stderr = String::from_utf8_lossy(&build_output.stderr);
-                bail!("Failed to build {binary_name}: {stderr}");
-            }
-
-            // Always build in release mode
-            let source_path =
-                temp_path.join("target").join("release").join(binary_name);
-
-            if !source_path.exists() {
-                bail!("Expected binary not found at {source_path}");
-            }
-
-            // Copy to cache
-            let cached_path = cache_dir.join(binary_name);
-            tokio::fs::copy(&source_path, &cached_path).await?;
-            set_permissions(&cached_path, 0o755).await?;
-
-            result_paths.push(cached_path);
-        }
-
-        info!(self.log, "Successfully built and cached {project} binaries");
-        Ok(result_paths)
-    }
 }
 
-/// Parses a file of the format:
+/// A file containing data in the format:
 ///
 /// ```ignore
 /// KEY1="value1"
 /// KEY2="value2"
 /// ```
 ///
-/// And returns an array of the values in the same order as keys.
-async fn get_values_from_file<const N: usize>(
-    keys: [&str; N],
-    path: &Utf8Path,
-) -> Result<[String; N]> {
-    // Map of "key" => "Position in output".
-    let mut keys: HashMap<&str, usize> =
-        keys.into_iter().enumerate().map(|(i, s)| (s, i)).collect();
+/// These files are kept under `tools/`, and are formatted so that both shell
+/// scripts and Rust can read them.
+#[derive(Debug)]
+struct KvFile {
+    path: Utf8PathBuf,
+    values: BTreeMap<String, String>,
+}
 
-    const EMPTY_STRING: String = String::new();
-    let mut values = [EMPTY_STRING; N];
+impl KvFile {
+    async fn read(path: Utf8PathBuf) -> Result<Self> {
+        let contents = tokio::fs::read_to_string(&path)
+            .await
+            .with_context(|| format!("Failed to read {path}"))?;
+        Self::parse(path, &contents)
+    }
 
-    let content = tokio::fs::read_to_string(&path)
-        .await
-        .with_context(|| format!("Failed to read {path}"))?;
-    for line in content.lines() {
-        let line = line.trim();
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        let value = value.trim_matches('"');
-        if let Some(i) = keys.remove(key) {
-            values[i] = value.to_string();
+    fn parse(path: Utf8PathBuf, contents: &str) -> Result<Self> {
+        let mut values = BTreeMap::new();
+        for (index, line) in contents.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let line_number = index + 1;
+            let Some((key, value)) =
+                line.split_once('=').filter(|(key, _)| !key.is_empty())
+            else {
+                // Ban non-empty lines that aren't in the correct KEY="value"
+                // format.
+                bail!(
+                    "{path}:{line_number}: expected KEY=\"value\", found {line:?}"
+                );
+            };
+            match values.entry(key.to_owned()) {
+                btree_map::Entry::Vacant(entry) => {
+                    // We permit both quoted and unquoted values.
+                    entry.insert(value.trim_matches('"').to_owned());
+                }
+                btree_map::Entry::Occupied(_) => {
+                    // Ban duplicate keys.
+                    bail!(
+                        "{path}:{line_number}: key {key:?} is already set earlier in the file"
+                    );
+                }
+            }
         }
+        Ok(Self { path, values })
     }
-    if !keys.is_empty() {
-        bail!("Could not find keys: {:?}", keys.keys().collect::<Vec<_>>(),);
+
+    fn get_string_value(&self, key: &str) -> Result<&str> {
+        let Some(value) = self.values.get(key) else {
+            bail!(
+                "Could not find key {key:?} in {}, which sets {:?}",
+                self.path,
+                self.values.keys().collect::<Vec<_>>(),
+            );
+        };
+        Ok(value)
     }
-    Ok(values)
+
+    fn get_sha256_value(&self, key: &str) -> Result<Sha256Digest> {
+        let value = self.get_string_value(key)?;
+        let bytes = value.parse().with_context(|| {
+            format!(
+                "Invalid SHA-256 checksum {value:?} for {key} in {}",
+                self.path,
+            )
+        })?;
+        Ok(Sha256Digest(bytes))
+    }
+
+    fn get_git_commit_hash_value(&self, key: &str) -> Result<GitCommitHash> {
+        let value = self.get_string_value(key)?;
+        let bytes = value.parse().with_context(|| {
+            format!(
+                "Invalid git commit hash {value:?} for {key} in {}",
+                self.path
+            )
+        })?;
+        Ok(GitCommitHash(bytes))
+    }
 }
 
 /// Send a GET request to `url`, downloading the contents to `path`.
@@ -391,21 +390,44 @@ async fn streaming_download(url: &str, path: &Utf8Path) -> Result<()> {
     Ok(())
 }
 
-/// Returns the hex, lowercase sha2 checksum of a file at `path`.
-async fn sha2_checksum(path: &Utf8Path) -> Result<String> {
-    let mut buf = vec![0u8; 65536];
-    let mut file = tokio::fs::File::open(path).await?;
-    let mut ctx = sha2::Sha256::new();
-    loop {
-        let n = file.read(&mut buf).await?;
-        if n == 0 {
-            break;
-        }
-        ctx.write_all(&buf[0..n])?;
-    }
+/// A SHA-256 digest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Sha256Digest(HexArray<32>);
 
-    let digest = ctx.finalize();
-    Ok(format!("{digest:x}"))
+impl Sha256Digest {
+    /// Computes and returns the SHA-256 digest of the file at `path`.
+    async fn from_path(path: &Utf8Path) -> Result<Self> {
+        let mut buf = vec![0u8; 65536];
+        let mut file = tokio::fs::File::open(path).await?;
+        let mut ctx = sha2::Sha256::new();
+        loop {
+            let n = file.read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            ctx.write_all(&buf[0..n])?;
+        }
+
+        Ok(Self(HexArray::new(ctx.finalize().into())))
+    }
+}
+
+impl fmt::Display for Sha256Digest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0, f)
+    }
+}
+
+/// A full (non-abbreviated) Git commit hash.
+///
+/// Currently we only support SHA-1 commit hashes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct GitCommitHash(HexArray<20>);
+
+impl fmt::Display for GitCommitHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0, f)
+    }
 }
 
 async fn unpack_tarball(
@@ -449,30 +471,21 @@ async fn unpack_gzip(
     task.await?
 }
 
-async fn clickhouse_confirm_binary_works(binary: &Utf8Path) -> Result<()> {
+async fn confirm_binary_works(binary: &Utf8Path, args: &[&str]) -> Result<()> {
     let mut cmd = Command::new(binary);
-    cmd.args(["server", "--version"]);
+    cmd.args(args);
 
-    let output =
-        cmd.output().await.context(format!("Failed to run {binary}"))?;
+    let output = cmd
+        .output()
+        .await
+        .with_context(|| format!("Failed to run {binary}"))?;
     if !output.status.success() {
-        let stderr =
-            String::from_utf8(output.stderr).unwrap_or_else(|_| String::new());
-        bail!("{binary} failed: {} (stderr: {stderr})", output.status);
-    }
-    Ok(())
-}
-
-async fn cockroach_confirm_binary_works(binary: &Utf8Path) -> Result<()> {
-    let mut cmd = Command::new(binary);
-    cmd.arg("version");
-
-    let output =
-        cmd.output().await.context(format!("Failed to run {binary}"))?;
-    if !output.status.success() {
-        let stderr =
-            String::from_utf8(output.stderr).unwrap_or_else(|_| String::new());
-        bail!("{binary} failed: {} (stderr: {stderr})", output.status);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!(
+            "{binary} {args:?} failed: {} (stdout: {stdout}, stderr: {stderr})",
+            output.status
+        );
     }
     Ok(())
 }
@@ -498,18 +511,6 @@ async fn set_permissions(path: &Utf8Path, mode: u32) -> Result<()> {
     Ok(())
 }
 
-enum ChecksumAlgorithm {
-    Sha2,
-}
-
-impl ChecksumAlgorithm {
-    async fn checksum(&self, path: &Utf8Path) -> Result<String> {
-        match self {
-            ChecksumAlgorithm::Sha2 => sha2_checksum(path).await,
-        }
-    }
-}
-
 /// Downloads a file and verifies the checksum.
 ///
 /// If the file already exists and the checksum matches,
@@ -518,12 +519,11 @@ async fn download_file_and_verify(
     log: &Logger,
     path: &Utf8Path,
     url: &str,
-    algorithm: ChecksumAlgorithm,
-    checksum: &str,
+    checksum: Sha256Digest,
 ) -> Result<()> {
     let do_download = if path.exists() {
         info!(log, "Already downloaded ({path})");
-        if algorithm.checksum(&path).await? == checksum {
+        if Sha256Digest::from_path(path).await? == checksum {
             info!(
                 log,
                 "Checksum matches already downloaded file - skipping download"
@@ -556,7 +556,7 @@ async fn download_file_and_verify(
         }
     }
 
-    let observed_checksum = algorithm.checksum(&path).await?;
+    let observed_checksum = Sha256Digest::from_path(path).await?;
     if observed_checksum != checksum {
         bail!(
             "Checksum mismatch (saw {observed_checksum}, expected {checksum})"
@@ -566,6 +566,113 @@ async fn download_file_and_verify(
 }
 
 impl Downloader<'_> {
+    async fn read_version_file(&self, filename: &str) -> Result<String> {
+        let path = self.versions_dir.join(filename);
+        let contents = tokio::fs::read_to_string(&path)
+            .await
+            .with_context(|| format!("Failed to read version from {path}"))?;
+        let version = contents.trim();
+        if version.is_empty() {
+            bail!("Version file {path} should not be empty");
+        }
+        Ok(version.to_string())
+    }
+
+    /// Downloads a file off of Buildomat to the given path, and verifies its
+    /// checksum.
+    ///
+    /// If the path is already present and matches the checksum, it isn't
+    /// downloaded again.
+    async fn download_oxide_buildomat_file(
+        &self,
+        file: &OxideBuildomatFile,
+        path: &Utf8Path,
+    ) -> Result<()> {
+        download_file_and_verify(&self.log, path, &file.url(), file.sha2).await
+    }
+
+    /// Downloads an executable file off of Buildomat to the given path, and
+    /// verifies its checksum.
+    ///
+    /// The file is staged in `{self.output_dir}/downloads`.
+    async fn download_oxide_buildomat_binary(
+        &self,
+        binary: &OxideBuildomatFile,
+        binary_dir: &Utf8Path,
+    ) -> Result<()> {
+        let path = self.output_dir.join("downloads").join(binary.filename);
+        self.download_oxide_buildomat_file(binary, &path).await?;
+        set_permissions(&path, 0o755).await?;
+        let dest = binary_dir.join(binary.filename);
+        tokio::fs::copy(&path, &dest)
+            .await
+            .with_context(|| format!("Failed to copy {path} to {dest}"))?;
+
+        // A prebuilt binary can potentially be incompatible with this host
+        // (e.g., due to a libc version or dynamically linked libraries). Do a
+        // little smoke test to make sure the binary works.
+        info!(self.log, "Checking that {} works", binary.filename);
+        confirm_binary_works(&dest, &["--help"]).await?;
+        Ok(())
+    }
+
+    /// Installs binaries for the host into `binary_dir`.
+    ///
+    /// Uses prebuilt binaries where available, otherwise fails.
+    ///
+    /// This doesn't do anything on illumos, since the image tarball already
+    /// provides the binaries.
+    async fn install_host_native_binaries(
+        &self,
+        repo: OxideRepoRevision,
+        linux_series: &'static str,
+        binaries: &[HostNativeBinary],
+        binary_dir: &Utf8Path,
+    ) -> Result<()> {
+        match os_name()? {
+            Os::Linux => match arch()? {
+                Arch::X86_64 => {
+                    for binary in binaries {
+                        let file = OxideBuildomatFile {
+                            repo,
+                            series: linux_series,
+                            filename: binary.name,
+                            sha2: binary.x86_64_linux_sha2,
+                        };
+                        self.download_oxide_buildomat_binary(&file, binary_dir)
+                            .await?;
+                    }
+                }
+                Arch::Aarch64 => {
+                    // We can start publishing these binaries if anyone needs them.
+                    bail!("aarch64 Linux is not supported");
+                }
+            },
+            Os::Mac => match arch()? {
+                Arch::Aarch64 => {
+                    for binary in binaries {
+                        let file = OxideBuildomatFile {
+                            repo,
+                            series: MACOS_AARCH64_SERIES,
+                            filename: binary.name,
+                            sha2: binary.aarch64_macos_sha2,
+                        };
+                        self.download_oxide_buildomat_binary(&file, binary_dir)
+                            .await?;
+                    }
+                }
+                Arch::X86_64 => {
+                    bail!("x86_64 macOS is not supported");
+                }
+            },
+            Os::Illumos => {
+                // The image tarball already provides all binaries.
+            }
+        }
+
+        Ok(())
+    }
+
     async fn download_cargo_hack(&self) -> Result<()> {
         let os = os_name()?;
         let arch = arch()?;
@@ -573,18 +680,12 @@ impl Downloader<'_> {
         let download_dir = self.output_dir.join("downloads");
         let destination_dir = self.output_dir.join("cargo-hack");
 
-        let checksums_path = self.versions_dir.join("cargo_hack_checksum");
-        let [checksum] = get_values_from_file(
-            [&format!("CIDL_SHA256_{}", os.env_name())],
-            &checksums_path,
-        )
-        .await?;
+        let checksums =
+            KvFile::read(self.versions_dir.join("cargo_hack_checksum")).await?;
+        let checksum = checksums
+            .get_sha256_value(&format!("CIDL_SHA256_{}", os.env_name()))?;
 
-        let versions_path = self.versions_dir.join("cargo_hack_version");
-        let version = tokio::fs::read_to_string(&versions_path)
-            .await
-            .context("Failed to read version from {versions_path}")?;
-        let version = version.trim();
+        let version = self.read_version_file("cargo_hack_version").await?;
 
         let (platform, supported_arch) = match (os, arch) {
             (Os::Illumos, Arch::X86_64) => ("unknown-illumos", "x86_64"),
@@ -609,8 +710,7 @@ impl Downloader<'_> {
             &self.log,
             &tarball_path,
             &tarball_url,
-            ChecksumAlgorithm::Sha2,
-            &checksum,
+            checksum,
         )
         .await?;
 
@@ -625,18 +725,13 @@ impl Downloader<'_> {
         let download_dir = self.output_dir.join("downloads");
         let destination_dir = self.output_dir.join("clickhouse");
 
-        let checksums_path = self.versions_dir.join("clickhouse_checksums");
-        let [checksum] = get_values_from_file(
-            [&format!("CIDL_SHA256_{}", os.env_name())],
-            &checksums_path,
-        )
-        .await?;
+        let checksums =
+            KvFile::read(self.versions_dir.join("clickhouse_checksums"))
+                .await?;
+        let checksum = checksums
+            .get_sha256_value(&format!("CIDL_SHA256_{}", os.env_name()))?;
 
-        let versions_path = self.versions_dir.join("clickhouse_version");
-        let version = tokio::fs::read_to_string(&versions_path)
-            .await
-            .context("Failed to read version from {versions_path}")?;
-        let version = version.trim();
+        let version = self.read_version_file("clickhouse_version").await?;
 
         const S3_BUCKET: &'static str =
             "https://oxide-clickhouse-build.s3.us-west-2.amazonaws.com";
@@ -659,8 +754,7 @@ impl Downloader<'_> {
             &self.log,
             &tarball_path,
             &tarball_url,
-            ChecksumAlgorithm::Sha2,
-            &checksum,
+            checksum,
         )
         .await?;
 
@@ -668,7 +762,8 @@ impl Downloader<'_> {
         let clickhouse_binary = destination_dir.join("clickhouse");
 
         info!(self.log, "Checking that binary works");
-        clickhouse_confirm_binary_works(&clickhouse_binary).await?;
+        confirm_binary_works(&clickhouse_binary, &["server", "--version"])
+            .await?;
 
         Ok(())
     }
@@ -679,12 +774,12 @@ impl Downloader<'_> {
         let download_dir = self.output_dir.join("downloads");
         let destination_dir = self.output_dir.join("cockroachdb");
 
-        let checksums_path = self.versions_dir.join("cockroachdb_checksums");
-        let [commit, checksum] = get_values_from_file(
-            ["COCKROACH_COMMIT", &format!("CIDL_SHA256_{}", os.env_name())],
-            &checksums_path,
-        )
-        .await?;
+        let checksums =
+            KvFile::read(self.versions_dir.join("cockroachdb_checksums"))
+                .await?;
+        let commit = checksums.get_git_commit_hash_value("COCKROACH_COMMIT")?;
+        let checksum = checksums
+            .get_sha256_value(&format!("CIDL_SHA256_{}", os.env_name()))?;
 
         let build = match os {
             Os::Illumos => "illumos-amd64",
@@ -692,23 +787,18 @@ impl Downloader<'_> {
             Os::Mac => "darwin-amd64",
         };
 
-        let tarball_filename = "cockroach.tgz";
-        let tarball_url = format!(
-            "{BUILDOMAT_URL}/oxidecomputer/cockroach/{build}/{commit}/{tarball_filename}"
-        );
-        let tarball_path = download_dir.join(tarball_filename);
+        let tarball = OxideBuildomatFile {
+            repo: OxideRepoRevision { name: "cockroach", revision: commit },
+            series: build,
+            filename: "cockroach.tgz",
+            sha2: checksum,
+        };
+        let tarball_path = download_dir.join(tarball.filename);
 
         tokio::fs::create_dir_all(&download_dir).await?;
         tokio::fs::create_dir_all(&destination_dir).await?;
 
-        download_file_and_verify(
-            &self.log,
-            &tarball_path,
-            &tarball_url,
-            ChecksumAlgorithm::Sha2,
-            &checksum,
-        )
-        .await?;
+        self.download_oxide_buildomat_file(&tarball, &tarball_path).await?;
 
         // We unpack the tarball in the download directory to emulate the old
         // behavior. This could be a little more consistent with Clickhouse.
@@ -725,10 +815,12 @@ impl Downloader<'_> {
         let binary_dir = destination_dir.join("bin");
         tokio::fs::create_dir_all(&binary_dir).await?;
         let src = tarball_path.with_file_name("cockroach").join("cockroach");
-        tokio::fs::copy(src, &cockroach_binary).await?;
+        tokio::fs::copy(&src, &cockroach_binary).await.with_context(|| {
+            format!("Failed to copy {src} to {cockroach_binary}")
+        })?;
 
         info!(self.log, "Checking that binary works");
-        cockroach_confirm_binary_works(&cockroach_binary).await?;
+        confirm_binary_works(&cockroach_binary, &["version"]).await?;
 
         Ok(())
     }
@@ -737,9 +829,10 @@ impl Downloader<'_> {
         let download_dir = self.output_dir.join("downloads");
         let tarball_path = download_dir.join("console.tar.gz");
 
-        let checksums_path = self.versions_dir.join("console_version");
-        let [commit, checksum] =
-            get_values_from_file(["COMMIT", "SHA2"], &checksums_path).await?;
+        let checksums =
+            KvFile::read(self.versions_dir.join("console_version")).await?;
+        let commit = checksums.get_git_commit_hash_value("COMMIT")?;
+        let checksum = checksums.get_sha256_value("SHA2")?;
 
         tokio::fs::create_dir_all(&download_dir).await?;
         let tarball_url = format!(
@@ -749,8 +842,7 @@ impl Downloader<'_> {
             &self.log,
             &tarball_path,
             &tarball_url,
-            ChecksumAlgorithm::Sha2,
-            &checksum,
+            checksum,
         )
         .await?;
 
@@ -767,37 +859,35 @@ impl Downloader<'_> {
         let download_dir = self.output_dir.join("downloads");
         let destination_dir = self.output_dir.join("dendrite-stub");
 
-        let stub_checksums_path =
-            self.versions_dir.join("dendrite_stub_checksums");
+        let stub_checksums =
+            KvFile::read(self.versions_dir.join("dendrite_stub_checksums"))
+                .await?;
+        let sha2 = stub_checksums.get_sha256_value("CIDL_SHA256_ILLUMOS")?;
+        let dpd_linux_sha2 =
+            stub_checksums.get_sha256_value("CIDL_SHA256_LINUX_DPD")?;
+        let swadm_linux_sha2 =
+            stub_checksums.get_sha256_value("CIDL_SHA256_LINUX_SWADM")?;
+        let dpd_macos_aarch64_sha2 =
+            stub_checksums.get_sha256_value("CIDL_SHA256_MACOS_AARCH64_DPD")?;
+        let swadm_macos_aarch64_sha2 = stub_checksums
+            .get_sha256_value("CIDL_SHA256_MACOS_AARCH64_SWADM")?;
+        let version =
+            KvFile::read(self.versions_dir.join("dendrite_version")).await?;
+        let commit = version.get_git_commit_hash_value("COMMIT")?;
 
-        let [sha2, dpd_sha2, swadm_sha2] = get_values_from_file(
-            [
-                "CIDL_SHA256_ILLUMOS",
-                "CIDL_SHA256_LINUX_DPD",
-                "CIDL_SHA256_LINUX_SWADM",
-            ],
-            &stub_checksums_path,
-        )
-        .await?;
-        let version_path = self.versions_dir.join("dendrite_version");
-        let [commit] = get_values_from_file(["COMMIT"], &version_path).await?;
-
-        let tarball_file = "dendrite-stub.tar.gz";
-        let tarball_path = download_dir.join(tarball_file);
-        let repo = "oxidecomputer/dendrite";
-        let url_base = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
+        let repo = OxideRepoRevision { name: "dendrite", revision: commit };
+        let tarball = OxideBuildomatFile {
+            repo,
+            series: "image",
+            filename: "dendrite-stub.tar.gz",
+            sha2,
+        };
+        let tarball_path = download_dir.join(tarball.filename);
 
         tokio::fs::create_dir_all(&download_dir).await?;
         tokio::fs::create_dir_all(&destination_dir).await?;
 
-        download_file_and_verify(
-            &self.log,
-            &tarball_path,
-            &format!("{url_base}/{tarball_file}"),
-            ChecksumAlgorithm::Sha2,
-            &sha2,
-        )
-        .await?;
+        self.download_oxide_buildomat_file(&tarball, &tarball_path).await?;
 
         // Unpack in the download directory, then copy everything into the
         // destination directory.
@@ -818,89 +908,53 @@ impl Downloader<'_> {
         )
         .context("Failed to create a symlink to dendrite's bin directory")?;
 
-        match os_name()? {
-            Os::Linux => {
-                let base_url =
-                    format!("{BUILDOMAT_URL}/{repo}/linux-bin/{commit}");
-                let filename = "dpd";
-                let path = download_dir.join(filename);
-                download_file_and_verify(
-                    &self.log,
-                    &path,
-                    &format!("{base_url}/{filename}"),
-                    ChecksumAlgorithm::Sha2,
-                    &dpd_sha2,
-                )
-                .await?;
-                set_permissions(&path, 0o755).await?;
-                tokio::fs::copy(path, bin_dir.join(filename)).await?;
-
-                let filename = "swadm";
-                let path = download_dir.join(filename);
-                download_file_and_verify(
-                    &self.log,
-                    &path,
-                    &format!("{base_url}/{filename}"),
-                    ChecksumAlgorithm::Sha2,
-                    &swadm_sha2,
-                )
-                .await?;
-                set_permissions(&path, 0o755).await?;
-                tokio::fs::copy(path, bin_dir.join(filename)).await?;
-            }
-            Os::Illumos => {}
-            Os::Mac => {
-                info!(self.log, "Building dendrite from source for macOS");
-
-                let binaries = [
-                    ("dpd", &["--features=tofino_stub"][..]),
-                    ("swadm", &[][..]),
-                ];
-
-                let built_binaries =
-                    self.build_from_git("dendrite", &commit, &binaries).await?;
-
-                // Copy built binaries to bin_dir
-                for (binary_path, (binary_name, _)) in
-                    built_binaries.iter().zip(binaries.iter())
-                {
-                    let dest = bin_dir.join(binary_name);
-                    tokio::fs::copy(binary_path, &dest).await?;
-                    set_permissions(&dest, 0o755).await?;
-                }
-            }
-        }
-
-        Ok(())
+        let binaries = [
+            HostNativeBinary {
+                name: "dpd",
+                x86_64_linux_sha2: dpd_linux_sha2,
+                aarch64_macos_sha2: dpd_macos_aarch64_sha2,
+            },
+            HostNativeBinary {
+                name: "swadm",
+                x86_64_linux_sha2: swadm_linux_sha2,
+                aarch64_macos_sha2: swadm_macos_aarch64_sha2,
+            },
+        ];
+        self.install_host_native_binaries(
+            repo,
+            "linux-bin",
+            &binaries,
+            &bin_dir,
+        )
+        .await
     }
 
     async fn download_maghemite_mgd(&self) -> Result<()> {
         let download_dir = self.output_dir.join("downloads");
         tokio::fs::create_dir_all(&download_dir).await?;
 
-        let checksums_path = self.versions_dir.join("maghemite_mgd_checksums");
-        let [mgd_sha2, mgd_linux_sha2] = get_values_from_file(
-            ["CIDL_SHA256", "MGD_LINUX_SHA256"],
-            &checksums_path,
+        let checksums =
+            KvFile::read(self.versions_dir.join("maghemite_mgd_checksums"))
+                .await?;
+        let mgd_sha2 = checksums.get_sha256_value("CIDL_SHA256")?;
+        let mgd_linux_sha2 = checksums.get_sha256_value("MGD_LINUX_SHA256")?;
+        let mgd_macos_aarch64_sha2 =
+            checksums.get_sha256_value("MGD_MACOS_AARCH64_SHA256")?;
+        let version = KvFile::read(
+            self.versions_dir.join("maghemite_mg_openapi_version"),
         )
         .await?;
-        let commit_path =
-            self.versions_dir.join("maghemite_mg_openapi_version");
-        let [commit] = get_values_from_file(["COMMIT"], &commit_path).await?;
+        let commit = version.get_git_commit_hash_value("COMMIT")?;
 
-        let repo = "oxidecomputer/maghemite";
-        let base_url = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
-
-        let filename = "mgd.tar.gz";
-        let tarball_path = download_dir.join(filename);
-        download_file_and_verify(
-            &self.log,
-            &tarball_path,
-            &format!("{base_url}/{filename}"),
-            ChecksumAlgorithm::Sha2,
-            &mgd_sha2,
-        )
-        .await?;
+        let repo = OxideRepoRevision { name: "maghemite", revision: commit };
+        let tarball = OxideBuildomatFile {
+            repo,
+            series: "image",
+            filename: "mgd.tar.gz",
+            sha2: mgd_sha2,
+        };
+        let tarball_path = download_dir.join(tarball.filename);
+        self.download_oxide_buildomat_file(&tarball, &tarball_path).await?;
         unpack_tarball(&self.log, &tarball_path, &download_dir).await?;
 
         let destination_dir = self.output_dir.join("mgd");
@@ -913,70 +967,42 @@ impl Downloader<'_> {
 
         let binary_dir = destination_dir.join("root/opt/oxide/mgd/bin");
 
-        match os_name()? {
-            Os::Linux => {
-                let filename = "mgd";
-                let path = download_dir.join(filename);
-                download_file_and_verify(
-                    &self.log,
-                    &path,
-                    &format!(
-                        "{BUILDOMAT_URL}/{repo}/linux/{commit}/{filename}"
-                    ),
-                    ChecksumAlgorithm::Sha2,
-                    &mgd_linux_sha2,
-                )
-                .await?;
-                set_permissions(&path, 0o755).await?;
-                tokio::fs::copy(path, binary_dir.join(filename)).await?;
-            }
-            Os::Mac => {
-                info!(self.log, "Building maghemite from source for macOS");
-
-                let binaries = [("mgd", &["--no-default-features"][..])];
-
-                let built_binaries = self
-                    .build_from_git("maghemite", &commit, &binaries)
-                    .await?;
-
-                // Copy built binary to binary_dir
-                let dest = binary_dir.join("mgd");
-                tokio::fs::copy(&built_binaries[0], &dest).await?;
-                set_permissions(&dest, 0o755).await?;
-            }
-            Os::Illumos => (),
-        }
-
-        Ok(())
+        let binaries = [HostNativeBinary {
+            name: "mgd",
+            x86_64_linux_sha2: mgd_linux_sha2,
+            aarch64_macos_sha2: mgd_macos_aarch64_sha2,
+        }];
+        self.install_host_native_binaries(repo, "linux", &binaries, &binary_dir)
+            .await
     }
 
     async fn download_maghemite_ddmd(&self) -> Result<()> {
         let download_dir = self.output_dir.join("downloads");
         tokio::fs::create_dir_all(&download_dir).await?;
 
-        let checksums_path = self.versions_dir.join("maghemite_mgd_checksums");
-        let [mg_ddm_sha2, ddmd_linux_sha2] = get_values_from_file(
-            ["MG_DDM_SHA256", "DDMD_LINUX_SHA256"],
-            &checksums_path,
+        let checksums =
+            KvFile::read(self.versions_dir.join("maghemite_mgd_checksums"))
+                .await?;
+        let mg_ddm_sha2 = checksums.get_sha256_value("MG_DDM_SHA256")?;
+        let ddmd_linux_sha2 =
+            checksums.get_sha256_value("DDMD_LINUX_SHA256")?;
+        let ddmd_macos_aarch64_sha2 =
+            checksums.get_sha256_value("DDMD_MACOS_AARCH64_SHA256")?;
+        let version = KvFile::read(
+            self.versions_dir.join("maghemite_ddm_openapi_version"),
         )
         .await?;
-        let commit_path =
-            self.versions_dir.join("maghemite_ddm_openapi_version");
-        let [commit] = get_values_from_file(["COMMIT"], &commit_path).await?;
+        let commit = version.get_git_commit_hash_value("COMMIT")?;
 
-        let repo = "oxidecomputer/maghemite";
-        let base_url = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
-
-        let filename = "mg-ddm.tar.gz";
-        let tarball_path = download_dir.join(filename);
-        download_file_and_verify(
-            &self.log,
-            &tarball_path,
-            &format!("{base_url}/{filename}"),
-            ChecksumAlgorithm::Sha2,
-            &mg_ddm_sha2,
-        )
-        .await?;
+        let repo = OxideRepoRevision { name: "maghemite", revision: commit };
+        let tarball = OxideBuildomatFile {
+            repo,
+            series: "image",
+            filename: "mg-ddm.tar.gz",
+            sha2: mg_ddm_sha2,
+        };
+        let tarball_path = download_dir.join(tarball.filename);
+        self.download_oxide_buildomat_file(&tarball, &tarball_path).await?;
         unpack_tarball(&self.log, &tarball_path, &download_dir).await?;
 
         let destination_dir = self.output_dir.join("mg-ddm");
@@ -989,68 +1015,32 @@ impl Downloader<'_> {
 
         let binary_dir = destination_dir.join("root/opt/oxide/mg-ddm/bin");
 
-        match os_name()? {
-            Os::Linux => {
-                let filename = "ddmd";
-                let path = download_dir.join(filename);
-                download_file_and_verify(
-                    &self.log,
-                    &path,
-                    &format!(
-                        "{BUILDOMAT_URL}/{repo}/linux/{commit}/{filename}"
-                    ),
-                    ChecksumAlgorithm::Sha2,
-                    &ddmd_linux_sha2,
-                )
-                .await?;
-                set_permissions(&path, 0o755).await?;
-                tokio::fs::copy(path, binary_dir.join(filename)).await?;
-            }
-            Os::Mac => {
-                info!(
-                    self.log,
-                    "Building maghemite ddmd from source for macOS"
-                );
-
-                let binaries = [("ddmd", &["--no-default-features"][..])];
-
-                let built_binaries = self
-                    .build_from_git("maghemite", &commit, &binaries)
-                    .await?;
-
-                let dest = binary_dir.join("ddmd");
-                tokio::fs::copy(&built_binaries[0], &dest).await?;
-                set_permissions(&dest, 0o755).await?;
-            }
-            Os::Illumos => (),
-        }
-
-        Ok(())
+        let binaries = [HostNativeBinary {
+            name: "ddmd",
+            x86_64_linux_sha2: ddmd_linux_sha2,
+            aarch64_macos_sha2: ddmd_macos_aarch64_sha2,
+        }];
+        self.install_host_native_binaries(repo, "linux", &binaries, &binary_dir)
+            .await
     }
 
     async fn download_softnpu(&self) -> Result<()> {
         let destination_dir = self.output_dir.join("npuzone");
         tokio::fs::create_dir_all(&destination_dir).await?;
 
-        let checksums_path = self.versions_dir.join("softnpu_version");
-        let [commit, sha2] =
-            get_values_from_file(["COMMIT", "SHA2"], &checksums_path).await?;
+        let checksums =
+            KvFile::read(self.versions_dir.join("softnpu_version")).await?;
+        let commit = checksums.get_git_commit_hash_value("COMMIT")?;
+        let sha2 = checksums.get_sha256_value("SHA2")?;
 
-        let repo = "oxidecomputer/softnpu";
-
-        let filename = "npuzone";
-        let base_url = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
-        let artifact_url = format!("{base_url}/{filename}");
-
-        let path = destination_dir.join(filename);
-        download_file_and_verify(
-            &self.log,
-            &path,
-            &artifact_url,
-            ChecksumAlgorithm::Sha2,
-            &sha2,
-        )
-        .await?;
+        let npuzone = OxideBuildomatFile {
+            repo: OxideRepoRevision { name: "softnpu", revision: commit },
+            series: "image",
+            filename: "npuzone",
+            sha2,
+        };
+        let path = destination_dir.join(npuzone.filename);
+        self.download_oxide_buildomat_file(&npuzone, &path).await?;
         set_permissions(&path, 0o755).await?;
 
         Ok(())
@@ -1061,26 +1051,24 @@ impl Downloader<'_> {
         let download_dir = self.output_dir.join("downloads");
         tokio::fs::create_dir_all(&download_dir).await?;
 
-        let [commit, sha2] = get_values_from_file(
-            ["COMMIT", "CIDL_SHA256_ILLUMOS"],
-            &self.versions_dir.join("transceiver_control_version"),
-        )
-        .await?;
+        let version =
+            KvFile::read(self.versions_dir.join("transceiver_control_version"))
+                .await?;
+        let commit = version.get_git_commit_hash_value("COMMIT")?;
+        let sha2 = version.get_sha256_value("CIDL_SHA256_ILLUMOS")?;
 
-        let repo = "oxidecomputer/transceiver-control";
-        let base_url = format!("{BUILDOMAT_URL}/{repo}/bins/{commit}");
-
-        let filename_gz = "xcvradm.gz";
+        let xcvradm_gz = OxideBuildomatFile {
+            repo: OxideRepoRevision {
+                name: "transceiver-control",
+                revision: commit,
+            },
+            series: "bins",
+            filename: "xcvradm.gz",
+            sha2,
+        };
         let filename = "xcvradm";
-        let gzip_path = download_dir.join(filename_gz);
-        download_file_and_verify(
-            &self.log,
-            &gzip_path,
-            &format!("{base_url}/{filename_gz}"),
-            ChecksumAlgorithm::Sha2,
-            &sha2,
-        )
-        .await?;
+        let gzip_path = download_dir.join(xcvradm_gz.filename);
+        self.download_oxide_buildomat_file(&xcvradm_gz, &gzip_path).await?;
 
         let download_bin_dir = download_dir.join("root/opt/oxide/bin");
         tokio::fs::create_dir_all(&download_bin_dir).await?;
@@ -1110,5 +1098,69 @@ impl Downloader<'_> {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn example_path() -> Utf8PathBuf {
+        Utf8PathBuf::from("tools/example_checksums")
+    }
+
+    #[test]
+    fn kv_file_rejects_malformed_files() {
+        let err =
+            KvFile::parse(example_path(), "COMMIT=\"abc\"\n\nnot a pair\n")
+                .expect_err("line without `=` is rejected");
+        assert_eq!(
+            format!("{err:#}"),
+            "tools/example_checksums:3: expected KEY=\"value\", \
+             found \"not a pair\"",
+        );
+
+        let err =
+            KvFile::parse(example_path(), "COMMIT=\"abc\"\nCOMMIT=\"def\"\n")
+                .expect_err("duplicate key is rejected");
+        assert_eq!(
+            format!("{err:#}"),
+            "tools/example_checksums:2: key \"COMMIT\" is already set \
+             earlier in the file",
+        );
+    }
+
+    #[test]
+    fn kv_file_errors_name_key_and_file() {
+        let file =
+            KvFile::parse(example_path(), "CIDL_SHA256_LINUX=\"abc123\"\n")
+                .expect("parsed example file");
+
+        let err = file
+            .get_sha256_value("CIDL_SHA256_LINUX")
+            .expect_err("truncated checksum is rejected");
+        assert_eq!(
+            format!("{err:#}"),
+            "Invalid SHA-256 checksum \"abc123\" for CIDL_SHA256_LINUX in \
+             tools/example_checksums: expected 64 hex characters, got 6",
+        );
+
+        let err = file
+            .get_git_commit_hash_value("CIDL_SHA256_LINUX")
+            .expect_err("abbreviated commit is rejected");
+        assert_eq!(
+            format!("{err:#}"),
+            "Invalid git commit hash \"abc123\" for CIDL_SHA256_LINUX in \
+             tools/example_checksums: expected 40 hex characters, got 6",
+        );
+
+        let err = file
+            .get_string_value("COMMIT")
+            .expect_err("missing key is rejected");
+        assert_eq!(
+            format!("{err:#}"),
+            "Could not find key \"COMMIT\" in tools/example_checksums, \
+             which sets [\"CIDL_SHA256_LINUX\"]",
+        );
     }
 }

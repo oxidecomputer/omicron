@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 # omicron environment file: source this file to set up your PATH to use the
 # various tools in the Omicron workspace where this file lives.  The test suite
 # and other commands expect these copies of these tools to be on your PATH.

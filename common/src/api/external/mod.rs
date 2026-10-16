@@ -11,7 +11,6 @@ mod error;
 pub mod http_pagination;
 pub use crate::address::IpVersion;
 pub use crate::api::internal::shared::AllowedSourceIps;
-use crate::update::ArtifactId;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
@@ -28,7 +27,6 @@ use parse_display::Display;
 use parse_display::FromStr;
 use rand::Rng;
 use schemars::JsonSchema;
-use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
@@ -45,7 +43,6 @@ use std::num::{NonZeroU16, NonZeroU32};
 use std::ops::Deref;
 use std::ops::RangeInclusive;
 use std::str::FromStr;
-use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 // The type aliases below exist primarily to ensure consistency among return
@@ -111,7 +108,7 @@ impl<T: ObjectIdentity> SimpleIdentityOrName for T {
 /// collection of objects
 ///
 /// This is logically analogous to Dropshot's `PageSelector` (plus the limit from
-/// Dropshot's `PaginationParams).  However, this type is HTTP-agnostic.  More
+/// Dropshot's `PaginationParams`).  However, this type is HTTP-agnostic.  More
 /// importantly, by the time this struct is generated, we know the type of the
 /// sort field and we can specialize `DataPageParams` to that type.  This makes
 /// it considerably simpler to implement the backend for most of our paginated
@@ -591,6 +588,8 @@ impl Display for ByteCount {
 // TODO-cleanup This could use the experimental std::num::IntErrorKind.
 #[derive(
     Debug,
+    Clone,
+    Copy,
     Eq,
     thiserror::Error,
     Ord,
@@ -707,172 +706,6 @@ impl From<BlockSize> for u64 {
         u64::from(bs.0)
     }
 }
-
-/// Generation numbers stored in the database, used for optimistic concurrency
-/// control
-//
-// A generation is a value between 0 and 2**63-1, i.e. equivalent to a u63.
-// The reason is that we store it as an i64 in the database, and we want to
-// disallow negative values. (We could potentially use two's complement to
-// store values greater than that as negative values, but surely 2**63 is
-// enough.)
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    Eq,
-    Hash,
-    JsonSchema,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Diffable,
-)]
-#[daft(leaf)]
-#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
-pub struct Generation(
-    // Generations are restricted to 2**63 - 1 as documented above.
-    #[cfg_attr(any(test, feature = "testing"), strategy(0..=i64::MAX as u64))]
-    u64,
-);
-
-impl Generation {
-    // `as` is a little distasteful because it allows lossy conversion, but we
-    // know converting `i64::MAX` to `u64` will always succeed losslessly.
-    const MAX: Generation = Generation(i64::MAX as u64);
-
-    pub const fn new() -> Generation {
-        Generation(1)
-    }
-
-    pub const fn from_u32(value: u32) -> Generation {
-        // `as` is a little distasteful because it allows lossy conversion, but
-        // (a) we know converting `u32` to `u64` will always succeed
-        // losslessly, and (b) it allows to make this function `const`, unlike
-        // if we were to use `u64::from(value)`.
-        Generation(value as u64)
-    }
-
-    pub const fn next(&self) -> Generation {
-        // It should technically be an operational error if this wraps or even
-        // exceeds the value allowed by an i64.  But it seems unlikely enough to
-        // happen in practice that we can probably feel safe with this.
-        let next_gen = self.0 + 1;
-        assert!(
-            next_gen <= Generation::MAX.0,
-            "attempt to overflow generation number"
-        );
-        Generation(next_gen)
-    }
-
-    pub const fn prev(&self) -> Option<Generation> {
-        if self.0 > 1 { Some(Generation(self.0 - 1)) } else { None }
-    }
-
-    pub const fn as_u64(self) -> u64 {
-        self.0
-    }
-}
-
-impl<'de> Deserialize<'de> for Generation {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = u64::deserialize(deserializer)?;
-        Generation::try_from(value).map_err(|GenerationOverflowError(_)| {
-            serde::de::Error::invalid_value(
-                serde::de::Unexpected::Unsigned(value),
-                &"an integer between 0 and 9223372036854775807",
-            )
-        })
-    }
-}
-
-// This is the equivalent of applying `#[serde(transparent)]`, but that has a
-// side effect of changing the JsonSchema derive to no longer emit a schema.
-impl Serialize for Generation {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.0.serialize(serializer)
-    }
-}
-
-impl Display for Generation {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        f.write_str(&self.0.to_string())
-    }
-}
-
-impl From<&Generation> for i64 {
-    fn from(g: &Generation) -> Self {
-        // We have already validated that the value is within range.
-        i64::try_from(g.0).unwrap()
-    }
-}
-
-impl From<Generation> for u64 {
-    fn from(g: Generation) -> Self {
-        g.0
-    }
-}
-
-impl From<u32> for Generation {
-    fn from(value: u32) -> Self {
-        Generation(u64::from(value))
-    }
-}
-
-impl TryFrom<i64> for Generation {
-    type Error = GenerationNegativeError;
-
-    fn try_from(value: i64) -> Result<Self, Self::Error> {
-        Ok(Generation(
-            u64::try_from(value).map_err(|_| GenerationNegativeError(()))?,
-        ))
-    }
-}
-
-impl TryFrom<u64> for Generation {
-    type Error = GenerationOverflowError;
-
-    fn try_from(value: u64) -> Result<Self, Self::Error> {
-        i64::try_from(value).map_err(|_| GenerationOverflowError(()))?;
-        Ok(Generation(value))
-    }
-}
-
-impl FromStr for Generation {
-    type Err = std::num::ParseIntError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // Try to parse `s` as both an i64 and u64, returning the error from
-        // either.
-        let _ = i64::from_str(s)?;
-        Ok(Generation(u64::from_str(s)?))
-    }
-}
-
-impl slog::Value for Generation {
-    fn serialize(
-        &self,
-        _rec: &slog::Record,
-        key: slog::Key,
-        serializer: &mut dyn slog::Serializer,
-    ) -> slog::Result {
-        serializer.emit_u64(key, self.0)
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("negative generation number")]
-pub struct GenerationNegativeError(());
-
-#[derive(Debug, thiserror::Error)]
-#[error("generation number too large")]
-pub struct GenerationOverflowError(());
 
 /// An RFC-1035-compliant hostname.
 #[derive(
@@ -2484,179 +2317,6 @@ impl std::fmt::Display for Digest {
     }
 }
 
-/// An address lot and associated blocks resulting from creating an address lot.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct AddressLotCreateResponse {
-    /// The address lot that was created.
-    pub lot: AddressLot,
-
-    /// The address lot blocks that were created.
-    pub blocks: Vec<AddressLotBlock>,
-}
-
-/// An address lot and associated blocks resulting from viewing an address lot.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct AddressLotViewResponse {
-    /// The address lot.
-    pub lot: AddressLot,
-
-    /// The address lot blocks.
-    pub blocks: Vec<AddressLotBlock>,
-}
-
-/// Represents an address lot object, containing the id of the lot that can be
-/// used in other API calls.
-// TODO Add kind attribute to AddressLot
-// https://github.com/oxidecomputer/omicron/issues/3064
-#[derive(
-    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
-)]
-pub struct AddressLot {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    /// Desired use of `AddressLot`
-    pub kind: AddressLotKind,
-}
-
-/// The kind associated with an address lot.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum AddressLotKind {
-    /// Infrastructure address lots are used for network infrastructure like
-    /// addresses assigned to rack switches.
-    Infra,
-
-    /// Pool address lots are used by IP pools.
-    Pool,
-}
-
-/// An address lot block is a part of an address lot and contains a range of
-/// addresses. The range is inclusive.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct AddressLotBlock {
-    /// The id of the address lot block.
-    pub id: Uuid,
-
-    /// The first address of the block (inclusive).
-    pub first_address: IpAddr,
-
-    /// The last address of the block (inclusive).
-    pub last_address: IpAddr,
-}
-
-/// Information about LLDP advertisements from other network entities directly
-/// connected to a switch port.  This structure contains both metadata about
-/// when and where the neighbor was seen, as well as the specific information
-/// the neighbor was advertising.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct LldpNeighbor {
-    // Unique ID assigned to this neighbor - only used for pagination
-    #[serde(skip)]
-    pub id: Uuid,
-
-    /// The port on which the neighbor was seen
-    pub local_port: String,
-
-    /// Initial sighting of this LldpNeighbor
-    pub first_seen: DateTime<Utc>,
-
-    /// Most recent sighting of this LldpNeighbor
-    pub last_seen: DateTime<Utc>,
-
-    /// The LLDP link name advertised by the neighbor
-    pub link_name: String,
-
-    /// The LLDP link description advertised by the neighbor
-    pub link_description: Option<String>,
-
-    /// The LLDP chassis identifier advertised by the neighbor
-    pub chassis_id: String,
-
-    /// The LLDP system name advertised by the neighbor
-    pub system_name: Option<String>,
-
-    /// The LLDP system description advertised by the neighbor
-    pub system_description: Option<String>,
-
-    /// The LLDP management IP(s) advertised by the neighbor
-    pub management_ip: Vec<lldp_protocol::types::ManagementAddress>,
-}
-
-impl SimpleIdentity for LldpNeighbor {
-    fn id(&self) -> Uuid {
-        self.id
-    }
-}
-
-/// A route configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortRouteConfig {
-    /// The port settings object this route configuration belongs to.
-    pub port_settings_id: Uuid,
-
-    /// The interface name this route configuration is assigned to.
-    pub interface_name: Name,
-
-    /// The route's destination network.
-    pub dst: oxnet::IpNet,
-
-    /// The route's gateway address.
-    pub gw: IpAddr,
-
-    /// The VLAN identifier for the route. Use this if the gateway is reachable
-    /// over an 802.1Q tagged L2 segment.
-    pub vlan_id: Option<u16>,
-
-    /// Route RIB priority. Higher priority indicates precedence within and across
-    /// protocols.
-    pub rib_priority: Option<u8>,
-}
-
-/// An IP address configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortAddressConfig {
-    /// The port settings object this address configuration belongs to.
-    pub port_settings_id: Uuid,
-
-    /// The id of the address lot block this address is drawn from.
-    pub address_lot_block_id: Uuid,
-
-    /// The IP address and prefix.
-    pub address: oxnet::IpNet,
-
-    /// An optional VLAN ID
-    pub vlan_id: Option<u16>,
-
-    /// The interface name this address belongs to.
-    pub interface_name: Name,
-}
-
-/// An IP address configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortAddressView {
-    /// The port settings object this address configuration belongs to.
-    pub port_settings_id: Uuid,
-
-    /// The id of the address lot this address is drawn from.
-    pub address_lot_id: Uuid,
-
-    /// The name of the address lot this address is drawn from.
-    pub address_lot_name: Name,
-
-    /// The id of the address lot block this address is drawn from.
-    pub address_lot_block_id: Uuid,
-
-    /// The IP address and prefix.
-    pub address: oxnet::IpNet,
-
-    /// An optional VLAN ID
-    pub vlan_id: Option<u16>,
-
-    /// The interface name this address belongs to.
-    pub interface_name: Name,
-}
-
 /// Configuration of inbound ICMP allowed by API services.
 #[derive(
     Clone,
@@ -2677,84 +2337,6 @@ pub struct ServiceIcmpConfig {
     /// MTU discovery and better cope with fragmentation issues. Otherwise all
     /// inbound ICMP traffic will be dropped.
     pub enabled: bool,
-}
-
-// TODO: move these TUF repo structs out of this file. They're not external
-// anymore after refactors that use views::TufRepo in the external API. They are
-// still used extensively in internal services.
-
-/// A description of an uploaded TUF repository.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-pub struct TufRepoDescription {
-    /// Information about the repository.
-    pub repo: TufRepoMeta,
-
-    /// Information about the artifacts present in the repository.
-    pub artifacts: Vec<TufArtifactMeta>,
-}
-
-impl TufRepoDescription {
-    /// Sorts the artifacts so that descriptions can be compared.
-    pub fn sort_artifacts(&mut self) {
-        self.artifacts.sort_by(|a, b| a.id.cmp(&b.id));
-    }
-}
-
-/// Metadata about a TUF repository.
-///
-/// Found within a `TufRepoDescription`.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-pub struct TufRepoMeta {
-    /// The hash of the repository.
-    ///
-    /// This is a slight abuse of `ArtifactHash`, since that's the hash of
-    /// individual artifacts within the repository. However, we use it here for
-    /// convenience.
-    pub hash: ArtifactHash,
-
-    /// The version of the targets role.
-    pub targets_role_version: u64,
-
-    /// The time until which the repo is valid.
-    pub valid_until: DateTime<Utc>,
-
-    /// The system version in artifacts.json.
-    pub system_version: Version,
-
-    /// The file name of the repository.
-    ///
-    /// This is purely used for debugging and may not always be correct (e.g.
-    /// with wicket, we read the file contents from stdin so we don't know the
-    /// correct file name).
-    pub file_name: String,
-}
-
-/// Metadata about an individual TUF artifact.
-///
-/// Found within a `TufRepoDescription`.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-pub struct TufArtifactMeta {
-    /// The artifact ID.
-    pub id: ArtifactId,
-
-    /// The hash of the artifact.
-    pub hash: ArtifactHash,
-
-    /// The size of the artifact in bytes.
-    pub size: u64,
-
-    /// Contents of the `BORD` field of a Hubris archive caboose. Only
-    /// applicable to artifacts that are Hubris archives.
-    ///
-    /// This field should always be `Some(_)` if `sign` is `Some(_)`, but the
-    /// opposite is not true (SP images will have a `board` but not a `sign`).
-    pub board: Option<String>,
-
-    /// Contents of the `SIGN` field of a Hubris archive caboose, i.e.,
-    /// an identifier for the set of valid signing keys. Currently only
-    /// applicable to RoT image and bootloader artifacts, where it will
-    /// be an LPC55 Root Key Table Hash (RKTH).
-    pub sign: Option<Vec<u8>>,
 }
 
 /// A networking probe
@@ -2836,7 +2418,6 @@ mod test {
     use serde::Deserialize;
     use serde::Serialize;
 
-    use super::Generation;
     use super::RouteDestination;
     use super::RouteTarget;
     use super::VpcFirewallIcmpFilter;
@@ -3069,51 +2650,6 @@ mod test {
             format!("{}", ByteCount::from_gibibytes_u32(1024)),
             "1 TiB".to_string()
         );
-    }
-
-    #[test]
-    fn test_generation_display_parse() {
-        assert_eq!(Generation::new().to_string(), "1");
-        assert_eq!(Generation::from_str("1").unwrap(), Generation::new());
-    }
-
-    #[test]
-    fn test_generation_serde() {
-        assert_eq!(serde_json::to_string(&Generation::new()).unwrap(), "1");
-        assert_eq!(
-            serde_json::from_str::<Generation>("1").unwrap(),
-            Generation::new()
-        );
-    }
-
-    #[test]
-    fn test_generation_from_int() {
-        for good_value in [0, Generation::MAX.0] {
-            Generation::try_from(good_value).unwrap();
-            serde_json::from_str::<Generation>(&good_value.to_string())
-                .unwrap();
-        }
-        for good_value in [0, i64::MAX] {
-            Generation::try_from(good_value).unwrap();
-            serde_json::from_str::<Generation>(&good_value.to_string())
-                .unwrap();
-        }
-        for bad_value in [Generation::MAX.0 + 1, u64::MAX] {
-            Generation::try_from(bad_value).unwrap_err();
-            serde_json::from_str::<Generation>(&bad_value.to_string())
-                .unwrap_err();
-        }
-        for bad_value in [-1, i64::MIN] {
-            Generation::try_from(bad_value).unwrap_err();
-            serde_json::from_str::<Generation>(&bad_value.to_string())
-                .unwrap_err();
-        }
-    }
-
-    #[test]
-    #[should_panic(expected = "attempt to overflow generation number")]
-    fn test_generation_overflow() {
-        Generation::MAX.next();
     }
 
     #[test]

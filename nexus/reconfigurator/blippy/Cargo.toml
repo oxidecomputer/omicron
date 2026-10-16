@@ -8,10 +8,12 @@ workspace = true
 
 [dependencies]
 nexus-types.workspace = true
+omicron-generation-kinds.workspace = true
 sled-agent-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
+strum.workspace = true
 tufaceous-artifact.workspace = true
 
 [dev-dependencies]

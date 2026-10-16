@@ -40,8 +40,16 @@ slog.workspace = true
 slog-error-chain.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
-tufaceous-artifact.workspace = true
 uuid.workspace = true
 zip.workspace = true
 
 omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+rand.workspace = true
+zstd.workspace = true
+
+[[bench]]
+name = "zone_logs"
+harness = false

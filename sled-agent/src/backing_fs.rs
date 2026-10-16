@@ -27,7 +27,7 @@ use illumos_utils::zfs::{
     SizeDetails, Zfs,
 };
 use omicron_common::api::external::ByteCount;
-use omicron_common::disk::CompressionAlgorithm;
+use sled_agent_types::disk::CompressionAlgorithm;
 use std::io;
 
 #[derive(Debug, thiserror::Error)]

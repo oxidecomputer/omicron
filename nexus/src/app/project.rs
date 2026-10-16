@@ -68,7 +68,7 @@ impl super::Nexus {
             .lookup_node_output::<(authz::Project, db::model::Project)>(
                 "project",
             )
-            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .map_err(|e| Error::internal_error(&format!("{:#}", e)))
             .internal_context("looking up output from project create saga")?;
         Ok(db_project)
     }

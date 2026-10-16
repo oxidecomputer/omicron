@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2025 Oxide Computer Company
-
 use ereport_types::Ena;
 use ereport_types::EreporterRestartUuid;
 use gateway_messages::SpPort;
@@ -65,10 +63,13 @@ mod sled0 {
 
     def_ereport! {
         LOSS: {
-            "baseboard_part_number": "SimGimletSp",
+            "baseboard_part_number": sp_sim::FAKE_GIMLET_MODEL,
             "baseboard_serial_number": "SimGimlet00",
-            "hubris_archive_id": "ffffffff",
-            "hubris_version": "0.0.2",
+            "hubris_caboose": {
+                "board": sp_sim::SIM_GIMLET_BOARD,
+                "commit": "ffffffff",
+                "version": "0.0.2",
+            },
             "hubris_task_name": "packrat",
             "hubris_task_gen": 0,
             "hubris_uptime_ms": 666,
@@ -79,10 +80,13 @@ mod sled0 {
 
     def_ereport! {
         EREPORT_1: {
-            "baseboard_part_number": "SimGimletSp",
+            "baseboard_part_number": sp_sim::FAKE_GIMLET_MODEL,
             "baseboard_serial_number": "SimGimlet00",
-            "hubris_archive_id": "ffffffff",
-            "hubris_version": "0.0.2",
+            "hubris_caboose": {
+                "board": sp_sim::SIM_GIMLET_BOARD,
+                "commit": "ffffffff",
+                "version": "0.0.2",
+            },
             "hubris_task_name": "task_apollo_server",
             "hubris_task_gen": 13,
             "hubris_uptime_ms": 1233,
@@ -93,10 +97,13 @@ mod sled0 {
     }
     def_ereport! {
         EREPORT_2: {
-            "baseboard_part_number": "SimGimletSp",
+            "baseboard_part_number": sp_sim::FAKE_GIMLET_MODEL,
             "baseboard_serial_number": "SimGimlet00",
-            "hubris_archive_id": "ffffffff",
-            "hubris_version": "0.0.2",
+            "hubris_caboose": {
+                "board": sp_sim::SIM_GIMLET_BOARD,
+                "commit": "ffffffff",
+                "version": "0.0.2",
+            },
             "hubris_task_name": "drv_ae35_server",
             "hubris_task_gen": 1,
             "hubris_uptime_ms": 1234,
@@ -116,10 +123,13 @@ mod sled0 {
     }
     def_ereport! {
         EREPORT_3: {
-            "baseboard_part_number": "SimGimletSp",
+            "baseboard_part_number": sp_sim::FAKE_GIMLET_MODEL,
             "baseboard_serial_number": "SimGimlet00",
-            "hubris_archive_id": "ffffffff",
-            "hubris_version": "0.0.2",
+            "hubris_caboose": {
+                "board": sp_sim::SIM_GIMLET_BOARD,
+                "commit": "ffffffff",
+                "version": "0.0.2",
+            },
             "hubris_task_name": "task_apollo_server",
             "hubris_task_gen": 13,
             "hubris_uptime_ms": 1237,
@@ -136,10 +146,13 @@ mod sled0 {
 
     def_ereport! {
         EREPORT_4: {
-            "baseboard_part_number": "SimGimletSp",
+            "baseboard_part_number": sp_sim::FAKE_GIMLET_MODEL,
             "baseboard_serial_number": "SimGimlet00",
-            "hubris_archive_id": "ffffffff",
-            "hubris_version": "0.0.2",
+            "hubris_caboose": {
+                "board": sp_sim::SIM_GIMLET_BOARD,
+                "commit": "ffffffff",
+                "version": "0.0.2",
+            },
             "hubris_task_name": "drv_thingy_server",
             "hubris_task_gen": 2,
             "hubris_uptime_ms": 1240,
@@ -151,10 +164,13 @@ mod sled0 {
 
     def_ereport! {
         EREPORT_5: {
-            "baseboard_part_number": "SimGimletSp",
+            "baseboard_part_number": sp_sim::FAKE_GIMLET_MODEL,
             "baseboard_serial_number": "SimGimlet00",
-            "hubris_archive_id": "ffffffff",
-            "hubris_version": "0.0.2",
+            "hubris_caboose": {
+                "board": sp_sim::SIM_GIMLET_BOARD,
+                "commit": "ffffffff",
+                "version": "0.0.2",
+            },
             "hubris_task_name": "task_latex_server",
             "hubris_task_gen": 1,
             "hubris_uptime_ms": 1245,
@@ -173,10 +189,13 @@ mod sled1 {
 
     def_ereport! {
         LOSS: {
-            "baseboard_part_number": "SimGimletSp",
+            "baseboard_part_number": sp_sim::FAKE_GIMLET_MODEL,
             "baseboard_serial_number": "SimGimlet01",
-            "hubris_archive_id": "ffffffff",
-            "hubris_version": "0.0.2",
+            "hubris_caboose": {
+                "board": sp_sim::SIM_GIMLET_BOARD,
+                "commit": "ffffffff",
+                "version": "0.0.2",
+            },
             "hubris_task_name": "packrat",
             "hubris_task_gen": 0,
             "hubris_uptime_ms": 666,
@@ -187,10 +206,13 @@ mod sled1 {
 
     def_ereport! {
         EREPORT_1: {
-            "baseboard_part_number": "SimGimletSp",
+            "baseboard_part_number": sp_sim::FAKE_GIMLET_MODEL,
             "baseboard_serial_number": "SimGimlet01",
-            "hubris_archive_id": "ffffffff",
-            "hubris_version": "0.0.2",
+            "hubris_caboose": {
+                "board": sp_sim::SIM_GIMLET_BOARD,
+                "commit": "ffffffff",
+                "version": "0.0.2",
+            },
             "hubris_task_name": "task_thermal_server",
             "hubris_task_gen": 1,
             "hubris_uptime_ms": 1233,

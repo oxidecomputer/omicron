@@ -9,10 +9,10 @@ use anyhow::Context as _;
 use dropshot::ConfigDropshot;
 use dropshot::HttpServer;
 use dropshot::ServerBuilder;
-use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SledUuid;
-use sled_agent_types::inventory::Baseboard;
+use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::SledRole;
+use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use sp_sim::GimletPowerState;
 use std::net::SocketAddr;
@@ -157,7 +157,7 @@ struct HostPhase2SledAgentContext {
     state: watch::Receiver<HostPhase2State>,
     id: SledUuid,
     role: SledRole,
-    baseboard: Baseboard,
+    baseboard: BaseboardId,
 }
 
 impl HostPhase2SledAgentContext {
@@ -169,7 +169,10 @@ impl HostPhase2SledAgentContext {
             // random sled ID every time our `/inventory` endpoint is collected.
             id: SledUuid::new_v4(),
             role: SledRole::Gimlet,
-            baseboard: Baseboard::Unknown,
+            baseboard: BaseboardId {
+                part_number: "test".to_string(),
+                serial_number: "test".to_string(),
+            },
         }
     }
 }
@@ -197,14 +200,13 @@ mod api_impl {
     use dropshot::StreamingBody;
     use dropshot::TypedBody;
     use iddqd::IdOrdMap;
-    use omicron_common::api::external::Generation;
-    use omicron_common::api::internal::nexus::DiskRuntimeState;
     use omicron_common::api::internal::shared::ExternalIpGatewayMap;
     use omicron_common::api::internal::shared::SledIdentifiers;
     use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
     use omicron_common::api::internal::shared::{
         ResolvedVpcRouteSet, ResolvedVpcRouteState,
     };
+    use omicron_generation_kinds::SledConfigGeneration;
     use sled_agent_types::artifact::ArtifactConfig;
     use sled_agent_types::artifact::ArtifactCopyFromDepotBody;
     use sled_agent_types::artifact::ArtifactCopyFromDepotResponse;
@@ -215,12 +217,9 @@ mod api_impl {
     use sled_agent_types::bootstore::BootstoreStatus;
     use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
     use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
-    use sled_agent_types::debug::ChickenSwitchDestroyOrphanedDatasets;
     use sled_agent_types::debug::OperatorSwitchZonePolicy;
     use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadPathParm;
     use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
-    use sled_agent_types::disk::DiskEnsureBody;
-    use sled_agent_types::disk::DiskPathParam;
     use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
     use sled_agent_types::instance::InstanceEnsureBody;
     use sled_agent_types::instance::InstanceExternalIpBody;
@@ -242,13 +241,14 @@ mod api_impl {
     use sled_agent_types::inventory::FmdInventory;
     use sled_agent_types::inventory::HostPhase2DesiredContents;
     use sled_agent_types::inventory::HostPhase2DesiredSlots;
+    use sled_agent_types::inventory::InstanceManagerStatus;
     use sled_agent_types::inventory::Inventory;
     use sled_agent_types::inventory::ManifestInventory;
     use sled_agent_types::inventory::MupdateOverrideInventory;
     use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::OmicronSledConfig;
+    use sled_agent_types::inventory::OmicronSledUpdateDisposition;
     use sled_agent_types::inventory::SledCpuFamily;
-    use sled_agent_types::inventory::SledRole;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
     use sled_agent_types::probes::ProbeSet;
     use sled_agent_types::sled::AddSledRequest;
@@ -259,7 +259,6 @@ mod api_impl {
     use sled_agent_types::support_bundle::SupportBundleMetadata;
     use sled_agent_types::support_bundle::SupportBundlePathParam;
     use sled_agent_types::support_bundle::SupportBundleTransferQueryParams;
-    use sled_agent_types::uplink::SwitchPorts;
     use sled_agent_types::zone_bundle::BundleUtilization;
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_agent_types::zone_bundle::CleanupContextUpdate;
@@ -268,13 +267,15 @@ mod api_impl {
     use sled_agent_types::zone_bundle::ZoneBundleId;
     use sled_agent_types::zone_bundle::ZoneBundleMetadata;
     use sled_agent_types::zone_bundle::ZonePathParam;
-    use sled_agent_types_versions::v1;
     use sled_agent_types_versions::v20;
     use sled_agent_types_versions::v25;
     use sled_agent_types_versions::v26;
     use sled_agent_types_versions::v30;
     use sled_agent_types_versions::v33;
     use sled_agent_types_versions::v39;
+    use sled_agent_types_versions::v42;
+    use sled_agent_types_versions::v47;
+    use sled_agent_types_versions::v48;
     use sled_diagnostics::SledDiagnosticsQueryOutput;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
@@ -340,7 +341,7 @@ mod api_impl {
             // The rest of the inventory fields are irrelevant; fill them in
             // with something quasi-reasonable (or empty, if we can).
             let config = OmicronSledConfig {
-                generation: Generation::new(),
+                generation: SledConfigGeneration::new(),
                 disks: IdOrdMap::new(),
                 datasets: IdOrdMap::new(),
                 zones: IdOrdMap::new(),
@@ -350,13 +351,14 @@ mod api_impl {
                     slot_b: HostPhase2DesiredContents::CurrentContents,
                 },
                 measurements: BTreeSet::new(),
+                update_disposition: OmicronSledUpdateDisposition::Available,
             };
 
             Ok(HttpResponseOk(Inventory {
                 sled_id: ctx.id,
                 sled_agent_address,
                 sled_role: ctx.role,
-                baseboard: ctx.baseboard.clone(),
+                baseboard_id: ctx.baseboard.clone(),
                 usable_hardware_threads: 64,
                 usable_physical_ram: (1 << 30).into(),
                 reservoir_size: (1 << 29).into(),
@@ -378,6 +380,7 @@ mod api_impl {
                     remove_mupdate_override: None,
                     boot_partitions,
                 }),
+                instance_manager_status: InstanceManagerStatus::available(0),
                 fmd: Ok(FmdInventory::default()),
                 file_source_resolver: OmicronFileSourceResolverInventory {
                     zone_manifest: ManifestInventory {
@@ -576,12 +579,6 @@ mod api_impl {
             unimplemented!()
         }
 
-        async fn sled_role_get_v1(
-            _rqctx: RequestContext<Self::Context>,
-        ) -> Result<HttpResponseOk<SledRole>, HttpError> {
-            unimplemented!()
-        }
-
         async fn vmm_register(
             _rqctx: RequestContext<Self::Context>,
             _path_params: Path<VmmPathParam>,
@@ -672,14 +669,6 @@ mod api_impl {
             }
         }
 
-        async fn disk_put(
-            _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<DiskPathParam>,
-            _body: TypedBody<DiskEnsureBody>,
-        ) -> Result<HttpResponseOk<DiskRuntimeState>, HttpError> {
-            unimplemented!()
-        }
-
         async fn artifact_config_get(
             _rqctx: RequestContext<Self::Context>,
         ) -> Result<HttpResponseOk<ArtifactConfig>, HttpError> {
@@ -760,19 +749,24 @@ mod api_impl {
             unimplemented!()
         }
 
-        async fn uplink_ensure(
+        async fn write_network_bootstore_config_v48(
             _rqctx: RequestContext<Self::Context>,
-            _body: TypedBody<SwitchPorts>,
+            _body: TypedBody<v48::system_networking::WriteNetworkConfigRequest>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 
-        async fn read_network_bootstore_config_cache(
+        async fn write_network_bootstore_config_v47(
             _rqctx: RequestContext<Self::Context>,
-        ) -> Result<
-            HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
-            HttpError,
-        > {
+            _body: TypedBody<v47::system_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v42(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v42::system_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 
@@ -814,13 +808,6 @@ mod api_impl {
         async fn write_network_bootstore_config_v20(
             _rqctx: RequestContext<Self::Context>,
             _body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
-        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-            unimplemented!()
-        }
-
-        async fn write_network_bootstore_config_v1(
-            _rqctx: RequestContext<Self::Context>,
-            _body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
@@ -948,22 +935,6 @@ mod api_impl {
                 SledDiagnosticsLogsDownloadQueryParam,
             >,
         ) -> Result<http::Response<Body>, HttpError> {
-            unimplemented!()
-        }
-
-        async fn chicken_switch_destroy_orphaned_datasets_get_v1(
-            _request_context: RequestContext<Self::Context>,
-        ) -> Result<
-            HttpResponseOk<ChickenSwitchDestroyOrphanedDatasets>,
-            HttpError,
-        > {
-            unimplemented!()
-        }
-
-        async fn chicken_switch_destroy_orphaned_datasets_put_v1(
-            _request_context: RequestContext<Self::Context>,
-            _body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
-        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 

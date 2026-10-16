@@ -26,12 +26,11 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
-use omicron_common::api::external::Vni;
 
 impl DataStore {
     /// Currently used to ensure that a NAT entry exists for an Instance.
     /// This SHOULD NOT be directly used to create service zone nat entries,
-    /// as they are updated via a background task.
+    /// as they are managed by an entirely separate subsystem.
     pub async fn ensure_nat_entry(
         &self,
         opctx: &OpContext,
@@ -101,86 +100,6 @@ impl DataStore {
             }
             Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
         }
-    }
-
-    /// Method for synchronizing service zone nat, called by `ServiceZoneNatTracker`
-    /// background task.
-    /// Expects a complete set of service zone nat entries.
-    /// Soft-deletes db entries that are not present in `nat_entries` parameter.
-    /// Creates missing entries idempotently.
-    ///
-    /// returns the number of records added
-    pub async fn nat_sync_service_zones(
-        &self,
-        opctx: &OpContext,
-        nat_entries: &[NatEntryValues],
-    ) -> CreateResult<usize> {
-        use nexus_db_schema::schema::nat_entry::dsl;
-
-        let vni = nexus_db_model::Vni(Vni::SERVICES_VNI);
-
-        // find all active nat entries with the services vni
-        let result: Vec<NatEntry> = dsl::nat_entry
-            .filter(dsl::vni.eq(vni))
-            .filter(dsl::version_removed.is_null())
-            .select(NatEntry::as_select())
-            .load_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        // determine what to keep and what to delete
-        let mut keep: Vec<_> = vec![];
-        let mut delete: Vec<_> = vec![];
-
-        for db_entry in result.iter() {
-            let values = NatEntryValues {
-                external_address: db_entry.external_address,
-                first_port: db_entry.first_port,
-                last_port: db_entry.last_port,
-                sled_address: db_entry.sled_address,
-                vni: db_entry.vni,
-                mac: db_entry.mac,
-            };
-
-            if nat_entries.contains(&values) {
-                keep.push(values);
-            } else {
-                delete.push(db_entry)
-            }
-        }
-
-        // delete entries that are not present in requested entries
-        for entry in delete {
-            if let Err(e) = self.nat_delete(opctx, entry).await {
-                error!(
-                    opctx.log,
-                    "failed to delete service zone nat entry";
-                    "error" => ?e,
-                    "entry" => ?entry,
-                );
-            }
-        }
-
-        // optimization: only attempt to add what is missing
-        let add = nat_entries.iter().filter(|entry| !keep.contains(entry));
-
-        let mut count = 0;
-
-        // insert nat_entries
-        for entry in add {
-            if let Err(e) = self.ensure_nat_entry(opctx, entry.clone()).await {
-                error!(
-                    opctx.log,
-                    "failed to ensure service zone nat entry";
-                    "error" => ?e,
-                    "entry" => ?entry,
-                );
-                continue;
-            }
-            count += 1;
-        }
-
-        Ok(count)
     }
 
     /// Mark the provided NAT entry as removed in the database.
@@ -650,125 +569,6 @@ mod test {
         assert_eq!(active.len(), 0);
         assert_eq!(inactive.len(), 2);
         assert_eq!(datastore.nat_current_version(&opctx).await.unwrap(), 4);
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    // Test our ability to reconcile a set of service zone nat entries
-    #[tokio::test]
-    async fn nat_sync_service_zones() {
-        let logctx = dev::test_setup_log("nat_sync_service_zones");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        // We should not have any NAT entries at this moment
-        let initial_state =
-            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
-
-        assert!(initial_state.is_empty());
-        assert_eq!(datastore.nat_current_version(&opctx).await.unwrap(), 0);
-
-        // create two nat entries:
-        // 1. an entry should be deleted during the next sync
-        // 2. an entry that should be kept during the next sync
-
-        let external_address =
-            oxnet::Ipv4Net::host_net("10.0.0.100".parse().unwrap());
-
-        let sled_address =
-            oxnet::Ipv6Net::host_net("fd00:1122:3344:104::1".parse().unwrap());
-
-        // Add a nat entry.
-        let nat1 = NatEntryValues {
-            external_address: external_address.into(),
-            first_port: 0.into(),
-            last_port: 999.into(),
-            sled_address: sled_address.into(),
-            vni: Vni(external::Vni::SERVICES_VNI),
-            mac: MacAddr(
-                external::MacAddr::from_str("A8:40:25:F5:EB:2A").unwrap(),
-            ),
-        };
-
-        let nat2 = NatEntryValues {
-            first_port: 1000.into(),
-            last_port: 1999.into(),
-            ..nat1
-        };
-
-        datastore.ensure_nat_entry(&opctx, nat1.clone()).await.unwrap();
-        datastore.ensure_nat_entry(&opctx, nat2.clone()).await.unwrap();
-
-        let db_entries =
-            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
-
-        assert_eq!(db_entries.len(), 2);
-
-        // sync two nat entries:
-        // 1. a nat entry that already exists
-        // 2. a nat entry that does not already exist
-
-        let nat3 = NatEntryValues {
-            first_port: 2000.into(),
-            last_port: 2999.into(),
-            ..nat2
-        };
-
-        datastore
-            .nat_sync_service_zones(&opctx, &[nat2.clone(), nat3.clone()])
-            .await
-            .unwrap();
-
-        // we should have three nat entries in the db
-        // 1. the old one that was deleted during the last sync
-        // 2. the old one that "survived" the last sync
-        // 3. a new one that was added during the last sync
-        let db_entries =
-            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
-
-        assert_eq!(db_entries.len(), 3);
-
-        // nat2 and nat3 should not be soft deleted
-        for request in [nat2.clone(), nat3.clone()] {
-            assert!(db_entries.iter().any(|entry| {
-                entry.first_port == request.first_port
-                    && entry.last_port == request.last_port
-                    && entry.time_deleted.is_none()
-            }));
-        }
-
-        // nat1 should be soft deleted
-        assert!(db_entries.iter().any(|entry| {
-            entry.first_port == nat1.first_port
-                && entry.last_port == nat1.last_port
-                && entry.time_deleted.is_some()
-                && entry.version_removed.is_some()
-        }));
-
-        // add nat1 back
-        // this simulates a zone leaving and then returning, i.e. when a sled gets restarted
-        datastore
-            .nat_sync_service_zones(
-                &opctx,
-                &[nat1.clone(), nat2.clone(), nat3.clone()],
-            )
-            .await
-            .unwrap();
-
-        // we should have four nat entries in the db
-        let db_entries =
-            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
-
-        assert_eq!(db_entries.len(), 4);
-
-        // there should be an active entry for nat1 again
-        assert!(db_entries.iter().any(|entry| {
-            entry.first_port == nat1.first_port
-                && entry.last_port == nat1.last_port
-                && entry.time_deleted.is_none()
-                && entry.version_removed.is_none()
-        }));
 
         db.terminate().await;
         logctx.cleanup_successful();

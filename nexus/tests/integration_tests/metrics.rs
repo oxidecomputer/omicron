@@ -30,7 +30,8 @@ use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use oximeter::TimeseriesSchema;
 use oximeter::types::FieldValue;
 use std::borrow::Borrow;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use uuid::Uuid;
 
 pub async fn assert_system_metrics(
@@ -546,6 +547,36 @@ async fn test_project_timeseries_query(
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].timeseries.len(), 0);
 
+    // Check that a string literal cannot inject SQL through either query
+    // endpoint. The response body can't tell us whether the injection worked:
+    // no real `state` value equals the payload string, so Rust-side filtering
+    // leaves zero timeseries in the response no matter what. Instead we look at
+    // the query summaries, which list each SQL query OxQL ran.
+    let body = timeseries::TimeseriesQuery {
+        query: format!(
+            r#"{q1} | filter state == "success') OR 1 = 1 OR equals(state, '""#,
+        ),
+        include_summaries: true,
+    };
+    for url in
+        ["/v1/timeseries/query?project=project1", "/v1/system/timeseries/query"]
+    {
+        let request = RequestBuilder::new(client, Method::POST, url)
+            .body(Some(&body))
+            .expect_status(Some(StatusCode::OK));
+        let result = NexusRequest::new(request)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<oxql::OxqlQueryResult>()
+            .await;
+        assert_eq!(result.tables.len(), 1);
+        assert_eq!(result.tables[0].timeseries.len(), 0);
+        // OxQL first queries the fields tables for matching timeseries and
+        // only runs a second query for measurements if any matched. Exactly
+        // one summary means the SQL matched nothing. Two would mean the
+        // injected `OR 1 = 1` took effect.
+        assert_eq!(result.query_summaries.unwrap().len(), 1);
+    }
+
     // now let's test it with group_by
     let q4 = &format!(
         "{} | align mean_within(1m) | group_by [instance_id], sum",
@@ -704,7 +735,9 @@ async fn test_mgs_metrics(
             sp_sim_config.simulated_sps.gimlet.iter().map(|g| &g.common);
         let sidecar_configs =
             sp_sim_config.simulated_sps.sidecar.iter().map(|s| &s.common);
-        gimlet_configs.chain(sidecar_configs)
+        let psc_configs =
+            sp_sim_config.simulated_sps.psc.iter().map(|p| &p.common);
+        gimlet_configs.chain(sidecar_configs).chain(psc_configs)
     };
     // XXX(eliza): yes, this code is repetitive. We could probably make it a
     // little elss ugly with nested hash maps, but like...I already wrote it, so
@@ -717,36 +750,44 @@ async fn test_mgs_metrics(
     // pretty unlikely that a bug in MGS' sensor metrics subsystem would mess
     // that up --- the most important thing is just to make sure that the sensor
     // data is *present*, as that should catch most regressions.
-    let mut temp_sensors = HashMap::new();
-    let mut current_sensors = HashMap::new();
-    let mut voltage_sensors = HashMap::new();
-    let mut power_sensors = HashMap::new();
-    let mut input_voltage_sensors = HashMap::new();
-    let mut input_current_sensors = HashMap::new();
-    let mut fan_speed_sensors = HashMap::new();
-    let mut cpu_tctl_sensors = HashMap::new();
-    let mut pwm_sensors = HashMap::new();
-    let mut input_power_sensors = HashMap::new();
-    let mut input_energy_sensors = HashMap::new();
-    let mut output_energy_sensors = HashMap::new();
+    let mut temp_sensors = BTreeMap::new();
+    let mut current_sensors = BTreeMap::new();
+    let mut voltage_sensors = BTreeMap::new();
+    let mut power_sensors = BTreeMap::new();
+    let mut input_voltage_sensors = BTreeMap::new();
+    let mut input_current_sensors = BTreeMap::new();
+    let mut fan_speed_sensors = BTreeMap::new();
+    let mut cpu_tctl_sensors = BTreeMap::new();
+    let mut pwm_sensors = BTreeMap::new();
+    let mut input_power_sensors = BTreeMap::new();
+    let mut input_energy_sensors = BTreeMap::new();
+    let mut output_energy_sensors = BTreeMap::new();
     for sp in all_sp_configs {
-        let mut temp = 0;
-        let mut current = 0;
-        let mut voltage = 0;
-        let mut input_voltage = 0;
-        let mut input_current = 0;
-        let mut power = 0;
-        let mut speed = 0;
-        let mut cpu_tctl = 0;
-        let mut pwm = 0;
-        let mut input_power = 0;
-        let mut input_energy = 0;
-        let mut output_energy = 0;
+        // Okay, so this part is a bit sad. Currently, some SP metrics contain
+        // multiple readings of the same sensor kind with the same sensor name.
+        // Oximeter will collapse these to a single timeseries with multiple
+        // data points. So, to determine how many timeserieses to expect, we
+        // have to count the number of *unique component-id + sensor name pairs*
+        // for that sensor type, rather than just the total number of unique
+        // sensors defined in the config. See also:
+        // https://github.com/oxidecomputer/hubris/issues/2634
+        let mut temp = BTreeSet::new();
+        let mut current = BTreeSet::new();
+        let mut voltage = BTreeSet::new();
+        let mut input_voltage = BTreeSet::new();
+        let mut input_current = BTreeSet::new();
+        let mut power = BTreeSet::new();
+        let mut speed = BTreeSet::new();
+        let mut cpu_tctl = BTreeSet::new();
+        let mut pwm = BTreeSet::new();
+        let mut input_power = BTreeSet::new();
+        let mut input_energy = BTreeSet::new();
+        let mut output_energy = BTreeSet::new();
         for component in &sp.components {
             for sensor in &component.sensors {
                 use gateway_messages::measurement::MeasurementKind as Kind;
-                match sensor.def.kind {
-                    Kind::CpuTctl => cpu_tctl += 1,
+                let which_set = match sensor.def.kind {
+                    Kind::CpuTctl => &mut cpu_tctl,
                     Kind::Temperature => {
                         // Currently, Tctl measurements are reported as a
                         // "temperature" measurement, but are tracked by a
@@ -755,42 +796,82 @@ async fn test_mgs_metrics(
                         if component.device == "sbtsi"
                             && sensor.def.name == "CPU"
                         {
-                            cpu_tctl += 1
+                            &mut cpu_tctl
                         } else {
-                            temp += 1;
+                            &mut temp
                         }
                     }
-                    Kind::Current => current += 1,
-                    Kind::Voltage => voltage += 1,
-                    Kind::InputVoltage => input_voltage += 1,
-                    Kind::InputCurrent => input_current += 1,
-                    Kind::Speed => speed += 1,
-                    Kind::Power => power += 1,
-                    Kind::Pwm => pwm += 1,
-                    Kind::InputPower => input_power += 1,
-                    Kind::OutputEnergy => output_energy += 1,
-                    Kind::InputEnergy => input_energy += 1,
-                }
+                    Kind::Current => &mut current,
+                    Kind::Voltage => &mut voltage,
+                    Kind::InputVoltage => &mut input_voltage,
+                    Kind::InputCurrent => &mut input_current,
+                    Kind::Speed => &mut speed,
+                    Kind::Power => &mut power,
+                    Kind::Pwm => &mut pwm,
+                    Kind::InputPower => &mut input_power,
+                    Kind::OutputEnergy => &mut output_energy,
+                    Kind::InputEnergy => &mut input_energy,
+                };
+                // As discussed above, we count the number of unique component
+                // ID/sensor name pairs per measurement type, because that's the
+                // number of unique timeserieses we expect to see in oximeter.
+                let key = (&component.id, &sensor.def.name);
+                which_set.insert(key);
             }
         }
-        temp_sensors.insert(sp.serial_number.clone(), temp);
-        current_sensors.insert(sp.serial_number.clone(), current);
-        voltage_sensors.insert(sp.serial_number.clone(), voltage);
-        input_voltage_sensors.insert(sp.serial_number.clone(), input_voltage);
-        input_current_sensors.insert(sp.serial_number.clone(), input_current);
-        fan_speed_sensors.insert(sp.serial_number.clone(), speed);
-        power_sensors.insert(sp.serial_number.clone(), power);
-        cpu_tctl_sensors.insert(sp.serial_number.clone(), cpu_tctl);
-        pwm_sensors.insert(sp.serial_number.clone(), pwm);
-        input_power_sensors.insert(sp.serial_number.clone(), input_power);
-        input_energy_sensors.insert(sp.serial_number.clone(), input_energy);
-        output_energy_sensors.insert(sp.serial_number.clone(), output_energy);
+
+        eprintln!(
+            "-- SP {} expects the following sensors ---",
+            sp.serial_number
+        );
+        macro_rules! print_expected {
+            ($($name:ident),*) => {
+                $(
+                    eprintln!("  {}: {}", stringify!($name), $name.len());
+                    if !$name.is_empty() {
+                        eprintln!("    {:?}", $name);
+                    }
+                )*
+            };
+        }
+        print_expected! {
+            temp,
+            current,
+            voltage,
+            input_voltage,
+            input_current,
+            speed,
+            power,
+            cpu_tctl,
+            pwm,
+            input_power,
+            output_energy,
+            input_energy
+        };
+        eprintln!("");
+
+        temp_sensors.insert(sp.serial_number.clone(), temp.len());
+        current_sensors.insert(sp.serial_number.clone(), current.len());
+        voltage_sensors.insert(sp.serial_number.clone(), voltage.len());
+        input_voltage_sensors
+            .insert(sp.serial_number.clone(), input_voltage.len());
+        input_current_sensors
+            .insert(sp.serial_number.clone(), input_current.len());
+        fan_speed_sensors.insert(sp.serial_number.clone(), speed.len());
+        power_sensors.insert(sp.serial_number.clone(), power.len());
+        cpu_tctl_sensors.insert(sp.serial_number.clone(), cpu_tctl.len());
+        pwm_sensors.insert(sp.serial_number.clone(), pwm.len());
+        input_power_sensors.insert(sp.serial_number.clone(), input_power.len());
+        input_energy_sensors
+            .insert(sp.serial_number.clone(), input_energy.len());
+        output_energy_sensors
+            .insert(sp.serial_number.clone(), output_energy.len());
     }
 
     async fn check_all_timeseries_present<N>(
         querier: &MetricsQuerier<'_, N>,
         name: &str,
-        expected: HashMap<String, usize>,
+        expected: BTreeMap<String, usize>,
     ) {
         let metric_name = format!("hardware_component:{name}");
         eprintln!("\n=== checking timeseries for {metric_name} ===\n");
@@ -832,7 +913,7 @@ async fn test_mgs_metrics(
             let mut found = expected
                 .keys()
                 .map(|serial| (serial.clone(), 0))
-                .collect::<HashMap<_, usize>>();
+                .collect::<BTreeMap<_, usize>>();
             for timeseries in &table.timeseries {
                 let fields = &timeseries.fields;
                 if timeseries.points.is_empty() {
@@ -855,7 +936,7 @@ async fn test_mgs_metrics(
                     }
                 };
                 if let Some(count) = found.get_mut(serial_str) {
-                    *count += 1;
+                    *count += timeseries.points.dimensionality();
                 } else {
                     panic!(
                         "{name} timeseries had an unexpected chassis serial \
@@ -866,9 +947,10 @@ async fn test_mgs_metrics(
 
             eprintln!("-> {name}: found timeseries: {found:#?}");
             if found != expected {
+
                 return Err(MetricsNotYet::new(format!(
                     "number of {name} timeseries didn't match \
-                    expected in {table:#?}",
+                    expected (found {found:?}, expected {expected:?})",
                 )));
             }
             eprintln!("-> okay, looks good!");

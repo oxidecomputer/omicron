@@ -9,7 +9,7 @@ use illumos_utils::dladm::EtherstubVnic;
 use illumos_utils::running_zone::RunningZone;
 use illumos_utils::zpool::PathInPool;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use sled_agent_types::resolvable_files::PreparedOmicronZone;
 use sled_agent_types::resolvable_files::RemoveMupdateOverrideResult;
@@ -60,7 +60,10 @@ pub trait SledAgentFacilities: Send + Sync + 'static {
     ) -> anyhow::Result<()>;
 
     /// Instruct DDM to stop advertising a prefix.
-    fn ddm_remove_internal_dns_prefix(&self, prefix: Ipv6Subnet<SLED_PREFIX>);
+    fn ddm_remove_internal_dns_prefix(
+        &self,
+        prefix: Ipv6Subnet<SLED_PREFIX_LENGTH>,
+    );
 }
 
 pub trait SledAgentArtifactStore: Send + Sync + 'static {

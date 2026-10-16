@@ -14,14 +14,16 @@ use crate::db;
 use crate::db::DataStore;
 use crate::db::datastore::IdentityCheckPolicy;
 use omicron_test_utils::dev::db::CockroachInstance;
+use omicron_uuid_kinds::RackUuid;
 use slog::Logger;
 use std::sync::Arc;
-use uuid::Uuid;
 
 pub mod crdb;
 pub mod explain;
+pub mod fm;
 pub mod helpers;
 pub mod multicast;
+pub mod simulated_sleds;
 
 enum Populate {
     Nothing,
@@ -37,7 +39,11 @@ enum Interface {
 
 fn new_pool(log: &Logger, db: &CockroachInstance) -> Arc<db::Pool> {
     let cfg = db::Config { url: db.pg_config().clone() };
-    Arc::new(db::Pool::new_single_host(log, &cfg))
+    Arc::new(db::Pool::new_single_host(
+        log,
+        &cfg,
+        db::ClaimBacktraceSetting::Capture,
+    ))
 }
 
 struct TestDatabaseBuilder {
@@ -303,14 +309,13 @@ impl TestDatabase {
     }
 }
 
-pub const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
+pub use nexus_inventory::examples::RACK_UUID;
 
 async fn datastore_test_on_default_rack(
     log: &Logger,
     db: &CockroachInstance,
 ) -> (OpContext, Arc<DataStore>) {
-    let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
-    datastore_test(log, db, rack_id).await
+    datastore_test(log, db, RACK_UUID).await
 }
 
 // Constructs a DataStore for use in test suites that has preloaded the
@@ -319,12 +324,16 @@ async fn datastore_test_on_default_rack(
 async fn datastore_test(
     log: &Logger,
     db: &CockroachInstance,
-    rack_id: Uuid,
+    rack_id: RackUuid,
 ) -> (OpContext, Arc<DataStore>) {
     use crate::authn;
 
     let cfg = db::Config { url: db.pg_config().clone() };
-    let pool = Arc::new(db::Pool::new_single_host(&log, &cfg));
+    let pool = Arc::new(db::Pool::new_single_host(
+        &log,
+        &cfg,
+        db::ClaimBacktraceSetting::Capture,
+    ));
     let datastore = Arc::new(
         DataStore::new(&log, pool, None, IdentityCheckPolicy::DontCare)
             .await

@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
-
 //! An interface to libipcc (inter-processor communications channel) which
 //! currently supports looking up values stored in the SP by key. These
 //! values are variously static, passed from the control plane to the SP

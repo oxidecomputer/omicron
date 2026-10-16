@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 #
 # Small tool to install OPTE and the xde kernel driver and ONU bits.
 
@@ -88,7 +92,8 @@ if [[ "x$OPTE_COMMIT" != "x" ]]; then
     curl -fL -o "$P5P_PATH" "$P5P_URL"
 
     RC=0
-    pfexec pkg install -g "$P5P_PATH" pkg://helios-dev/driver/network/opte || RC=$?
+    # The OPTE CI p5p publishes under the "helios" publisher.
+    pfexec pkg install -g "$P5P_PATH" pkg://helios/driver/network/opte || RC=$?
     if [[ "$RC" -eq 0 ]]; then
         echo "xde driver installed from override p5p"
     elif [[ "$RC" -eq 4 ]]; then

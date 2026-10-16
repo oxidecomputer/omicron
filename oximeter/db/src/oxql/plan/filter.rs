@@ -4,8 +4,6 @@
 
 //! OxQL query plan node for representing a filtering operation.
 
-// Copyright 2024 Oxide Computer Company
-
 use crate::oxql::ast::literal::Literal;
 use crate::oxql::ast::table_ops::filter;
 use crate::oxql::ast::table_ops::filter::implicit_field_names_for_table_schema;

@@ -4,6 +4,7 @@
 
 //! omdb commands that query or update specific Nexus instances
 
+mod fm_config;
 mod quiesce;
 mod reconfigurator_config;
 mod update_status;
@@ -26,6 +27,8 @@ use clap::Args;
 use clap::ColorChoice;
 use clap::Subcommand;
 use clap::ValueEnum;
+use fm_config::FmConfigArgs;
+use fm_config::cmd_nexus_fm_config;
 use futures::StreamExt;
 use futures::TryStreamExt;
 use http::StatusCode;
@@ -44,6 +47,7 @@ use nexus_lockstep_client::types::PhysicalDiskPath;
 use nexus_lockstep_client::types::SagaState;
 use nexus_lockstep_client::types::SledSelector;
 use nexus_saga_recovery::LastPass;
+use nexus_saga_recovery::LastPassSuccess;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::ClickhouseMode;
 use nexus_types::deployment::ClickhousePolicy;
@@ -55,12 +59,16 @@ use nexus_types::internal_api::background::AttachedSubnetManagerStatus;
 use nexus_types::internal_api::background::AuditLogCleanupStatus;
 use nexus_types::internal_api::background::AuditLogTimeoutIncompleteStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
-use nexus_types::internal_api::background::BlueprintRendezvousStats;
+use nexus_types::internal_api::background::BlueprintPrunerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
+use nexus_types::internal_api::background::DatasetRendezvousOutcome;
+use nexus_types::internal_api::background::DatasetRendezvousStats;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::FmAnalysisStatus;
+use nexus_types::internal_api::background::FmConfigLoadStatus;
 use nexus_types::internal_api::background::FmRendezvousStatus;
+use nexus_types::internal_api::background::IncompleteBootstoreConfigReport;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::InventoryLoadStatus;
@@ -78,16 +86,21 @@ use nexus_types::internal_api::background::ServiceFirewallRuleStatus;
 use nexus_types::internal_api::background::SessionCleanupStatus;
 use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
+use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousOutcome;
+use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousStats;
 use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
 use nexus_types::internal_api::background::SwitchPortPopulatorStatus;
 use nexus_types::internal_api::background::SwitchPortPopulatorStatusKind;
+use nexus_types::internal_api::background::SwitchPortSettingsManagerStatus;
 use nexus_types::internal_api::background::TrustQuorumManagerStatus;
 use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
 use nexus_types::internal_api::background::TufRepoPrunerStatus;
+use nexus_types::internal_api::background::VmmMarkStopForUpdateStatus;
+use nexus_types::internal_api::background::WebhookRxDeliveryStatus;
 use nexus_types::internal_api::background::fm_rendezvous;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
@@ -98,15 +111,28 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
+use oxide_update_engine_display::LineDisplay;
+use oxide_update_engine_display::LineDisplayStyles;
+use oxide_update_engine_display::ProgressRatioDisplay;
+use oxide_update_engine_types::buffer::EventBuffer;
+use oxide_update_engine_types::buffer::ExecutionStatus;
+use oxide_update_engine_types::buffer::ExecutionTerminalInfo;
+use oxide_update_engine_types::buffer::TerminalKind;
+use oxide_update_engine_types::events::EventReport;
+use oxide_update_engine_types::events::StepOutcome;
+use oxide_update_engine_types::spec::GenericSpec;
+use oxide_update_engine_types::spec::SerializableError;
 use quiesce::QuiesceArgs;
 use quiesce::cmd_nexus_quiesce;
 use reconfigurator_config::ReconfiguratorConfigArgs;
 use reconfigurator_config::cmd_nexus_reconfigurator_config;
 use serde::Deserialize;
+use sled_agent_types::disk::DiskIdentity;
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fmt;
 use std::fs::OpenOptions;
 use std::num::ParseIntError;
 use std::os::unix::fs::PermissionsExt;
@@ -121,17 +147,6 @@ use tabled::settings::object::Columns;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::OnceCell;
 use trust_quorum_types::types::Epoch;
-use update_engine::EventBuffer;
-use update_engine::ExecutionStatus;
-use update_engine::ExecutionTerminalInfo;
-use update_engine::NestedError;
-use update_engine::NestedSpec;
-use update_engine::TerminalKind;
-use update_engine::display::LineDisplay;
-use update_engine::display::LineDisplayStyles;
-use update_engine::display::ProgressRatioDisplay;
-use update_engine::events::EventReport;
-use update_engine::events::StepOutcome;
 use update_status::cmd_nexus_update_status;
 use uuid::Uuid;
 
@@ -182,6 +197,8 @@ enum NexusCommands {
     TrustQuorum(TrustQuorumArgs),
     /// show running artifact versions
     UpdateStatus(UpdateStatusArgs),
+    /// view or modify fault management config
+    FmConfig(FmConfigArgs),
 }
 
 #[derive(Debug, Args)]
@@ -602,10 +619,38 @@ struct TrustQuorumConfigArgs {
 #[derive(Debug, Args)]
 struct TrustQuorumRemoveSledArgs {
     // remove is _extremely_ dangerous, so we also require a database
-    // connection to perform some safety checks
+    // connection to perform some safety checks. These are only possible when
+    // removing by sled ID; a sled identified by baseboard may have no database
+    // record at all.
     #[clap(flatten)]
     db_url_opts: DbUrlOptions,
-    sled_id: SledUuid,
+
+    /// ID of the rack to remove the sled from
+    rack_id: RackUuid,
+
+    /// ID of the sled to remove
+    #[clap(
+        long,
+        conflicts_with_all = ["part_number", "serial_number"],
+        required_unless_present_any = ["part_number", "serial_number"],
+    )]
+    sled_id: Option<SledUuid>,
+
+    /// part number of the sled to remove, for a sled with no database record
+    #[clap(long, requires = "serial_number")]
+    part_number: Option<String>,
+
+    /// serial number of the sled to remove, for a sled with no database record
+    #[clap(long, requires = "part_number")]
+    serial_number: Option<String>,
+}
+
+impl TrustQuorumRemoveSledArgs {
+    fn baseboard_id(&self) -> Option<BaseboardId> {
+        let part_number = self.part_number.clone()?;
+        let serial_number = self.serial_number.clone()?;
+        Some(BaseboardId { part_number, serial_number })
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -707,7 +752,7 @@ impl NexusArgs {
                 format!("http://{}", addr)
             }
         };
-        eprintln!("note: using Nexus URL {}", &nexus_url);
+        eprintln!("note: using Nexus URL {}", nexus_url);
         let client =
             nexus_lockstep_client::Client::new(&nexus_url, log.clone());
 
@@ -935,6 +980,9 @@ impl NexusArgs {
             }
             NexusCommands::UpdateStatus(args) => {
                 cmd_nexus_update_status(&client, args).await
+            }
+            NexusCommands::FmConfig(args) => {
+                cmd_nexus_fm_config(omdb, &client, args).await
             }
         }
     }
@@ -1269,6 +1317,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "blueprint_rendezvous" => {
             print_task_blueprint_rendezvous(details);
         }
+        "blueprint_pruner" => {
+            print_task_blueprint_pruner(details);
+        }
         "dns_config_external" | "dns_config_internal" => {
             print_task_dns_config(details);
         }
@@ -1362,11 +1413,17 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "fm_analysis" => {
             print_task_fm_analysis(details);
         }
+        "fm_config_loader" => {
+            print_task_fm_config_loader(details);
+        }
         "fm_sitrep_loader" => {
             print_task_fm_sitrep_loader(details);
         }
         "fm_sitrep_gc" => {
             print_task_fm_sitrep_gc(details);
+        }
+        "fm_sitrep_history_pruner" => {
+            print_task_fm_sitrep_history_pruner(details);
         }
         "fm_rendezvous" => {
             print_task_fm_rendezvous(details);
@@ -1376,6 +1433,12 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "populate_switch_ports" => {
             print_task_populate_switch_ports(details);
+        }
+        "switch_port_config_manager" => {
+            print_task_switch_port_settings_manager(details);
+        }
+        "vmm_mark_stop_for_update" => {
+            print_task_vmm_mark_stop_for_update(details);
         }
         _ => {
             println!(
@@ -1538,7 +1601,7 @@ fn print_task_blueprint_executor(details: &serde_json::Value) {
     struct BlueprintExecutorStatus {
         target_id: Uuid,
         enabled: bool,
-        execution_error: Option<NestedError>,
+        execution_error: Option<SerializableError>,
     }
 
     match serde_json::from_value::<BlueprintExecutorStatus>(value) {
@@ -1647,47 +1710,144 @@ fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
             error, details
         ),
         Ok(status) => {
-            println!("    target blueprint:     {}", status.blueprint_id);
-            println!(
-                "    inventory collection: {}",
-                status.inventory_collection_id
-            );
+            let BlueprintRendezvousStatus {
+                blueprint_id,
+                sled_blueprint_availability,
+                datasets,
+            } = status;
+            println!("    target blueprint:     {blueprint_id}");
 
-            let BlueprintRendezvousStats {
-                debug_dataset,
-                crucible_dataset,
-                local_storage_dataset,
-                local_storage_unencrypted_dataset,
-            } = status.stats;
+            match datasets {
+                DatasetRendezvousOutcome::NoInventoryCollection => {
+                    println!(
+                        "    inventory collection: none loaded yet; dataset \
+                         reconciliation skipped"
+                    );
+                }
+                DatasetRendezvousOutcome::Error {
+                    inventory_collection_id,
+                    error,
+                } => {
+                    println!(
+                        "    inventory collection: {inventory_collection_id}"
+                    );
+                    println!("    dataset reconciliation failed: {error}");
+                }
+                DatasetRendezvousOutcome::Reconciled {
+                    inventory_collection_id,
+                    stats,
+                } => {
+                    println!(
+                        "    inventory collection: {inventory_collection_id}"
+                    );
+                    print_dataset_rendezvous_stats(&stats);
+                }
+            }
 
-            print_datasets_rendezvous_stats(&debug_dataset, "debug_dataset");
-
-            // crucible datasets have a different number of rendezvous stats
-            println!("    crucible_dataset rendezvous counts:");
-            println!(
-                "        num_inserted:         {}",
-                crucible_dataset.num_inserted
-            );
-            println!(
-                "        num_already_exist:    {}",
-                crucible_dataset.num_already_exist
-            );
-            println!(
-                "        num_not_in_inventory: {}",
-                crucible_dataset.num_not_in_inventory
-            );
-
-            print_datasets_rendezvous_stats(
-                &local_storage_dataset,
-                "local_storage_dataset",
-            );
-
-            print_datasets_rendezvous_stats(
-                &local_storage_unencrypted_dataset,
-                "local_storage_unencrypted_dataset",
-            );
+            match sled_blueprint_availability {
+                SledBlueprintAvailabilityRendezvousOutcome::Error(error) => {
+                    println!(
+                        "    sled_blueprint_availability reconciliation \
+                         failed: {error}"
+                    );
+                }
+                SledBlueprintAvailabilityRendezvousOutcome::Reconciled(
+                    stats,
+                ) => {
+                    print_sled_blueprint_availability_rendezvous_stats(&stats);
+                }
+            }
         }
     }
+}
+
+fn print_task_blueprint_pruner(details: &serde_json::Value) {
+    match serde_json::from_value::<BlueprintPrunerStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {}: {:?}",
+            InlineErrorChain::new(&error),
+            details
+        ),
+        Ok(status) => {
+            print!("{}", status);
+        }
+    }
+}
+
+fn print_dataset_rendezvous_stats(stats: &DatasetRendezvousStats) {
+    let DatasetRendezvousStats {
+        debug_dataset,
+        crucible_dataset,
+        local_storage_dataset,
+        local_storage_unencrypted_dataset,
+    } = stats;
+
+    print_datasets_rendezvous_stats(debug_dataset, "debug_dataset");
+
+    // crucible datasets have a different number of rendezvous stats
+    println!("    crucible_dataset rendezvous counts:");
+    println!("        num_inserted:         {}", crucible_dataset.num_inserted);
+    println!(
+        "        num_already_exist:    {}",
+        crucible_dataset.num_already_exist
+    );
+    println!(
+        "        num_not_in_inventory: {}",
+        crucible_dataset.num_not_in_inventory
+    );
+
+    print_datasets_rendezvous_stats(
+        local_storage_dataset,
+        "local_storage_dataset",
+    );
+
+    print_datasets_rendezvous_stats(
+        local_storage_unencrypted_dataset,
+        "local_storage_unencrypted_dataset",
+    );
+}
+
+fn print_sled_blueprint_availability_rendezvous_stats(
+    stats: &SledBlueprintAvailabilityRendezvousStats,
+) {
+    let SledBlueprintAvailabilityRendezvousStats {
+        num_marked_available,
+        num_marked_unavailable,
+        num_unchanged,
+        num_invariant_violations,
+        num_decommissioned,
+        num_already_decommissioned,
+        num_not_in_blueprint,
+        num_decommissioned_not_in_blueprint,
+    } = stats;
+
+    println!("    sled_blueprint_availability rendezvous counts:");
+    println!(
+        "        num_marked_available:                {num_marked_available}"
+    );
+    println!(
+        "        num_marked_unavailable:              \
+         {num_marked_unavailable}"
+    );
+    println!("        num_unchanged:                       {num_unchanged}");
+    println!(
+        "        num_invariant_violations:            \
+         {num_invariant_violations}"
+    );
+    println!(
+        "        num_decommissioned:                  {num_decommissioned}"
+    );
+    println!(
+        "        num_already_decommissioned:          \
+         {num_already_decommissioned}"
+    );
+    println!(
+        "        num_not_in_blueprint:                {num_not_in_blueprint}"
+    );
+    println!(
+        "        num_decommissioned_not_in_blueprint: \
+         {num_decommissioned_not_in_blueprint}"
+    );
 }
 
 fn print_task_dns_config(details: &serde_json::Value) {
@@ -2601,6 +2761,24 @@ fn print_task_region_snapshot_replacement_step(details: &serde_json::Value) {
     }
 }
 
+struct LastPassSuccessDisplay<'a>(&'a LastPassSuccess);
+
+impl std::fmt::Display for LastPassSuccessDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let LastPassSuccess { nfound, nrecovered, nfailed, nskipped, nremoved } =
+            self.0;
+        writeln!(
+            f,
+            "        found sagas: {nfound:3} \
+             (in-progress, assigned to this Nexus)"
+        )?;
+        writeln!(f, "        recovered:   {nrecovered:3} (successfully)")?;
+        writeln!(f, "        failed:      {nfailed:3}")?;
+        writeln!(f, "        skipped:     {nskipped:3} (already running)")?;
+        writeln!(f, "        removed:     {nremoved:3} (newly finished)")
+    }
+}
+
 fn print_task_saga_recovery(details: &serde_json::Value) {
     match serde_json::from_value::<nexus_saga_recovery::Report>(details.clone())
     {
@@ -2644,24 +2822,7 @@ fn print_task_saga_recovery(details: &serde_json::Value) {
                 }
                 LastPass::Success(success) => {
                     println!("    last pass:");
-                    println!(
-                        "        found sagas: {:3} \
-                        (in-progress, assigned to this Nexus)",
-                        success.nfound
-                    );
-                    println!(
-                        "        recovered:   {:3} (successfully)",
-                        success.nrecovered
-                    );
-                    println!("        failed:      {:3}", success.nfailed);
-                    println!(
-                        "        skipped:     {:3} (already running)",
-                        success.nskipped
-                    );
-                    println!(
-                        "        removed:     {:3} (newly finished)",
-                        success.nskipped
-                    );
+                    print!("{}", LastPassSuccessDisplay(&success));
                 }
             };
 
@@ -2752,6 +2913,40 @@ fn print_task_audit_log_cleanup(details: &serde_json::Value) {
                 status.max_deleted_per_activation
             );
             if let Some(error) = &status.error {
+                println!("    {ERROR:<WIDTH$}{error}");
+            }
+        }
+    };
+}
+
+fn print_task_vmm_mark_stop_for_update(details: &serde_json::Value) {
+    match serde_json::from_value::<VmmMarkStopForUpdateStatus>(details.clone())
+    {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            let VmmMarkStopForUpdateStatus {
+                vmms_marked,
+                batches,
+                batch_size,
+                error,
+            } = status;
+
+            const MARKED: &str = "VMMs marked to be stopped for an update:";
+            const BATCHES: &str = "  batches:";
+            const BATCH_SIZE: &str = "batch size:";
+            const ERROR: &str = "error:";
+            const WIDTH: usize =
+                const_max_len(&[MARKED, BATCHES, BATCH_SIZE, ERROR]) + 1;
+
+            println!("    {BATCH_SIZE:<WIDTH$}{batch_size}");
+            println!("    {MARKED:<WIDTH$}{}", vmms_marked);
+            if batches > 0 {
+                println!("    {BATCHES:<WIDTH$}{batches}");
+            }
+            if let Some(error) = &error {
                 println!("    {ERROR:<WIDTH$}{error}");
             }
         }
@@ -3067,7 +3262,7 @@ fn print_task_alert_dispatcher(details: &serde_json::Value) {
     const GLOBS_REPROCESSED: &str = "glob subscriptions reprocessed:";
     const ALREADY_REPROCESSED: &str =
         "globs already reprocessed by another Nexus:";
-    const GLOB_ERRORS: &str = "globs that failed to be reprocessed";
+    const GLOB_ERRORS: &str = "globs that failed to be reprocessed:";
     const WIDTH: usize = const_max_len(&[
         DISPATCHED,
         NO_RECEIVERS,
@@ -3160,11 +3355,49 @@ fn print_task_alert_dispatcher(details: &serde_json::Value) {
         );
     }
 }
+
+#[derive(Debug, Default, Eq, PartialEq)]
+struct WebhookDeliveryTotals {
+    ok: usize,
+    already_delivered: usize,
+    in_progress: usize,
+    failed: usize,
+    errors: usize,
+}
+
+impl WebhookDeliveryTotals {
+    fn from_status<'a>(
+        by_rx: impl IntoIterator<Item = &'a WebhookRxDeliveryStatus>,
+    ) -> Self {
+        let mut totals = Self::default();
+        for status in by_rx {
+            let WebhookRxDeliveryStatus {
+                ready: _,
+                delivered_ok,
+                already_delivered,
+                in_progress,
+                failed_deliveries,
+                delivery_errors: _,
+                error: _,
+            } = status;
+            totals.ok += delivered_ok;
+            totals.already_delivered += already_delivered;
+            totals.in_progress += in_progress;
+            totals.failed += failed_deliveries.len();
+            totals.errors += rx_internal_errors(status);
+        }
+        totals
+    }
+}
+
+fn rx_internal_errors(status: &WebhookRxDeliveryStatus) -> usize {
+    status.delivery_errors.len() + if status.error.is_some() { 1 } else { 0 }
+}
+
 fn print_task_webhook_deliverator(details: &serde_json::Value) {
     use nexus_types::external_api::alert::WebhookDeliveryAttemptResult;
     use nexus_types::internal_api::background::WebhookDeliveratorStatus;
     use nexus_types::internal_api::background::WebhookDeliveryFailure;
-    use nexus_types::internal_api::background::WebhookRxDeliveryStatus;
 
     let WebhookDeliveratorStatus { by_rx, error } = match serde_json::from_value::<
         WebhookDeliveratorStatus,
@@ -3199,13 +3432,17 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
     ]) + 1;
     const NUM_WIDTH: usize = 3;
 
-    let mut total_ok = 0;
-    let mut total_already_delivered = 0;
-    let mut total_in_progress = 0;
-    let mut total_failed = 0;
-    let mut total_errors = 0;
+    let WebhookDeliveryTotals {
+        ok: total_ok,
+        already_delivered: total_already_delivered,
+        in_progress: total_in_progress,
+        failed: total_failed,
+        errors: total_errors,
+    } = WebhookDeliveryTotals::from_status(by_rx.values());
     println!("    {RECEIVERS:<WIDTH$}{:>NUM_WIDTH$}", by_rx.len());
     for (rx_id, status) in by_rx {
+        let n_internal_errors = rx_internal_errors(&status);
+        let n_failed = status.failed_deliveries.len();
         let WebhookRxDeliveryStatus {
             ready,
             delivered_ok,
@@ -3237,11 +3474,6 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
             already_delivered,
         );
         println!("      {IN_PROGRESS:<WIDTH$}{in_progress:>NUM_WIDTH$}");
-        total_ok += delivered_ok;
-        total_already_delivered += total_already_delivered;
-        total_in_progress += in_progress;
-        let n_failed = failed_deliveries.len();
-        total_failed += n_failed;
         println!("      {FAILED:<WIDTH$}{n_failed:>NUM_WIDTH$}");
         if n_failed > 0 {
             #[derive(Tabled)]
@@ -3282,10 +3514,7 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
                 .to_string();
             println!("{}", textwrap::indent(&table.to_string(), "      "));
         }
-        let n_internal_errors =
-            delivery_errors.len() + if error.is_some() { 1 } else { 0 };
         if n_internal_errors > 0 {
-            total_errors += n_internal_errors;
             println!(
                 "{ERRICON}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
                 n_internal_errors,
@@ -3352,7 +3581,10 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
                 "(i) {SPS_NOT_PRESENT:<WIDTH$}{sps_not_present:>NUM_WIDTH$}"
             );
         }
-        print_ereporter_status_totals(sps.iter().map(|sp| &sp.status));
+        print!(
+            "{}",
+            EreporterStatusTotalsDisplay::new(sps.iter().map(|sp| &sp.status))
+        );
     }
 
     if !sps.is_empty() {
@@ -3366,8 +3598,9 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
         println!("\n    service processors:");
         for SpEreporterStatus { sp_type, slot, status, ignition_type } in &sps {
             println!(
-                "    - {sp_type:<6} {slot:02}: {:>NUM_WIDTH$} ereports",
-                status.ereports_received
+                "    - rack {}, {sp_type:<6} {slot:02}: {:>NUM_WIDTH$} \
+                 ereports",
+                status.rack_id, status.ereports_received
             );
             println!("      ignition type: {ignition_type:?}",);
             println!(
@@ -3392,70 +3625,129 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
     }
 }
 
-fn print_ereporter_status_totals<'status>(
-    statuses: impl Iterator<Item = &'status EreporterStatus>,
-) {
-    let mut total_received = 0;
-    let mut total_new = 0;
-    let mut total_reqs = 0;
-    let mut total_errors = 0;
-    let mut reporters_with_ereports = 0;
-    let mut reporters_without_ereports = 0;
-    let mut reporters_with_errors = 0;
-    let mut reporters_without_errors = 0;
+struct EreporterStatusTotalsDisplay {
+    total_received: usize,
+    total_new: usize,
+    total_reqs: usize,
+    total_errors: usize,
+    total_racks: usize,
+    total_reporters: usize,
+    reporters_with_ereports: usize,
+    reporters_without_ereports: usize,
+    reporters_with_errors: usize,
+    reporters_without_errors: usize,
+}
 
-    for &EreporterStatus {
-        ereports_received,
-        new_ereports,
-        requests,
-        ref errors,
-    } in statuses
-    {
-        total_received += ereports_received;
-        total_new += new_ereports;
-        total_reqs += requests;
-        total_errors += errors.len();
-        if ereports_received > 0 {
-            reporters_with_ereports += 1;
-        } else {
-            reporters_without_ereports += 1;
+impl EreporterStatusTotalsDisplay {
+    fn new<'a>(
+        statuses: impl IntoIterator<Item = &'a EreporterStatus>,
+    ) -> Self {
+        let mut racks = std::collections::HashSet::new();
+        let mut total_received = 0;
+        let mut total_new = 0;
+        let mut total_reqs = 0;
+        let mut total_errors = 0;
+        let mut reporters_with_ereports = 0;
+        let mut reporters_without_ereports = 0;
+        let mut reporters_with_errors = 0;
+        let mut reporters_without_errors = 0;
+
+        for &EreporterStatus {
+            rack_id,
+            ereports_received,
+            new_ereports,
+            requests,
+            ref errors,
+        } in statuses
+        {
+            racks.insert(rack_id);
+            total_received += ereports_received;
+            total_new += new_ereports;
+            total_reqs += requests;
+            total_errors += errors.len();
+            if ereports_received > 0 {
+                reporters_with_ereports += 1;
+            } else {
+                reporters_without_ereports += 1;
+            }
+            if !errors.is_empty() {
+                reporters_with_errors += 1;
+            } else {
+                reporters_without_errors += 1;
+            }
         }
-        if !errors.is_empty() {
-            reporters_with_errors += 1;
-        } else {
-            reporters_without_errors += 1;
+        let total_reporters =
+            reporters_with_ereports + reporters_without_ereports;
+        let total_racks = racks.len();
+        Self {
+            total_received,
+            total_new,
+            total_reqs,
+            total_errors,
+            total_racks,
+            total_reporters,
+            reporters_with_ereports,
+            reporters_without_ereports,
+            reporters_with_errors,
+            reporters_without_errors,
         }
     }
-    let total_reporters = reporters_with_ereports + reporters_without_ereports;
+}
 
-    use ereporter_status_fields::*;
-    println!("    {EREPORTS_RECEIVED:<WIDTH$}{total_received:>NUM_WIDTH$}");
-    println!("    {NEW_EREPORTS:<WIDTH$}{total_new:>NUM_WIDTH$}");
-    println!("    {HTTP_REQUESTS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
-    println!("    {ERRORS:<WIDTH$}{total_errors:>NUM_WIDTH$}");
-    println!("    {TOTAL_REPORTERS:<WIDTH$}{total_reporters:>NUM_WIDTH$}",);
-    println!(
-        "    {REPORTERS_CONTACTED_SUCCESSFULLY:<WIDTH$}\
-        {reporters_without_errors:>NUM_WIDTH$}",
-    );
-    println!(
-        "    {REPORTERS_WITH_EREPORTS:<WIDTH$}\
-         {reporters_with_ereports:>NUM_WIDTH$}"
-    );
-    println!(
-        "    {REPORTERS_WITHOUT_EREPORTS:<WIDTH$}\
-         {reporters_without_ereports:>NUM_WIDTH$}"
-    );
-    println!(
-        "    {REPORTERS_WITH_ERRORS:<WIDTH$}\
-         {reporters_with_errors:>NUM_WIDTH$}"
-    );
+impl fmt::Display for EreporterStatusTotalsDisplay {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            total_received,
+            total_new,
+            total_reqs,
+            total_errors,
+            total_racks,
+            total_reporters,
+            reporters_with_ereports,
+            reporters_without_ereports,
+            reporters_with_errors,
+            reporters_without_errors,
+        } = self;
+        use ereporter_status_fields::*;
+
+        writeln!(f, "    {TOTAL_RACKS:<WIDTH$}{total_racks:>NUM_WIDTH$}")?;
+        writeln!(
+            f,
+            "    {EREPORTS_RECEIVED:<WIDTH$}{total_received:>NUM_WIDTH$}"
+        )?;
+        writeln!(f, "    {NEW_EREPORTS:<WIDTH$}{total_new:>NUM_WIDTH$}")?;
+        writeln!(f, "    {HTTP_REQUESTS:<WIDTH$}{total_reqs:>NUM_WIDTH$}")?;
+        writeln!(f, "    {ERRORS:<WIDTH$}{total_errors:>NUM_WIDTH$}")?;
+        writeln!(
+            f,
+            "    {TOTAL_REPORTERS:<WIDTH$}{total_reporters:>NUM_WIDTH$}",
+        )?;
+        writeln!(
+            f,
+            "    {REPORTERS_CONTACTED_SUCCESSFULLY:<WIDTH$}\
+            {reporters_without_errors:>NUM_WIDTH$}",
+        )?;
+        writeln!(
+            f,
+            "    {REPORTERS_WITH_EREPORTS:<WIDTH$}\
+             {reporters_with_ereports:>NUM_WIDTH$}"
+        )?;
+        writeln!(
+            f,
+            "    {REPORTERS_WITHOUT_EREPORTS:<WIDTH$}\
+             {reporters_without_ereports:>NUM_WIDTH$}"
+        )?;
+        writeln!(
+            f,
+            "    {REPORTERS_WITH_ERRORS:<WIDTH$}\
+             {reporters_with_errors:>NUM_WIDTH$}"
+        )?;
+        Ok(())
+    }
 }
 
 mod ereporter_status_fields {
-    pub const TOTAL_NEW_EREPORTS: &str = "new ereports ingested:";
-    pub const TOTAL_HTTP_REQUESTS: &str = "HTTP requests sent:";
-
+    pub const TOTAL_RACKS: &str = "total racks:";
     pub const EREPORTS_RECEIVED: &str = "total ereports received:";
     pub const NEW_EREPORTS: &str = "  new ereports ingested:";
     pub const HTTP_REQUESTS: &str = "total HTTP requests sent:";
@@ -3469,12 +3761,12 @@ mod ereporter_status_fields {
     pub const SPS_FOUND: &str = "SPs found via ignition:";
     pub const SPS_NOT_PRESENT: &str = "SPs not present:";
     pub const WIDTH: usize = super::const_max_len(&[
-        TOTAL_NEW_EREPORTS,
-        TOTAL_HTTP_REQUESTS,
+        TOTAL_RACKS,
         EREPORTS_RECEIVED,
         NEW_EREPORTS,
         HTTP_REQUESTS,
         ERRORS,
+        TOTAL_REPORTERS,
         REPORTERS_CONTACTED_SUCCESSFULLY,
         REPORTERS_WITH_EREPORTS,
         REPORTERS_WITHOUT_EREPORTS,
@@ -3524,10 +3816,18 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
     println!("    FAULT MANAGEMENT ANALYSIS SUMMARY");
     println!("    =================================");
     let (prep_status, analysis_status) = match outcome {
-        Outcome::Disabled => {
+        Outcome::Disabled(config_source) => {
             println!(
-                "    fault management analysis explicitly disabled \
-                 by config!"
+                "    fault management analysis explicitly disabled by config!"
+            );
+            println!("{}", config_source.display_multiline(6));
+            return;
+        }
+        Outcome::WaitingForConfig => {
+            println!(
+                "    analysis was not performed, as the fault management\n    \
+                     configuration has not yet been loaded.\n\
+                 (i) note: this should only happen if Nexus has just started.",
             );
             return;
         }
@@ -3574,21 +3874,27 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
         }
     };
 
-    let AnalysisStatus {
-        start_time,
-        end_time,
-        report: analysis_report,
-        outcome,
-    } = analysis_status;
-    match outcome {
+    let AnalysisStatus { start_time, end_time, outcome, capacity } =
+        analysis_status;
+    let sitrep_id = match outcome {
         AnalysisOutcome::Error(error) => {
             println!("{ERRICON} analysis failed: {error}");
+            None
         }
         AnalysisOutcome::Unchanged => {
             println!(
                 "    no changes from the current situation report ({:?})",
                 parent_sitrep_id
             );
+            None
+        }
+        AnalysisOutcome::LimitReached { limit } => {
+            println!(
+                "{ERRICON}   analysis succeeded, but the database sitrep \
+                 limit ({limit} sitreps) has been reached!"
+            );
+            println!("    no new sitrep was written.");
+            None
         }
         AnalysisOutcome::NotCommitted { sitrep_id } => {
             println!(
@@ -3599,6 +3905,7 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
                 of date"
             );
             println!("    sitrep ID: {sitrep_id:?}");
+            Some(sitrep_id)
         }
         AnalysisOutcome::CommitFailed { sitrep_id, error } => {
             println!(
@@ -3607,11 +3914,20 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
             );
             println!("    sitrep ID: {sitrep_id:?}");
             println!("    error:     {error}");
+            Some(sitrep_id)
         }
         AnalysisOutcome::Committed { sitrep_id } => {
             println!("    analyzed the situation, and committed a new sitrep!");
             println!("    sitrep ID: {sitrep_id:?}");
+            Some(sitrep_id)
         }
+    };
+    if let Some(sitrep_id) = sitrep_id {
+        println!(
+            "    note: you can view the sitrep and its reports with:\n      \
+                   $ omdb db sitrep show {sitrep_id}\n      \
+                   $ omdb db sitrep analysis-report {sitrep_id} "
+        )
     }
     println!();
 
@@ -3622,20 +3938,60 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
         }
     }
 
-    let PreparationStatus { warnings, report: prep_report } = prep_status;
-    println!("    preparation report:");
-    print!("{}", prep_report.display_multiline(6));
+    if let Some(capacity) = capacity {
+        let usage_percent = capacity.usage_percent();
+        println!("    sitrep storage capacity: {usage_percent}% used");
+        println!("      limit: {:>6}", capacity.limit);
+        println!("      count: {:>6}", capacity.count);
+    }
+
+    let PreparationStatus { warnings } = prep_status;
     if !warnings.is_empty() {
         println!("{ERRICON}   non-fatal errors preparing analysis inputs:");
         for error in warnings {
             println!("      > {error}")
         }
     }
-
-    println!();
-    println!("    analysis report:");
-    print!("{}", analysis_report.display_multiline(6));
     print_start_end_time(start_time, end_time, 4);
+}
+
+fn print_task_fm_config_loader(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::CurrentFmConfig;
+    let current_config =
+        match serde_json::from_value::<FmConfigLoadStatus>(details.clone()) {
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details
+                );
+                return;
+            }
+            Ok(FmConfigLoadStatus::Error(error)) => {
+                println!("    task did not complete successfully: {error}");
+                return;
+            }
+            Ok(FmConfigLoadStatus::LatestConfigInvalid { error, fallback }) => {
+                println!(
+                    "/!\\ the latest FM config override in the database is \
+                 invalid: {error}"
+                );
+                fallback
+            }
+            Ok(FmConfigLoadStatus::Loaded(config)) => config,
+        };
+
+    let CurrentFmConfig { time_loaded, updated, config } = current_config;
+
+    const TIME_LOADED: &str = "config last loaded at:";
+    const UPDATED: &str = "  loaded by this activation:";
+    const WIDTH: usize = const_max_len(&[TIME_LOADED, UPDATED]) + 1;
+    println!(
+        "    {TIME_LOADED:<WIDTH$}{}",
+        humantime::format_rfc3339_millis(time_loaded.into()),
+    );
+    println!("    {UPDATED:<WIDTH$}{updated}");
+    println!("    current config:");
+    print!("{}", config.display_multiline(6));
 }
 
 fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
@@ -3663,6 +4019,83 @@ fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
             );
         }
     };
+}
+
+fn print_task_fm_sitrep_history_pruner(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::SitrepHistoryPrunerStatus;
+    use nexus_types::internal_api::background::fm_sitrep_history_pruner::{
+        Outcome, SitrepsPruned,
+    };
+
+    let (cfg, batch_size, SitrepsPruned { batches, total, versions }, outcome) =
+        match serde_json::from_value::<SitrepHistoryPrunerStatus>(
+            details.clone(),
+        ) {
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details
+                );
+                return;
+            }
+            Ok(SitrepHistoryPrunerStatus::WaitingForConfig) => {
+                println!(
+                    "    nothing was pruned, as the fault management\n    \
+                         configuration has not yet been loaded.\n\
+                     (i) note: this should only happen if Nexus has just \
+                     started.",
+                );
+                return;
+            }
+            Ok(SitrepHistoryPrunerStatus::Activated {
+                cfg,
+                batch_size,
+                pruned,
+                outcome,
+            }) => (cfg, batch_size, pruned, outcome),
+        };
+
+    const STATUS: &str = "status:";
+    const SITREP_COUNT: &str = "  current count:";
+    const PRUNED_COUNT: &str = "  sitreps pruned:";
+    const PRUNED_VERSIONS: &str = "  versions pruned:";
+    const BATCHES: &str = "  batches:";
+    const BATCH_SIZE: &str = "deletion batch size:";
+    const P_WIDTH: usize = const_max_len(&[
+        SITREP_COUNT,
+        PRUNED_COUNT,
+        PRUNED_VERSIONS,
+        BATCHES,
+        BATCH_SIZE,
+    ]) + 1;
+    const NUM_WIDTH: usize = 4;
+    println!("    configuration:");
+    print!("{}", cfg.display_multiline(6));
+    println!("    {BATCH_SIZE:<P_WIDTH$}{batch_size:>NUM_WIDTH$}");
+    match outcome {
+        Outcome::Error(error) => {
+            println!("{ERRICON} {STATUS} failed!");
+            println!("      > {error}")
+        }
+        Outcome::NotPruned { count } => {
+            println!("    {STATUS} within limit (nothing was deleted)");
+            println!("    {SITREP_COUNT:<P_WIDTH$}{count:>NUM_WIDTH$}");
+        }
+        Outcome::Pruned { count } => {
+            println!("    {STATUS} limit reached (old sitreps were deleted)");
+            println!("    {SITREP_COUNT:<P_WIDTH$}{count:>NUM_WIDTH$}");
+        }
+    }
+
+    // If anything was deleted, including partial progress made before a
+    // query failed, display the details of what was pruned.
+    if total > 0 {
+        println!("    {PRUNED_COUNT:<P_WIDTH$}{total:>NUM_WIDTH$}");
+        if let Some(versions) = versions {
+            println!("    {PRUNED_VERSIONS:<P_WIDTH$}v{versions:?}");
+        }
+        println!("    {BATCHES:<P_WIDTH$}{batches:>NUM_WIDTH$}");
+    }
 }
 
 fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
@@ -3696,13 +4129,9 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
         .fold(BASE_WIDTH, |w, l| w.max(l));
 
     if !errors.is_empty() {
-        println!(
-            "{ERRICON}   {:<width$}{:>NUM_WIDTH$}",
-            "errors:",
-            errors.len()
-        );
+        println!("{ERRICON} {:<width$}{:>NUM_WIDTH$}", "errors:", errors.len());
         for error in errors {
-            println!("      > {error}")
+            println!("    > {error}")
         }
     }
 
@@ -3726,7 +4155,7 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
             format!("orphaned {table_name} rows deleted:"),
             stats.rows_deleted,
         );
-        println!("    {:<width$}{:>NUM_WIDTH$}", "  batches:", stats.batches,);
+        println!("    {:<width$}{:>NUM_WIDTH$}", "  batches:", stats.batches);
     }
 }
 
@@ -3754,6 +4183,8 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
         alerts,
         support_bundles,
         ereport_marking: marking,
+        alert_marker_gc,
+        support_bundle_marker_gc,
     } = match serde_json::from_value::<FmRendezvousStatus>(details.clone()) {
         Err(error) => {
             eprintln!(
@@ -3931,6 +4362,36 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
             }
         },
     );
+    print_op(
+        "garbage collecting alert creation markers",
+        &alert_marker_gc,
+        print_marker_gc_details,
+    );
+    print_op(
+        "garbage collecting support bundle creation markers",
+        &support_bundle_marker_gc,
+        print_marker_gc_details,
+    );
+}
+
+fn print_marker_gc_details(status: &fm_rendezvous::MarkerGcStatus) {
+    let fm_rendezvous::MarkerGcStatus { rows_deleted, batches, errors } =
+        status;
+    const ROWS_DELETED: &str = "rows deleted:";
+    const BATCHES: &str = "batches:";
+    const ERRORS: &str = "errors:";
+    const WIDTH: usize = const_max_len(&[ROWS_DELETED, BATCHES, ERRORS]) + 1;
+    const NUM_WIDTH: usize = 4;
+    println!("      {ROWS_DELETED:<WIDTH$}{rows_deleted:>NUM_WIDTH$}");
+    println!("      {BATCHES:<WIDTH$}{batches:>NUM_WIDTH$}");
+    println!(
+        "{}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+        warn_if_nonzero(errors.len()),
+        errors.len()
+    );
+    for error in errors {
+        println!("        > {error}");
+    }
 }
 
 fn print_task_trust_quorum_manager(details: &serde_json::Value) {
@@ -4000,6 +4461,51 @@ fn print_task_populate_switch_ports(details: &serde_json::Value) {
     print_one("switch1", switch1);
 }
 
+fn print_task_switch_port_settings_manager(details: &serde_json::Value) {
+    let status = match serde_json::from_value::<SwitchPortSettingsManagerStatus>(
+        details.clone(),
+    ) {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:#?}",
+                error, details
+            );
+            return;
+        }
+    };
+
+    let SwitchPortSettingsManagerStatus { incomplete_bootstore_configs } =
+        status;
+
+    if incomplete_bootstore_configs.is_empty() {
+        println!(
+            "all racks appear to have a complete bootstore network config\n\
+             (note: this check is not yet complete -- there might still \
+             be errors that aren't in the report)"
+        );
+        return;
+    }
+
+    println!(
+        "{ERRICON} {} rack(s) skipped due to an incomplete bootstore network \
+         config:",
+        incomplete_bootstore_configs.len(),
+    );
+    for IncompleteBootstoreConfigReport { rack_id, problems } in
+        incomplete_bootstore_configs
+    {
+        println!("  rack {rack_id}: {} problem(s)", problems.len());
+        for problem in problems {
+            println!("    {ERRICON} {problem}");
+        }
+    }
+    println!(
+        "(note: this check is not yet complete -- there might be other \
+         errors that aren't in the report)"
+    );
+}
+
 fn print_task_physical_disk_adoption(details: &serde_json::Value) {
     let status = match serde_json::from_value::<PhysicalDiskAdoptionStatus>(
         details.clone(),
@@ -4048,7 +4554,7 @@ fn bgtask_apply_kv_style(table: &mut tabled::Table) {
 /// output can be quite large.)
 fn extract_event_buffer(
     value: &mut serde_json::Value,
-) -> anyhow::Result<Option<EventBuffer<NestedSpec>>> {
+) -> anyhow::Result<Option<EventBuffer<GenericSpec>>> {
     let Some(obj) = value.as_object_mut() else {
         bail!("expected value to be an object")
     };
@@ -4059,7 +4565,7 @@ fn extract_event_buffer(
     // Try deserializing the event report generically. We could deserialize to
     // a more explicit spec, e.g. `ReconfiguratorExecutionSpec`, but that's
     // unnecessary for omdb's purposes.
-    let value: Result<EventReport<NestedSpec>, NestedError> =
+    let value: Result<EventReport<GenericSpec>, SerializableError> =
         serde_json::from_value(event_report)
             .context("failed to deserialize event report")?;
     let event_report = value.context(
@@ -4074,7 +4580,7 @@ fn extract_event_buffer(
 // Make a short summary of the current state of an execution based on an event
 // buffer, and add it to the table.
 fn push_event_buffer_summary(
-    event_buffer: anyhow::Result<Option<EventBuffer<NestedSpec>>>,
+    event_buffer: anyhow::Result<Option<EventBuffer<GenericSpec>>>,
     builder: &mut tabled::builder::Builder,
 ) {
     match event_buffer {
@@ -4100,7 +4606,7 @@ fn push_event_buffer_summary(
 }
 
 fn event_buffer_summary_impl(
-    buffer: EventBuffer<NestedSpec>,
+    buffer: EventBuffer<GenericSpec>,
     builder: &mut tabled::builder::Builder,
 ) {
     let Some(summary) = buffer.root_execution_summary() else {
@@ -4160,7 +4666,7 @@ fn event_buffer_summary_impl(
 fn push_event_buffer_terminal_info(
     info: &ExecutionTerminalInfo,
     total_steps: usize,
-    buffer: &EventBuffer<NestedSpec>,
+    buffer: &EventBuffer<GenericSpec>,
     builder: &mut tabled::builder::Builder,
 ) {
     let step_data = buffer.get(&info.step_key).expect("step exists");
@@ -4550,11 +5056,11 @@ async fn cmd_nexus_clickhouse_policy_get(
                     Defaulting to single-node deployment"
                 );
             } else {
-                eprintln!("error: {:#}", err);
+                return Err(err).context("retrieving clickhouse policy");
             }
         }
         Ok(policy) => {
-            println!("Clickhouse Policy: ");
+            println!("Clickhouse Policy:");
             println!("    version: {}", policy.version);
             println!("    creation time: {}", policy.time_created);
             match policy.mode {
@@ -4660,7 +5166,6 @@ async fn cmd_nexus_clickhouse_policy_set(
                     time_created: now_db_precision(),
                 }
             } else {
-                eprintln!("error: {:#}", err);
                 return Err(err).context("retrieving clickhouse policy");
             }
         }
@@ -4696,11 +5201,11 @@ async fn cmd_nexus_oximeter_read_policy_get(
                     Defaulting to reading from a single-node"
                 );
             } else {
-                eprintln!("error: {:#}", err);
+                return Err(err).context("retrieving oximeter read policy");
             }
         }
         Ok(policy) => {
-            println!("Oximeter Read Policy: ");
+            println!("Oximeter Read Policy:");
             println!("    version: {}", policy.version);
             println!("    creation time: {}", policy.time_created);
             match policy.mode {
@@ -4737,7 +5242,6 @@ async fn cmd_nexus_oximeter_read_policy_set(
                     time_created: now_db_precision(),
                 }
             } else {
-                eprintln!("error: {:#}", err);
                 return Err(err).context("retrieving oximeter read policy");
             }
         }
@@ -5062,7 +5566,7 @@ async fn cmd_nexus_sled_expunge_disk_with_datastore(
         .context("loading latest collection")?
     {
         Some(collection) => {
-            let disk_identity = omicron_common::disk::DiskIdentity {
+            let disk_identity = DiskIdentity {
                 vendor: physical_disk.vendor.clone(),
                 serial: physical_disk.serial.clone(),
                 model: physical_disk.model.clone(),
@@ -5237,39 +5741,38 @@ async fn cmd_nexus_trust_quorum_remove_sled(
     args: &TrustQuorumRemoveSledArgs,
     omdb: &Omdb,
     log: &slog::Logger,
-    destruction_token: DestructiveOperationToken,
-) -> Result<(), anyhow::Error> {
-    let datastore = args.db_url_opts.connect(omdb, log).await?;
-    let result = cmd_nexus_trust_quorum_remove_sled_with_datastore(
-        &datastore,
-        client,
-        args,
-        log,
-        destruction_token,
-    )
-    .await;
-    datastore.terminate().await;
-    result
-}
-
-// `omdb nexus trust-quorum remove-sled`, but borrowing a datastore
-async fn cmd_nexus_trust_quorum_remove_sled_with_datastore(
-    datastore: &Arc<DataStore>,
-    client: &nexus_lockstep_client::Client,
-    args: &TrustQuorumRemoveSledArgs,
-    log: &slog::Logger,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
-    use nexus_db_queries::context::OpContext;
-    let opctx = OpContext::for_omdb(log.clone(), datastore.clone());
-    let opctx = &opctx;
-
-    // First, we need to look up the sled so we know its serial number.
-    let (_authz_sled, sled) = LookupPath::new(opctx, datastore)
-        .sled_id(args.sled_id)
-        .fetch()
-        .await
-        .with_context(|| format!("failed to find sled {}", args.sled_id))?;
+    // Trust quorum membership is tracked by baseboard, so a sled ID has to be
+    // resolved into one. A sled given by baseboard may have no database record
+    // to resolve, which is the reason for accepting one.
+    let (baseboard_id, description) = match args.baseboard_id() {
+        Some(baseboard_id) => {
+            let description = format!(
+                "sled {baseboard_id} from the trust-quorum for rack {}",
+                args.rack_id,
+            );
+            (baseboard_id, description)
+        }
+        None => {
+            let sled_id =
+                args.sled_id.expect("clap requires a sled ID or a baseboard");
+            let datastore = args.db_url_opts.connect(omdb, log).await?;
+            let sled = lookup_sled_by_id(&datastore, sled_id, log).await;
+            datastore.terminate().await;
+            let sled = sled?;
+            let description = format!(
+                "sled {sled_id} ({}) from the trust-quorum for rack {}",
+                sled.serial_number(),
+                args.rack_id,
+            );
+            let baseboard_id = BaseboardId {
+                part_number: sled.part_number().to_string(),
+                serial_number: sled.serial_number().to_string(),
+            };
+            (baseboard_id, description)
+        }
+    };
 
     // Helper to get confirmation messages from the user.
     let mut prompt = ConfirmationPrompt::new();
@@ -5294,14 +5797,11 @@ async fn cmd_nexus_trust_quorum_remove_sled_with_datastore(
     );
 
     println!(
-        "WARNING: This operation will PERMANENTLY and IRRECOVABLY remove sled \
-        {} ({}) from the trust-quorum for rack {}. To proceed, type the \
-        sled's serial number.",
-        args.sled_id,
-        sled.serial_number(),
-        sled.rack_id
+        "WARNING: This operation will PERMANENTLY and IRRECOVABLY remove \
+        {description}. To proceed, type the sled's serial number."
     );
-    prompt.read_and_validate("sled serial number", sled.serial_number())?;
+    prompt
+        .read_and_validate("sled serial number", &baseboard_id.serial_number)?;
 
     println!(
         "About to start the trust quorum reconfiguration to remove the sled."
@@ -5324,7 +5824,7 @@ async fn cmd_nexus_trust_quorum_remove_sled_with_datastore(
     );
 
     let epoch = client
-        .trust_quorum_remove_sled(&args.sled_id.into_untyped_uuid())
+        .trust_quorum_remove_sled(args.rack_id.as_untyped_uuid(), &baseboard_id)
         .await
         .context("trust quorum remove sled")?
         .into_inner();
@@ -5332,6 +5832,24 @@ async fn cmd_nexus_trust_quorum_remove_sled_with_datastore(
     println!("Started trust quorum reconfiguration at epoch {epoch}\n");
 
     Ok(())
+}
+
+// Look up a sled by ID, for the safety checks in `omdb nexus trust-quorum
+// remove-sled`.
+async fn lookup_sled_by_id(
+    datastore: &Arc<DataStore>,
+    sled_id: SledUuid,
+    log: &slog::Logger,
+) -> Result<nexus_db_model::Sled, anyhow::Error> {
+    let opctx = OpContext::for_omdb(log.clone(), datastore.clone());
+
+    let (_authz_sled, sled) = LookupPath::new(&opctx, datastore)
+        .sled_id(sled_id)
+        .fetch()
+        .await
+        .with_context(|| format!("failed to find sled {sled_id}"))?;
+
+    Ok(sled)
 }
 
 /// Runs `omdb nexus support-bundles create`
@@ -5545,4 +6063,130 @@ async fn cmd_nexus_support_bundles_inspect(
     };
 
     support_bundle_viewer::run_dashboard(accessor).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_types::external_api::alert::WebhookDeliveryAttemptResult;
+    use nexus_types::internal_api::background::WebhookDeliveryFailure;
+    use omicron_uuid_kinds::AlertUuid;
+    use omicron_uuid_kinds::RackUuid;
+    use omicron_uuid_kinds::WebhookDeliveryUuid;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn test_ereporter_status_totals_display() {
+        // Include reporters with and without ereports, and errors both with
+        // and without received ereports.
+        //
+        // Also have one of the reporters contain multiple errors to distinguish
+        // the error count from the count of affected reporters. And throw in
+        // two rack IDs to see how that part looks.
+        let rack1 = RackUuid::from_u128(0x6174c6ce_9bb1_4ce8_afc3_97fc1e6aa450);
+        let rack2 = RackUuid::from_u128(0xaaf68b01_1fa2_4665_ad2d_cf43f7c3f378);
+        let statuses = [
+            EreporterStatus {
+                rack_id: rack1,
+                ereports_received: 12,
+                new_ereports: 7,
+                requests: 4,
+                errors: vec![],
+            },
+            EreporterStatus {
+                rack_id: rack1,
+                ereports_received: 3,
+                new_ereports: 2,
+                requests: 5,
+                errors: vec!["error one".into(), "error two".into()],
+            },
+            EreporterStatus {
+                rack_id: rack2,
+                requests: 2,
+                ereports_received: 0,
+                new_ereports: 0,
+                errors: Vec::new(),
+            },
+            EreporterStatus {
+                rack_id: rack2,
+                requests: 1,
+                ereports_received: 0,
+                new_ereports: 0,
+                errors: vec!["error three".into()],
+            },
+            EreporterStatus {
+                rack_id: rack1,
+                ereports_received: 0,
+                new_ereports: 0,
+                requests: 0,
+                errors: Vec::new(),
+            },
+        ];
+        expectorate::assert_contents(
+            "tests/output/ereporter-status-totals.txt",
+            &EreporterStatusTotalsDisplay::new(&statuses).to_string(),
+        );
+        expectorate::assert_contents(
+            "tests/output/ereporter-status-totals-empty.txt",
+            &EreporterStatusTotalsDisplay::new([]).to_string(),
+        );
+    }
+
+    #[test]
+    fn test_webhook_delivery_totals_distinct_counts() {
+        let failure = WebhookDeliveryFailure {
+            delivery_id: WebhookDeliveryUuid::nil(),
+            alert_id: AlertUuid::nil(),
+            attempt: 1,
+            result: WebhookDeliveryAttemptResult::FailedTimeout,
+            response_status: None,
+            response_duration: None,
+        };
+        let first = WebhookRxDeliveryStatus {
+            ready: 100,
+            delivered_ok: 1,
+            already_delivered: 2,
+            in_progress: 3,
+            failed_deliveries: vec![failure.clone()],
+            delivery_errors: BTreeMap::from([(
+                WebhookDeliveryUuid::nil(),
+                "error one".to_string(),
+            )]),
+            error: None,
+        };
+        let second = WebhookRxDeliveryStatus {
+            ready: 200,
+            delivered_ok: 10,
+            already_delivered: 20,
+            in_progress: 30,
+            failed_deliveries: vec![failure.clone(), failure],
+            delivery_errors: BTreeMap::new(),
+            error: Some("task error".to_string()),
+        };
+        assert_eq!(
+            WebhookDeliveryTotals::from_status([&first, &second]),
+            WebhookDeliveryTotals {
+                ok: 11,
+                already_delivered: 22,
+                in_progress: 33,
+                failed: 3,
+                errors: 2,
+            },
+        );
+    }
+
+    #[test]
+    fn test_last_pass_success_display_distinct_counts() {
+        let success = LastPassSuccess {
+            nfound: 5,
+            nrecovered: 4,
+            nfailed: 3,
+            nskipped: 2,
+            nremoved: 1,
+        };
+        expectorate::assert_contents(
+            "tests/output/saga-recovery-last-pass.txt",
+            &LastPassSuccessDisplay(&success).to_string(),
+        );
+    }
 }

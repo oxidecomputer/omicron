@@ -8,10 +8,11 @@
 //! types.
 
 use api_identity::ObjectIdentity;
-use omicron_common::api::external;
+use chrono::DateTime;
+use chrono::Utc;
 use omicron_common::api::external::{
-    AddressLotKind, IdentityMetadata, IdentityMetadataCreateParams, Name,
-    NameOrId, ObjectIdentity,
+    IdentityMetadata, IdentityMetadataCreateParams, Name, NameOrId,
+    ObjectIdentity,
 };
 use oxnet::IpNet;
 use schemars::JsonSchema;
@@ -27,6 +28,33 @@ use std::net::{IpAddr, Ipv4Addr};
 use uuid::Uuid;
 
 // ADDRESS LOT
+
+/// Represents an address lot object, containing the id of the lot that can be
+/// used in other API calls.
+// TODO Add kind attribute to AddressLot
+// https://github.com/oxidecomputer/omicron/issues/3064
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
+)]
+pub struct AddressLot {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// Desired use of `AddressLot`
+    pub kind: AddressLotKind,
+}
+
+/// The kind associated with an address lot.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum AddressLotKind {
+    /// Infrastructure address lots are used for network infrastructure like
+    /// addresses assigned to rack switches.
+    Infra,
+
+    /// Pool address lots are used by IP pools.
+    Pool,
+}
 
 /// Select an address lot by an optional name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
@@ -44,6 +72,40 @@ pub struct AddressLotCreate {
     pub kind: AddressLotKind,
     /// The blocks to add along with the new address lot.
     pub blocks: Vec<AddressLotBlockCreate>,
+}
+
+/// An address lot and associated blocks resulting from creating an address lot.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AddressLotCreateResponse {
+    /// The address lot that was created.
+    pub lot: AddressLot,
+
+    /// The address lot blocks that were created.
+    pub blocks: Vec<AddressLotBlock>,
+}
+
+/// An address lot and associated blocks resulting from viewing an address lot.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AddressLotViewResponse {
+    /// The address lot.
+    pub lot: AddressLot,
+
+    /// The address lot blocks.
+    pub blocks: Vec<AddressLotBlock>,
+}
+
+/// An address lot block is a part of an address lot and contains a range of
+/// addresses. The range is inclusive.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct AddressLotBlock {
+    /// The id of the address lot block.
+    pub id: Uuid,
+
+    /// The first address of the block (inclusive).
+    pub first_address: IpAddr,
+
+    /// The last address of the block (inclusive).
+    pub last_address: IpAddr,
 }
 
 /// Parameters for creating an address lot block. First and last addresses are
@@ -267,6 +329,74 @@ pub enum SwitchPortGeometry {
     Sfp28x4,
 }
 
+/// A route configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortRouteConfig {
+    /// The port settings object this route configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// The interface name this route configuration is assigned to.
+    pub interface_name: Name,
+
+    /// The route's destination network.
+    pub dst: oxnet::IpNet,
+
+    /// The route's gateway address.
+    pub gw: IpAddr,
+
+    /// The VLAN identifier for the route. Use this if the gateway is reachable
+    /// over an 802.1Q tagged L2 segment.
+    pub vlan_id: Option<u16>,
+
+    /// Route RIB priority. Higher priority indicates precedence within and across
+    /// protocols.
+    pub rib_priority: Option<u8>,
+}
+
+/// An IP address configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortAddressConfig {
+    /// The port settings object this address configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// The id of the address lot block this address is drawn from.
+    pub address_lot_block_id: Uuid,
+
+    /// The IP address and prefix.
+    pub address: oxnet::IpNet,
+
+    /// An optional VLAN ID
+    pub vlan_id: Option<u16>,
+
+    /// The interface name this address belongs to.
+    pub interface_name: Name,
+}
+
+/// An IP address configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortAddressView {
+    /// The port settings object this address configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// The id of the address lot this address is drawn from.
+    pub address_lot_id: Uuid,
+
+    /// The name of the address lot this address is drawn from.
+    pub address_lot_name: Name,
+
+    /// The id of the address lot block this address is drawn from.
+    pub address_lot_block_id: Uuid,
+
+    /// The IP address and prefix.
+    pub address: oxnet::IpNet,
+
+    /// An optional VLAN ID
+    pub vlan_id: Option<u16>,
+
+    /// The interface name this address belongs to.
+    pub interface_name: Name,
+}
+
 /// Switch link configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LinkConfigCreate {
@@ -371,6 +501,44 @@ impl PartialEq<LldpLinkConfig> for LldpLinkConfigCreate {
             && self.system_description == other.system_description
             && self.management_ip == other.management_ip
     }
+}
+
+/// Information about LLDP advertisements from other network entities directly
+/// connected to a switch port.  This structure contains both metadata about
+/// when and where the neighbor was seen, as well as the specific information
+/// the neighbor was advertising.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct LldpNeighbor {
+    // Unique ID assigned to this neighbor - only used for pagination
+    #[serde(skip)]
+    pub id: Uuid,
+
+    /// The port on which the neighbor was seen
+    pub local_port: String,
+
+    /// Initial sighting of this LldpNeighbor
+    pub first_seen: DateTime<Utc>,
+
+    /// Most recent sighting of this LldpNeighbor
+    pub last_seen: DateTime<Utc>,
+
+    /// The LLDP link name advertised by the neighbor
+    pub link_name: String,
+
+    /// The LLDP link description advertised by the neighbor
+    pub link_description: Option<String>,
+
+    /// The LLDP chassis identifier advertised by the neighbor
+    pub chassis_id: String,
+
+    /// The LLDP system name advertised by the neighbor
+    pub system_name: Option<String>,
+
+    /// The LLDP system description advertised by the neighbor
+    pub system_description: Option<String>,
+
+    /// The LLDP management IP(s) advertised by the neighbor
+    pub management_ip: Vec<lldp_protocol::types::ManagementAddress>,
 }
 
 /// A layer-3 switch interface configuration. When IPv6 is enabled, a link local
@@ -946,11 +1114,6 @@ pub struct BgpConfig {
 // SWITCH PORT SETTINGS (old response type with required BgpPeer.addr)
 
 /// Switch port settings (old version with required BgpPeer.addr).
-// TODO: several fields below embed `external::*` types directly from
-// `omicron-common`, which means their serialized shape is not truly frozen.
-// Once `omicron-common-versions` exists, replace these with version-local
-// copies of the types to ensure the initial version's wire format is
-// immutable.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SwitchPortSettings {
     #[serde(flatten)]
@@ -972,13 +1135,13 @@ pub struct SwitchPortSettings {
     pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
 
     /// IP route settings.
-    pub routes: Vec<external::SwitchPortRouteConfig>,
+    pub routes: Vec<SwitchPortRouteConfig>,
 
     /// BGP peer settings.
     pub bgp_peers: Vec<BgpPeer>,
 
     /// Layer 3 IP address settings.
-    pub addresses: Vec<external::SwitchPortAddressView>,
+    pub addresses: Vec<SwitchPortAddressView>,
 }
 
 /// A link configuration for a port settings object.

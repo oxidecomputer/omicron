@@ -8,7 +8,8 @@ use crate::analysis_input;
 use iddqd::IdOrdMap;
 use nexus_types::fm;
 use nexus_types::inventory;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::AlertGeneration;
+use omicron_generation_kinds::SupportBundleGeneration;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use slog::Logger;
@@ -20,7 +21,8 @@ pub use rng::SitrepBuilderRng;
 
 #[derive(Debug)]
 pub struct SitrepBuilder<'a> {
-    pub log: Logger,
+    logger: Logger,
+    debug_log: fm::analysis_reports::DebugLog,
     pub inventory: &'a inventory::Collection,
     pub parent_sitrep: Option<&'a fm::Sitrep>,
     pub sitrep_id: SitrepUuid,
@@ -39,16 +41,16 @@ pub struct SitrepBuilder<'a> {
 /// to seed the stamped generations on the child.
 #[derive(Debug, Clone, Copy)]
 struct ParentGenerations {
-    alert_generation: Generation,
-    support_bundle_generation: Generation,
+    alert_generation: AlertGeneration,
+    support_bundle_generation: SupportBundleGeneration,
 }
 
 impl ParentGenerations {
     /// Initial generations for the first sitrep, which has no parent.
     fn new() -> Self {
         Self {
-            alert_generation: Generation::new(),
-            support_bundle_generation: Generation::new(),
+            alert_generation: AlertGeneration::new(),
+            support_bundle_generation: SupportBundleGeneration::new(),
         }
     }
 }
@@ -86,7 +88,8 @@ impl<'a> SitrepBuilder<'a> {
         );
 
         SitrepBuilder {
-            log,
+            logger: log,
+            debug_log: fm::analysis_reports::DebugLog::default(),
             sitrep_id,
             inventory,
             parent_sitrep,
@@ -115,6 +118,20 @@ impl<'a> SitrepBuilder<'a> {
         &mut self.comment
     }
 
+    pub fn log_event(
+        &mut self,
+        event: impl ToString,
+    ) -> fm::analysis_reports::LogEntryBuilder<'_> {
+        self.debug_log.entry(&self.logger, event)
+    }
+
+    pub fn log_warning(
+        &mut self,
+        event: impl ToString,
+    ) -> fm::analysis_reports::LogEntryBuilder<'_> {
+        self.debug_log.warning(&self.logger, event)
+    }
+
     /// The parent sitrep's generations, or the initial generation on the
     /// first-ever sitrep.
     fn parent_generations(&self) -> ParentGenerations {
@@ -127,22 +144,28 @@ impl<'a> SitrepBuilder<'a> {
     }
 
     pub fn build(
-        self,
+        mut self,
         creator_id: OmicronZoneUuid,
         time_created: chrono::DateTime<chrono::Utc>,
     ) -> (fm::Sitrep, fm::analysis_reports::AnalysisReport) {
         let parent = self.parent_generations();
-        let alert_generation =
-            if self.cases.alert_set_changed() || self.alerts_changed {
-                parent.alert_generation.next()
-            } else {
-                parent.alert_generation
-            };
+        let alert_generation = if self.cases.alert_set_changed()
+            || self.alerts_changed
+        {
+            let new_gen = parent.alert_generation.next();
+            self.log_event("alerts changed").kv("generation", new_gen.as_u64());
+            new_gen
+        } else {
+            parent.alert_generation
+        };
         let support_bundle_generation =
             if self.cases.support_bundle_set_changed()
                 || self.support_bundles_changed
             {
-                parent.support_bundle_generation.next()
+                let new_gen = parent.support_bundle_generation.next();
+                self.log_event("support bundles changed")
+                    .kv("generation", new_gen.as_u64());
+                new_gen
             } else {
                 parent.support_bundle_generation
             };
@@ -175,6 +198,7 @@ impl<'a> SitrepBuilder<'a> {
             })
             .collect();
         let report = fm::analysis_reports::AnalysisReport {
+            log: self.debug_log,
             sitrep_id: self.sitrep_id,
             comment: self.comment.clone(),
             cases: report_cases,
@@ -228,19 +252,27 @@ mod tests {
     }
 
     /// Finalize the builder with throwaway values for `creator_id` and
-    /// `time_created` (which these tests don't exercise).
+    /// `time_created` (which these tests don't exercise), asserting that
+    /// building preserved slippy-cleanliness.
+    #[track_caller]
     fn build_sitrep(builder: SitrepBuilder<'_>) -> fm::Sitrep {
+        let parent = builder.input().parent_sitrep().cloned();
         let (sitrep, _) =
             builder.build(OmicronZoneUuid::new_v4(), chrono::Utc::now());
+        crate::test_util::assert_analysis_preserves_slippy_clean(
+            &sitrep,
+            parent.as_ref(),
+        );
         sitrep
     }
 
     /// Build a minimal `Input` with no parent sitrep and an empty inventory.
     fn make_input() -> Input {
-        let (input, _) =
-            Input::builder(None, make_collection(), Arc::new(IdOrdMap::new()))
-                .expect("no parent sitrep, so builder should succeed")
-                .build();
+        let (input, _) = Input::builder(None, make_collection())
+            .expect("no parent sitrep, so builder should succeed")
+            .with_empty_defaults()
+            .build()
+            .expect("all inputs provided");
         input
     }
 
@@ -271,13 +303,12 @@ mod tests {
             version: 1,
             time_made_current: chrono::Utc::now(),
         };
-        let (input, _) = Input::builder(
-            Some(Arc::new((parent_version, parent))),
-            inv,
-            Arc::new(IdOrdMap::new()),
-        )
-        .expect("parent and child share an inventory")
-        .build();
+        let (input, _) =
+            Input::builder(Some(Arc::new((parent_version, parent))), inv)
+                .expect("parent and child share an inventory")
+                .with_empty_defaults()
+                .build()
+                .expect("all inputs provided");
         input
     }
 
@@ -288,10 +319,10 @@ mod tests {
         );
         let inputs = make_input();
         let sitrep = build_sitrep(SitrepBuilder::new(&logctx.log, &inputs));
-        assert_eq!(sitrep.metadata.alert_generation, Generation::new());
+        assert_eq!(sitrep.metadata.alert_generation, AlertGeneration::new());
         assert_eq!(
             sitrep.metadata.support_bundle_generation,
-            Generation::new()
+            SupportBundleGeneration::new()
         );
         logctx.cleanup_successful();
     }
@@ -304,16 +335,20 @@ mod tests {
         let inputs = make_input();
         let mut builder = SitrepBuilder::new(&logctx.log, &inputs);
         {
-            let mut case =
-                builder.cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            let mut case = builder
+                .cases
+                .open_case(fm::DiagnosisEngineKind::PowerShelf, "test case");
             case.request_alert(&test_alerts::Foo(serde_json::json!({})), "")
                 .unwrap();
         }
         let sitrep = build_sitrep(builder);
-        assert_eq!(sitrep.metadata.alert_generation, Generation::new().next());
+        assert_eq!(
+            sitrep.metadata.alert_generation,
+            AlertGeneration::new().next()
+        );
         assert_eq!(
             sitrep.metadata.support_bundle_generation,
-            Generation::new()
+            SupportBundleGeneration::new()
         );
         logctx.cleanup_successful();
     }
@@ -326,15 +361,16 @@ mod tests {
         let inputs = make_input();
         let mut builder = SitrepBuilder::new(&logctx.log, &inputs);
         {
-            let mut case =
-                builder.cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            let mut case = builder
+                .cases
+                .open_case(fm::DiagnosisEngineKind::PowerShelf, "test case");
             case.request_support_bundle(Default::default(), "");
         }
         let sitrep = build_sitrep(builder);
-        assert_eq!(sitrep.metadata.alert_generation, Generation::new());
+        assert_eq!(sitrep.metadata.alert_generation, AlertGeneration::new());
         assert_eq!(
             sitrep.metadata.support_bundle_generation,
-            Generation::new().next()
+            SupportBundleGeneration::new().next()
         );
         logctx.cleanup_successful();
     }
@@ -345,14 +381,17 @@ mod tests {
             "generation_stable_when_no_new_requests_with_parent",
         );
         let inputs = make_input_with_parent_generations(ParentGenerations {
-            alert_generation: Generation::from_u32(1),
-            support_bundle_generation: Generation::from_u32(2),
+            alert_generation: AlertGeneration::from_u32(1),
+            support_bundle_generation: SupportBundleGeneration::from_u32(2),
         });
         let sitrep = build_sitrep(SitrepBuilder::new(&logctx.log, &inputs));
-        assert_eq!(sitrep.metadata.alert_generation, Generation::from_u32(1));
+        assert_eq!(
+            sitrep.metadata.alert_generation,
+            AlertGeneration::from_u32(1)
+        );
         assert_eq!(
             sitrep.metadata.support_bundle_generation,
-            Generation::from_u32(2)
+            SupportBundleGeneration::from_u32(2)
         );
         logctx.cleanup_successful();
     }
@@ -366,21 +405,25 @@ mod tests {
             "child_sitrep_with_new_alert_bumps_alert_generation_only",
         );
         let inputs = make_input_with_parent_generations(ParentGenerations {
-            alert_generation: Generation::from_u32(5),
-            support_bundle_generation: Generation::from_u32(7),
+            alert_generation: AlertGeneration::from_u32(5),
+            support_bundle_generation: SupportBundleGeneration::from_u32(7),
         });
         let mut builder = SitrepBuilder::new(&logctx.log, &inputs);
         {
-            let mut case =
-                builder.cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            let mut case = builder
+                .cases
+                .open_case(fm::DiagnosisEngineKind::PowerShelf, "test case");
             case.request_alert(&test_alerts::Foo(serde_json::json!({})), "")
                 .unwrap();
         }
         let sitrep = build_sitrep(builder);
-        assert_eq!(sitrep.metadata.alert_generation, Generation::from_u32(6));
+        assert_eq!(
+            sitrep.metadata.alert_generation,
+            AlertGeneration::from_u32(6)
+        );
         assert_eq!(
             sitrep.metadata.support_bundle_generation,
-            Generation::from_u32(7)
+            SupportBundleGeneration::from_u32(7)
         );
         logctx.cleanup_successful();
     }
@@ -391,20 +434,24 @@ mod tests {
             "child_sitrep_with_new_bundle_bumps_bundle_generation_only",
         );
         let inputs = make_input_with_parent_generations(ParentGenerations {
-            alert_generation: Generation::from_u32(5),
-            support_bundle_generation: Generation::from_u32(7),
+            alert_generation: AlertGeneration::from_u32(5),
+            support_bundle_generation: SupportBundleGeneration::from_u32(7),
         });
         let mut builder = SitrepBuilder::new(&logctx.log, &inputs);
         {
-            let mut case =
-                builder.cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            let mut case = builder
+                .cases
+                .open_case(fm::DiagnosisEngineKind::PowerShelf, "test case");
             case.request_support_bundle(Default::default(), "");
         }
         let sitrep = build_sitrep(builder);
-        assert_eq!(sitrep.metadata.alert_generation, Generation::from_u32(5));
+        assert_eq!(
+            sitrep.metadata.alert_generation,
+            AlertGeneration::from_u32(5)
+        );
         assert_eq!(
             sitrep.metadata.support_bundle_generation,
-            Generation::from_u32(8)
+            SupportBundleGeneration::from_u32(8)
         );
         logctx.cleanup_successful();
     }
@@ -417,22 +464,26 @@ mod tests {
             "child_sitrep_with_both_new_requests_bumps_both_generations",
         );
         let inputs = make_input_with_parent_generations(ParentGenerations {
-            alert_generation: Generation::from_u32(5),
-            support_bundle_generation: Generation::from_u32(7),
+            alert_generation: AlertGeneration::from_u32(5),
+            support_bundle_generation: SupportBundleGeneration::from_u32(7),
         });
         let mut builder = SitrepBuilder::new(&logctx.log, &inputs);
         {
-            let mut case =
-                builder.cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            let mut case = builder
+                .cases
+                .open_case(fm::DiagnosisEngineKind::PowerShelf, "test case");
             case.request_alert(&test_alerts::Foo(serde_json::json!({})), "")
                 .unwrap();
             case.request_support_bundle(Default::default(), "");
         }
         let sitrep = build_sitrep(builder);
-        assert_eq!(sitrep.metadata.alert_generation, Generation::from_u32(6));
+        assert_eq!(
+            sitrep.metadata.alert_generation,
+            AlertGeneration::from_u32(6)
+        );
         assert_eq!(
             sitrep.metadata.support_bundle_generation,
-            Generation::from_u32(8)
+            SupportBundleGeneration::from_u32(8)
         );
         logctx.cleanup_successful();
     }
@@ -481,8 +532,8 @@ mod tests {
                 creator_id: OmicronZoneUuid::new_v4(),
                 comment: String::new(),
                 time_created: chrono::Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: [closed_case].into_iter().collect(),
             ereports_by_id: IdOrdMap::new(),
@@ -495,17 +546,17 @@ mod tests {
         let mut builder_inputs = crate::analysis_input::Input::builder(
             Some(Arc::new((parent_version, parent))),
             inv,
-            Arc::new(IdOrdMap::new()),
         )
-        .unwrap();
+        .unwrap()
+        .with_empty_defaults();
         // Marker exists, so carry-forward will drop the case.
         builder_inputs.add_marked_alert_requests([alert_id]);
-        let (input, _) = builder_inputs.build();
+        let (input, _) = builder_inputs.build().expect("all inputs provided");
 
         let sitrep = build_sitrep(SitrepBuilder::new(&logctx.log, &input));
         assert_eq!(
             sitrep.metadata.alert_generation,
-            Generation::new().next(),
+            AlertGeneration::new().next(),
             "dropping a case with alerts from the set of closed cases being \
              carried forwards must bump alert_generation past the parent's"
         );
@@ -556,8 +607,8 @@ mod tests {
                 creator_id: OmicronZoneUuid::new_v4(),
                 comment: String::new(),
                 time_created: chrono::Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: [closed_case].into_iter().collect(),
             ereports_by_id: IdOrdMap::new(),
@@ -570,17 +621,17 @@ mod tests {
         let mut builder_inputs = crate::analysis_input::Input::builder(
             Some(Arc::new((parent_version, parent))),
             inv,
-            Arc::new(IdOrdMap::new()),
         )
-        .unwrap();
+        .unwrap()
+        .with_empty_defaults();
         // Marker exists, so carry-forward will drop the case.
         builder_inputs.add_marked_support_bundle_requests([bundle_id]);
-        let (input, _) = builder_inputs.build();
+        let (input, _) = builder_inputs.build().expect("all inputs provided");
 
         let sitrep = build_sitrep(SitrepBuilder::new(&logctx.log, &input));
         assert_eq!(
             sitrep.metadata.support_bundle_generation,
-            Generation::new().next(),
+            SupportBundleGeneration::new().next(),
             "dropping a case with support bundle requests from the set of \
              closed cases being carried forwards must bump \
              support_bundle_generation past the parent's"

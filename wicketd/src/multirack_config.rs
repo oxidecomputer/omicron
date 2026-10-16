@@ -7,7 +7,7 @@
 use crate::RssOrMultirackJoinConfigCommon;
 use crate::bgp_auth_keys::BgpAuthKeys;
 use crate::context::CommonConfigContainer;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 use wicket_common::inventory::MgsV1Inventory;
@@ -15,7 +15,7 @@ use wicket_common::inventory::SledInventory;
 use wicket_common::multirack_setup::CurrentMultirackJoinUserConfig;
 use wicket_common::multirack_setup::MultirackJoinConfigBaseUserInput;
 use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
-use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
 
 pub(crate) struct CurrentMultirackJoinConfig {
     pub common: RssOrMultirackJoinConfigCommon,
@@ -26,9 +26,9 @@ impl CurrentMultirackJoinConfig {
     pub(crate) fn update(
         &mut self,
         config: MultirackJoinConfigBaseUserInput,
-        our_baseboard: Option<&Baseboard>,
+        our_baseboard: &BaseboardId,
         inventory: &MgsV1Inventory,
-        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        ddm_discovered_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
         log: &slog::Logger,
     ) -> Result<(), String> {
         self.common.update(
@@ -45,10 +45,10 @@ impl CurrentMultirackJoinConfig {
     }
 
     pub(crate) fn new_with_inventory_and_peers(
-        our_baseboard: Option<&Baseboard>,
+        our_baseboard: &BaseboardId,
         config: MultirackJoinConfigBaseUserInput,
         inventory: &MgsV1Inventory,
-        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        ddm_discovered_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
         log: &slog::Logger,
     ) -> Result<Self, String> {
         let sled_inventory =

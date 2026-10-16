@@ -5,16 +5,14 @@
 //! Support for the TOML file we give to and accept from clients for setting
 //! (most of) the rack setup configuration.
 
-use omicron_common::address::IpRange;
-use omicron_common::api::external::AllowedSourceIps;
+use iddqd::IdOrdMap;
 use serde::Serialize;
 use sled_agent_types::early_networking::BgpConfig;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::RouteConfig;
-use sled_agent_types::early_networking::UplinkAddress;
-use sled_hardware_types::Baseboard;
+use sled_agent_types::early_networking::TxEqConfig;
+use sled_hardware_types::BaseboardId;
 use std::borrow::Cow;
-use std::collections::BTreeSet;
 use std::fmt;
 use toml_edit::Array;
 use toml_edit::ArrayOfTables;
@@ -27,12 +25,17 @@ use toml_edit::Value;
 use wicket_common::inventory::SpType;
 use wicket_common::rack_setup::BootstrapSledDescription;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
-use wicket_common::rack_setup::ManualPortConfig;
-use wicket_common::rack_setup::UserSpecifiedBgpPeerConfig;
-use wicket_common::rack_setup::UserSpecifiedImportExportPolicy;
-use wicket_common::rack_setup::UserSpecifiedPortConfig;
-use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
-use wicket_common::rack_setup::UserSpecifiedUplinkAddressConfig;
+use wicketd_commission_types::rack_setup::AllowedSourceIps;
+use wicketd_commission_types::rack_setup::IpRange;
+use wicketd_commission_types::rack_setup::L1PortConfig;
+use wicketd_commission_types::rack_setup::ServiceIpPoolConfig;
+use wicketd_commission_types::rack_setup::UplinkAddress;
+use wicketd_commission_types::rack_setup::UplinkPortConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedBgpPeerConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedImportExportPolicy;
+use wicketd_commission_types::rack_setup::UserSpecifiedPortConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedUplinkAddressConfig;
 
 static TEMPLATE: &str = include_str!("config_template.toml");
 
@@ -67,23 +70,7 @@ impl TomlTemplate {
             .map(|s| Value::String(Formatted::new(s.to_string())))
             .collect();
 
-        *doc.get_mut("internal_services_ip_pool_ranges")
-            .unwrap()
-            .as_array_mut()
-            .unwrap() = config
-            .internal_services_ip_pool_ranges
-            .iter()
-            .map(|r| {
-                let mut t = InlineTable::new();
-                let (first, last) = match r {
-                    IpRange::V4(r) => (r.first.to_string(), r.last.to_string()),
-                    IpRange::V6(r) => (r.first.to_string(), r.last.to_string()),
-                };
-                t.insert("first", Value::String(Formatted::new(first)));
-                t.insert("last", Value::String(Formatted::new(last)));
-                Value::InlineTable(t)
-            })
-            .collect();
+        populate_service_ip_pool_tables(&mut doc, &config.service_ip_pools);
 
         *doc.get_mut("external_dns_ips").unwrap().as_array_mut().unwrap() =
             config
@@ -92,12 +79,7 @@ impl TomlTemplate {
                 .map(|s| Value::String(Formatted::new(s.to_string())))
                 .collect();
 
-        for array in [
-            "ntp_servers",
-            "dns_servers",
-            "internal_services_ip_pool_ranges",
-            "external_dns_ips",
-        ] {
+        for array in ["ntp_servers", "dns_servers", "external_dns_ips"] {
             format_multiline_array(
                 doc.get_mut(array).unwrap().as_array_mut().unwrap(),
             );
@@ -125,6 +107,74 @@ impl TomlTemplate {
 
         Self { doc }
     }
+}
+
+fn populate_service_ip_pool_tables(
+    doc: &mut DocumentMut,
+    pools: &IdOrdMap<ServiceIpPoolConfig>,
+) {
+    // With no pools in the current config, leave the template's block (its
+    // explanatory comment and a placeholder pool) in place to give some
+    // scaffolding to the operator.
+    if pools.is_empty() {
+        return;
+    }
+
+    let existing = doc
+        .get_mut("service_ip_pools")
+        .unwrap()
+        .as_array_of_tables_mut()
+        .unwrap();
+
+    // Cache the comment from the template to reapply it later after inserting
+    // the existing tables.
+    let comment = existing.get(0).and_then(|t| t.decor().prefix().cloned());
+
+    let mut tables: ArrayOfTables = pools
+        .iter()
+        .map(|pool| {
+            let mut table = Table::new();
+            table.insert(
+                "name",
+                Item::Value(Value::String(Formatted::new(
+                    pool.name.to_string(),
+                ))),
+            );
+            table.insert(
+                "description",
+                Item::Value(Value::String(Formatted::new(
+                    pool.description.clone(),
+                ))),
+            );
+            let ranges = pool
+                .ranges()
+                .iter()
+                .map(|r| {
+                    let mut t = InlineTable::new();
+                    let (first, last) = match r {
+                        IpRange::V4(r) => {
+                            (r.first.to_string(), r.last.to_string())
+                        }
+                        IpRange::V6(r) => {
+                            (r.first.to_string(), r.last.to_string())
+                        }
+                    };
+                    t.insert("first", Value::String(Formatted::new(first)));
+                    t.insert("last", Value::String(Formatted::new(last)));
+                    Value::InlineTable(t)
+                })
+                .collect::<Array>();
+            table.insert("ranges", Item::Value(Value::Array(ranges)));
+            table
+        })
+        .collect();
+
+    // Reapply the template's section comment to the first pool.
+    if let Some(comment) = comment {
+        tables.get_mut(0).unwrap().decor_mut().set_prefix(comment);
+    }
+
+    *existing = tables;
 }
 
 // Populate the allowed source IP list, which can be specified as a specified as
@@ -188,27 +238,16 @@ fn format_multiline_array(array: &mut Array) {
     array.set_trailing("\n");
 }
 
-fn build_sleds_array(sleds: &BTreeSet<BootstrapSledDescription>) -> Array {
+fn build_sleds_array(sleds: &IdOrdMap<BootstrapSledDescription>) -> Array {
     // Helper function to build the comment attached to a given sled.
     fn sled_comment(sled: &BootstrapSledDescription, end: &str) -> String {
         let ip = sled
             .bootstrap_ip
             .map(|ip| Cow::from(format!("{ip}")))
             .unwrap_or_else(|| Cow::from("IP address UNKNOWN"));
-        match &sled.baseboard {
-            Baseboard::Gimlet { identifier, model, revision } => {
-                format!(
-                    " # {identifier} (model {model} revision {revision}, {ip})\
-                     {end}"
-                )
-            }
-            Baseboard::Unknown => {
-                format!(" # UNKNOWN SLED ({ip}){end}")
-            }
-            Baseboard::Pc { identifier, model } => {
-                format!(" # NON-OXIDE {identifier} (model {model}, {ip}){end}")
-            }
-        }
+
+        let BaseboardId { serial_number, part_number } = &sled.baseboard_id;
+        format!(" # {serial_number} (model {part_number}, {ip}){end}")
     }
 
     let mut array = Array::new();
@@ -216,7 +255,7 @@ fn build_sleds_array(sleds: &BTreeSet<BootstrapSledDescription>) -> Array {
 
     for sled in sleds {
         // We should never get a non-sled from wicketd; if we do, filter it out.
-        if sled.id.type_ != SpType::Sled {
+        if sled.id.typ != SpType::Sled {
             continue;
         }
 
@@ -284,8 +323,16 @@ fn populate_network_table(
         switch_table.set_implicit(true);
 
         for (port, cfg) in &config.switch0 {
-            let uplink = populate_uplink_table(cfg);
-            switch_table.insert(port, Item::Table(uplink));
+            match cfg {
+                UserSpecifiedPortConfig::Uplink(uplink) => {
+                    let uplink = populate_uplink_table(uplink);
+                    switch_table.insert(port, Item::Table(uplink));
+                }
+                UserSpecifiedPortConfig::Ddm(ddm) => {
+                    let ddm = populate_ddm_table(ddm);
+                    switch_table.insert(port, Item::Table(ddm));
+                }
+            }
         }
     }
 
@@ -299,8 +346,16 @@ fn populate_network_table(
         switch_table.set_implicit(true);
 
         for (port, cfg) in &config.switch1 {
-            let uplink = populate_uplink_table(cfg);
-            switch_table.insert(port, Item::Table(uplink));
+            match cfg {
+                UserSpecifiedPortConfig::Uplink(uplink) => {
+                    let uplink = populate_uplink_table(uplink);
+                    switch_table.insert(port, Item::Table(uplink));
+                }
+                UserSpecifiedPortConfig::Ddm(ddm) => {
+                    let ddm = populate_ddm_table(ddm);
+                    switch_table.insert(port, Item::Table(ddm));
+                }
+            }
         }
     }
 
@@ -344,18 +399,25 @@ fn populate_network_table(
     }
 }
 
+fn populate_ddm_table(cfg: &L1PortConfig) -> Table {
+    // A DDM port carries only physical-layer settings (the comment is
+    // operator-facing).
+    let L1PortConfig { speed, fec, autoneg, lldp, tx_eq } = cfg;
+    let mut ddm = Table::new();
+    ddm.decor_mut().set_prefix("\n# This port routes DDM traffic.\n");
+    ddm.insert("kind", string_item("ddm"));
+    ddm.insert("speed", string_item(enum_to_toml_string(&speed)));
+    if let Some(fec) = fec {
+        ddm.insert("fec", string_item(enum_to_toml_string(&fec)));
+    }
+    ddm.insert("autoneg", bool_item(*autoneg));
+    populate_lldp_and_tx_eq(&mut ddm, lldp, tx_eq);
+    ddm
+}
+
 #[must_use]
-fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
-    // This style ensures that if a new field is added, this fails loudly.
-    let manual_port_config = match cfg {
-        UserSpecifiedPortConfig::Manual(manual) => manual,
-        UserSpecifiedPortConfig::DdmAutoPortConfig {} => {
-            let mut uplink = Table::new();
-            uplink.insert("type", string_item("ddm_auto_port_config"));
-            return uplink;
-        }
-    };
-    let ManualPortConfig {
+fn populate_uplink_table(cfg: &UplinkPortConfig) -> Table {
+    let UplinkPortConfig {
         routes,
         addresses,
         uplink_port_speed,
@@ -364,7 +426,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         bgp_peers,
         lldp,
         tx_eq,
-    } = manual_port_config;
+    } = cfg;
 
     let mut uplink = Table::new();
 
@@ -442,6 +504,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
             enforce_first_as,
             allowed_import,
             allowed_export,
+            src_addr,
             vlan_id,
             router_lifetime,
         } = p;
@@ -529,6 +592,11 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
             peer.insert("allowed_export", Item::Value(Value::Array(out)));
         }
 
+        // src_addr
+        if let Some(x) = src_addr {
+            peer.insert("src_addr", string_item(&x.to_string()));
+        }
+
         //vlan
         if let Some(x) = vlan_id {
             peer.insert("vlan_id", i64_item(i64::from(*x)));
@@ -555,6 +623,16 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
 
     uplink.insert("bgp_peers", Item::ArrayOfTables(peers));
 
+    populate_lldp_and_tx_eq(&mut uplink, lldp, tx_eq);
+
+    uplink
+}
+
+fn populate_lldp_and_tx_eq(
+    uplink: &mut Table,
+    lldp: &Option<LldpPortConfig>,
+    tx_eq: &Option<TxEqConfig>,
+) {
     if let Some(l) = lldp {
         let LldpPortConfig {
             status,
@@ -614,8 +692,6 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         }
         uplink.insert("tx_eq", Item::Table(tx_eq));
     }
-
-    uplink
 }
 
 // Helper function to serialize enums into their appropriate string
@@ -665,9 +741,8 @@ fn bool_item(b: bool) -> Item {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wicket_common::{
-        example::ExampleRackSetupData, rack_setup::PutRssUserConfigInsensitive,
-    };
+    use wicket_common::example::ExampleRackSetupData;
+    use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 
     #[test]
     fn round_trip_nonempty_config() {
@@ -683,5 +758,29 @@ mod tests {
         let parsed: PutRssUserConfigInsensitive =
             toml::de::from_str(&template).unwrap();
         assert_eq!(example.put_insensitive, parsed);
+    }
+
+    #[test]
+    fn empty_config_emits_service_pool_scaffold() {
+        // There are no pools in a new rack. `populate` should leave the dummy
+        // scaffolding in the template's `[[service_ip_pools]]` table, with
+        // empty values, since it provides a useful comment and example for the
+        // operator to create their own data from.
+        let empty = CurrentRssUserConfigInsensitive {
+            bootstrap_sleds: IdOrdMap::new(),
+            ntp_servers: Vec::new(),
+            dns_servers: Vec::new(),
+            service_ip_pools: IdOrdMap::new(),
+            external_dns_ips: Vec::new(),
+            external_dns_zone_name: String::new(),
+            rack_network_config: None,
+            allowed_source_ips: None,
+            external_jumbo_frames_opt_in_enabled: false,
+        };
+        let template = TomlTemplate::populate(&empty).to_string();
+        expectorate::assert_contents(
+            "tests/output/example_empty.toml",
+            &template,
+        );
     }
 }

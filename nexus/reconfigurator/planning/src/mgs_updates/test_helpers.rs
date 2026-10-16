@@ -4,10 +4,9 @@
 
 //! Test-only support code for testing MGS update planning.
 
-use chrono::Utc;
 use gateway_client::types::SpComponentCaboose;
-use gateway_client::types::SpIdentifier;
 use gateway_types::component::PowerState;
+use gateway_types::component::SpIdentifier;
 use gateway_types::component::SpState;
 use gateway_types::rot::RotSlot;
 use gateway_types::rot::RotState;
@@ -26,37 +25,48 @@ use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::SpType;
-use omicron_common::api::external::Generation;
-use omicron_common::api::external::TufArtifactMeta;
-use omicron_common::api::external::TufRepoDescription;
-use omicron_common::api::external::TufRepoMeta;
-use omicron_common::disk::M2Slot;
-use omicron_common::update::ArtifactId;
+use nexus_types::tuf_repo::TufRepoDescription;
+use omicron_generation_kinds::SledConfigGeneration;
 use omicron_uuid_kinds::SledUuid;
-use sled_agent_types::inventory::Baseboard;
+use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::BootImageHeader;
 use sled_agent_types::inventory::BootPartitionContents;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::CurrentUpdateDisposition;
 use sled_agent_types::inventory::FmdInventory;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
+use sled_agent_types::inventory::InstanceManagerStatus;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+use sled_hardware_types::BaseboardId;
 use sled_hardware_types::COSMO_SLED_MODEL;
 use sled_hardware_types::GIMLET_SLED_MODEL;
 use sled_hardware_types::OxideSled;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactKind;
+use tufaceous_artifact::ArtifactSet;
 use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::KnownArtifactKind;
+use tufaceous_artifact::KnownArtifactTags;
+use tufaceous_artifact::OsBoard;
+use tufaceous_artifact::OsPhase1Tags;
+use tufaceous_artifact::OsPhase2Tags;
+use tufaceous_artifact::OsVariant;
+use tufaceous_artifact::RotBootloaderTags;
+use tufaceous_artifact::RotKeyTableHash;
+use tufaceous_artifact::RotTags;
+use tufaceous_artifact::SpTags;
+use tufaceous_artifact::ZoneTags;
 
+use crate::mgs_updates::EvacuatingSleds;
 use crate::mgs_updates::PendingHostPhase2Changes;
 
 /// Version that will be used for all artifacts in the TUF repo
@@ -156,7 +166,6 @@ pub(super) const ARTIFACT_HASH_COSMO_HOST_PHASE_1: ArtifactHash =
     ArtifactHash([38; 32]);
 
 // unused artifact hashes contained in our fake TUF repo
-const ARTIFACT_HASH_CONTROL_PLANE: ArtifactHash = ArtifactHash([33; 32]);
 const ARTIFACT_HASH_NEXUS: ArtifactHash = ArtifactHash([34; 32]);
 
 /// Hash of fake RoT signing keys
@@ -252,7 +261,7 @@ impl TestBoards {
                 let slot = slot as u16;
                 boards
                     .insert_unique(TestBoard {
-                        id: SpIdentifier { type_, slot },
+                        id: SpIdentifier { typ: type_, slot },
                         sled_id: SledUuid::new_v4(),
                         serial,
                         sp_board,
@@ -268,9 +277,44 @@ impl TestBoards {
     /// Get the sled ID of a particular sled by SP slot number.
     pub fn sled_id(&self, sp_slot: u16) -> Option<SledUuid> {
         self.boards.iter().find_map(|b| {
-            (b.id.type_ == SpType::Sled && b.id.slot == sp_slot)
+            (b.id.typ == SpType::Sled && b.id.slot == sp_slot)
                 .then_some(b.sled_id)
         })
+    }
+
+    /// Get the IDs of all sleds.
+    pub fn sled_ids(&self) -> impl Iterator<Item = SledUuid> + '_ {
+        self.boards
+            .iter()
+            .filter_map(|b| (b.id.typ == SpType::Sled).then_some(b.sled_id))
+    }
+
+    /// Get the SP slot of a particular sled.
+    pub fn sled_sp_slot(&self, sled_id: SledUuid) -> Option<u16> {
+        self.boards.iter().find_map(|b| {
+            (b.id.typ == SpType::Sled && b.sled_id == sled_id)
+                .then_some(b.id.slot)
+        })
+    }
+
+    /// Get the serial number of a particular sled.
+    pub fn sled_serial_number(
+        &self,
+        sled_id: SledUuid,
+    ) -> Option<&'static str> {
+        self.boards.iter().find_map(|b| {
+            (b.id.typ == SpType::Sled && b.sled_id == sled_id)
+                .then_some(b.serial)
+        })
+    }
+
+    /// Get an `EvacuatingSleds` describing a blueprint in which every
+    /// sled is marked `Evacuating` at the initial sled config generation.
+    pub fn all_sleds_evacuating(&self) -> EvacuatingSleds {
+        EvacuatingSleds::new_for_test(
+            self.sled_ids()
+                .map(|sled_id| (sled_id, SledConfigGeneration::new())),
+        )
     }
 
     /// Get a helper to build an inventory collection reflecting specific
@@ -315,243 +359,184 @@ impl TestBoards {
         const SYSTEM_HASH: ArtifactHash = ArtifactHash([3; 32]);
 
         fn make_artifact(
-            name: &str,
-            kind: ArtifactKind,
+            tags: KnownArtifactTags,
             hash: ArtifactHash,
-            board: Option<&str>,
-            sign: Option<Vec<u8>>,
-        ) -> TufArtifactMeta {
-            TufArtifactMeta {
-                id: ArtifactId {
-                    name: name.to_string(),
-                    version: ARTIFACT_VERSION_2,
-                    kind,
-                },
+        ) -> Artifact {
+            Artifact {
+                version: ARTIFACT_VERSION_2,
+                tags: tags.to_tags().unwrap(),
                 hash,
-                size: 0, // unused here
-                board: board.map(|s| s.to_string()),
-                sign,
+                length: 0, // unused here
             }
         }
 
         // Include a bunch of SP-related artifacts, as well as a few others just
         // to make sure those are properly ignored.
-        let artifacts = vec![
+        let artifacts = ArtifactSet::from([
             make_artifact(
-                "control-plane",
-                KnownArtifactKind::ControlPlane.into(),
-                ARTIFACT_HASH_CONTROL_PLANE,
-                None,
-                None,
-            ),
-            make_artifact(
-                "nexus",
-                KnownArtifactKind::Zone.into(),
+                ZoneTags { zone_name: String::from("nexus") }.into(),
                 ARTIFACT_HASH_NEXUS,
-                None,
-                None,
             ),
             make_artifact(
-                "gimlet-host-os-phase-1",
-                ArtifactKind::GIMLET_HOST_PHASE_1,
+                OsPhase1Tags {
+                    os_board: OsBoard::GIMLET,
+                    os_variant: OsVariant::Host,
+                }
+                .into(),
                 ARTIFACT_HASH_GIMLET_HOST_PHASE_1,
-                None,
-                None,
             ),
             make_artifact(
-                "cosmo-host-os-phase-1",
-                ArtifactKind::COSMO_HOST_PHASE_1,
+                OsPhase1Tags {
+                    os_board: OsBoard::COSMO,
+                    os_variant: OsVariant::Host,
+                }
+                .into(),
                 ARTIFACT_HASH_COSMO_HOST_PHASE_1,
-                None,
-                None,
             ),
             make_artifact(
-                "host-os-phase-2",
-                ArtifactKind::HOST_PHASE_2,
+                OsPhase2Tags { os_variant: OsVariant::Host }.into(),
                 ARTIFACT_HASH_HOST_PHASE_2,
-                None,
-                None,
             ),
             make_artifact(
-                "cosmo-b",
-                KnownArtifactKind::GimletSp.into(),
+                SpTags { sp_board: String::from("cosmo-b") }.into(),
                 test_artifact_for_board("cosmo-b"),
-                Some("cosmo-b"),
-                None,
             ),
             make_artifact(
-                "gimlet-d",
-                KnownArtifactKind::GimletSp.into(),
+                SpTags { sp_board: String::from("gimlet-d") }.into(),
                 test_artifact_for_board("gimlet-d"),
-                Some("gimlet-d"),
-                None,
             ),
             make_artifact(
-                "gimlet-e",
-                KnownArtifactKind::GimletSp.into(),
+                SpTags { sp_board: String::from("gimlet-e") }.into(),
                 test_artifact_for_board("gimlet-e"),
-                Some("gimlet-e"),
-                None,
             ),
             make_artifact(
-                "sidecar-b",
-                KnownArtifactKind::SwitchSp.into(),
+                SpTags { sp_board: String::from("sidecar-b") }.into(),
                 test_artifact_for_board("sidecar-b"),
-                Some("sidecar-b"),
-                None,
             ),
             make_artifact(
-                "sidecar-c",
-                KnownArtifactKind::SwitchSp.into(),
+                SpTags { sp_board: String::from("sidecar-c") }.into(),
                 test_artifact_for_board("sidecar-c"),
-                Some("sidecar-c"),
-                None,
             ),
             make_artifact(
-                "psc-b",
-                KnownArtifactKind::PscSp.into(),
+                SpTags { sp_board: String::from("psc-b") }.into(),
                 test_artifact_for_board("psc-b"),
-                Some("psc-b"),
-                None,
             ),
             make_artifact(
-                "psc-c",
-                KnownArtifactKind::PscSp.into(),
+                SpTags { sp_board: String::from("psc-c") }.into(),
                 test_artifact_for_board("psc-c"),
-                Some("psc-c"),
-                None,
             ),
             make_artifact(
-                "oxide-rot-1-fake-key",
-                ArtifactKind::GIMLET_ROT_IMAGE_A,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::GIMLET_ROT_IMAGE_A,
-                    Some(OxideSled::Gimlet),
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_GIMLET.into()),
+                RotTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_rkth: Some(RotKeyTableHash(ROT_SIGN_GIMLET.into())),
+                    rot_slot: tufaceous_artifact::RotSlot::A,
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_GIMLET_A,
             ),
             make_artifact(
-                "oxide-rot-1-fake-key",
-                ArtifactKind::GIMLET_ROT_IMAGE_B,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::GIMLET_ROT_IMAGE_B,
-                    Some(OxideSled::Gimlet),
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_GIMLET.into()),
+                RotTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_rkth: Some(RotKeyTableHash(ROT_SIGN_GIMLET.into())),
+                    rot_slot: tufaceous_artifact::RotSlot::B,
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_GIMLET_B,
             ),
             make_artifact(
-                "oxide-rot-1-fake-key",
-                ArtifactKind::GIMLET_ROT_IMAGE_A,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::GIMLET_ROT_IMAGE_A,
-                    Some(OxideSled::Cosmo),
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_COSMO.into()),
+                RotTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_rkth: Some(RotKeyTableHash(ROT_SIGN_COSMO.into())),
+                    rot_slot: tufaceous_artifact::RotSlot::A,
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_COSMO_A,
             ),
             make_artifact(
-                "oxide-rot-1-fake-key",
-                ArtifactKind::GIMLET_ROT_IMAGE_B,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::GIMLET_ROT_IMAGE_B,
-                    Some(OxideSled::Cosmo),
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_COSMO.into()),
+                RotTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_rkth: Some(RotKeyTableHash(ROT_SIGN_COSMO.into())),
+                    rot_slot: tufaceous_artifact::RotSlot::B,
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_COSMO_B,
             ),
             make_artifact(
-                "oxide-rot-1-fake-key",
-                ArtifactKind::PSC_ROT_IMAGE_A,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::PSC_ROT_IMAGE_A,
-                    None,
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_PSC.into()),
+                RotTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_rkth: Some(RotKeyTableHash(ROT_SIGN_PSC.into())),
+                    rot_slot: tufaceous_artifact::RotSlot::A,
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_PSC_A,
             ),
             make_artifact(
-                "oxide-rot-1-fake-key",
-                ArtifactKind::PSC_ROT_IMAGE_B,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::PSC_ROT_IMAGE_B,
-                    None,
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_PSC.into()),
+                RotTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_rkth: Some(RotKeyTableHash(ROT_SIGN_PSC.into())),
+                    rot_slot: tufaceous_artifact::RotSlot::B,
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_PSC_B,
             ),
             make_artifact(
-                "oxide-rot-1-fake-key",
-                ArtifactKind::SWITCH_ROT_IMAGE_A,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::SWITCH_ROT_IMAGE_A,
-                    None,
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_SWITCH.into()),
+                RotTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_rkth: Some(RotKeyTableHash(ROT_SIGN_SWITCH.into())),
+                    rot_slot: tufaceous_artifact::RotSlot::A,
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_SWITCH_A,
             ),
             make_artifact(
-                "oxide-rot-1-fake-key",
-                ArtifactKind::SWITCH_ROT_IMAGE_B,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::SWITCH_ROT_IMAGE_B,
-                    None,
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_SWITCH.into()),
+                RotTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_rkth: Some(RotKeyTableHash(ROT_SIGN_SWITCH.into())),
+                    rot_slot: tufaceous_artifact::RotSlot::B,
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_SWITCH_B,
             ),
             make_artifact(
-                "bootloader-fake-key",
-                ArtifactKind::GIMLET_ROT_STAGE0,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::GIMLET_ROT_STAGE0,
-                    Some(OxideSled::Gimlet),
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_GIMLET.into()),
+                RotBootloaderTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_rkth: Some(RotKeyTableHash(ROT_SIGN_GIMLET.into())),
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_BOOTLOADER_GIMLET,
             ),
             make_artifact(
-                "bootloader-fake-key",
-                ArtifactKind::GIMLET_ROT_STAGE0,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::GIMLET_ROT_STAGE0,
-                    Some(OxideSled::Cosmo),
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_COSMO.into()),
+                RotBootloaderTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_rkth: Some(RotKeyTableHash(ROT_SIGN_COSMO.into())),
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_BOOTLOADER_COSMO,
             ),
             make_artifact(
-                "bootloader-fake-key",
-                ArtifactKind::PSC_ROT_STAGE0,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::PSC_ROT_STAGE0,
-                    None,
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_PSC.into()),
+                RotBootloaderTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_rkth: Some(RotKeyTableHash(ROT_SIGN_PSC.into())),
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_BOOTLOADER_PSC,
             ),
             make_artifact(
-                "bootloader-fake-key",
-                ArtifactKind::SWITCH_ROT_STAGE0,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::SWITCH_ROT_STAGE0,
-                    None,
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_SWITCH.into()),
+                RotBootloaderTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_rkth: Some(RotKeyTableHash(ROT_SIGN_SWITCH.into())),
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_BOOTLOADER_SWITCH,
             ),
-        ];
+        ]);
 
         TufRepoDescription {
-            repo: TufRepoMeta {
-                hash: SYSTEM_HASH,
-                targets_role_version: 0,
-                valid_until: Utc::now(),
-                system_version: SYSTEM_VERSION,
-                file_name: String::new(),
-            },
             artifacts,
+            metadata: BTreeMap::new(),
+            system_version: SYSTEM_VERSION,
+            hash: SYSTEM_HASH,
+            file_name: String::new(),
         }
     }
 
@@ -565,7 +550,7 @@ impl TestBoards {
             let sled_type = board_to_sled(&board.sp_board);
             updates
                 .insert_unique(ExpectedUpdate {
-                    sp_type: board.id.type_,
+                    sp_type: board.id.typ,
                     sp_slot: board.id.slot,
                     component: MgsUpdateComponent::Sp,
                     expected_serial: board.serial,
@@ -574,41 +559,49 @@ impl TestBoards {
                 .expect("boards are unique");
             updates
                 .insert_unique(ExpectedUpdate {
-                    sp_type: board.id.type_,
+                    sp_type: board.id.typ,
                     sp_slot: board.id.slot,
                     component: MgsUpdateComponent::Rot,
                     expected_serial: board.serial,
-                    expected_artifact: test_artifact_for_artifact_kind(
-                        match board.id.type_ {
-                            SpType::Sled => ArtifactKind::GIMLET_ROT_IMAGE_B,
-                            SpType::Power => ArtifactKind::PSC_ROT_IMAGE_B,
-                            SpType::Switch => ArtifactKind::SWITCH_ROT_IMAGE_B,
+                    expected_artifact: match board.id.typ {
+                        SpType::Sled => match sled_type.expect(
+                            "test bug: did not detect sled type for sled",
+                        ) {
+                            OxideSled::Gimlet => ARTIFACT_HASH_ROT_GIMLET_B,
+                            OxideSled::Cosmo => ARTIFACT_HASH_ROT_COSMO_B,
                         },
-                        sled_type,
-                    ),
+                        SpType::Power => ARTIFACT_HASH_ROT_PSC_B,
+                        SpType::Switch => ARTIFACT_HASH_ROT_SWITCH_B,
+                    },
                 })
                 .expect("boards are unique");
             updates
                 .insert_unique(ExpectedUpdate {
-                    sp_type: board.id.type_,
+                    sp_type: board.id.typ,
                     sp_slot: board.id.slot,
                     component: MgsUpdateComponent::RotBootloader,
                     expected_serial: board.serial,
-                    expected_artifact: test_artifact_for_artifact_kind(
-                        match board.id.type_ {
-                            SpType::Sled => ArtifactKind::GIMLET_ROT_STAGE0,
-                            SpType::Power => ArtifactKind::PSC_ROT_STAGE0,
-                            SpType::Switch => ArtifactKind::SWITCH_ROT_STAGE0,
+                    expected_artifact: match board.id.typ {
+                        SpType::Sled => match sled_type.expect(
+                            "test bug: did not detect sled type for sled",
+                        ) {
+                            OxideSled::Gimlet => {
+                                ARTIFACT_HASH_ROT_BOOTLOADER_GIMLET
+                            }
+                            OxideSled::Cosmo => {
+                                ARTIFACT_HASH_ROT_BOOTLOADER_COSMO
+                            }
                         },
-                        sled_type,
-                    ),
+                        SpType::Power => ARTIFACT_HASH_ROT_BOOTLOADER_PSC,
+                        SpType::Switch => ARTIFACT_HASH_ROT_BOOTLOADER_SWITCH,
+                    },
                 })
                 .expect("boards are unique");
 
-            if board.id.type_ == SpType::Sled {
+            if board.id.typ == SpType::Sled {
                 updates
                     .insert_unique(ExpectedUpdate {
-                        sp_type: board.id.type_,
+                        sp_type: board.id.typ,
                         sp_slot: board.id.slot,
                         component: MgsUpdateComponent::HostOs,
                         expected_serial: board.serial,
@@ -694,6 +687,17 @@ impl ExpectedUpdates {
 
     pub fn len(&self) -> usize {
         self.updates.len()
+    }
+
+    /// Returns whether we still expect an update to `component` of the board
+    /// in the given SP slot.
+    pub fn contains(
+        &self,
+        sp_type: SpType,
+        sp_slot: u16,
+        component: MgsUpdateComponent,
+    ) -> bool {
+        self.updates.contains_key(&(sp_type, sp_slot, component))
     }
 
     /// Confirm that `update` matches one of our expected updates, and _remove_
@@ -854,6 +858,13 @@ pub(super) struct TestBoardCollectionBuilder<'a> {
 
     // host exceptions are keyed only by slot; they only apply to sleds.
     host_exceptions: BTreeMap<u16, HostOsException>,
+
+    // sled-agent inventory exceptions (relevant to sled evacuation); also
+    // keyed only by slot, and only apply to sleds.
+    sled_config_generation_exceptions: BTreeMap<u16, SledConfigGeneration>,
+    sled_ledgered_disposition_exceptions:
+        BTreeMap<u16, OmicronSledUpdateDisposition>,
+    instance_manager_status_exceptions: BTreeMap<u16, InstanceManagerStatus>,
 }
 
 impl<'a> TestBoardCollectionBuilder<'a> {
@@ -890,6 +901,9 @@ impl<'a> TestBoardCollectionBuilder<'a> {
             rot_active_slot_exceptions: BTreeMap::new(),
             rot_persistent_boot_preference_exceptions: BTreeMap::new(),
             host_exceptions: BTreeMap::new(),
+            sled_config_generation_exceptions: BTreeMap::new(),
+            sled_ledgered_disposition_exceptions: BTreeMap::new(),
+            instance_manager_status_exceptions: BTreeMap::new(),
         }
     }
 
@@ -910,7 +924,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         v: ArtifactVersion,
     ) -> Self {
         self.sp_active_version_exceptions
-            .insert(SpIdentifier { type_, slot }, v);
+            .insert(SpIdentifier { typ: type_, slot }, v);
         self
     }
 
@@ -920,7 +934,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         slot: u16,
     ) -> bool {
         self.sp_active_version_exceptions
-            .contains_key(&SpIdentifier { type_, slot })
+            .contains_key(&SpIdentifier { typ: type_, slot })
     }
 
     pub fn rot_versions(
@@ -940,7 +954,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         v: ArtifactVersion,
     ) -> Self {
         self.rot_active_version_exceptions
-            .insert(SpIdentifier { type_, slot }, v);
+            .insert(SpIdentifier { typ: type_, slot }, v);
         self
     }
 
@@ -951,7 +965,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         s: RotSlot,
     ) -> Self {
         self.rot_active_slot_exceptions
-            .insert(SpIdentifier { type_, slot: sp_slot }, s);
+            .insert(SpIdentifier { typ: type_, slot: sp_slot }, s);
         self
     }
 
@@ -962,7 +976,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         s: RotSlot,
     ) -> Self {
         self.rot_persistent_boot_preference_exceptions
-            .insert(SpIdentifier { type_, slot: sp_slot }, s);
+            .insert(SpIdentifier { typ: type_, slot: sp_slot }, s);
         self
     }
 
@@ -972,7 +986,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         slot: u16,
     ) -> bool {
         self.rot_active_version_exceptions
-            .contains_key(&SpIdentifier { type_, slot })
+            .contains_key(&SpIdentifier { typ: type_, slot })
     }
 
     pub fn stage0_versions(
@@ -991,7 +1005,8 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         slot: u16,
         v: ArtifactVersion,
     ) -> Self {
-        self.stage0_version_exceptions.insert(SpIdentifier { type_, slot }, v);
+        self.stage0_version_exceptions
+            .insert(SpIdentifier { typ: type_, slot }, v);
         self
     }
 
@@ -1001,7 +1016,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         slot: u16,
     ) -> bool {
         self.stage0_version_exceptions
-            .contains_key(&SpIdentifier { type_, slot })
+            .contains_key(&SpIdentifier { typ: type_, slot })
     }
 
     pub fn gimlet_host_phase_1_artifacts(
@@ -1047,6 +1062,103 @@ impl<'a> TestBoardCollectionBuilder<'a> {
 
     pub fn has_host_active_exception(&self, slot: u16) -> bool {
         self.host_exceptions.contains_key(&slot)
+    }
+
+    /// Override the generation of the sled config reported by the sled in the
+    /// given slot (both `ledgered_sled_config` and `last_reconciled_config`).
+    /// By default, all sleds report `SledConfigGeneration::new()`.
+    pub fn sled_config_generation_exception(
+        mut self,
+        sp_slot: u16,
+        generation: SledConfigGeneration,
+    ) -> Self {
+        self.sled_config_generation_exceptions.insert(sp_slot, generation);
+        self
+    }
+
+    /// Override the update disposition in the sled config reported by the sled
+    /// in the given slot (both `ledgered_sled_config` and
+    /// `last_reconciled_config`). By default, all sleds report `Available`.
+    pub fn sled_ledgered_disposition_exception(
+        mut self,
+        sp_slot: u16,
+        disposition: OmicronSledUpdateDisposition,
+    ) -> Self {
+        self.sled_ledgered_disposition_exceptions.insert(sp_slot, disposition);
+        self
+    }
+
+    /// Override the instance manager status reported by the sled in the given
+    /// slot. By default, all sleds report `Known(Available)` with zero
+    /// registered VMMs.
+    pub fn instance_manager_status_exception(
+        mut self,
+        sp_slot: u16,
+        status: InstanceManagerStatus,
+    ) -> Self {
+        self.instance_manager_status_exceptions.insert(sp_slot, status);
+        self
+    }
+
+    /// Make the sled in the given slot report that it has fully evacuated: its
+    /// sled config is at `generation` with an `Evacuating` disposition, and its
+    /// instance manager reports `Evacuating` with zero registered VMMs.
+    pub fn sled_evacuated(
+        self,
+        sp_slot: u16,
+        generation: SledConfigGeneration,
+    ) -> Self {
+        self.sled_config_generation_exception(sp_slot, generation)
+            .sled_ledgered_disposition_exception(
+                sp_slot,
+                OmicronSledUpdateDisposition::Evacuating,
+            )
+            .instance_manager_status_exception(
+                sp_slot,
+                InstanceManagerStatus {
+                    update_disposition: CurrentUpdateDisposition::Known(
+                        OmicronSledUpdateDisposition::Evacuating,
+                    ),
+                    num_registered_vmms: 0,
+                },
+            )
+    }
+
+    /// Make the sled in the given slot report that it is `Available` again
+    /// after an evacuation: its sled config is at `generation` with an
+    /// `Available` disposition, and its instance manager reports `Available`
+    /// with zero registered VMMs.
+    pub fn sled_available(
+        self,
+        sp_slot: u16,
+        generation: SledConfigGeneration,
+    ) -> Self {
+        self.sled_config_generation_exception(sp_slot, generation)
+            .sled_ledgered_disposition_exception(
+                sp_slot,
+                OmicronSledUpdateDisposition::Available,
+            )
+            .instance_manager_status_exception(
+                sp_slot,
+                InstanceManagerStatus {
+                    update_disposition: CurrentUpdateDisposition::Known(
+                        OmicronSledUpdateDisposition::Available,
+                    ),
+                    num_registered_vmms: 0,
+                },
+            )
+    }
+
+    /// Make every sled report that it has fully evacuated at the initial sled
+    /// config generation.
+    pub fn all_sleds_evacuated(mut self) -> Self {
+        for board in &self.boards.boards {
+            if board.id.typ == SpType::Sled {
+                self = self
+                    .sled_evacuated(board.id.slot, SledConfigGeneration::new());
+            }
+        }
+        self
     }
 
     pub fn build(self) -> Collection {
@@ -1099,7 +1211,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
 
             let sp_state = SpState {
                 // We assume a valid model ID for sleds
-                model: match sp_id.type_ {
+                model: match sp_id.typ {
                     SpType::Sled => {
                         // The RKTH is expected to be different between
                         // Cosmo and Gimlet so we can use that here.
@@ -1109,7 +1221,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                             GIMLET_SLED_MODEL.to_string()
                         }
                     }
-                    _ => format!("dummy_{}", sp_id.type_),
+                    _ => format!("dummy_{}", sp_id.typ),
                 },
                 serial_number: serial.to_string(),
                 ..dummy_sp_state.clone()
@@ -1120,7 +1232,8 @@ impl<'a> TestBoardCollectionBuilder<'a> {
             let baseboard_id = builder
                 .found_sp_state(
                     "test",
-                    sp_id.type_,
+                    nexus_inventory::examples::RACK_UUID,
+                    sp_id.typ,
                     sp_id.slot,
                     sp_state.clone(),
                 )
@@ -1246,7 +1359,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                     .unwrap();
             }
 
-            if board.id.type_ == SpType::Sled {
+            if board.id.typ == SpType::Sled {
                 let phase_1_active_artifact = self
                     .host_exceptions
                     .get(&board.id.slot)
@@ -1297,14 +1410,28 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                     )
                     .unwrap();
                 let fake_sled_config = OmicronSledConfig {
-                    generation: Generation::new(),
+                    generation: self
+                        .sled_config_generation_exceptions
+                        .get(&board.id.slot)
+                        .copied()
+                        .unwrap_or_else(SledConfigGeneration::new),
                     disks: IdOrdMap::new(),
                     datasets: IdOrdMap::new(),
                     zones: IdOrdMap::new(),
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
                     measurements: BTreeSet::new(),
+                    update_disposition: self
+                        .sled_ledgered_disposition_exceptions
+                        .get(&board.id.slot)
+                        .copied()
+                        .unwrap_or(OmicronSledUpdateDisposition::Available),
                 };
+                let instance_manager_status = self
+                    .instance_manager_status_exceptions
+                    .get(&board.id.slot)
+                    .copied()
+                    .unwrap_or(InstanceManagerStatus::available(0));
 
                 // The only sled-agent fields that matter for the purposes of
                 // update testing are:
@@ -1313,6 +1440,9 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                 // * `baseboard` (must match this fake SP's)
                 // * `last_reconciliation` (must contain a valid boot disk and
                 //   active slot phase 2 hash)
+                // * `ledgered_sled_config` (its generation is checked when
+                //   deciding whether a sled has been evacuated)
+                // * `instance_manager_status` (likewise)
                 let fake_phase_2_header = BootImageHeader {
                     flags: 0,
                     data_size: 0,
@@ -1340,10 +1470,9 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                         Inventory {
                             // fields we care about
                             sled_id,
-                            baseboard: Baseboard::Gimlet {
-                                identifier: sp_state.serial_number.clone(),
-                                model: sp_state.model.clone(),
-                                revision: 0,
+                            baseboard_id: BaseboardId {
+                                part_number: sp_state.model.clone(),
+                                serial_number: sp_state.serial_number.clone(),
                             },
                             last_reconciliation: Some(
                                 ConfigReconcilerInventory {
@@ -1370,6 +1499,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                             ledgered_sled_config: Some(fake_sled_config),
                             reconciler_status:
                                 ConfigReconcilerInventoryStatus::NotYetRun,
+                            instance_manager_status,
                             file_source_resolver:
                                 OmicronFileSourceResolverInventory::new_fake(),
                             smf_services_enabled_not_online:
@@ -1410,53 +1540,5 @@ fn test_artifact_for_board(board: &str) -> ArtifactHash {
         "psc-c" => ARTIFACT_HASH_SP_PSC_C,
         "cosmo-b" => ARTIFACT_HASH_SP_COSMO_B,
         _ => panic!("test bug: no artifact for board {board:?}"),
-    }
-}
-
-// There's no difference between Gimlet and Cosmo from an RoT perspective
-// so both of them still use the same `ArtifactKind` everywhere. This is
-// why we need the extra `sled_type` argument here
-fn test_artifact_for_artifact_kind(
-    kind: ArtifactKind,
-    sled_type: Option<OxideSled>,
-) -> ArtifactHash {
-    if kind == ArtifactKind::GIMLET_ROT_IMAGE_A
-        && sled_type == Some(OxideSled::Gimlet)
-    {
-        ARTIFACT_HASH_ROT_GIMLET_A
-    } else if kind == ArtifactKind::GIMLET_ROT_IMAGE_B
-        && sled_type == Some(OxideSled::Gimlet)
-    {
-        ARTIFACT_HASH_ROT_GIMLET_B
-    } else if kind == ArtifactKind::GIMLET_ROT_IMAGE_A
-        && sled_type == Some(OxideSled::Cosmo)
-    {
-        ARTIFACT_HASH_ROT_COSMO_A
-    } else if kind == ArtifactKind::GIMLET_ROT_IMAGE_B
-        && sled_type == Some(OxideSled::Cosmo)
-    {
-        ARTIFACT_HASH_ROT_COSMO_B
-    } else if kind == ArtifactKind::PSC_ROT_IMAGE_A {
-        ARTIFACT_HASH_ROT_PSC_A
-    } else if kind == ArtifactKind::PSC_ROT_IMAGE_B {
-        ARTIFACT_HASH_ROT_PSC_B
-    } else if kind == ArtifactKind::SWITCH_ROT_IMAGE_A {
-        ARTIFACT_HASH_ROT_SWITCH_A
-    } else if kind == ArtifactKind::SWITCH_ROT_IMAGE_B {
-        ARTIFACT_HASH_ROT_SWITCH_B
-    } else if kind == ArtifactKind::GIMLET_ROT_STAGE0
-        && sled_type == Some(OxideSled::Gimlet)
-    {
-        ARTIFACT_HASH_ROT_BOOTLOADER_GIMLET
-    } else if kind == ArtifactKind::GIMLET_ROT_STAGE0
-        && sled_type == Some(OxideSled::Cosmo)
-    {
-        ARTIFACT_HASH_ROT_BOOTLOADER_COSMO
-    } else if kind == ArtifactKind::PSC_ROT_STAGE0 {
-        ARTIFACT_HASH_ROT_BOOTLOADER_PSC
-    } else if kind == ArtifactKind::SWITCH_ROT_STAGE0 {
-        ARTIFACT_HASH_ROT_BOOTLOADER_SWITCH
-    } else {
-        panic!("test bug: no artifact for artifact kind {kind:?}")
     }
 }

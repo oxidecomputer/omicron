@@ -15,6 +15,7 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::sled::SledReservationReason;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
+use nexus_types::external_api;
 use nexus_types::external_api::path_params;
 use nexus_types::external_api::physical_disk::PhysicalDiskPolicy;
 use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
@@ -29,7 +30,6 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PhysicalDiskAdoptionRequestUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
-use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_client::Client as SledAgentClient;
@@ -115,7 +115,7 @@ impl super::Nexus {
         let (authz_sled, sled) =
             sled_lookup.fetch_for(authz::Action::Modify).await?;
 
-        let rack_id = RackUuid::from_untyped_uuid(sled.rack_id);
+        let rack_id = sled.rack_id();
         let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
 
         // If the sled still exists in the latest committed trust quorum
@@ -164,6 +164,10 @@ impl super::Nexus {
         // for the next periodic activation before they can be cleaned up.
         self.background_tasks.task_instance_watcher.activate();
 
+        // The blueprint planner is going to perform actions based on the
+        // expungement, so kick it off now.
+        self.background_tasks.task_blueprint_planner.activate();
+
         Ok(prev_policy)
     }
 
@@ -171,10 +175,16 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::Sled> {
-        self.db_datastore
+    ) -> ListResultVec<external_api::sled::Sled> {
+        let inv = self.inventory_load_rx().borrow().clone();
+        let sleds = self
+            .db_datastore
             .sled_list(&opctx, &pagparams, SledFilter::InService)
-            .await
+            .await?
+            .into_iter()
+            .map(|sled| sled.to_external_api(&inv))
+            .collect::<Vec<_>>();
+        Ok(sleds)
     }
 
     pub async fn sled_client(
@@ -365,9 +375,9 @@ impl super::Nexus {
                     || existing_disk.serial != request.serial
                     || existing_disk.model != request.model
                 {
-                    return Err(Error::internal_error(
-                        "Invalid Physical Disk update (was: {existing_disk:?}, asking for {request:?})",
-                    ));
+                    return Err(Error::internal_error(&format!(
+                        "Invalid Physical Disk update (was: {existing_disk:?}, asking for {request:?})"
+                    )));
                 }
                 return Ok(());
             }

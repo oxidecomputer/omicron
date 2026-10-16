@@ -4,8 +4,6 @@
 
 //! Types for serving produced metric data to an Oximeter collector server.
 
-// Copyright 2026 Oxide Computer Company
-
 use dropshot::ConfigDropshot;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
@@ -22,6 +20,7 @@ use omicron_common::FileKv;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
+use omicron_common::http_client::internal_http_client;
 use oximeter::types::ProducerRegistry;
 use oximeter::types::ProducerResults;
 use oximeter_producer_api::ProducerApi;
@@ -362,8 +361,9 @@ async fn resolve_nexus_and_register(
         debug!(log, "will register with Nexus at {}", address);
 
         // Register as a metric producer.
-        let client = nexus_client::Client::new(
+        let client = nexus_client::Client::new_with_client(
             &format!("http://{}", address),
+            internal_http_client(),
             log.clone(),
         );
         client

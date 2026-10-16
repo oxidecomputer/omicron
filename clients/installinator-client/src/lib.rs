@@ -8,28 +8,20 @@ progenitor::generate_api!(
     spec = "../../openapi/installinator/installinator-1.0.0-c0ed87.json",
     interface = Positional,
     inner_type = slog::Logger,
-    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-        slog::debug!(log, "client request";
-            "method" => %request.method(),
-            "uri" => %request.url(),
-            "body" => ?&request.body(),
-        );
-    }),
-    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-        slog::debug!(log, "client response"; "result" => ?result);
-    }),
+    hooks = Expected,
     derives = [schemars::JsonSchema],
     crates = {
         "omicron-uuid-kinds" = "*",
     },
     replace = {
         Duration = std::time::Duration,
-        EventReportForGenericSpec = update_engine::events::EventReport<update_engine::NestedSpec>,
-        M2Slot = omicron_common::disk::M2Slot,
-        ProgressEventForGenericSpec = update_engine::events::ProgressEvent<update_engine::NestedSpec>,
-        StepEventForGenericSpec = update_engine::events::StepEvent<update_engine::NestedSpec>,
+        EventReportForGenericSpec = oxide_update_engine_types::events::EventReport<oxide_update_engine_types::spec::GenericSpec>,
+        ProgressEventForGenericSpec = oxide_update_engine_types::events::ProgressEvent<oxide_update_engine_types::spec::GenericSpec>,
+        StepEventForGenericSpec = oxide_update_engine_types::events::StepEvent<oxide_update_engine_types::spec::GenericSpec>,
     }
 );
+
+progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
 
 /// A type alias for errors returned by this crate.
 pub type ClientError = crate::Error<crate::types::Error>;

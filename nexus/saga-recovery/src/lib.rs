@@ -93,6 +93,7 @@ pub use status::DebuggingHistory;
 pub use status::LastPass;
 pub use status::LastPassSuccess;
 pub use status::RecoveryFailure;
+pub use status::RecoveryFailureKind;
 pub use status::RecoverySuccess;
 pub use status::Report;
 
@@ -278,6 +279,7 @@ mod test {
                     nerrors += 1;
                     execution_builder.saga_recovery_failure(
                         *saga_id,
+                        saga.current_sec,
                         &Error::internal_error("test error"),
                     );
                 } else {

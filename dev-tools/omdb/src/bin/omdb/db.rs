@@ -55,6 +55,7 @@ use diesel::OptionalExtension;
 use diesel::TextExpressionMethods;
 use diesel::expression::SelectableHelper;
 use diesel::query_dsl::QueryDsl;
+use display_error_chain::DisplayErrorChain;
 use indicatif::ProgressBar;
 use indicatif::ProgressDrawTarget;
 use indicatif::ProgressStyle;
@@ -65,6 +66,7 @@ use nexus_db_errors::OptionalError;
 use nexus_db_lookup::DataStoreConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::CrucibleDataset;
+use nexus_db_model::DbSledBpAvailability;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::DnsName;
 use nexus_db_model::DnsVersion;
@@ -151,8 +153,11 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::CollectionDisplayCliFilter;
 use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
+use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::InstanceStateGeneration;
+use omicron_generation_kinds::InstanceUpdaterGeneration;
+use omicron_generation_kinds::UpdateDispositionGeneration;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsRegionUuid;
@@ -166,6 +171,7 @@ use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use parallel_task_set::ParallelTaskSet;
 use sled_agent_client::VolumeConstructionRequest;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -299,7 +305,7 @@ impl DbUrlOptions {
         log: &slog::Logger,
     ) -> anyhow::Result<Arc<DataStore>> {
         let db_url = self.resolve_pg_url(omdb, log).await?;
-        eprintln!("note: using database URL {}", &db_url);
+        eprintln!("note: using database URL {}", db_url);
 
         let addrs = db_url.all_addresses()?;
         let pool = Arc::new(db::Pool::new_fixed_hosts(log, addrs));
@@ -1092,6 +1098,10 @@ enum ValidateCommands {
     /// Crucible agent says were deleted, or region snapshots that Nexus doesn't
     /// know about.
     ValidateRegionSnapshots,
+
+    /// Validate that the artifact replication configuration in the database
+    /// matches the one present on all sleds.
+    ValidateArtifactReplication,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1440,7 +1450,7 @@ impl DbArgs {
                         args.exec(&omdb, &opctx, &datastore).await
                     }
                     DbCommands::Sitrep(args) => {
-                        sitrep::cmd_db_sitrep(&opctx, &datastore, &fetch_opts, args).await
+                        sitrep::cmd_db_sitrep(&omdb, &opctx, &datastore, &fetch_opts, args).await
                     }
                     DbCommands::Sitreps(args) => {
                         sitrep::cmd_db_sitrep_history(&opctx, &datastore, &fetch_opts, args).await
@@ -1584,6 +1594,9 @@ impl DbArgs {
                     DbCommands::Validate(ValidateArgs {
                         command: ValidateCommands::ValidateRegionSnapshots,
                     }) => cmd_db_validate_region_snapshots(&datastore).await,
+                    DbCommands::Validate(ValidateArgs {
+                        command: ValidateCommands::ValidateArtifactReplication,
+                    }) => cmd_db_validate_artifact_replication(&opctx, &datastore, &fetch_opts).await,
                     DbCommands::Volumes(VolumeArgs {
                         command: VolumeCommands::Info(args),
                     }) => cmd_db_volume_info(&datastore, args).await,
@@ -2646,7 +2659,7 @@ async fn cmd_db_disk_info(
             .select(nexus_db_model::Disk::as_select())
             .get_result_async(&*conn)
             .await
-            .unwrap()
+            .context("failed to find disk")?
     };
 
     match datastore.disk_get_with_model(opctx, disk).await? {
@@ -4443,6 +4456,9 @@ async fn cmd_db_region_replacement_status(
                         .await?;
 
                 if let Some(repair_progress) = maybe_repair_progress {
+                    // {wide_bar:.green}, etc. are indicatif template
+                    // placeholders, not Rust format args.
+                    #[expect(clippy::literal_string_with_formatting_args)]
                     let bar = ProgressBar::with_draw_target(
                         Some(repair_progress.total_items as u64),
                         ProgressDrawTarget::stdout(),
@@ -4543,6 +4559,9 @@ async fn cmd_db_region_replacement_info(
                     .await?;
 
             if let Some(repair_progress) = maybe_repair_progress {
+                // {wide_bar:.green}, etc. are indicatif template
+                // placeholders, not Rust format args.
+                #[expect(clippy::literal_string_with_formatting_args)]
                 let bar = ProgressBar::with_draw_target(
                     Some(repair_progress.total_items as u64),
                     ProgressDrawTarget::stdout(),
@@ -4650,11 +4669,13 @@ struct SledRow {
     role: &'static str,
     policy: SledPolicy,
     state: SledState,
+    #[tabled(rename = "BP AVAIL")]
+    bp_availability: &'static str,
     id: SledUuid,
 }
 
-impl From<Sled> for SledRow {
-    fn from(s: Sled) -> Self {
+impl SledRow {
+    fn new(s: Sled, bp_availability: Option<DbSledBpAvailability>) -> Self {
         SledRow {
             id: s.id(),
             serial: s.serial_number().to_string(),
@@ -4662,6 +4683,10 @@ impl From<Sled> for SledRow {
             role: if s.is_scrimlet() { "scrimlet" } else { "-" },
             policy: s.policy(),
             state: s.state().into(),
+            bp_availability: match bp_availability {
+                Some(state) => state.label(),
+                None => "(missing)",
+            },
         }
     }
 }
@@ -4691,7 +4716,19 @@ async fn cmd_db_sleds(
         .context("listing sleds")?;
     check_limit(&sleds, limit, || String::from("listing sleds"));
 
-    let rows = sleds.into_iter().map(|s| SledRow::from(s));
+    // Look up each sled's reconfigurator provisioning availability from the
+    // `rendezvous_sled_bp_availability` rendezvous table. A sled might not be
+    // present in the table (e.g. it was just added and the reconciliation task
+    // has not run yet), in which case it is rendered as `(missing)`.
+    let bp_availability = datastore
+        .rendezvous_sled_bp_availability_list_all_batched(opctx)
+        .await
+        .context("listing sled bp-availability rendezvous rows")?;
+
+    let rows = sleds.into_iter().map(|s| {
+        let state = bp_availability.get(&s.id()).map(|r| r.bp_availability());
+        SledRow::new(s, state)
+    });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(1, 1, 0, 0))
@@ -4954,11 +4991,10 @@ async fn cmd_db_instance_info(
     const TARGET_VMM: &'static str = "target VMM ID";
     const MIGRATION_ID: &'static str = "migration ID";
     const UPDATER_LOCK: &'static str = "updater lock";
-    const ACTIVE_VMM_RECORD: &'static str = "active VMM record";
     const MIGRATION_RECORD: &'static str = "migration record";
-    const TARGET_VMM_RECORD: &'static str = "target VMM record";
     const WIDTH: usize = crate::helpers::const_max_len(&[
         ID,
+        PROJECT_ID,
         NAME,
         DESCRIPTION,
         CREATED,
@@ -4980,9 +5016,7 @@ async fn cmd_db_instance_info(
         TARGET_VMM,
         MIGRATION_ID,
         UPDATER_LOCK,
-        ACTIVE_VMM_RECORD,
         MIGRATION_RECORD,
-        TARGET_VMM_RECORD,
     ]);
 
     fn print_multiline_debug(slug: &str, thing: &impl core::fmt::Debug) {
@@ -5033,7 +5067,7 @@ async fn cmd_db_instance_info(
     println!("    {INTENDED_STATE:>WIDTH$}: {}", instance.intended_state);
     println!(
         "    {LAST_UPDATED:>WIDTH$}: {time_updated:?} (generation {})",
-        generation.0
+        InstanceStateGeneration::from(generation)
     );
 
     // Reincarnation status
@@ -5054,15 +5088,29 @@ async fn cmd_db_instance_info(
                 "    {KARMIC_STATUS:>WIDTH$}: nirvāṇa (reincarnation disabled)"
             );
         }
-        Reincarnatability::CoolingDown(remaining) => {
+        Reincarnatability::CoolingDown { until } => {
             println!(
-                "/!\\ {KARMIC_STATUS:>WIDTH$}: cooling down \
-                 ({remaining:?} remaining)"
+                "    {KARMIC_STATUS:>WIDTH$}: cooling down \
+                 (until {until})"
             );
+
+            if let Some(last) = time_last_auto_restarted {
+                let icon = if needs_reincarnation { "/!\\" } else { "(i)" };
+                println!("{icon}  this instance last restarted at {last}.");
+                if needs_reincarnation {
+                    println!(
+                        "     it will not be permitted to restart until {until}"
+                    );
+                } else {
+                    println!(
+                        "     if it fails, it will not be permitted to \
+                        restart again until {until}"
+                    );
+                }
+            }
         }
     }
     println!("    {LAST_AUTO_RESTART:>WIDTH$}: {time_last_auto_restarted:?}");
-
     println!("    {ACTIVE_VMM:>WIDTH$}: {propolis_id:?}");
     println!("    {TARGET_VMM:>WIDTH$}: {dst_propolis_id:?}");
 
@@ -5075,7 +5123,10 @@ async fn cmd_db_instance_info(
     } else {
         print!("    {UPDATER_LOCK:>WIDTH$}: UNLOCKED");
     }
-    println!(" at generation: {}", instance.updater_gen.0);
+    println!(
+        " at generation: {}",
+        InstanceUpdaterGeneration::from(instance.updater_gen)
+    );
 
     fn print_vmm(kind: &str, id: Uuid, vmm: Option<&Vmm>) {
         match vmm {
@@ -5286,7 +5337,7 @@ async fn cmd_db_instance_info(
             .with_context(ctx)?;
 
         if !past_migrations.is_empty() {
-            println!("\n{:=<80}\n", "== MIGRATION HISTORY");
+            println!("\n{:=<80}\n", "== MIGRATION HISTORY ");
 
             check_limit(&past_migrations, fetch_opts.fetch_limit, ctx);
 
@@ -5345,6 +5396,7 @@ async fn cmd_db_instance_info(
                     generation: _,
                     state: _,
                     failure_reason: _,
+                    stop_for_update_disposition_generation: _,
                 } = vmm;
                 VmmRow {
                     state: VmmStateRow::from(vmm),
@@ -5638,8 +5690,8 @@ async fn cmd_db_dns_diff(
             .select(DnsName::as_select())
             .load_async(&*datastore.pool_connection_for_tests().await?)
             .await
-            .context("loading added names")?;
-        check_limit(&added, limit, || "loading removed names");
+            .context("loading removed names")?;
+        check_limit(&removed, limit, || "loading removed names");
         println!(
             "changes:                    names added: {}, names removed: {}",
             added.len(),
@@ -6557,7 +6609,7 @@ async fn cmd_db_validate_volume_references(
                     // full table scan
                     conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
-                    let pattern = format!("%{}%", &snapshot_addr);
+                    let pattern = format!("%{}%", snapshot_addr);
 
                     use nexus_db_schema::schema::volume::dsl;
 
@@ -7254,6 +7306,96 @@ async fn cmd_db_validate_region_snapshots(
 
     println!("{}", table);
 
+    Ok(())
+}
+
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct ValidateArtifactReplicationRow {
+    id: SledUuid,
+    serial: String,
+    ip: String,
+    state: String,
+}
+
+async fn cmd_db_validate_artifact_replication(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+) -> Result<(), anyhow::Error> {
+    let config = datastore.tuf_list_artifacts_unpruned_batched(opctx).await?;
+
+    let limit = fetch_opts.fetch_limit;
+    let filter = SledFilter::TufArtifactReplication;
+    let sleds = datastore
+        .sled_list(&opctx, &first_page(limit), filter)
+        .await
+        .context("listing sleds")?;
+    check_limit(&sleds, limit, || String::from("listing sleds"));
+
+    let mut task_set = ParallelTaskSet::new();
+    let mut outputs = Vec::new();
+    for sled in sleds {
+        let log = opctx.log.clone();
+        if let Some(output) = task_set
+            .spawn(async move {
+                let url = format!("http://{}", sled.address());
+                let client = sled_agent_client::Client::new(&url, log);
+                let sled_config = client
+                    .artifact_config_get()
+                    .await
+                    .map(|res| res.into_inner());
+                (sled, sled_config)
+            })
+            .await
+        {
+            outputs.push(output);
+        }
+    }
+    let mut rows = Vec::new();
+    outputs.extend(task_set.join_remaining().await);
+    for (sled, sled_config_result) in outputs {
+        let state = match sled_config_result {
+            Ok(sled_config) => {
+                match config.generation.cmp(&sled_config.generation) {
+                    Ordering::Equal => {
+                        // `artifacts` is a BTreeSet, so no need to sort.
+                        if config.artifacts == sled_config.artifacts {
+                            "OK".to_owned()
+                        } else {
+                            format!(
+                                "BAD: nexus's {g} = sled's {sg} with incorrect artifacts",
+                                g = config.generation,
+                                sg = sled_config.generation
+                            )
+                        }
+                    }
+                    Ordering::Less => format!(
+                        "BAD: nexus's {g} < sled's {sg}",
+                        g = config.generation,
+                        sg = sled_config.generation
+                    ),
+                    Ordering::Greater => format!(
+                        "OLD: nexus's {g} > sled's {sg}",
+                        g = config.generation,
+                        sg = sled_config.generation
+                    ),
+                }
+            }
+            Err(err) => format!("ERROR: {}", DisplayErrorChain::new(&err)),
+        };
+        rows.push(ValidateArtifactReplicationRow {
+            id: sled.id(),
+            serial: sled.serial_number().to_owned(),
+            ip: sled.ip().to_string(),
+            state,
+        });
+    }
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+    println!("{table}");
     Ok(())
 }
 
@@ -7978,98 +8120,130 @@ fn prettyprint_vmm(
     sled_serial: Option<&str>,
     inst_id: bool,
 ) {
-    const ID: &'static str = "ID";
-    const CREATED: &'static str = "created at";
-    const DELETED: &'static str = "deleted at";
-    const UPDATED: &'static str = "updated at";
-    const INSTANCE_ID: &'static str = "instance ID";
-    const SLED_ID: &'static str = "sled ID";
-    const SLED_SERIAL: &'static str = "sled serial";
-    const CPU_PLATFORM: &'static str = "CPU platform";
-    const ADDRESS: &'static str = "propolis address";
-    const STATE: &'static str = "state";
-    const FAILURE_REASON: &'static str = "  failure reason";
-    const FAILURE_NOTE: &'static str = "  note";
-    const WIDTH: usize = const_max_len(&[
-        ID,
-        CREATED,
-        DELETED,
-        UPDATED,
-        INSTANCE_ID,
-        SLED_ID,
-        SLED_SERIAL,
-        CPU_PLATFORM,
-        STATE,
-        ADDRESS,
-        FAILURE_REASON,
-        FAILURE_NOTE,
-    ]);
+    print!("{}", VmmDisplay { indent, vmm, width, sled_serial, inst_id });
+}
 
-    let width = std::cmp::max(width, Some(WIDTH)).unwrap_or(WIDTH);
-    let Vmm {
-        id,
-        time_created,
-        time_deleted,
-        instance_id,
-        sled_id,
-        propolis_ip,
-        propolis_port,
-        cpu_platform,
-        state,
-        generation,
-        time_state_updated,
-        failure_reason,
-    } = vmm;
+struct VmmDisplay<'a> {
+    indent: &'a str,
+    vmm: &'a Vmm,
+    width: Option<usize>,
+    sled_serial: Option<&'a str>,
+    inst_id: bool,
+}
 
-    println!("{indent}{ID:>width$}: {id}");
-    if inst_id {
-        println!("{indent}{INSTANCE_ID:>width$}: {instance_id}");
-    }
-    println!("{indent}{CREATED:>width$}: {time_created}");
-    if let Some(deleted) = time_deleted {
-        println!("{indent}{DELETED:width$}: {deleted}");
-    }
-    println!("{indent}{STATE:>width$}: {state}");
-    if let Some(reason) = failure_reason {
-        println!("{indent}{FAILURE_REASON:>width$}: {reason}");
+impl Display for VmmDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { indent, vmm, width, sled_serial, inst_id } = *self;
+        const ID: &'static str = "ID";
+        const CREATED: &'static str = "created at";
+        const DELETED: &'static str = "deleted at";
+        const UPDATED: &'static str = "updated at";
+        const INSTANCE_ID: &'static str = "instance ID";
+        const SLED_ID: &'static str = "sled ID";
+        const SLED_SERIAL: &'static str = "sled serial";
+        const CPU_PLATFORM: &'static str = "CPU platform";
+        const ADDRESS: &'static str = "propolis address";
+        const STATE: &'static str = "state";
+        const FAILURE_REASON: &'static str = "  failure reason";
+        const FAILURE_NOTE: &'static str = "  note";
+        const STOP_FOR_UPDATE: &'static str =
+            "  marked to stop for sled update";
+        const WIDTH: usize = const_max_len(&[
+            ID,
+            CREATED,
+            DELETED,
+            UPDATED,
+            INSTANCE_ID,
+            SLED_ID,
+            SLED_SERIAL,
+            CPU_PLATFORM,
+            STATE,
+            ADDRESS,
+            FAILURE_REASON,
+            FAILURE_NOTE,
+            STOP_FOR_UPDATE,
+        ]);
 
-        if state == &db::model::VmmState::Failed {
-            println!(
-                "{indent}{FAILURE_NOTE:>width$}: {}",
-                reason.description()
-            );
-        } else {
-            println!(
-                "{:<width$}weird: VMMs should only have non-NULL failure \
-                     reasons if they are in the failed state",
+        let width = std::cmp::max(width, Some(WIDTH)).unwrap_or(WIDTH);
+        let Vmm {
+            id,
+            time_created,
+            time_deleted,
+            instance_id,
+            sled_id,
+            propolis_ip,
+            propolis_port,
+            cpu_platform,
+            state,
+            generation,
+            time_state_updated,
+            failure_reason,
+            stop_for_update_disposition_generation,
+        } = vmm;
+
+        writeln!(f, "{indent}{ID:>width$}: {id}")?;
+        if inst_id {
+            writeln!(f, "{indent}{INSTANCE_ID:>width$}: {instance_id}")?;
+        }
+        writeln!(f, "{indent}{CREATED:>width$}: {time_created}")?;
+        if let Some(deleted) = time_deleted {
+            writeln!(f, "{indent}{DELETED:>width$}: {deleted}")?;
+        }
+        writeln!(f, "{indent}{STATE:>width$}: {state}")?;
+        if let Some(reason) = failure_reason {
+            writeln!(f, "{indent}{FAILURE_REASON:>width$}: {reason}")?;
+
+            if state == &db::model::VmmState::Failed {
+                writeln!(
+                    f,
+                    "{indent}{FAILURE_NOTE:>width$}: {}",
+                    reason.description()
+                )?;
+            } else {
+                writeln!(
+                    f,
+                    "{:<width$}weird: VMMs should only have non-NULL failure \
+                         reasons if they are in the failed state",
+                    "/!\\",
+                    width = indent.len(),
+                )?;
+            }
+        } else if state == &db::model::VmmState::Failed {
+            writeln!(
+                f,
+                "{:<width$}weird: VMMs in the 'failed' state should have a \
+                 non-NULL failure reason",
                 "/!\\",
                 width = indent.len(),
-            );
+            )?;
         }
-    } else if state == &db::model::VmmState::Failed {
-        println!(
-            "{:<width$}weird: VMMs in the 'failed' state should have a \
-             non-NULL failure reason",
-            "/!\\",
-            width = indent.len(),
-        );
-    }
+        if let Some(ud_generation) = stop_for_update_disposition_generation {
+            let u_g = UpdateDispositionGeneration::from(*ud_generation);
+            writeln!(
+                f,
+                "{indent}{STOP_FOR_UPDATE:>width$}: update disposition generation {u_g}"
+            )?;
+        }
 
-    let g = u64::from(generation.0);
-    println!(
-        "{indent}{UPDATED:>width$}: {time_state_updated:?} (generation {g})"
-    );
+        let g = u64::from(generation.0);
+        writeln!(
+            f,
+            "{indent}{UPDATED:>width$}: {time_state_updated:?} (generation {g})"
+        )?;
 
-    println!(
-        "{indent}{ADDRESS:>width$}: {}:{}",
-        propolis_ip.ip(),
-        propolis_port.0
-    );
-    println!("{indent}{SLED_ID:>width$}: {sled_id}");
-    if let Some(serial) = sled_serial {
-        println!("{indent}{SLED_SERIAL:>width$}: {serial}");
+        writeln!(
+            f,
+            "{indent}{ADDRESS:>width$}: {}:{}",
+            propolis_ip.ip(),
+            propolis_port.0
+        )?;
+        writeln!(f, "{indent}{SLED_ID:>width$}: {sled_id}")?;
+        if let Some(serial) = sled_serial {
+            writeln!(f, "{indent}{SLED_SERIAL:>width$}: {serial}")?;
+        }
+        writeln!(f, "{indent}{CPU_PLATFORM:>width$}: {cpu_platform}")?;
+        Ok(())
     }
-    println!("{indent}{CPU_PLATFORM:>width$}: {cpu_platform}");
 }
 
 async fn cmd_db_vmm_list(
@@ -8150,6 +8324,7 @@ async fn cmd_db_vmm_list(
                 generation: _,
                 state: _,
                 failure_reason: _,
+                stop_for_update_disposition_generation: _,
             } = vmm;
             let sled = match sled {
                 Some(sled) => sled.serial_number(),
@@ -8497,4 +8672,70 @@ async fn cmd_db_trust_quorum_list_configs(
     println!("{}", table);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use swrite::SWrite as _;
+    use swrite::swriteln;
+
+    fn epoch_vmm() -> Vmm {
+        let when = chrono::DateTime::from_timestamp(0, 0)
+            .expect("the epoch is a valid timestamp");
+        let mut vmm = Vmm::new(
+            PropolisUuid::nil(),
+            InstanceUuid::nil(),
+            SledUuid::nil(),
+            "127.0.0.1".parse().unwrap(),
+            12400,
+            db::model::VmmCpuPlatform::AmdMilan,
+        );
+        vmm.time_created = when;
+        vmm.time_state_updated = when;
+        vmm
+    }
+
+    #[test]
+    fn test_vmm_display() {
+        let mut failed = epoch_vmm();
+        failed.state = db::model::VmmState::Failed;
+        failed.stop_for_update_disposition_generation =
+            Some(db::model::to_db_typed_generation(
+                UpdateDispositionGeneration::from_u32(7),
+            ));
+
+        let mut running = epoch_vmm();
+        running.state = db::model::VmmState::Running;
+        running.failure_reason = Some(db::model::VmmFailureReason::SledOff);
+
+        let mut deleted = epoch_vmm();
+        deleted.time_deleted = Some(deleted.time_created);
+
+        let mut output = String::new();
+        for (name, vmm, sled_serial, inst_id) in [
+            ("failed without reason", &failed, None, false),
+            ("reason without failure", &running, None, false),
+            (
+                "deleted with instance and serial",
+                &deleted,
+                Some("BRM00000000"),
+                true,
+            ),
+        ] {
+            swriteln!(output, "=== {name} ===");
+            swriteln!(
+                output,
+                "{}",
+                VmmDisplay {
+                    indent: "    ",
+                    vmm,
+                    width: None,
+                    sled_serial,
+                    inst_id,
+                }
+            );
+        }
+        expectorate::assert_contents("tests/output/vmm-lines.txt", &output);
+    }
 }

@@ -18,7 +18,7 @@ sled-list
 
 # Create a TUF repository whose artifacts match the install dataset, so noop
 # conversions of all zones would otherwise be eligible.
-tuf-assemble ../../update-common/manifests/fake.toml
+generate-fake-repo 1.0.0
 set target-release repo-1.0.0.zip
 
 # Update the install dataset on serial0 to the target release. This populates

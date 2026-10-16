@@ -48,6 +48,8 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::bail_unless;
 use openssl::pkey::PKey;
 use openssl::x509::X509;
+use rustls::pki_types::PrivateKeyDer;
+use rustls::pki_types::pem::PemObject;
 use rustls::sign::CertifiedKey;
 use serde::Serialize;
 use serde_with::SerializeDisplay;
@@ -431,12 +433,11 @@ impl TryFrom<Certificate> for TlsCertificate {
 
         // Assemble a rustls CertifiedKey with both the certificate and the key.
         let certified_key = {
-            let mut cursor = std::io::Cursor::new(db_cert.key.clone());
-            let rustls_private_key = rustls_pemfile::private_key(&mut cursor)
-                .expect("parsing private key PEM")
-                .expect("no private keys found");
+            let rustls_private_key =
+                PrivateKeyDer::from_pem_slice(&db_cert.key)
+                    .context("parsing private key PEM for rustls")?;
             let rustls_signing_key =
-                rustls::crypto::ring::sign::any_supported_type(
+                rustls::crypto::aws_lc_rs::sign::any_supported_type(
                     &rustls_private_key,
                 )
                 .context("parsing DER private key")?;
@@ -543,7 +544,7 @@ pub(crate) async fn read_all_endpoints(
                 opctx,
                 Some(ServiceKind::Nexus),
                 &PaginatedBy::Id(p.current_pagparams()),
-                false,
+                None,
             )
             .await?;
         paginator = p.found_batch(&batch, &|s: &Certificate| s.id());
@@ -828,7 +829,6 @@ mod test {
                 description: String::new(),
             },
             quotas: silo::SiloQuotasCreate::empty(),
-            discoverable: false,
             identity_mode,
             admin_group_name: None,
             tls_certificates: vec![],
@@ -836,9 +836,9 @@ mod test {
         };
 
         if let Some(silo_id) = silo_id {
-            Silo::new_with_id(silo_id, params)
+            Silo::new_with_id(silo_id, params, false)
         } else {
-            Silo::new(params)
+            Silo::new(params, false)
         }
         .unwrap()
     }

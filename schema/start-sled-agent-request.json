@@ -51,6 +51,15 @@
         }
       }
     },
+    "RackUuid": {
+      "type": "string",
+      "format": "uuid",
+      "x-rust-type": {
+        "crate": "omicron-uuid-kinds",
+        "path": "omicron_uuid_kinds::RackUuid",
+        "version": "*"
+      }
+    },
     "SledUuid": {
       "type": "string",
       "format": "uuid",
@@ -85,8 +94,11 @@
         },
         "rack_id": {
           "description": "Uuid of the rack to which this sled agent belongs.",
-          "type": "string",
-          "format": "uuid"
+          "allOf": [
+            {
+              "$ref": "#/definitions/RackUuid"
+            }
+          ]
         },
         "subnet": {
           "description": "Portion of the IP space to be managed by the Sled Agent.",

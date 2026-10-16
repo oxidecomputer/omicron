@@ -11,7 +11,6 @@ use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::iter::Iterator;
 use std::sync::LazyLock;
-use tufaceous_artifact::KnownArtifactKind;
 use wicket_common::inventory::{
     RackV1Inventory, RotInventory, RotSlot, SpComponentCaboose,
     SpComponentInfo, SpIgnition, SpState, SpType, Transceiver,
@@ -61,7 +60,7 @@ impl Inventory {
 
         for sp in mgs_inventory.sps {
             let i = sp.id.slot;
-            let type_ = sp.id.type_;
+            let type_ = sp.id.typ;
             let sp = Sp {
                 ignition: sp.ignition,
                 state: sp.state,
@@ -295,30 +294,6 @@ impl ComponentId {
         self.to_string()
     }
 
-    pub fn sp_known_artifact_kind(&self) -> KnownArtifactKind {
-        match self {
-            ComponentId::Sled(_) => KnownArtifactKind::GimletSp,
-            ComponentId::Switch(_) => KnownArtifactKind::SwitchSp,
-            ComponentId::Psc(_) => KnownArtifactKind::PscSp,
-        }
-    }
-
-    pub fn rot_known_artifact_kind(&self) -> KnownArtifactKind {
-        match self {
-            ComponentId::Sled(_) => KnownArtifactKind::GimletRot,
-            ComponentId::Switch(_) => KnownArtifactKind::SwitchRot,
-            ComponentId::Psc(_) => KnownArtifactKind::PscRot,
-        }
-    }
-
-    pub fn rot_bootloader_known_artifact_kind(&self) -> KnownArtifactKind {
-        match self {
-            ComponentId::Sled(_) => KnownArtifactKind::GimletRotBootloader,
-            ComponentId::Switch(_) => KnownArtifactKind::SwitchRotBootloader,
-            ComponentId::Psc(_) => KnownArtifactKind::PscRotBootloader,
-        }
-    }
-
     pub fn to_string_uppercase(&self) -> String {
         let mut s = self.to_string();
         s.make_ascii_uppercase();
@@ -333,24 +308,6 @@ impl Display for ComponentId {
             ComponentId::Sled(i) => write!(f, "sled {}", i),
             ComponentId::Switch(i) => write!(f, "switch {}", i),
             ComponentId::Psc(i) => write!(f, "PSC {}", i),
-        }
-    }
-}
-
-pub struct ParsableComponentId<'a> {
-    pub sp_type: &'a str,
-    pub i: &'a str,
-}
-
-impl<'a> TryFrom<ParsableComponentId<'a>> for ComponentId {
-    type Error = ();
-    fn try_from(value: ParsableComponentId<'a>) -> Result<Self, Self::Error> {
-        let i: u8 = value.i.parse().map_err(|_| ())?;
-        match (value.sp_type, i) {
-            ("sled", 0..=31) => Ok(ComponentId::Sled(i)),
-            ("switch", 0..=1) => Ok(ComponentId::Switch(i)),
-            ("power", 0..=1) => Ok(ComponentId::Psc(i)),
-            _ => Err(()),
         }
     }
 }

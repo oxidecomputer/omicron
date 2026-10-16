@@ -5,11 +5,8 @@
 //! Bootstrap-related utilities
 
 pub(crate) mod bootstore_setup;
-pub mod client;
-mod http_entrypoints;
 mod http_entrypoints_lockstep;
 mod maghemite;
-pub(crate) mod params;
 mod pre_server;
 mod pumpkind;
 mod rack_ops;
@@ -18,7 +15,6 @@ pub mod secret_retriever;
 pub mod server;
 mod sprockets_server;
 pub(crate) mod trust_quorum_setup;
-mod views;
 
 pub(crate) use pre_server::BootstrapNetworking;
 pub use rack_ops::RssAccessError;

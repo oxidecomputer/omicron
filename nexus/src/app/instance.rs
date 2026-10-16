@@ -42,6 +42,7 @@ use nexus_db_queries::db::model::InstanceStateComputer;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_ip;
 use nexus_types::external_api::instance;
+use omicron_common::http_client::internal_http_client;
 // We'll use `InstanceState` frequently, and the code that uses it is already
 // subtle enough: break from the pattern of external API types being referenced
 // by `topic::Name` to help legibility and keep line wrapping under control..
@@ -64,6 +65,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_generation_kinds::InstanceStateGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::MulticastGroupUuid;
@@ -822,7 +824,7 @@ impl super::Nexus {
 
         let instance_id = saga_outputs
             .lookup_node_output::<Uuid>("instance_id")
-            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .map_err(|e| Error::internal_error(&format!("{:#}", e)))
             .internal_context("looking up output from instance create saga")?;
 
         // If the caller asked to start the instance, kick off that saga.
@@ -1305,11 +1307,11 @@ impl super::Nexus {
                         InstanceStateChangeRequestAction::UpdateRuntime(
                             db::model::InstanceRuntimeState {
                                 time_updated: chrono::Utc::now(),
-                                generation: prev_runtime
-                                    .generation
-                                    .0
-                                    .next()
-                                    .into(),
+                                generation: InstanceStateGeneration::from(
+                                    prev_runtime.generation,
+                                )
+                                .next()
+                                .into(),
                                 nexus_state: db::model::InstanceState::NoVmm,
                                 ..prev_runtime.clone()
                             },
@@ -2215,7 +2217,10 @@ impl super::Nexus {
             .await?;
         Ok((
             vmm,
-            propolis_client::Client::new(&format!("http://{}", client_addr)),
+            propolis_client::Client::new_with_client(
+                &format!("http://{}", client_addr),
+                internal_http_client(),
+            ),
         ))
     }
 
@@ -2566,7 +2571,7 @@ impl super::Nexus {
 
         let out = saga_outputs
             .lookup_node_output::<external_ip::ExternalIp>("output")
-            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .map_err(|e| Error::internal_error(&format!("{:#}", e)))
             .internal_context("looking up output from ip attach saga");
 
         // The VPC routing RPW currently has double-duty on ensuring that
@@ -2604,7 +2609,7 @@ impl super::Nexus {
 
         saga_outputs
             .lookup_node_output::<Option<external_ip::ExternalIp>>("output")
-            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .map_err(|e| Error::internal_error(&format!("{:#}", e)))
             .internal_context("looking up output from ip detach saga")
             .and_then(|eip| {
                 // Saga idempotency means we'll get Ok(None) on double detach

@@ -1,8 +1,11 @@
 #!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-3.0-opte-0.41"
+#: target = "lab-3.0-opte-0.42"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-*.log*",
 #:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log*",
@@ -297,11 +300,9 @@ EXTERNAL_DNS_DOMAIN="$(sed -n 's/external_dns_zone_name = "\(.*\)"/\1/p' pkg/con
 sed -i~ "
 	/^external_dns_ips/c\\
 external_dns_ips = [ \"$DNS_IP1\", \"$DNS_IP2\" ]
-	/^\\[\\[internal_services_ip_pool_ranges/,/^\$/ {
-		/^first/c\\
-first = \"$SERVICE_IP_POOL_START\"
-		/^last/c\\
-last = \"$SERVICE_IP_POOL_END\"
+	/^\\[\\[service_ip_pools/,/^\$/ {
+		/^ranges =/c\\
+ranges = \\[ { first = \"$SERVICE_IP_POOL_START\", last = \"$SERVICE_IP_POOL_END\" } \\]
 	}
 	/^infra_ip_first/c\\
 infra_ip_first = \"$UPLINK_IP\"
@@ -374,12 +375,13 @@ curl -sSfL -o debian-11-genericcloud-amd64.raw \
 OMICRON_NO_UNINSTALL=1 \
     ptime -m pfexec ./target/release/omicron-package -t test install
 
-# Wait for switch zone to come up
+# Wait for switch zone to come up. This normally takes 24-36 seconds (see
+# #11453), so leave plenty of headroom.
 retry=0
 until curl --max-time 1 --head --silent --show-error -o /dev/null "http://[fd00:1122:3344:101::2]:12224/"
 do
-	if [[ $retry -gt 30 ]]; then
-		echo "Failed to reach switch zone after 30 attempts"
+	if [[ $retry -gt 300 ]]; then
+		echo "Failed to reach switch zone after 300 attempts"
 		exit 1
 	fi
 	sleep 1

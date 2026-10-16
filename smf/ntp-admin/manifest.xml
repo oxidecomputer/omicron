@@ -21,6 +21,11 @@
   <service_fmri value='svc:/oxide/ntp:default' />
   </dependency>
 
+  <dependency name='chrony-setup' grouping='require_all' restart_on='refresh'
+    type='service'>
+  <service_fmri value='svc:/oxide/chrony-setup:default' />
+  </dependency>
+
   <exec_method type='method' name='start'
     exec='/opt/oxide/lib/svc/manifest/ntp-admin.sh'
     timeout_seconds='0' />

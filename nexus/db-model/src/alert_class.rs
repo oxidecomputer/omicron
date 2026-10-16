@@ -29,6 +29,8 @@ impl_enum_type!(
     TestFooBaz => b"test.foo.baz"
     TestQuuxBar => b"test.quux.bar"
     TestQuuxBarBaz => b"test.quux.bar.baz"
+    PsuInserted => b"hardware.power_shelf.psu.insert"
+    PsuRemoved => b"hardware.power_shelf.psu.remove"
 );
 
 impl AlertClass {
@@ -62,6 +64,8 @@ impl From<nexus_types::alert::AlertClass> for AlertClass {
             In::TestFooBaz => Self::TestFooBaz,
             In::TestQuuxBar => Self::TestQuuxBar,
             In::TestQuuxBarBaz => Self::TestQuuxBarBaz,
+            In::PsuInserted => Self::PsuInserted,
+            In::PsuRemoved => Self::PsuRemoved,
         }
     }
 }
@@ -75,6 +79,8 @@ impl From<AlertClass> for nexus_types::alert::AlertClass {
             AlertClass::TestFooBaz => Self::TestFooBaz,
             AlertClass::TestQuuxBar => Self::TestQuuxBar,
             AlertClass::TestQuuxBarBaz => Self::TestQuuxBarBaz,
+            AlertClass::PsuInserted => Self::PsuInserted,
+            AlertClass::PsuRemoved => Self::PsuRemoved,
         }
     }
 }

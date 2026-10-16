@@ -11,7 +11,7 @@ use hickory_resolver::lookup::SrvLookup;
 use hickory_resolver::name_server::TokioConnectionProvider;
 use internal_dns_types::names::ServiceName;
 use omicron_common::address::{
-    AZ_PREFIX, DNS_PORT, Ipv6Subnet, get_internal_dns_server_addresses,
+    AZ_PREFIX_LENGTH, DNS_PORT, Ipv6Subnet, get_internal_dns_server_addresses,
 };
 use slog::{debug, error, info, trace};
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -186,7 +186,7 @@ impl Resolver {
         log: slog::Logger,
         address: Ipv6Addr,
     ) -> Result<Self, ResolveError> {
-        let subnet = Ipv6Subnet::<AZ_PREFIX>::new(address);
+        let subnet = Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(address);
         Self::new_from_subnet(log, subnet)
     }
 
@@ -209,7 +209,7 @@ impl Resolver {
     // re-resolve this.  That's how we'd learn about dynamic changes to the set
     // of DNS servers.
     pub fn servers_from_subnet(
-        subnet: Ipv6Subnet<AZ_PREFIX>,
+        subnet: Ipv6Subnet<AZ_PREFIX_LENGTH>,
     ) -> Vec<SocketAddr> {
         get_internal_dns_server_addresses(subnet.net().addr())
             .into_iter()
@@ -227,7 +227,7 @@ impl Resolver {
     /// [omicron_common::address::ReservedRackSubnet].
     pub fn new_from_subnet(
         log: slog::Logger,
-        subnet: Ipv6Subnet<AZ_PREFIX>,
+        subnet: Ipv6Subnet<AZ_PREFIX_LENGTH>,
     ) -> Result<Self, ResolveError> {
         let dns_ips = Self::servers_from_subnet(subnet);
         Resolver::new_from_addrs(log, &dns_ips)
@@ -457,6 +457,7 @@ mod test {
     use super::ResolveError;
     use super::Resolver;
     use anyhow::Context;
+    use camino_tempfile::Utf8TempDir;
     use dropshot::{
         ApiDescription, HandlerTaskMode, HttpError, HttpResponseOk,
         RequestContext, endpoint,
@@ -475,13 +476,12 @@ mod test {
     use std::net::SocketAddrV6;
     use std::str::FromStr;
     use std::sync::Arc;
-    use tempfile::TempDir;
 
     struct DnsServer {
         // We hang onto the storage_path even though it's never used because
         // dropping it causes it to be cleaned up.
         #[allow(dead_code)]
-        storage_path: Option<TempDir>,
+        storage_path: Option<Utf8TempDir>,
         // Similarly, we hang onto the Dropshot server to keep it running.
         #[allow(dead_code)]
         dropshot_server: dropshot::HttpServer<dns_server::http_server::Context>,
@@ -494,15 +494,11 @@ mod test {
 
     impl DnsServer {
         async fn create(log: &Logger) -> Self {
-            let storage_path =
-                TempDir::new().expect("Failed to create temporary directory");
+            let storage_path = Utf8TempDir::new()
+                .expect("Failed to create temporary directory");
             let config_store = dns_server::storage::Config {
                 keep_old_generations: 3,
-                storage_path: storage_path
-                    .path()
-                    .to_string_lossy()
-                    .into_owned()
-                    .into(),
+                storage_path: storage_path.path().to_owned(),
             };
             let store = dns_server::storage::Store::new(
                 log.new(o!("component" => "DnsStore")),
@@ -513,9 +509,10 @@ mod test {
             let (dns_server, dropshot_server) = dns_server::start_servers(
                 log.clone(),
                 store,
-                &dns_server::dns_server::Config {
-                    bind_address: "[::1]:0".parse().unwrap(),
-                },
+                &dns_server::dns_server::Config::new(vec![
+                    "[::1]:0".parse().unwrap(),
+                ])
+                .expect("valid DNS configuration"),
                 &dropshot::ConfigDropshot {
                     bind_address: "[::1]:0".parse().unwrap(),
                     default_request_body_max_bytes: 8 * 1024,
@@ -543,7 +540,7 @@ mod test {
         }
 
         fn dns_server_address(&self) -> SocketAddr {
-            self.dns_server.local_address()
+            self.dns_server.sole_local_address().expect("exactly one address")
         }
 
         fn cleanup_successful(mut self) {
@@ -837,17 +834,10 @@ mod test {
         spec = "tests/output/test-server.json",
         interface = Positional,
         inner_type = slog::Logger,
-        pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-            slog::debug!(log, "client request";
-                "method" => %request.method(),
-                "uri" => %request.url(),
-                "body" => ?&request.body(),
-            );
-        }),
-        post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-            slog::debug!(log, "client response"; "result" => ?result);
-        }),
+        hooks = Expected,
     );
+
+    progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
 
     // Verify that we have an up-to-date representation
     // of this server's API as JSON.
@@ -897,7 +887,7 @@ mod test {
         let dns_server = DnsServer::create(&logctx.log).await;
         let resolver = Resolver::new_from_addrs(
             logctx.log.clone(),
-            &[dns_server.dns_server.local_address()],
+            &dns_server.dns_server.local_addresses().collect::<Vec<_>>(),
         )
         .unwrap();
 
@@ -977,8 +967,14 @@ mod test {
         let resolver = Resolver::new_from_addrs(
             logctx.log.clone(),
             &[
-                dns_server1.dns_server.local_address(),
-                dns_server2.dns_server.local_address(),
+                dns_server1
+                    .dns_server
+                    .sole_local_address()
+                    .expect("exactly one address"),
+                dns_server2
+                    .dns_server
+                    .sole_local_address()
+                    .expect("exactly one address"),
             ],
         )
         .unwrap();
@@ -1054,7 +1050,7 @@ mod test {
         let dns_server = DnsServer::create(&logctx.log).await;
         let resolver = Resolver::new_from_addrs(
             logctx.log.clone(),
-            &[dns_server.dns_server.local_address()],
+            &dns_server.dns_server.local_addresses().collect::<Vec<_>>(),
         )
         .unwrap();
 

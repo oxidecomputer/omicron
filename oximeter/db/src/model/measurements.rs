@@ -4,8 +4,6 @@
 
 //! Methods for reading / writing oximeter measurements to the database.
 
-// Copyright 2024 Oxide Computer Company
-
 use super::columns;
 use crate::model::columns::Quantile;
 use crate::native::block::Block;

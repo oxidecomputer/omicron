@@ -100,7 +100,7 @@ use internal_dns_types::{
     config::{DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord},
     names::ZONE_APEX_NAME,
 };
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use serde::{Deserialize, Serialize};
 use sled::transaction::ConflictableTransactionError;
 use slog::{debug, error, info, o, warn};
@@ -265,7 +265,7 @@ impl Store {
         );
 
         let db = sled::open(&config.storage_path).with_context(|| {
-            format!("open DNS database {:?}", &config.storage_path)
+            format!("open DNS database {:?}", config.storage_path)
         })?;
 
         Self::new_with_db(log, Arc::new(db), config)
@@ -570,7 +570,7 @@ impl Store {
             let tree = self
                 .db
                 .open_tree(&tree_name)
-                .with_context(|| format!("creating tree {:?}", &tree_name))?;
+                .with_context(|| format!("creating tree {:?}", tree_name))?;
 
             for (name, records) in &zone_config.records {
                 if records.is_empty() {
@@ -994,7 +994,7 @@ mod test {
     use internal_dns_types::config::DnsConfigZone;
     use internal_dns_types::config::DnsRecord;
     use internal_dns_types::names::ZONE_APEX_NAME;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
     use std::collections::HashMap;

@@ -4,8 +4,6 @@
 
 //! Identity-related traits which may be derived for DB structures.
 
-// Copyright 2021 Oxide Computer Company
-
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::external::Name;

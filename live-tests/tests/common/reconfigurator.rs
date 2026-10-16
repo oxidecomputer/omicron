@@ -81,31 +81,53 @@ pub async fn blueprint_load_target_enabled(
 pub async fn blueprint_edit_current_target(
     log: &slog::Logger,
     nexus: &nexus_lockstep_client::Client,
-    edit_fn: &dyn Fn(&mut BlueprintBuilder) -> Result<(), anyhow::Error>,
+    edit_fn: impl FnOnce(&mut BlueprintBuilder<'_>) -> Result<(), anyhow::Error>,
 ) -> Result<(Blueprint, Blueprint), anyhow::Error> {
+    // General note about this function: we move as much of the non-generic
+    // parts to separate functions as possible to avoid monomorphization bloat.
+
     // Fetch the current target configuration.
     info!(log, "editing current target blueprint");
     let blueprint1 = blueprint_load_target_enabled(log, nexus).await?;
 
     // Make a new builder based on that blueprint and use `edit_fn` to edit it.
-    let mut builder = BlueprintBuilder::new_based_on(
-        log,
-        &blueprint1,
-        "test-suite",
-        PlannerRng::from_entropy(),
-    )
-    .context("creating BlueprintBuilder")?;
+    let mut builder = blueprint_builder_based_on(log, &blueprint1)?;
 
     edit_fn(&mut builder)?;
 
     // Assemble the new blueprint, import it, and make it the new target.
     let blueprint2 = builder.build(BlueprintSource::Test);
+    blueprint_import_and_set_target(log, nexus, &blueprint1, &blueprint2)
+        .await?;
+
+    Ok((blueprint1, blueprint2))
+}
+
+fn blueprint_builder_based_on<'a>(
+    log: &slog::Logger,
+    parent: &'a Blueprint,
+) -> Result<BlueprintBuilder<'a>, anyhow::Error> {
+    BlueprintBuilder::new_based_on(
+        log,
+        parent,
+        "test-suite",
+        PlannerRng::from_entropy(),
+    )
+    .context("creating BlueprintBuilder")
+}
+
+async fn blueprint_import_and_set_target(
+    log: &slog::Logger,
+    nexus: &nexus_lockstep_client::Client,
+    blueprint1: &Blueprint,
+    blueprint2: &Blueprint,
+) -> Result<(), anyhow::Error> {
     info!(log, "assembled new blueprint based on target";
         "current_target_id" => %blueprint1.id,
         "new_blueprint_id" => %blueprint2.id,
     );
     nexus
-        .blueprint_import(&blueprint2)
+        .blueprint_import(blueprint2)
         .await
         .context("importing new blueprint")?;
     debug!(log, "imported new blueprint";
@@ -122,8 +144,7 @@ pub async fn blueprint_edit_current_target(
         "old_target_id" => %blueprint1.id,
         "new_target_id" => %blueprint2.id,
     );
-
-    Ok((blueprint1, blueprint2))
+    Ok(())
 }
 
 /// Checks whether the given blueprint's sled configurations appear to be

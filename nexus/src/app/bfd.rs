@@ -16,11 +16,8 @@ impl super::Nexus {
         opctx: &OpContext,
         session: networking::BfdSessionEnable,
     ) -> Result<(), Error> {
-        // add the bfd session to the db and trigger the bfd manager to handle
-        // the reset
+        // add the bfd session to the db and trigger bootstore propagation
         self.datastore().bfd_session_create(opctx, &session).await?;
-        self.background_tasks.activate(&self.background_tasks.task_bfd_manager);
-        // for timely propagation to bootstore
         self.background_tasks
             .activate(&self.background_tasks.task_switch_port_settings_manager);
         Ok(())
@@ -31,11 +28,8 @@ impl super::Nexus {
         opctx: &OpContext,
         session: networking::BfdSessionDisable,
     ) -> Result<(), Error> {
-        // remove the bfd session from the db and trigger the bfd manager to
-        // handle the reset
+        // remove the bfd session from the db and trigger bootstore propagation
         self.datastore().bfd_session_delete(opctx, &session).await?;
-        self.background_tasks.activate(&self.background_tasks.task_bfd_manager);
-        // for timely propagation to bootstore
         self.background_tasks
             .activate(&self.background_tasks.task_switch_port_settings_manager);
         Ok(())
@@ -84,7 +78,7 @@ impl super::Nexus {
                     },
                     switch_slot,
                     local: Some(info.config.listen),
-                    detection_threshold: info.config.detection_threshold,
+                    detection_threshold: info.config.detection_threshold.into(),
                     required_rx: info.config.required_rx,
                     mode: match info.config.mode {
                         mg_admin_client::types::SessionMode::SingleHop => {

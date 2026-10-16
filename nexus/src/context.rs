@@ -1,3 +1,4 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
@@ -20,9 +21,11 @@ use nexus_db_queries::authn::ConsoleSessionWithSiloId;
 use nexus_db_queries::authn::external::session_cookie::SessionStore;
 use nexus_db_queries::context::{OpContext, OpKind};
 use nexus_db_queries::{authn, authz, db};
-use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
+use omicron_common::address::{AZ_PREFIX_LENGTH, Ipv6Subnet};
+use omicron_debug_dropbox::DebugDropbox;
 use omicron_uuid_kinds::ConsoleSessionUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
@@ -64,11 +67,12 @@ impl ApiContext {
     /// Create a new context with a rack ID and logger. This creates the
     /// underlying `Nexus` as well.
     pub async fn for_internal(
-        rack_id: Uuid,
+        rack_id: RackUuid,
         log: Logger,
         config: &NexusConfig,
+        debug_dropbox: DebugDropbox,
     ) -> Result<Self, String> {
-        ServerContext::new(rack_id, log, config)
+        ServerContext::new(rack_id, log, config, debug_dropbox)
             .await
             .map(|context| Self { kind: ServerKind::Internal, context })
     }
@@ -130,9 +134,10 @@ impl ServerContext {
     /// Create a new context with the given rack id and log.  This creates the
     /// underlying nexus as well.
     pub async fn new(
-        rack_id: Uuid,
+        rack_id: RackUuid,
         log: Logger,
         config: &NexusConfig,
+        debug_dropbox: DebugDropbox,
     ) -> Result<Arc<ServerContext>, String> {
         let nexus_schemes = config
             .pkg
@@ -229,7 +234,7 @@ impl ServerContext {
         let (resolver, qorb_resolver) = match config.deployment.internal_dns {
             nexus_config::InternalDns::FromSubnet { subnet } => {
                 let az_subnet =
-                    Ipv6Subnet::<AZ_PREFIX>::new(subnet.net().addr());
+                    Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(subnet.net().addr());
                 info!(
                     log,
                     "Setting up resolver using DNS servers for subnet: {:?}",
@@ -269,6 +274,13 @@ impl ServerContext {
             }
         };
 
+        let backtrace_setting = if config.deployment.record_db_claim_backtraces
+        {
+            db::ClaimBacktraceSetting::Capture
+        } else {
+            db::ClaimBacktraceSetting::Skip
+        };
+
         // Once this database pool is created, it spawns workers which will
         // be continually attempting to access database backends.
         //
@@ -283,6 +295,7 @@ impl ServerContext {
                 db::Pool::new_single_host(
                     &log,
                     &db::Config { url: url.clone() },
+                    backtrace_setting,
                 )
             }
             nexus_config::Database::FromDns => {
@@ -290,7 +303,7 @@ impl ServerContext {
                     log, "Setting up qorb database pool from DNS";
                     "dns_addrs" => ?qorb_resolver.bootstrap_dns_ips(),
                 );
-                db::Pool::new(&log, &qorb_resolver)
+                db::Pool::new(&log, &qorb_resolver, backtrace_setting)
             }
         };
 
@@ -304,6 +317,7 @@ impl ServerContext {
             &producer_registry,
             config,
             Arc::clone(&authz),
+            debug_dropbox,
         )
         .await
         {

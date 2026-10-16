@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Functions for querying the timeseries database.
-// Copyright 2024 Oxide Computer Company
 
 use crate::{DATABASE_NAME, Error, FieldSchema, FieldSource, TimeseriesSchema};
 use chrono::{DateTime, Utc};
@@ -750,7 +749,7 @@ fn field_as_db_str(value: &FieldValue) -> String {
             };
             format!("'{}'", addr)
         }
-        FieldValue::String(inner) => format!("'{}'", inner),
+        FieldValue::String(inner) => crate::quoted_string_literal(inner),
         FieldValue::Uuid(inner) => format!("'{}'", inner),
     }
 }
@@ -770,6 +769,8 @@ mod tests {
         assert_eq!(field_as_db_str(&FieldValue::from(false)), "0");
         assert_eq!(field_as_db_str(&FieldValue::from(true)), "1");
         assert_eq!(field_as_db_str(&FieldValue::from(10i64)), "10");
+        assert_eq!(field_as_db_str(&FieldValue::from("it's")), r"'it\'s'");
+        assert_eq!(field_as_db_str(&FieldValue::from(r"a\b")), r"'a\\b'");
         assert_eq!(
             field_as_db_str(&FieldValue::IpAddr("127.0.0.1".parse().unwrap())),
             "'::ffff:127.0.0.1'"

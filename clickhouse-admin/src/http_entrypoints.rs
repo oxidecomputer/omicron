@@ -22,7 +22,7 @@ use dropshot::{
     HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
     TypedBody,
 };
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use std::sync::Arc;
 
 pub fn clickhouse_admin_server_api() -> ApiDescription<Arc<ServerContext>> {

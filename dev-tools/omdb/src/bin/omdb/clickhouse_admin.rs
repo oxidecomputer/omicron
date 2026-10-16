@@ -83,7 +83,7 @@ impl ClickHouseAdminArgs {
         };
         eprintln!(
             "note: using {}clickhouse-admin URL {}",
-            maybe_replicated, &server_url
+            maybe_replicated, server_url
         );
 
         let client = Client::new(

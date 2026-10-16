@@ -58,6 +58,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
             name: "my-proj".parse().unwrap(),
             description: "a project".to_string(),
         },
+        defaults: None,
     };
 
     // hitting auth-gated API endpoint without session cookie 401s
@@ -218,8 +219,13 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
         "/device/success",
         "/device/verify",
         "/images",
+        "/images/irrelevant-path",
         "/utilization",
         "/access",
+        "/users",
+        "/users/irrelevant-path",
+        "/groups",
+        "/groups/irrelevant-path",
         "/lookup/",
         "/lookup/abc",
     ];
@@ -608,14 +614,11 @@ async fn test_login_redirect_multiple_silos(
 
     let client = &cptestctx.external_client;
     let silo_saml0 =
-        create_silo(&client, "saml-0-idps", false, SiloIdentityMode::SamlJit)
-            .await;
+        create_silo(&client, "saml-0-idps", SiloIdentityMode::SamlJit).await;
     let silo_saml1 =
-        create_silo(&client, "saml-1-idp", false, SiloIdentityMode::SamlJit)
-            .await;
+        create_silo(&client, "saml-1-idp", SiloIdentityMode::SamlJit).await;
     let silo_saml2 =
-        create_silo(&client, "saml-2-idps", false, SiloIdentityMode::SamlJit)
-            .await;
+        create_silo(&client, "saml-2-idps", SiloIdentityMode::SamlJit).await;
 
     for (i, silo) in [&silo_saml1, &silo_saml2].into_iter().enumerate() {
         let nidps = i + 1;
@@ -626,7 +629,7 @@ async fn test_login_redirect_multiple_silos(
                     name: idp_name.parse().unwrap(),
                     description: format!(
                         "silo {:?} idp {:?}",
-                        &silo.identity.name, idp_name
+                        silo.identity.name, idp_name
                     ),
                 },
 
@@ -648,7 +651,7 @@ async fn test_login_redirect_multiple_silos(
             };
             let idp_create_url = format!(
                 "/v1/system/identity-providers/saml?silo={}",
-                &silo.identity.name
+                silo.identity.name
             );
             let _: identity_provider::SamlIdentityProvider =
                 object_create(client, &idp_create_url, &idp_params).await;
@@ -779,7 +782,7 @@ async fn test_login_redirect_multiple_silos(
     assert_eq!(
         make_request(&reqwest_client, cptestctx.silo_name.as_str(), port, None)
             .await,
-        Redirect::Location(format!("/login/{}/local", &cptestctx.silo_name,)),
+        Redirect::Location(format!("/login/{}/local", cptestctx.silo_name,)),
     );
 
     // same thing, but with state param in URL
@@ -793,7 +796,7 @@ async fn test_login_redirect_multiple_silos(
         .await,
         Redirect::Location(format!(
             "/login/{}/local?redirect_uri=%2Fabc%2Fdef",
-            &cptestctx.silo_name,
+            cptestctx.silo_name,
         )),
     );
 

@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Nexus startup task to load hardcoded data into the database
 //!
 //! Initial populating of the CockroachDB database happens in two different ways:
@@ -48,8 +52,8 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::Error;
 use omicron_common::backoff;
+use omicron_uuid_kinds::RackUuid;
 use std::sync::Arc;
-use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 pub(crate) enum PopulateStatus {
@@ -60,11 +64,11 @@ pub(crate) enum PopulateStatus {
 
 /// Auxiliary data necessary to populate the database.
 pub(crate) struct PopulateArgs {
-    rack_id: Uuid,
+    rack_id: RackUuid,
 }
 
 impl PopulateArgs {
-    pub(crate) fn new(rack_id: Uuid) -> Self {
+    pub(crate) fn new(rack_id: RackUuid) -> Self {
         Self { rack_id }
     }
 }
@@ -343,8 +347,8 @@ mod test {
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::RackUuid;
     use std::sync::Arc;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_populators() {
@@ -363,7 +367,11 @@ mod test {
         let logctx = dev::test_setup_log("test_populator");
         let db = TestDatabase::new_populate_schema_only(&logctx.log).await;
         let cfg = db::Config { url: db.crdb().pg_config().clone() };
-        let pool = Arc::new(db::Pool::new_single_host(&logctx.log, &cfg));
+        let pool = Arc::new(db::Pool::new_single_host(
+            &logctx.log,
+            &cfg,
+            db::ClaimBacktraceSetting::Capture,
+        ));
         let datastore = Arc::new(
             db::DataStore::new(
                 &logctx.log,
@@ -382,7 +390,7 @@ mod test {
         );
         let log = &logctx.log;
 
-        let args = PopulateArgs::new(Uuid::new_v4());
+        let args = PopulateArgs::new(RackUuid::new_v4());
 
         // Satisfy any prerequisites by running the previous populators.
         for p in prev {

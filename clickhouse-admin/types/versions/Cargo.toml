@@ -19,6 +19,7 @@ expectorate.workspace = true
 iddqd.workspace = true
 itertools.workspace = true
 omicron-common.workspace = true
+omicron-generation-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 schemars.workspace = true
 serde.workspace = true

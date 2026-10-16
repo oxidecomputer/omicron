@@ -26,7 +26,7 @@ pub fn verify_graceful_exit(
         .wait_timeout(TIMEOUT)
         .expect("failed to wait for process to exit")
         .unwrap_or_else(|| {
-            panic!("timed out waiting {:?} for process to exit", &TIMEOUT)
+            panic!("timed out waiting {:?} for process to exit", TIMEOUT)
         });
 
     assert!(!process_running(cmd_pid));

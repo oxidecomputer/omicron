@@ -18,6 +18,8 @@ jobs:
         run: cargo install toml-cli@0.2.3
       - name: Check OPTE version and rev match
         run: ./tools/ci_check_opte_ver.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
   check-opte-override:
     runs-on: ubuntu-22.04

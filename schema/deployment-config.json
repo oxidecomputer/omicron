@@ -28,7 +28,9 @@
     },
     "external_http_clients": {
       "description": "Configuration for HTTP clients to external services.",
-      "default": {},
+      "default": {
+        "treat_loopback_as_external": "no"
+      },
       "allOf": [
         {
           "$ref": "#/definitions/ExternalHttpClientConfig"
@@ -53,8 +55,16 @@
     },
     "rack_id": {
       "description": "Uuid of the Rack where Nexus is executing.",
-      "type": "string",
-      "format": "uuid"
+      "allOf": [
+        {
+          "$ref": "#/definitions/RackUuid"
+        }
+      ]
+    },
+    "record_db_claim_backtraces": {
+      "description": "By default, we capture backtraces when claiming a connection from the DB pool, but setting this flag to `false` will disable that behavior.\n\nThis flag is intended as an escape hatch in case we ever encounter an unexpected pathological case where capturing backtraces is slow enough to be an issue.\n\nNote that we probably shouldn't need a default here, but I'm leaving it for now just to be safe in case there are any update-related corner cases where this might matter. We can remove this in a future release.",
+      "default": true,
+      "type": "boolean"
     }
   },
   "definitions": {
@@ -103,6 +113,15 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "treat_loopback_as_external": {
+          "description": "Whether external HTTP clients are permitted to make requests to loopback addresses (and names in the special-use \"localhost.\" zone).\n\nExternal HTTP clients normally refuse to make requests to any address that isn't external to the rack, including loopback addresses. Test environments, however, run their \"external\" servers on localhost, so the test suite needs a way to turn that off.",
+          "default": "no",
+          "allOf": [
+            {
+              "$ref": "#/definitions/TreatLoopbackAsExternal"
+            }
           ]
         }
       }
@@ -184,6 +203,34 @@
         "path": "omicron_uuid_kinds::OmicronZoneUuid",
         "version": "*"
       }
+    },
+    "RackUuid": {
+      "type": "string",
+      "format": "uuid",
+      "x-rust-type": {
+        "crate": "omicron-uuid-kinds",
+        "path": "omicron_uuid_kinds::RackUuid",
+        "version": "*"
+      }
+    },
+    "TreatLoopbackAsExternal": {
+      "description": "Whether HTTP clients for external services permit requests to loopback addresses.\n\nThis is an enum rather than a `bool`, so that if you want to turn on the test-only config, you have to type the string \"yes_for_test_purposes_only\" in the config file so you know what you're doing.",
+      "oneOf": [
+        {
+          "description": "Loopback addresses are considered \"external\". This must only be used in test environments.",
+          "type": "string",
+          "enum": [
+            "yes_for_test_purposes_only"
+          ]
+        },
+        {
+          "description": "Loopback addresses are rejected (the default).",
+          "type": "string",
+          "enum": [
+            "no"
+          ]
+        }
+      ]
     }
   }
 }

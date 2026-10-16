@@ -8,8 +8,8 @@
 
 //! Shared private IP config types.
 
-use crate::address::MAX_VPC_IPV4_SUBNET_PREFIX;
-use crate::address::MIN_VPC_IPV4_SUBNET_PREFIX;
+use crate::address::MAX_VPC_IPV4_SUBNET_PREFIX_LENGTH;
+use crate::address::MIN_VPC_IPV4_SUBNET_PREFIX_LENGTH;
 use crate::address::VPC_SUBNET_IPV6_PREFIX_LENGTH;
 use crate::api::external;
 use daft::Diffable;
@@ -29,7 +29,8 @@ pub enum PrivateIpConfigError {
     IpNotInSubnet { subnet: IpNet, ip: IpAddr },
     #[error(
         "IPv4 subnet prefix /{prefix} must be between \
-        /{MIN_VPC_IPV4_SUBNET_PREFIX} and /{MAX_VPC_IPV4_SUBNET_PREFIX}"
+        /{MIN_VPC_IPV4_SUBNET_PREFIX_LENGTH} and \
+        /{MAX_VPC_IPV4_SUBNET_PREFIX_LENGTH}"
     )]
     InvalidIpv4NetworkPrefix { prefix: u8 },
     #[error(
@@ -263,8 +264,8 @@ impl PrivateIpv4Config {
         subnet: Ipv4Net,
         transit_ips: Vec<Ipv4Net>,
     ) -> Result<Self, PrivateIpConfigError> {
-        if subnet.width() < MIN_VPC_IPV4_SUBNET_PREFIX
-            || subnet.width() > MAX_VPC_IPV4_SUBNET_PREFIX
+        if subnet.width() < MIN_VPC_IPV4_SUBNET_PREFIX_LENGTH
+            || subnet.width() > MAX_VPC_IPV4_SUBNET_PREFIX_LENGTH
         {
             return Err(PrivateIpConfigError::InvalidIpv4NetworkPrefix {
                 prefix: subnet.width(),

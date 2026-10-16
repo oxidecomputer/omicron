@@ -1,13 +1,17 @@
 #!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #:
 #: name = "helios / build TUF repo"
 #: variety = "basic"
 #: target = "helios-3.0-16c128gb"
 #: rust_toolchain = true
 #: output_rules = [
-#:	"=/work/manifest.toml",
 #:	"=/work/repo.zip",
 #:	"=/work/repo.zip.sha256.txt",
+#:	"=/work/repo-v1-deprecated.zip",
+#:	"=/work/repo-v1-deprecated.zip.sha256.txt",
 #:	"=/work/helios.json",
 #:	"=/work/incorporation.p5m",
 #:	"=/work/incorporation.p5p",
@@ -22,11 +26,6 @@
 #:
 #: [[publish]]
 #: series = "rot-all"
-#: name = "manifest.toml"
-#: from_output = "/work/manifest.toml"
-#:
-#: [[publish]]
-#: series = "rot-all"
 #: name = "repo.zip"
 #: from_output = "/work/repo.zip"
 #:
@@ -34,6 +33,16 @@
 #: series = "rot-all"
 #: name = "repo.zip.sha256.txt"
 #: from_output = "/work/repo.zip.sha256.txt"
+#:
+#: [[publish]]
+#: series = "rot-all"
+#: name = "repo-v1-deprecated.zip"
+#: from_output = "/work/repo-v1-deprecated.zip"
+#:
+#: [[publish]]
+#: series = "rot-all"
+#: name = "repo-v1-deprecated.zip.sha256.txt"
+#: from_output = "/work/repo.zip-v1-deprecated.sha256.txt"
 #:
 #: [[publish]]
 #: series = "rot-all"
@@ -81,4 +90,4 @@ esac
 pfexec zfs create -p "rpool/images/$USER/host"
 pfexec zfs create -p "rpool/images/$USER/recovery"
 
-cargo xtask releng --output-dir /work --mkincorp
+cargo xtask releng --output-dir /work --mkincorp --verify-debug-libraries

@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use proc_macro::TokenStream;
 use quote::quote;
 use std::collections::HashSet as Set;
@@ -10,6 +14,7 @@ use syn::{ItemFn, Token, parse_macro_input};
 pub(crate) enum NexusTestArg {
     ServerUnderTest(syn::Path),
     ExtraSledAgents(u16),
+    ConfigureSecondNexus(bool),
 }
 
 impl syn::parse::Parse for NexusTestArg {
@@ -26,6 +31,11 @@ impl syn::parse::Parse for NexusTestArg {
             let value: syn::LitInt = input.parse()?;
             let value = value.base10_parse::<u16>()?;
             return Ok(Self::ExtraSledAgents(value));
+        }
+
+        if name.is_ident("configure_second_nexus") {
+            let value: syn::LitBool = input.parse()?;
+            return Ok(Self::ConfigureSecondNexus(value.value()));
         }
 
         Err(syn::Error::new(name.span(), "unrecognized argument to nexus_test"))
@@ -92,6 +102,7 @@ pub fn nexus_test(attrs: TokenStream, input: TokenStream) -> TokenStream {
     let mut which_nexus =
         syn::parse_str::<syn::Path>("::omicron_nexus::Server").unwrap();
     let mut extra_sled_agents: u16 = 0;
+    let mut configure_second_nexus: bool = false;
 
     for arg in nexus_test_args.0 {
         match arg {
@@ -101,6 +112,10 @@ pub fn nexus_test(attrs: TokenStream, input: TokenStream) -> TokenStream {
 
             NexusTestArg::ExtraSledAgents(value) => {
                 extra_sled_agents = value;
+            }
+
+            NexusTestArg::ConfigureSecondNexus(value) => {
+                configure_second_nexus = value;
             }
         }
     }
@@ -130,6 +145,7 @@ pub fn nexus_test(attrs: TokenStream, input: TokenStream) -> TokenStream {
                 #func_ident_string,
             )
             .with_extra_sled_agents(#extra_sled_agents)
+            .with_second_nexus_configured(#configure_second_nexus)
             .start::<#which_nexus>()
             .await;
             #func_ident(&ctx).await;

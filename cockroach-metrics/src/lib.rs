@@ -12,6 +12,7 @@ use chrono::{DateTime, Utc};
 use cockroach_admin_client::Client;
 use cockroach_admin_types::node::InternalNodeId;
 use futures::stream::{FuturesUnordered, StreamExt};
+use omicron_common::http_client::internal_http_client_builder;
 use parallel_task_set::ParallelTaskSet;
 use serde::{Deserialize, Serialize};
 use slog::{Logger, debug, warn};
@@ -36,7 +37,7 @@ impl CockroachAdminClient {
     ///
     /// "timeout" is used as both a connection and request timeout duration.
     fn new(log: Logger, address: SocketAddr, timeout: Duration) -> Self {
-        let reqwest_client = reqwest::ClientBuilder::new()
+        let reqwest_client = internal_http_client_builder()
             .connect_timeout(timeout)
             .timeout(timeout)
             .build()
@@ -354,7 +355,7 @@ impl CockroachClusterAdminClient {
                 results.push(result);
             }
         }
-        results.append(&mut tasks.join_all().await);
+        results.append(&mut tasks.join_remaining().await);
 
         // Collect all successful results
         let mut successful_results = Vec::new();
@@ -431,7 +432,7 @@ impl CockroachClusterAdminClient {
                 results.push(result);
             }
         }
-        results.append(&mut tasks.join_all().await);
+        results.append(&mut tasks.join_remaining().await);
 
         // Collect all successful results
         let mut successful_results = Vec::new();

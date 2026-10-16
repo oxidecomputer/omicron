@@ -19,6 +19,7 @@ crossterm.workspace = true
 futures.workspace = true
 hex.workspace = true
 humantime.workspace = true
+iddqd.workspace = true
 indexmap.workspace = true
 indicatif.workspace = true
 itertools.workspace = true
@@ -49,9 +50,12 @@ unicode-width.workspace = true
 zeroize.workspace = true
 
 omicron-passwords.workspace = true
-update-engine.workspace = true
+oxide-update-engine-types.workspace = true
+oxide-update-engine-display.workspace = true
 wicket-common.workspace = true
 wicketd-client.workspace = true
+wicketd-commission-client.workspace = true
+wicketd-commission-types.workspace = true
 omicron-workspace-hack.workspace = true
 semver.workspace = true
 tufaceous-artifact.workspace = true
@@ -59,9 +63,9 @@ slog-error-chain.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true
+camino-tempfile.workspace = true
 expectorate.workspace = true
 maplit.workspace = true
-tempfile.workspace = true
 proptest.workspace = true
 
 [[bin]]

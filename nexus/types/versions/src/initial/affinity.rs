@@ -106,12 +106,14 @@ pub struct AntiAffinityInstanceGroupMemberPath {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum AffinityPolicy {
-    /// If the affinity request cannot be satisfied, allow it anyway.
-    ///
-    /// This enables a "best-effort" attempt to satisfy the affinity policy.
+    /// Best-effort: instances can start even when the group's constraints
+    /// cannot be satisfied.
     Allow,
 
-    /// If the affinity request cannot be satisfied, fail explicitly.
+    /// When the group's constraints cannot be satisfied, an instance start
+    /// request will fail and the instance will remain stopped. Starting the
+    /// instance may succeed later if conditions change, e.g., other instances
+    /// stop.
     Fail,
 }
 
