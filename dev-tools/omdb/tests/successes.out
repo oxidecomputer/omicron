@@ -398,6 +398,10 @@ task: "blueprint_rendezvous"
     owned rendezvous tables that other subsystems consume
 
 
+task: "capacity_metrics"
+    periodically emits quota capacity metrics
+
+
 task: "crdb_node_id_collector"
     Collects node IDs of running CockroachDB zones
 
@@ -779,6 +783,12 @@ task: "blueprint_rendezvous"
         num_already_decommissioned:          0
         num_not_in_blueprint:                0
         num_decommissioned_not_in_blueprint: 0
+
+task: "capacity_metrics"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    samples queued: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -1517,6 +1527,12 @@ task: "blueprint_rendezvous"
         num_already_decommissioned:          0
         num_not_in_blueprint:                0
         num_decommissioned_not_in_blueprint: 0
+
+task: "capacity_metrics"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    samples queued: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m

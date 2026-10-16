@@ -1,0 +1,71 @@
+format_version = 1
+
+[target]
+name = "silo_quota"
+description = "Silo quota capacity and provisioned resources"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "nexus_id", "silo_id" ] },
+]
+
+[fields.nexus_id]
+type = "uuid"
+description = "ID of the Nexus reporting the sample. We emit quota metrics from each Nexus, so aggregate over Nexus instances by mean or max, but not sum, to avoid double-counting."
+
+[fields.silo_id]
+type = "uuid"
+description = "ID of the silo"
+
+[[metrics]]
+name = "memory_capacity"
+description = "Quota capacity for provisioned memory"
+units = "bytes"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "memory_provisioned"
+description = "Provisioned memory charged against the quota"
+units = "bytes"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "cpu_capacity"
+description = "Quota capacity for provisioned vCPUs"
+units = "count"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "cpu_provisioned"
+description = "Provisioned vCPUs charged against the quota"
+units = "count"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "storage_capacity"
+description = "Quota capacity for provisioned disk and snapshot storage"
+units = "bytes"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "storage_provisioned"
+description = "Provisioned disk and snapshot storage charged against the quota"
+units = "bytes"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
