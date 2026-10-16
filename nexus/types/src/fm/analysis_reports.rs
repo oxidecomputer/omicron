@@ -5,6 +5,7 @@
 //! Human-readable reports summarizing what occurred during fault management
 //! analysis.
 
+use super::FmConfig;
 use super::case;
 use super::display;
 use super::ereport::EreportId;
@@ -19,6 +20,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
+use std::num::NonZeroU32;
+use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AnalysisReport {
@@ -508,6 +511,11 @@ pub struct InputReport {
     pub parent_sitrep_id: Option<SitrepUuid>,
     pub parent_inv_id: Option<CollectionUuid>,
     pub inv_id: CollectionUuid,
+    /// The time diagnosis engines treated as "now" for this analysis: the
+    /// completion time of the inventory collection it ran against. `None`
+    /// only for reports written before this field existed.
+    #[serde(default)]
+    pub reference_time: Option<DateTime<Utc>>,
     pub new_ereport_ids: BTreeSet<EreportId>,
     /// Cases which were open in the parent sitrep.
     pub open_cases: BTreeMap<CaseUuid, case::Metadata>,
@@ -524,9 +532,52 @@ pub struct InputReport {
     /// analysis pass.
     #[serde(default)]
     pub observed_sagas: BTreeMap<steno::SagaId, ObservedSagaReport>,
+    /// Every silo, with its installed external TLS certificates, visible to
+    /// the diagnosis engines for this analysis pass. Keyed by silo ID.
+    #[serde(default)]
+    pub observed_silo_certificates: BTreeMap<Uuid, SiloCertificatesReport>,
+    /// The fault management configuration diagnosis engines ran with. `None`
+    /// only for reports written before this field existed.
+    #[serde(default)]
+    pub config: Option<ConfigReport>,
     // Reports are serialized to the database, so any new field here should
     // be `#[serde(default)]` (or `Option`al) to keep reports written before
     // the field existed parseable.
+}
+
+/// The configuration settings diagnosis engines consumed during an analysis
+/// pass, as recorded in an [`InputReport`].
+///
+/// Settings are recorded as plain values, not as
+/// [`Setting`](super::Setting)s. A `Setting::Default` serializes without a
+/// value and means "this release's default", which may change across releases;
+/// a report read after an upgrade could then misstate the value analysis
+/// actually used.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConfigReport {
+    /// See [`FmConfig::certificate_expiry_warning_days`].
+    pub certificate_expiry_warning_days: NonZeroU32,
+}
+
+impl From<&FmConfig> for ConfigReport {
+    fn from(config: &FmConfig) -> Self {
+        // Destructure exhaustively, so that adding a setting to `FmConfig`
+        // forces a decision about whether it belongs in the report.
+        let FmConfig {
+            // Recorded: an input to the certificate diagnosis engine.
+            certificate_expiry_warning_days,
+            // Not recorded: these govern whether and how often analysis runs,
+            // and how sitrep history is retained. They are not inputs to any
+            // diagnosis engine, so they can't change what analysis decides.
+            analysis_enabled: _,
+            sitrep_limit: _,
+            history_pruning_threshold: _,
+        } = *config;
+        Self {
+            certificate_expiry_warning_days: certificate_expiry_warning_days
+                .value(),
+        }
+    }
 }
 
 /// Summary of one non-terminal saga in an [`InputReport`].
@@ -540,6 +591,22 @@ pub struct ObservedSagaReport {
     /// The classified state of the owning Nexus, or `None` if the saga has
     /// no current SEC.
     pub owner_state: Option<SagaOwnerState>,
+}
+
+/// Summary of one silo's external TLS certificates in an [`InputReport`].
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SiloCertificatesReport {
+    pub silo_name: String,
+    /// The silo's certificates, keyed by certificate ID.
+    pub certificates: BTreeMap<Uuid, ObservedCertificateReport>,
+}
+
+/// Summary of one external TLS certificate in an [`InputReport`].
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ObservedCertificateReport {
+    pub name: String,
+    pub not_before: DateTime<Utc>,
+    pub not_after: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -584,12 +651,15 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     parent_sitrep_id,
                     parent_inv_id,
                     inv_id,
+                    reference_time,
                     new_ereport_ids,
                     open_cases,
                     closed_cases_copied_forward,
                     num_ereporter_restarts,
                     in_service_disks,
                     observed_sagas,
+                    observed_silo_certificates,
+                    config,
                 },
             indent,
             colored,
@@ -639,6 +709,39 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                      (collection {parent_inv_id})"
                 )),
             )?;
+        }
+
+        match reference_time {
+            Some(t) => writeln!(
+                f,
+                "{:indent$}{}: {t}",
+                "",
+                heading.style("reference time")
+            )?,
+            None => writeln!(
+                f,
+                "{:indent$}{}: <not recorded>",
+                "",
+                heading.style("reference time")
+            )?,
+        }
+
+        match config {
+            Some(ConfigReport { certificate_expiry_warning_days }) => {
+                writeln!(f, "{:indent$}{}:", "", heading.style("config"))?;
+                writeln!(
+                    f,
+                    "{:indent$}  certificate expiry warning window: \
+                     {certificate_expiry_warning_days} days",
+                    "",
+                )?;
+            }
+            None => writeln!(
+                f,
+                "{:indent$}{}: <not recorded>",
+                "",
+                heading.style("config")
+            )?,
         }
 
         writeln!(
@@ -897,6 +1000,43 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
             }
         }
 
+        if observed_silo_certificates.is_empty() {
+            writeln!(f, "\n{:indent$}no silos observed", "")?;
+        } else {
+            writeln!(
+                f,
+                "\n{:indent$}silo external TLS certificates observed ({} \
+                 silos):",
+                "",
+                observed_silo_certificates.len()
+            )?;
+            let indent = indent + 2;
+            for (silo_id, silo) in observed_silo_certificates {
+                let SiloCertificatesReport { silo_name, certificates } = silo;
+                writeln!(
+                    f,
+                    "{:indent$}* silo {silo_id} ({silo_name}): {} \
+                     certificate(s)",
+                    "",
+                    certificates.len()
+                )?;
+                let indent = indent + 2;
+                for (cert_id, cert) in certificates {
+                    let ObservedCertificateReport {
+                        name,
+                        not_before,
+                        not_after,
+                    } = cert;
+                    writeln!(
+                        f,
+                        "{:indent$}* certificate {cert_id} ({name}): valid \
+                         from {not_before} until {not_after}",
+                        ""
+                    )?;
+                }
+            }
+        }
+
         Ok(())
     }
 }
@@ -1019,18 +1159,46 @@ mod tests {
         );
 
         let observed_sagas = example_observed_sagas();
+        let observed_silo_certificates = example_observed_silo_certificates();
 
         InputReport {
             parent_sitrep_id: Some(parent_sitrep_id),
             parent_inv_id: Some(parent_inv_id),
             inv_id,
+            reference_time: Some("2024-01-01T00:00:00Z".parse().unwrap()),
             num_ereporter_restarts: 420,
             new_ereport_ids,
             open_cases,
             closed_cases_copied_forward,
             in_service_disks,
             observed_sagas,
+            observed_silo_certificates,
+            config: Some(ConfigReport {
+                certificate_expiry_warning_days: NonZeroU32::new(30).unwrap(),
+            }),
         }
+    }
+
+    fn example_observed_silo_certificates()
+    -> BTreeMap<Uuid, SiloCertificatesReport> {
+        let mut certificates = BTreeMap::new();
+        certificates.insert(
+            Uuid::from_str("cccccccc-0000-0000-0000-000000000001").unwrap(),
+            ObservedCertificateReport {
+                name: "fake-cert-1".to_string(),
+                not_before: "2020-01-01T00:00:00Z".parse().unwrap(),
+                not_after: "2021-01-01T00:00:00Z".parse().unwrap(),
+            },
+        );
+        let mut silos = BTreeMap::new();
+        silos.insert(
+            Uuid::from_str("5110aaaa-0000-0000-0000-000000000001").unwrap(),
+            SiloCertificatesReport {
+                silo_name: "fake-silo".to_string(),
+                certificates,
+            },
+        );
+        silos
     }
 
     fn example_observed_sagas() -> BTreeMap<steno::SagaId, ObservedSagaReport> {
@@ -1075,12 +1243,15 @@ mod tests {
             parent_sitrep_id: None,
             parent_inv_id: None,
             inv_id,
+            reference_time: None,
             num_ereporter_restarts: 0,
             new_ereport_ids: BTreeSet::new(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
             in_service_disks: BTreeSet::new(),
             observed_sagas: BTreeMap::new(),
+            observed_silo_certificates: BTreeMap::new(),
+            config: None,
         }
     }
 
@@ -1096,13 +1267,41 @@ mod tests {
             parent_sitrep_id: Some(parent_sitrep_id),
             parent_inv_id: Some(inv_id),
             inv_id,
+            reference_time: Some("2024-01-01T00:00:00Z".parse().unwrap()),
             num_ereporter_restarts: 420,
             new_ereport_ids: BTreeSet::new(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
             in_service_disks: BTreeSet::new(),
             observed_sagas: BTreeMap::new(),
+            observed_silo_certificates: BTreeMap::new(),
+            config: Some(ConfigReport {
+                certificate_expiry_warning_days: NonZeroU32::new(60).unwrap(),
+            }),
         }
+    }
+
+    #[test]
+    fn config_report_resolves_settings() {
+        // A setting left at its default is recorded as the default's concrete
+        // value, not as "default".
+        let report = ConfigReport::from(&FmConfig::default());
+        assert_eq!(
+            report.certificate_expiry_warning_days,
+            FmConfig::DEFAULT_CERTIFICATE_EXPIRY_WARNING_DAYS,
+        );
+
+        let config = FmConfig {
+            certificate_expiry_warning_days: super::super::Setting::new(
+                NonZeroU32::new(60).unwrap(),
+            ),
+            ..FmConfig::default()
+        };
+        let report = ConfigReport::from(&config);
+        assert_eq!(
+            report.certificate_expiry_warning_days,
+            NonZeroU32::new(60).unwrap(),
+        );
     }
 
     // Note: the example report includes the `/!\ WEIRD` warning, so
