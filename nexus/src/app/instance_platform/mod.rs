@@ -392,6 +392,7 @@ impl Default for Components {
                 component_names::PVPANIC,
                 Component::QemuPvpanic(QemuPvpanic { enable_isa: true }),
             ),
+            /*
             (
                 component_names::VSOCK,
                 Component::VirtioSocket(VirtioSocket {
@@ -400,6 +401,7 @@ impl Default for Components {
                         .expect("vsock bdf (0, 25, 0)"),
                 }),
             ),
+            */
         ]
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v))
