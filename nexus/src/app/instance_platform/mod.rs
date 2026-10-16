@@ -67,6 +67,8 @@
 //! backends, this is easily done by using component IDs as backend names, as
 //! described above.
 
+#![allow(unused_imports, dead_code)] // commented-out vsock for migration test
+
 // CPU platforms are broken out only because they're wordy.
 mod cpu_platform;
 
