@@ -38,3 +38,5 @@ pub mod v3;
 pub mod v4;
 #[path = "multirack_join/mod.rs"]
 pub mod v5;
+#[path = "update_progress_repository/mod.rs"]
+pub mod v6;
