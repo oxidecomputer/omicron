@@ -40,10 +40,6 @@ description = "Serial number of the sled"
 type = "string"
 description = "Name of the zone owning the link"
 
-[fields.lane]
-type = "u8"
-description = "Lane (Tx/Rx pair) within a single link"
-
 [[metrics]]
 name = "bytes_sent"
 description = "Number of bytes sent on the link"
@@ -140,5 +136,5 @@ description = "Total number of FEC symbol errors"
 units = "count"
 datum_type = "cumulative_u64"
 versions = [
-    { added_in = 1, fields = [ "lane" ] }
+    { added_in = 1, fields = [] }
 ]
