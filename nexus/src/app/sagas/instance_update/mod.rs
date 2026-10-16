@@ -574,8 +574,8 @@ impl UpdatesRequired {
                         active_vmm_update_disposition_gen = Some(generation);
 
                     } else if snapshot.instance.intended_state
-                    == InstanceIntendedState::Running
-                    && snapshot.migration.is_none()
+                        == InstanceIntendedState::Running
+                        && snapshot.migration.is_none()
                 {
                     // Did the active VMM shut itself down, when it was
                     // intended to be running *and* we were not migrating
@@ -750,7 +750,7 @@ impl UpdatesRequired {
             new_runtime.nexus_state = if active_vmm_failed {
                 InstanceState::Failed
             } else if let Some(g) = active_vmm_update_disposition_gen {
-                debug!(
+                info!(
                     log,
                     "instance update: VMM was stopped due to its sled being \
                      evacuated for an update. Setting new runtime instance \

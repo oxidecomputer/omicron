@@ -350,7 +350,7 @@ impl<'s> InstanceStateComputer<'s> {
             // - An instance with no VMM is always "stopped" (as long as it's
             //   not "starting" etc.)
             (InstanceState::NoVmm, None) => instance::InstanceState::Stopped,
-            // - An instance with no VMM because it was in a sled that is being
+            // - An instance with no VMM because it was on a sled that is being
             //   evacuated is always "rebooting"
             (InstanceState::SledEvacuating, None) => {
                 instance::InstanceState::Rebooting
