@@ -2588,6 +2588,7 @@ async fn local_storage_disk_info(
 
         allocation_type: String,
 
+        allocation_id: DatasetUuid,
         dataset_id: DatasetUuid,
         pool_id: ExternalZpoolUuid,
         sled_id: SledUuid,
@@ -2605,6 +2606,7 @@ async fn local_storage_disk_info(
 
                 allocation_type: String::from("unencrypted"),
 
+                allocation_id: allocation.id(),
                 dataset_id: allocation.local_storage_unencrypted_dataset_id(),
                 pool_id: allocation.pool_id(),
                 sled_id: allocation.sled_id(),
@@ -2620,6 +2622,7 @@ async fn local_storage_disk_info(
 
                 allocation_type: String::from("encrypted"),
 
+                allocation_id: allocation.id(),
                 dataset_id: allocation.local_storage_dataset_id(),
                 pool_id: allocation.pool_id(),
                 sled_id: allocation.sled_id(),
