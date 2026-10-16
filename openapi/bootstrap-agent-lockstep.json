@@ -2393,6 +2393,20 @@
               "state": {
                 "type": "string",
                 "enum": [
+                  "wait_for_completion"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
                   "completed"
                 ]
               }

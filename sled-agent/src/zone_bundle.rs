@@ -351,10 +351,13 @@ impl ZoneBundler {
         zone: &RunningZone,
         cause: ZoneBundleCause,
     ) -> Result<ZoneBundleMetadata, BundleError> {
-        // NOTE: [Self::await_completion_of_prior_bundles] relies on this lock
-        // being held across this whole function. If we want more concurrency,
-        // we'll need to add a barrier-like mechanism to let callers know when
-        // prior bundles have completed.
+        // NOTE: Previously (Prior to #8064),
+        // [Self::await_completion_of_prior_bundles] relied on this lock being
+        // held across this whole function.
+        //
+        // That method was unused, but the lock was left in place. The method
+        // has since been removed, but the lock was kept to avoid changing
+        // behavior in an unrelated [PR](#11476).
         let inner = self.inner.lock().await;
         let storage_dirs = inner.bundle_directories().await;
         let extra_log_dirs = inner
@@ -371,14 +374,6 @@ impl ZoneBundler {
             "context" => ?context,
         );
         create(&self.log, zone, &context).await
-    }
-
-    /// Awaits the completion of all prior calls to [ZoneBundler::create].
-    ///
-    /// This is critical for disk expungement, which wants to ensure that the
-    /// Sled Agent is no longer using devices after they have been expunged.
-    pub async fn await_completion_of_prior_bundles(&self) {
-        let _ = self.inner.lock().await;
     }
 
     /// Return the paths for all bundles of the provided zone and ID.
