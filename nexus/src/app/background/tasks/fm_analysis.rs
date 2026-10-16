@@ -450,7 +450,6 @@ impl FmAnalysis {
             .await
             .context("failed to load saga node-event times")?
             .into_iter()
-            .map(|(id, t)| (id.0, t))
             .collect();
 
         // Classify each owning Nexus (current_sec) against db_metadata_nexus.
@@ -508,10 +507,10 @@ impl FmAnalysis {
                     None => SagaOwnerState::Absent,
                 });
             let last_event_time =
-                last_event_times.get(&saga.id.0).copied().flatten();
+                last_event_times.get(&saga.id).copied().flatten();
             observed
                 .insert_unique(ObservedSaga {
-                    saga_id: saga.id.0,
+                    saga_id: saga.id,
                     saga_name: saga.name,
                     saga_state,
                     time_created: saga.time_created,

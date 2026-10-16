@@ -449,7 +449,7 @@ mod tests {
     use std::sync::Arc;
 
     fn saga_id(n: u128) -> steno::SagaId {
-        steno::SagaId(uuid::Uuid::from_u128(n))
+        steno::SagaId::from_u128(n)
     }
 
     /// Build a synthetic example collection (only used here for its

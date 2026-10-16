@@ -509,7 +509,7 @@ pub fn make_abandoned_saga_fact(
     parent_sitrep_id: SitrepUuid,
     saga_n: u128,
 ) -> fm::case::Fact {
-    let saga_id = steno::SagaId(uuid::Uuid::from_u128(saga_n));
+    let saga_id = steno::SagaId::from_u128(saga_n);
     fm::case::Fact {
         metadata: fm::case::FactMetadata {
             id: FactUuid::new_v4(),

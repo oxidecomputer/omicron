@@ -8,7 +8,6 @@
 
 use iddqd::IdOrdItem;
 use iddqd::id_upcast;
-use uuid::Uuid;
 
 progenitor::generate_api!(
     spec = "../../openapi/nexus-lockstep.json",
@@ -21,6 +20,7 @@ progenitor::generate_api!(
         "omicron-generation-kinds" = "*",
         "omicron-uuid-kinds" = "*",
         "oxnet" = "0.1.0",
+        "steno" = "*",
     },
     replace = {
         BaseboardId = sled_hardware_types::BaseboardId,
@@ -93,7 +93,7 @@ progenitor::generate_api!(
 progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
 
 impl IdOrdItem for types::PendingSagaInfo {
-    type Key<'a> = Uuid;
+    type Key<'a> = steno::SagaId;
 
     fn key(&self) -> Self::Key<'_> {
         self.saga_id
