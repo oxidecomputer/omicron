@@ -66,6 +66,7 @@ use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use slog::{Drain, Logger, info};
+use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
@@ -333,7 +334,8 @@ async fn handoff_to_nexus(
             .map_err(BackoffError::transient)
     };
     let log_failure = |err, _| {
-        info!(log, "Failed to handoff to nexus: {err}");
+        info!(log, "Failed to handoff to nexus";
+            "err" => InlineErrorChain::new(&err));
     };
     retry_notify(
         retry_policy_internal_service_aggressive(),

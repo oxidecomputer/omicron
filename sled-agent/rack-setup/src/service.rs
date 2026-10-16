@@ -921,7 +921,8 @@ impl ServiceInner {
                 .map_err(BackoffError::transient)
         };
         let log_failure = |err, _| {
-            info!(self.log, "Failed to handoff to nexus: {err}");
+            info!(self.log, "Failed to handoff to nexus";
+                "err" => InlineErrorChain::new(&err));
         };
 
         retry_notify(
