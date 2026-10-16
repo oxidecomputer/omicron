@@ -526,6 +526,7 @@ mod tests {
     use crate::native::block::DataType;
     use crate::native::block::ValueArray;
     use crate::native::connection::Connection;
+    use crate::native::errors::UNACCEPTABLE_URL;
     use crate::native::packets::client::QueryResult;
     use crate::native::packets::client::Setting;
     use crate::native::packets::client::Settings;
@@ -1277,6 +1278,53 @@ mod tests {
             )
             .await,
         );
+    }
+
+    #[tokio::test]
+    async fn test_remote_url_denied() {
+        let logctx = test_setup_log("test_remote_url_denied");
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
+            .await
+            .expect("Failed to start ClickHouse");
+
+        let mut conn = Connection::new(db.native_address().into(), User::Admin)
+            .await
+            .unwrap();
+
+        for query in [
+            "SELECT * FROM url('http://localhost:1/', 'CSV', 'a UInt8')",
+            "CREATE TABLE default.forbidden_url (a UInt8) \
+             ENGINE = URL('http://localhost:1/', 'CSV')",
+        ] {
+            let result = conn.query(Uuid::new_v4(), query).await;
+            match result {
+                Ok(_) => {
+                    panic!(
+                        "expected {query:?} to be rejected, but it succeeded"
+                    )
+                }
+                Err(Error::Exception { exceptions }) => {
+                    let code = exceptions
+                        .first()
+                        .expect(
+                            "server exception should have at least one entry",
+                        )
+                        .code;
+                    assert_eq!(
+                        code, UNACCEPTABLE_URL,
+                        "query {query:?}: expected error code \
+                         {UNACCEPTABLE_URL}, got {code}:{exceptions:#?}"
+                    );
+                }
+                Err(other) => panic!(
+                    "expected a server exception rejecting the \
+                     query {query:?}, but got a different error: {other:?}"
+                ),
+            }
+        }
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
