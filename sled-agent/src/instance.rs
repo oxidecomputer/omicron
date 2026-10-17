@@ -970,14 +970,17 @@ impl InstanceRunner {
                                 // If we're going to stop the instance, start
                                 // the timeout after which we will forcefully
                                 // terminate the VMM.
-                                if let VmmStateRequested::Stopped = state && acpi_timeout_secs.is_none() {
+                                if let VmmStateRequested::Stopped = state {
                                     // Only start the stop timeout if there
                                     // isn't one already, so that additional
                                     // requests to stop coming in don't reset
                                     // the clock.
                                     if stop_timeout.is_none() {
+                                        let acpi_timeout = Duration::from_secs(
+                                            acpi_timeout_secs.unwrap_or(0)
+                                        );
                                         stop_timeout = Some(Box::pin(tokio::time::sleep(
-                                            Self::STOP_GRACE_PERIOD
+                                            Self::STOP_GRACE_PERIOD + acpi_timeout
                                         )));
                                     }
                                 }
@@ -2459,21 +2462,24 @@ impl InstanceRunner {
                     self.terminate().await;
                     (None, None)
                 } else {
-                    (
-                        Some(PropolisRequest::Stop),
-                        Some(PublishedVmmState::Stopping),
-                    )
+                    let p = if acpi_timeout_secs.is_some() {
+                        PropolisRequest::AcpiStop
+                    } else {
+                        PropolisRequest::Stop
+                    };
+                    (Some(p), Some(PublishedVmmState::Stopping))
                 }
             }
             VmmStateRequested::Reboot => {
                 if !already_had_zone {
                     return Err(Error::VmNotRunning(self.propolis_id));
                 }
-
-                (
-                    Some(PropolisRequest::Reboot),
-                    Some(PublishedVmmState::Rebooting),
-                )
+                let p = if acpi_timeout_secs.is_some() {
+                    PropolisRequest::AcpiReboot
+                } else {
+                    PropolisRequest::Reboot
+                };
+                (Some(p), Some(PublishedVmmState::Rebooting))
             }
         };
 

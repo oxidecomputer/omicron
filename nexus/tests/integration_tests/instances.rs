@@ -146,8 +146,16 @@ fn get_instance_start_url(instance_name: &str) -> String {
     format!("/v1/instances/{}/start?{}", instance_name, get_project_selector())
 }
 
-fn get_instance_stop_url(instance_name: &str) -> String {
-    format!("/v1/instances/{}/stop?{}", instance_name, get_project_selector())
+fn get_instance_stop_url(
+    instance_name: &str,
+    skip_os_shutdown: bool,
+) -> String {
+    format!(
+        "/v1/instances/{}/stop?{}{}",
+        instance_name,
+        get_project_selector(),
+        if skip_os_shutdown { "&skip_os_shutdown=true" } else { "" }
+    )
 }
 
 fn get_disks_url() -> String {
@@ -649,7 +657,7 @@ async fn test_instances_create_reboot_halt(
         client,
         StatusCode::NOT_FOUND,
         Method::POST,
-        get_instance_stop_url(instance_name).as_str(),
+        get_instance_stop_url(instance_name, false).as_str(),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -7698,11 +7706,12 @@ async fn expect_instance_start_ok(
 async fn expect_instance_stop_ok(
     client: &ClientTestContext,
     instance_name: &str,
+    skip_os_shutdown: bool,
 ) {
     let builder = RequestBuilder::new(
         client,
         http::Method::POST,
-        &get_instance_stop_url(instance_name),
+        &get_instance_stop_url(instance_name, skip_os_shutdown),
     )
     .expect_status(Some(http::StatusCode::ACCEPTED));
 
@@ -7988,7 +7997,8 @@ async fn test_can_start_instance_with_cpu_platform(
     // Great, now let's update the instance to require Turin and start it again.
     // This will fail because there is no Turin in our simulated environment
     // (yet!)
-    expect_instance_stop_ok(client, instance.identity.name.as_str()).await;
+    expect_instance_stop_ok(client, instance.identity.name.as_str(), true)
+        .await;
     instance_simulate(nexus, &instance_id).await;
     instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
@@ -8043,7 +8053,8 @@ async fn test_can_start_instance_with_cpu_platform(
 
     // We're free to switch this instance from the initial AmdTurin to AmdTurinV2, which has
     // identical placement constraints and should land on the same simulated Turin sled.
-    expect_instance_stop_ok(client, instance.identity.name.as_str()).await;
+    expect_instance_stop_ok(client, instance.identity.name.as_str(), true)
+        .await;
     instance_simulate(nexus, &instance_id).await;
     instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
@@ -9146,7 +9157,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::POST,
-            &get_instance_stop_url(instance.identity.name.as_str()),
+            &get_instance_stop_url(instance.identity.name.as_str(), true),
         )
         .body(None as Option<&serde_json::Value>)
         .expect_status(Some(StatusCode::ACCEPTED)),
@@ -10439,11 +10450,26 @@ async fn test_instances_shutdown_policy_updates(
     let instance_name = "resonance-cascade";
     let instance_url = get_instance_url(instance_name);
 
-    let propolis_addr = cptestctx
-        .first_sled_agent()
+    let sled_agent = cptestctx.first_sled_agent();
+    let propolis_addr = sled_agent
         .start_local_mock_propolis_server(&cptestctx.logctx.log)
         .await
         .unwrap();
+
+    async fn mock_get_last_state_requested(
+        propolis_addr: std::net::SocketAddr,
+    ) -> propolis_client::types::InstanceStateChange {
+        let mock_last_state_req_url =
+            format!("http://{}/mock/last_state_requested", propolis_addr);
+        reqwest::Client::new()
+            .get(mock_last_state_req_url)
+            .send()
+            .await
+            .expect("retrieving last instance state change failed unexpectedly")
+            .json()
+            .await
+            .expect("invalid JSON response")
+    }
 
     create_project_and_pool(&client).await;
 
@@ -10502,9 +10528,27 @@ async fn test_instances_shutdown_policy_updates(
     assert_eq!(updated_vmm.propolis_ip.ip(), propolis_addr.ip());
     assert_eq!(updated_vmm.propolis_port.0, propolis_addr.port());
 
-    expect_instance_stop_ok(client, instance_name).await;
-    // TODO give propolis-mock an escape hatch api ep to check what timeout arg was passed.
-    // TODO start instance again, stop with skip_os_shutdown=true param.
+    // check the default instance's shutdown behavior
+    // (should default to AcpiShutdown w/ 600 second timeout)
+    expect_instance_stop_ok(client, instance_name, false).await;
+    assert_matches::assert_matches!(
+        mock_get_last_state_requested(propolis_addr).await,
+        propolis_client::types::InstanceStateChange {
+            acpi_timeout_secs: Some(600),
+            state: propolis_client::types::InstanceStateRequested::AcpiStop
+        }
+    );
+
+    // start instance again, then stop with skip_os_shutdown=true param.
+    expect_instance_start_ok(client, instance_name).await;
+    expect_instance_stop_ok(client, instance_name, true).await;
+    assert_matches::assert_matches!(
+        mock_get_last_state_requested(propolis_addr).await,
+        propolis_client::types::InstanceStateChange {
+            acpi_timeout_secs: None,
+            state: propolis_client::types::InstanceStateRequested::Stop
+        }
+    );
 
     // changes to shutdown policy
     let base_update = instance::InstanceUpdate {
@@ -10527,5 +10571,63 @@ async fn test_instances_shutdown_policy_updates(
     )
     .await;
 
-    // TODO start instance, stop again.
+    assert_eq!(
+        instance_hard.shutdown_policy,
+        Some(instance::InstanceShutdownPolicy::HardOff)
+    );
+
+    // start instance again with new hard-off config, then stop without forcing
+    expect_instance_start_ok(client, instance_name).await;
+    expect_instance_stop_ok(client, instance_name, false).await;
+    assert_matches::assert_matches!(
+        mock_get_last_state_requested(propolis_addr).await,
+        propolis_client::types::InstanceStateChange {
+            acpi_timeout_secs: None,
+            state: propolis_client::types::InstanceStateRequested::Stop
+        }
+    );
+
+    // change shutdown policy to soft-off and 30 second timeout (non-default)
+    let instance_soft = expect_instance_reconfigure_ok(
+        client,
+        &instance_default.identity.id,
+        instance::InstanceUpdate {
+            shutdown_policy: Some(
+                instance::InstanceShutdownPolicy::PowerButton {
+                    timeout_secs: 30,
+                },
+            ),
+            ..base_update.clone()
+        },
+    )
+    .await;
+
+    assert_eq!(
+        instance_soft.shutdown_policy,
+        Some(instance::InstanceShutdownPolicy::PowerButton {
+            timeout_secs: 30
+        })
+    );
+    expect_instance_start_ok(client, instance_name).await;
+    expect_instance_stop_ok(client, instance_name, false).await;
+    assert_matches::assert_matches!(
+        mock_get_last_state_requested(propolis_addr).await,
+        propolis_client::types::InstanceStateChange {
+            acpi_timeout_secs: Some(30),
+            state: propolis_client::types::InstanceStateRequested::AcpiStop
+        }
+    );
+    // test that hard-off is still sent for a force stop request even when
+    // an explicit powerbutton shutdown policy is present
+    expect_instance_start_ok(client, instance_name).await;
+    expect_instance_stop_ok(client, instance_name, true).await;
+    assert_matches::assert_matches!(
+        mock_get_last_state_requested(propolis_addr).await,
+        propolis_client::types::InstanceStateChange {
+            acpi_timeout_secs: None,
+            state: propolis_client::types::InstanceStateRequested::Stop
+        }
+    );
+
+    // TODO test reboots too
 }

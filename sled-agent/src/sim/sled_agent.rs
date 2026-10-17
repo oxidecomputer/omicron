@@ -592,10 +592,18 @@ impl SledAgent {
                     return Ok(VmmPutStateResponse { updated_runtime: None });
                 }
                 VmmStateRequested::Stopped => {
-                    propolis_client::types::InstanceStateRequested::Stop
+                    if acpi_timeout_secs.is_some() {
+                        propolis_client::types::InstanceStateRequested::AcpiStop
+                    } else {
+                        propolis_client::types::InstanceStateRequested::Stop
+                    }
                 }
                 VmmStateRequested::Reboot => {
-                    propolis_client::types::InstanceStateRequested::Reboot
+                    if acpi_timeout_secs.is_some() {
+                        propolis_client::types::InstanceStateRequested::AcpiReboot
+                    } else {
+                        propolis_client::types::InstanceStateRequested::Reboot
+                    }
                 }
             };
             let body = propolis_client::types::InstanceStateChange {
