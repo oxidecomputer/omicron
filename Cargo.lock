@@ -2184,9 +2184,9 @@ dependencies = [
 [[package]]
 name = "crucible-client-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=bd62980710dd3d6d3524aa7f6617127942b75002#bd62980710dd3d6d3524aa7f6617127942b75002"
+source = "git+https://github.com/oxidecomputer/crucible?rev=91a199a2cab76c2d0894b2a8fa19ba0b284628ad#91a199a2cab76c2d0894b2a8fa19ba0b284628ad"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "crucible-workspace-hack",
  "schemars 0.8.22",
  "serde",
@@ -2197,9 +2197,9 @@ dependencies = [
 [[package]]
 name = "crucible-client-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=f85cf0dc3631e2f0c13384787efb0efc1b642162#f85cf0dc3631e2f0c13384787efb0efc1b642162"
+source = "git+https://github.com/oxidecomputer/crucible?rev=bd62980710dd3d6d3524aa7f6617127942b75002#bd62980710dd3d6d3524aa7f6617127942b75002"
 dependencies = [
- "base64 0.23.1",
+ "base64 0.22.1",
  "crucible-workspace-hack",
  "schemars 0.8.22",
  "serde",
@@ -9821,7 +9821,7 @@ dependencies = [
  "clap",
  "clickhouse-admin-types",
  "crucible-agent-client",
- "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=f85cf0dc3631e2f0c13384787efb0efc1b642162)",
+ "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=91a199a2cab76c2d0894b2a8fa19ba0b284628ad)",
  "derive_more 0.99.20",
  "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?rev=ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc)",
  "display-error-chain",
