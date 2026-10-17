@@ -521,6 +521,11 @@ impl InstanceAutoRestart {
 
         let now = diesel::dsl::now.into_sql::<pg::sql_types::Timestamptz>();
 
+        // TODO-K: For a follow up PR. Do we want to restart instances we are
+        // evacuating regardless of the auto-restart policy?
+        //
+        // Tracking issue: https://github.com/oxidecomputer/omicron/issues/11169
+
         // The instance's auto-restart policy must allow the control plane
         // to restart it automatically.
         //

@@ -15,6 +15,7 @@ use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -104,6 +105,36 @@ pub struct AbandonedVmmReaperStatus {
     pub vmms_deleted: usize,
     pub vmms_already_deleted: usize,
     pub errors: Vec<String>,
+}
+
+/// VMMs on a single sled
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct VmmsBySled {
+    pub sled_id: SledUuid,
+    pub vmm_ids: Vec<PropolisUuid>,
+}
+
+impl IdOrdItem for VmmsBySled {
+    type Key<'a> = SledUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.sled_id
+    }
+
+    id_upcast!();
+}
+
+/// The status of a `vmm_stop_for_update` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct VmmStopForUpdateStatus {
+    /// Number of VMMs stopped in this activation, keyed by the sled they were
+    /// running on.
+    pub vmms_stopped_by_sled: IdOrdMap<VmmsBySled>,
+    /// Number of VMMs that failed to stop in this activation, keyed by the sled
+    /// they are running on.
+    pub vmms_failed_by_sled: IdOrdMap<VmmsBySled>,
+    /// Errors encountered during this activation, if any.
+    pub error_messages: Vec<String>,
 }
 
 /// The status of an `instance_updater` background task activation.
@@ -229,6 +260,10 @@ pub enum ReincarnationReason {
     Failed,
     /// A previous instance-start saga for this instance has failed.
     SagaUnwound,
+    // TODO-K: In a follow up PR add a StoppedForUpdate reason, so the instances
+    // we stopped during sled evacuation actually get restarted
+    //
+    // Tracking issue: https://github.com/oxidecomputer/omicron/issues/11169
 }
 
 impl std::fmt::Display for ReincarnationReason {
