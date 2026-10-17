@@ -756,11 +756,11 @@ progenitor-extras = "0.2.0"
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
 # TODO(lif): before PR, get propolis#1217 merged and update commit accordingly. this is just from that PR's branch
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "bd5596b957d80595da9ffd8ba2965385c48d3e76" }
-propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "bd5596b957d80595da9ffd8ba2965385c48d3e76" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "bd5596b957d80595da9ffd8ba2965385c48d3e76" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "bd5596b957d80595da9ffd8ba2965385c48d3e76" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "bd5596b957d80595da9ffd8ba2965385c48d3e76" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "463fb8850a1b1d0a472bc650f6edfa1da9d25714" }
+propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "463fb8850a1b1d0a472bc650f6edfa1da9d25714" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "463fb8850a1b1d0a472bc650f6edfa1da9d25714" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "463fb8850a1b1d0a472bc650f6edfa1da9d25714" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "463fb8850a1b1d0a472bc650f6edfa1da9d25714" }
 # NOTE: see above!
 proptest = "1.11.0"
 qorb = "0.4.1"
