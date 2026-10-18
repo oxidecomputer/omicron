@@ -12,7 +12,8 @@ use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{
     control_plane_router_configuration, router_configuration,
     router_configuration_bfd_peer, router_configuration_bgp_peer,
-    router_configuration_static_route, silo_router_configuration,
+    router_configuration_static_route, router_configuration_switch,
+    silo_router_configuration,
 };
 use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
@@ -33,7 +34,7 @@ use std::net::IpAddr;
 use std::num::NonZeroU8;
 use uuid::Uuid;
 
-/// The BGP configuration stored inline on a `router_configuration` row.
+/// The BGP configuration stored inline on a `router_configuration_switch` row.
 ///
 /// All of its columns are nullable in the table (a router configuration may
 /// have no BGP configuration), but a CHECK constraint ensures they are either
@@ -42,13 +43,13 @@ use uuid::Uuid;
 #[derive(
     Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
 )]
-#[diesel(table_name = router_configuration)]
+#[diesel(table_name = router_configuration_switch)]
 pub struct RouterConfigurationBgpConfig {
-    #[diesel(select_expression = router_configuration::bgp_asn.assume_not_null())]
+    #[diesel(select_expression = router_configuration_switch::bgp_asn.assume_not_null())]
     pub bgp_asn: SqlU32,
-    #[diesel(select_expression = router_configuration::bgp_max_paths.assume_not_null())]
+    #[diesel(select_expression = router_configuration_switch::bgp_max_paths.assume_not_null())]
     pub bgp_max_paths: SqlU8,
-    #[diesel(select_expression = router_configuration::bgp_announce_set_id.assume_not_null())]
+    #[diesel(select_expression = router_configuration_switch::bgp_announce_set_id.assume_not_null())]
     pub bgp_announce_set_id: DbTypedUuid<BgpAnnounceSetKind>,
 }
 
@@ -93,9 +94,6 @@ impl TryFrom<RouterConfigurationBgpConfig>
 pub struct RouterConfiguration {
     #[diesel(embed)]
     pub identity: RouterConfigurationIdentity,
-    pub switch: DbSwitchSlot,
-    #[diesel(embed)]
-    pub bgp_config: Option<RouterConfigurationBgpConfig>,
 }
 
 impl RouterConfiguration {
@@ -108,12 +106,27 @@ impl RouterConfiguration {
                     description: c.identity.description.clone(),
                 },
             ),
-            switch: c.switch.into(),
-            bgp_config: None,
         }
     }
+}
 
-    /// Returns the BGP configuration stored inline in this row, if set.
+/// One participating switch, with optional BGP settings.
+#[derive(
+    Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
+)]
+#[diesel(table_name = router_configuration_switch)]
+pub struct RouterConfigurationSwitch {
+    pub router_configuration_id: DbTypedUuid<RouterConfigurationKind>,
+    pub switch: DbSwitchSlot,
+    #[diesel(embed)]
+    pub bgp_config: Option<RouterConfigurationBgpConfig>,
+}
+
+impl RouterConfigurationSwitch {
+    pub fn new(id: RouterConfigurationUuid, switch: DbSwitchSlot) -> Self {
+        Self { router_configuration_id: id.into(), switch, bgp_config: None }
+    }
+
     pub fn bgp_config(
         &self,
     ) -> Result<Option<networking::RouterConfigurationBgpConfig>, Error> {
@@ -121,19 +134,25 @@ impl RouterConfiguration {
     }
 }
 
-impl TryFrom<RouterConfiguration> for networking::RouterConfiguration {
+impl TryFrom<RouterConfigurationSwitch>
+    for networking::RouterConfigurationSwitch
+{
     type Error = Error;
-
-    fn try_from(value: RouterConfiguration) -> Result<Self, Self::Error> {
-        let bgp_config = value.bgp_config()?;
+    fn try_from(value: RouterConfigurationSwitch) -> Result<Self, Error> {
         Ok(Self {
-            identity: value.identity(),
             switch: value.switch.into(),
-            bgp_config,
+            bgp_config: value.bgp_config()?,
             bgp_peers: Vec::new(),
             routes: Vec::new(),
             bfd_peers: Vec::new(),
         })
+    }
+}
+
+impl TryFrom<RouterConfiguration> for networking::RouterConfiguration {
+    type Error = Error;
+    fn try_from(value: RouterConfiguration) -> Result<Self, Error> {
+        Ok(Self { identity: value.identity(), switches: Vec::new() })
     }
 }
 
@@ -142,7 +161,6 @@ impl TryFrom<RouterConfiguration> for networking::RouterConfiguration {
 pub struct RouterConfigurationUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
-    pub switch: Option<DbSwitchSlot>,
     pub time_modified: DateTime<Utc>,
 }
 
@@ -151,7 +169,6 @@ impl From<networking::RouterConfigurationUpdate> for RouterConfigurationUpdate {
         Self {
             name: update.identity.name.map(Into::into),
             description: update.identity.description,
-            switch: update.switch.map(Into::into),
             time_modified: Utc::now(),
         }
     }
@@ -192,6 +209,7 @@ fn import_export_policy_from_db(
 #[diesel(table_name = router_configuration_bgp_peer)]
 pub struct RouterConfigurationBgpPeer {
     pub router_configuration_id: DbTypedUuid<RouterConfigurationKind>,
+    pub switch: DbSwitchSlot,
     pub name: Name,
     pub addr: Option<IpNetwork>,
     pub port_name: Option<Name>,
@@ -217,6 +235,7 @@ pub struct RouterConfigurationBgpPeer {
 impl RouterConfigurationBgpPeer {
     pub fn new(
         router_configuration_id: RouterConfigurationUuid,
+        switch: DbSwitchSlot,
         peer: networking::RouterConfigurationBgpPeer,
     ) -> Result<Self, Error> {
         let (addr, src_addr, port_name, router_lifetime) = match peer.peer {
@@ -240,6 +259,7 @@ impl RouterConfigurationBgpPeer {
         };
         Ok(Self {
             router_configuration_id: router_configuration_id.into(),
+            switch,
             name: peer.name.into(),
             addr,
             port_name: port_name.map(Into::into),
@@ -357,6 +377,7 @@ impl TryFrom<RouterConfigurationBgpPeer>
 #[diesel(table_name = router_configuration_static_route)]
 pub struct RouterConfigurationStaticRoute {
     pub router_configuration_id: DbTypedUuid<RouterConfigurationKind>,
+    pub switch: DbSwitchSlot,
     pub name: Name,
     pub dst: IpNetwork,
     pub gw: IpNetwork,
@@ -371,6 +392,7 @@ impl RouterConfigurationStaticRoute {
     /// fail later, at render or apply time, after it had been persisted.
     pub fn new(
         router_configuration_id: RouterConfigurationUuid,
+        switch: DbSwitchSlot,
         route: networking::StaticRoute,
     ) -> Result<Self, Error> {
         let dst_v4 = matches!(route.dst, oxnet::IpNet::V4(_));
@@ -384,6 +406,7 @@ impl RouterConfigurationStaticRoute {
         }
         Ok(Self {
             router_configuration_id: router_configuration_id.into(),
+            switch,
             name: route.name.into(),
             dst: route.dst.into(),
             gw: route.gw.into(),
@@ -411,6 +434,7 @@ impl From<RouterConfigurationStaticRoute> for networking::StaticRoute {
 #[diesel(table_name = router_configuration_bfd_peer)]
 pub struct RouterConfigurationBfdPeer {
     pub router_configuration_id: DbTypedUuid<RouterConfigurationKind>,
+    pub switch: DbSwitchSlot,
     pub name: Name,
     pub remote: IpNetwork,
     pub local: Option<IpNetwork>,
@@ -427,6 +451,7 @@ impl RouterConfigurationBfdPeer {
     /// present, must be of the remote address's family.
     pub fn new(
         router_configuration_id: RouterConfigurationUuid,
+        switch: DbSwitchSlot,
         peer: networking::BfdPeer,
     ) -> Result<Self, Error> {
         if let Some(local) = peer.local {
@@ -440,6 +465,7 @@ impl RouterConfigurationBfdPeer {
         }
         Ok(Self {
             router_configuration_id: router_configuration_id.into(),
+            switch,
             name: peer.name.into(),
             remote: peer.remote.into(),
             local: peer.local.map(Into::into),
@@ -456,12 +482,12 @@ impl TryFrom<RouterConfigurationBfdPeer> for networking::BfdPeer {
     fn try_from(value: RouterConfigurationBfdPeer) -> Result<Self, Error> {
         let detection_threshold = NonZeroU8::new(value.detection_threshold.0)
             .ok_or_else(|| {
-                Error::internal_error(&format!(
-                    "invalid database contents: bfd peer {} has a zero \
+            Error::internal_error(&format!(
+                "invalid database contents: bfd peer {} has a zero \
                      detection threshold",
-                    value.name,
-                ))
-            })?;
+                value.name,
+            ))
+        })?;
         Ok(Self {
             name: value.name.into(),
             remote: value.remote.ip(),
@@ -571,8 +597,12 @@ mod tests {
                     "hold_time": 6, "keepalive": 2, "connect_retry": 3,
                     "delay_open": 0, "idle_hold_time": 3, "enforce_first_as": false,
                 })).unwrap();
-            let mut db =
-                RouterConfigurationBgpPeer::new(id, api.clone()).unwrap();
+            let mut db = RouterConfigurationBgpPeer::new(
+                id,
+                DbSwitchSlot::Switch0,
+                api.clone(),
+            )
+            .unwrap();
             let back =
                 networking::RouterConfigurationBgpPeer::try_from(db.clone())
                     .unwrap();
@@ -594,7 +624,11 @@ mod tests {
                 );
             }
             assert!(matches!(
-                RouterConfigurationBgpPeer::new(id, invalid),
+                RouterConfigurationBgpPeer::new(
+                    id,
+                    DbSwitchSlot::Switch0,
+                    invalid
+                ),
                 Err(Error::InvalidRequest { .. })
             ));
         }
@@ -603,39 +637,93 @@ mod tests {
     #[test]
     fn static_route_requires_matching_families() {
         let id = RouterConfigurationUuid::new_v4();
-        assert!(RouterConfigurationStaticRoute::new(id, route("10.0.0.0/8", "10.1.1.1")).is_ok());
-        assert!(RouterConfigurationStaticRoute::new(id, route("fd00::/8", "fd00::1")).is_ok());
-        let e = RouterConfigurationStaticRoute::new(id, route("10.0.0.0/8", "fd00::1"))
-            .unwrap_err();
+        assert!(
+            RouterConfigurationStaticRoute::new(
+                id,
+                DbSwitchSlot::Switch0,
+                route("10.0.0.0/8", "10.1.1.1")
+            )
+            .is_ok()
+        );
+        assert!(
+            RouterConfigurationStaticRoute::new(
+                id,
+                DbSwitchSlot::Switch0,
+                route("fd00::/8", "fd00::1")
+            )
+            .is_ok()
+        );
+        let e = RouterConfigurationStaticRoute::new(
+            id,
+            DbSwitchSlot::Switch0,
+            route("10.0.0.0/8", "fd00::1"),
+        )
+        .unwrap_err();
         assert!(is_invalid_request(&e), "{e}");
-        let e = RouterConfigurationStaticRoute::new(id, route("fd00::/8", "10.1.1.1"))
-            .unwrap_err();
+        let e = RouterConfigurationStaticRoute::new(
+            id,
+            DbSwitchSlot::Switch0,
+            route("fd00::/8", "10.1.1.1"),
+        )
+        .unwrap_err();
         assert!(is_invalid_request(&e), "{e}");
     }
 
     #[test]
     fn bfd_peer_requires_matching_families_and_keeps_required_rx() {
         let id = RouterConfigurationUuid::new_v4();
-        let db = RouterConfigurationBfdPeer::new(id, bfd("203.0.113.10", None)).unwrap();
+        let db = RouterConfigurationBfdPeer::new(
+            id,
+            DbSwitchSlot::Switch0,
+            bfd("203.0.113.10", None),
+        )
+        .unwrap();
         assert_eq!(*db.required_rx, u32::MAX);
         let back: networking::BfdPeer = db.try_into().unwrap();
         assert_eq!(back.required_rx, u32::MAX);
         assert_eq!(back.detection_threshold.get(), 3);
 
-        assert!(RouterConfigurationBfdPeer::new(id, bfd("203.0.113.10", Some("203.0.113.1"))).is_ok());
-        assert!(RouterConfigurationBfdPeer::new(id, bfd("fd00::10", Some("fd00::1"))).is_ok());
-        let e = RouterConfigurationBfdPeer::new(id, bfd("203.0.113.10", Some("fd00::1")))
-            .unwrap_err();
+        assert!(
+            RouterConfigurationBfdPeer::new(
+                id,
+                DbSwitchSlot::Switch0,
+                bfd("203.0.113.10", Some("203.0.113.1"))
+            )
+            .is_ok()
+        );
+        assert!(
+            RouterConfigurationBfdPeer::new(
+                id,
+                DbSwitchSlot::Switch0,
+                bfd("fd00::10", Some("fd00::1"))
+            )
+            .is_ok()
+        );
+        let e = RouterConfigurationBfdPeer::new(
+            id,
+            DbSwitchSlot::Switch0,
+            bfd("203.0.113.10", Some("fd00::1")),
+        )
+        .unwrap_err();
         assert!(is_invalid_request(&e), "{e}");
-        let e = RouterConfigurationBfdPeer::new(id, bfd("fd00::10", Some("203.0.113.1")))
-            .unwrap_err();
+        let e = RouterConfigurationBfdPeer::new(
+            id,
+            DbSwitchSlot::Switch0,
+            bfd("fd00::10", Some("203.0.113.1")),
+        )
+        .unwrap_err();
         assert!(is_invalid_request(&e), "{e}");
     }
 
     #[test]
     fn bfd_peer_zero_threshold_in_database_is_an_internal_error() {
         let id = RouterConfigurationUuid::new_v4();
-        let mut db = RouterConfigurationBfdPeer::new(id, bfd("203.0.113.10", None)).unwrap();
+        let mut db = RouterConfigurationBfdPeer::new(
+            id,
+            DbSwitchSlot::Switch0,
+            bfd("203.0.113.10", None),
+        )
+        .unwrap();
         db.detection_threshold = SqlU8::new(0);
         let e = networking::BfdPeer::try_from(db).unwrap_err();
         assert!(matches!(e, Error::InternalError { .. }), "{e}");

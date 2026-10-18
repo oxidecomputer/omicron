@@ -355,6 +355,12 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    router_configuration_switch (router_configuration_id, switch) {
+        router_configuration_id -> Uuid,
         switch -> crate::enums::SwitchSlotEnum,
         bgp_asn -> Nullable<Int8>,
         bgp_max_paths -> Nullable<Int2>,
@@ -363,8 +369,9 @@ table! {
 }
 
 table! {
-    router_configuration_bgp_peer (router_configuration_id, name) {
+    router_configuration_bgp_peer (router_configuration_id, switch, name) {
         router_configuration_id -> Uuid,
+        switch -> crate::enums::SwitchSlotEnum,
         name -> Text,
         addr -> Nullable<Inet>,
         port_name -> Nullable<Text>,
@@ -389,8 +396,9 @@ table! {
 }
 
 table! {
-    router_configuration_static_route (router_configuration_id, name) {
+    router_configuration_static_route (router_configuration_id, switch, name) {
         router_configuration_id -> Uuid,
+        switch -> crate::enums::SwitchSlotEnum,
         name -> Text,
         dst -> Inet,
         gw -> Inet,
@@ -400,8 +408,9 @@ table! {
 }
 
 table! {
-    router_configuration_bfd_peer (router_configuration_id, name) {
+    router_configuration_bfd_peer (router_configuration_id, switch, name) {
         router_configuration_id -> Uuid,
+        switch -> crate::enums::SwitchSlotEnum,
         name -> Text,
         remote -> Inet,
         local -> Nullable<Inet>,

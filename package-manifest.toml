@@ -677,47 +677,53 @@ output.type = "zone"
 service_name = "mg-ddm"
 # Note: unlike every other package, `maghemite` is not restricted to either the
 # "standard" or "trampoline" image; it is included in both.
-source.type = "prebuilt"
-source.repo = "maghemite"
+# 662 local mode: built from the sibling maghemite checkout and staged as
+# out/mg-ddm-gz.tar; the bake fails if it is absent (no prebuilt fallback).
+source.type = "manual"
+#source.repo = "maghemite"
 # Updating the commit hash here currently requires also updating
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "02248c98761bc78d628fd2195617a8d6727078ed"
+#source.commit = "02248c98761bc78d628fd2195617a8d6727078ed"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "06a9f2335871e4164285afd0c484895d57a69f44f730cc88edc2b7296df0fe45"
+#source.sha256 = "06a9f2335871e4164285afd0c484895d57a69f44f730cc88edc2b7296df0fe45"
 output.type = "tarball"
 
 [package.mg-ddm]
 service_name = "mg-ddm"
 # Note: unlike every other package, `maghemite` is not restricted to either the
 # "standard" or "trampoline" image; it is included in both.
-source.type = "prebuilt"
-source.repo = "maghemite"
+# 662 local mode: built from the sibling maghemite checkout and staged as
+# out/mg-ddm.tar.gz; the bake fails if it is absent (no prebuilt fallback).
+source.type = "manual"
+#source.repo = "maghemite"
 # Updating the commit hash here currently requires also updating
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "02248c98761bc78d628fd2195617a8d6727078ed"
+#source.commit = "02248c98761bc78d628fd2195617a8d6727078ed"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "e5d8b831cb7211007835fba37ec81bcbbc7f35efa6c9634b3af47d88c58d3013"
+#source.sha256 = "e5d8b831cb7211007835fba37ec81bcbbc7f35efa6c9634b3af47d88c58d3013"
 output.type = "zone"
 output.intermediate_only = true
 
 [package.mgd]
 service_name = "mgd"
-source.type = "prebuilt"
-source.repo = "maghemite"
+# 662 local mode: built from the sibling maghemite checkout and staged as
+# out/mgd.tar.gz; the bake fails if it is absent (no prebuilt fallback).
+source.type = "manual"
+#source.repo = "maghemite"
 # Updating the commit hash here currently requires also updating
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "02248c98761bc78d628fd2195617a8d6727078ed"
+#source.commit = "02248c98761bc78d628fd2195617a8d6727078ed"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
-source.sha256 = "c08bdd36bb332c1425762b051a17c82d2cccf49a8fe446e2914fdd26865095f1"
+#source.sha256 = "c08bdd36bb332c1425762b051a17c82d2cccf49a8fe446e2914fdd26865095f1"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -810,10 +816,12 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out/dendrite-softnpu.tar.gz
 # 3. Change the below `source.type` key to `"manual"` and comment out or remove
 # the other `source.*` keys.
-source.type = "prebuilt"
-source.repo = "dendrite"
-source.commit = "f508339744a8b04b92407a89b1ad6945ca4d09f5"
-source.sha256 = "cb19b67de8b8a7fb163661f0b62266840bfa0f646dd64c3a823887452e0671f7"
+# 662 local mode: built from the sibling dendrite checkout and staged as
+# out/dendrite-softnpu.tar.gz; the bake fails if it is absent.
+source.type = "manual"
+#source.repo = "dendrite"
+#source.commit = "f508339744a8b04b92407a89b1ad6945ca4d09f5"
+#source.sha256 = "cb19b67de8b8a7fb163661f0b62266840bfa0f646dd64c3a823887452e0671f7"
 output.type = "zone"
 output.intermediate_only = true
 

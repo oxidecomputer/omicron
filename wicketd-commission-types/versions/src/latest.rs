@@ -94,10 +94,15 @@ pub mod rack_setup {
     pub use crate::v2::rack_setup::ServiceIpPoolError;
 
     pub use crate::v3::rack_setup::ManualPortConfig;
-    pub use crate::v3::rack_setup::PutRssUserConfigInsensitive;
     pub use crate::v3::rack_setup::UserSpecifiedBgpPeerConfig;
     pub use crate::v3::rack_setup::UserSpecifiedPortConfig;
     pub use crate::v3::rack_setup::UserSpecifiedRackNetworkConfig;
+    pub use crate::v4::rack_setup::{
+        PutRssUserConfigInsensitive, UserSpecifiedInitialRouterAssignment,
+        UserSpecifiedInitialRouterConfiguration, UserSpecifiedRouterBgpPeer,
+        UserSpecifiedRouterConfigurationSwitch,
+        UserSpecifiedRoutingAnnounceSet, UserSpecifiedRoutingConfig,
+    };
 }
 
 pub mod update {

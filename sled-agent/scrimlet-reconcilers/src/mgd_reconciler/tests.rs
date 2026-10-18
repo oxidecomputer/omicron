@@ -353,7 +353,6 @@ fn uplink_render_full() {
     let bgp = router.bgp.as_ref().expect("default router has BGP");
     assert_eq!(bgp.asn, 65000);
     assert_eq!(bgp.id, 65000);
-    assert_eq!(bgp.listen, "[::]:179");
     assert_eq!(bgp.originate.len(), 2);
     assert_eq!(bgp.max_paths, NonZeroU8::new(4));
     let checker = bgp.checker.as_ref().unwrap();
@@ -646,7 +645,7 @@ fn operator_default_spec_replaces_uplink_render() {
     assert_eq!(routers.len(), 1);
     let router = &routers[0];
     assert_eq!(router.name, DEFAULT_ROUTER_NAME);
-    assert_eq!(router.id.0, spec_id);
+    assert_eq!(router.id, RouterId(uuid::Uuid::nil()));
     let bgp = router.bgp.as_ref().unwrap();
     assert_eq!(bgp.asn, 65042);
     // Numbered operator peers all live under the "default" group.
@@ -735,7 +734,6 @@ fn operator_named_specs_are_appended_to_the_uplink_default() {
     let bgp = experiment.bgp.as_ref().unwrap();
     assert_eq!(bgp.asn, 65100);
     assert_eq!(bgp.id, 65100);
-    assert_eq!(bgp.listen, "[::]:179");
     assert_eq!(bgp.max_paths, NonZeroU8::new(8));
     assert_eq!(bgp.checker.as_ref().unwrap().code, "checker code");
     assert!(bgp.shaper.is_none());

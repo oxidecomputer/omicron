@@ -34,6 +34,7 @@ progenitor::generate_api!(
         "oxide-update-engine-types" = "*",
     },
     replace = {
+        NameOrId = omicron_common::api::external::NameOrId,
         AbortUpdateOptions = wicket_common::rack_update::AbortUpdateOptions,
         AllowedSourceIps = omicron_common::api::internal::shared::AllowedSourceIps,
         ArtifactId = wicket_common::artifact::ArtifactId,
@@ -53,7 +54,7 @@ progenitor::generate_api!(
         EventReportForUplinkPreflightCheckSpec = wicket_common::preflight_check::EventReport,
         EventReportForWicketdEngineSpec = wicket_common::update_events::EventReport,
         GetBgpAuthKeyInfoResponse = wicket_common::rack_setup::GetBgpAuthKeyInfoResponse,
-        ImportExportPolicy = omicron_common::api::internal::shared::ImportExportPolicy,
+        ImportExportPolicy = sled_agent_types::early_networking::ImportExportPolicy,
         IpRange = omicron_common::address::IpRange,
         Ipv4Range = omicron_common::address::Ipv4Range,
         Ipv6Range = omicron_common::address::Ipv6Range,

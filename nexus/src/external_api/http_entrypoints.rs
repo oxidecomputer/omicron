@@ -4887,9 +4887,49 @@ impl NexusExternalApi for NexusExternalApiImpl {
         .await
     }
 
+    async fn networking_router_configuration_switch_create(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
+    ) -> Result<
+        HttpResponseCreated<networking::RouterConfigurationSwitch>,
+        HttpError,
+    > {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sel = path_params.into_inner();
+            Ok(HttpResponseCreated(
+                nexus
+                    .router_configuration_switch_create(
+                        &opctx,
+                        sel.configuration,
+                        sel.switch,
+                    )
+                    .await?,
+            ))
+        })
+        .await
+    }
+
+    async fn networking_router_configuration_switch_delete(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sel = path_params.into_inner();
+            nexus
+                .router_configuration_switch_delete(
+                    &opctx,
+                    sel.configuration,
+                    sel.switch,
+                )
+                .await?;
+            Ok(HttpResponseUpdatedNoContent {})
+        })
+        .await
+    }
+
     async fn networking_router_configuration_bgp_config_view(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<networking::RouterConfigurationSelector>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
     ) -> Result<
         HttpResponseOk<networking::RouterConfigurationBgpConfig>,
         HttpError,
@@ -4901,7 +4941,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let result = nexus
-                .router_configuration_bgp_config_view(&opctx, sel.configuration)
+                .router_configuration_bgp_config_view(
+                    &opctx,
+                    sel.configuration,
+                    sel.switch,
+                )
                 .await?;
             Ok(HttpResponseOk(result))
         };
@@ -4914,7 +4958,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_router_configuration_bgp_config_set(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<networking::RouterConfigurationSelector>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
         config: TypedBody<networking::RouterConfigurationBgpConfigSet>,
     ) -> Result<
         HttpResponseOk<networking::RouterConfigurationBgpConfig>,
@@ -4927,6 +4971,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .router_configuration_bgp_config_set(
                     &opctx,
                     sel.configuration,
+                    sel.switch,
                     config,
                 )
                 .await?;
@@ -4937,7 +4982,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_router_configuration_bgp_config_delete(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<networking::RouterConfigurationSelector>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let sel = path_params.into_inner();
@@ -4945,6 +4990,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .router_configuration_bgp_config_delete(
                     &opctx,
                     sel.configuration,
+                    sel.switch,
                 )
                 .await?;
             Ok(HttpResponseUpdatedNoContent {})
@@ -4954,7 +5000,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_router_configuration_bgp_peer_list(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<networking::RouterConfigurationSelector>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
         query_params: Query<PaginatedByName>,
     ) -> Result<
         HttpResponseOk<ResultsPage<networking::RouterConfigurationBgpPeer>>,
@@ -4972,6 +5018,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .router_configuration_bgp_peer_list(
                     &opctx,
                     sel.configuration,
+                    sel.switch,
                     &pagparams,
                 )
                 .await?;
@@ -4994,7 +5041,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_router_configuration_bgp_peer_create(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<networking::RouterConfigurationSelector>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
         peer: TypedBody<networking::RouterConfigurationBgpPeer>,
     ) -> Result<
         HttpResponseCreated<networking::RouterConfigurationBgpPeer>,
@@ -5007,6 +5054,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .router_configuration_bgp_peer_create(
                     &opctx,
                     sel.configuration,
+                    sel.switch,
                     peer,
                 )
                 .await?;
@@ -5030,6 +5078,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .router_configuration_bgp_peer_view(
                     &opctx,
                     sel.configuration,
+                    sel.switch,
                     &sel.peer,
                 )
                 .await?;
@@ -5055,6 +5104,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .router_configuration_bgp_peer_update(
                     &opctx,
                     sel.configuration,
+                    sel.switch,
                     &sel.peer,
                     peer,
                 )
@@ -5074,6 +5124,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .router_configuration_bgp_peer_delete(
                     &opctx,
                     sel.configuration,
+                    sel.switch,
                     &sel.peer,
                 )
                 .await?;
@@ -5084,7 +5135,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_router_configuration_static_route_list(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<networking::RouterConfigurationSelector>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
         query_params: Query<PaginatedByName>,
     ) -> Result<HttpResponseOk<ResultsPage<networking::StaticRoute>>, HttpError>
     {
@@ -5100,6 +5151,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .router_configuration_static_route_list(
                     &opctx,
                     sel.configuration,
+                    sel.switch,
                     &pagparams,
                 )
                 .await?;
@@ -5120,7 +5172,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_router_configuration_static_route_create(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<networking::RouterConfigurationSelector>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
         route: TypedBody<networking::StaticRoute>,
     ) -> Result<HttpResponseCreated<networking::StaticRoute>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
@@ -5130,6 +5182,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .router_configuration_static_route_create(
                     &opctx,
                     sel.configuration,
+                    sel.switch,
                     route,
                 )
                 .await?;
@@ -5152,6 +5205,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .router_configuration_static_route_view(
                     &opctx,
                     sel.configuration,
+                    sel.switch,
                     &sel.route,
                 )
                 .await?;
@@ -5176,6 +5230,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .router_configuration_static_route_update(
                     &opctx,
                     sel.configuration,
+                    sel.switch,
                     &sel.route,
                     route,
                 )
@@ -5195,6 +5250,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .router_configuration_static_route_delete(
                     &opctx,
                     sel.configuration,
+                    sel.switch,
                     &sel.route,
                 )
                 .await?;
@@ -5205,7 +5261,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_router_configuration_bfd_peer_list(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<networking::RouterConfigurationSelector>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
         query_params: Query<PaginatedByName>,
     ) -> Result<HttpResponseOk<ResultsPage<networking::BfdPeer>>, HttpError>
     {
@@ -5221,6 +5277,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .router_configuration_bfd_peer_list(
                     &opctx,
                     sel.configuration,
+                    sel.switch,
                     &pagparams,
                 )
                 .await?;
@@ -5241,7 +5298,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_router_configuration_bfd_peer_create(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<networking::RouterConfigurationSelector>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
         peer: TypedBody<networking::BfdPeer>,
     ) -> Result<HttpResponseCreated<networking::BfdPeer>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
@@ -5251,6 +5308,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .router_configuration_bfd_peer_create(
                     &opctx,
                     sel.configuration,
+                    sel.switch,
                     peer,
                 )
                 .await?;
@@ -5273,6 +5331,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .router_configuration_bfd_peer_view(
                     &opctx,
                     sel.configuration,
+                    sel.switch,
                     &sel.peer,
                 )
                 .await?;
@@ -5297,6 +5356,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .router_configuration_bfd_peer_update(
                     &opctx,
                     sel.configuration,
+                    sel.switch,
                     &sel.peer,
                     peer,
                 )
@@ -5316,6 +5376,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .router_configuration_bfd_peer_delete(
                     &opctx,
                     sel.configuration,
+                    sel.switch,
                     &sel.peer,
                 )
                 .await?;

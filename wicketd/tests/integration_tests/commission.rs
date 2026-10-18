@@ -459,7 +459,8 @@ async fn test_commission_rss_config() {
     assert_client_error(&err, StatusCode::BAD_REQUEST);
 
     // Ensure that roundtripping the RSS config works.
-    let mut internal = ExampleRackSetupData::non_empty().put_insensitive;
+    let mut internal =
+        ExampleRackSetupData::with_named_routing().put_insensitive;
     // This is a strict subset of the harness's two sleds. get_rss_config
     // substitutes the full inventory whenever the stored bootstrap-sleds set
     // is empty, so {0, 1} would equal that substitute and the assertion below
@@ -490,6 +491,7 @@ async fn test_commission_rss_config() {
         external_dns_ips: expected_external_dns_ips,
         external_dns_zone_name: expected_dns_zone_name,
         rack_network_config: expected_rack_network_config,
+        routing: expected_routing,
         allowed_source_ips: expected_allowed_source_ips,
         external_jumbo_frames_opt_in_enabled: expected_jumbo_frames,
     } = internal;
@@ -502,10 +504,12 @@ async fn test_commission_rss_config() {
         external_dns_ips,
         external_dns_zone_name,
         rack_network_config,
+        routing,
         allowed_source_ips,
         external_jumbo_frames_opt_in_enabled,
     } = current.insensitive;
 
+    assert_eq!(routing, expected_routing, "routing stored");
     let stored_slots: BTreeSet<u16> =
         bootstrap_sleds.iter().map(|sled| sled.id.slot).collect();
     assert_eq!(stored_slots, expected_slots, "bootstrap sled slots stored");
@@ -594,6 +598,26 @@ async fn test_commission_rss_config() {
         .await
         .expect_err("a key ID absent from the RSS config is rejected");
     assert_client_error_message(&err, StatusCode::BAD_REQUEST, "bgp-key-nope");
+
+    // The old v3 body still initializes through the legacy path, even after
+    // a named routing configuration was stored with v4.
+    let mut legacy = serde_json::to_value(example_put_config()).unwrap();
+    legacy.as_object_mut().unwrap().remove("routing");
+    legacy["bootstrap_sleds"] = serde_json::json!([1]);
+    let response = reqwest::Client::new()
+        .put(format!(
+            "http://{}/rack-setup/config",
+            ctx.wicketd_addrs.commission
+        ))
+        .header(omicron_common::api::VERSION_HEADER, "3.0.0")
+        .json(&legacy)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let current =
+        ctx.wicketd_client.get_rss_config().await.unwrap().into_inner();
+    assert!(current.insensitive.routing.is_none());
 
     ctx.teardown().await;
 }

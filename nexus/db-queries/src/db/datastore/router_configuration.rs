@@ -23,11 +23,11 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{
-    ControlPlaneRouterConfiguration, DbTypedUuid, NetworkInterfaceKind,
-    RouterConfiguration, RouterConfigurationBfdPeer,
+    ControlPlaneRouterConfiguration, DbSwitchSlot, DbTypedUuid,
+    NetworkInterfaceKind, RouterConfiguration, RouterConfigurationBfdPeer,
     RouterConfigurationBgpPeer, RouterConfigurationStaticRoute,
-    RouterConfigurationUpdate, SiloRouterConfiguration, Sled, SqlU8, SqlU32,
-    to_db_typed_uuid,
+    RouterConfigurationSwitch, RouterConfigurationUpdate,
+    SiloRouterConfiguration, Sled, SqlU8, SqlU32, to_db_typed_uuid,
 };
 use nexus_types::deployment::SledFilter;
 use nexus_types::identity::Resource;
@@ -72,6 +72,18 @@ impl DataStore {
                 })?;
         }
 
+        use nexus_db_schema::schema::router_configuration_switch::dsl as switches;
+        for (builtin, slot) in [
+            (&*nexus_db_fixed_data::router_configuration::DEFAULT_SWITCH0_ROUTER_CONFIGURATION, DbSwitchSlot::Switch0),
+            (&*nexus_db_fixed_data::router_configuration::DEFAULT_SWITCH1_ROUTER_CONFIGURATION, DbSwitchSlot::Switch1),
+        ] {
+            diesel::insert_into(switches::router_configuration_switch)
+                .values(RouterConfigurationSwitch::new(builtin.id(), slot))
+                .on_conflict_do_nothing()
+                .execute_async(&*conn).await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        }
+
         info!(opctx.log, "created built-in default router configurations");
         Ok(())
     }
@@ -104,21 +116,187 @@ impl DataStore {
         }
     }
 
+    async fn ensure_router_configuration_switch_live(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        authz_configuration: &authz::RouterConfiguration,
+        switch: DbSwitchSlot,
+        err: &OptionalError<Error>,
+    ) -> Result<(), diesel::result::Error> {
+        Self::ensure_router_configuration_live(conn, authz_configuration, err)
+            .await?;
+        use nexus_db_schema::schema::router_configuration_switch::dsl;
+        let live = diesel::dsl::select(diesel::dsl::exists(
+            dsl::router_configuration_switch
+                .filter(
+                    dsl::router_configuration_id
+                        .eq(to_db_typed_uuid(authz_configuration.id())),
+                )
+                .filter(dsl::switch.eq(switch)),
+        ))
+        .get_result_async::<bool>(conn)
+        .await?;
+        if live {
+            Ok(())
+        } else {
+            Err(err.bail(Error::non_resourcetype_not_found(format!(
+                "router configuration has no {switch:?} block"
+            ))))
+        }
+    }
+
+    pub async fn router_configuration_switch_list_batch(
+        &self,
+        opctx: &OpContext,
+        ids: &[RouterConfigurationUuid],
+    ) -> ListResultVec<RouterConfigurationSwitch> {
+        use nexus_db_schema::schema::router_configuration_switch::dsl;
+        let ids: Vec<_> = ids.iter().copied().map(to_db_typed_uuid).collect();
+        dsl::router_configuration_switch
+            .filter(dsl::router_configuration_id.eq_any(ids))
+            .order_by((dsl::router_configuration_id, dsl::switch))
+            .select(RouterConfigurationSwitch::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn router_configuration_switch_view(
+        &self,
+        opctx: &OpContext,
+        authz_configuration: &authz::RouterConfiguration,
+        switch: DbSwitchSlot,
+    ) -> LookupResult<RouterConfigurationSwitch> {
+        use nexus_db_schema::schema::router_configuration_switch::dsl;
+        opctx.authorize(authz::Action::Read, authz_configuration).await?;
+        dsl::router_configuration_switch
+            .filter(
+                dsl::router_configuration_id
+                    .eq(to_db_typed_uuid(authz_configuration.id())),
+            )
+            .filter(dsl::switch.eq(switch))
+            .select(RouterConfigurationSwitch::as_select())
+            .first_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| match e {
+                diesel::result::Error::NotFound => {
+                    Error::non_resourcetype_not_found(format!(
+                        "router configuration has no {switch:?} block"
+                    ))
+                }
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
+            })
+    }
+
+    pub async fn router_configuration_switch_create(
+        &self,
+        opctx: &OpContext,
+        authz_configuration: &authz::RouterConfiguration,
+        switch: DbSwitchSlot,
+    ) -> CreateResult<RouterConfigurationSwitch> {
+        use nexus_db_schema::schema::router_configuration_switch::dsl;
+        opctx
+            .authorize(authz::Action::CreateChild, authz_configuration)
+            .await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+        self.transaction_retry_wrapper("router_configuration_switch_create")
+            .transaction(&conn, async |conn| {
+                Self::ensure_router_configuration_live(
+                    &conn,
+                    authz_configuration,
+                    &err,
+                )
+                .await?;
+                diesel::insert_into(dsl::router_configuration_switch)
+                    .values(RouterConfigurationSwitch::new(
+                        authz_configuration.id(),
+                        switch,
+                    ))
+                    .returning(RouterConfigurationSwitch::as_returning())
+                    .get_result_async(&conn)
+                    .await
+            })
+            .await
+            .map_err(|e| {
+                err.take().unwrap_or_else(|| {
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::Conflict(
+                            ResourceType::RouterConfiguration,
+                            "switch block",
+                        ),
+                    )
+                })
+            })
+    }
+
+    pub async fn router_configuration_switch_delete(
+        &self,
+        opctx: &OpContext,
+        authz_configuration: &authz::RouterConfiguration,
+        switch: DbSwitchSlot,
+    ) -> DeleteResult {
+        use nexus_db_schema::schema::router_configuration_switch::dsl;
+        opctx.authorize(authz::Action::Modify, authz_configuration).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let id = to_db_typed_uuid(authz_configuration.id());
+        let err = OptionalError::new();
+        self.transaction_retry_wrapper("router_configuration_switch_delete")
+            .transaction(&conn, async |conn| {
+                Self::ensure_router_configuration_switch_live(&conn, authz_configuration, switch, &err).await?;
+                {
+                    use nexus_db_schema::schema::router_configuration_bgp_peer::dsl as child;
+                    diesel::delete(child::router_configuration_bgp_peer)
+                        .filter(child::router_configuration_id.eq(id))
+                        .filter(child::switch.eq(switch)).execute_async(&conn).await?;
+                }
+                {
+                    use nexus_db_schema::schema::router_configuration_static_route::dsl as child;
+                    diesel::delete(child::router_configuration_static_route)
+                        .filter(child::router_configuration_id.eq(id))
+                        .filter(child::switch.eq(switch)).execute_async(&conn).await?;
+                }
+                {
+                    use nexus_db_schema::schema::router_configuration_bfd_peer::dsl as child;
+                    diesel::delete(child::router_configuration_bfd_peer)
+                        .filter(child::router_configuration_id.eq(id))
+                        .filter(child::switch.eq(switch)).execute_async(&conn).await?;
+                }
+                diesel::delete(dsl::router_configuration_switch)
+                    .filter(dsl::router_configuration_id.eq(id))
+                    .filter(dsl::switch.eq(switch)).execute_async(&conn).await?;
+                Ok(())
+            }).await.map_err(|e| err.take().unwrap_or_else(|| public_error_from_diesel(e, ErrorHandler::Server)))
+    }
+
     pub async fn router_configuration_create(
         &self,
         opctx: &OpContext,
         config: RouterConfiguration,
+        switches: &[sled_agent_types::early_networking::SwitchSlot],
     ) -> CreateResult<RouterConfiguration> {
         use nexus_db_schema::schema::router_configuration::dsl;
-
+        use nexus_db_schema::schema::router_configuration_switch::dsl as blocks;
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
-
         let conn = self.pool_connection_authorized(opctx).await?;
         let name = config.name().to_string();
-        diesel::insert_into(dsl::router_configuration)
-            .values(config)
-            .returning(RouterConfiguration::as_returning())
-            .get_result_async(&*conn)
+        let switch_rows: Vec<_> = switches
+            .iter()
+            .map(|s| RouterConfigurationSwitch::new(config.id(), (*s).into()))
+            .collect();
+        self.transaction_retry_wrapper("router_configuration_create")
+            .transaction(&conn, async |conn| {
+                let parent = diesel::insert_into(dsl::router_configuration)
+                    .values(config.clone())
+                    .returning(RouterConfiguration::as_returning())
+                    .get_result_async(&conn)
+                    .await?;
+                diesel::insert_into(blocks::router_configuration_switch)
+                    .values(switch_rows.clone())
+                    .execute_async(&conn)
+                    .await?;
+                Ok(parent)
+            })
             .await
             .map_err(|e| {
                 public_error_from_diesel(
@@ -264,6 +442,12 @@ impl DataStore {
                     .filter(bfd_peer_dsl::router_configuration_id.eq(id))
                     .execute_async(&conn)
                     .await?;
+                {
+                    use nexus_db_schema::schema::router_configuration_switch::dsl as blocks;
+                    diesel::delete(blocks::router_configuration_switch)
+                        .filter(blocks::router_configuration_id.eq(id))
+                        .execute_async(&conn).await?;
+                }
                 Ok(())
             })
             .await
@@ -285,12 +469,13 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_configuration: &authz::RouterConfiguration,
+        switch: DbSwitchSlot,
         asn: u32,
         max_paths: MaxPathConfig,
         bgp_announce_set_id: BgpAnnounceSetUuid,
-    ) -> UpdateResult<RouterConfiguration> {
+    ) -> UpdateResult<RouterConfigurationSwitch> {
         use nexus_db_schema::schema::bgp_announce_set::dsl as announce_set_dsl;
-        use nexus_db_schema::schema::router_configuration::dsl;
+        use nexus_db_schema::schema::router_configuration_switch::dsl;
 
         opctx.authorize(authz::Action::Modify, authz_configuration).await?;
 
@@ -298,6 +483,7 @@ impl DataStore {
         let err = OptionalError::new();
         self.transaction_retry_wrapper("router_configuration_bgp_config_set")
             .transaction(&conn, async |conn| {
+                Self::ensure_router_configuration_switch_live(&conn, authz_configuration, switch, &err).await?;
                 // The announce set must still be live when the reference is
                 // written. `bgp_delete_announce_set` refuses to delete a set
                 // a live router configuration references; checking here, in
@@ -321,18 +507,17 @@ impl DataStore {
                     )));
                 }
 
-                diesel::update(dsl::router_configuration)
-                    .filter(dsl::time_deleted.is_null())
-                    .filter(dsl::id.eq(to_db_typed_uuid(authz_configuration.id())))
+                diesel::update(dsl::router_configuration_switch)
+                    .filter(dsl::switch.eq(switch))
+                    .filter(dsl::router_configuration_id.eq(to_db_typed_uuid(authz_configuration.id())))
                     .set((
                         dsl::bgp_asn.eq(Some(SqlU32::from(asn))),
                         dsl::bgp_max_paths
                             .eq(Some(SqlU8::from(max_paths.as_u8()))),
                         dsl::bgp_announce_set_id
                             .eq(Some(to_db_typed_uuid(bgp_announce_set_id))),
-                        dsl::time_modified.eq(Utc::now()),
                     ))
-                    .returning(RouterConfiguration::as_returning())
+                    .returning(RouterConfigurationSwitch::as_returning())
                     .get_result_async(&conn)
                     .await
             })
@@ -357,20 +542,20 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_configuration: &authz::RouterConfiguration,
+        switch: DbSwitchSlot,
     ) -> DeleteResult {
-        use nexus_db_schema::schema::router_configuration::dsl;
+        use nexus_db_schema::schema::router_configuration_switch::dsl;
 
         opctx.authorize(authz::Action::Modify, authz_configuration).await?;
 
-        let updated = diesel::update(dsl::router_configuration)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(to_db_typed_uuid(authz_configuration.id())))
+        let updated = diesel::update(dsl::router_configuration_switch)
+            .filter(dsl::switch.eq(switch))
+            .filter(dsl::router_configuration_id.eq(to_db_typed_uuid(authz_configuration.id())))
             .set((
                 dsl::bgp_asn.eq(Option::<SqlU32>::None),
                 dsl::bgp_max_paths.eq(Option::<SqlU8>::None),
                 dsl::bgp_announce_set_id
                     .eq(Option::<DbTypedUuid<BgpAnnounceSetKind>>::None),
-                dsl::time_modified.eq(Utc::now()),
             ))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -399,7 +584,11 @@ impl DataStore {
             ids.iter().map(|id| to_db_typed_uuid(*id)).collect();
         dsl::router_configuration_bgp_peer
             .filter(dsl::router_configuration_id.eq_any(ids))
-            .order_by((dsl::router_configuration_id.asc(), dsl::name.asc()))
+            .order_by((
+                dsl::router_configuration_id.asc(),
+                dsl::switch.asc(),
+                dsl::name.asc(),
+            ))
             .select(RouterConfigurationBgpPeer::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -418,7 +607,11 @@ impl DataStore {
             ids.iter().map(|id| to_db_typed_uuid(*id)).collect();
         dsl::router_configuration_static_route
             .filter(dsl::router_configuration_id.eq_any(ids))
-            .order_by((dsl::router_configuration_id.asc(), dsl::name.asc()))
+            .order_by((
+                dsl::router_configuration_id.asc(),
+                dsl::switch.asc(),
+                dsl::name.asc(),
+            ))
             .select(RouterConfigurationStaticRoute::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -437,7 +630,11 @@ impl DataStore {
             ids.iter().map(|id| to_db_typed_uuid(*id)).collect();
         dsl::router_configuration_bfd_peer
             .filter(dsl::router_configuration_id.eq_any(ids))
-            .order_by((dsl::router_configuration_id.asc(), dsl::name.asc()))
+            .order_by((
+                dsl::router_configuration_id.asc(),
+                dsl::switch.asc(),
+                dsl::name.asc(),
+            ))
             .select(RouterConfigurationBfdPeer::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -450,6 +647,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_configuration: &authz::RouterConfiguration,
+        switch: DbSwitchSlot,
         pagparams: &DataPageParams<'_, external::Name>,
     ) -> ListResultVec<RouterConfigurationBgpPeer> {
         use nexus_db_schema::schema::router_configuration_bgp_peer::dsl;
@@ -467,6 +665,7 @@ impl DataStore {
             dsl::router_configuration_id
                 .eq(to_db_typed_uuid(authz_configuration.id())),
         )
+        .filter(dsl::switch.eq(switch))
         .select(RouterConfigurationBgpPeer::as_select())
         .load_async(&*self.pool_connection_authorized(opctx).await?)
         .await
@@ -480,6 +679,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_configuration: &authz::RouterConfiguration,
+        switch: DbSwitchSlot,
         peer: RouterConfigurationBgpPeer,
     ) -> CreateResult<RouterConfigurationBgpPeer> {
         use nexus_db_schema::schema::router_configuration_bgp_peer::dsl;
@@ -494,15 +694,17 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
+        assert_eq!(peer.switch, switch);
         let name = peer.name.to_string();
         self.transaction_retry_wrapper("router_configuration_bgp_peer_create")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 let peer = peer.clone();
                 async move {
-                    Self::ensure_router_configuration_live(
+                    Self::ensure_router_configuration_switch_live(
                         &conn,
                         authz_configuration,
+                        switch,
                         &err,
                     )
                     .await?;
@@ -533,6 +735,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_configuration: &authz::RouterConfiguration,
+        switch: DbSwitchSlot,
         name: &external::Name,
     ) -> LookupResult<RouterConfigurationBgpPeer> {
         use nexus_db_schema::schema::router_configuration_bgp_peer::dsl;
@@ -544,6 +747,7 @@ impl DataStore {
                 dsl::router_configuration_id
                     .eq(to_db_typed_uuid(authz_configuration.id())),
             )
+            .filter(dsl::switch.eq(switch))
             .filter(dsl::name.eq(name.to_string()))
             .select(RouterConfigurationBgpPeer::as_select())
             .first_async(&*self.pool_connection_authorized(opctx).await?)
@@ -561,6 +765,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_configuration: &authz::RouterConfiguration,
+        switch: DbSwitchSlot,
         name: &external::Name,
         peer: RouterConfigurationBgpPeer,
     ) -> UpdateResult<RouterConfigurationBgpPeer> {
@@ -570,15 +775,17 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
+        assert_eq!(peer.switch, switch);
         let new_name = peer.name.to_string();
         self.transaction_retry_wrapper("router_configuration_bgp_peer_update")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 let peer = peer.clone();
                 async move {
-                    Self::ensure_router_configuration_live(
+                    Self::ensure_router_configuration_switch_live(
                         &conn,
                         authz_configuration,
+                        switch,
                         &err,
                     )
                     .await?;
@@ -589,6 +796,7 @@ impl DataStore {
                                     to_db_typed_uuid(authz_configuration.id()),
                                 ),
                             )
+                            .filter(dsl::switch.eq(switch))
                             .filter(dsl::name.eq(name.to_string()))
                             .execute_async(&conn)
                             .await?;
@@ -625,6 +833,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_configuration: &authz::RouterConfiguration,
+        switch: DbSwitchSlot,
         name: &external::Name,
     ) -> DeleteResult {
         use nexus_db_schema::schema::router_configuration_bgp_peer::dsl;
@@ -636,6 +845,7 @@ impl DataStore {
                 dsl::router_configuration_id
                     .eq(to_db_typed_uuid(authz_configuration.id())),
             )
+            .filter(dsl::switch.eq(switch))
             .filter(dsl::name.eq(name.to_string()))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -655,6 +865,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_configuration: &authz::RouterConfiguration,
+        switch: DbSwitchSlot,
         pagparams: &DataPageParams<'_, external::Name>,
     ) -> ListResultVec<RouterConfigurationStaticRoute> {
         use nexus_db_schema::schema::router_configuration_static_route::dsl;
@@ -672,6 +883,7 @@ impl DataStore {
             dsl::router_configuration_id
                 .eq(to_db_typed_uuid(authz_configuration.id())),
         )
+        .filter(dsl::switch.eq(switch))
         .select(RouterConfigurationStaticRoute::as_select())
         .load_async(&*self.pool_connection_authorized(opctx).await?)
         .await
@@ -685,6 +897,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_configuration: &authz::RouterConfiguration,
+        switch: DbSwitchSlot,
         route: RouterConfigurationStaticRoute,
     ) -> CreateResult<RouterConfigurationStaticRoute> {
         use nexus_db_schema::schema::router_configuration_static_route::dsl;
@@ -699,6 +912,7 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
+        assert_eq!(route.switch, switch);
         let name = route.name.to_string();
         self.transaction_retry_wrapper(
             "router_configuration_static_route_create",
@@ -707,9 +921,10 @@ impl DataStore {
             let err = err.clone();
             let route = route.clone();
             async move {
-                Self::ensure_router_configuration_live(
+                Self::ensure_router_configuration_switch_live(
                     &conn,
                     authz_configuration,
+                    switch,
                     &err,
                 )
                 .await?;
@@ -740,6 +955,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_configuration: &authz::RouterConfiguration,
+        switch: DbSwitchSlot,
         name: &external::Name,
     ) -> LookupResult<RouterConfigurationStaticRoute> {
         use nexus_db_schema::schema::router_configuration_static_route::dsl;
@@ -751,6 +967,7 @@ impl DataStore {
                 dsl::router_configuration_id
                     .eq(to_db_typed_uuid(authz_configuration.id())),
             )
+            .filter(dsl::switch.eq(switch))
             .filter(dsl::name.eq(name.to_string()))
             .select(RouterConfigurationStaticRoute::as_select())
             .first_async(&*self.pool_connection_authorized(opctx).await?)
@@ -768,6 +985,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_configuration: &authz::RouterConfiguration,
+        switch: DbSwitchSlot,
         name: &external::Name,
         route: RouterConfigurationStaticRoute,
     ) -> UpdateResult<RouterConfigurationStaticRoute> {
@@ -777,6 +995,7 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
+        assert_eq!(route.switch, switch);
         let new_name = route.name.to_string();
         self.transaction_retry_wrapper(
             "router_configuration_static_route_update",
@@ -785,9 +1004,10 @@ impl DataStore {
             let err = err.clone();
             let route = route.clone();
             async move {
-                Self::ensure_router_configuration_live(
+                Self::ensure_router_configuration_switch_live(
                     &conn,
                     authz_configuration,
+                    switch,
                     &err,
                 )
                 .await?;
@@ -797,6 +1017,7 @@ impl DataStore {
                             dsl::router_configuration_id
                                 .eq(to_db_typed_uuid(authz_configuration.id())),
                         )
+                        .filter(dsl::switch.eq(switch))
                         .filter(dsl::name.eq(name.to_string()))
                         .execute_async(&conn)
                         .await?;
@@ -833,6 +1054,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_configuration: &authz::RouterConfiguration,
+        switch: DbSwitchSlot,
         name: &external::Name,
     ) -> DeleteResult {
         use nexus_db_schema::schema::router_configuration_static_route::dsl;
@@ -844,6 +1066,7 @@ impl DataStore {
                 dsl::router_configuration_id
                     .eq(to_db_typed_uuid(authz_configuration.id())),
             )
+            .filter(dsl::switch.eq(switch))
             .filter(dsl::name.eq(name.to_string()))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -863,6 +1086,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_configuration: &authz::RouterConfiguration,
+        switch: DbSwitchSlot,
         pagparams: &DataPageParams<'_, external::Name>,
     ) -> ListResultVec<RouterConfigurationBfdPeer> {
         use nexus_db_schema::schema::router_configuration_bfd_peer::dsl;
@@ -880,6 +1104,7 @@ impl DataStore {
             dsl::router_configuration_id
                 .eq(to_db_typed_uuid(authz_configuration.id())),
         )
+        .filter(dsl::switch.eq(switch))
         .select(RouterConfigurationBfdPeer::as_select())
         .load_async(&*self.pool_connection_authorized(opctx).await?)
         .await
@@ -893,6 +1118,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_configuration: &authz::RouterConfiguration,
+        switch: DbSwitchSlot,
         peer: RouterConfigurationBfdPeer,
     ) -> CreateResult<RouterConfigurationBfdPeer> {
         use nexus_db_schema::schema::router_configuration_bfd_peer::dsl;
@@ -907,15 +1133,17 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
+        assert_eq!(peer.switch, switch);
         let name = peer.name.to_string();
         self.transaction_retry_wrapper("router_configuration_bfd_peer_create")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 let peer = peer.clone();
                 async move {
-                    Self::ensure_router_configuration_live(
+                    Self::ensure_router_configuration_switch_live(
                         &conn,
                         authz_configuration,
+                        switch,
                         &err,
                     )
                     .await?;
@@ -946,6 +1174,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_configuration: &authz::RouterConfiguration,
+        switch: DbSwitchSlot,
         name: &external::Name,
     ) -> LookupResult<RouterConfigurationBfdPeer> {
         use nexus_db_schema::schema::router_configuration_bfd_peer::dsl;
@@ -957,6 +1186,7 @@ impl DataStore {
                 dsl::router_configuration_id
                     .eq(to_db_typed_uuid(authz_configuration.id())),
             )
+            .filter(dsl::switch.eq(switch))
             .filter(dsl::name.eq(name.to_string()))
             .select(RouterConfigurationBfdPeer::as_select())
             .first_async(&*self.pool_connection_authorized(opctx).await?)
@@ -974,6 +1204,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_configuration: &authz::RouterConfiguration,
+        switch: DbSwitchSlot,
         name: &external::Name,
         peer: RouterConfigurationBfdPeer,
     ) -> UpdateResult<RouterConfigurationBfdPeer> {
@@ -983,15 +1214,17 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
+        assert_eq!(peer.switch, switch);
         let new_name = peer.name.to_string();
         self.transaction_retry_wrapper("router_configuration_bfd_peer_update")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 let peer = peer.clone();
                 async move {
-                    Self::ensure_router_configuration_live(
+                    Self::ensure_router_configuration_switch_live(
                         &conn,
                         authz_configuration,
+                        switch,
                         &err,
                     )
                     .await?;
@@ -1002,6 +1235,7 @@ impl DataStore {
                                     to_db_typed_uuid(authz_configuration.id()),
                                 ),
                             )
+                            .filter(dsl::switch.eq(switch))
                             .filter(dsl::name.eq(name.to_string()))
                             .execute_async(&conn)
                             .await?;
@@ -1038,6 +1272,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_configuration: &authz::RouterConfiguration,
+        switch: DbSwitchSlot,
         name: &external::Name,
     ) -> DeleteResult {
         use nexus_db_schema::schema::router_configuration_bfd_peer::dsl;
@@ -1049,6 +1284,7 @@ impl DataStore {
                 dsl::router_configuration_id
                     .eq(to_db_typed_uuid(authz_configuration.id())),
             )
+            .filter(dsl::switch.eq(switch))
             .filter(dsl::name.eq(name.to_string()))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -1431,7 +1667,7 @@ mod test {
                 name: name.parse().unwrap(),
                 description: "datastore test".into(),
             },
-            switch: SwitchSlot::Switch0,
+            switches: vec![SwitchSlot::Switch0],
         }
     }
 
@@ -1462,6 +1698,7 @@ mod test {
             .router_configuration_create(
                 opctx,
                 RouterConfiguration::new(&create_params(name)),
+                &[SwitchSlot::Switch0],
             )
             .await
             .expect("create router configuration");
@@ -1501,13 +1738,17 @@ mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let (cfg, authz_cfg) = create(datastore, opctx, "parent").await;
-        let r1 =
-            RouterConfigurationStaticRoute::new(cfg.id(), static_route("r1"))
-                .unwrap();
+        let r1 = RouterConfigurationStaticRoute::new(
+            cfg.id(),
+            DbSwitchSlot::Switch0,
+            static_route("r1"),
+        )
+        .unwrap();
         datastore
             .router_configuration_static_route_create(
                 opctx,
                 &authz_cfg,
+                DbSwitchSlot::Switch0,
                 r1.clone(),
             )
             .await
@@ -1517,11 +1758,19 @@ mod test {
             .await
             .expect("delete parent");
 
-        let r2 =
-            RouterConfigurationStaticRoute::new(cfg.id(), static_route("r2"))
-                .unwrap();
+        let r2 = RouterConfigurationStaticRoute::new(
+            cfg.id(),
+            DbSwitchSlot::Switch0,
+            static_route("r2"),
+        )
+        .unwrap();
         let err = datastore
-            .router_configuration_static_route_create(opctx, &authz_cfg, r2)
+            .router_configuration_static_route_create(
+                opctx,
+                &authz_cfg,
+                DbSwitchSlot::Switch0,
+                r2,
+            )
             .await
             .expect_err("create under a deleted parent");
         assert!(matches!(err, Error::ObjectNotFound { .. }), "{err}");
@@ -1529,6 +1778,7 @@ mod test {
             .router_configuration_static_route_update(
                 opctx,
                 &authz_cfg,
+                DbSwitchSlot::Switch0,
                 &"r1".parse().unwrap(),
                 r1,
             )
@@ -1536,7 +1786,11 @@ mod test {
             .expect_err("update under a deleted parent");
         assert!(matches!(err, Error::ObjectNotFound { .. }), "{err}");
         let err = datastore
-            .router_configuration_bgp_config_delete(opctx, &authz_cfg)
+            .router_configuration_bgp_config_delete(
+                opctx,
+                &authz_cfg,
+                DbSwitchSlot::Switch0,
+            )
             .await
             .expect_err("bgp config delete on a deleted parent");
         assert!(matches!(err, Error::ObjectNotFound { .. }), "{err}");
@@ -1568,12 +1822,16 @@ mod test {
                 create(datastore, opctx, &format!("race-{round}")).await;
             let route = RouterConfigurationStaticRoute::new(
                 cfg.id(),
+                DbSwitchSlot::Switch0,
                 static_route("raced"),
             )
             .unwrap();
             let (created, deleted) = tokio::join!(
                 datastore.router_configuration_static_route_create(
-                    opctx, &authz_cfg, route,
+                    opctx,
+                    &authz_cfg,
+                    DbSwitchSlot::Switch0,
+                    route,
                 ),
                 datastore.router_configuration_delete(opctx, &authz_cfg),
             );
@@ -1633,6 +1891,7 @@ mod test {
                 .router_configuration_create(
                     &unprivileged,
                     RouterConfiguration::new(&create_params("nope")),
+                    &[SwitchSlot::Switch0],
                 )
                 .await
                 .map(drop),
@@ -1642,6 +1901,7 @@ mod test {
                 .router_configuration_static_route_list(
                     &unprivileged,
                     &authz_cfg,
+                    DbSwitchSlot::Switch0,
                     &pagparams,
                 )
                 .await
@@ -1652,8 +1912,10 @@ mod test {
                 .router_configuration_static_route_create(
                     &unprivileged,
                     &authz_cfg,
+                    DbSwitchSlot::Switch0,
                     RouterConfigurationStaticRoute::new(
                         cfg.id(),
+                        DbSwitchSlot::Switch0,
                         static_route("nope"),
                     )
                     .unwrap(),
@@ -1666,6 +1928,7 @@ mod test {
                 .router_configuration_bgp_config_delete(
                     &unprivileged,
                     &authz_cfg,
+                    DbSwitchSlot::Switch0,
                 )
                 .await,
         );

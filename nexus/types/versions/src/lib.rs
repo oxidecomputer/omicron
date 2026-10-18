@@ -105,3 +105,5 @@ pub mod v2026_08_14_00;
 pub mod v2026_08_14_01;
 #[path = "add_router_configurations/mod.rs"]
 pub mod v2026_09_02_00;
+
+pub mod router_configuration;

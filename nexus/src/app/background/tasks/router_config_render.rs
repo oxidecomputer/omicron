@@ -58,7 +58,8 @@ pub async fn render_switch_router_configs(
     let configs = load_configurations(datastore, opctx).await?;
 
     let ids: Vec<_> = configs.iter().map(|c| c.id()).collect();
-    let (bgp_peers, static_routes, bfd_peers) = futures::try_join!(
+    let (blocks, bgp_peers, static_routes, bfd_peers) = futures::try_join!(
+        datastore.router_configuration_switch_list_batch(opctx, &ids),
         datastore.router_configuration_bgp_peer_list_batch(opctx, &ids),
         datastore.router_configuration_static_route_list_batch(opctx, &ids),
         datastore.router_configuration_bfd_peer_list_batch(opctx, &ids),
@@ -70,7 +71,7 @@ pub async fn render_switch_router_configs(
         )
     })?;
 
-    let originate = load_originate_prefixes(datastore, opctx, &configs).await?;
+    let originate = load_originate_prefixes(datastore, opctx, &blocks).await?;
 
     let mut rendered = SwitchRouterConfigs::new();
     for config in &configs {
@@ -82,64 +83,77 @@ pub async fn render_switch_router_configs(
         let my = |cid: &nexus_db_model::DbTypedUuid<
             omicron_uuid_kinds::RouterConfigurationKind,
         >| cid.into_untyped_uuid() == id;
-        let originate = config
-            .bgp_config
-            .as_ref()
-            .map(|bgp| {
-                originate
+        for block in blocks.iter().filter(|b| my(&b.router_configuration_id)) {
+            let originate =
+                block
+                    .bgp_config
+                    .as_ref()
+                    .map(|bgp| {
+                        originate
                     .get(&BgpAnnounceSetUuid::from(bgp.bgp_announce_set_id))
                     .cloned()
                     .expect("load_originate_prefixes covers every announce set")
-            })
-            .unwrap_or_default();
-        let bgp = build_bgp_spec(
-            config,
-            &bgp_peers
-                .iter()
-                .filter(|p| my(&p.router_configuration_id))
-                .collect::<Vec<_>>(),
-            originate,
-            errors,
-        );
-        let (static4, static6) = build_static_routes(
-            config,
-            &static_routes
-                .iter()
-                .filter(|r| my(&r.router_configuration_id))
-                .collect::<Vec<_>>(),
-            errors,
-        );
-        let bfd_peers = build_bfd_peers(
-            config,
-            &bfd_peers
-                .iter()
-                .filter(|p| my(&p.router_configuration_id))
-                .collect::<Vec<_>>(),
-            errors,
-        );
-        let spec = RouterConfigSpec {
-            // mgd maps a spec named "default" onto its daemon-owned default
-            // router; the built-ins configure their own switch's default
-            // router in place.
-            name: if is_builtin {
-                "default".to_string()
-            } else {
-                config.name().to_string()
-            },
-            id,
-            bgp,
-            static4,
-            static6,
-            bfd_peers,
-        };
-        // Only once the operator has put contents in it: a "default" spec is
-        // the router's complete desired state, so an empty one would wipe
-        // the uplink BGP/static state the scrimlet reconciler renders from
-        // the rack network config.
-        if is_builtin && spec.is_empty() {
-            continue;
+                    })
+                    .unwrap_or_default();
+            let bgp = build_bgp_spec(
+                config,
+                block,
+                &bgp_peers
+                    .iter()
+                    .filter(|p| {
+                        my(&p.router_configuration_id)
+                            && p.switch == block.switch
+                    })
+                    .collect::<Vec<_>>(),
+                originate,
+                errors,
+            );
+            let (static4, static6) = build_static_routes(
+                config,
+                &static_routes
+                    .iter()
+                    .filter(|r| {
+                        my(&r.router_configuration_id)
+                            && r.switch == block.switch
+                    })
+                    .collect::<Vec<_>>(),
+                errors,
+            );
+            let bfd_peers = build_bfd_peers(
+                config,
+                &bfd_peers
+                    .iter()
+                    .filter(|p| {
+                        my(&p.router_configuration_id)
+                            && p.switch == block.switch
+                    })
+                    .collect::<Vec<_>>(),
+                errors,
+            );
+            let spec = RouterConfigSpec {
+                // mgd maps a spec named "default" onto its daemon-owned default
+                // router; the built-ins configure their own switch's default
+                // router in place.
+                name: if is_builtin {
+                    "default".to_string()
+                } else {
+                    config.name().to_string()
+                },
+                id,
+                bgp,
+                static4,
+                static6,
+                bfd_peers,
+            };
+            // Only once the operator has put contents in it: a "default" spec is
+            // the router's complete desired state, so an empty one would wipe
+            // the uplink BGP/static state the scrimlet reconciler renders from
+            // the rack network config.
+            if is_builtin && spec.is_empty() {
+                continue;
+            }
+            rendered.entry(block.switch.into()).or_default().push(spec);
         }
-        rendered.entry(config.switch.into()).or_default().push(spec);
     }
     // Give every switch an entry, even an empty one: the scrimlet reconciler
     // always applies, so removed routers are torn down.
@@ -186,7 +200,7 @@ async fn load_configurations(
 async fn load_originate_prefixes(
     datastore: &DataStore,
     opctx: &OpContext,
-    configs: &[RouterConfiguration],
+    configs: &[nexus_db_model::RouterConfigurationSwitch],
 ) -> Result<HashMap<BgpAnnounceSetUuid, Vec<IpNet>>, String> {
     let mut originate = HashMap::new();
     for config in configs {
@@ -211,10 +225,11 @@ async fn load_originate_prefixes(
                     InlineErrorChain::new(&e)
                 )
             })?;
-        originate.insert(
-            set_id,
-            announcements.iter().map(|a| IpNet::from(a.network)).collect(),
-        );
+        let mut prefixes: Vec<_> =
+            announcements.iter().map(|a| IpNet::from(a.network)).collect();
+        // Match RSS ordering so handoff does not reorder otherwise equal specs.
+        prefixes.sort_by_key(|p| p.to_string());
+        originate.insert(set_id, prefixes);
     }
     Ok(originate)
 }
@@ -249,11 +264,12 @@ fn peer_parameters(
 
 fn build_bgp_spec(
     config: &RouterConfiguration,
+    block: &nexus_db_model::RouterConfigurationSwitch,
     peers: &[&RouterConfigurationBgpPeer],
     originate: Vec<IpNet>,
     errors: &mut Vec<String>,
 ) -> Option<RouterConfigBgpSpec> {
-    let bgp = config.bgp_config.as_ref()?;
+    let bgp = block.bgp_config.as_ref()?;
     let asn = *bgp.bgp_asn;
     let mut numbered = Vec::new();
     let mut unnumbered = Vec::new();
@@ -395,25 +411,31 @@ mod tests {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_uuid_kinds::BgpAnnounceSetUuid;
 
-    fn config(max_paths: u8) -> RouterConfiguration {
-        let mut config = RouterConfiguration::new(&RouterConfigurationCreate {
+    fn config(
+        max_paths: u8,
+    ) -> (RouterConfiguration, nexus_db_model::RouterConfigurationSwitch) {
+        let config = RouterConfiguration::new(&RouterConfigurationCreate {
             identity: IdentityMetadataCreateParams {
                 name: "routy".parse().unwrap(),
                 description: String::new(),
             },
-            switch: SwitchSlot::Switch0,
+            switches: vec![SwitchSlot::Switch0],
         });
-        config.bgp_config = Some(RouterConfigurationBgpConfig {
+        let mut block = nexus_db_model::RouterConfigurationSwitch::new(
+            config.id(),
+            SwitchSlot::Switch0.into(),
+        );
+        block.bgp_config = Some(RouterConfigurationBgpConfig {
             bgp_asn: SqlU32::new(65001),
             bgp_max_paths: SqlU8::new(max_paths),
             bgp_announce_set_id: BgpAnnounceSetUuid::new_v4().into(),
         });
-        config
+        (config, block)
     }
 
     #[test]
     fn bgp_source_address_is_rendered() {
-        let config = config(1);
+        let (config, block) = config(1);
         for (target, source) in [
             ("10.99.0.3", Some("10.99.0.4")),
             ("2001:db8::3", Some("2001:db8::4")),
@@ -426,11 +448,17 @@ mod tests {
                 "delay_open": 0, "idle_hold_time": 3, "enforce_first_as": false,
             })).unwrap();
             let peer =
-                RouterConfigurationBgpPeer::new(config.id(), api).unwrap();
-            let mut errors = Vec::new();
-            let spec =
-                build_bgp_spec(&config, &[&peer], Vec::new(), &mut errors)
+                RouterConfigurationBgpPeer::new(config.id(), block.switch, api)
                     .unwrap();
+            let mut errors = Vec::new();
+            let spec = build_bgp_spec(
+                &config,
+                &block,
+                &[&peer],
+                Vec::new(),
+                &mut errors,
+            )
+            .unwrap();
             assert!(errors.is_empty(), "{errors:?}");
             assert_eq!(
                 spec.peers[0].src_addr,
@@ -445,31 +473,49 @@ mod tests {
     fn bgp_max_paths_is_rendered() {
         let mut errors = Vec::new();
         for value in [1u8, 2, 32] {
-            let spec =
-                build_bgp_spec(&config(value), &[], Vec::new(), &mut errors)
-                    .expect("bgp spec");
+            let spec = build_bgp_spec(
+                &config(value).0,
+                &config(value).1,
+                &[],
+                Vec::new(),
+                &mut errors,
+            )
+            .expect("bgp spec");
             assert_eq!(spec.max_paths, NonZeroU8::new(value), "value {value}");
         }
         assert!(errors.is_empty(), "{errors:?}");
         // Out-of-range storage (impossible under the CHECK constraint) is
         // reported and falls back to mgd's default instead of dropping BGP.
-        let spec = build_bgp_spec(&config(33), &[], Vec::new(), &mut errors)
-            .expect("bgp spec");
+        let spec = build_bgp_spec(
+            &config(33).0,
+            &config(33).1,
+            &[],
+            Vec::new(),
+            &mut errors,
+        )
+        .expect("bgp spec");
         assert_eq!(spec.max_paths, None);
         assert_eq!(errors.len(), 1);
         // No BGP configuration at all renders no BGP spec.
-        let mut plain = config(2);
-        plain.bgp_config = None;
-        assert!(build_bgp_spec(&plain, &[], Vec::new(), &mut errors).is_none());
+        let (plain, mut block) = config(2);
+        block.bgp_config = None;
+        assert!(
+            build_bgp_spec(&plain, &block, &[], Vec::new(), &mut errors)
+                .is_none()
+        );
     }
 
     /// A-21: `required_rx` is widened losslessly from the stored u32.
     #[test]
     fn bfd_required_rx_is_widened_losslessly() {
-        let config = config(1);
+        let (config, block) = config(1);
         let peer = RouterConfigurationBfdPeer {
             router_configuration_id: config.id().into(),
-            name: "spine1-bfd".parse::<omicron_common::api::external::Name>().unwrap().into(),
+            switch: block.switch,
+            name: "spine1-bfd"
+                .parse::<omicron_common::api::external::Name>()
+                .unwrap()
+                .into(),
             remote: "203.0.113.10".parse::<IpAddr>().unwrap().into(),
             local: None,
             mode: nexus_db_model::BfdMode::MultiHop,

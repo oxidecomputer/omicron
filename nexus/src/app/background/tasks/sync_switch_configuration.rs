@@ -25,7 +25,7 @@ use serde_json::json;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::router_config::{
-    RouterConfigListEntry, SwitchRouterConfigs, default_router_list,
+    RouterConfigListEntry, SwitchRouterConfigs,
 };
 use sled_agent_types::system_networking::BlueprintExternalNetworkingConfig;
 
@@ -270,10 +270,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 "error" => %e,
                             );
                             status.router_config_render_errors.push(e);
-                            current_contents
-                                .as_ref()
-                                .map(|c| c.switch_router_configs.clone())
-                                .unwrap_or_default()
+                            let Some(current) = &current_contents else {
+                                // Nexus has no cached copy of RSS routing yet.
+                                // A failed read must not withdraw that routing.
+                                continue;
+                            };
+                            current.switch_router_configs.clone()
                         }
                     };
 
@@ -307,10 +309,10 @@ impl BackgroundTask for SwitchPortSettingsManager {
                              list";
                             "error" => %DisplayErrorChain::new(&e),
                         );
-                        current_contents
-                            .as_ref()
-                            .map(|c| c.control_plane_router_list.clone())
-                            .unwrap_or_else(default_router_list)
+                        let Some(current) = &current_contents else {
+                            continue;
+                        };
+                        current.control_plane_router_list.clone()
                     }
                 };
 
@@ -731,6 +733,7 @@ mod tests {
     use sled_agent_types::early_networking::SwitchSlot;
     use sled_agent_types::early_networking::UplinkPorts;
     use sled_agent_types::inventory::SourceNatConfigGeneric;
+    use sled_agent_types::router_config::default_router_list;
     use sled_agent_types::system_networking::ServiceZoneNatEntries;
     use sled_agent_types::system_networking::ServiceZoneNatEntry;
     use sled_agent_types::system_networking::ServiceZoneNatKind;

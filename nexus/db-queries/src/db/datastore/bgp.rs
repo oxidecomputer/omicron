@@ -678,7 +678,7 @@ impl DataStore {
 
         use nexus_db_schema::schema::bgp_config;
         use nexus_db_schema::schema::bgp_config::dsl as bgp_config_dsl;
-        use nexus_db_schema::schema::router_configuration::dsl as rc_dsl;
+        use nexus_db_schema::schema::router_configuration_switch::dsl as rc_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let name_or_id = sel.announce_set.clone();
@@ -757,15 +757,15 @@ impl DataStore {
                     // cannot race into a dangling reference.
                     let in_use_by_router_configuration =
                         diesel::dsl::select(diesel::dsl::exists(
-                            rc_dsl::router_configuration
-                                .filter(rc_dsl::bgp_announce_set_id.eq(Some(
+                            rc_dsl::router_configuration_switch.filter(
+                                rc_dsl::bgp_announce_set_id.eq(Some(
                                     to_db_typed_uuid(
                                         BgpAnnounceSetUuid::from_untyped_uuid(
                                             id,
                                         ),
                                     ),
-                                )))
-                                .filter(rc_dsl::time_deleted.is_null()),
+                                )),
+                            ),
                         ))
                         .get_result_async::<bool>(&conn)
                         .await?;

@@ -23,6 +23,7 @@
 //!   [`SiloRouterConfigurationsUpdate`] and [`SiloRouterConfigurationEntry`]
 //!   for the new `/v1/system/silos/{silo}/router-configurations` endpoints.
 
+use crate::router_configuration::bgp_defaults;
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
     IdentityMetadata, IdentityMetadataCreateParams,
@@ -49,19 +50,29 @@ pub struct RouterConfiguration {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// The switch this router configuration applies to
+    /// Settings for each participating switch.
+    pub switches: Vec<RouterConfigurationSwitch>,
+}
+
+/// Routing settings for one switch within a router configuration.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct RouterConfigurationSwitch {
+    /// Switch configured by this block
     pub switch: SwitchSlot,
 
     /// The BGP configuration for this router configuration, if set
     pub bgp_config: Option<RouterConfigurationBgpConfig>,
 
     /// BGP peers in this router configuration
+    #[serde(default)]
     pub bgp_peers: Vec<RouterConfigurationBgpPeer>,
 
     /// Static routes in this router configuration
+    #[serde(default)]
     pub routes: Vec<StaticRoute>,
 
     /// BFD peers in this router configuration
+    #[serde(default)]
     pub bfd_peers: Vec<BfdPeer>,
 }
 
@@ -71,8 +82,8 @@ pub struct RouterConfigurationCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
-    /// The switch this router configuration applies to
-    pub switch: SwitchSlot,
+    /// Initial participating switches. Each starts with empty settings.
+    pub switches: Vec<SwitchSlot>,
 }
 
 /// Parameters for updating a router configuration
@@ -82,9 +93,6 @@ pub struct RouterConfigurationCreate {
 pub struct RouterConfigurationUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
-
-    /// The switch this router configuration applies to
-    pub switch: Option<SwitchSlot>,
 }
 
 /// Select a router configuration by a name or id
@@ -94,6 +102,15 @@ pub struct RouterConfigurationSelector {
     pub configuration: NameOrId,
 }
 
+/// Select a switch block within a router configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct RouterConfigurationSwitchSelector {
+    /// Router configuration name or id.
+    pub configuration: NameOrId,
+    /// Participating switch.
+    pub switch: SwitchSlot,
+}
+
 /// The BGP configuration associated with a router configuration
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct RouterConfigurationBgpConfig {
@@ -101,6 +118,7 @@ pub struct RouterConfigurationBgpConfig {
     pub asn: u32,
 
     /// Maximum number of equal-cost paths for BGP ECMP
+    #[serde(default)]
     pub max_paths: MaxPathConfig,
 
     /// BGP announce set that defines the prefixes originated by this router
@@ -172,19 +190,24 @@ pub struct RouterConfigurationBgpPeer {
     pub allowed_export: ImportExportPolicy,
 
     /// Hold time between keepalives in seconds
+    #[serde(default = "bgp_defaults::hold_time")]
     pub hold_time: u32,
 
     /// Keepalive request interval in seconds
+    #[serde(default = "bgp_defaults::keepalive")]
     pub keepalive: u32,
 
     /// TCP connection retry interval in seconds
+    #[serde(default = "bgp_defaults::connect_retry")]
     pub connect_retry: u32,
 
     /// Delay in seconds before sending open request after TCP session
     /// establishment
+    #[serde(default = "bgp_defaults::delay_open")]
     pub delay_open: u32,
 
     /// Time to hold peer in idle state in seconds
+    #[serde(default = "bgp_defaults::idle_hold_time")]
     pub idle_hold_time: u32,
 
     /// Local preference for received routes
@@ -216,6 +239,9 @@ pub struct RouterConfigurationBgpPeerSelector {
     /// A name or id to use when selecting a router configuration.
     pub configuration: NameOrId,
 
+    /// Switch containing this entry.
+    pub switch: SwitchSlot,
+
     /// Name of the BGP peer entry.
     pub peer: Name,
 }
@@ -245,6 +271,9 @@ pub struct StaticRoute {
 pub struct RouterConfigurationStaticRouteSelector {
     /// A name or id to use when selecting a router configuration.
     pub configuration: NameOrId,
+
+    /// Switch containing this entry.
+    pub switch: SwitchSlot,
 
     /// Name of the static route entry.
     pub route: Name,
@@ -283,6 +312,9 @@ pub struct BfdPeer {
 pub struct RouterConfigurationBfdPeerSelector {
     /// A name or id to use when selecting a router configuration.
     pub configuration: NameOrId,
+
+    /// Switch containing this entry.
+    pub switch: SwitchSlot,
 
     /// Name of the BFD peer entry.
     pub peer: Name,

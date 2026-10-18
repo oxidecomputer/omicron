@@ -61,6 +61,14 @@ impl BackgroundTask for RouterListManager {
         async move {
             let mut errors = Vec::new();
 
+            // Read initialized racks first: handoff atomically installs the
+            // service NICs and assignments before setting initialized=true.
+            let racks = match self.datastore.rack_list_initialized(opctx, &omicron_common::api::external::DataPageParams::max_page()).await {
+                Ok(racks) => racks,
+                Err(e) => return json!({ "error": e.to_string() }),
+            };
+            if racks.is_empty() { return json!({ "waiting_for_rack_initialization": true }); }
+
             // silo -> prioritized router-configuration list
             let links = match self
                 .datastore
@@ -175,6 +183,7 @@ impl BackgroundTask for RouterListManager {
 
             let mut pushed = 0;
             for sled in &sleds {
+                if !racks.iter().any(|rack| rack.id() == sled.rack_id()) { continue; }
                 let client =
                     sled_client_from_address(sled.id(), sled.address(), &log);
 
@@ -229,5 +238,37 @@ impl BackgroundTask for RouterListManager {
             })
         }
         .boxed()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_bb8_diesel::AsyncSimpleConnection;
+    use nexus_db_queries::db::pub_test_utils::TestDatabase;
+    use omicron_test_utils::dev::test_setup_log;
+
+    #[tokio::test]
+    async fn waits_for_handoff_before_reading_or_applying_assignments() {
+        let logctx = test_setup_log("router_lists_waits_for_handoff");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        // Make desired-state reads fail. Before handoff, the task must return
+        // before these reads or any attempt to enumerate/update service ports.
+        db.datastore()
+            .pool_connection_for_tests()
+            .await
+            .unwrap()
+            .batch_execute_async(
+                "DROP TABLE omicron.public.control_plane_router_configuration",
+            )
+            .await
+            .unwrap();
+        let mut task = RouterListManager::new(Arc::clone(db.datastore()));
+        assert_eq!(
+            task.activate(db.opctx()).await,
+            json!({"waiting_for_rack_initialization": true})
+        );
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 }

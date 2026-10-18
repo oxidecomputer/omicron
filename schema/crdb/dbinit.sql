@@ -4093,20 +4093,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.bgp_announcement (
     PRIMARY KEY (announce_set_id, network)
 );
 
-/*
- * A switch-specific router configuration.
- * The BGP configuration sub-resource is stored inline in the
- * `bgp_*` columns; either all of them are null (no BGP configuration) or all
- * of them are set.
- */
+/* Router identity is shared by all participating switches. */
 CREATE TABLE IF NOT EXISTS omicron.public.router_configuration (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
-    time_deleted TIMESTAMPTZ,
+    time_deleted TIMESTAMPTZ
+);
 
+CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_switch (
+    router_configuration_id UUID NOT NULL,
     switch omicron.public.switch_slot NOT NULL,
 
     bgp_asn INT8,
@@ -4115,6 +4113,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_configuration (
         OR (bgp_max_paths > 0 AND bgp_max_paths <= 32)
     ),
     bgp_announce_set_id UUID,
+
+    PRIMARY KEY (router_configuration_id, switch),
 
     CONSTRAINT bgp_config_set_together CHECK (
         (
@@ -4131,6 +4131,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_configuration (
     )
 );
 
+CREATE INDEX IF NOT EXISTS lookup_router_configuration_switch_by_bgp_announce_set_id
+    ON omicron.public.router_configuration_switch (bgp_announce_set_id)
+    WHERE bgp_announce_set_id IS NOT NULL;
+
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_router_configuration_by_name ON omicron.public.router_configuration (
     name
 ) WHERE
@@ -4138,7 +4142,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_router_configuration_by_name ON omicron
 
 /*
  * A BGP peer within a router configuration. Peers are identified by name
- * within their parent router configuration. A numbered peer has `addr` and
+ * within their router configuration and switch block. A numbered peer has `addr` and
  * an optional same-family `src_addr` set; an unnumbered peer has only `port_name` and `router_lifetime`
  * (0 = disabled) set. A null `allowed_import`/`allowed_export` means no
  * filtering.
@@ -4168,6 +4172,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_bgp_peer (
     ),
 
     src_addr INET CHECK (host(src_addr) != '0.0.0.0' AND host(src_addr) != '::'),
+    switch omicron.public.switch_slot NOT NULL,
     CONSTRAINT src_addr_only_for_numbered_peers
         CHECK (src_addr IS NULL OR addr IS NOT NULL),
     CONSTRAINT src_addr_family_must_match_peer
@@ -4187,17 +4192,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_bgp_peer (
         )
     ),
 
-    PRIMARY KEY (router_configuration_id, name)
+    CONSTRAINT router_configuration_bgp_peer_pkey_switch
+        PRIMARY KEY (router_configuration_id, switch, name)
 );
 
 /* Unique constraint for numbered BGP peers (one per peer address) */
 CREATE UNIQUE INDEX IF NOT EXISTS router_configuration_bgp_peer_numbered_unique
-    ON omicron.public.router_configuration_bgp_peer (router_configuration_id, addr)
+    ON omicron.public.router_configuration_bgp_peer (router_configuration_id, switch, addr)
     WHERE addr IS NOT NULL;
 
 /* Unique constraint for unnumbered BGP peers (one per port) */
 CREATE UNIQUE INDEX IF NOT EXISTS router_configuration_bgp_peer_unnumbered_unique
-    ON omicron.public.router_configuration_bgp_peer (router_configuration_id, port_name)
+    ON omicron.public.router_configuration_bgp_peer (router_configuration_id, switch, port_name)
     WHERE addr IS NULL;
 
 /*
@@ -4211,8 +4217,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_static_route (
     gw INET NOT NULL,
     rib_priority INT2,
     vlan_id INT4,
+    switch omicron.public.switch_slot NOT NULL,
 
-    PRIMARY KEY (router_configuration_id, name)
+    CONSTRAINT router_configuration_static_route_pkey_switch
+        PRIMARY KEY (router_configuration_id, switch, name)
 );
 
 /*
@@ -6953,8 +6961,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_bfd_peer (
     mode omicron.public.bfd_mode NOT NULL,
     detection_threshold INT2 NOT NULL,
     required_rx INT8 NOT NULL,
+    switch omicron.public.switch_slot NOT NULL,
 
-    PRIMARY KEY (router_configuration_id, name)
+    CONSTRAINT router_configuration_bfd_peer_pkey_switch
+        PRIMARY KEY (router_configuration_id, switch, name)
 );
 
 
@@ -9686,7 +9696,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '301.0.0', NULL)
+    (TRUE, NOW(), NOW(), '302.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

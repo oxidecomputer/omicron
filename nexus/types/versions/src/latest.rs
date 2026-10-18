@@ -355,6 +355,8 @@ pub mod networking {
     pub use crate::v2026_09_02_00::networking::RouterConfigurationCreate;
     pub use crate::v2026_09_02_00::networking::RouterConfigurationSelector;
     pub use crate::v2026_09_02_00::networking::RouterConfigurationStaticRouteSelector;
+    pub use crate::v2026_09_02_00::networking::RouterConfigurationSwitch;
+    pub use crate::v2026_09_02_00::networking::RouterConfigurationSwitchSelector;
     pub use crate::v2026_09_02_00::networking::RouterConfigurationUpdate;
     pub use crate::v2026_09_02_00::networking::SiloRouterConfiguration;
     pub use crate::v2026_09_02_00::networking::SiloRouterConfigurationEntry;

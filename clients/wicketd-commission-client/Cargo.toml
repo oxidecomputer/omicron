@@ -8,6 +8,7 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
+omicron-common.workspace = true
 iddqd.workspace = true
 omicron-uuid-kinds.workspace = true
 oxnet.workspace = true
@@ -16,6 +17,7 @@ regress.workspace = true
 reqwest = { workspace = true, features = ["json", "rustls", "stream"] }
 schemars.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 slog.workspace = true
 wicketd-commission-types-versions.workspace = true
 omicron-workspace-hack.workspace = true

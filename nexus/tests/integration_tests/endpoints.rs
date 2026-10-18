@@ -1027,7 +1027,7 @@ pub const DEMO_ROUTER_CONFIGURATIONS_URL: &'static str =
     "/v1/system/networking/router-configurations";
 pub const DEMO_ROUTER_CONFIGURATION_URL: &'static str =
     "/v1/system/networking/router-configurations/demo-router-configuration";
-pub const DEMO_ROUTER_CONFIGURATION_BGP_CONFIG_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/bgp-config";
+pub const DEMO_ROUTER_CONFIGURATION_BGP_CONFIG_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/switches/switch0/bgp-config";
 pub static DEMO_ROUTER_CONFIGURATION_CREATE: LazyLock<
     networking::RouterConfigurationCreate,
 > = LazyLock::new(|| networking::RouterConfigurationCreate {
@@ -1035,7 +1035,7 @@ pub static DEMO_ROUTER_CONFIGURATION_CREATE: LazyLock<
         name: "demo-router-configuration".parse().unwrap(),
         description: "a demo router configuration".into(),
     },
-    switch: SwitchSlot::Switch0,
+    switches: vec![SwitchSlot::Switch0],
 });
 pub static DEMO_ROUTER_CONFIGURATION_UPDATE: LazyLock<
     networking::RouterConfigurationUpdate,
@@ -1044,7 +1044,6 @@ pub static DEMO_ROUTER_CONFIGURATION_UPDATE: LazyLock<
         name: Some("demo-router-configuration".parse().unwrap()),
         description: Some("an updated demo router configuration".into()),
     },
-    switch: None,
 });
 pub static DEMO_ROUTER_CONFIGURATION_BGP_CONFIG_SET: LazyLock<
     networking::RouterConfigurationBgpConfigSet,
@@ -1053,8 +1052,8 @@ pub static DEMO_ROUTER_CONFIGURATION_BGP_CONFIG_SET: LazyLock<
     max_paths: Default::default(),
     bgp_announce_set: NameOrId::Name("instances".parse().unwrap()),
 });
-pub const DEMO_ROUTER_CONFIGURATION_BGP_PEERS_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/bgp-peers";
-pub const DEMO_ROUTER_CONFIGURATION_BGP_PEER_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/bgp-peers/demo-bgp-peer";
+pub const DEMO_ROUTER_CONFIGURATION_BGP_PEERS_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/switches/switch0/bgp-peers";
+pub const DEMO_ROUTER_CONFIGURATION_BGP_PEER_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/switches/switch0/bgp-peers/demo-bgp-peer";
 pub static DEMO_ROUTER_CONFIGURATION_BGP_PEER: LazyLock<
     networking::RouterConfigurationBgpPeer,
 > = LazyLock::new(|| networking::RouterConfigurationBgpPeer {
@@ -1079,8 +1078,8 @@ pub static DEMO_ROUTER_CONFIGURATION_BGP_PEER: LazyLock<
     min_ttl: None,
     vlan_id: None,
 });
-pub const DEMO_ROUTER_CONFIGURATION_STATIC_ROUTES_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/routes";
-pub const DEMO_ROUTER_CONFIGURATION_STATIC_ROUTE_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/routes/demo-static-route";
+pub const DEMO_ROUTER_CONFIGURATION_STATIC_ROUTES_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/switches/switch0/routes";
+pub const DEMO_ROUTER_CONFIGURATION_STATIC_ROUTE_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/switches/switch0/routes/demo-static-route";
 pub static DEMO_ROUTER_CONFIGURATION_STATIC_ROUTE: LazyLock<
     networking::StaticRoute,
 > = LazyLock::new(|| networking::StaticRoute {
@@ -1090,8 +1089,8 @@ pub static DEMO_ROUTER_CONFIGURATION_STATIC_ROUTE: LazyLock<
     rib_priority: None,
     vlan_id: None,
 });
-pub const DEMO_ROUTER_CONFIGURATION_BFD_PEERS_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/bfd-peers";
-pub const DEMO_ROUTER_CONFIGURATION_BFD_PEER_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/bfd-peers/demo-bfd-peer";
+pub const DEMO_ROUTER_CONFIGURATION_BFD_PEERS_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/switches/switch0/bfd-peers";
+pub const DEMO_ROUTER_CONFIGURATION_BFD_PEER_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/switches/switch0/bfd-peers/demo-bfd-peer";
 pub static DEMO_ROUTER_CONFIGURATION_BFD_PEER: LazyLock<networking::BfdPeer> =
     LazyLock::new(|| networking::BfdPeer {
         name: "demo-bfd-peer".parse().unwrap(),
@@ -3600,6 +3599,15 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                         )
                         .unwrap(),
                     ),
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: "/v1/system/networking/router-configurations/demo-router-configuration/switches/switch0",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Post(serde_json::json!({})),
                     AllowedMethod::Delete,
                 ],
             },

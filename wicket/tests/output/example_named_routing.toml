@@ -1,0 +1,210 @@
+# TODO Explanatory block comment
+
+# Delegated external DNS zone name
+#
+# The rack provides separate external API and console endpoints for each Silo.
+# These are named `$silo_name.sys.$external_dns_zone_name`.  For a Silo called
+# "eng" with delegated domain "oxide.example", the API would be accessible at
+# "eng.sys.oxide.example".  The rack runs external DNS servers that serve A/AAAA
+# records for these DNS names.
+external_dns_zone_name = "oxide.computer"
+
+# IP addresses for authoritative external DNS servers operated by the rack for
+# the DNS domain delegated to the rack by the customer. Each of these addresses
+# must be contained in one of the "internal services" IP Pool ranges listed
+# below.
+external_dns_ips = [
+    "10.0.0.1",
+]
+
+# External NTP servers; e.g., "ntp.eng.oxide.computer".
+ntp_servers = [
+    "ntp1.com",
+    "ntp2.com",
+]
+
+# External DNS server IP Addresses; e.g., "1.1.1.1", "9.9.9.9".
+dns_servers = [
+    "1.1.1.1",
+    "2.2.2.2",
+]
+
+# List of sleds to initialize.
+#
+# Confirm this list contains all expected sleds before continuing!
+bootstrap_sleds = [
+    1, # serial 1 2 3 (model model1, ::1)
+    5, # serial 4 5 6 (model model2, IP address UNKNOWN)
+]
+
+# When true, end users may opt in to jumbo frames (8500 byte MTU) on the primary
+# interface of an instance, and control plane services with external-facing OPTE
+# NICs are brought up with an 8500 byte MTU. Operators can also toggle this at
+# runtime via the Nexus `/v1/system/networking/settings` endpoint after rack
+# initialization.
+external_jumbo_frames_opt_in_enabled = false
+
+# The IP pools from which addresses are assigned to externally-facing services
+# (external DNS, Nexus, and boundary NTP).
+#
+# Specify one pool per `[[service_ip_pools]]` stanza; copy the stanza to define
+# more than one pool (e.g. an IPv4 pool and an IPv6 pool). All ranges within a
+# single pool must be of the same IP version. Each range has the form
+# `{ first = "first_ip", last = "last_ip" }`, where `last_ip` is equal to or
+# higher than `first_ip`. For example, a pool with two ranges:
+#
+#     ranges = [
+#         { first = "1.1.1.1", last = "1.1.1.10" },
+#         { first = "1.1.1.20", last = "1.1.1.30" },
+#     ]
+[[service_ip_pools]]
+name = "oxide-service-pool-v4"
+description = "IPv4 IP Pool for Oxide Services"
+ranges = [{ first = "10.0.0.1", last = "10.0.0.5" }]
+
+# Allowlist of source IPs that can make requests to user-facing services.
+#
+# Use the key:
+#
+# allow = "any"
+#
+# to indicate any external IPs are allowed to make requests. This is the default.
+#
+# Use the below two lines to only allow requests from the specified IP subnets.
+# Requests from any other source IPs are refused. Note that individual addresses
+# must include the netmask, e.g., "1.2.3.4/32".
+#
+# allow = "list"
+# ips = [ "1.2.3.4/5", "5.6.7.8/10" ]
+[allowed_source_ips]
+allow = "any"
+
+# TODO: docs on network config
+[rack_network_config]
+infra_ip_first = "172.30.0.1"
+infra_ip_last = "172.30.0.10"
+rack_subnet_address = "fd00:1122:3344:100::"
+
+[rack_network_config.switch0.port0]
+routes = [{ nexthop = "172.30.0.10", destination = "0.0.0.0/0", vlan_id = 1 }]
+addresses = [{ address = "addrconf", vlan_id = 1 }]
+uplink_port_speed = "speed400_g"
+uplink_port_fec = "firecode"
+autoneg = true
+
+[[rack_network_config.switch0.port0.bgp_peers]]
+asn = 47
+port = "port0"
+addr = "unnumbered"
+hold_time = 6
+idle_hold_time = 3
+delay_open = 0
+connect_retry = 3
+keepalive = 2
+auth_key_id = "bgp-key-1"
+allowed_export = ["127.0.0.1/8"]
+enforce_first_as = false
+
+[[rack_network_config.switch0.port0.bgp_peers]]
+asn = 28
+port = "port0"
+addr = "10.2.3.5"
+hold_time = 10
+idle_hold_time = 20
+delay_open = 40
+connect_retry = 30
+keepalive = 50
+remote_asn = 200
+min_ttl = 90
+auth_key_id = "bgp-key-2"
+multi_exit_discriminator = 100
+communities = [60, 70]
+allowed_import = ["64:ff9b::/96", "255.255.0.0/16"]
+allowed_export = []
+local_pref = 80
+enforce_first_as = true
+
+[rack_network_config.switch0.port0.lldp]
+status = "enabled"
+chassis_id = "chassid id override"
+port_id = "port id override"
+system_name = "system name override"
+system_description = "system description override"
+port_description = "port description override"
+
+[rack_network_config.switch0.port0.tx_eq]
+pre1 = 0
+pre2 = 0
+main = 26
+post1 = 0
+post2 = 0
+
+[rack_network_config.switch1.port0]
+routes = [{ nexthop = "172.33.0.10", destination = "0.0.0.0/0", vlan_id = 1 }]
+addresses = [{ address = "172.30.0.1/24" }]
+uplink_port_speed = "speed400_g"
+autoneg = true
+
+[[rack_network_config.switch1.port0.bgp_peers]]
+asn = 47
+port = "port0"
+addr = "10.2.3.4"
+hold_time = 6
+idle_hold_time = 3
+delay_open = 0
+connect_retry = 3
+keepalive = 2
+auth_key_id = "bgp-key-1"
+allowed_import = ["224.0.0.0/4"]
+enforce_first_as = false
+
+[rack_network_config.switch1.port0.lldp]
+status = "enabled"
+chassis_id = "chassid id override"
+port_id = "port id override"
+system_name = "system name override"
+system_description = "system description override"
+port_description = "port description override"
+management_addrs = ["172.32.0.4"]
+
+[rack_network_config.switch1.port0.tx_eq]
+pre1 = 0
+pre2 = 0
+main = 26
+post1 = 0
+post2 = 0
+
+[[rack_network_config.bgp]]
+asn = 47
+originate = ["10.0.0.0/16"]
+max_paths = 1
+
+[routing]
+announce_sets = [{ name = "external-prefixes", description = "External pool", prefixes = ["198.51.100.0/24"] }]
+router_configurations = [{ name = "external", description = "Both switches", switches = [{ switch = "switch0", bgp_config = { asn = 65000, max_paths = 2, bgp_announce_set = "external-prefixes" }, bgp_peers = [{ name = "customer", peer = { type = "numbered", addr = "198.51.101.1", src_addr = "198.51.101.2" }, allowed_import = { type = "no_filtering" }, allowed_export = { type = "no_filtering" }, hold_time = 6, keepalive = 2, connect_retry = 3, delay_open = 0, idle_hold_time = 3, communities = [], enforce_first_as = false, auth_key_id = "named-bgp" }], routes = [{ name = "default", dst = "0.0.0.0/0", gw = "198.51.101.1" }], bfd_peers = [{ name = "customer", remote = "198.51.101.1", local = "198.51.101.2", mode = "single_hop", detection_threshold = 3, required_rx = 1000000 }] }, { switch = "switch1", bgp_config = { asn = 65001, max_paths = 1, bgp_announce_set = "external-prefixes" }, bgp_peers = [], routes = [{ name = "default", dst = "0.0.0.0/0", gw = "198.51.101.5" }], bfd_peers = [] }] }]
+control_plane_router_configurations = [{ router_configuration = "external", priority = 100 }]
+recovery_silo_router_configurations = []
+
+# Optional named routing. Omit [routing] to keep legacy default initialization.
+# When present, both assignment lists are required; an empty list disables
+# external routing for that context. Port addresses stay in rack_network_config.
+# Other routing lists default to empty; descriptions default to an empty string.
+# Named BGP defaults: max_paths=1; hold_time=6, keepalive=2, connect_retry=3,
+# delay_open=0, idle_hold_time=3 (seconds). Explicit values are retained.
+# BGP peers use auth_key_id and the existing separate BGP-key upload command;
+# never put md5_auth_key or other authentication secrets in this file.
+# Example: one router configuration with separate static routes on two switches.
+# Replace the gateways below with reachable addresses on your configured ports.
+#
+# [routing]
+# control_plane_router_configurations = [{ router_configuration = "external", priority = 100 }]
+# recovery_silo_router_configurations = [{ router_configuration = "external", priority = 100 }]
+# [[routing.router_configurations]]
+# name = "external"
+# description = "External routing on both switches"
+# [[routing.router_configurations.switches]]
+# switch = "switch0"
+# routes = [{ name = "default", dst = "0.0.0.0/0", gw = "192.0.2.1" }]
+# [[routing.router_configurations.switches]]
+# switch = "switch1"
+# routes = [{ name = "default", dst = "0.0.0.0/0", gw = "192.0.2.5" }]

@@ -32,8 +32,6 @@ fn builtin(
                 ),
             },
         ),
-        switch,
-        bgp_config: None,
     }
 }
 

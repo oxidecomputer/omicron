@@ -23,6 +23,7 @@ use omicron_common::api::external::{
 };
 use omicron_uuid_kinds::{GenericUuid, RouterConfigurationUuid};
 use sled_agent_client::types::RouterListEntry;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::{BTreeSet, HashMap};
 use uuid::Uuid;
 
@@ -66,33 +67,75 @@ impl super::Nexus {
         authz_configuration: &authz::RouterConfiguration,
         db_configuration: RouterConfiguration,
     ) -> Result<networking::RouterConfiguration, Error> {
-        let mut view: networking::RouterConfiguration =
-            db_configuration.try_into()?;
-        // The view carries the complete entry sets; the external per-entry
-        // list endpoints are paginated separately.
-        let ids = [authz_configuration.id()];
-        view.bgp_peers = self
-            .db_datastore
-            .router_configuration_bgp_peer_list_batch(opctx, &ids)
+        let _ = authz_configuration;
+        Ok(self
+            .router_configurations_assemble(opctx, vec![db_configuration])
             .await?
+            .remove(0))
+    }
+
+    async fn router_configurations_assemble(
+        &self,
+        opctx: &OpContext,
+        configurations: Vec<RouterConfiguration>,
+    ) -> ListResultVec<networking::RouterConfiguration> {
+        let ids: Vec<_> = configurations.iter().map(|c| c.id()).collect();
+        let (blocks, bgp_peers, routes, bfd_peers) = futures::try_join!(
+            self.db_datastore
+                .router_configuration_switch_list_batch(opctx, &ids),
+            self.db_datastore
+                .router_configuration_bgp_peer_list_batch(opctx, &ids),
+            self.db_datastore
+                .router_configuration_static_route_list_batch(opctx, &ids),
+            self.db_datastore
+                .router_configuration_bfd_peer_list_batch(opctx, &ids),
+        )?;
+        let mut switches =
+            HashMap::<_, networking::RouterConfigurationSwitch>::new();
+        for block in blocks {
+            switches.insert(
+                (block.router_configuration_id, block.switch),
+                block.try_into()?,
+            );
+        }
+        for peer in bgp_peers {
+            if let Some(block) =
+                switches.get_mut(&(peer.router_configuration_id, peer.switch))
+            {
+                block.bgp_peers.push(peer.try_into()?);
+            }
+        }
+        for route in routes {
+            if let Some(block) =
+                switches.get_mut(&(route.router_configuration_id, route.switch))
+            {
+                block.routes.push(route.into());
+            }
+        }
+        for peer in bfd_peers {
+            if let Some(block) =
+                switches.get_mut(&(peer.router_configuration_id, peer.switch))
+            {
+                block.bfd_peers.push(peer.try_into()?);
+            }
+        }
+        configurations
             .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()?;
-        view.routes = self
-            .db_datastore
-            .router_configuration_static_route_list_batch(opctx, &ids)
-            .await?
-            .into_iter()
-            .map(Into::into)
-            .collect();
-        view.bfd_peers = self
-            .db_datastore
-            .router_configuration_bfd_peer_list_batch(opctx, &ids)
-            .await?
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()?;
-        Ok(view)
+            .map(|config| {
+                let id = config.id();
+                let mut view: networking::RouterConfiguration =
+                    config.try_into()?;
+                view.switches = switches
+                    .iter()
+                    .filter(|((parent, _), _)| {
+                        parent.into_untyped_uuid() == id.into_untyped_uuid()
+                    })
+                    .map(|(_, block)| block.clone())
+                    .collect();
+                view.switches.sort_by_key(|block| block.switch);
+                Ok(view)
+            })
+            .collect()
     }
 
     pub async fn router_configuration_create(
@@ -109,16 +152,23 @@ impl super::Nexus {
                 params.identity.name,
             )));
         }
+        let unique: BTreeSet<_> = params.switches.iter().collect();
+        if unique.len() != params.switches.len() {
+            return Err(Error::invalid_request("duplicate switch blocks"));
+        }
         let db_configuration = self
             .db_datastore
             .router_configuration_create(
                 opctx,
                 RouterConfiguration::new(params),
+                &params.switches,
             )
             .await?;
         self.activate_router_configuration_propagation();
-        // A just-created router configuration has no entries.
-        db_configuration.try_into()
+        Ok(self
+            .router_configurations_assemble(opctx, vec![db_configuration])
+            .await?
+            .remove(0))
     }
 
     pub async fn router_configuration_list(
@@ -131,58 +181,7 @@ impl super::Nexus {
             .db_datastore
             .router_configuration_list(opctx, pagparams)
             .await?;
-        let ids: Vec<RouterConfigurationUuid> =
-            db_configurations.iter().map(|c| c.id()).collect();
-
-        let mut bgp_peers: HashMap<RouterConfigurationUuid, Vec<_>> =
-            HashMap::new();
-        for peer in self
-            .db_datastore
-            .router_configuration_bgp_peer_list_batch(opctx, &ids)
-            .await?
-        {
-            bgp_peers
-                .entry(peer.router_configuration_id.into())
-                .or_default()
-                .push(networking::RouterConfigurationBgpPeer::try_from(peer)?);
-        }
-        let mut routes: HashMap<RouterConfigurationUuid, Vec<_>> =
-            HashMap::new();
-        for route in self
-            .db_datastore
-            .router_configuration_static_route_list_batch(opctx, &ids)
-            .await?
-        {
-            routes
-                .entry(route.router_configuration_id.into())
-                .or_default()
-                .push(networking::StaticRoute::from(route));
-        }
-        let mut bfd_peers: HashMap<RouterConfigurationUuid, Vec<_>> =
-            HashMap::new();
-        for peer in self
-            .db_datastore
-            .router_configuration_bfd_peer_list_batch(opctx, &ids)
-            .await?
-        {
-            bfd_peers
-                .entry(peer.router_configuration_id.into())
-                .or_default()
-                .push(networking::BfdPeer::try_from(peer)?);
-        }
-
-        db_configurations
-            .into_iter()
-            .map(|db_configuration| {
-                let id = db_configuration.id();
-                let mut view: networking::RouterConfiguration =
-                    db_configuration.try_into()?;
-                view.bgp_peers = bgp_peers.remove(&id).unwrap_or_default();
-                view.routes = routes.remove(&id).unwrap_or_default();
-                view.bfd_peers = bfd_peers.remove(&id).unwrap_or_default();
-                Ok(view)
-            })
-            .collect()
+        self.router_configurations_assemble(opctx, db_configurations).await
     }
 
     pub async fn router_configuration_view(
@@ -253,15 +252,6 @@ impl super::Nexus {
                 _ => {}
             }
         }
-        if let (Some((_, fixed_switch)), Some(new_switch)) =
-            (builtin, update.switch)
-        {
-            if new_switch != fixed_switch {
-                return Err(Error::invalid_request(
-                    "built-in router configurations cannot change switch",
-                ));
-            }
-        }
         let db_configuration = self
             .db_datastore
             .router_configuration_update(
@@ -303,28 +293,86 @@ impl super::Nexus {
         Ok(())
     }
 
+    pub async fn router_configuration_switch_create(
+        &self,
+        opctx: &OpContext,
+        name_or_id: NameOrId,
+        switch: SwitchSlot,
+    ) -> CreateResult<networking::RouterConfigurationSwitch> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let (.., authz_configuration) = self
+            .router_configuration_lookup(opctx, name_or_id)?
+            .lookup_for(authz::Action::Modify)
+            .await?;
+        if is_builtin_router_configuration_id(
+            &authz_configuration.id().into_untyped_uuid(),
+        ) {
+            return Err(Error::invalid_request(
+                "built-in router configurations cannot add or remove switch blocks",
+            ));
+        }
+        let block = self
+            .db_datastore
+            .router_configuration_switch_create(
+                opctx,
+                &authz_configuration,
+                switch.into(),
+            )
+            .await?;
+        self.activate_router_configuration_propagation();
+        block.try_into()
+    }
+
+    pub async fn router_configuration_switch_delete(
+        &self,
+        opctx: &OpContext,
+        name_or_id: NameOrId,
+        switch: SwitchSlot,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let (.., authz_configuration) = self
+            .router_configuration_lookup(opctx, name_or_id)?
+            .lookup_for(authz::Action::Modify)
+            .await?;
+        if is_builtin_router_configuration_id(
+            &authz_configuration.id().into_untyped_uuid(),
+        ) {
+            return Err(Error::invalid_request(
+                "built-in router configurations cannot add or remove switch blocks",
+            ));
+        }
+        self.db_datastore
+            .router_configuration_switch_delete(
+                opctx,
+                &authz_configuration,
+                switch.into(),
+            )
+            .await?;
+        self.activate_router_configuration_propagation();
+        Ok(())
+    }
+
     pub async fn router_configuration_bgp_config_view(
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        switch: SwitchSlot,
     ) -> LookupResult<networking::RouterConfigurationBgpConfig> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        let (.., db_configuration) = self
+        let (.., authz_configuration) = self
             .router_configuration_lookup(opctx, name_or_id)?
-            .fetch()
+            .lookup_for(authz::Action::Read)
             .await?;
-        db_configuration.bgp_config()?.ok_or_else(|| {
-            Error::non_resourcetype_not_found(format!(
-                "router configuration \"{}\" has no BGP configuration",
-                db_configuration.name(),
-            ))
-        })
+        self.db_datastore.router_configuration_switch_view(opctx, &authz_configuration, switch.into()).await?
+            .bgp_config()?.ok_or_else(|| Error::non_resourcetype_not_found(
+                format!("router configuration {switch:?} block has no BGP configuration")))
     }
 
     pub async fn router_configuration_bgp_config_set(
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        switch: SwitchSlot,
         config: networking::RouterConfigurationBgpConfigSet,
     ) -> UpdateResult<networking::RouterConfigurationBgpConfig> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
@@ -341,6 +389,7 @@ impl super::Nexus {
             .router_configuration_bgp_config_set(
                 opctx,
                 &authz_configuration,
+                switch.into(),
                 config.asn,
                 config.max_paths,
                 authz_announce_set.id(),
@@ -358,6 +407,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        switch: SwitchSlot,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let (.., authz_configuration) = self
@@ -365,7 +415,11 @@ impl super::Nexus {
             .lookup_for(authz::Action::Modify)
             .await?;
         self.db_datastore
-            .router_configuration_bgp_config_delete(opctx, &authz_configuration)
+            .router_configuration_bgp_config_delete(
+                opctx,
+                &authz_configuration,
+                switch.into(),
+            )
             .await?;
         self.activate_router_configuration_propagation();
         Ok(())
@@ -375,6 +429,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        switch: SwitchSlot,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<networking::RouterConfigurationBgpPeer> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
@@ -383,9 +438,18 @@ impl super::Nexus {
             .lookup_for(authz::Action::Read)
             .await?;
         self.db_datastore
+            .router_configuration_switch_view(
+                opctx,
+                &authz_configuration,
+                switch.into(),
+            )
+            .await?;
+
+        self.db_datastore
             .router_configuration_bgp_peer_list(
                 opctx,
                 &authz_configuration,
+                switch.into(),
                 pagparams,
             )
             .await?
@@ -398,6 +462,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        switch: SwitchSlot,
         peer: networking::RouterConfigurationBgpPeer,
     ) -> CreateResult<networking::RouterConfigurationBgpPeer> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
@@ -410,8 +475,10 @@ impl super::Nexus {
             .router_configuration_bgp_peer_create(
                 opctx,
                 &authz_configuration,
+                switch.into(),
                 RouterConfigurationBgpPeer::new(
                     authz_configuration.id(),
+                    switch.into(),
                     peer,
                 )?,
             )
@@ -424,6 +491,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        switch: SwitchSlot,
         peer: &Name,
     ) -> LookupResult<networking::RouterConfigurationBgpPeer> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
@@ -435,6 +503,7 @@ impl super::Nexus {
             .router_configuration_bgp_peer_view(
                 opctx,
                 &authz_configuration,
+                switch.into(),
                 peer,
             )
             .await?
@@ -445,6 +514,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        switch: SwitchSlot,
         peer_name: &Name,
         peer: networking::RouterConfigurationBgpPeer,
     ) -> UpdateResult<networking::RouterConfigurationBgpPeer> {
@@ -458,9 +528,11 @@ impl super::Nexus {
             .router_configuration_bgp_peer_update(
                 opctx,
                 &authz_configuration,
+                switch.into(),
                 peer_name,
                 RouterConfigurationBgpPeer::new(
                     authz_configuration.id(),
+                    switch.into(),
                     peer,
                 )?,
             )
@@ -473,6 +545,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        switch: SwitchSlot,
         peer: &Name,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
@@ -484,6 +557,7 @@ impl super::Nexus {
             .router_configuration_bgp_peer_delete(
                 opctx,
                 &authz_configuration,
+                switch.into(),
                 peer,
             )
             .await?;
@@ -495,6 +569,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        switch: SwitchSlot,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<networking::StaticRoute> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
@@ -502,11 +577,20 @@ impl super::Nexus {
             .router_configuration_lookup(opctx, name_or_id)?
             .lookup_for(authz::Action::Read)
             .await?;
+        self.db_datastore
+            .router_configuration_switch_view(
+                opctx,
+                &authz_configuration,
+                switch.into(),
+            )
+            .await?;
+
         Ok(self
             .db_datastore
             .router_configuration_static_route_list(
                 opctx,
                 &authz_configuration,
+                switch.into(),
                 pagparams,
             )
             .await?
@@ -519,6 +603,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        switch: SwitchSlot,
         route: networking::StaticRoute,
     ) -> CreateResult<networking::StaticRoute> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
@@ -531,8 +616,10 @@ impl super::Nexus {
             .router_configuration_static_route_create(
                 opctx,
                 &authz_configuration,
+                switch.into(),
                 RouterConfigurationStaticRoute::new(
                     authz_configuration.id(),
+                    switch.into(),
                     route,
                 )?,
             )
@@ -545,6 +632,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        switch: SwitchSlot,
         route: &Name,
     ) -> LookupResult<networking::StaticRoute> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
@@ -557,6 +645,7 @@ impl super::Nexus {
             .router_configuration_static_route_view(
                 opctx,
                 &authz_configuration,
+                switch.into(),
                 route,
             )
             .await?
@@ -567,6 +656,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        switch: SwitchSlot,
         route_name: &Name,
         route: networking::StaticRoute,
     ) -> UpdateResult<networking::StaticRoute> {
@@ -580,9 +670,11 @@ impl super::Nexus {
             .router_configuration_static_route_update(
                 opctx,
                 &authz_configuration,
+                switch.into(),
                 route_name,
                 RouterConfigurationStaticRoute::new(
                     authz_configuration.id(),
+                    switch.into(),
                     route,
                 )?,
             )
@@ -595,6 +687,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        switch: SwitchSlot,
         route: &Name,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
@@ -606,6 +699,7 @@ impl super::Nexus {
             .router_configuration_static_route_delete(
                 opctx,
                 &authz_configuration,
+                switch.into(),
                 route,
             )
             .await?;
@@ -617,6 +711,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        switch: SwitchSlot,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<networking::BfdPeer> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
@@ -624,23 +719,32 @@ impl super::Nexus {
             .router_configuration_lookup(opctx, name_or_id)?
             .lookup_for(authz::Action::Read)
             .await?;
-        Ok(self
-            .db_datastore
+        self.db_datastore
+            .router_configuration_switch_view(
+                opctx,
+                &authz_configuration,
+                switch.into(),
+            )
+            .await?;
+
+        self.db_datastore
             .router_configuration_bfd_peer_list(
                 opctx,
                 &authz_configuration,
+                switch.into(),
                 pagparams,
             )
             .await?
             .into_iter()
             .map(TryInto::try_into)
-            .collect::<Result<_, _>>()?)
+            .collect::<Result<_, _>>()
     }
 
     pub async fn router_configuration_bfd_peer_create(
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        switch: SwitchSlot,
         peer: networking::BfdPeer,
     ) -> CreateResult<networking::BfdPeer> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
@@ -653,20 +757,23 @@ impl super::Nexus {
             .router_configuration_bfd_peer_create(
                 opctx,
                 &authz_configuration,
+                switch.into(),
                 RouterConfigurationBfdPeer::new(
                     authz_configuration.id(),
+                    switch.into(),
                     peer,
                 )?,
             )
             .await?;
         self.activate_router_configuration_propagation();
-        Ok(db_peer.try_into()?)
+        db_peer.try_into()
     }
 
     pub async fn router_configuration_bfd_peer_view(
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        switch: SwitchSlot,
         peer: &Name,
     ) -> LookupResult<networking::BfdPeer> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
@@ -674,21 +781,22 @@ impl super::Nexus {
             .router_configuration_lookup(opctx, name_or_id)?
             .lookup_for(authz::Action::Read)
             .await?;
-        Ok(self
-            .db_datastore
+        self.db_datastore
             .router_configuration_bfd_peer_view(
                 opctx,
                 &authz_configuration,
+                switch.into(),
                 peer,
             )
             .await?
-            .try_into()?)
+            .try_into()
     }
 
     pub async fn router_configuration_bfd_peer_update(
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        switch: SwitchSlot,
         peer_name: &Name,
         peer: networking::BfdPeer,
     ) -> UpdateResult<networking::BfdPeer> {
@@ -702,21 +810,24 @@ impl super::Nexus {
             .router_configuration_bfd_peer_update(
                 opctx,
                 &authz_configuration,
+                switch.into(),
                 peer_name,
                 RouterConfigurationBfdPeer::new(
                     authz_configuration.id(),
+                    switch.into(),
                     peer,
                 )?,
             )
             .await?;
         self.activate_router_configuration_propagation();
-        Ok(db_peer.try_into()?)
+        db_peer.try_into()
     }
 
     pub async fn router_configuration_bfd_peer_delete(
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        switch: SwitchSlot,
         peer: &Name,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
@@ -728,6 +839,7 @@ impl super::Nexus {
             .router_configuration_bfd_peer_delete(
                 opctx,
                 &authz_configuration,
+                switch.into(),
                 peer,
             )
             .await?;

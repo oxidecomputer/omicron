@@ -711,6 +711,7 @@ pub async fn run_standalone_server(
     }
 
     let rack_init_request = RackInitializationRequest {
+        routing: None,
         blueprint,
         physical_disks,
         zpools,

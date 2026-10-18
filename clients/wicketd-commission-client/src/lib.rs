@@ -25,6 +25,7 @@ progenitor::generate_api!(
         "oxnet" = "0.1.0",
     },
     replace = {
+        NameOrId = omicron_common::api::external::NameOrId,
         AllowedSourceIps = wicketd_commission_types_versions::latest::rack_setup::AllowedSourceIps,
         BgpAuthKey = wicketd_commission_types_versions::latest::rack_setup::BgpAuthKey,
         BgpAuthKeyId = wicketd_commission_types_versions::latest::rack_setup::BgpAuthKeyId,

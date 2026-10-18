@@ -72,3 +72,18 @@ rustflags = [
 # Set up `cargo xtask`.
 [alias]
 xtask = "run --package xtask -- "
+# >>> 662 local-mode sibling sources (scripts/local-mode.sh) >>>
+# Selected sibling checkouts. Applies to every reference to these git URLs,
+# including the split ddm-admin-client pin and transitive dpd-client uses.
+[patch."https://github.com/oxidecomputer/maghemite"]
+mg-admin-client = { path = "../maghemite/mg-admin-client" }
+mg-api-types = { path = "../maghemite/mg-api-types" }
+ddm-admin-client = { path = "../maghemite/ddm-admin-client" }
+
+[patch."https://github.com/oxidecomputer/dendrite"]
+dpd-client = { path = "../dendrite/dpd-client" }
+
+[patch."https://github.com/oxidecomputer/opte"]
+oxide-vpc = { path = "../opte/lib/oxide-vpc" }
+opte-ioctl = { path = "../opte/lib/opte-ioctl" }
+# <<< 662 local-mode sibling sources <<<

@@ -553,7 +553,10 @@ impl PortManager {
                     class,
                     port_name: port_name.clone(),
                     dest: super::net_to_cidr(route.dest),
-                    target: super::router_target_opte(&route.target),
+                    target: super::router_target_opte(
+                        &route.target,
+                        is_instance,
+                    ),
                 };
                 hdl.add_router_entry(&request)?;
                 debug!(
@@ -651,7 +654,10 @@ impl PortManager {
         let hdl = Handle::new()?;
 
         // Propagate deltas out to all ports.
-        for port in ports.values() {
+        for ((_, nic_kind), port) in ports.iter() {
+            let is_instance =
+                matches!(nic_kind, NetworkInterfaceKind::Instance { .. });
+
             // Fetch deltas for all router keys: system, IPv4 subnet, and IPv6
             // subnet.
             let system_delta = deltas.get(&port.system_router_key());
@@ -681,7 +687,10 @@ impl PortManager {
                         class,
                         port_name: port.name().into(),
                         dest: super::net_to_cidr(route.dest),
-                        target: super::router_target_opte(&route.target),
+                        target: super::router_target_opte(
+                            &route.target,
+                            is_instance,
+                        ),
                     };
 
                     hdl.del_router_entry(&route)?;
@@ -699,7 +708,10 @@ impl PortManager {
                         class,
                         port_name: port.name().into(),
                         dest: super::net_to_cidr(route.dest),
-                        target: super::router_target_opte(&route.target),
+                        target: super::router_target_opte(
+                            &route.target,
+                            is_instance,
+                        ),
                     };
 
                     hdl.add_router_entry(&route)?;
@@ -1732,6 +1744,118 @@ mod tests {
                 );
             }
         }
+
+        logctx.cleanup_successful();
+    }
+
+    // Probe ports have no EIP<->IGW mappings installed in OPTE, so their EIPs
+    // are only usable through routes targeting an IGW without an ID.
+    #[test]
+    fn probe_routes_strip_internet_gateway_ids() {
+        let logctx = test_setup_log("probe_routes_strip_internet_gateway_ids");
+        let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
+        let handle = Handle::new().unwrap();
+        handle.set_xde_underlay("foo0", "foo1").unwrap();
+
+        let vni = Vni::try_from(Vni::MIN_GUEST_VNI).unwrap();
+        let private_subnet =
+            Ipv4Net::new(Ipv4Addr::new(172, 30, 0, 0), 22).unwrap();
+        let create_probe = |n: u8| {
+            manager
+                .create_port(PortCreateParams {
+                    nic: &NetworkInterface {
+                        id: Uuid::new_v4(),
+                        kind: NetworkInterfaceKind::Probe {
+                            id: Uuid::new_v4(),
+                        },
+                        name: format!("probe{n}").parse().unwrap(),
+                        ip_config: PrivateIpConfig::new_ipv4(
+                            Ipv4Addr::new(172, 30, 0, 5 + n),
+                            private_subnet,
+                        )
+                        .unwrap(),
+                        mac: MacAddr(MacAddr6::new(
+                            0xa8, 0x40, 0x25, 0xf0, 0x00, n,
+                        )),
+                        vni,
+                        primary: true,
+                        slot: 0,
+                    },
+                    external_ips: &ExternalIpConfig {
+                        v4: Some(ExternalIpv4Config {
+                            ephemeral_ip: Some(Ipv4Addr::new(10, 0, 0, 5 + n)),
+                            ..Default::default()
+                        }),
+                        v6: None,
+                    },
+                    firewall_rules: &[],
+                    dhcp_config: DhcpCfg {
+                        hostname: None,
+                        host_domain: None,
+                        domain_search_list: Vec::new(),
+                        dns4_servers: Vec::new(),
+                        dns6_servers: Vec::new(),
+                    },
+                    attached_subnets: vec![],
+                    mtu: None,
+                    router_list: &[],
+                })
+                .unwrap()
+        };
+
+        // Nexus resolves the default route of a project VPC to its IGW, with
+        // that IGW's ID.
+        let (port0, _ticket0) = create_probe(0);
+        let system_router_id = Uuid::new_v4();
+        let default_route = |igw: Uuid, version: u64| {
+            vec![ResolvedVpcRouteSet {
+                id: port0.system_router_key(),
+                version: Some(RouterVersion {
+                    router_id: system_router_id,
+                    version,
+                }),
+                routes: HashSet::from([ResolvedVpcRoute {
+                    dest: IpNet::V4(
+                        Ipv4Net::new(Ipv4Addr::UNSPECIFIED, 0).unwrap(),
+                    ),
+                    target: RouterTarget::InternetGateway(
+                        InternetGatewayRouterTarget::Instance(igw),
+                    ),
+                }]),
+            }]
+        };
+        let assert_default_route_has_no_igw_id = || {
+            let state = handle.state().lock().unwrap();
+            assert_eq!(state.ports.len(), 2);
+            for (port_name, port) in &state.ports {
+                let igw_routes = port
+                    .routes
+                    .iter()
+                    .filter(|rt| {
+                        matches!(
+                            rt.target,
+                            oxide_vpc::api::RouterTarget::InternetGateway(_)
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(igw_routes.len(), 1, "{port_name}: {igw_routes:?}");
+                assert!(
+                    igw_routes[0].is_system_default_ipv4_route(),
+                    "{port_name}: {igw_routes:?}",
+                );
+            }
+        };
+
+        // Routes are applied both to existing ports and to ports created
+        // afterwards.
+        manager.vpc_routes_ensure(default_route(Uuid::new_v4(), 1)).unwrap();
+        let (_port1, _ticket1) = create_probe(1);
+        assert_default_route_has_no_igw_id();
+
+        // Moving the default route to another IGW must leave exactly one
+        // default route on each port.
+        manager.vpc_routes_ensure(default_route(Uuid::new_v4(), 2)).unwrap();
+        assert_default_route_has_no_igw_id();
 
         logctx.cleanup_successful();
     }

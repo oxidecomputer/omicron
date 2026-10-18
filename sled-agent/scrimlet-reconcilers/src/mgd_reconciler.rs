@@ -66,7 +66,6 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
-use std::net::SocketAddrV6;
 use std::num::NonZeroU8;
 use std::time::Duration;
 
@@ -276,7 +275,6 @@ fn render_uplink_bgp_spec(
         asn,
         // The uplink config has no distinct BGP router-id; reuse the ASN.
         id: asn,
-        listen: bgp_listen_addr(),
         originate: originate.clone(),
         checker: checker.clone().map(|code| MgdCheckerSource { asn, code }),
         shaper: shaper.clone().map(|code| MgdShaperSource { asn, code }),
@@ -359,7 +357,11 @@ fn render_uplink_bfd_peers(
 fn convert_operator_spec(spec: &RouterConfigSpec) -> RouterSpec {
     RouterSpec {
         name: spec.name.clone(),
-        id: RouterId(spec.id),
+        id: if spec.name == DEFAULT_ROUTER_NAME {
+            RouterId(uuid::Uuid::nil())
+        } else {
+            RouterId(spec.id)
+        },
         bgp: spec.bgp.as_ref().map(convert_operator_bgp),
         static4: spec
             .static4
@@ -426,7 +428,6 @@ fn convert_operator_bgp(bgp: &RouterConfigBgpSpec) -> BgpSpec {
         asn,
         // The spec has no distinct BGP router-id; reuse the ASN.
         id: asn,
-        listen: bgp_listen_addr(),
         originate: bgp.originate.clone(),
         checker: bgp.checker.clone().map(|code| MgdCheckerSource { asn, code }),
         shaper: bgp.shaper.clone().map(|code| MgdShaperSource { asn, code }),
@@ -573,10 +574,6 @@ fn convert_bfd_mode(mode: BfdMode) -> MgdSessionMode {
         BfdMode::SingleHop => MgdSessionMode::SingleHop,
         BfdMode::MultiHop => MgdSessionMode::MultiHop,
     }
-}
-
-fn bgp_listen_addr() -> String {
-    SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, BGP_PORT, 0, 0).to_string()
 }
 
 #[cfg(test)]

@@ -6225,16 +6225,49 @@ pub trait NexusExternalApi {
         path_params: Path<latest::networking::RouterConfigurationSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Add an empty switch block to a router configuration
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/router-configurations/{configuration}/switches/{switch}",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_switch_create(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            latest::networking::RouterConfigurationSwitchSelector,
+        >,
+    ) -> Result<
+        HttpResponseCreated<latest::networking::RouterConfigurationSwitch>,
+        HttpError,
+    >;
+
+    /// Remove a switch block and its contents
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/networking/router-configurations/{configuration}/switches/{switch}",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_switch_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            latest::networking::RouterConfigurationSwitchSelector,
+        >,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
     /// Fetch BGP configuration for router configuration
     #[endpoint {
         method = GET,
-        path = "/v1/system/networking/router-configurations/{configuration}/bgp-config",
+        path = "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/bgp-config",
         tags = ["system/networking"],
         versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
     }]
     async fn networking_router_configuration_bgp_config_view(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::networking::RouterConfigurationSelector>,
+        path_params: Path<
+            latest::networking::RouterConfigurationSwitchSelector,
+        >,
     ) -> Result<
         HttpResponseOk<latest::networking::RouterConfigurationBgpConfig>,
         HttpError,
@@ -6243,13 +6276,15 @@ pub trait NexusExternalApi {
     /// Create or update BGP configuration for router configuration
     #[endpoint {
         method = PUT,
-        path = "/v1/system/networking/router-configurations/{configuration}/bgp-config",
+        path = "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/bgp-config",
         tags = ["system/networking"],
         versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
     }]
     async fn networking_router_configuration_bgp_config_set(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::networking::RouterConfigurationSelector>,
+        path_params: Path<
+            latest::networking::RouterConfigurationSwitchSelector,
+        >,
         config: TypedBody<latest::networking::RouterConfigurationBgpConfigSet>,
     ) -> Result<
         HttpResponseOk<latest::networking::RouterConfigurationBgpConfig>,
@@ -6259,25 +6294,29 @@ pub trait NexusExternalApi {
     /// Remove BGP configuration from router configuration
     #[endpoint {
         method = DELETE,
-        path = "/v1/system/networking/router-configurations/{configuration}/bgp-config",
+        path = "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/bgp-config",
         tags = ["system/networking"],
         versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
     }]
     async fn networking_router_configuration_bgp_config_delete(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::networking::RouterConfigurationSelector>,
+        path_params: Path<
+            latest::networking::RouterConfigurationSwitchSelector,
+        >,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// List BGP peers in router configuration
     #[endpoint {
         method = GET,
-        path = "/v1/system/networking/router-configurations/{configuration}/bgp-peers",
+        path = "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/bgp-peers",
         tags = ["system/networking"],
         versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
     }]
     async fn networking_router_configuration_bgp_peer_list(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::networking::RouterConfigurationSelector>,
+        path_params: Path<
+            latest::networking::RouterConfigurationSwitchSelector,
+        >,
         query_params: Query<PaginatedByName>,
     ) -> Result<
         HttpResponseOk<
@@ -6289,13 +6328,15 @@ pub trait NexusExternalApi {
     /// Add BGP peer to router configuration
     #[endpoint {
         method = POST,
-        path = "/v1/system/networking/router-configurations/{configuration}/bgp-peers",
+        path = "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/bgp-peers",
         tags = ["system/networking"],
         versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
     }]
     async fn networking_router_configuration_bgp_peer_create(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::networking::RouterConfigurationSelector>,
+        path_params: Path<
+            latest::networking::RouterConfigurationSwitchSelector,
+        >,
         peer: TypedBody<latest::networking::RouterConfigurationBgpPeer>,
     ) -> Result<
         HttpResponseCreated<latest::networking::RouterConfigurationBgpPeer>,
@@ -6305,7 +6346,7 @@ pub trait NexusExternalApi {
     /// Fetch BGP peer in router configuration
     #[endpoint {
         method = GET,
-        path = "/v1/system/networking/router-configurations/{configuration}/bgp-peers/{peer}",
+        path = "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/bgp-peers/{peer}",
         tags = ["system/networking"],
         versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
     }]
@@ -6322,7 +6363,7 @@ pub trait NexusExternalApi {
     /// Update BGP peer in router configuration
     #[endpoint {
         method = PUT,
-        path = "/v1/system/networking/router-configurations/{configuration}/bgp-peers/{peer}",
+        path = "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/bgp-peers/{peer}",
         tags = ["system/networking"],
         versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
     }]
@@ -6340,7 +6381,7 @@ pub trait NexusExternalApi {
     /// Remove BGP peer from router configuration
     #[endpoint {
         method = DELETE,
-        path = "/v1/system/networking/router-configurations/{configuration}/bgp-peers/{peer}",
+        path = "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/bgp-peers/{peer}",
         tags = ["system/networking"],
         versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
     }]
@@ -6354,13 +6395,15 @@ pub trait NexusExternalApi {
     /// List static routes in router configuration
     #[endpoint {
         method = GET,
-        path = "/v1/system/networking/router-configurations/{configuration}/routes",
+        path = "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/routes",
         tags = ["system/networking"],
         versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
     }]
     async fn networking_router_configuration_static_route_list(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::networking::RouterConfigurationSelector>,
+        path_params: Path<
+            latest::networking::RouterConfigurationSwitchSelector,
+        >,
         query_params: Query<PaginatedByName>,
     ) -> Result<
         HttpResponseOk<ResultsPage<latest::networking::StaticRoute>>,
@@ -6370,20 +6413,22 @@ pub trait NexusExternalApi {
     /// Add static route to router configuration
     #[endpoint {
         method = POST,
-        path = "/v1/system/networking/router-configurations/{configuration}/routes",
+        path = "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/routes",
         tags = ["system/networking"],
         versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
     }]
     async fn networking_router_configuration_static_route_create(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::networking::RouterConfigurationSelector>,
+        path_params: Path<
+            latest::networking::RouterConfigurationSwitchSelector,
+        >,
         route: TypedBody<latest::networking::StaticRoute>,
     ) -> Result<HttpResponseCreated<latest::networking::StaticRoute>, HttpError>;
 
     /// Fetch static route in router configuration
     #[endpoint {
         method = GET,
-        path = "/v1/system/networking/router-configurations/{configuration}/routes/{route}",
+        path = "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/routes/{route}",
         tags = ["system/networking"],
         versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
     }]
@@ -6397,7 +6442,7 @@ pub trait NexusExternalApi {
     /// Update static route in router configuration
     #[endpoint {
         method = PUT,
-        path = "/v1/system/networking/router-configurations/{configuration}/routes/{route}",
+        path = "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/routes/{route}",
         tags = ["system/networking"],
         versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
     }]
@@ -6412,7 +6457,7 @@ pub trait NexusExternalApi {
     /// Remove static route from router configuration
     #[endpoint {
         method = DELETE,
-        path = "/v1/system/networking/router-configurations/{configuration}/routes/{route}",
+        path = "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/routes/{route}",
         tags = ["system/networking"],
         versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
     }]
@@ -6426,13 +6471,15 @@ pub trait NexusExternalApi {
     /// List BFD peers in router configuration
     #[endpoint {
         method = GET,
-        path = "/v1/system/networking/router-configurations/{configuration}/bfd-peers",
+        path = "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/bfd-peers",
         tags = ["system/networking"],
         versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
     }]
     async fn networking_router_configuration_bfd_peer_list(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::networking::RouterConfigurationSelector>,
+        path_params: Path<
+            latest::networking::RouterConfigurationSwitchSelector,
+        >,
         query_params: Query<PaginatedByName>,
     ) -> Result<
         HttpResponseOk<ResultsPage<latest::networking::BfdPeer>>,
@@ -6442,20 +6489,22 @@ pub trait NexusExternalApi {
     /// Add BFD peer to router configuration
     #[endpoint {
         method = POST,
-        path = "/v1/system/networking/router-configurations/{configuration}/bfd-peers",
+        path = "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/bfd-peers",
         tags = ["system/networking"],
         versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
     }]
     async fn networking_router_configuration_bfd_peer_create(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::networking::RouterConfigurationSelector>,
+        path_params: Path<
+            latest::networking::RouterConfigurationSwitchSelector,
+        >,
         peer: TypedBody<latest::networking::BfdPeer>,
     ) -> Result<HttpResponseCreated<latest::networking::BfdPeer>, HttpError>;
 
     /// Fetch BFD peer in router configuration
     #[endpoint {
         method = GET,
-        path = "/v1/system/networking/router-configurations/{configuration}/bfd-peers/{peer}",
+        path = "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/bfd-peers/{peer}",
         tags = ["system/networking"],
         versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
     }]
@@ -6469,7 +6518,7 @@ pub trait NexusExternalApi {
     /// Update BFD peer in router configuration
     #[endpoint {
         method = PUT,
-        path = "/v1/system/networking/router-configurations/{configuration}/bfd-peers/{peer}",
+        path = "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/bfd-peers/{peer}",
         tags = ["system/networking"],
         versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
     }]
@@ -6484,7 +6533,7 @@ pub trait NexusExternalApi {
     /// Remove BFD peer from router configuration
     #[endpoint {
         method = DELETE,
-        path = "/v1/system/networking/router-configurations/{configuration}/bfd-peers/{peer}",
+        path = "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/bfd-peers/{peer}",
         tags = ["system/networking"],
         versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
     }]

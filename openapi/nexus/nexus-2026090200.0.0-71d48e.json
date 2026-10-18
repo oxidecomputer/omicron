@@ -11229,7 +11229,92 @@
         }
       }
     },
-    "/v1/system/networking/router-configurations/{configuration}/bfd-peers": {
+    "/v1/system/networking/router-configurations/{configuration}/switches/{switch}": {
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Add an empty switch block to a router configuration",
+        "operationId": "networking_router_configuration_switch_create",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "Router configuration name or id.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "Participating switch.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterConfigurationSwitch"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Remove a switch block and its contents",
+        "operationId": "networking_router_configuration_switch_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "Router configuration name or id.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "Participating switch.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/bfd-peers": {
       "get": {
         "tags": [
           "system/networking"
@@ -11240,10 +11325,19 @@
           {
             "in": "path",
             "name": "configuration",
-            "description": "A name or id to use when selecting a router configuration.",
+            "description": "Router configuration name or id.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "Participating switch.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           },
           {
@@ -11306,10 +11400,19 @@
           {
             "in": "path",
             "name": "configuration",
-            "description": "A name or id to use when selecting a router configuration.",
+            "description": "Router configuration name or id.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "Participating switch.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           }
         ],
@@ -11343,7 +11446,7 @@
         }
       }
     },
-    "/v1/system/networking/router-configurations/{configuration}/bfd-peers/{peer}": {
+    "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/bfd-peers/{peer}": {
       "get": {
         "tags": [
           "system/networking"
@@ -11367,6 +11470,15 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "Switch containing this entry.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           }
         ],
@@ -11412,6 +11524,15 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "Switch containing this entry.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           }
         ],
@@ -11468,6 +11589,15 @@
             "schema": {
               "$ref": "#/components/schemas/Name"
             }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "Switch containing this entry.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
+            }
           }
         ],
         "responses": {
@@ -11483,7 +11613,7 @@
         }
       }
     },
-    "/v1/system/networking/router-configurations/{configuration}/bgp-config": {
+    "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/bgp-config": {
       "get": {
         "tags": [
           "system/networking"
@@ -11494,10 +11624,19 @@
           {
             "in": "path",
             "name": "configuration",
-            "description": "A name or id to use when selecting a router configuration.",
+            "description": "Router configuration name or id.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "Participating switch.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           }
         ],
@@ -11530,10 +11669,19 @@
           {
             "in": "path",
             "name": "configuration",
-            "description": "A name or id to use when selecting a router configuration.",
+            "description": "Router configuration name or id.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "Participating switch.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           }
         ],
@@ -11576,10 +11724,19 @@
           {
             "in": "path",
             "name": "configuration",
-            "description": "A name or id to use when selecting a router configuration.",
+            "description": "Router configuration name or id.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "Participating switch.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           }
         ],
@@ -11596,7 +11753,7 @@
         }
       }
     },
-    "/v1/system/networking/router-configurations/{configuration}/bgp-peers": {
+    "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/bgp-peers": {
       "get": {
         "tags": [
           "system/networking"
@@ -11607,10 +11764,19 @@
           {
             "in": "path",
             "name": "configuration",
-            "description": "A name or id to use when selecting a router configuration.",
+            "description": "Router configuration name or id.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "Participating switch.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           },
           {
@@ -11673,10 +11839,19 @@
           {
             "in": "path",
             "name": "configuration",
-            "description": "A name or id to use when selecting a router configuration.",
+            "description": "Router configuration name or id.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "Participating switch.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           }
         ],
@@ -11710,7 +11885,7 @@
         }
       }
     },
-    "/v1/system/networking/router-configurations/{configuration}/bgp-peers/{peer}": {
+    "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/bgp-peers/{peer}": {
       "get": {
         "tags": [
           "system/networking"
@@ -11734,6 +11909,15 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "Switch containing this entry.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           }
         ],
@@ -11779,6 +11963,15 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "Switch containing this entry.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           }
         ],
@@ -11835,6 +12028,15 @@
             "schema": {
               "$ref": "#/components/schemas/Name"
             }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "Switch containing this entry.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
+            }
           }
         ],
         "responses": {
@@ -11850,7 +12052,7 @@
         }
       }
     },
-    "/v1/system/networking/router-configurations/{configuration}/routes": {
+    "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/routes": {
       "get": {
         "tags": [
           "system/networking"
@@ -11861,10 +12063,19 @@
           {
             "in": "path",
             "name": "configuration",
-            "description": "A name or id to use when selecting a router configuration.",
+            "description": "Router configuration name or id.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "Participating switch.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           },
           {
@@ -11927,10 +12138,19 @@
           {
             "in": "path",
             "name": "configuration",
-            "description": "A name or id to use when selecting a router configuration.",
+            "description": "Router configuration name or id.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "Participating switch.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           }
         ],
@@ -11964,7 +12184,7 @@
         }
       }
     },
-    "/v1/system/networking/router-configurations/{configuration}/routes/{route}": {
+    "/v1/system/networking/router-configurations/{configuration}/switches/{switch}/routes/{route}": {
       "get": {
         "tags": [
           "system/networking"
@@ -11988,6 +12208,15 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "Switch containing this entry.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           }
         ],
@@ -12033,6 +12262,15 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "Switch containing this entry.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           }
         ],
@@ -12088,6 +12326,15 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "Switch containing this entry.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           }
         ],
@@ -28546,29 +28793,6 @@
         "description": "A router configuration",
         "type": "object",
         "properties": {
-          "bfd_peers": {
-            "description": "BFD peers in this router configuration",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BfdPeer"
-            }
-          },
-          "bgp_config": {
-            "nullable": true,
-            "description": "The BGP configuration for this router configuration, if set",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/RouterConfigurationBgpConfig"
-              }
-            ]
-          },
-          "bgp_peers": {
-            "description": "BGP peers in this router configuration",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RouterConfigurationBgpPeer"
-            }
-          },
           "description": {
             "description": "Human-readable free-form text about a resource",
             "type": "string"
@@ -28586,20 +28810,12 @@
               }
             ]
           },
-          "routes": {
-            "description": "Static routes in this router configuration",
+          "switches": {
+            "description": "Settings for each participating switch.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/StaticRoute"
+              "$ref": "#/components/schemas/RouterConfigurationSwitch"
             }
-          },
-          "switch": {
-            "description": "The switch this router configuration applies to",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchSlot"
-              }
-            ]
           },
           "time_created": {
             "description": "Timestamp when this resource was created",
@@ -28613,13 +28829,10 @@
           }
         },
         "required": [
-          "bfd_peers",
-          "bgp_peers",
           "description",
           "id",
           "name",
-          "routes",
-          "switch",
+          "switches",
           "time_created",
           "time_modified"
         ]
@@ -28644,6 +28857,7 @@
           },
           "max_paths": {
             "description": "Maximum number of equal-cost paths for BGP ECMP",
+            "default": 1,
             "allOf": [
               {
                 "$ref": "#/components/schemas/MaxPathConfig"
@@ -28653,8 +28867,7 @@
         },
         "required": [
           "asn",
-          "bgp_announce_set",
-          "max_paths"
+          "bgp_announce_set"
         ]
       },
       "RouterConfigurationBgpConfigSet": {
@@ -28728,12 +28941,14 @@
           },
           "connect_retry": {
             "description": "TCP connection retry interval in seconds",
+            "default": 3,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
           },
           "delay_open": {
             "description": "Delay in seconds before sending open request after TCP session establishment",
+            "default": 0,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -28744,18 +28959,21 @@
           },
           "hold_time": {
             "description": "Hold time between keepalives in seconds",
+            "default": 6,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
           },
           "idle_hold_time": {
             "description": "Time to hold peer in idle state in seconds",
+            "default": 3,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
           },
           "keepalive": {
             "description": "Keepalive request interval in seconds",
+            "default": 2,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -28818,12 +29036,7 @@
           }
         },
         "required": [
-          "connect_retry",
-          "delay_open",
           "enforce_first_as",
-          "hold_time",
-          "idle_hold_time",
-          "keepalive",
           "name",
           "peer"
         ]
@@ -28859,19 +29072,18 @@
           "name": {
             "$ref": "#/components/schemas/Name"
           },
-          "switch": {
-            "description": "The switch this router configuration applies to",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchSlot"
-              }
-            ]
+          "switches": {
+            "description": "Initial participating switches. Each starts with empty settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchSlot"
+            }
           }
         },
         "required": [
           "description",
           "name",
-          "switch"
+          "switches"
         ]
       },
       "RouterConfigurationResultsPage": {
@@ -28895,6 +29107,56 @@
           "items"
         ]
       },
+      "RouterConfigurationSwitch": {
+        "description": "Routing settings for one switch within a router configuration.",
+        "type": "object",
+        "properties": {
+          "bfd_peers": {
+            "description": "BFD peers in this router configuration",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BfdPeer"
+            }
+          },
+          "bgp_config": {
+            "nullable": true,
+            "description": "The BGP configuration for this router configuration, if set",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterConfigurationBgpConfig"
+              }
+            ]
+          },
+          "bgp_peers": {
+            "description": "BGP peers in this router configuration",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouterConfigurationBgpPeer"
+            }
+          },
+          "routes": {
+            "description": "Static routes in this router configuration",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StaticRoute"
+            }
+          },
+          "switch": {
+            "description": "Switch configured by this block",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchSlot"
+              }
+            ]
+          }
+        },
+        "required": [
+          "switch"
+        ]
+      },
       "RouterConfigurationUpdate": {
         "description": "Parameters for updating a router configuration\n\nIf a value is not specified, it will remain unchanged.",
         "type": "object",
@@ -28908,15 +29170,6 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
-              }
-            ]
-          },
-          "switch": {
-            "nullable": true,
-            "description": "The switch this router configuration applies to",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchSlot"
               }
             ]
           }

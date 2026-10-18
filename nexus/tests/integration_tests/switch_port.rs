@@ -725,6 +725,81 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
             )
         });
     }
+
+    // A-27: without a Nexus cache, failed RC/list reads must leave RSS's
+    // already-installed network alone. Exercise both failures through the
+    // complete task after establishing that it can publish on this fixture.
+    use async_bb8_diesel::AsyncSimpleConnection;
+    use nexus_db_queries::{authn, authz, context::OpContext};
+    use std::sync::Arc;
+    let datastore = ctx.server.server_context().nexus.datastore();
+    let opctx = OpContext::for_background(
+        ctx.logctx.log.new(slog::o!()),
+        Arc::new(authz::Authz::new(&ctx.logctx.log)),
+        authn::Context::internal_db_init(),
+        Arc::clone(datastore) as Arc<dyn nexus_auth::storage::Storage>,
+    );
+    let conn = datastore.pool_connection_for_tests().await.unwrap();
+    conn.batch_execute_async(
+        "DELETE FROM omicron.public.bootstore_config WHERE key = 'network_key'",
+    )
+    .await
+    .unwrap();
+    assert!(
+        datastore
+            .get_latest_bootstore_config(
+                &opctx,
+                nexus_db_model::NETWORK_KEY.into()
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
+    for table in
+        ["router_configuration_switch", "control_plane_router_configuration"]
+    {
+        conn.batch_execute_async(&format!("ALTER TABLE omicron.public.{table} RENAME TO unavailable_routing_for_test")).await.unwrap();
+        let task = nexus_test_utils::background::activate_background_task(
+            &ctx.lockstep_client,
+            "switch_port_config_manager",
+        )
+        .await;
+        conn.batch_execute_async(&format!("ALTER TABLE omicron.public.unavailable_routing_for_test RENAME TO {table}")).await.unwrap();
+        let nexus_lockstep_client::types::LastResult::Completed(result) =
+            task.last
+        else {
+            panic!("task did not complete: {:?}", task.last);
+        };
+        let status: nexus_types::internal_api::background::SwitchPortSettingsManagerStatus = serde_json::from_value(result.details).unwrap();
+        assert!(status.incomplete_bootstore_configs.is_empty(), "{status:?}");
+        if table == "router_configuration_switch" {
+            assert!(
+                !status.router_config_render_errors.is_empty(),
+                "the injected read failure must reach the renderer"
+            );
+        }
+        assert!(
+            datastore
+                .get_latest_bootstore_config(
+                    &opctx,
+                    nexus_db_model::NETWORK_KEY.into()
+                )
+                .await
+                .unwrap()
+                .is_none(),
+            "failed {table} read must not publish an invented configuration"
+        );
+        for s in &ctx.sled_agents {
+            assert_eq!(
+                s.sled_agent()
+                    .bootstore_network_config
+                    .lock()
+                    .unwrap()
+                    .generation,
+                4
+            );
+        }
+    }
 }
 
 async fn wait_for_sled_agent_bootstore_gen(

@@ -91,6 +91,11 @@ impl super::Nexus {
         let log = &opctx.log;
 
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        if let Some(routing) = &request.routing {
+            routing
+                .validate(&request.rack_network_config)
+                .map_err(|e| Error::invalid_request(&e.to_string()))?;
+        }
 
         let physical_disks: Vec<_> = request
             .physical_disks
@@ -661,6 +666,7 @@ impl super::Nexus {
                     external_dns,
                     recovery_silo,
                     recovery_silo_fq_dns_name,
+                    routing: request.routing,
                     recovery_user_id: request.recovery_silo.user_name,
                     recovery_user_password_hash: request
                         .recovery_silo
