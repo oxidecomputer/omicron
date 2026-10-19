@@ -28,6 +28,7 @@ use serde::Serialize;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog::Key;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::net::Ipv6Addr;
@@ -111,7 +112,7 @@ pub struct AbandonedVmmReaperStatus {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct VmmsBySled {
     pub sled_id: SledUuid,
-    pub vmm_ids: Vec<PropolisUuid>,
+    pub vmm_ids: BTreeSet<PropolisUuid>,
 }
 
 impl IdOrdItem for VmmsBySled {

@@ -32,6 +32,7 @@ use sled_agent_client::types::VmmPutStateBody;
 use sled_agent_client::types::VmmStateRequested;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 /// Determines the number of attempts to stop VMMs (sled agent PUT request and
@@ -67,14 +68,20 @@ impl VmmStopForUpdateResult {
         for VmmsBySled { sled_id, vmm_ids } in vmms_stopped_by_sled {
             self.vmms_stopped_by_sled
                 .entry(sled_id)
-                .or_insert_with(|| VmmsBySled { sled_id, vmm_ids: Vec::new() })
+                .or_insert_with(|| VmmsBySled {
+                    sled_id,
+                    vmm_ids: BTreeSet::new(),
+                })
                 .vmm_ids
                 .extend(vmm_ids);
         }
         for VmmsBySled { sled_id, vmm_ids } in vmms_failed_by_sled {
             self.vmms_failed_by_sled
                 .entry(sled_id)
-                .or_insert_with(|| VmmsBySled { sled_id, vmm_ids: Vec::new() })
+                .or_insert_with(|| VmmsBySled {
+                    sled_id,
+                    vmm_ids: BTreeSet::new(),
+                })
                 .vmm_ids
                 .extend(vmm_ids);
         }
@@ -233,7 +240,8 @@ impl VmmStopForUpdate {
                 }
             };
 
-            // TODO-K: pass the whole VMM not just the ID so I can thread in the instance ID
+            // TODO-K: pass the whole VMM not just the ID so I can thread in the
+            // instance ID for logs
             for vmm_id in vmm_ids {
                 let stop =
                     self.stop_vmm(opctx, sled_client.clone(), sled_id, vmm_id);
@@ -268,6 +276,8 @@ impl VmmStopForUpdate {
                 .await
             {
                 Ok(res) => res.into_inner().updated_runtime.map(Into::into),
+                // TODO-K: check if SledAgentInstanceError::vmm_gone returns
+                // true, and if so, synthesize a Failed instance state update
                 Err(e) => {
                     let err = SledAgentInstanceError(e);
 
@@ -285,10 +295,10 @@ impl VmmStopForUpdate {
                         .entry(sled_id)
                         .or_insert_with(|| VmmsBySled {
                             sled_id,
-                            vmm_ids: Vec::new(),
+                            vmm_ids: BTreeSet::new(),
                         })
                         .vmm_ids
-                        .push(*id);
+                        .insert(*id);
 
                     return result;
                 }
@@ -403,10 +413,10 @@ impl VmmStopForUpdate {
                                 .entry(sled_id)
                                 .or_insert_with(|| VmmsBySled {
                                     sled_id,
-                                    vmm_ids: Vec::new(),
+                                    vmm_ids: BTreeSet::new(),
                                 })
                                 .vmm_ids
-                                .push(*id);
+                                .insert(*id);
 
                             slog::debug!(
                                 opctx.log,
