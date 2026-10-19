@@ -1841,4 +1841,16 @@ impl SledAgentApi for SledAgentImpl {
             })
             .await
     }
+
+    async fn multirack_join_complete(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.complete_multirack_join()?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
 }

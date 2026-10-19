@@ -10,6 +10,7 @@ use nexus_types::trust_quorum::{
     IsLrtqUpgrade, ProposedTrustQuorumConfig, TrustQuorumConfig,
 };
 use omicron_common::api::external::Error;
+use omicron_common::http_client::internal_http_client_builder;
 use omicron_uuid_kinds::RackUuid;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
@@ -348,7 +349,7 @@ impl super::Nexus {
         let timeout = Duration::from_secs(60);
         let url = format!("http://{}", sled.address());
         let log = self.log.new(o!("SledAgent" => url.clone()));
-        let reqwest_client = reqwest::ClientBuilder::new()
+        let reqwest_client = internal_http_client_builder()
             .connect_timeout(timeout)
             .timeout(timeout)
             .build()

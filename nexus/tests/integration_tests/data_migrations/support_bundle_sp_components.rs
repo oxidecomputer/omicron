@@ -11,11 +11,11 @@ use futures::future::BoxFuture;
 use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
-const BUNDLE_ID: Uuid = Uuid::from_u128(0x30900001_0000_0000_0000_000000000001);
+const BUNDLE_ID: Uuid = Uuid::from_u128(0x31000001_0000_0000_0000_000000000001);
 
-const SITREP_ID: Uuid = Uuid::from_u128(0x30900002_0000_0000_0000_000000000001);
+const SITREP_ID: Uuid = Uuid::from_u128(0x31000002_0000_0000_0000_000000000001);
 const REQUEST_ID: Uuid =
-    Uuid::from_u128(0x30900003_0000_0000_0000_000000000001);
+    Uuid::from_u128(0x31000003_0000_0000_0000_000000000001);
 
 pub(crate) fn checks() -> DataMigrationFns {
     DataMigrationFns::new().before(before).after(after)
@@ -40,7 +40,7 @@ async fn before_impl(ctx: &MigrationContext<'_>) {
             "
         ))
         .await
-        .expect("migration 309 test data insertion should succeed");
+        .expect("migration 310test data insertion should succeed");
 }
 
 async fn after_impl(ctx: &MigrationContext<'_>) {
@@ -57,7 +57,7 @@ async fn after_impl(ctx: &MigrationContext<'_>) {
             &[],
         )
         .await
-        .expect("migration 309 bundle flags query should succeed")
+        .expect("migration 310bundle flags query should succeed")
         .get("include_sp_components");
     assert_eq!(bundle_flag, false);
 
@@ -75,7 +75,7 @@ async fn after_impl(ctx: &MigrationContext<'_>) {
             &[],
         )
         .await
-        .expect("migration 309 FM request flags query should succeed")
+        .expect("migration 310FM request flags query should succeed")
         .get("include_sp_components");
     assert_eq!(request_flag, false);
 
@@ -92,7 +92,7 @@ async fn after_impl(ctx: &MigrationContext<'_>) {
             "
         ))
         .await
-        .expect("migration 309 test data cleanup should succeed");
+        .expect("migration 310test data cleanup should succeed");
 }
 
 fn before<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {

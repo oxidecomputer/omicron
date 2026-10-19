@@ -19,6 +19,7 @@ use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
+use omicron_common::http_client::internal_http_client;
 use serde_json::json;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -39,7 +40,8 @@ async fn get_region_from_agent(
     region_id: Uuid,
 ) -> Result<Region> {
     let url = format!("http://{}", agent_address);
-    let client = CrucibleAgentClient::new(&url);
+    let client =
+        CrucibleAgentClient::new_with_client(&url, internal_http_client());
 
     let result = client.region_get(&RegionId(region_id.to_string())).await?;
 

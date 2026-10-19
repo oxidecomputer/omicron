@@ -5,6 +5,7 @@
 //! Functions common to interacting with the Crucible agent in saga actions
 
 use super::*;
+use omicron_common::http_client::internal_http_client;
 
 use crate::Nexus;
 use crucible_pantry_client::types::Error as CruciblePantryClientError;
@@ -128,7 +129,10 @@ pub(crate) async fn call_pantry_attach_for_volume(
 
     info!(log, "sending attach request for {attach_id} to {pantry_address}");
 
-    let client = crucible_pantry_client::Client::new(&endpoint);
+    let client = crucible_pantry_client::Client::new_with_client(
+        &endpoint,
+        internal_http_client(),
+    );
 
     let attach_request = crucible_pantry_client::types::AttachRequest {
         volume_construction_request,
@@ -186,7 +190,10 @@ pub(crate) async fn call_pantry_detach(
 
     info!(log, "sending detach for {attach_id} to endpoint {endpoint}");
 
-    let client = crucible_pantry_client::Client::new(&endpoint);
+    let client = crucible_pantry_client::Client::new_with_client(
+        &endpoint,
+        internal_http_client(),
+    );
 
     let detach_operation =
         || async { client.detach(&attach_id.to_string()).await };

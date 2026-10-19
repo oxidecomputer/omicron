@@ -28,6 +28,8 @@ use nexus_types::inventory::SpType;
 use nexus_types::inventory::TimeSync;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
 use omicron_common::address::NTP_ADMIN_PORT;
+use omicron_common::http_client::internal_http_client;
+use omicron_common::http_client::internal_http_client_builder;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use parallel_task_set::ParallelTaskSet;
 use sled_agent_types::disk::M2Slot;
@@ -556,7 +558,14 @@ impl<'a> Collector<'a> {
                 let url = format!("http://{addr}");
                 let log = self.log.new(o!("ntp_admin_url" => url.clone()));
 
-                (cfg.id, ntp_admin_client::Client::new(&url, log))
+                (
+                    cfg.id,
+                    ntp_admin_client::Client::new_with_client(
+                        &url,
+                        internal_http_client(),
+                        log,
+                    ),
+                )
             })
             .collect();
 
@@ -685,7 +694,14 @@ impl<'a> Collector<'a> {
                 let url = format!("http://{http_address}");
                 let log = self.log.new(o!("internal_dns_url" => url.clone()));
 
-                (cfg.id, dns_service_client::Client::new(&url, log))
+                (
+                    cfg.id,
+                    dns_service_client::Client::new_with_client(
+                        &url,
+                        internal_http_client(),
+                        log,
+                    ),
+                )
             })
             .collect();
 
@@ -737,7 +753,7 @@ async fn collect_one_sled_agent(
         "sled_agent_url" => url
     );
 
-    let reqwest_client = reqwest::ClientBuilder::new()
+    let reqwest_client = internal_http_client_builder()
         .connect_timeout(SLED_AGENT_TIMEOUT)
         .timeout(SLED_AGENT_TIMEOUT)
         .build()

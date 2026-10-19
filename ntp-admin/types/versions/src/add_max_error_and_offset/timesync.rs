@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::v1;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
@@ -41,17 +40,4 @@ pub struct TimeSync {
     /// The maximum estimated clock error: root_delay / 2 + root_dispersion,
     /// in seconds.
     pub max_error: f64,
-}
-
-impl From<TimeSync> for v1::timesync::TimeSync {
-    fn from(s: TimeSync) -> Self {
-        v1::timesync::TimeSync {
-            sync: s.sync,
-            ref_id: s.ref_id,
-            ip_addr: s.ip_addr,
-            stratum: s.stratum,
-            ref_time: s.ref_time,
-            correction: s.correction,
-        }
-    }
 }

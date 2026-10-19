@@ -28,6 +28,7 @@ use illumos_utils::zone::OmicronZoneConfigExt;
 use illumos_utils::zone::Zones;
 use ntp_admin_client::types::TimeSync;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::http_client::internal_http_client;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::OmicronZoneConfig;
@@ -587,8 +588,9 @@ impl OmicronZones {
             return Err(TimeSyncError::MultipleRunningNtpZones);
         }
 
-        let client = ntp_admin_client::Client::new(
+        let client = ntp_admin_client::Client::new_with_client(
             &format!("http://{ntp_admin_address}"),
+            internal_http_client(),
             log.clone(),
         );
 

@@ -20,14 +20,18 @@ use nexus_auth::authz;
 use nexus_auth::context::OpContext;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_model::DbTypedUuid;
 use nexus_db_model::SagaReasonAbandoned;
 use nexus_db_model::SagaState;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_db_schema::schema::saga;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_uuid_kinds::GenericUuid;
 use slog_error_chain::InlineErrorChain;
 use std::ops::Add;
+use steno::SagaIdKind;
 
 // This type is deliberately close to the database representation so it can be
 // directly inserted as-is. It is currently pub so that omdb can use it and
@@ -173,12 +177,11 @@ impl DataStore {
     ) -> Result<(), Error> {
         use nexus_db_schema::schema::saga::dsl;
 
-        let saga_id: db::saga_types::SagaId = saga_id.into();
         let result = diesel::update(dsl::saga)
-            .filter(dsl::id.eq(saga_id))
+            .filter(dsl::id.eq(to_db_typed_uuid(saga_id)))
             .filter(dsl::current_sec.eq(current_sec))
             .set::<SagaStateDbFields>(new_state.clone().into())
-            .check_if_exists::<db::saga_types::Saga>(saga_id)
+            .check_if_exists::<db::saga_types::Saga>(to_db_typed_uuid(saga_id))
             .execute_and_check(&*self.pool_connection_unauthorized().await?)
             .await
             .map_err(|e| {
@@ -186,7 +189,7 @@ impl DataStore {
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::SagaDbg,
-                        LookupType::ById(saga_id.0.into()),
+                        LookupType::ById(saga_id.into_untyped_uuid()),
                     ),
                 )
             })?;
@@ -238,7 +241,8 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
-            paginator = p.found_batch(&batch, &|row| row.id());
+            paginator =
+                p.found_batch(&batch, &|row| to_db_typed_uuid(row.id()));
 
             // Validate each row into a `Saga` as we collect it.
             for row in batch {
@@ -335,7 +339,7 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
-            paginator = p.found_batch(&batch, &|row| row.id);
+            paginator = p.found_batch(&batch, &|row| to_db_typed_uuid(row.id));
             sagas.extend(batch);
         }
         Ok(sagas)
@@ -350,18 +354,19 @@ impl DataStore {
     pub async fn saga_latest_node_event_times(
         &self,
         opctx: &OpContext,
-        saga_ids: &[db::saga_types::SagaId],
-    ) -> Result<Vec<(db::saga_types::SagaId, Option<DateTime<Utc>>)>, Error>
-    {
+        saga_ids: &[steno::SagaId],
+    ) -> Result<Vec<(steno::SagaId, Option<DateTime<Utc>>)>, Error> {
         use nexus_db_schema::schema::saga_node_event::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
         let mut results = Vec::with_capacity(saga_ids.len());
         // Chunk the IDs so a large non-terminal saga count doesn't produce one
         // giant statement.
         for chunk in saga_ids.chunks(SQL_BATCH_SIZE.get() as usize) {
-            let batch: Vec<(db::saga_types::SagaId, Option<DateTime<Utc>>)> =
+            let chunk: Vec<_> =
+                chunk.iter().copied().map(to_db_typed_uuid).collect();
+            let batch: Vec<(DbTypedUuid<SagaIdKind>, Option<DateTime<Utc>>)> =
                 dsl::saga_node_event
-                    .filter(dsl::saga_id.eq_any(chunk.to_vec()))
+                    .filter(dsl::saga_id.eq_any(chunk))
                     .group_by(dsl::saga_id)
                     .select((dsl::saga_id, diesel::dsl::max(dsl::event_time)))
                     .load_async(&*conn)
@@ -369,7 +374,9 @@ impl DataStore {
                     .map_err(|e| {
                         public_error_from_diesel(e, ErrorHandler::Server)
                     })?;
-            results.extend(batch);
+            results.extend(
+                batch.into_iter().map(|(saga_id, time)| (saga_id.into(), time)),
+            );
         }
         Ok(results)
     }
@@ -379,7 +386,7 @@ impl DataStore {
     pub async fn saga_fetch_log_batched(
         &self,
         opctx: &OpContext,
-        saga_id: db::saga_types::SagaId,
+        saga_id: steno::SagaId,
     ) -> Result<Vec<steno::SagaNodeEvent>, Error> {
         let mut events = vec![];
         let mut paginator = Paginator::new(
@@ -394,7 +401,7 @@ impl DataStore {
                 (dsl::node_id, dsl::event_type),
                 &p.current_pagparams(),
             )
-            .filter(dsl::saga_id.eq(saga_id))
+            .filter(dsl::saga_id.eq(to_db_typed_uuid(saga_id)))
             .select(db::saga_types::SagaNodeEvent::as_select())
             .load_async(&*conn)
             .await
@@ -525,7 +532,6 @@ mod test {
     use db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_db_model::Saga;
     use nexus_db_model::SagaExecState;
-    use nexus_db_model::SagaId;
     use nexus_db_model::SagaReasonAbandoned;
     use nexus_db_model::{SagaNodeEvent, SecId};
     use omicron_generation_kinds::SagaAdoptGeneration;
@@ -533,6 +539,7 @@ mod test {
     use rand::seq::SliceRandom;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
+    use steno::SagaId;
     use uuid::Uuid;
 
     // Tests that the logic for producing candidates for saga recovery only
@@ -731,10 +738,7 @@ mod test {
                 cx.new_db_event(0, steno::SagaNodeEventType::Started);
             event.event_time = t(1_000 + i);
             event_batch.push(event);
-            expected.push((
-                db::saga_types::SagaId::from(cx.saga_id),
-                Some(t(1_000 + i)),
-            ));
+            expected.push((cx.saga_id, Some(t(1_000 + i))));
         }
 
         // One saga with several events: only the latest time is returned.
@@ -745,10 +749,7 @@ mod test {
             event.event_time = t(secs);
             event_batch.push(event);
         }
-        expected.push((
-            db::saga_types::SagaId::from(multi_cx.saga_id),
-            Some(t(30_000)),
-        ));
+        expected.push((multi_cx.saga_id, Some(t(30_000))));
 
         // One saga with no events at all: absent from the result.
         let no_events_cx = SagaTestContext::new(sec_id);
@@ -768,7 +769,7 @@ mod test {
         let queried_ids: Vec<_> = expected
             .iter()
             .map(|(id, _)| *id)
-            .chain([db::saga_types::SagaId::from(no_events_cx.saga_id)])
+            .chain([no_events_cx.saga_id])
             .collect();
         let mut observed = datastore
             .saga_latest_node_event_times(&opctx, &queried_ids)
@@ -832,10 +833,7 @@ mod test {
 
         // List them, expect to see them all in order by ID.
         let observed_nodes = datastore
-            .saga_fetch_log_batched(
-                &opctx,
-                nexus_db_model::saga_types::SagaId::from(node_cx.saga_id),
-            )
+            .saga_fetch_log_batched(&opctx, node_cx.saga_id)
             .await
             .expect("Failed to list nodes of unfinished saga");
         inserted_nodes.sort_by_key(|a| (a.node_id, a.event_type.clone()));
@@ -872,15 +870,12 @@ mod test {
         let logctx = dev::test_setup_log("test_list_no_unfinished_nodes");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
-        let saga_id = steno::SagaId(Uuid::new_v4());
+        let saga_id = steno::SagaId::new_v4();
 
         // Test that this returns "no nodes" rather than throwing some "not
         // found" error.
         let observed_nodes = datastore
-            .saga_fetch_log_batched(
-                &opctx,
-                nexus_db_model::saga_types::SagaId::from(saga_id),
-            )
+            .saga_fetch_log_batched(&opctx, saga_id)
             .await
             .expect("Failed to list nodes of unfinished saga");
         assert_eq!(observed_nodes.len(), 0);
@@ -1013,7 +1008,7 @@ mod test {
             .expect("updating state to Abandoned");
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
-        let saga_id: db::saga_types::SagaId = node_cx.saga_id.into();
+        let saga_id = to_db_typed_uuid(node_cx.saga_id);
         let found_saga = {
             use nexus_db_schema::schema::saga::dsl;
             dsl::saga
@@ -1043,7 +1038,7 @@ mod test {
 
     impl SagaTestContext {
         fn new(sec_id: SecId) -> Self {
-            Self { saga_id: steno::SagaId(Uuid::new_v4()), sec_id }
+            Self { saga_id: steno::SagaId::new_v4(), sec_id }
         }
 
         fn new_running_db_saga(&self) -> db::model::saga_types::Saga {
@@ -1065,7 +1060,7 @@ mod test {
             };
             db::model::saga_types::Saga::new_abandoned(
                 self.sec_id,
-                self.saga_id.into(),
+                self.saga_id,
                 "test_saga".to_string(),
                 serde_json::value::Value::Null,
                 abandon_metadata,
@@ -1144,7 +1139,7 @@ mod test {
                 steno::SagaCachedState::Done,
             ] {
                 let params = steno::SagaCreateParams {
-                    id: steno::SagaId(Uuid::new_v4()),
+                    id: steno::SagaId::new_v4(),
                     name: steno::SagaName::new("tewst saga"),
                     dag: serde_json::value::Value::Null,
                     state,
@@ -1300,7 +1295,7 @@ mod test {
                 steno::SagaCachedState::Done,
             ] {
                 let params = steno::SagaCreateParams {
-                    id: steno::SagaId(Uuid::new_v4()),
+                    id: steno::SagaId::new_v4(),
                     name: steno::SagaName::new("test saga"),
                     dag: serde_json::value::Value::Null,
                     state,
