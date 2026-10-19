@@ -13,6 +13,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::DataStore;
 use crate::db::datastore::IdentityCheckPolicy;
+use omicron_git_version_types::GitVersion;
 use omicron_test_utils::dev::db::CockroachInstance;
 use omicron_uuid_kinds::RackUuid;
 use slog::Logger;
@@ -24,6 +25,15 @@ pub mod fm;
 pub mod helpers;
 pub mod multicast;
 pub mod simulated_sleds;
+
+/// A fixed Git version for datastores built by test utilities.
+///
+/// This is deliberately not `omicron_git_version::current()`, since that would
+/// introduce a lot of unnecessary recompiles. See #10692. This is also
+/// deliberately not a commit hash since we aren't trying to treat it as
+/// anything other than an opaque string here. (But there is an argument for
+/// parsing it as a 20-byte hex string.)
+pub const TEST_GIT_VERSION: GitVersion = GitVersion::new_static("test", false);
 
 enum Populate {
     Nothing,
@@ -128,6 +138,7 @@ impl TestDatabaseBuilder {
                                 pool,
                                 None,
                                 IdentityCheckPolicy::DontCare,
+                                TEST_GIT_VERSION,
                             )
                             .await
                             .unwrap(),
@@ -264,9 +275,15 @@ impl TestDatabase {
     pub async fn extra_datastore(&self, log: &Logger) -> Arc<DataStore> {
         let pool = new_pool(log, &self.db);
         Arc::new(
-            DataStore::new(&log, pool, None, IdentityCheckPolicy::DontCare)
-                .await
-                .unwrap(),
+            DataStore::new(
+                &log,
+                pool,
+                None,
+                IdentityCheckPolicy::DontCare,
+                TEST_GIT_VERSION,
+            )
+            .await
+            .unwrap(),
         )
     }
 
@@ -335,9 +352,15 @@ async fn datastore_test(
         db::ClaimBacktraceSetting::Capture,
     ));
     let datastore = Arc::new(
-        DataStore::new(&log, pool, None, IdentityCheckPolicy::DontCare)
-            .await
-            .unwrap(),
+        DataStore::new(
+            &log,
+            pool,
+            None,
+            IdentityCheckPolicy::DontCare,
+            TEST_GIT_VERSION,
+        )
+        .await
+        .unwrap(),
     );
 
     // Create an OpContext with the credentials of "db-init" just for the

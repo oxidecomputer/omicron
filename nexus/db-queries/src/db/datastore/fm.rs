@@ -2171,6 +2171,7 @@ mod tests {
     use super::test_utils::*;
     use super::*;
     use crate::db::explain::ExplainableAsync;
+    use crate::db::pub_test_utils::TEST_GIT_VERSION;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use chrono::Utc;
@@ -3203,8 +3204,12 @@ mod tests {
             ),
             cases: Default::default(),
         };
-        model::fm::SitrepAnalysisReport::new(&input_report, &analysis_report)
-            .expect("failed to serialize analysis report")
+        model::fm::SitrepAnalysisReport::new(
+            &input_report,
+            &analysis_report,
+            &TEST_GIT_VERSION,
+        )
+        .expect("failed to serialize analysis report")
     }
 
     #[tokio::test]
@@ -3841,6 +3846,7 @@ mod tests {
             model::fm::SitrepAnalysisReport::new(
                 &input_report,
                 &analysis_report,
+                &TEST_GIT_VERSION,
             )
             .expect("ghost analysis report should be valid")
         };

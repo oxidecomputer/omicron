@@ -107,7 +107,7 @@ impl ReconfiguratorExec {
             db::ClaimBacktraceSetting::Capture,
         ));
         let datastore = Arc::new(
-            DataStore::new_failfast(&log, pool)
+            DataStore::new_failfast(&log, pool, omicron_git_version::current())
                 .await
                 .context("creating datastore")?,
         );

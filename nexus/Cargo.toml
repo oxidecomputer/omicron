@@ -154,6 +154,7 @@ nexus-types.workspace = true
 nexus-types-versions.workspace = true
 omicron-certificates.workspace = true
 omicron-common.workspace = true
+omicron-git-version.workspace = true
 omicron-passwords.workspace = true
 oxide-tokio-rt.workspace = true
 oximeter.workspace = true
