@@ -28,11 +28,18 @@ pub mod simulated_sleds;
 
 /// A fixed Git version for datastores built by test utilities.
 ///
-/// This is deliberately not `omicron_git_version::current()`, since that would
-/// introduce a lot of unnecessary recompiles. See #10692. This is also
-/// deliberately not a commit hash since we aren't trying to treat it as
-/// anything other than an opaque string here. (But there is an argument for
-/// parsing it as a 20-byte hex string.)
+/// Notes:
+///
+/// * This is deliberately not `omicron_git_version::current()`, since that would
+///   introduce a lot of unnecessary recompiles. See #10692.
+/// * This is also not a commit hash, since we aren't trying to treat it as
+///   anything other than an opaque string. (There is an argument for
+///   parsing it as a 20-byte hex string. But as things currently stand, we
+///   don't do that.)
+/// * It is fine that this is a dummy value that's always the same regardless
+///   of the actual Git version, since the test database is not expected to
+///   emit any information that might be read by tools compiled with a different
+///   schema. (Or, at least that doing so would be quite strange.)
 pub const TEST_GIT_VERSION: GitVersion = GitVersion::new_static("test", false);
 
 enum Populate {

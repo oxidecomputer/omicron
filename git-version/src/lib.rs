@@ -5,6 +5,11 @@
 //! A very tiny crate for obtaining the current Git SHA of the `omicron`
 //! repository.
 //!
+//! **Warning:** Only depend on this crate in leaf nodes! Depending on it in a
+//! core library will cause it and all its dependents to be recompiled every
+//! time the underlying Git commit hash changes. See
+//! [#10692](https://github.com/oxidecomputer/omicron/issues/10692).
+//!
 //! For the core type definitions, see [`omicron_git_version_types`].
 //!
 //! This lives in its own crate, rather than someplace like `omicron-common`,
