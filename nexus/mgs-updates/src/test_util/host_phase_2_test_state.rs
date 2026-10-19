@@ -9,6 +9,7 @@ use anyhow::Context as _;
 use dropshot::ConfigDropshot;
 use dropshot::HttpServer;
 use dropshot::ServerBuilder;
+use nexus_test_utils::RACK_UUID;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::disk::M2Slot;
@@ -175,7 +176,7 @@ impl HostPhase2SledAgentContext {
                 part_number: "test".to_string(),
                 serial_number: "test".to_string(),
             },
-            rack_id: RackUuid::new_v4(),
+            rack_id: RACK_UUID,
         }
     }
 }

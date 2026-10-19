@@ -1632,6 +1632,7 @@ mod test {
     };
     use iddqd::IdOrdMap;
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
+    use nexus_test_utils::RACK_UUID;
     use omicron_common::{
         address::{
             AZ_PREFIX_LENGTH, IpRange, Ipv6Subnet, RACK_PREFIX_LENGTH,
@@ -1724,11 +1725,10 @@ mod test {
     }
 
     fn make_fake_sleds() -> Vec<SledInfo> {
-        let rack_id = RackUuid::new_v4();
         vec![
             make_sled_info(
                 SledUuid::new_v4(),
-                rack_id,
+                RACK_UUID,
                 Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:101::1".parse().unwrap(),
                 ),
@@ -1736,7 +1736,7 @@ mod test {
             ),
             make_sled_info(
                 SledUuid::new_v4(),
-                rack_id,
+                RACK_UUID,
                 Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:102::1".parse().unwrap(),
                 ),
@@ -1744,7 +1744,7 @@ mod test {
             ),
             make_sled_info(
                 SledUuid::new_v4(),
-                rack_id,
+                RACK_UUID,
                 Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:103::1".parse().unwrap(),
                 ),

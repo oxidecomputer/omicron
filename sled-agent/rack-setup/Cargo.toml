@@ -57,5 +57,6 @@ uuid.workspace = true
 [dev-dependencies]
 camino-tempfile.workspace = true
 nexus-reconfigurator-blippy.workspace = true
+nexus-test-utils.workspace = true
 omicron-test-utils.workspace = true
 rcgen.workspace = true

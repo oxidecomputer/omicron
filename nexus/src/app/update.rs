@@ -906,6 +906,7 @@ mod test {
     use nexus_db_model::saga_types::SecId;
     use nexus_inventory::CollectionBuilder;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_test_utils::RACK_UUID;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
@@ -914,7 +915,6 @@ mod test {
     use omicron_common::api::external::ByteCount;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::PropolisUuid;
-    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::disk::M2Slot;
@@ -954,7 +954,7 @@ mod test {
             sled_role: SledRole::Gimlet,
             sled_agent_address: "[::1]:56792".parse().unwrap(),
             sled_id: SledUuid::new_v4(),
-            rack_id: RackUuid::new_v4(),
+            rack_id: RACK_UUID,
             usable_hardware_threads: 10,
             usable_physical_ram: ByteCount::from(1024 * 1024),
             cpu_family: SledCpuFamily::AmdMilan,
