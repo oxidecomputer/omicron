@@ -1942,7 +1942,7 @@ table! {
         instance_manager_num_registered_vmms -> Int8,
 
         rack_id -> Uuid,
-        multirack_join_in_progress -> Bool,
+        running_multirack_join_service -> Bool,
     }
 }
 

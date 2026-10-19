@@ -786,7 +786,7 @@ fn display_sleds(
             sled_id,
             baseboard_id,
             rack_id,
-            multirack_join_in_progress,
+            running_multirack_join_service,
             sled_agent_address,
             sled_role,
             usable_hardware_threads,
@@ -827,8 +827,8 @@ fn display_sleds(
 
         writeln!(indented, "rack ID:     {rack_id}",)?;
 
-        if *multirack_join_in_progress {
-            writeln!(indented, "multirack join in progress")?;
+        if *running_multirack_join_service {
+            writeln!(indented, "running multirack join service")?;
         }
 
         writeln!(

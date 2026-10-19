@@ -36,7 +36,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (58, ADD_MULTIRACK_JOIN_IN_PROGRESS_TO_INVENTORY),
+    (58, ADD_RUNNING_MULTIRACK_JOIN_SERVICE_TO_INVENTORY),
     (57, ADD_RACK_ID_TO_INVENTORY),
     (56, ADD_MULTIRACK_JOIN_COMPLETE),
     (55, ARTIFACT_HASH_SCHEMA),
@@ -1097,7 +1097,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_ADD_MULTIRACK_JOIN_IN_PROGRESS_TO_INVENTORY..,
+        versions = VERSION_ADD_RUNNING_MULTIRACK_JOIN_SERVICE_TO_INVENTORY..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
@@ -1108,7 +1108,7 @@ pub trait SledAgentApi {
         operation_id = "inventory",
         method = GET,
         path = "/inventory",
-        versions = VERSION_ADD_RACK_ID_TO_INVENTORY..VERSION_ADD_MULTIRACK_JOIN_IN_PROGRESS_TO_INVENTORY,
+        versions = VERSION_ADD_RACK_ID_TO_INVENTORY..VERSION_ADD_RUNNING_MULTIRACK_JOIN_SERVICE_TO_INVENTORY,
     }]
     async fn inventory_v57(
         rqctx: RequestContext<Self::Context>,

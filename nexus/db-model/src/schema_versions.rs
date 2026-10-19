@@ -30,7 +30,7 @@ pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
         KnownVersion::new(
             310,
-            "add-multirack-join-in-progress-to-inv-sled-agent",
+            "add-running-multirack-join-service-to-inv-sled-agent",
         ),
         KnownVersion::new(309, "fm-certificate-de"),
         KnownVersion::new(308, "inv-power-shelf-psu"),

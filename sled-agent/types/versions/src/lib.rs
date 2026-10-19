@@ -117,7 +117,7 @@ pub mod v54;
 pub mod v55;
 #[path = "add_rack_id_to_inventory/mod.rs"]
 pub mod v57;
-#[path = "add_multirack_join_in_progress_to_inventory/mod.rs"]
+#[path = "add_running_multirack_join_service_to_inventory/mod.rs"]
 pub mod v58;
 #[path = "add_probe_put_endpoint/mod.rs"]
 pub mod v6;

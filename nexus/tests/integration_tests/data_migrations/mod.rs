@@ -24,9 +24,9 @@ use semver::Version;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
-mod add_multirack_join_in_progress_to_inv_sled_agent;
 mod add_rack_id_to_inv_sled_agent;
 mod add_rendezvous_sled_bp_availability;
+mod add_running_multirack_join_service_to_inv_sled_agent;
 mod add_sled_update_disposition;
 mod bgp_unnumbered_peer_cleanup;
 mod blueprint_zone_multiple_external_ips;
@@ -91,7 +91,7 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(support_bundle_time_range);
     register!(inv_service_processor_rack_id);
     register!(add_rack_id_to_inv_sled_agent);
-    register!(add_multirack_join_in_progress_to_inv_sled_agent);
+    register!(add_running_multirack_join_service_to_inv_sled_agent);
 
     map
 }

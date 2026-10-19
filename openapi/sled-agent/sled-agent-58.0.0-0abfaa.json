@@ -6368,9 +6368,6 @@
               }
             ]
           },
-          "multirack_join_in_progress": {
-            "type": "boolean"
-          },
           "rack_id": {
             "$ref": "#/components/schemas/RackUuid"
           },
@@ -6397,6 +6394,9 @@
           },
           "reservoir_size": {
             "$ref": "#/components/schemas/ByteCount"
+          },
+          "running_multirack_join_service": {
+            "type": "boolean"
           },
           "sled_agent_address": {
             "type": "string"
@@ -6433,11 +6433,11 @@
           "file_source_resolver",
           "fmd",
           "instance_manager_status",
-          "multirack_join_in_progress",
           "rack_id",
           "reconciler_status",
           "reference_measurements",
           "reservoir_size",
+          "running_multirack_join_service",
           "sled_agent_address",
           "sled_id",
           "sled_role",

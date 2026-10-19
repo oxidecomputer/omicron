@@ -1473,7 +1473,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                                 serial_number: sp_state.serial_number.clone(),
                             },
                             rack_id: nexus_inventory::examples::RACK_UUID,
-                            multirack_join_in_progress: false,
+                            running_multirack_join_service: false,
                             last_reconciliation: Some(
                                 ConfigReconcilerInventory {
                                     last_reconciled_config: fake_sled_config

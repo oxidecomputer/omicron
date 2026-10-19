@@ -36,7 +36,7 @@ pub struct Inventory {
     pub sled_role: SledRole,
     pub baseboard_id: BaseboardId,
     pub rack_id: RackUuid,
-    pub multirack_join_in_progress: bool,
+    pub running_multirack_join_service: bool,
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
     pub cpu_family: SledCpuFamily,
@@ -83,7 +83,7 @@ impl From<Inventory> for v57::inventory::Inventory {
             fmd,
 
             // added in this version; drop it to downconvert
-            multirack_join_in_progress: _,
+            running_multirack_join_service: _,
         } = value;
 
         v57::inventory::Inventory {

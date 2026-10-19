@@ -1124,7 +1124,7 @@ mod test {
                     sled_agent_address: "[::1]:56792".parse().unwrap(),
                     sled_id: sled.id(),
                     rack_id: sled.rack_id(),
-                    multirack_join_in_progress: false,
+                    running_multirack_join_service: false,
                     usable_hardware_threads: 10,
                     usable_physical_ram: ByteCount::from(1024 * 1024),
                     cpu_family: SledCpuFamily::AmdMilan,

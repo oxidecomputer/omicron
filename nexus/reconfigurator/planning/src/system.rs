@@ -1558,7 +1558,7 @@ impl Sled {
                 sled_agent_address,
                 sled_id,
                 rack_id: nexus_inventory::examples::RACK_UUID,
-                multirack_join_in_progress: false,
+                running_multirack_join_service: false,
                 usable_hardware_threads: resources.usable_hardware_threads,
                 usable_physical_ram: resources.usable_physical_ram,
                 cpu_family: resources.cpu_family,
@@ -1777,8 +1777,8 @@ impl Sled {
             sled_agent_address: inv_sled_agent.sled_agent_address,
             sled_id,
             rack_id: inv_sled_agent.rack_id,
-            multirack_join_in_progress: inv_sled_agent
-                .multirack_join_in_progress,
+            running_multirack_join_service: inv_sled_agent
+                .running_multirack_join_service,
             usable_hardware_threads: inv_sled_agent.usable_hardware_threads,
             usable_physical_ram: inv_sled_agent.usable_physical_ram,
             cpu_family: inv_sled_agent.cpu_family,

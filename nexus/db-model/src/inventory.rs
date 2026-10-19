@@ -960,7 +960,7 @@ pub struct InvSledAgent {
     instance_manager_num_registered_vmms: SqlU32,
 
     pub rack_id: DbTypedUuid<RackKind>,
-    pub multirack_join_in_progress: bool,
+    pub running_multirack_join_service: bool,
 }
 
 /// Helper for breaking an [`InstanceManagerStatus`] up into its DB columns.
@@ -1443,8 +1443,8 @@ impl InvSledAgent {
                 instance_manager_update_disposition,
                 instance_manager_num_registered_vmms,
                 rack_id,
-                multirack_join_in_progress: sled_agent
-                    .multirack_join_in_progress,
+                running_multirack_join_service: sled_agent
+                    .running_multirack_join_service,
             })
         }
     }

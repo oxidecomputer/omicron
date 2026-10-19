@@ -364,7 +364,7 @@ mod api_impl {
                 sled_role: ctx.role,
                 baseboard_id: ctx.baseboard.clone(),
                 rack_id: ctx.rack_id,
-                multirack_join_in_progress: false,
+                running_multirack_join_service: false,
                 usable_hardware_threads: 64,
                 usable_physical_ram: (1 << 30).into(),
                 reservoir_size: (1 << 29).into(),

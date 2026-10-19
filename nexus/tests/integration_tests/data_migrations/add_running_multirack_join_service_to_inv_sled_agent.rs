@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Validates the `add-multirack-join-in-progress-to-inv-sled-agent` migration,
+//! Validates the `add-running-multirack-join-service-to-inv-sled-agent` migration,
 //! with checks that pre-existing rows are backfilled with `false`.
 
 use super::super::schema::{DataMigrationFns, MigrationContext};
@@ -10,13 +10,13 @@ use futures::future::BoxFuture;
 use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
-const RACK_ID: Uuid = Uuid::from_u128(0x30900001_0000_0000_0000_000000000001);
+const RACK_ID: Uuid = Uuid::from_u128(0x31000001_0000_0000_0000_000000000001);
 
-const SLED_1: Uuid = Uuid::from_u128(0x30900002_0000_0000_0000_000000000001);
-const SLED_2: Uuid = Uuid::from_u128(0x30900002_0000_0000_0000_000000000002);
+const SLED_1: Uuid = Uuid::from_u128(0x31000002_0000_0000_0000_000000000001);
+const SLED_2: Uuid = Uuid::from_u128(0x31000002_0000_0000_0000_000000000002);
 
 const INV_COLL_ID: Uuid =
-    Uuid::from_u128(0x30900003_0000_0000_0000_000000000001);
+    Uuid::from_u128(0x31000003_0000_0000_0000_000000000001);
 
 pub(crate) fn checks() -> DataMigrationFns {
     DataMigrationFns::new().before(before).after(after)
@@ -59,7 +59,7 @@ async fn after_impl(ctx: &MigrationContext<'_>) {
         .query(
             "
             SELECT
-                sled_id, multirack_join_in_progress
+                sled_id, running_multirack_join_service
             FROM
                 omicron.public.inv_sled_agent
             ORDER BY
@@ -73,7 +73,7 @@ async fn after_impl(ctx: &MigrationContext<'_>) {
         .map(|row| {
             (
                 row.get::<_, Uuid>("sled_id"),
-                row.get::<_, bool>("multirack_join_in_progress"),
+                row.get::<_, bool>("running_multirack_join_service"),
             )
         })
         .collect();

@@ -1030,7 +1030,7 @@ impl SledAgent {
             sled_role: self.config.sled_role,
             baseboard_id: self.config.hardware.baseboard.clone().into(),
             rack_id: self.config.rack_id,
-            multirack_join_in_progress: false,
+            running_multirack_join_service: false,
             usable_hardware_threads: self.config.hardware.hardware_threads,
             usable_physical_ram: ByteCount::try_from(
                 self.config.hardware.physical_ram,

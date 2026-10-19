@@ -4609,7 +4609,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     rack_id UUID NOT NULL,
 
     -- Whether this sled is currently running the multirack-join-service
-    multirack_join_in_progress BOOLEAN NOT NULL,
+    running_multirack_join_service BOOLEAN NOT NULL,
 
     CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
         (reconciler_status_kind = 'running'
