@@ -7342,6 +7342,7 @@
           "system/active-problems"
         ],
         "summary": "List Active Problems",
+        "description": "Active Problems are sorted by the time at which they were detected, and may be filtered by state.",
         "operationId": "active_problem_list",
         "parameters": [
           {
@@ -7368,7 +7369,15 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
+              "$ref": "#/components/schemas/TimeAndIdSortMode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "description": "Optional state used to filter Active Problems.\n\nIf this is included, only Active Problems in the specified state will be returned. Otherwise, Active Problems in all states will be returned.",
+            "schema": {
+              "$ref": "#/components/schemas/ActiveProblemState"
             }
           }
         ],
@@ -16204,6 +16213,12 @@
             "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
+          },
+          "time_resolved": {
+            "nullable": true,
+            "description": "If this Active Problem is in the \"resolved\" state, the time at which the problem was resolved.\n\nThis field is non-null if, and only if, the `state` field is \"resolved\".",
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
@@ -16295,38 +16310,16 @@
         "oneOf": [
           {
             "description": "The condition represented by the Active Problem still exists.",
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "active"
-                ]
-              }
-            },
-            "required": [
-              "state"
+            "type": "string",
+            "enum": [
+              "active"
             ]
           },
           {
             "description": "The system has determined that the problem no longer exists.\n\nA resolved Active Problem never becomes active again. If the same condition is detected again, a new Active Problem with a new ID is created.",
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "resolved"
-                ]
-              },
-              "time_resolved": {
-                "description": "The time at which the problem was resolved.",
-                "type": "string",
-                "format": "date-time"
-              }
-            },
-            "required": [
-              "state",
-              "time_resolved"
+            "type": "string",
+            "enum": [
+              "resolved"
             ]
           }
         ]

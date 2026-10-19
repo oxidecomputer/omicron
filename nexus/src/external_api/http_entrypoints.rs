@@ -6,7 +6,7 @@
 
 use super::console_api;
 use crate::app::SetTargetReleaseIntent;
-use crate::app::Unimpl;
+
 use crate::app::external_endpoints::authority_for_request;
 use crate::app::support_bundles::SupportBundleQueryType;
 use crate::context::{ApiContext, audit_and_time};
@@ -8933,7 +8933,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn active_problem_list(
         rqctx: RequestContext<Self::Context>,
-        _pagination: Query<PaginatedById>,
+        query_params: Query<
+            PaginatedByTimeAndId<active_problem::ActiveProblemListParams>,
+        >,
     ) -> Result<
         HttpResponseOk<ResultsPage<active_problem::ActiveProblem>>,
         HttpError,
@@ -8943,7 +8945,22 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            Err(nexus.unimplemented_todo(&opctx, Unimpl::Public).await.into())
+            let query = query_params.into_inner();
+            let scan_params = ScanByTimeAndId::from_query(&query)?;
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let problems = nexus
+                .active_problem_list(&opctx, &scan_params.selector, &pag_params)
+                .await?
+                .into_iter()
+                .map(active_problem::ActiveProblem::from)
+                .collect();
+            Ok(HttpResponseOk(ScanByTimeAndId::results_page(
+                &query,
+                problems,
+                &|_, problem: &active_problem::ActiveProblem| {
+                    (problem.identity.time_created, problem.identity.id)
+                },
+            )?))
         };
         apictx
             .context

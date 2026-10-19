@@ -9487,6 +9487,9 @@ pub trait NexusExternalApi {
     // Active Problems
 
     /// List Active Problems
+    ///
+    /// Active Problems are sorted by the time at which they were detected, and
+    /// may be filtered by state.
     #[endpoint {
         method = GET,
         path = "/v1/system/active-problems",
@@ -9495,7 +9498,11 @@ pub trait NexusExternalApi {
     }]
     async fn active_problem_list(
         rqctx: RequestContext<Self::Context>,
-        pagination: Query<PaginatedById>,
+        pagination: Query<
+            PaginatedByTimeAndId<
+                latest::active_problem::ActiveProblemListParams,
+            >,
+        >,
     ) -> Result<
         HttpResponseOk<ResultsPage<latest::active_problem::ActiveProblem>>,
         HttpError,
