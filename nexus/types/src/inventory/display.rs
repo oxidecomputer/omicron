@@ -43,7 +43,7 @@ use uuid::Uuid;
 
 use crate::inventory::{
     CabooseWhich, Collection, Dataset, InternalDnsGenerationStatus,
-    PhysicalDisk, RotPageWhich, SledAgent, TimeSync, Zpool,
+    PhysicalDisk, PowerShelf, RotPageWhich, SledAgent, TimeSync, Zpool,
 };
 
 /// Code to display inventory collections.
@@ -490,7 +490,6 @@ fn display_devices(
         writeln!(f, "    rack ID:  {}", sp.rack_id)?;
         write!(f, "    MGS slot: {:?} {}", sp.sp_type, sp.sp_slot)?;
         writeln!(f, "")?;
-        writeln!(f, "    rack ID:  {}", sp.rack_id)?;
         writeln!(
             f,
             "    found at: {} from {}",
@@ -498,6 +497,13 @@ fn display_devices(
                 .to_rfc3339_opts(SecondsFormat::Millis, /* use_z */ true),
             sp.source
         )?;
+
+        if sp.sp_type == SpType::Power {
+            display_power_shelf(
+                collection.power_shelves.get(&(&sp.rack_id, sp.sp_slot)),
+                f,
+            )?;
+        }
 
         if sp.sp_type == SpType::Sled {
             #[derive(Tabled)]
@@ -667,6 +673,91 @@ fn display_devices(
             hw_baseboard_id {:?} -- this is a bug",
             rot_missing_sp
         )?;
+    }
+
+    Ok(())
+}
+
+fn display_power_shelf(
+    shelf: Option<&PowerShelf>,
+    f: &mut dyn fmt::Write,
+) -> fmt::Result {
+    use super::PsuIdentityResult;
+    use super::PsuSlot;
+
+    let Some(shelf) = shelf else {
+        return writeln!(f, "    PSUs: no information found");
+    };
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct PsuRow<'a> {
+        slot: PsuSlot,
+        presence: String,
+        device: &'a str,
+        #[tabled(display_with = "option_str_or_dash")]
+        mfr_model: Option<&'a str>,
+        #[tabled(display_with = "option_str_or_dash")]
+        mfr_serial: Option<&'a str>,
+        #[tabled(display_with = "option_str_or_dash")]
+        primary_fw_rev: Option<&'a str>,
+        #[tabled(display_with = "option_str_or_dash")]
+        secondary_fw_rev: Option<&'a str>,
+        #[tabled(display_with = "option_str_or_dash")]
+        mfr_id: Option<&'a str>,
+        #[tabled(display_with = "option_str_or_dash")]
+        mfr_location: Option<&'a str>,
+        #[tabled(display_with = "option_str_or_dash")]
+        mfr_date: Option<&'a str>,
+    }
+
+    writeln!(f, "    PSUs:")?;
+    let mut errors = Vec::new();
+    let rows = shelf
+        .psus
+        .iter()
+        .map(|psu| {
+            let vpd = match psu.identity() {
+                PsuIdentityResult::Present(vpd) => Some(vpd),
+                PsuIdentityResult::Error(error) => {
+                    errors.push((psu.slot, error.to_owned()));
+                    None
+                }
+                PsuIdentityResult::NotPresent => None,
+            };
+            let fw_revs = vpd.and_then(|vpd| match vpd.firmware_revs() {
+                Ok(revs) => Some(revs),
+                Err(error) => {
+                    errors.push((psu.slot, format!("{error:#}")));
+                    None
+                }
+            });
+            PsuRow {
+                slot: psu.slot,
+                presence: format!("{:?}", psu.presence()),
+                device: psu.hubris_device_type.as_str(),
+                mfr_id: vpd.map(|vpd| vpd.mfr_id.as_str()),
+                mfr_model: vpd.map(|vpd| vpd.mfr_model.as_str()),
+                primary_fw_rev: fw_revs.as_ref().map(|revs| revs.primary),
+                secondary_fw_rev: fw_revs.as_ref().map(|revs| revs.secondary),
+                mfr_location: vpd.map(|vpd| vpd.mfr_location.as_str()),
+                mfr_date: vpd.map(|vpd| vpd.mfr_date.as_str()),
+                mfr_serial: vpd.map(|vpd| vpd.mfr_serial.as_str()),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+    writeln!(f, "{}", textwrap::indent(&table, "        "))?;
+
+    if !errors.is_empty() {
+        writeln!(f, "    PSU VPD errors:")?;
+        for (slot, error) in errors {
+            writeln!(f, "      - {slot}: {error}")?;
+        }
     }
 
     Ok(())
@@ -1584,5 +1675,103 @@ fn option_impl_display<T: fmt::Display>(t: &Option<T>) -> String {
     match t {
         Some(v) => format!("{v}"),
         None => String::from("n/a"),
+    }
+}
+
+fn option_str_or_dash<T: AsRef<str>>(t: &Option<T>) -> &str {
+    match t {
+        Some(v) => v.as_ref(),
+        None => "-",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::display_power_shelf;
+    use crate::inventory::PowerShelf;
+    use crate::inventory::Psu;
+
+    use crate::inventory::PsuIdentity;
+    use crate::inventory::PsuSlot;
+    use crate::inventory::PsuState;
+    use crate::inventory::PsuStatus;
+    use chrono::DateTime;
+    use chrono::Utc;
+    use iddqd::IdOrdMap;
+    use omicron_uuid_kinds::RackUuid;
+    use sled_hardware_types::BaseboardId;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_power_shelf_inventory_display() {
+        fn identity(serial: &str, date: &str, fw_rev: &str) -> PsuIdentity {
+            PsuIdentity {
+                mfr_id: String::from("Murata-PS"),
+                mfr_model: String::from("MWOCP68-3600-D-RM"),
+                mfr_revision: fw_rev.to_owned(),
+                mfr_location: String::from("China"),
+                mfr_date: date.to_owned(),
+                mfr_serial: serial.to_owned(),
+            }
+        }
+
+        fn present(identity: Result<PsuIdentity, String>) -> Option<PsuState> {
+            Some(PsuState { status: PsuStatus::Present, identity })
+        }
+
+        let mut psus = IdOrdMap::with_capacity(6);
+        let values = [
+            (
+                PsuSlot::Psu0,
+                present(Ok(identity("LL2111Q9002T", "2111", "0762-0701-0000"))),
+            ),
+            // VPD read successfully, but its MFR_REVISION is not in the
+            // expected format, so firmware revisions could not be parsed.
+            (
+                PsuSlot::Psu1,
+                present(Ok(identity("LL2111Q9003T", "2111", "0762-0701"))),
+            ),
+            (
+                PsuSlot::Psu2,
+                present(Err(String::from(
+                    "test suite injected VPD read failure",
+                ))),
+            ),
+            (PsuSlot::Psu3, None),
+            (
+                PsuSlot::Psu4,
+                present(Ok(identity("LL2115Q1001T", "2115", "0762-0702-0000"))),
+            ),
+            (PsuSlot::Psu5, None),
+        ];
+        for (slot, state) in values {
+            psus.insert_unique(Psu {
+                time_collected: DateTime::<Utc>::MIN_UTC,
+                source: String::from("test MGS"),
+                slot,
+                hubris_device_type: String::from("mwocp68"),
+                state,
+            })
+            .expect("test PSU slots are unique");
+        }
+        let shelf = PowerShelf {
+            psc_baseboard_id: Arc::new(BaseboardId {
+                part_number: String::from("test-psc"),
+                serial_number: String::from("test-psc-serial"),
+            }),
+            rack_id: RackUuid::from_u128(
+                0xc19a698f_c6f9_4a17_ae30_20d711b8f7dc,
+            ),
+            slot: 0,
+            psus,
+        };
+        let mut output = String::new();
+        display_power_shelf(Some(&shelf), &mut output)
+            .expect("formatting test power shelf succeeds");
+
+        expectorate::assert_contents(
+            "output/inventory_power_shelf.txt",
+            &output,
+        );
     }
 }

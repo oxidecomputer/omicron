@@ -5,17 +5,17 @@
 use crate::v1::inventory::InventoryDataset;
 use crate::v1::inventory::InventoryDisk;
 use crate::v1::inventory::SledRole;
-use crate::v14::inventory::OmicronFileSourceResolverInventory;
 use crate::v16::inventory::SingleMeasurementInventory;
 use crate::v24::inventory::InventoryZpool;
 use crate::v40::inventory::FmdInventory;
 use crate::v40::inventory::FmdInventoryError;
 use crate::v46::inventory::SvcsEnabledNotOnlineResult;
-use crate::v51::inventory::ConfigReconcilerInventory;
-use crate::v51::inventory::ConfigReconcilerInventoryStatus;
-use crate::v51::inventory::OmicronSledConfig;
-use crate::v53;
 use crate::v53::inventory::InstanceManagerStatus;
+use crate::v55;
+use crate::v55::inventory::ConfigReconcilerInventory;
+use crate::v55::inventory::ConfigReconcilerInventoryStatus;
+use crate::v55::inventory::OmicronFileSourceResolverInventory;
+use crate::v55::inventory::OmicronSledConfig;
 use iddqd::IdOrdMap;
 use omicron_common::api::external::ByteCount;
 use omicron_common::snake_case_result;
@@ -57,7 +57,7 @@ pub struct Inventory {
     pub fmd: Result<FmdInventory, FmdInventoryError>,
 }
 
-impl From<Inventory> for v53::inventory::Inventory {
+impl From<Inventory> for v55::inventory::Inventory {
     fn from(value: Inventory) -> Self {
         let Inventory {
             sled_id,
@@ -84,7 +84,7 @@ impl From<Inventory> for v53::inventory::Inventory {
             rack_id: _,
         } = value;
 
-        v53::inventory::Inventory {
+        v55::inventory::Inventory {
             sled_id,
             sled_agent_address,
             sled_role,

@@ -193,6 +193,18 @@ pub struct HostPhase2DesiredSlots {
     pub slot_b: HostPhase2DesiredContents,
 }
 
+impl HostPhase2DesiredSlots {
+    /// Return a `HostPhase2DesiredSlots` with both slots set to
+    /// [`HostPhase2DesiredContents::CurrentContents`]; i.e., "make no changes
+    /// to the current contents of either slot".
+    pub const fn current_contents() -> Self {
+        Self {
+            slot_a: HostPhase2DesiredContents::CurrentContents,
+            slot_b: HostPhase2DesiredContents::CurrentContents,
+        }
+    }
+}
+
 /// Describes a persistent ZFS dataset associated with an Omicron zone
 #[derive(
     Clone,

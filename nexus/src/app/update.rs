@@ -19,7 +19,6 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_model::TufRepoUpload;
 use nexus_db_model::TufTrustRoot;
 use nexus_db_model::saga_types::Saga;
-use nexus_db_model::saga_types::SagaId;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
 use nexus_types::deployment::Blueprint;
@@ -50,6 +49,7 @@ use std::collections::BTreeSet;
 use std::error::Error as _;
 use std::iter;
 use std::sync::Arc;
+use steno::SagaId;
 use tokio::sync::watch;
 use tufaceous::ExpirationEnforcement;
 use tufaceous::RepositoryLoader;
@@ -1079,7 +1079,7 @@ mod test {
     async fn insert_stuck_running_saga(cptestctx: &ControlPlaneTestContext) {
         let datastore = cptestctx.server.server_context().nexus.datastore();
         let params = steno::SagaCreateParams {
-            id: steno::SagaId(Uuid::new_v4()),
+            id: steno::SagaId::new_v4(),
             name: steno::SagaName::new("test stuck saga"),
             dag: serde_json::Value::Null,
             state: steno::SagaCachedState::Running,
@@ -1094,7 +1094,7 @@ mod test {
     // that exercise `problems()` directly.
     fn fake_saga() -> Saga {
         let params = steno::SagaCreateParams {
-            id: steno::SagaId(saga_uuid()),
+            id: saga_id(),
             name: steno::SagaName::new("test stuck saga"),
             dag: serde_json::Value::Null,
             state: steno::SagaCachedState::Running,
@@ -1182,8 +1182,8 @@ mod test {
         ZpoolUuid::from_untyped_uuid(Uuid::from_u128(0xBBBB))
     }
 
-    fn saga_uuid() -> Uuid {
-        Uuid::from_u128(0xCCCC)
+    fn saga_id() -> SagaId {
+        SagaId::from_u128(0xCCCC)
     }
 
     // `Zpool.time_collected` is stamped by `CollectionBuilder::build` with the

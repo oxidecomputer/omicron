@@ -9,10 +9,10 @@ branch = "main"
 
 requires_token = true
 
-# Run in response to the image buildomat job in dendrite completing
+# Triggers a dendrite update when the job indicating that the commit is ready for release completes
 
 [[on]]
 repository = "oxidecomputer/dendrite"
 event = "check_run"
 action = "completed"
-check = "image"
+check = "omicron-merge"

@@ -1502,7 +1502,6 @@ pub mod test {
     use std::sync::atomic::AtomicU64;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
-    use uuid::Uuid;
 
     /// Used by various tests of tasks that kick off sagas
     pub(crate) struct NoopStartSaga {
@@ -1529,7 +1528,7 @@ pub mod test {
             async {
                 // We've not actually started a real saga, so just make
                 // something up.
-                Ok(steno::SagaId(Uuid::new_v4()))
+                Ok(steno::SagaId::new_v4())
             }
             .boxed()
         }
@@ -1543,7 +1542,7 @@ pub mod test {
         > {
             let _ = self.count.fetch_add(1, Ordering::SeqCst);
             async {
-                let id = steno::SagaId(Uuid::new_v4());
+                let id = steno::SagaId::new_v4();
                 // No-op sagas complete immediately.
                 let completed = async { Ok(()) }.boxed();
                 Ok((id, completed))

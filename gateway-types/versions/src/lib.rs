@@ -39,3 +39,5 @@ pub mod v2;
 pub mod v4;
 #[path = "rack_id/mod.rs"]
 pub mod v5;
+#[path = "artifact_hash_schema/mod.rs"]
+pub mod v6;

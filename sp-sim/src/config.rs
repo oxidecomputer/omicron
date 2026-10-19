@@ -199,6 +199,7 @@ pub enum ComponentVpdConfig {
     Barcode(gw_vpd::Barcode),
     SledFanTray(Box<gw_vpd::SledFanTrayVpd>),
     Tmp11x(gw_vpd::Tmp11xVpd),
+    ReadError(gateway_messages::VpdError),
 }
 
 /// One PMBus block-read response for a simulated PMBus device's VPD.

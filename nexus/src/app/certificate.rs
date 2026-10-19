@@ -7,6 +7,7 @@
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
+use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::model::Name;
@@ -14,28 +15,81 @@ use nexus_db_queries::db::model::ServiceKind;
 use nexus_types::external_api::certificate;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl super::Nexus {
-    pub fn certificate_lookup<'a>(
-        &'a self,
-        opctx: &'a OpContext,
-        certificate: &'a NameOrId,
-    ) -> lookup::Certificate<'a> {
-        match certificate {
+    /// Fetch a certificate in the current user's silo
+    ///
+    /// `Certificate` is `visible_outside_silo` so that fleet admins can reach
+    /// other silos' certificates by ID through `/v1/system/certificates`. That
+    /// turns off the check that lookups of silo-scoped resources normally do
+    /// against the caller's silo, so a lookup by ID can find a certificate in
+    /// any silo the caller is authorized to see. The `/v1/certificates`
+    /// endpoints are scoped to the caller's silo, so they still need that
+    /// check: without it, a fleet admin could view or delete another silo's
+    /// certificate by ID through them. This does the check here instead.
+    pub(crate) async fn current_silo_certificate_fetch_for(
+        &self,
+        opctx: &OpContext,
+        certificate: &NameOrId,
+        action: authz::Action,
+    ) -> LookupResult<(authz::Certificate, db::model::Certificate)> {
+        let current_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("looking up Certificate")?;
+        let lookup = match certificate {
             NameOrId::Id(id) => {
                 LookupPath::new(opctx, &self.db_datastore).certificate_id(*id)
             }
             NameOrId::Name(name) => LookupPath::new(opctx, &self.db_datastore)
                 .certificate_name(Name::ref_cast(name)),
+        };
+        let (authz_silo, authz_cert, db_cert) =
+            lookup.fetch_for(action).await?;
+        if authz_silo.id() != current_silo.id() {
+            return Err(authz_cert.not_found());
+        }
+        Ok((authz_cert, db_cert))
+    }
+
+    /// Look up a certificate in any silo
+    ///
+    /// The silo must be provided if `certificate` is a name, and must not be
+    /// provided if `certificate` is an ID.
+    pub fn silo_certificate_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        silo: Option<NameOrId>,
+        certificate: NameOrId,
+    ) -> LookupResult<lookup::Certificate<'a>> {
+        match (silo, certificate) {
+            (None, NameOrId::Id(id)) => {
+                Ok(LookupPath::new(opctx, &self.db_datastore)
+                    .certificate_id(id))
+            }
+            (Some(silo), NameOrId::Name(name)) => Ok(self
+                .silo_lookup(opctx, silo)?
+                .certificate_name_owned(name.into())),
+            (Some(_), NameOrId::Id(_)) => Err(Error::invalid_request(
+                "when providing certificate as an ID, silo should not be \
+                 specified",
+            )),
+            (None, NameOrId::Name(_)) => Err(Error::invalid_request(
+                "certificate should either be a UUID or silo should be \
+                 specified",
+            )),
         }
     }
 
+    /// Create a certificate in the current user's silo
     pub(crate) async fn certificate_create(
         &self,
         opctx: &OpContext,
@@ -45,20 +99,42 @@ impl super::Nexus {
             .authn
             .silo_required()
             .internal_context("creating a Certificate")?;
+        self.certificate_create_for_silo(opctx, &authz_silo, params).await
+    }
 
-        // The `opctx` we received is going to be checked for permission to
-        // create a cert below in `db_datastore.certificate_create`, but first
-        // we need to look up this silo's fully-qualified domain names in order
-        // to check that the cert we've been given is valid for this silo.
-        // Looking up DNS names requires reading the DNS configuration of the
-        // _rack_, which this user may not be able to do (even if they have
-        // permission to upload new certs, which almost certainly implies a
-        // silo-level admin). We'll use our `opctx_external_authn()` context,
-        // which is the same context used to create a silo. This is a higher
-        // privilege than the current user may have, but we believe it does not
-        // leak any information that a silo admin doesn't already know (the
-        // external DNS name(s) of the rack, which leads to their silo's DNS
-        // name(s)).
+    /// Create a certificate in the specified silo
+    pub(crate) async fn silo_certificate_create(
+        &self,
+        opctx: &OpContext,
+        silo_lookup: &lookup::Silo<'_>,
+        params: certificate::CertificateCreate,
+    ) -> CreateResult<db::model::Certificate> {
+        let (authz_silo,) = silo_lookup.lookup_for(authz::Action::Read).await?;
+        self.certificate_create_for_silo(opctx, &authz_silo, params).await
+    }
+
+    async fn certificate_create_for_silo(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        params: certificate::CertificateCreate,
+    ) -> CreateResult<db::model::Certificate> {
+        // Check this up front so that we don't use the elevated context below
+        // on behalf of a caller who can't create certificates in this silo.
+        let authz_cert_list =
+            authz::SiloCertificateList::new(authz_silo.clone());
+        opctx.authorize(authz::Action::CreateChild, &authz_cert_list).await?;
+
+        // To check that the cert we've been given is valid for this silo, we
+        // need to look up this silo's fully-qualified domain names. Looking up
+        // DNS names requires reading the DNS configuration of the _rack_,
+        // which this user may not be able to do (even if they have permission
+        // to upload new certs, which almost certainly implies a silo-level
+        // admin). We'll use our `opctx_external_authn()` context, which is the
+        // same context used to create a silo. This is a higher privilege than
+        // the current user may have, but we believe it does not leak any
+        // information that a silo admin doesn't already know (the external DNS
+        // name(s) of the rack, which leads to their silo's DNS name(s)).
         let silo_fq_dns_names = self
             .silo_fq_dns_names(self.opctx_external_authn(), authz_silo.id())
             .await?;
@@ -73,7 +149,7 @@ impl super::Nexus {
         )?;
         let cert = self
             .db_datastore
-            .certificate_create(opctx, new_certificate)
+            .certificate_create(opctx, authz_silo, new_certificate)
             .await?;
 
         match kind {
@@ -94,22 +170,62 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Certificate> {
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("listing Certificates")?;
         self.db_datastore
-            .certificate_list_for(opctx, None, pagparams, true)
+            .certificate_list_for(opctx, None, pagparams, Some(&authz_silo))
+            .await
+    }
+
+    pub(crate) async fn silo_certificates_list(
+        &self,
+        opctx: &OpContext,
+        silo_lookup: &lookup::Silo<'_>,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<db::model::Certificate> {
+        let (authz_silo,) = silo_lookup.lookup_for(authz::Action::Read).await?;
+        self.db_datastore
+            .certificate_list_for(opctx, None, pagparams, Some(&authz_silo))
             .await
     }
 
     pub(crate) async fn certificate_delete(
         &self,
         opctx: &OpContext,
-        certificate_lookup: lookup::Certificate<'_>,
+        certificate: &NameOrId,
+    ) -> DeleteResult {
+        let (authz_cert, db_cert) = self
+            .current_silo_certificate_fetch_for(
+                opctx,
+                certificate,
+                authz::Action::Delete,
+            )
+            .await?;
+        self.certificate_delete_inner(opctx, &authz_cert, &db_cert).await
+    }
+
+    pub(crate) async fn silo_certificate_delete(
+        &self,
+        opctx: &OpContext,
+        certificate_lookup: &lookup::Certificate<'_>,
     ) -> DeleteResult {
         let (.., authz_cert, db_cert) =
             certificate_lookup.fetch_for(authz::Action::Delete).await?;
-        self.db_datastore.certificate_delete(opctx, &authz_cert).await?;
+        self.certificate_delete_inner(opctx, &authz_cert, &db_cert).await
+    }
+
+    async fn certificate_delete_inner(
+        &self,
+        opctx: &OpContext,
+        authz_cert: &authz::Certificate,
+        db_cert: &db::model::Certificate,
+    ) -> DeleteResult {
+        self.db_datastore.certificate_delete(opctx, authz_cert).await?;
         match db_cert.service {
             ServiceKind::Nexus => {
-                // See the comment in certificate_create() above.
+                // See the comment in certificate_create_for_silo() above.
                 self.background_tasks
                     .activate(&self.background_tasks.task_external_endpoints);
             }

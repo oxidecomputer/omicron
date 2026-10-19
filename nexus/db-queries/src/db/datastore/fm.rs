@@ -2943,7 +2943,7 @@ mod tests {
         // Saga cases, exercising the fm_fact_saga read/write/GC paths, split
         // across two cases so each is a shape the engine actually produces.
         let case3 = {
-            let stuck_saga_id = steno::SagaId(uuid::Uuid::new_v4());
+            let stuck_saga_id = steno::SagaId::new_v4();
             let mut facts = iddqd::IdOrdMap::new();
             facts
                 .insert_unique(fm::case::Fact {
@@ -3015,7 +3015,7 @@ mod tests {
                     },
                     payload: fm::FactPayload::Saga(fm::SagaFact::Abandoned(
                         fm::SagaAbandonedFactPayload {
-                            saga_id: steno::SagaId(uuid::Uuid::new_v4()),
+                            saga_id: steno::SagaId::new_v4(),
                         },
                     )),
                 })

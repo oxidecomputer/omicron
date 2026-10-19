@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "55.0.0"
+    "version": "57.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -42,8 +42,15 @@
             "name": "sha256",
             "required": true,
             "schema": {
+              "x-rust-type": {
+                "crate": "byte-wrapper",
+                "path": "byte_wrapper::HexArray::<32>",
+                "version": "0.1.0"
+              },
               "type": "string",
-              "format": "hex string (32 bytes)"
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "minLength": 64,
+              "maxLength": 64
             }
           },
           {
@@ -95,8 +102,15 @@
             "name": "sha256",
             "required": true,
             "schema": {
+              "x-rust-type": {
+                "crate": "byte-wrapper",
+                "path": "byte_wrapper::HexArray::<32>",
+                "version": "0.1.0"
+              },
               "type": "string",
-              "format": "hex string (32 bytes)"
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "minLength": 64,
+              "maxLength": 64
             }
           },
           {
@@ -350,6 +364,24 @@
           },
           "required": true
         },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/multirack-join-complete": {
+      "put": {
+        "summary": "Report that this sled's multirack join is complete.",
+        "description": "Sent by Nexus once it has observed this sled on the underlay network.",
+        "operationId": "multirack_join_complete",
         "responses": {
           "204": {
             "description": "resource updated"
@@ -1360,8 +1392,15 @@
             "name": "hash",
             "required": true,
             "schema": {
+              "x-rust-type": {
+                "crate": "byte-wrapper",
+                "path": "byte_wrapper::HexArray::<32>",
+                "version": "0.1.0"
+              },
               "type": "string",
-              "format": "hex string (32 bytes)"
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "minLength": 64,
+              "maxLength": 64
             }
           }
         ],
@@ -3778,8 +3817,15 @@
         "type": "object",
         "properties": {
           "artifact_hash": {
+            "x-rust-type": {
+              "crate": "byte-wrapper",
+              "path": "byte_wrapper::HexArray::<32>",
+              "version": "0.1.0"
+            },
             "type": "string",
-            "format": "hex string (32 bytes)"
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "minLength": 64,
+            "maxLength": 64
           },
           "artifact_size": {
             "type": "integer",
@@ -5762,8 +5808,15 @@
             "type": "object",
             "properties": {
               "hash": {
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.1.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "type": {
                 "type": "string",
@@ -6915,7 +6968,7 @@
         ]
       },
       "ManifestInventory": {
-        "description": "Inventory representation of a manifest.\n\nPart of [`ZoneImageResolverInventory`].\n\nA manifest is used for both zones and reference measurements. A zone manifest is a listing of all the zones present in a system's install dataset. A measurement manifset is a listing of all the reference measurements present in a system's install dataset. This struct contains information about the install dataset gathered from a system.",
+        "description": "Inventory representation of a manifest.\n\nPart of [`OmicronFileSourceResolverInventory`].\n\nA manifest is used for both zones and reference measurements. A zone manifest is a listing of all the zones present in a system's install dataset. A measurement manifset is a listing of all the reference measurements present in a system's install dataset. This struct contains information about the install dataset gathered from a system.",
         "type": "object",
         "properties": {
           "boot_disk_path": {
@@ -7650,8 +7703,15 @@
         "properties": {
           "hash": {
             "description": "Measurements are the artifacts matching the hashes from the TUF artifact store (aka \"TUF repo depot\")\n\nMeasurements may also come from outside the TUF repo depot via the install dataset from MUPdate but are not explicitly tracked here",
+            "x-rust-type": {
+              "crate": "byte-wrapper",
+              "path": "byte_wrapper::HexArray::<32>",
+              "version": "0.1.0"
+            },
             "type": "string",
-            "format": "hex string (32 bytes)"
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "minLength": 64,
+            "maxLength": 64
           }
         },
         "required": [
@@ -7840,8 +7900,15 @@
             "type": "object",
             "properties": {
               "hash": {
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.1.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "type": {
                 "type": "string",
@@ -10879,8 +10946,15 @@
         "properties": {
           "expected_hash": {
             "description": "The expected digest of the file's contents.",
+            "x-rust-type": {
+              "crate": "byte-wrapper",
+              "path": "byte_wrapper::HexArray::<32>",
+              "version": "0.1.0"
+            },
             "type": "string",
-            "format": "hex string (32 bytes)"
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "minLength": 64,
+            "maxLength": 64
           },
           "expected_size": {
             "description": "The expected size of the file, in bytes.",

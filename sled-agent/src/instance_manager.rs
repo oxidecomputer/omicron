@@ -6,7 +6,6 @@
 
 use crate::instance;
 use crate::instance::Instance;
-use crate::instance::VmmStateOwner;
 use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClient;
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
@@ -119,6 +118,7 @@ pub(crate) struct InstanceManagerServices {
     pub zone_builder_factory: ZoneBuilderFactory,
     pub metrics_queue: MetricsRequestQueue,
     pub available_datasets_rx: AvailableDatasetsReceiver,
+    pub currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
 }
 
 // Describes the internals of the "InstanceManager", though most of the
@@ -669,25 +669,6 @@ impl InstanceManagerRunner {
                     }
                 }
 
-                // If the set of currently-managed zpools has changed, shut down
-                // any instances due to disks that have disappeared out from
-                // under them.
-                result = self.currently_managed_zpools_rx.changed() => {
-                    match result {
-                        Ok(()) => {
-                            self.use_only_currently_managed_zpools().await;
-                        }
-                        Err(_) => {
-                            warn!(
-                                self.log,
-                                "InstanceManager's 'current zpools' channel \
-                                 closed; shutting down",
-                            );
-                            break;
-                        }
-                    }
-                }
-
                 // If our update disposition has changed, notify `self.jobs`
                 // of the new value.
                 result = self.update_disposition_rx.changed_value() => {
@@ -874,6 +855,9 @@ impl InstanceManagerRunner {
                     zone_builder_factory: self.zone_builder_factory.clone(),
                     metrics_queue: self.metrics_queue.clone(),
                     available_datasets_rx: self.available_datasets_rx.clone(),
+                    currently_managed_zpools_rx: self
+                        .currently_managed_zpools_rx
+                        .clone(),
                 };
 
                 let state = crate::instance::InstanceInitialState {
@@ -939,9 +923,7 @@ impl InstanceManagerRunner {
         // Otherwise, request that the instance terminate, and send back the
         // terminator so that the caller can wait for the instance to finish
         // terminating.
-        let terminator = instance
-            .request_termination(&self.log, VmmStateOwner::Nexus)
-            .clone();
+        let terminator = instance.request_termination(&self.log).clone();
         tx.send(Some(terminator)).map_err(|_| Error::FailedSendClientClosed)?;
         Ok(())
     }
@@ -1084,38 +1066,6 @@ impl InstanceManagerRunner {
         };
         instance.current_state(tx)?;
         Ok(())
-    }
-
-    async fn use_only_currently_managed_zpools(&mut self) {
-        let current_zpools =
-            self.currently_managed_zpools_rx.current_and_update();
-        for (id, instance) in self.jobs.iter() {
-            // If we can read the filesystem pool, consider it. Otherwise, move
-            // on, to prevent blocking the cleanup of other instances.
-            // TODO(eliza): clone each instance and spawn a task to handle it,
-            // so that a single misbehaving instance cannot block the instance
-            // manager's run loop...
-            let (tx, rx) = oneshot::channel();
-            // This will fail if the tx has been dropped, which we just...don't do.
-            let _ = instance.get_filesystem_zpool(tx);
-            let Ok(Ok(Some(filesystem_pool))) = rx.await else {
-                info!(self.log, "use_only_these_disks: Cannot read filesystem pool"; "instance_id" => ?id);
-                continue;
-            };
-            if !current_zpools.contains(&filesystem_pool) {
-                info!(
-                    self.log,
-                    "use_only_these_disks: Terminating instance";
-                    "instance_id" => ?id,
-                );
-                // Note that we do *not* need to await the completion of the
-                // termination request here. It has been successfully signalled,
-                // so the VMM will terminate eventually. We can now go on with
-                // our lives and terminate any other instances without awaiting
-                // the completion of the termination request.
-                instance.request_termination(&self.log, VmmStateOwner::Runner);
-            }
-        }
     }
 
     fn set_attached_subnets(
