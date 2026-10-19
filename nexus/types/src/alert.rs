@@ -8,6 +8,7 @@ use schemars::JsonSchema;
 use serde::Serialize;
 use std::fmt;
 
+pub mod certificate;
 pub mod power_shelf;
 
 /// Trait implemented by alerts.
@@ -78,6 +79,10 @@ pub enum AlertClass {
     PsuInserted,
     #[strum(serialize = "hardware.power_shelf.psu.remove")]
     PsuRemoved,
+    #[strum(serialize = "silo.certificate.expiring")]
+    SiloCertificateExpiring,
+    #[strum(serialize = "silo.certificate.expired")]
+    SiloCertificateExpired,
 }
 
 impl AlertClass {
@@ -120,6 +125,16 @@ impl AlertClass {
             }
             Self::PsuRemoved => {
                 "A power supply unit (PSU) has been removed from a power shelf"
+            }
+            Self::SiloCertificateExpiring => {
+                "The TLS certificate that a silo's external API serves is \
+                 about to expire, and no later-expiring certificate is \
+                 installed for that silo"
+            }
+            Self::SiloCertificateExpired => {
+                "The TLS certificate that a silo's external API serves has \
+                 expired, and no later-expiring certificate is installed for \
+                 that silo"
             }
         }
     }
