@@ -488,7 +488,7 @@ impl FmAnalysis {
                 let cert_id = cert.id();
                 let cert_name = cert.name().clone();
                 let silo_id = cert.silo_id;
-                let Some(mut silo) = silos.get_mut(&silo_id) else {
+                let Some(mut silo) = silos.get_mut(silo_id) else {
                     warnings.push(format!(
                         "certificate {cert_id} belongs to silo {silo_id}, \
                          which was not found; ignoring it",
