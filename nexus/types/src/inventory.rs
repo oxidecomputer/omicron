@@ -1060,6 +1060,7 @@ pub struct SledAgent {
     pub sled_id: SledUuid,
     pub baseboard_id: Option<Arc<BaseboardId>>,
     pub rack_id: RackUuid,
+    pub multirack_join_in_progress: bool,
     pub sled_agent_address: SocketAddrV6,
     pub sled_role: SledRole,
     pub usable_hardware_threads: u32,

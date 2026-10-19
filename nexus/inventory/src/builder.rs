@@ -651,6 +651,7 @@ impl CollectionBuilder {
             sled_role: inventory.sled_role,
             baseboard_id,
             rack_id: inventory.rack_id,
+            multirack_join_in_progress: inventory.multirack_join_in_progress,
             usable_hardware_threads: inventory.usable_hardware_threads,
             usable_physical_ram: inventory.usable_physical_ram,
             cpu_family: inventory.cpu_family,

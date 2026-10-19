@@ -1340,6 +1340,8 @@ impl SledAgent {
         let is_scrimlet = self.inner.hardware.is_scrimlet();
         let baseboard = self.inner.hardware.baseboard();
         let rack_id = self.inner.start_request.body.rack_id;
+        let multirack_join_in_progress =
+            self.inner.multirack_join_completer.is_multirack_join_in_progress();
         let usable_hardware_threads =
             self.inner.hardware.online_processor_count();
         let usable_physical_ram =
@@ -1371,6 +1373,7 @@ impl SledAgent {
             sled_role,
             baseboard_id: baseboard.into(),
             rack_id,
+            multirack_join_in_progress,
             usable_hardware_threads,
             usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
             cpu_family,

@@ -786,6 +786,7 @@ fn display_sleds(
             sled_id,
             baseboard_id,
             rack_id,
+            multirack_join_in_progress,
             sled_agent_address,
             sled_role,
             usable_hardware_threads,
@@ -825,6 +826,10 @@ fn display_sleds(
         let mut indented = IndentWriter::new("    ", f);
 
         writeln!(indented, "rack ID:     {rack_id}",)?;
+
+        if *multirack_join_in_progress {
+            writeln!(indented, "multirack join in progress")?;
+        }
 
         writeln!(
             indented,

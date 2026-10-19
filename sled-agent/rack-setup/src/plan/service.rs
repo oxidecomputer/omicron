@@ -1565,6 +1565,7 @@ mod tests {
                     serial_number: "test".to_string(),
                 },
                 rack_id,
+                multirack_join_in_progress: false,
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::try_from(1_u64 << 40).unwrap(),
                 cpu_family: SledCpuFamily::AmdMilan,

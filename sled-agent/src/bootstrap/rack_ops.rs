@@ -156,10 +156,6 @@ impl MultirackJoinCompleter {
     /// Used to provide inventory with information about the particular
     /// sled-agent that is performing the multirack join. This prevents Nexus
     /// from having to guess or try all sled-agents.
-    //
-    // TODO: Remove this `unused` annotation when we add this functionality
-    // to inventory.
-    #[expect(unused)]
     pub fn is_multirack_join_in_progress(&self) -> bool {
         match &*self.0.status.lock().unwrap() {
             RssStatus::MultirackJoinInProgress { .. } => true,

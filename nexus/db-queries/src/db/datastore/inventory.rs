@@ -2089,6 +2089,8 @@ impl DataStore {
                                 .into_sql::<diesel::sql_types::Int8>(),
                             sled_agent.rack_id.into_untyped_uuid()
                                 .into_sql::<diesel::sql_types::Uuid>(),
+                            sled_agent.multirack_join_in_progress
+                                .into_sql::<diesel::sql_types::Bool>(),
                         ))
                         .filter(
                             baseboard_dsl::part_number
@@ -2134,6 +2136,7 @@ impl DataStore {
                                 sa_dsl::instance_manager_update_disposition,
                                 sa_dsl::instance_manager_num_registered_vmms,
                                 sa_dsl::rack_id,
+                                sa_dsl::multirack_join_in_progress,
                             ))
                             .execute_async(&conn)
                             .await?;
@@ -2173,6 +2176,7 @@ impl DataStore {
                         _instance_manager_update_disposition,
                         _instance_manager_num_registered_vmms,
                         _rack_id,
+                        _multirack_join_in_progress,
                     ) = sa_dsl::inv_sled_agent::all_columns();
                 }
 
@@ -5255,6 +5259,7 @@ impl DataStore {
                 sled_id,
                 baseboard_id,
                 rack_id: s.rack_id.into(),
+                multirack_join_in_progress: s.multirack_join_in_progress,
                 sled_agent_address: std::net::SocketAddrV6::new(
                     std::net::Ipv6Addr::from(s.sled_agent_ip),
                     u16::from(s.sled_agent_port),
