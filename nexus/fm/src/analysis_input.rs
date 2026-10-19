@@ -180,15 +180,13 @@ impl Input {
             }
         }
         Ok(Builder {
+            ereports: None,
             parent_sitrep,
             inv,
             in_service_disks: None,
             observed_sagas: None,
             observed_silo_certificates: None,
             config: None,
-            new_ereports: IdOrdMap::default(),
-            ereporter_restarts: IdOrdMap::default(),
-            unmarked_seen_ereports: BTreeSet::default(),
             marked_alert_requests: HashSet::new(),
             marked_support_bundle_requests: HashSet::new(),
         })
@@ -225,18 +223,7 @@ pub struct Builder {
     /// collections: analysis must not silently run against defaults when an
     /// operator has overridden them.
     config: Option<FmConfig>,
-    /// Ereports which are new and should be input to analysis in the next
-    /// sitrep.
-    new_ereports: IdOrdMap<Arc<fm::Ereport>>,
 
-    /// The IDs of any ereports which have been included in the parent sitrep,
-    /// but which have *not* yet been marked as seen in the database.
-    ///
-    /// These must be tracked in order to determine which closed cases must be
-    /// copied forwards due to containing unmarked ereports.
-    unmarked_seen_ereports: BTreeSet<fm::EreportId>,
-
-    ereporter_restarts: IdOrdMap<Arc<nexus_db_model::EreporterRestart>>,
     /// The IDs of alert requests on the parent sitrep's closed cases that
     /// already have a marker row in `rendezvous_alert_created`. A closed-case
     /// request absent from this set is outstanding work, and (like an unmarked
@@ -261,32 +248,26 @@ pub struct Builder {
     /// of the query shape in `fm_rendezvous_existing_support_bundle_markers`,
     /// which needs to be an index lookup rather than a table scan.
     marked_support_bundle_requests: HashSet<SupportBundleUuid>,
+    ereports: Option<EreportsBuilder>,
 }
 
 impl Builder {
-    /// Adds a set of ereports which have not been marked as "seen" in the
-    /// database to the inputs under construction.
-    ///
-    /// This will filter out any ereports which are present in the parent sitrep
-    /// and have not yet been marked in the database, and then add any ereports
-    /// which remain to the set of ereports which are actually new and should be
-    /// included in the inputs to the next sitrep.
-    pub fn add_unmarked_ereports(
-        &mut self,
-        ereports: impl IntoIterator<Item = fm::Ereport>,
-    ) {
-        let parent_sitrep = self.parent_sitrep.as_ref().map(|s| &s.1);
-        self.new_ereports.extend(ereports.into_iter().filter_map(|ereport| {
-            if let Some(sitrep) = parent_sitrep {
-                let id = ereport.id;
-                if sitrep.ereports_by_id.contains_key(&id) {
-                    self.unmarked_seen_ereports.insert(id);
-                    return None;
-                }
-            }
+    pub fn build_ereports(&self) -> EreportsBuilder {
+        EreportsBuilder {
+            parent_sitrep: self.parent_sitrep.clone(),
+            ereporter_restarts: IdOrdMap::new(),
+            unmarked_seen_ereports: BTreeSet::new(),
+            new_ereports: IdOrdMap::new(),
+        }
+    }
 
-            Some(Arc::new(ereport))
-        }))
+    pub fn add_ereports(&mut self, ereports: EreportsBuilder) -> &mut Self {
+        assert!(
+            self.ereports.is_none(),
+            "tried to add ereports to this builder twice!"
+        );
+        self.ereports = Some(ereports);
+        self
     }
 
     /// Records the alert request ids (from the parent sitrep's closed cases)
@@ -310,25 +291,6 @@ impl Builder {
         marker_ids: impl IntoIterator<Item = SupportBundleUuid>,
     ) {
         self.marked_support_bundle_requests.extend(marker_ids);
-    }
-
-    pub fn num_ereports(&self) -> usize {
-        self.new_ereports.len()
-    }
-
-    /// Adds a set of ereport restart IDs to the input.
-    pub fn add_ereporter_restarts<I>(
-        &mut self,
-        restarts: impl IntoIterator<Item = I>,
-    ) where
-        Arc<EreporterRestart>: From<I>,
-    {
-        self.ereporter_restarts.extend(restarts.into_iter().map(Arc::from))
-    }
-
-    /// Borrows the map of known ereport reporter restart IDs.
-    pub fn ereporter_restarts(&self) -> &IdOrdMap<Arc<EreporterRestart>> {
-        &self.ereporter_restarts
     }
 
     /// Finish constructing the [`Input`] and return it, along with a [`Report`]
@@ -411,13 +373,22 @@ impl Builder {
             None => (None, None),
         };
 
+        let EreportsBuilder {
+            parent_sitrep: _,
+            unmarked_seen_ereports,
+            new_ereports,
+            ereporter_restarts,
+        } = self
+            .ereports
+            .ok_or(InvalidInputs::MissingInput { name: "ereports" })?;
+
         let mut report = Report {
             parent_sitrep_id,
             parent_inv_id,
             inv_id: self.inv.id,
             reference_time: Some(self.inv.time_done),
-            new_ereport_ids: self.new_ereports.iter().map(|e| e.id).collect(),
-            num_ereporter_restarts: self.ereporter_restarts.len(),
+            new_ereport_ids: new_ereports.iter().map(|e| e.id).collect(),
+            num_ereporter_restarts: ereporter_restarts.len(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
             in_service_disks: in_service_disks
@@ -480,6 +451,7 @@ impl Builder {
         let mut closed_cases_copied_forward = IdOrdMap::new();
         let mut alerts_changed = false;
         let mut support_bundles_changed = false;
+
         for case in parent_sitrep.iter().flat_map(|s| s.cases.iter()) {
             if case.is_open() {
                 report.open_cases.insert(case.id, case.metadata.clone());
@@ -493,7 +465,7 @@ impl Builder {
                     .iter()
                     .filter_map(|ereport| {
                         let id = ereport.ereport_id();
-                        if self.unmarked_seen_ereports.contains(&id) {
+                        if unmarked_seen_ereports.contains(&id) {
                             Some(*id)
                         } else {
                             None
@@ -554,10 +526,10 @@ impl Builder {
         let input = Input {
             parent_sitrep: self.parent_sitrep.clone(),
             inv: self.inv.clone(),
-            new_ereports: self.new_ereports,
+            new_ereports,
             open_cases,
             closed_cases_copied_forward,
-            ereporter_restarts: self.ereporter_restarts,
+            ereporter_restarts,
             alerts_changed,
             support_bundles_changed,
             in_service_disks,
@@ -567,6 +539,69 @@ impl Builder {
         };
 
         Ok((input, report))
+    }
+}
+
+#[must_use]
+pub struct EreportsBuilder {
+    parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
+    /// Ereports which are new and should be input to analysis in the next
+    /// sitrep.
+    new_ereports: IdOrdMap<Arc<fm::Ereport>>,
+
+    /// The IDs of any ereports which have been included in the parent sitrep,
+    /// but which have *not* yet been marked as seen in the database.
+    ///
+    /// These must be tracked in order to determine which closed cases must be
+    /// copied forwards due to containing unmarked ereports.
+    unmarked_seen_ereports: BTreeSet<fm::EreportId>,
+
+    ereporter_restarts: IdOrdMap<Arc<nexus_db_model::EreporterRestart>>,
+}
+
+impl EreportsBuilder {
+    /// Adds a set of ereports which have not been marked as "seen" in the
+    /// database to the inputs under construction.
+    ///
+    /// This will filter out any ereports which are present in the parent sitrep
+    /// and have not yet been marked in the database, and then add any ereports
+    /// which remain to the set of ereports which are actually new and should be
+    /// included in the inputs to the next sitrep.
+    pub fn add_unmarked_ereports(
+        &mut self,
+        ereports: impl IntoIterator<Item = fm::Ereport>,
+    ) {
+        let parent_sitrep = self.parent_sitrep.as_ref().map(|s| &s.1);
+        self.new_ereports.extend(ereports.into_iter().filter_map(|ereport| {
+            if let Some(sitrep) = parent_sitrep {
+                let id = ereport.id;
+                if sitrep.ereports_by_id.contains_key(&id) {
+                    self.unmarked_seen_ereports.insert(id);
+                    return None;
+                }
+            }
+
+            Some(Arc::new(ereport))
+        }))
+    }
+
+    /// Adds a set of ereport restart IDs to the input.
+    pub fn add_ereporter_restarts<I>(
+        &mut self,
+        restarts: impl IntoIterator<Item = I>,
+    ) where
+        Arc<EreporterRestart>: From<I>,
+    {
+        self.ereporter_restarts.extend(restarts.into_iter().map(Arc::from))
+    }
+
+    /// Borrows the map of known ereport reporter restart IDs.
+    pub fn ereporter_restarts(&self) -> &IdOrdMap<Arc<EreporterRestart>> {
+        &self.ereporter_restarts
+    }
+
+    pub fn num_ereports(&self) -> usize {
+        self.new_ereports.len()
     }
 }
 
