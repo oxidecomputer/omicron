@@ -25,6 +25,11 @@ use crate::v2025_11_20_00::asset::AssetIdentityMetadata;
 pub struct ActiveProblem {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
+    /// If this Active Problem is in the "resolved" state, the time at which the
+    /// problem was resolved.
+    ///
+    /// This field is non-null if, and only if, the `state` field is "resolved".
+    pub time_resolved: Option<DateTime<Utc>>,
     /// The current state of this Active Problem.
     pub state: ActiveProblemState,
     /// The current revision number of this Active Problem.
@@ -68,7 +73,7 @@ pub struct ActiveProblem {
 
 /// The state of an Active Problem.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "state", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum ActiveProblemState {
     /// The condition represented by the Active Problem still exists.
     Active,
@@ -77,10 +82,17 @@ pub enum ActiveProblemState {
     /// A resolved Active Problem never becomes active again. If the same
     /// condition is detected again, a new Active Problem with a new ID is
     /// created.
-    Resolved {
-        /// The time at which the problem was resolved.
-        time_resolved: DateTime<Utc>,
-    },
+    Resolved,
+}
+
+/// Query parameters for listing Active Problems
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ActiveProblemListParams {
+    /// Optional state used to filter Active Problems.
+    ///
+    /// If this is included, only Active Problems in the specified state will
+    /// be returned. Otherwise, Active Problems in all states will be returned.
+    pub state: Option<ActiveProblemState>,
 }
 
 /// An Active Problem that is a cause or consequence of another Active Problem

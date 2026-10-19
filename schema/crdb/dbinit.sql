@@ -9756,6 +9756,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.active_problem (
     CONSTRAINT revision_is_non_zero CHECK (current_revision > 0)
 );
 
+CREATE INDEX IF NOT EXISTS
+    lookup_active_problem_by_time_created
+ON
+    omicron.public.active_problem (time_created)
+WHERE
+    time_deleted IS NULL;
+
 -- A revision of an Active Problem (see RFD 699). This table allows us to store
 -- the revision history of a given Active Problem, along with the current
 -- revision. Querying the current version is done by looking up the Active
@@ -9800,12 +9807,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.active_problem_revision (
     action_required STRING NOT NULL,
 
     CONSTRAINT revision_is_non_zero CHECK (revision > 0),
-    CONSTRAINT problem_code_is_non_zero CHECK (code > 0),
+    CONSTRAINT problem_code_is_non_negative CHECK (code >= 0),
 
     PRIMARY KEY (problem_id, revision)
 );
-
-
 
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.

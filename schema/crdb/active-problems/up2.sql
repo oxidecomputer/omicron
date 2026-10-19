@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.active_problem_revision (
     action_required STRING NOT NULL,
 
     CONSTRAINT revision_is_non_zero CHECK (revision > 0),
-    CONSTRAINT problem_code_is_non_zero CHECK (code > 0),
+    CONSTRAINT problem_code_is_non_negative CHECK (code >= 0),
 
     PRIMARY KEY (problem_id, revision)
 );
