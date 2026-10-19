@@ -20,9 +20,9 @@ pub use config::{
 
 pub mod fact;
 pub use fact::{
-    DiskFact, FactPayload, SagaAbandonedFactPayload, SagaFact,
-    SagaNotProgressingFactPayload, SagaOwnerNotCurrentFactPayload,
-    ZpoolUnhealthyFactPayload,
+    CertificateExpiryFactPayload, CertificateFact, DiskFact, FactPayload,
+    SagaAbandonedFactPayload, SagaFact, SagaNotProgressingFactPayload,
+    SagaOwnerNotCurrentFactPayload, ZpoolUnhealthyFactPayload,
 };
 pub mod display;
 
@@ -253,4 +253,5 @@ pub enum DiagnosisEngineKind {
     PowerShelf,
     PhysicalDisk,
     Saga,
+    Certificate,
 }

@@ -309,6 +309,10 @@ scim_token_create                        POST     /v1/system/scim/tokens
 scim_token_delete                        DELETE   /v1/system/scim/tokens/{token_id}
 scim_token_list                          GET      /v1/system/scim/tokens
 scim_token_view                          GET      /v1/system/scim/tokens/{token_id}
+silo_certificate_create                  POST     /v1/system/certificates
+silo_certificate_delete                  DELETE   /v1/system/certificates/{certificate}
+silo_certificate_list                    GET      /v1/system/certificates
+silo_certificate_view                    GET      /v1/system/certificates/{certificate}
 silo_create                              POST     /v1/system/silos
 silo_delete                              DELETE   /v1/system/silos/{silo}
 silo_identity_provider_list              GET      /v1/system/identity-providers

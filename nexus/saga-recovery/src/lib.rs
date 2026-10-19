@@ -127,7 +127,7 @@ mod test {
     pub fn make_saga_ids(count: usize) -> Vec<SagaId> {
         let mut rv = Vec::with_capacity(count);
         for _ in 0..count {
-            rv.push(SagaId(Uuid::new_v4()));
+            rv.push(SagaId::new_v4());
         }
         // Essentially by coincidence, the values we're checking against
         // are going to be sorted.  Sort this here for convenience.
@@ -165,7 +165,7 @@ mod test {
         /// Pretend that a particular saga was running in a previous Nexus
         /// lifetime (and so needs to be recovered).
         pub fn sim_previously_running_saga(&mut self) -> SagaId {
-            let saga_id = SagaId(Uuid::new_v4());
+            let saga_id = SagaId::new_v4();
             println!("sim: recording previously-running saga {saga_id}");
             self.db_list.insert(saga_id, make_fake_saga(saga_id));
             saga_id
@@ -174,7 +174,7 @@ mod test {
         /// Pretend that Nexus started a new saga (e.g., in response to an API
         /// request)
         pub fn sim_normal_saga_start(&mut self) -> SagaId {
-            let saga_id = SagaId(Uuid::new_v4());
+            let saga_id = SagaId::new_v4();
             println!("sim: starting saga {saga_id}");
             self.db_list.insert(saga_id, make_fake_saga(saga_id));
             self.started_sagas.push(saga_id);

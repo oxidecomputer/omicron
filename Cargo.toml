@@ -182,6 +182,7 @@ members = [
     "trust-quorum/types/versions",
     "typed-rng",
     "uuid-kinds",
+    "wicket-cli-types",
     "wicket-common",
     "wicket-dbg",
     "wicket",
@@ -380,6 +381,7 @@ default-members = [
     "test-utils",
     "typed-rng",
     "uuid-kinds",
+    "wicket-cli-types",
     "wicket-common",
     "wicket-dbg",
     "wicket",
@@ -709,6 +711,7 @@ oxide-tokio-rt = "0.1.4"
 oxide-update-engine = "0.1.2"
 oxide-update-engine-types = { version = "0.1.2", features = ["schemars08"] }
 oxide-update-engine-display = "0.1.2"
+oxide-versioned-envelope = { version = "0.1.1", features = ["schemars08"] }
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "fd2d6ad625cef6fb903660e57dcd4729ff66a6fe", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.7"
@@ -763,11 +766,11 @@ progenitor-extras = "0.3.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "9da09f63ba10c232bd1e3dc2327195de3a081df1" }
-propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "9da09f63ba10c232bd1e3dc2327195de3a081df1" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "9da09f63ba10c232bd1e3dc2327195de3a081df1" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "9da09f63ba10c232bd1e3dc2327195de3a081df1" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "9da09f63ba10c232bd1e3dc2327195de3a081df1" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "3b60af56ed99c4497f02ac9fe014c76adfcf978b" }
+propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "3b60af56ed99c4497f02ac9fe014c76adfcf978b" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "3b60af56ed99c4497f02ac9fe014c76adfcf978b" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "3b60af56ed99c4497f02ac9fe014c76adfcf978b" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "3b60af56ed99c4497f02ac9fe014c76adfcf978b" }
 # NOTE: see above!
 proptest = "1.11.0"
 qorb = "0.4.1"
@@ -860,7 +863,7 @@ static_assertions = "1.1.0"
 # Please do not change the Steno version to a Git dependency.  It makes it
 # harder than expected to make breaking changes (even if you specify a specific
 # SHA).  Cut a new Steno release instead.  See omicron#2117.
-steno = "0.4.1"
+steno = "0.5.0"
 strum = { version = "0.27.2", features = [ "derive" ] }
 subprocess = "0.2.9"
 subtle = "2.6.1"
@@ -907,6 +910,7 @@ vergen-gitcl = { version = "1.0.8" }
 walkdir = "2.5"
 whoami = "1.5"
 wicket = { path = "wicket" }
+wicket-cli-types = { path = "wicket-cli-types" }
 wicket-common = { path = "wicket-common" }
 wicketd-api = { path = "wicketd-api" }
 wicketd-client = { path = "clients/wicketd-client" }

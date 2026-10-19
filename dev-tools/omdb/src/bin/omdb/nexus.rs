@@ -5289,7 +5289,7 @@ async fn cmd_nexus_sagas_list(
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct SagaRow {
-        saga_id: Uuid,
+        saga_id: steno::SagaId,
         state: &'static str,
     }
     let rows = sagas.into_iter().map(|saga| SagaRow {

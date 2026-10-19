@@ -55,7 +55,6 @@ use tufaceous_artifact::RotBootloaderTags;
 use tufaceous_artifact::RotKeyTableHash;
 use tufaceous_artifact::RotTags;
 use tufaceous_artifact::SpTags;
-use uuid::Uuid;
 
 pub async fn to_list<T, U>(object_stream: ObjectStream<T>) -> Vec<U>
 where
@@ -75,13 +74,13 @@ where
 /// users.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct Saga {
-    pub id: Uuid,
+    pub id: steno::SagaId,
     pub state: SagaState,
 }
 
 impl From<steno::SagaView> for Saga {
     fn from(s: steno::SagaView) -> Self {
-        Saga { id: Uuid::from(s.id), state: SagaState::from(s.state) }
+        Saga { id: s.id, state: SagaState::from(s.state) }
     }
 }
 
@@ -193,7 +192,7 @@ impl From<steno::SagaStateView> for SagaState {
 /// Identifies an instance of the demo saga
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct DemoSaga {
-    pub saga_id: Uuid,
+    pub saga_id: steno::SagaId,
     pub demo_saga_id: DemoSagaUuid,
 }
 
