@@ -24,6 +24,7 @@ use nexus_types::internal_api::background::VmmsBySled;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use reqwest::Client as ReqwestClient;
 use serde_json::json;
 use sled_agent_client::types::VmmPutStateBody;
 use sled_agent_client::types::VmmStateRequested;
@@ -111,7 +112,34 @@ impl VmmStopForUpdate {
                 (vmm.sled_id().into_untyped_uuid(), vmm.id)
             });
 
-            let batch_result = self.stop_batch(&vmms, opctx).await;
+            // Build the reqwest client beforehand to avoid building a new one per
+            // sled below.
+            let reqwest_client =
+                match nexus_networking::default_reqwest_client_builder().build()
+                {
+                    Ok(client) => client,
+                    Err(e) => {
+                        let err = InlineErrorChain::new(&e);
+
+                        slog::error!(
+                            opctx.log,
+                            "Failed to build the HTTP client";
+                            &err,
+                        );
+
+                        result.errors.push(Error::InternalError {
+                            internal_message: format!(
+                                "failed to build the HTTP client: {}",
+                                err
+                            ),
+                        });
+
+                        return result;
+                    }
+                };
+
+            let batch_result =
+                self.stop_batch(&vmms, reqwest_client, opctx).await;
             result.merge(batch_result);
         }
 
@@ -122,34 +150,10 @@ impl VmmStopForUpdate {
     async fn stop_batch(
         &self,
         vmms: &[Vmm],
+        reqwest_client: ReqwestClient,
         opctx: &OpContext,
     ) -> VmmStopForUpdateResult {
         let mut result = VmmStopForUpdateResult::new();
-
-        // Build the reqwest client beforehand to avoid building a new one per
-        // sled below.
-        let reqwest_client =
-            match nexus_networking::default_reqwest_client_builder().build() {
-                Ok(client) => client,
-                Err(e) => {
-                    let err = InlineErrorChain::new(&e);
-
-                    slog::error!(
-                        opctx.log,
-                        "Failed to build the HTTP client";
-                        &err,
-                    );
-
-                    result.errors.push(Error::InternalError {
-                        internal_message: format!(
-                            "failed to build the HTTP client: {}",
-                            err
-                        ),
-                    });
-
-                    return result;
-                }
-            };
 
         for vmms_per_sled in vmms.chunk_by(|a, b| a.sled_id() == b.sled_id()) {
             // We only retrieve the first VMM in order to get the sled id.
