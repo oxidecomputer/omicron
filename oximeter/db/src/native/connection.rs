@@ -1028,13 +1028,14 @@ mod tests {
         crate::native::errors::ACCESS_DENIED,
     ];
 
-    // Assert that a query was rejected by the server for a permission-related
-    // reason, rather than succeeding or failing for some other cause.
+    // Assert that a query was rejected with one of the expected server error
+    // codes, rather than succeeding or failing for some other cause.
     #[track_caller]
     fn assert_denied(
         user: User,
         label: &str,
         result: Result<QueryResult, Error>,
+        expected_codes: &[i32],
     ) {
         let user = user.username();
         match result {
@@ -1048,9 +1049,9 @@ mod tests {
                     .expect("server exception should have at least one entry")
                     .code;
                 assert!(
-                    DENIED_CODES.contains(&code),
-                    "{user}: {label}: expected a permission/read-only error \
-                     (one of {DENIED_CODES:?}), but got code {code}:\n\
+                    expected_codes.contains(&code),
+                    "{user}: {label}: expected a server error \
+                     (one of {expected_codes:?}), but got code {code}:\n\
                      {exceptions:#?}",
                 );
             }
@@ -1144,6 +1145,7 @@ mod tests {
             "SELECT from another database",
             conn.query(Uuid::new_v4(), "SELECT x FROM not_oximeter.samples")
                 .await,
+            DENIED_CODES,
         );
 
         // Denied: reading `system` tables such as `system.query_log`.
@@ -1151,6 +1153,7 @@ mod tests {
             user,
             "SELECT from system.query_log",
             conn.query(Uuid::new_v4(), "SELECT * FROM system.query_log").await,
+            DENIED_CODES,
         );
 
         // Denied: creating databases or tables, inside `oximeter` or out.
@@ -1162,11 +1165,13 @@ mod tests {
                 "CREATE DATABASE IF NOT EXISTS oximeter",
             )
             .await,
+            DENIED_CODES,
         );
         assert_denied(
             user,
             "CREATE DATABASE outside oximeter",
             conn.query(Uuid::new_v4(), "CREATE DATABASE some_other_db").await,
+            DENIED_CODES,
         );
         assert_denied(
             user,
@@ -1176,6 +1181,7 @@ mod tests {
                 "CREATE TABLE oximeter.other (x UInt8) ENGINE = Memory",
             )
             .await,
+            DENIED_CODES,
         );
         assert_denied(
             user,
@@ -1185,6 +1191,7 @@ mod tests {
                 "CREATE TABLE default.foo (x UInt8) ENGINE = Memory",
             )
             .await,
+            DENIED_CODES,
         );
 
         // Denied: mutating or dropping data.
@@ -1196,16 +1203,19 @@ mod tests {
                 "ALTER TABLE oximeter.samples UPDATE x = 0 WHERE 1",
             )
             .await,
+            DENIED_CODES,
         );
         assert_denied(
             user,
             "DROP TABLE",
             conn.query(Uuid::new_v4(), "DROP TABLE oximeter.samples").await,
+            DENIED_CODES,
         );
         assert_denied(
             user,
             "DROP DATABASE",
             conn.query(Uuid::new_v4(), "DROP DATABASE oximeter").await,
+            DENIED_CODES,
         );
 
         // Denied: modifying access control.
@@ -1217,11 +1227,13 @@ mod tests {
                 &format!("GRANT SELECT ON oximeter.* TO {}", user.username()),
             )
             .await,
+            DENIED_CODES,
         );
         assert_denied(
             user,
             "CREATE USER",
             conn.query(Uuid::new_v4(), "CREATE USER eve").await,
+            DENIED_CODES,
         );
 
         // Denied: table functions, which might need temporary tables.
@@ -1237,6 +1249,7 @@ mod tests {
                 "SELECT * FROM url('http://localhost:1/', 'CSV', 'a UInt8')",
             )
             .await,
+            DENIED_CODES,
         );
         assert_denied(
             user,
@@ -1246,16 +1259,18 @@ mod tests {
                 "SELECT * FROM meilisearch('http://localhost:1/', 'index', 'key')",
             )
             .await,
+            DENIED_CODES,
         );
         assert_denied(
             user,
             "postgresql() table function",
             conn.query(
                 Uuid::new_v4(),
-                "SELECT * FROM postgresql('https://localhost:1/', 'my_db', \
+                "SELECT * FROM postgresql('localhost:1', 'my_db', \
                 'my_table', 'user', 'pass')",
             )
             .await,
+            &[UNACCEPTABLE_URL],
         );
         assert_denied(
             user,
@@ -1265,6 +1280,7 @@ mod tests {
                 "SELECT * FROM file('nonexistent.csv', 'CSV', 'a UInt8')",
             )
             .await,
+            DENIED_CODES,
         );
 
         // A source-backed table function needs BOTH the `CREATE TEMPORARY
@@ -1277,6 +1293,7 @@ mod tests {
                 "CREATE TEMPORARY TABLE t (x UInt8) ENGINE = Memory",
             )
             .await,
+            DENIED_CODES,
         );
     }
 
@@ -1296,31 +1313,12 @@ mod tests {
             "CREATE TABLE default.forbidden_url (a UInt8) \
              ENGINE = URL('http://localhost:1/', 'CSV')",
         ] {
-            let result = conn.query(Uuid::new_v4(), query).await;
-            match result {
-                Ok(_) => {
-                    panic!(
-                        "expected {query:?} to be rejected, but it succeeded"
-                    )
-                }
-                Err(Error::Exception { exceptions }) => {
-                    let code = exceptions
-                        .first()
-                        .expect(
-                            "server exception should have at least one entry",
-                        )
-                        .code;
-                    assert_eq!(
-                        code, UNACCEPTABLE_URL,
-                        "query {query:?}: expected error code \
-                         {UNACCEPTABLE_URL}, got {code}:{exceptions:#?}"
-                    );
-                }
-                Err(other) => panic!(
-                    "expected a server exception rejecting the \
-                     query {query:?}, but got a different error: {other:?}"
-                ),
-            }
+            assert_denied(
+                User::Admin,
+                query,
+                conn.query(Uuid::new_v4(), query).await,
+                &[UNACCEPTABLE_URL],
+            );
         }
 
         db.cleanup().await.unwrap();
@@ -1384,6 +1382,7 @@ mod tests {
             "INSERT",
             conn.query(Uuid::new_v4(), "INSERT INTO oximeter.samples SELECT 3")
                 .await,
+            DENIED_CODES,
         );
 
         // The reader cannot escape its read-only/DDL constraints via SET, since
@@ -1393,16 +1392,19 @@ mod tests {
             User::Reader,
             "escalate allow_ddl",
             conn.query(Uuid::new_v4(), "SET allow_ddl = 1").await,
+            DENIED_CODES,
         );
         assert_denied(
             User::Reader,
             "escape readonly",
             conn.query(Uuid::new_v4(), "SET readonly = 0").await,
+            DENIED_CODES,
         );
         assert_denied(
             User::Reader,
             "raise max_execution_time",
             conn.query(Uuid::new_v4(), "SET max_execution_time = 0").await,
+            DENIED_CODES,
         );
 
         db.cleanup().await.unwrap();
