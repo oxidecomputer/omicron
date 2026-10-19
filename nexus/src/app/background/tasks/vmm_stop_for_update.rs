@@ -23,8 +23,8 @@ use nexus_types::internal_api::background::VmmStopForUpdateStatus;
 use nexus_types::internal_api::background::VmmsBySled;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
-use omicron_uuid_kinds::SledUuid;
 use parallel_task_set::ParallelTaskSet;
 use reqwest::Client as ReqwestClient;
 use serde_json::json;
@@ -235,11 +235,9 @@ impl VmmStopForUpdate {
                 }
             };
 
-            // TODO-K: pass the whole VMM not just the ID so I can thread in the
-            // instance ID for logs
-            for vmm_id in vmm_ids {
+            for vmm in vmms_per_sled {
                 let stop =
-                    self.stop_vmm(opctx, sled_client.clone(), sled_id, vmm_id);
+                    self.stop_vmm(opctx, sled_client.clone(), vmm.clone());
                 if let Some(vmm_result) = tasks.spawn(stop).await {
                     result.merge(vmm_result);
                 }
@@ -252,13 +250,15 @@ impl VmmStopForUpdate {
         &self,
         opctx: &Arc<OpContext>,
         sled_client: sled_agent_client::Client,
-        sled_id: SledUuid,
-        vmm_id: PropolisUuid,
+        vmm: Vmm,
     ) -> impl Future<Output = VmmStopForUpdateResult> + Send + 'static + use<>
     {
         let datastore = self.datastore.clone();
         let sagas = self.sagas.clone();
         let opctx = Arc::clone(opctx);
+        let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
+        let instance_id = InstanceUuid::from_untyped_uuid(vmm.instance_id);
+        let sled_id = vmm.sled_id();
 
         async move {
             let mut result = VmmStopForUpdateResult::new();
@@ -281,6 +281,7 @@ impl VmmStopForUpdate {
                         "Failed to mark VMM as Stopped";
                         "sled_id" => %sled_id,
                         "vmm_id" => %id,
+                        "instance_id" => %instance_id,
                         InlineErrorChain::new(&err),
                     );
 
@@ -305,7 +306,8 @@ impl VmmStopForUpdate {
                         opctx.log,
                         "VMM already stopped, no changes to state";
                         "sled_id" => %sled_id,
-                        "vmm_id" => %id
+                        "vmm_id" => %id,
+                        "instance_id" => %instance_id,
                     );
                 }
                 Some(sled_vmm_state) => {
@@ -334,6 +336,7 @@ impl VmmStopForUpdate {
                                 "sled_id" => %sled_id,
                                 "vmm_id" => %id,
                                 "state" => ?sled_vmm_state,
+                                "instance_id" => %instance_id,
                                 InlineErrorChain::new(&err),
                             );
                             result.errors.push(err);
@@ -349,6 +352,7 @@ impl VmmStopForUpdate {
                                             "sled_id" => %sled_id,
                                             "vmm_id" => %id,
                                             "saga_id" => %saga_id,
+                                            "instance_id" => %instance_id,
                                             InlineErrorChain::new(&err),
                                         );
                                         result.errors.push(err);
@@ -362,6 +366,7 @@ impl VmmStopForUpdate {
                                          be started";
                                         "sled_id" => %sled_id,
                                         "vmm_id" => %id,
+                                        "instance_id" => %instance_id,
                                         InlineErrorChain::new(&err),
                                     );
                                     result.errors.push(err);
@@ -420,6 +425,7 @@ impl VmmStopForUpdate {
                                 "sled_id" => %sled_id,
                                 "vmm_id" => %id,
                                 "vmm_generation" => ?generation,
+                                "instance_id" => %instance_id,
                                 "time_updated" => ?time_updated,
                             );
                         }
@@ -441,6 +447,7 @@ impl VmmStopForUpdate {
                                 restart. No need to stop it";
                                 "sled_id" => %sled_id,
                                 "vmm_id" => %id,
+                                "instance_id" => %instance_id,
                                 "reason" => description,
                                 "state" => ?state,
                                 "vmm_generation" => ?generation,
@@ -461,6 +468,7 @@ impl VmmStopForUpdate {
                                 "vmm_id" => %id,
                                 "state" => ?state,
                                 "vmm_generation" => ?generation,
+                                "instance_id" => %instance_id,
                                 "time_updated" => ?time_updated,
                             );
                             result.errors.push(Error::InternalError {
