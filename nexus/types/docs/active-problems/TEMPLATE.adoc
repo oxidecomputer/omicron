@@ -23,14 +23,6 @@ ifdef::problem-version-retired[**Retired in**: {problem-version-retired}]
 
 == Description
 
-This is not a real problem. It exists only for testing purposes.
-
 == Action Required
 
-If you encounter this problem in real life, this is a bug.
-Please contact Oxide support.
-But, everything is fine and no other action is required.
-
 == Automated Response
-
-None.
