@@ -11,6 +11,7 @@ use crate::app::instance::SledAgentInstanceError;
 use crate::app::saga::StartSaga;
 use futures::future::BoxFuture;
 use iddqd::IdOrdMap;
+use nexus_db_model::Vmm;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
@@ -94,7 +95,10 @@ impl VmmStopForUpdate {
         while let Some(p) = paginator.next() {
             let vmms = match self
                 .datastore
-                .vmm_list_marked_stop_for_update(opctx, &p.current_pagparams())
+                .vmm_list_marked_stop_for_update_by_sled_id(
+                    opctx,
+                    &p.current_pagparams(),
+                )
                 .await
             {
                 Ok(vmms) => vmms,
@@ -103,21 +107,11 @@ impl VmmStopForUpdate {
                     break;
                 }
             };
-            paginator = p.found_batch(&vmms, &|vmm| vmm.id);
+            paginator = p.found_batch(&vmms, &|vmm| {
+                (vmm.sled_id().into_untyped_uuid(), vmm.id)
+            });
 
-            let mut vmms_by_sled = IdOrdMap::new();
-            for vmm in vmms {
-                let sled_id = vmm.sled_id();
-                vmms_by_sled
-                    .entry(sled_id)
-                    .or_insert_with(|| VmmsBySled {
-                        sled_id,
-                        vmm_ids: Vec::new(),
-                    })
-                    .vmm_ids
-                    .push(PropolisUuid::from_untyped_uuid(vmm.id));
-            }
-            let batch_result = self.stop_batch(vmms_by_sled, opctx).await;
+            let batch_result = self.stop_batch(&vmms, opctx).await;
             result.merge(batch_result);
         }
 
@@ -127,7 +121,7 @@ impl VmmStopForUpdate {
     /// Stops a batch of VMMs
     async fn stop_batch(
         &self,
-        vmms_by_sled: IdOrdMap<VmmsBySled>,
+        vmms: &[Vmm],
         opctx: &OpContext,
     ) -> VmmStopForUpdateResult {
         let mut result = VmmStopForUpdateResult::new();
@@ -157,7 +151,22 @@ impl VmmStopForUpdate {
                 }
             };
 
-        for VmmsBySled { sled_id, vmm_ids } in &vmms_by_sled {
+        for vmms_per_sled in vmms.chunk_by(|a, b| a.sled_id() == b.sled_id()) {
+            // We only retrieve the first VMM in order to get the sled id.
+            // The slice is constructed by VMMs with the same sled id, so it's
+            // fine to just check the first one
+            let Some(first_vmm) = vmms_per_sled.first() else {
+                // `chunk_by` never returns an empty slice, so this should never
+                // be `None`. We handle the case regardless
+                continue;
+            };
+            let sled_id = first_vmm.sled_id();
+
+            let vmm_ids: Vec<PropolisUuid> = vmms_per_sled
+                .iter()
+                .map(|vmm| PropolisUuid::from_untyped_uuid(vmm.id))
+                .collect();
+
             slog::info!(
                 opctx.log,
                 "Stopping VMMs for update";
@@ -165,13 +174,13 @@ impl VmmStopForUpdate {
                 "vmms" => ?vmm_ids,
             );
 
-            // Since we're using IdOrdMap, each sled id will only appear once
-            // per batch of VMMs. Because of this, it's ok to start a new sled
-            // agent client per sled id.
+            // Since we're chunking by sled id, each will only appear once per
+            // batch of VMMs. Because of this, it's ok to start a new sled agent
+            // client per sled id.
             let sled_client = match nexus_networking::sled_client_ext(
                 &self.datastore,
                 &opctx,
-                *sled_id,
+                sled_id,
                 &opctx.log,
                 reqwest_client.clone(),
             )
@@ -192,7 +201,8 @@ impl VmmStopForUpdate {
                 }
             };
 
-            for id in vmm_ids {
+            // TODO-K: pass the whole VMM not just the ID so I can thread in the instance ID
+            for id in &vmm_ids {
                 let response = match sled_client
                     .vmm_put_state(
                         id,
@@ -215,9 +225,9 @@ impl VmmStopForUpdate {
                         result.errors.push(err.into());
                         result
                             .vmms_failed_by_sled
-                            .entry(*sled_id)
+                            .entry(sled_id)
                             .or_insert_with(|| VmmsBySled {
-                                sled_id: *sled_id,
+                                sled_id,
                                 vmm_ids: Vec::new(),
                             })
                             .vmm_ids
@@ -333,9 +343,9 @@ impl VmmStopForUpdate {
                             | VmmState::Destroyed => {
                                 result
                                     .vmms_stopped_by_sled
-                                    .entry(*sled_id)
+                                    .entry(sled_id)
                                     .or_insert_with(|| VmmsBySled {
-                                        sled_id: *sled_id,
+                                        sled_id,
                                         vmm_ids: Vec::new(),
                                     })
                                     .vmm_ids

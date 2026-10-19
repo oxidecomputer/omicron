@@ -11,6 +11,7 @@ use crate::db::model;
 use crate::db::model::Vmm;
 use crate::db::model::VmmState as DbVmmState;
 use crate::db::pagination::paginated;
+use crate::db::pagination::paginated_multicolumn;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateAndQueryResult;
 use crate::db::update_and_check::UpdateStatus;
@@ -572,12 +573,15 @@ impl DataStore {
 
     /// Lists VMMs that have been marked as needing to be stopped for a sled
     /// update.
-    pub async fn vmm_list_marked_stop_for_update(
+    ///
+    /// The query performed by this function is paginated by the sled and
+    /// VMM UUIDs, in that order.
+    pub async fn vmm_list_marked_stop_for_update_by_sled_id(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, (Uuid, Uuid)>,
     ) -> ListResultVec<Vmm> {
-        paginated(dsl::vmm, dsl::id, pagparams)
+        paginated_multicolumn(dsl::vmm, (dsl::sled_id, dsl::id), pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::stop_for_update_disposition_generation.is_not_null())
             .filter(dsl::state.eq_any(DbVmmState::SHOULD_STOP_FOR_EVACUATION))
@@ -1344,7 +1348,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_vmm_list_marked_stop_for_update() {
+    async fn test_vmm_list_marked_stop_for_update_by_sled_id() {
         // Setup
         let logctx =
             dev::test_setup_log("test_vmm_list_marked_stop_for_update");
@@ -1428,7 +1432,7 @@ mod tests {
         // Check the retrieved ids for stoppable VMMs are the same as the
         // expected ones
         let listed = datastore
-            .vmm_list_marked_stop_for_update(
+            .vmm_list_marked_stop_for_update_by_sled_id(
                 &opctx,
                 &DataPageParams::max_page(),
             )
