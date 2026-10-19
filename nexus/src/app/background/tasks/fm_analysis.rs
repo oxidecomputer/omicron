@@ -624,7 +624,7 @@ impl FmAnalysis {
     async fn load_ereporter_restarts(
         &mut self,
         opctx: &OpContext,
-        builder: &mut fm::analysis_input::Builder,
+        builder: &mut fm::analysis_input::EreportsBuilder,
     ) -> anyhow::Result<()> {
         let mut nbatches = 0;
         let mut paginator = Paginator::new(
@@ -653,7 +653,7 @@ impl FmAnalysis {
     async fn load_new_ereports(
         &mut self,
         opctx: &OpContext,
-        builder: &mut fm::analysis_input::Builder,
+        builder: &mut fm::analysis_input::EreportsBuilder,
         warnings: &mut Vec<String>,
     ) -> anyhow::Result<()> {
         // Only surface ereports a diagnosis engine will consume.
@@ -1021,6 +1021,25 @@ enum PreparationError {
     InvalidInputs(#[from] InvalidInputs),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
+}
+
+struct PreparationStep {
+    pub time_started: chrono::DateTime<chrono::Utc>,
+    pub time_finished: chrono::DateTime<chrono::Utc>,
+    pub warnings: Vec<String>,
+    pub result: anyhow::Result<InputKind>,
+}
+
+enum InputKind {
+    Ereports(fm::analysis_input::EreportsBuilder),
+}
+
+async fn load_ereports(
+    datastore: Arc<Datastore>,
+    opctx: &OpContext,
+    mut builder: fm::analysis_input::EreportsBuilder,
+) -> anyhow::Result<fm::analysis_input::EreportsBuilder> {
+    todo!()
 }
 
 #[cfg(test)]
