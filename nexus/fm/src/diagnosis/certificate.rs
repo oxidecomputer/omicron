@@ -1055,7 +1055,7 @@ mod tests {
                             parent_sitrep_id,
                             fm::SagaFact::Abandoned(
                                 fm::SagaAbandonedFactPayload {
-                                    saga_id: steno::SagaId(Uuid::new_v4()),
+                                    saga_id: steno::SagaId::new_v4(),
                                 },
                             ),
                         )],
