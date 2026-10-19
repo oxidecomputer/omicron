@@ -265,6 +265,7 @@ impl VmmStopForUpdate {
                                     InlineErrorChain::new(&err),
                                 );
                                 result.errors.push(err);
+                                continue;
                             }
                             Ok(Some((_, saga))) => {
                                 match self.sagas.saga_run(saga).await {
@@ -279,6 +280,7 @@ impl VmmStopForUpdate {
                                                 InlineErrorChain::new(&err),
                                             );
                                             result.errors.push(err);
+                                            continue;
                                         }
                                     }
                                     Err(err) => {
@@ -291,6 +293,7 @@ impl VmmStopForUpdate {
                                             InlineErrorChain::new(&err),
                                         );
                                         result.errors.push(err);
+                                        continue;
                                     }
                                 }
                             }
@@ -388,6 +391,13 @@ impl VmmStopForUpdate {
                                     "vmm_generation" => ?generation,
                                     "time_updated" => ?time_updated,
                                 );
+                                result.errors.push(Error::InternalError {
+                                    internal_message: format!(
+                                        "failed to mark VMM {} on sled {} as \
+                                        Stopped; unexpected state reported {}",
+                                        id, sled_id, state
+                                    ),
+                                });
                             }
                         }
                     }
@@ -527,9 +537,9 @@ mod tests {
 
     // In order to stop a VMM, it needs to be registered with the simulated
     // sled agent. We keep a record of the states of the real VMMs we will be
-    // stopping. Even though `Created` is a "stoppable" state, we do not include
-    // it in this list as a VMM is only in this state for a short period. This
-    // means we cannot reliably test a VMM in the `Creating` state.
+    // stopping. Even though `Creating` is a "stoppable" state, we do not
+    // include it in this list as a VMM is only in this state for a short
+    // period. This means we cannot reliably test a VMM in the `Creating` state.
     //
     // The label is used to name instances and groups.
     const REAL_VMM_STATES: [(&str, DbVmmState); 3] = [
@@ -724,7 +734,7 @@ mod tests {
         create_default_ip_pools(client).await;
         create_project(client, PROJECT_NAME).await;
 
-        // The simulated agent can only stopp VMMs that are registered with it.
+        // The simulated agent can only stop VMMs that are registered with it.
         // So, for each VMM that we intend to stop, we create a real instance
         // via the external API.
         //
@@ -745,9 +755,9 @@ mod tests {
                 )
                 .await;
                 match state {
-                    // A new VMM in a simulatated environemnt stays in
-                    // `Starting` until the "poke" API is called, so we can
-                    // confidently test a VMM in this state.
+                    // A new VMM in a simulated environemnt stays in `Starting`
+                    // until the "poke" API is called, so we can confidently
+                    // test a VMM in this state.
                     DbVmmState::Starting => {}
                     DbVmmState::Running => {
                         instance_simulate(&cptestctx, &id).await;

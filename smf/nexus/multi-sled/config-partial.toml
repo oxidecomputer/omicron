@@ -67,12 +67,6 @@ service_firewall_propagation.period_secs = 300
 v2p_mapping_propagation.period_secs = 30
 instance_watcher.period_secs = 30
 abandoned_vmm_reaper.period_secs = 60
-# How frequently to attempt to stop VMMs that have been marked to stop for an
-# update.
-# The task that marks VMMs as needing to be stopped runs every 300s. In
-# addition, every time that task runs and marks any VMMs, this task is also
-# activated. We set this task to run every minute to ensure all VMMs are stopped
-# in a timely manner.
 vmm_stop_for_update.period_secs = 60
 saga_recovery.period_secs = 600
 lookup_region_port.period_secs = 60
