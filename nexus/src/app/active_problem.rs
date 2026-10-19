@@ -34,6 +34,17 @@ impl Nexus {
         Ok(problem)
     }
 
+    /// Lists the current revisions of Active Problems, optionally filtered by
+    /// state, paginated by the time each problem was created and its ID.
+    pub async fn active_problem_list(
+        &self,
+        opctx: &OpContext,
+        params: &api::ActiveProblemListParams,
+        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
+    ) -> ListResultVec<ActiveProblemView> {
+        self.db_datastore.active_problem_list(opctx, params, pagparams).await
+    }
+
     /// Fetches the current revision of an Active Problem.
     pub async fn active_problem_view(
         &self,
