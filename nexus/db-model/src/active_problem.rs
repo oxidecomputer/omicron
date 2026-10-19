@@ -75,8 +75,8 @@ pub struct ActiveProblemRevision {
 pub struct ActiveProblemView {
     pub identity: ActiveProblemIdentity,
     pub time_deleted: Option<DateTime<Utc>>,
+    pub time_resolved: Option<DateTime<Utc>>,
     pub revision: ActiveProblemGeneration,
-    pub state: api::ActiveProblemState,
     pub code: ProblemCode,
     pub summary: String,
     pub description: String,
@@ -126,18 +126,13 @@ impl TryFrom<(ActiveProblem, ActiveProblemRevision)> for ActiveProblemView {
                 ),
             });
         }
-        let state = match time_resolved {
-            Some(time_resolved) => {
-                api::ActiveProblemState::Resolved { time_resolved }
-            }
-            None => api::ActiveProblemState::Active,
-        };
+
         Ok(Self {
             identity,
             revision: revision.into(),
-            state,
-            code,
+            time_resolved,
             time_deleted,
+            code,
             summary,
             description,
             action_required,
@@ -167,16 +162,24 @@ impl From<ActiveProblemView> for api::ActiveProblem {
         let ActiveProblemView {
             identity: _identity,
             revision,
-            state,
-            code,
+            time_resolved,
+            // We shouldn't be attempting to convert a deleted active problem
+            // into an API response, since any queries should exclude deleted
+            // records...,
             time_deleted: _,
+            code,
             summary,
             description,
             action_required,
         } = view;
+        let state = match time_resolved {
+            Some(_) => api::ActiveProblemState::Resolved,
+            None => api::ActiveProblemState::Active,
+        };
         Self {
             identity,
             revision: revision.as_u64(),
+            time_resolved,
             state,
             code: code.into(),
             class: code.description().class.to_string(),
