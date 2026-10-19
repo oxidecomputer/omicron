@@ -107,6 +107,31 @@ impl VmmStopForUpdate {
     async fn stop_all(&self, opctx: &OpContext) -> VmmStopForUpdateResult {
         let mut result = VmmStopForUpdateResult::new();
 
+        // Build the reqwest client beforehand to avoid building a new one per
+        // page or sled below.
+        let reqwest_client =
+            match nexus_networking::default_reqwest_client_builder().build() {
+                Ok(client) => client,
+                Err(e) => {
+                    let err = InlineErrorChain::new(&e);
+
+                    slog::error!(
+                        opctx.log,
+                        "Failed to build the HTTP client";
+                        &err,
+                    );
+
+                    result.errors.push(Error::InternalError {
+                        internal_message: format!(
+                            "failed to build the HTTP client: {}",
+                            err
+                        ),
+                    });
+
+                    return result;
+                }
+            };
+
         let mut tasks =
             ParallelTaskSet::new_with_parallelism(MAX_CONCURRENT_STOPS);
         let task_opctx = Arc::new(opctx.child(BTreeMap::new()));
@@ -134,39 +159,9 @@ impl VmmStopForUpdate {
                 (vmm.sled_id().into_untyped_uuid(), vmm.id)
             });
 
-            // Build the reqwest client beforehand to avoid building a new one per
-            // sled below.
-            let reqwest_client =
-                match nexus_networking::default_reqwest_client_builder().build()
-                {
-                    Ok(client) => client,
-                    Err(e) => {
-                        let err = InlineErrorChain::new(&e);
-
-                        slog::error!(
-                            opctx.log,
-                            "Failed to build the HTTP client";
-                            &err,
-                        );
-
-                        result.errors.push(Error::InternalError {
-                            internal_message: format!(
-                                "failed to build the HTTP client: {}",
-                                err
-                            ),
-                        });
-
-                        // Instead of returning here, we break the loop. We want
-                        // to make sure that the operations to stop VMMs that
-                        // are already in-flight don't get canceled by dropping
-                        // `tasks`.
-                        break;
-                    }
-                };
-
             self.stop_batch(
                 &vmms,
-                reqwest_client,
+                &reqwest_client,
                 &task_opctx,
                 &mut tasks,
                 &mut result,
@@ -185,7 +180,7 @@ impl VmmStopForUpdate {
     async fn stop_batch(
         &self,
         vmms: &[Vmm],
-        reqwest_client: ReqwestClient,
+        reqwest_client: &ReqwestClient,
         opctx: &Arc<OpContext>,
         tasks: &mut ParallelTaskSet<VmmStopForUpdateResult>,
         result: &mut VmmStopForUpdateResult,
