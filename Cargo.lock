@@ -8834,6 +8834,7 @@ dependencies = [
 name = "omicron-certificates"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "display-error-chain",
  "foreign-types 0.3.2",
  "omicron-common",
@@ -9379,6 +9380,7 @@ dependencies = [
  "nexus-types-versions",
  "ntp-admin-client",
  "num-integer",
+ "omicron-certificates",
  "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-debug-dropbox",
@@ -10506,6 +10508,17 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+]
+
+[[package]]
+name = "oxide-versioned-envelope"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a36c6e7ec2aac34233572f24c8546dd7cd2c5fa01c8fec5a5126af37b9499c62"
+dependencies = [
+ "schemars 0.8.22",
+ "serde_core",
+ "serde_json",
 ]
 
 [[package]]
@@ -17865,13 +17878,13 @@ dependencies = [
  "indexmap 2.14.0",
  "indicatif",
  "itertools 0.14.0",
- "maplit",
  "omicron-common",
  "omicron-passwords",
  "omicron-workspace-hack",
  "owo-colors 4.3.0",
  "oxide-update-engine-display",
  "oxide-update-engine-types",
+ "oxide-versioned-envelope",
  "proptest",
  "ratatui",
  "reqwest",
@@ -17898,11 +17911,25 @@ dependencies = [
  "tufaceous-artifact 0.2.0",
  "tui-tree-widget",
  "unicode-width 0.1.14",
+ "wicket-cli-types",
  "wicket-common",
  "wicketd-client",
  "wicketd-commission-client",
  "wicketd-commission-types",
  "zeroize",
+]
+
+[[package]]
+name = "wicket-cli-types"
+version = "0.1.0"
+dependencies = [
+ "expectorate",
+ "omicron-workspace-hack",
+ "oxide-versioned-envelope",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "wicketd-commission-types-versions",
 ]
 
 [[package]]
@@ -17923,7 +17950,6 @@ dependencies = [
  "oxide-update-engine-types",
  "oxnet",
  "schemars 0.8.22",
- "semver 1.0.28",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -18018,6 +18044,7 @@ dependencies = [
  "oxide-tokio-rt",
  "oxide-update-engine",
  "oxide-update-engine-types",
+ "oxide-versioned-envelope",
  "oxnet",
  "rand 0.9.2",
  "reqwest",
@@ -18049,6 +18076,7 @@ dependencies = [
  "tufaceous-artifact 0.2.0",
  "uuid",
  "wicket",
+ "wicket-cli-types",
  "wicket-common",
  "wicketd-api",
  "wicketd-client",
