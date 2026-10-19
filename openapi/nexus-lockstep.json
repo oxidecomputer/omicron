@@ -1382,8 +1382,7 @@
             "name": "saga_id",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/SagaId"
             }
           }
         ],
@@ -4159,8 +4158,7 @@
             "$ref": "#/components/schemas/DemoSagaUuid"
           },
           "saga_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/SagaId"
           }
         },
         "required": [
@@ -5290,7 +5288,7 @@
         ]
       },
       "FmConfig": {
-        "description": "A fault management configuration.\n\n# Validation\n\nFor a config to be valid, the following requirements must be upheld:\n\n- [`Self::sitrep_limit`] must be at least [`Self::MIN_SITREP_LIMIT`], and no more than [`Self::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be at least [`Self::MIN_HISTORY_PRUNING_THRESHOLD`], and no more than [`Self::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be strictly less than [`Self::sitrep_limit`],\n\nThese rules are checked by the [`Self::validate`] method, which is called prior to accepting a config update.",
+        "description": "A fault management configuration.\n\n# Validation\n\nFor a config to be valid, the following requirements must be upheld:\n\n- [`Self::sitrep_limit`] must be at least [`Self::MIN_SITREP_LIMIT`], and no more than [`Self::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be at least [`Self::MIN_HISTORY_PRUNING_THRESHOLD`], and no more than [`Self::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be strictly less than [`Self::sitrep_limit`], - [`Self::certificate_expiry_warning_days`] must be no more than [`Self::MAX_CERTIFICATE_EXPIRY_WARNING_DAYS`] (it is a `NonZeroU32`, so it is always at least 1).\n\nThese rules are checked by the [`Self::validate`] method, which is called prior to accepting a config update.",
         "type": "object",
         "properties": {
           "analysis_enabled": {
@@ -5298,6 +5296,14 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/FmConfigBooleanSetting"
+              }
+            ]
+          },
+          "certificate_expiry_warning_days": {
+            "description": "How many days before a silo's external TLS certificate expires the certificate diagnosis engine opens a case and requests a `silo.certificate.expiring` alert.\n\nThe window applies to the certificate Nexus actually serves for the silo (the one with the latest expiration time), so a case opens only when no later-expiring replacement is installed. Time is measured against the completion time of the inventory collection each sitrep is generated from, not the wall clock.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FmConfigNonZeroU32Setting"
               }
             ]
           },
@@ -5320,6 +5326,7 @@
         },
         "required": [
           "analysis_enabled",
+          "certificate_expiry_warning_days",
           "history_pruning_threshold",
           "sitrep_limit"
         ]
@@ -7632,8 +7639,7 @@
             "type": "boolean"
           },
           "saga_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/SagaId"
           },
           "saga_name": {
             "type": "string"
@@ -9485,8 +9491,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/SagaId"
           },
           "state": {
             "$ref": "#/components/schemas/SagaState"
@@ -9584,6 +9589,15 @@
             ]
           }
         ]
+      },
+      "SagaId": {
+        "x-rust-type": {
+          "crate": "steno",
+          "path": "steno::SagaId",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "SagaQuiesceStatus": {
         "type": "object",

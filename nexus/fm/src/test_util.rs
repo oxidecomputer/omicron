@@ -15,12 +15,13 @@ use nexus_types::fm::ereport::{
     Ena, Ereport, EreportData, EreportId, Reporter,
 };
 use nexus_types::fm::{
-    DiskFact, SagaAbandonedFactPayload, SagaFact, Sitrep, SitrepVersion,
-    ZpoolUnhealthyFactPayload,
+    DiskFact, FmConfig, SagaAbandonedFactPayload, SagaFact, Sitrep,
+    SitrepVersion, ZpoolUnhealthyFactPayload,
 };
 use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::inventory;
 use nexus_types::inventory::ZpoolHealth;
+use nexus_types::observed_certificate::ObservedSiloCertificates;
 use nexus_types::observed_saga::ObservedSaga;
 use omicron_generation_kinds::AlertGeneration;
 use omicron_generation_kinds::SupportBundleGeneration;
@@ -86,10 +87,14 @@ impl FmTest {
         inv: Arc<inventory::Collection>,
         in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
         observed_sagas: Arc<IdOrdMap<ObservedSaga>>,
+        observed_silo_certificates: Arc<IdOrdMap<ObservedSiloCertificates>>,
+        config: FmConfig,
     ) -> Result<Builder, InvalidInputs> {
         let mut builder = Input::builder(parent_sitrep, inv)?
             .in_service_disks(in_service_disks)
-            .observed_sagas(observed_sagas);
+            .observed_sagas(observed_sagas)
+            .observed_silo_certificates(observed_silo_certificates)
+            .config(config);
         builder.add_ereporter_restarts(
             self.reporters.ereporter_restarts().iter().cloned(),
         );
@@ -509,7 +514,7 @@ pub fn make_abandoned_saga_fact(
     parent_sitrep_id: SitrepUuid,
     saga_n: u128,
 ) -> fm::case::Fact {
-    let saga_id = steno::SagaId(uuid::Uuid::from_u128(saga_n));
+    let saga_id = steno::SagaId::from_u128(saga_n);
     fm::case::Fact {
         metadata: fm::case::FactMetadata {
             id: FactUuid::new_v4(),
