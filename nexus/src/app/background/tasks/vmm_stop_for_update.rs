@@ -24,12 +24,22 @@ use nexus_types::internal_api::background::VmmsBySled;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::SledUuid;
+use parallel_task_set::ParallelTaskSet;
 use reqwest::Client as ReqwestClient;
 use serde_json::json;
 use sled_agent_client::types::VmmPutStateBody;
 use sled_agent_client::types::VmmStateRequested;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
 use std::sync::Arc;
+
+/// Determines the number of attempts to stop VMMs (sled agent PUT request and
+/// subsequent update saga per VMM) that can execute concurrently.
+///
+/// Like the instance-watcher task, we keep this number low to make sure we
+/// don't starve the system of resources.
+const MAX_CONCURRENT_STOPS: usize = 16;
 
 struct VmmStopForUpdateResult {
     vmms_stopped_by_sled: IdOrdMap<VmmsBySled>,
@@ -89,6 +99,11 @@ impl VmmStopForUpdate {
     /// stops them in batches.
     async fn stop_all(&self, opctx: &OpContext) -> VmmStopForUpdateResult {
         let mut result = VmmStopForUpdateResult::new();
+
+        let mut tasks =
+            ParallelTaskSet::new_with_parallelism(MAX_CONCURRENT_STOPS);
+        let task_opctx = Arc::new(opctx.child(BTreeMap::new()));
+
         let mut paginator = Paginator::new(
             SQL_BATCH_SIZE,
             dropshot::PaginationOrder::Ascending,
@@ -134,13 +149,26 @@ impl VmmStopForUpdate {
                             ),
                         });
 
-                        return result;
+                        // Instead of returning here, we break the loop. We want
+                        // to make sure that the operations to stop VMMs that
+                        // are already in-flight don't get canceled by dropping
+                        // `tasks`.
+                        break;
                     }
                 };
 
-            let batch_result =
-                self.stop_batch(&vmms, reqwest_client, opctx).await;
-            result.merge(batch_result);
+            self.stop_batch(
+                &vmms,
+                reqwest_client,
+                &task_opctx,
+                &mut tasks,
+                &mut result,
+            )
+            .await;
+        }
+
+        while let Some(vmm_result) = tasks.join_next().await {
+            result.merge(vmm_result);
         }
 
         result
@@ -151,10 +179,10 @@ impl VmmStopForUpdate {
         &self,
         vmms: &[Vmm],
         reqwest_client: ReqwestClient,
-        opctx: &OpContext,
-    ) -> VmmStopForUpdateResult {
-        let mut result = VmmStopForUpdateResult::new();
-
+        opctx: &Arc<OpContext>,
+        tasks: &mut ParallelTaskSet<VmmStopForUpdateResult>,
+        result: &mut VmmStopForUpdateResult,
+    ) {
         for vmms_per_sled in vmms.chunk_by(|a, b| a.sled_id() == b.sled_id()) {
             // We only retrieve the first VMM in order to get the sled id.
             // The slice is constructed by VMMs with the same sled id, so it's
@@ -206,220 +234,244 @@ impl VmmStopForUpdate {
             };
 
             // TODO-K: pass the whole VMM not just the ID so I can thread in the instance ID
-            for id in &vmm_ids {
-                let response = match sled_client
-                    .vmm_put_state(
-                        id,
-                        &VmmPutStateBody { state: VmmStateRequested::Stopped },
+            for vmm_id in vmm_ids {
+                let stop =
+                    self.stop_vmm(opctx, sled_client.clone(), sled_id, vmm_id);
+                if let Some(vmm_result) = tasks.spawn(stop).await {
+                    result.merge(vmm_result);
+                }
+            }
+        }
+    }
+
+    /// Stops a single VMM.
+    fn stop_vmm(
+        &self,
+        opctx: &Arc<OpContext>,
+        sled_client: sled_agent_client::Client,
+        sled_id: SledUuid,
+        vmm_id: PropolisUuid,
+    ) -> impl Future<Output = VmmStopForUpdateResult> + Send + 'static + use<>
+    {
+        let datastore = self.datastore.clone();
+        let sagas = self.sagas.clone();
+        let opctx = Arc::clone(opctx);
+
+        async move {
+            let mut result = VmmStopForUpdateResult::new();
+            let id = &vmm_id;
+            let response = match sled_client
+                .vmm_put_state(
+                    id,
+                    &VmmPutStateBody { state: VmmStateRequested::Stopped },
+                )
+                .await
+            {
+                Ok(res) => res.into_inner().updated_runtime.map(Into::into),
+                Err(e) => {
+                    let err = SledAgentInstanceError(e);
+
+                    slog::error!(
+                        opctx.log,
+                        "Failed to mark VMM as Stopped";
+                        "sled_id" => %sled_id,
+                        "vmm_id" => %id,
+                        InlineErrorChain::new(&err),
+                    );
+
+                    result.errors.push(err.into());
+                    result
+                        .vmms_failed_by_sled
+                        .entry(sled_id)
+                        .or_insert_with(|| VmmsBySled {
+                            sled_id,
+                            vmm_ids: Vec::new(),
+                        })
+                        .vmm_ids
+                        .push(*id);
+
+                    return result;
+                }
+            };
+
+            match response {
+                None => {
+                    slog::debug!(
+                        opctx.log,
+                        "VMM already stopped, no changes to state";
+                        "sled_id" => %sled_id,
+                        "vmm_id" => %id
+                    );
+                }
+                Some(sled_vmm_state) => {
+                    // We attempt to write the new VMM state to the db.
+                    // This will reduce the time it takes for an instance
+                    // to be reported as `Stopped`.
+                    match instance::process_vmm_update(
+                        &datastore,
+                        &opctx,
+                        *id,
+                        &sled_vmm_state,
                     )
                     .await
-                {
-                    Ok(res) => res.into_inner().updated_runtime.map(Into::into),
-                    Err(e) => {
-                        let err = SledAgentInstanceError(e);
-
-                        slog::error!(
-                            opctx.log,
-                            "Failed to mark VMM as Stopped";
-                            "sled_id" => %sled_id,
-                            "vmm_id" => %id,
-                            InlineErrorChain::new(&err),
-                        );
-
-                        result.errors.push(err.into());
-                        result
-                            .vmms_failed_by_sled
-                            .entry(sled_id)
-                            .or_insert_with(|| VmmsBySled {
-                                sled_id,
-                                vmm_ids: Vec::new(),
-                            })
-                            .vmm_ids
-                            .push(*id);
-
-                        continue;
-                    }
-                };
-
-                match response {
-                    None => {
-                        slog::debug!(
-                            opctx.log,
-                            "VMM already stopped, no changes to state";
-                            "sled_id" => %sled_id,
-                            "vmm_id" => %id
-                        );
-                    }
-                    Some(sled_vmm_state) => {
-                        // We attempt to write the new VMM state to the db.
-                        // This will reduce the time it takes for an instance
-                        // to be reported as `Stopped`.
-                        match instance::process_vmm_update(
-                            &self.datastore,
-                            opctx,
-                            *id,
-                            &sled_vmm_state,
-                        )
-                        .await
-                        {
-                            Err(err) => {
-                                // Sled agent will attempt to publish the new
-                                // state to Nexus when the VMM process exits,
-                                // and we also have the instance watcher
-                                // background task which is constantly trying to
-                                // read instances' states. So, it's not a huge
-                                // deal if we fail here. The instance state will
-                                // be updated eventually.
-                                slog::warn!(
-                                    opctx.log,
-                                    "Failed to record new VMM state";
-                                    "sled_id" => %sled_id,
-                                    "vmm_id" => %id,
-                                    "state" => ?sled_vmm_state,
-                                    InlineErrorChain::new(&err),
-                                );
-                                result.errors.push(err);
-                                continue;
-                            }
-                            Ok(Some((_, saga))) => {
-                                match self.sagas.saga_run(saga).await {
-                                    Ok((saga_id, completed)) => {
-                                        if let Err(err) = completed.await {
-                                            slog::warn!(
-                                                opctx.log,
-                                                "Instance update saga failed";
-                                                "sled_id" => %sled_id,
-                                                "vmm_id" => %id,
-                                                "saga_id" => %saga_id,
-                                                InlineErrorChain::new(&err),
-                                            );
-                                            result.errors.push(err);
-                                            continue;
-                                        }
-                                    }
-                                    Err(err) => {
+                    {
+                        Err(err) => {
+                            // Sled agent will attempt to publish the new
+                            // state to Nexus when the VMM process exits,
+                            // and we also have the instance watcher
+                            // background task which is constantly trying to
+                            // read instances' states. So, it's not a huge
+                            // deal if we fail here. The instance state will
+                            // be updated eventually.
+                            slog::warn!(
+                                opctx.log,
+                                "Failed to record new VMM state";
+                                "sled_id" => %sled_id,
+                                "vmm_id" => %id,
+                                "state" => ?sled_vmm_state,
+                                InlineErrorChain::new(&err),
+                            );
+                            result.errors.push(err);
+                            return result;
+                        }
+                        Ok(Some((_, saga))) => {
+                            match sagas.saga_run(saga).await {
+                                Ok((saga_id, completed)) => {
+                                    if let Err(err) = completed.await {
                                         slog::warn!(
                                             opctx.log,
-                                            "Instance update saga could not \
-                                             be started";
+                                            "Instance update saga failed";
                                             "sled_id" => %sled_id,
                                             "vmm_id" => %id,
+                                            "saga_id" => %saga_id,
                                             InlineErrorChain::new(&err),
                                         );
                                         result.errors.push(err);
-                                        continue;
+                                        return result;
                                     }
                                 }
+                                Err(err) => {
+                                    slog::warn!(
+                                        opctx.log,
+                                        "Instance update saga could not \
+                                         be started";
+                                        "sled_id" => %sled_id,
+                                        "vmm_id" => %id,
+                                        InlineErrorChain::new(&err),
+                                    );
+                                    result.errors.push(err);
+                                    return result;
+                                }
                             }
-                            Ok(None) => {}
                         }
+                        Ok(None) => {}
+                    }
 
-                        let SledVmmState {
-                            vmm_state,
-                            migration_in: _,
-                            migration_out: _,
-                        } = sled_vmm_state;
+                    let SledVmmState {
+                        vmm_state,
+                        migration_in: _,
+                        migration_out: _,
+                    } = sled_vmm_state;
 
-                        let VmmRuntimeState { state, generation, time_updated } =
-                            vmm_state;
+                    let VmmRuntimeState { state, generation, time_updated } =
+                        vmm_state;
 
-                        match state {
-                            // If we succeeded, one of three things happened:
-                            //
-                            //  - The VMM has not stopped yet, but propolis has
-                            //    accepted the `put_state` request and reports
-                            //    the VMM's state as `Stopping`.
-                            //  - A propolis zone does not exist yet. In this
-                            //    scenario a VMM could have been in the
-                            //    `Creating` state but had not reached the point
-                            //    where the propolis zone was created. In this
-                            //    case the request succeeded, but the VMM is
-                            //    reported as `Destroyed`.
-                            //  - A VMM should technically never be reported as
-                            //    `Stopped` since
-                            //    propolis_client::types::InstanceState::Stopped
-                            //    is always reported as `VmmState::Stopping`.
-                            //    But, if for some reason we get this state,
-                            //    it's what we want, so we consider it a
-                            //    success.
-                            VmmState::Stopped
-                            | VmmState::Stopping
-                            | VmmState::Destroyed => {
-                                result
-                                    .vmms_stopped_by_sled
-                                    .entry(sled_id)
-                                    .or_insert_with(|| VmmsBySled {
-                                        sled_id,
-                                        vmm_ids: Vec::new(),
-                                    })
-                                    .vmm_ids
-                                    .push(*id);
+                    match state {
+                        // If we succeeded, one of three things happened:
+                        //
+                        //  - The VMM has not stopped yet, but propolis has
+                        //    accepted the `put_state` request and reports
+                        //    the VMM's state as `Stopping`.
+                        //  - A propolis zone does not exist yet. In this
+                        //    scenario a VMM could have been in the
+                        //    `Creating` state but had not reached the point
+                        //    where the propolis zone was created. In this
+                        //    case the request succeeded, but the VMM is
+                        //    reported as `Destroyed`.
+                        //  - A VMM should technically never be reported as
+                        //    `Stopped` since
+                        //    propolis_client::types::InstanceState::Stopped
+                        //    is always reported as `VmmState::Stopping`.
+                        //    But, if for some reason we get this state,
+                        //    it's what we want, so we consider it a
+                        //    success.
+                        VmmState::Stopped
+                        | VmmState::Stopping
+                        | VmmState::Destroyed => {
+                            result
+                                .vmms_stopped_by_sled
+                                .entry(sled_id)
+                                .or_insert_with(|| VmmsBySled {
+                                    sled_id,
+                                    vmm_ids: Vec::new(),
+                                })
+                                .vmm_ids
+                                .push(*id);
 
-                                slog::debug!(
-                                    opctx.log,
-                                    "Stopped VMM for sled evacuation during \
-                                    an update";
-                                    "sled_id" => %sled_id,
-                                    "vmm_id" => %id,
-                                    "vmm_generation" => ?generation,
-                                    "time_updated" => ?time_updated,
-                                );
-                            }
-                            // Propolis is alive but does not find a VMM. This
-                            // implies that it restarted and lost the previously
-                            // created VMM. The VMM is reported as Failed. It's
-                            // not necessary to stop it anymore, so we don't add
-                            // it to the `vmms_failed_by_sled` list.
-                            //
-                            // While a `VmmState::Failed` could also be due to a
-                            // sled agent or sled restart, `vmm_put_state` would
-                            // report those cases as an `Error`, so we don't
-                            // need to handle those specific cases here.
-                            VmmState::Failed(reason) => {
-                                let description = reason.description();
-                                slog::info!(
-                                    opctx.log,
-                                    "Unable to find VMM, possibly due to a \
-                                    restart. No need to stop it";
-                                    "sled_id" => %sled_id,
-                                    "vmm_id" => %id,
-                                    "reason" => description,
-                                    "state" => ?state,
-                                    "vmm_generation" => ?generation,
-                                    "time_updated" => ?time_updated,
-                                );
-                            }
-                            VmmState::Migrating
-                            | VmmState::Rebooting
-                            | VmmState::Starting
-                            | VmmState::Running
-                            | VmmState::Creating
-                            | VmmState::SagaUnwound => {
-                                slog::error!(
-                                    opctx.log,
-                                    "Failed to mark VMM as Stopped, \
-                                    unexpected state reported";
-                                    "sled_id" => %sled_id,
-                                    "vmm_id" => %id,
-                                    "state" => ?state,
-                                    "vmm_generation" => ?generation,
-                                    "time_updated" => ?time_updated,
-                                );
-                                result.errors.push(Error::InternalError {
-                                    internal_message: format!(
-                                        "failed to mark VMM {} on sled {} as \
+                            slog::debug!(
+                                opctx.log,
+                                "Stopped VMM for sled evacuation during \
+                                an update";
+                                "sled_id" => %sled_id,
+                                "vmm_id" => %id,
+                                "vmm_generation" => ?generation,
+                                "time_updated" => ?time_updated,
+                            );
+                        }
+                        // Propolis is alive but does not find a VMM. This
+                        // implies that it restarted and lost the previously
+                        // created VMM. The VMM is reported as Failed. It's
+                        // not necessary to stop it anymore, so we don't add
+                        // it to the `vmms_failed_by_sled` list.
+                        //
+                        // While a `VmmState::Failed` could also be due to a
+                        // sled agent or sled restart, `vmm_put_state` would
+                        // report those cases as an `Error`, so we don't
+                        // need to handle those specific cases here.
+                        VmmState::Failed(reason) => {
+                            let description = reason.description();
+                            slog::info!(
+                                opctx.log,
+                                "Unable to find VMM, possibly due to a \
+                                restart. No need to stop it";
+                                "sled_id" => %sled_id,
+                                "vmm_id" => %id,
+                                "reason" => description,
+                                "state" => ?state,
+                                "vmm_generation" => ?generation,
+                                "time_updated" => ?time_updated,
+                            );
+                        }
+                        VmmState::Migrating
+                        | VmmState::Rebooting
+                        | VmmState::Starting
+                        | VmmState::Running
+                        | VmmState::Creating
+                        | VmmState::SagaUnwound => {
+                            slog::error!(
+                                opctx.log,
+                                "Failed to mark VMM as Stopped, \
+                                unexpected state reported";
+                                "sled_id" => %sled_id,
+                                "vmm_id" => %id,
+                                "state" => ?state,
+                                "vmm_generation" => ?generation,
+                                "time_updated" => ?time_updated,
+                            );
+                            result.errors.push(Error::InternalError {
+                                internal_message: format!(
+                                    "failed to mark VMM {} on sled {} as \
                                         Stopped; unexpected state reported {}",
-                                        id, sled_id, state
-                                    ),
-                                });
-                            }
+                                    id, sled_id, state
+                                ),
+                            });
                         }
                     }
                 }
             }
-        }
 
-        result
+            result
+        }
     }
 
     pub(crate) async fn actually_activate(
