@@ -1472,6 +1472,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                                 part_number: sp_state.model.clone(),
                                 serial_number: sp_state.serial_number.clone(),
                             },
+                            rack_id: nexus_inventory::examples::RACK_UUID,
                             last_reconciliation: Some(
                                 ConfigReconcilerInventory {
                                     last_reconciled_config: fake_sled_config

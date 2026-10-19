@@ -203,7 +203,6 @@ pub mod inventory {
     pub use crate::v55::inventory::ConfigReconcilerInventoryStatus;
     pub use crate::v55::inventory::HostPhase2DesiredContents;
     pub use crate::v55::inventory::HostPhase2DesiredSlots;
-    pub use crate::v55::inventory::Inventory;
     pub use crate::v55::inventory::ManifestBootInventory;
     pub use crate::v55::inventory::ManifestInventory;
     pub use crate::v55::inventory::OmicronFileSourceResolverInventory;
@@ -213,6 +212,8 @@ pub mod inventory {
     pub use crate::v55::inventory::OmicronZoneImageSource;
     pub use crate::v55::inventory::OmicronZonesConfig;
     pub use crate::v55::inventory::ZoneArtifactInventory;
+
+    pub use crate::v57::inventory::Inventory;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;
