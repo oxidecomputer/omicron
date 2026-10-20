@@ -19,6 +19,10 @@ pub use oxide_generation::{
 
 use oxide_generation_macros::impl_typed_generation_kinds;
 
+// Renaming export, since this is a bit shorter and we often refer to these as
+// "revision numbers" rather than "revision generation numbers".
+pub type ActiveProblemRevNum = ActiveProblemRevGeneration;
+
 // NOTE:
 //
 // This should generally be an append-only list. Removing items from this list
@@ -39,7 +43,7 @@ impl_typed_generation_kinds! {
         },
     },
     kinds = {
-        ActiveProblem = {},
+        ActiveProblemRev = {},
         ArtifactConfig = {},
         InstanceState = {},
         InstanceUpdater = {},
