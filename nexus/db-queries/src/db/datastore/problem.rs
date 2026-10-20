@@ -35,7 +35,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
-use omicron_generation_kinds::ProblemGeneration;
+use omicron_generation_kinds::ProblemRevNum;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::ProblemUuid;
 use std::cmp::Ordering;
@@ -186,7 +186,7 @@ impl DataStore {
             .values(Problem {
                 identity,
                 time_deleted: None,
-                current_revision: ProblemGeneration::from_u32(0).into(),
+                current_revision: ProblemRevNum::from_u32(0).into(),
             })
             .on_conflict(problem_dsl::id)
             .do_nothing()
@@ -272,7 +272,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_problem: &authz::Problem,
-        new_revision: ProblemGeneration,
+        new_revision: ProblemRevNum,
     ) -> UpdateResult<SetCurrentRevisionOutcome> {
         opctx.authorize(authz::Action::Modify, authz_problem).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -340,7 +340,7 @@ impl DataStore {
     /// `tests/output/problem_set_current_revision.sql`.
     fn problem_set_current_revision_query(
         problem_id: ProblemUuid,
-        new_revision: ProblemGeneration,
+        new_revision: ProblemRevNum,
     ) -> impl RunnableQuery<(Option<Uuid>, Option<Uuid>, Problem)> {
         let revision_num = DbTypedGeneration::from(new_revision);
         let revision_row = rev_dsl::problem_revision
@@ -375,7 +375,7 @@ pub enum SetCurrentRevisionOutcome {
     /// The problem was already at a later revision, so nothing was changed.
     Superseded {
         /// The problem's current revision.
-        current_revision: ProblemGeneration,
+        current_revision: ProblemRevNum,
     },
 }
 
@@ -394,8 +394,8 @@ mod revision_tests {
     use omicron_test_utils::dev;
     use std::num::NonZeroU32;
 
-    fn rev(revision: u32) -> ProblemGeneration {
-        ProblemGeneration::from_u32(revision)
+    fn rev(revision: u32) -> ProblemRevNum {
+        ProblemRevNum::from_u32(revision)
     }
 
     /// Returns revision `revision` of the problem `id`.
@@ -551,7 +551,7 @@ mod revision_tests {
             "creating a problem a second time should not overwrite the \
              existing record's `time_created`"
         );
-        assert_eq!(problem.current_revision(), ProblemGeneration::ZERO);
+        assert_eq!(problem.current_revision(), ProblemRevNum::ZERO);
 
         let err = datastore
             .problem_fetch_current_revision(opctx, &authz_problem, problem)
@@ -590,7 +590,7 @@ mod revision_tests {
             create_with_revisions(opctx, datastore, 2).await;
 
         for revision in &revisions {
-            let number = ProblemGeneration::from(revision.revision);
+            let number = ProblemRevNum::from(revision.revision);
             let outcome = datastore
                 .problem_set_current_revision(opctx, &authz_problem, number)
                 .await
@@ -678,7 +678,7 @@ mod revision_tests {
         assert_matches!(err, Error::InternalError { .. });
 
         let problem = load_problem(datastore, &authz_problem).await;
-        assert_eq!(problem.current_revision(), ProblemGeneration::ZERO);
+        assert_eq!(problem.current_revision(), ProblemRevNum::ZERO);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -805,7 +805,7 @@ mod revision_tests {
         let problem = load_problem(datastore, &authz_problem).await;
         assert_eq!(
             problem.current_revision(),
-            ProblemGeneration::from_u32(REVISIONS)
+            ProblemRevNum::from_u32(REVISIONS)
         );
         assert_eq!(
             problem.identity.time_modified,
@@ -816,7 +816,7 @@ mod revision_tests {
         logctx.cleanup_successful();
     }
 
-    /// Creates an Active Problem with the provided `time_created`, and inserts
+    /// Creates a problem with the provided `time_created`, and inserts
     /// and makes current its first revision.
     ///
     /// If `resolved` is true, the first revision is resolved.
@@ -825,19 +825,19 @@ mod revision_tests {
         datastore: &DataStore,
         time_created: DateTime<Utc>,
         resolved: bool,
-    ) -> authz::ActiveProblem {
-        let id = ActiveProblemUuid::new_v4();
-        let identity = ActiveProblemIdentity {
+    ) -> authz::Problem {
+        let id = ProblemUuid::new_v4();
+        let identity = ProblemIdentity {
             id: id.into(),
             time_created,
             time_modified: time_created,
         };
         datastore
-            .active_problem_create(opctx, identity)
+            .problem_create(opctx, identity)
             .await
-            .expect("creating an active problem should succeed");
+            .expect("creating a problem should succeed");
         let (authz_problem,) = LookupPath::new(opctx, datastore)
-            .active_problem_id(id)
+            .problem_id(id)
             .lookup_for(authz::Action::Modify)
             .await
             .unwrap();
@@ -847,25 +847,25 @@ mod revision_tests {
             revision.time_resolved = Some(revision.time_created);
         }
         datastore
-            .active_problem_revision_insert(opctx, &authz_problem, revision)
+            .problem_revision_insert(opctx, &authz_problem, revision)
             .await
             .expect("inserting a revision should succeed");
         datastore
-            .active_problem_set_current_revision(opctx, &authz_problem, rev(1))
+            .problem_set_current_revision(opctx, &authz_problem, rev(1))
             .await
             .expect("making a revision current should succeed");
         authz_problem
     }
 
-    /// Lists every Active Problem matching `filter`, fetching `page_size`
+    /// Lists every problem matching `filter`, fetching `page_size`
     /// problems at a time.
     async fn list_all(
         opctx: &OpContext,
         datastore: &DataStore,
-        filter: api::ActiveProblemListParams,
+        filter: api::ProblemListParams,
         direction: PaginationOrder,
         page_size: u32,
-    ) -> Vec<ActiveProblemView> {
+    ) -> Vec<ProblemView> {
         // Guards against a pagination bug that never returns an empty page.
         const MAX_PAGES: usize = 100;
 
@@ -876,7 +876,7 @@ mod revision_tests {
             let pagparams =
                 DataPageParams { marker: marker.as_ref(), direction, limit };
             let page = datastore
-                .active_problem_list(opctx, &filter, &pagparams)
+                .problem_list(opctx, &filter, &pagparams)
                 .await
                 .expect("listing active problems should succeed");
             assert!(page.len() <= page_size as usize, "page: {page:#?}");
@@ -889,17 +889,16 @@ mod revision_tests {
         panic!("listing active problems did not finish in {MAX_PAGES} pages");
     }
 
-    fn ids(problems: &[ActiveProblemView]) -> Vec<ActiveProblemUuid> {
+    fn ids(problems: &[ProblemView]) -> Vec<ProblemUuid> {
         problems.iter().map(|problem| problem.id()).collect()
     }
 
-    /// The state filter selects Active Problems by the state of their
-    /// *current* revision, and Active Problems which are deleted or have no
+    /// The state filter selects problems by the state of their
+    /// *current* revision, and problems which are deleted or have no
     /// current revision are never listed.
     #[tokio::test]
-    async fn test_active_problem_list_state_filter() {
-        let logctx =
-            dev::test_setup_log("test_active_problem_list_state_filter");
+    async fn test_problem_list_state_filter() {
+        let logctx = dev::test_setup_log("test_problem_list_state_filter");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let now = omicron_common::now_db_precision();
@@ -917,7 +916,7 @@ mod revision_tests {
         resolving_revision.time_resolved =
             Some(resolving_revision.time_created);
         datastore
-            .active_problem_revision_insert(
+            .problem_revision_insert(
                 opctx,
                 &pending_resolution,
                 resolving_revision,
@@ -927,19 +926,16 @@ mod revision_tests {
 
         // A problem with no current revision.
         datastore
-            .active_problem_create(
-                opctx,
-                ActiveProblemIdentity::new(ActiveProblemUuid::new_v4()),
-            )
+            .problem_create(opctx, ProblemIdentity::new(ProblemUuid::new_v4()))
             .await
-            .expect("creating an active problem should succeed");
+            .expect("creating a problem should succeed");
 
         // A deleted problem.
         let deleted =
             create_current_problem(opctx, datastore, now, false).await;
         {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            diesel::update(problem_dsl::active_problem)
+            diesel::update(problem_dsl::problem)
                 .filter(problem_dsl::id.eq(deleted.id().into_untyped_uuid()))
                 .set(problem_dsl::time_deleted.eq(Utc::now()))
                 .execute_async(&*conn)
@@ -951,17 +947,17 @@ mod revision_tests {
             list_all(
                 opctx,
                 datastore,
-                api::ActiveProblemListParams { state },
+                api::ProblemListParams { state },
                 PaginationOrder::Ascending,
                 100,
             )
         };
-        let sorted_ids = |problems: Vec<ActiveProblemView>| {
+        let sorted_ids = |problems: Vec<ProblemView>| {
             let mut ids = ids(&problems);
             ids.sort_unstable();
             ids
         };
-        let sorted = |mut ids: Vec<ActiveProblemUuid>| {
+        let sorted = |mut ids: Vec<ProblemUuid>| {
             ids.sort_unstable();
             ids
         };
@@ -979,12 +975,11 @@ mod revision_tests {
         );
 
         assert_eq!(
-            sorted_ids(list(Some(api::ActiveProblemState::Active)).await),
+            sorted_ids(list(Some(api::ProblemState::Active)).await),
             sorted(vec![active.id(), pending_resolution.id()]),
         );
 
-        let listed_resolved =
-            list(Some(api::ActiveProblemState::Resolved)).await;
+        let listed_resolved = list(Some(api::ProblemState::Resolved)).await;
         assert_eq!(ids(&listed_resolved), vec![resolved.id()]);
         assert!(listed_resolved[0].time_resolved.is_some());
 
@@ -1033,7 +1028,7 @@ mod revision_tests {
             let ascending = list_all(
                 opctx,
                 datastore,
-                api::ActiveProblemListParams { state: None },
+                api::ProblemListParams { state: None },
                 PaginationOrder::Ascending,
                 page_size,
             )
@@ -1043,7 +1038,7 @@ mod revision_tests {
             let descending = list_all(
                 opctx,
                 datastore,
-                api::ActiveProblemListParams { state: None },
+                api::ProblemListParams { state: None },
                 PaginationOrder::Descending,
                 page_size,
             )
@@ -1059,8 +1054,8 @@ mod revision_tests {
             let active = list_all(
                 opctx,
                 datastore,
-                api::ActiveProblemListParams {
-                    state: Some(api::ActiveProblemState::Active),
+                api::ProblemListParams {
+                    state: Some(api::ProblemState::Active),
                 },
                 PaginationOrder::Ascending,
                 page_size,
