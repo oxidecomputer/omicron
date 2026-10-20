@@ -69,9 +69,9 @@ function do_update_packages {
     PACKAGE_COMMITS=()
     PACKAGE_SHAS=()
     for PACKAGE in "${PACKAGES[@]}"; do
-        COMMIT=$(toml2json "$PKG_MANIFEST" | jq -r ".package | .[\"$PACKAGE\"].source.commit") \
+        COMMIT=$(toml2json "$PKG_MANIFEST" | jq -re ".package | .[\"$PACKAGE\"].source.commit") \
           || not_found "$PACKAGE commit" "$PKG_MANIFEST"
-        SHA=$(toml2json "$PKG_MANIFEST" | jq -r ".package | .[\"$PACKAGE\"].source.sha256") \
+        SHA=$(toml2json "$PKG_MANIFEST" | jq -re ".package | .[\"$PACKAGE\"].source.sha256") \
           || not_found "$PACKAGE sha" "$PKG_MANIFEST"
 
         PACKAGE_COMMITS=("${PACKAGE_COMMITS[@]}" "$COMMIT")
@@ -120,7 +120,7 @@ function do_update_crates {
     CARGO_TOML="$SOURCE_DIR/../Cargo.toml"
     CARGO_COMMITS=()
     for CRATE in "${CRATES[@]}"; do
-        COMMIT=$(toml2json "$CARGO_TOML" | jq -r ".workspace.dependencies | .[\"$CRATE\"].rev") \
+        COMMIT=$(toml2json "$CARGO_TOML" | jq -re ".workspace.dependencies | .[\"$CRATE\"].rev") \
           || not_found "$CRATE commit" "$CARGO_TOML"
 
         CARGO_COMMITS=("${CARGO_COMMITS[@]}" "$COMMIT")

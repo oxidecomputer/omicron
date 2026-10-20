@@ -19,7 +19,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
-use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -30,15 +30,20 @@ impl DataStore {
     pub async fn certificate_create(
         &self,
         opctx: &OpContext,
+        authz_silo: &authz::Silo,
         certificate: Certificate,
     ) -> CreateResult<Certificate> {
         use nexus_db_schema::schema::certificate::dsl;
 
-        let authz_silo = opctx
-            .authn
-            .silo_required()
-            .internal_context("creating a Certificate")?;
-        let authz_cert_list = authz::SiloCertificateList::new(authz_silo);
+        if certificate.silo_id != authz_silo.id() {
+            return Err(Error::internal_error(&format!(
+                "certificate silo {} does not match authorized silo {}",
+                certificate.silo_id,
+                authz_silo.id(),
+            )));
+        }
+        let authz_cert_list =
+            authz::SiloCertificateList::new(authz_silo.clone());
         opctx.authorize(authz::Action::CreateChild, &authz_cert_list).await?;
 
         let name = certificate.name().clone();
@@ -66,17 +71,14 @@ impl DataStore {
         opctx: &OpContext,
         kind: Option<ServiceKind>,
         pagparams: &PaginatedBy<'_>,
-        silo_only: bool,
+        authz_silo: Option<&authz::Silo>,
     ) -> ListResultVec<Certificate> {
         use nexus_db_schema::schema::certificate::dsl;
 
-        let silo = if silo_only {
-            let authz_silo = opctx
-                .authn
-                .silo_required()
-                .internal_context("listing Certificates")?;
+        let silo = if let Some(authz_silo) = authz_silo {
             let silo_id = authz_silo.id();
-            let authz_cert_list = authz::SiloCertificateList::new(authz_silo);
+            let authz_cert_list =
+                authz::SiloCertificateList::new(authz_silo.clone());
             opctx
                 .authorize(authz::Action::ListChildren, &authz_cert_list)
                 .await?;

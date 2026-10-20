@@ -12,7 +12,6 @@ testing = [
     "nexus-fm-slippy",
     "nexus-reconfigurator-planning",
     "ereport-types",
-    "uuid",
 ]
 
 [build-dependencies]
@@ -38,13 +37,13 @@ slog-error-chain.workspace = true
 steno.workspace = true
 thiserror.workspace = true
 typed-rng.workspace = true
+uuid.workspace = true
 
 # deps for test utils
 omicron-test-utils = { workspace = true, optional = true }
 nexus-fm-slippy = { workspace = true, optional = true }
 nexus-reconfigurator-planning = { workspace = true, optional = true }
 ereport-types = { workspace = true, optional = true }
-uuid = { workspace = true, optional = true }
 
 omicron-workspace-hack.workspace = true
 
@@ -54,4 +53,3 @@ nexus-fm-slippy.workspace = true
 nexus-inventory.workspace = true
 nexus-reconfigurator-planning.workspace = true
 ereport-types.workspace = true
-uuid.workspace = true

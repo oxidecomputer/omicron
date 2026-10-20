@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "55.0.0"
+    "version": "57.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -364,6 +364,24 @@
           },
           "required": true
         },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/multirack-join-complete": {
+      "put": {
+        "summary": "Report that this sled's multirack join is complete.",
+        "description": "Sent by Nexus once it has observed this sled on the underlay network.",
+        "operationId": "multirack_join_complete",
         "responses": {
           "204": {
             "description": "resource updated"
@@ -6350,6 +6368,9 @@
               }
             ]
           },
+          "rack_id": {
+            "$ref": "#/components/schemas/RackUuid"
+          },
           "reconciler_status": {
             "$ref": "#/components/schemas/ConfigReconcilerInventoryStatus"
           },
@@ -6409,6 +6430,7 @@
           "file_source_resolver",
           "fmd",
           "instance_manager_status",
+          "rack_id",
           "reconciler_status",
           "reference_measurements",
           "reservoir_size",

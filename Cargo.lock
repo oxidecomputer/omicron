@@ -4822,10 +4822,11 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.17.0"
+version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f467dd6dccf739c208452f8014c75c18bb8301b050ad1cfb27153803edb0f51"
+checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 dependencies = [
+ "allocator-api2",
  "foldhash 0.2.0",
 ]
 
@@ -5537,15 +5538,15 @@ dependencies = [
 
 [[package]]
 name = "iddqd"
-version = "0.4.2"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7721c885a97a7c67bc8645958710f3f43b5e7ad8644ce6f43b188a77f05fda7"
+checksum = "c9c6a3a37e36cfd4170bf01265cb987a40993369198fb072c1a0041c0cc485cf"
 dependencies = [
  "allocator-api2",
  "daft",
  "equivalent",
  "foldhash 0.2.0",
- "hashbrown 0.16.1",
+ "hashbrown 0.17.1",
  "proptest",
  "ref-cast",
  "schemars 0.8.22",
@@ -5717,7 +5718,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
 dependencies = [
  "equivalent",
- "hashbrown 0.17.0",
+ "hashbrown 0.17.1",
  "serde",
  "serde_core",
 ]
@@ -7441,7 +7442,7 @@ dependencies = [
  "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-generation-kinds",
- "omicron-git-version",
+ "omicron-git-version-types",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-uuid-kinds",
@@ -7524,6 +7525,7 @@ dependencies = [
  "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-generation-kinds",
+ "omicron-git-version-types",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
@@ -7771,6 +7773,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "sled-hardware-types",
+ "steno",
  "trust-quorum-types",
  "uuid",
 ]
@@ -7801,6 +7804,7 @@ dependencies = [
  "sled-agent-types-versions",
  "sled-hardware-types",
  "slog",
+ "steno",
  "uuid",
 ]
 
@@ -7852,6 +7856,7 @@ dependencies = [
  "camino",
  "chrono",
  "dropshot",
+ "fmd-adm-sys",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -7863,12 +7868,15 @@ dependencies = [
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
+ "nexus-test-utils",
  "nexus-types",
  "omicron-common",
  "omicron-generation-kinds",
+ "omicron-rpaths",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "pq-sys",
  "qorb",
  "rand 0.9.2",
  "repo-depot-api",
@@ -8801,7 +8809,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2e5a6c098c7a3b6547378093f5cc30bc54fd361ce711e05293a5cc589562739b"
 dependencies = [
  "crc32fast",
- "hashbrown 0.17.0",
+ "hashbrown 0.17.1",
  "indexmap 2.14.0",
  "memchr",
 ]
@@ -8831,6 +8839,7 @@ dependencies = [
 name = "omicron-certificates"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "display-error-chain",
  "foreign-types 0.3.2",
  "omicron-common",
@@ -9191,10 +9200,18 @@ dependencies = [
 name = "omicron-git-version"
 version = "0.1.0"
 dependencies = [
+ "omicron-git-version-types",
+ "omicron-workspace-hack",
+ "vergen-gitcl",
+]
+
+[[package]]
+name = "omicron-git-version-types"
+version = "0.1.0"
+dependencies = [
  "omicron-workspace-hack",
  "serde",
  "serde_with 3.21.0",
- "vergen-gitcl",
 ]
 
 [[package]]
@@ -9237,6 +9254,7 @@ dependencies = [
  "nexus-types",
  "omicron-common",
  "omicron-generation-kinds",
+ "omicron-git-version",
  "omicron-rpaths",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -9376,10 +9394,12 @@ dependencies = [
  "nexus-types-versions",
  "ntp-admin-client",
  "num-integer",
+ "omicron-certificates",
  "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-debug-dropbox",
  "omicron-generation-kinds",
+ "omicron-git-version",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
@@ -9570,6 +9590,7 @@ dependencies = [
  "omicron-common",
  "omicron-generation-kinds",
  "omicron-git-version",
+ "omicron-git-version-types",
  "omicron-nexus",
  "omicron-rpaths",
  "omicron-test-utils",
@@ -9699,6 +9720,7 @@ dependencies = [
  "nexus-reconfigurator-execution",
  "nexus-types",
  "omicron-common",
+ "omicron-git-version",
  "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -10058,8 +10080,7 @@ dependencies = [
  "getrandom 0.4.3",
  "group 0.13.0",
  "hashbrown 0.15.5",
- "hashbrown 0.16.1",
- "hashbrown 0.17.0",
+ "hashbrown 0.17.1",
  "heck 0.4.1",
  "hex",
  "hickory-proto 0.25.2",
@@ -10099,7 +10120,6 @@ dependencies = [
  "peg-runtime",
  "pem-rfc7468 0.7.0",
  "percent-encoding",
- "petgraph 0.6.5",
  "petgraph 0.8.3",
  "portable-atomic",
  "postgres-types",
@@ -10505,6 +10525,17 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+]
+
+[[package]]
+name = "oxide-versioned-envelope"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a36c6e7ec2aac34233572f24c8546dd7cd2c5fa01c8fec5a5126af37b9499c62"
+dependencies = [
+ "schemars 0.8.22",
+ "serde_core",
+ "serde_json",
 ]
 
 [[package]]
@@ -11318,8 +11349,6 @@ checksum = "b4c5cc86750666a3ed20bdaf5ca2a0344f9c67674cae0515bec2da16fbaa47db"
 dependencies = [
  "fixedbitset 0.4.2",
  "indexmap 2.14.0",
- "serde",
- "serde_derive",
 ]
 
 [[package]]
@@ -13613,7 +13642,7 @@ dependencies = [
 [[package]]
 name = "scim2-rs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/scim2-rs?rev=9730595245fc7969c4ffeee5a32345ab7b3167b7#9730595245fc7969c4ffeee5a32345ab7b3167b7"
+source = "git+https://github.com/oxidecomputer/scim2-rs?rev=a024c0918bea9133bd545bc06c42a4a0e14c7915#a024c0918bea9133bd545bc06c42a4a0e14c7915"
 dependencies = [
  "anyhow",
  "chrono",
@@ -13632,7 +13661,7 @@ dependencies = [
 [[package]]
 name = "scim2-test-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/scim2-rs?rev=9730595245fc7969c4ffeee5a32345ab7b3167b7#9730595245fc7969c4ffeee5a32345ab7b3167b7"
+source = "git+https://github.com/oxidecomputer/scim2-rs?rev=a024c0918bea9133bd545bc06c42a4a0e14c7915#a024c0918bea9133bd545bc06c42a4a0e14c7915"
 dependencies = [
  "anyhow",
  "clap",
@@ -14539,6 +14568,7 @@ dependencies = [
  "chrono",
  "cockroach-admin-client",
  "dns-service-client",
+ "fmd-adm-sys",
  "futures",
  "http",
  "iddqd",
@@ -14548,16 +14578,19 @@ dependencies = [
  "itertools 0.14.0",
  "nexus-lockstep-client",
  "nexus-reconfigurator-blippy",
+ "nexus-test-utils",
  "nexus-types",
  "ntp-admin-client",
  "omicron-common",
  "omicron-ddm-admin-client",
  "omicron-generation-kinds",
  "omicron-ledger",
+ "omicron-rpaths",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
+ "pq-sys",
  "rand 0.9.2",
  "rcgen",
  "reqwest",
@@ -15356,24 +15389,24 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "steno"
-version = "0.4.1"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a77bea0b19d52c04783569b87bb3e8d47c85e285be239a9b0428241bdbb95460"
+checksum = "9c10d0fbaa0795770ffc859987192c7b2e4a51dfa49f82e2146d0cb734ce870d"
 dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
  "futures",
  "lazy_static",
+ "newtype-uuid",
  "newtype_derive",
- "petgraph 0.6.5",
+ "petgraph 0.8.3",
  "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tokio",
- "uuid",
 ]
 
 [[package]]
@@ -17866,13 +17899,13 @@ dependencies = [
  "indexmap 2.14.0",
  "indicatif",
  "itertools 0.14.0",
- "maplit",
  "omicron-common",
  "omicron-passwords",
  "omicron-workspace-hack",
  "owo-colors 4.3.0",
  "oxide-update-engine-display",
  "oxide-update-engine-types",
+ "oxide-versioned-envelope",
  "proptest",
  "ratatui",
  "reqwest",
@@ -17899,11 +17932,25 @@ dependencies = [
  "tufaceous-artifact 0.2.0",
  "tui-tree-widget",
  "unicode-width 0.1.14",
+ "wicket-cli-types",
  "wicket-common",
  "wicketd-client",
  "wicketd-commission-client",
  "wicketd-commission-types",
  "zeroize",
+]
+
+[[package]]
+name = "wicket-cli-types"
+version = "0.1.0"
+dependencies = [
+ "expectorate",
+ "omicron-workspace-hack",
+ "oxide-versioned-envelope",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "wicketd-commission-types-versions",
 ]
 
 [[package]]
@@ -17924,7 +17971,6 @@ dependencies = [
  "oxide-update-engine-types",
  "oxnet",
  "schemars 0.8.22",
- "semver 1.0.28",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -18019,6 +18065,7 @@ dependencies = [
  "oxide-tokio-rt",
  "oxide-update-engine",
  "oxide-update-engine-types",
+ "oxide-versioned-envelope",
  "oxnet",
  "rand 0.9.2",
  "reqwest",
@@ -18050,6 +18097,7 @@ dependencies = [
  "tufaceous-artifact 0.2.0",
  "uuid",
  "wicket",
+ "wicket-cli-types",
  "wicket-common",
  "wicketd-api",
  "wicketd-client",

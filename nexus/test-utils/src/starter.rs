@@ -5,6 +5,7 @@
 use crate::ControlPlaneTestContext;
 use crate::OXIMETER_UUID;
 use crate::PRODUCER_UUID;
+use crate::RACK_UUID;
 use crate::SLED_AGENT_UUID;
 use crate::SLED_AGENT2_UUID;
 use crate::TEST_SUITE_PASSWORD;
@@ -95,6 +96,7 @@ use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
@@ -954,6 +956,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub async fn start_sled(
         &mut self,
         sled_id: SledUuid,
+        rack_id: RackUuid,
         sim_mode: sim::SimMode,
         reconcilers_mode: Option<ScrimletReconcilersMode>,
     ) {
@@ -973,6 +976,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             )),
             nexus_address,
             sled_id,
+            rack_id,
             self.sled_index_allocator.next(),
             sim_mode,
             SledCpuFamily::AmdMilan,
@@ -1097,6 +1101,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub async fn extra_sled_agent(
         &mut self,
         sled_id: SledUuid,
+        rack_id: RackUuid,
         sim_mode: sim::SimMode,
     ) {
         let nexus_address =
@@ -1109,6 +1114,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             )),
             nexus_address,
             sled_id,
+            rack_id,
             self.sled_index_allocator.next(),
             sim_mode,
             SledCpuFamily::AmdMilan,
@@ -1879,6 +1885,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                     builder
                         .start_sled(
                             SLED_AGENT_UUID.parse().unwrap(),
+                            RACK_UUID,
                             sim_mode,
                             Some(mode),
                         )
@@ -1932,6 +1939,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                         builder
                             .start_sled(
                                 SLED_AGENT2_UUID.parse().unwrap(),
+                                RACK_UUID,
                                 sim_mode,
                                 Some(mode),
                             )
@@ -1950,7 +1958,11 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                     "add_extra_sled_agent",
                     Box::new(move |builder| {
                         builder
-                            .extra_sled_agent(SledUuid::new_v4(), sim_mode)
+                            .extra_sled_agent(
+                                SledUuid::new_v4(),
+                                RACK_UUID,
+                                sim_mode,
+                            )
                             .boxed()
                     }),
                 )],
@@ -2062,6 +2074,7 @@ pub(crate) async fn start_sled_agent(
     log: Logger,
     nexus_address: SocketAddr,
     id: SledUuid,
+    rack_id: RackUuid,
     sled_index: u16,
     sim_mode: sim::SimMode,
     cpu_family: SledCpuFamily,
@@ -2075,6 +2088,7 @@ pub(crate) async fn start_sled_agent(
 
     let config = sim::Config::for_testing_with_baseboard(
         id,
+        rack_id,
         sim_mode,
         Some(nexus_address),
         sim::ZpoolConfig::None,

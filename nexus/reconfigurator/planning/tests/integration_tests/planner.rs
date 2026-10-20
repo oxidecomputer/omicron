@@ -2879,11 +2879,8 @@ fn test_zones_marked_ready_for_cleanup_based_on_inventory() {
 
     eprintln!("planning with config ledgered but not reconciled...");
     sim.inventory_edit_latest_raw("ledger sled config", |collection| {
-        collection
-            .sled_agents
-            .get_mut(&sled_id)
-            .unwrap()
-            .ledgered_sled_config = Some(bp2_sled_config.clone());
+        collection.sled_agents.get_mut(sled_id).unwrap().ledgered_sled_config =
+            Some(bp2_sled_config.clone());
         Ok(())
     })
     .unwrap();
@@ -2894,11 +2891,8 @@ fn test_zones_marked_ready_for_cleanup_based_on_inventory() {
 
     eprintln!("planning with config ledgered but zones failed to shut down...");
     sim.inventory_edit_latest_raw("ledger sled config", |collection| {
-        collection
-            .sled_agents
-            .get_mut(&sled_id)
-            .unwrap()
-            .ledgered_sled_config = Some(bp2_sled_config.clone());
+        collection.sled_agents.get_mut(sled_id).unwrap().ledgered_sled_config =
+            Some(bp2_sled_config.clone());
         let mut reconciliation =
             ConfigReconcilerInventory::debug_assume_success(
                 bp2_sled_config.clone(),
@@ -2913,7 +2907,7 @@ fn test_zones_marked_ready_for_cleanup_based_on_inventory() {
                 }
             });
         }
-        collection.sled_agents.get_mut(&sled_id).unwrap().last_reconciliation =
+        collection.sled_agents.get_mut(sled_id).unwrap().last_reconciliation =
             Some(reconciliation);
         Ok(())
     })
@@ -2925,7 +2919,7 @@ fn test_zones_marked_ready_for_cleanup_based_on_inventory() {
 
     // Now make both changes to the inventory.
     sim.inventory_edit_latest_raw("ledger sled config", |collection| {
-        let mut config = collection.sled_agents.get_mut(&sled_id).unwrap();
+        let mut config = collection.sled_agents.get_mut(sled_id).unwrap();
         config.ledgered_sled_config = Some(bp2_sled_config.clone());
         config.last_reconciliation =
             Some(ConfigReconcilerInventory::debug_assume_success(
@@ -4349,7 +4343,7 @@ fn test_update_boundary_ntp() {
                 }
             })
             .unwrap();
-        collection.ntp_timesync.remove(&boundary_ntp_zone);
+        collection.ntp_timesync.remove(boundary_ntp_zone);
         Ok(())
     })
     .unwrap();
@@ -4372,7 +4366,7 @@ fn test_update_boundary_ntp() {
                 }
             })
             .unwrap();
-        collection.ntp_timesync.get_mut(&boundary_ntp_zone).unwrap().synced =
+        collection.ntp_timesync.get_mut(boundary_ntp_zone).unwrap().synced =
             false;
         Ok(())
     })
@@ -4723,7 +4717,7 @@ fn test_update_internal_dns() {
             .zone_id;
         collection
             .internal_dns_generation_status
-            .remove(&first_zone)
+            .remove(first_zone)
             .expect("Could not remove one status");
         Ok(())
     })

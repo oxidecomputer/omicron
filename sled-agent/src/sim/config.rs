@@ -5,6 +5,7 @@
 //! Interfaces for working with sled agent configuration
 
 use dropshot::ConfigDropshot;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use serde::Deserialize;
 use serde::Serialize;
@@ -73,6 +74,8 @@ pub struct ConfigHardware {
 pub struct Config {
     /// unique id for the sled
     pub id: SledUuid,
+    /// ID for the simulated rack
+    pub rack_id: RackUuid,
     /// how to simulate asynchronous Instance and Disk transitions
     pub sim_mode: SimMode,
     /// IP address and TCP port for Nexus instance to register with
@@ -98,6 +101,7 @@ pub enum ZpoolConfig {
 impl Config {
     pub fn for_testing(
         id: SledUuid,
+        rack_id: RackUuid,
         sim_mode: SimMode,
         nexus_address: Option<SocketAddr>,
         zpool_config: ZpoolConfig,
@@ -105,6 +109,7 @@ impl Config {
     ) -> Config {
         Self::for_testing_with_baseboard(
             id,
+            rack_id,
             sim_mode,
             nexus_address,
             zpool_config,
@@ -114,8 +119,10 @@ impl Config {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn for_testing_with_baseboard(
         id: SledUuid,
+        rack_id: RackUuid,
         sim_mode: SimMode,
         nexus_address: Option<SocketAddr>,
         zpool_config: ZpoolConfig,
@@ -147,6 +154,7 @@ impl Config {
 
         Config {
             id,
+            rack_id,
             sim_mode,
             nexus_address,
             dropshot: ConfigDropshot {

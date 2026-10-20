@@ -9,6 +9,8 @@ use anyhow::Context as _;
 use dropshot::ConfigDropshot;
 use dropshot::HttpServer;
 use dropshot::ServerBuilder;
+use nexus_test_utils::RACK_UUID;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::SledRole;
@@ -158,6 +160,7 @@ struct HostPhase2SledAgentContext {
     id: SledUuid,
     role: SledRole,
     baseboard: BaseboardId,
+    rack_id: RackUuid,
 }
 
 impl HostPhase2SledAgentContext {
@@ -173,6 +176,7 @@ impl HostPhase2SledAgentContext {
                 part_number: "test".to_string(),
                 serial_number: "test".to_string(),
             },
+            rack_id: RACK_UUID,
         }
     }
 }
@@ -359,6 +363,7 @@ mod api_impl {
                 sled_agent_address,
                 sled_role: ctx.role,
                 baseboard_id: ctx.baseboard.clone(),
+                rack_id: ctx.rack_id,
                 usable_hardware_threads: 64,
                 usable_physical_ram: (1 << 30).into(),
                 reservoir_size: (1 << 29).into(),
@@ -1139,6 +1144,12 @@ mod api_impl {
             _body: TypedBody<sled_agent_types::rot::Nonce>,
         ) -> Result<HttpResponseOk<sled_agent_types::rot::Attestation>, HttpError>
         {
+            unimplemented!()
+        }
+
+        async fn multirack_join_complete(
+            _request_context: RequestContext<Self::Context>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
     }

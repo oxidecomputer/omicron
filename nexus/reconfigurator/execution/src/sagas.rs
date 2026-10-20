@@ -207,8 +207,7 @@ mod test {
     use diesel::prelude::*;
     use iddqd::IdOrdMap;
     use nexus_db_model::{
-        AbandonMetadata, Saga, SagaExecState, SagaId, SagaReasonAbandoned,
-        SagaState,
+        AbandonMetadata, Saga, SagaExecState, SagaReasonAbandoned, SagaState,
     };
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_inventory::now_db_precision;
@@ -246,6 +245,7 @@ mod test {
     use std::collections::BTreeSet;
     use std::net::IpAddr;
     use std::net::Ipv6Addr;
+    use steno::SagaId;
     use uuid::Uuid;
 
     // Build an in-memory blueprint containing exactly the given top level
@@ -779,7 +779,7 @@ mod test {
                 sagas_to_insert.push(Saga::new(
                     sec,
                     steno::SagaCreateParams {
-                        id: steno::SagaId(Uuid::new_v4()),
+                        id: steno::SagaId::new_v4(),
                         name: steno::SagaName::new("test saga"),
                         dag: serde_json::Value::Null,
                         state,
@@ -788,7 +788,7 @@ mod test {
             }
             sagas_to_insert.push(Saga::new_abandoned(
                 sec,
-                SagaId(steno::SagaId(Uuid::new_v4())),
+                SagaId::new_v4(),
                 "test saga".to_string(),
                 serde_json::Value::Null,
                 AbandonMetadata {
@@ -839,7 +839,11 @@ mod test {
 
         // Read every saga we inserted back. Query by primary key to avoid a
         // full table scan.
-        let all_ids: Vec<SagaId> = initial_state.keys().copied().collect();
+        let all_ids: Vec<_> = initial_state
+            .keys()
+            .copied()
+            .map(nexus_db_model::to_db_typed_uuid)
+            .collect();
         let loaded: Vec<Saga> = {
             use nexus_db_schema::schema::saga::dsl;
             let conn = datastore.pool_connection_for_tests().await.unwrap();

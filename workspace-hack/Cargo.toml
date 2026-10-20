@@ -72,14 +72,13 @@ getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", defaul
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng", "wasm_js"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown-3575ec1268b04181 = { package = "hashbrown", version = "0.15.5" }
-hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17.0", default-features = false, features = ["default-hasher"] }
-hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16.1" }
+hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17.1", default-features = false, features = ["allocator-api2", "default-hasher", "inline-more"] }
 hex = { version = "0.4.3", features = ["serde"] }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hybrid-array = { version = "0.4.13", default-features = false, features = ["alloc", "ctutils", "extra-sizes", "subtle", "zeroize"] }
 hyper = { version = "1.10.1", features = ["full"] }
-iddqd = { version = "0.4.2", features = ["daft", "proptest", "schemars08"] }
+iddqd = { version = "0.5.0", features = ["daft", "proptest", "schemars08"] }
 idna = { version = "1.1.0" }
 indexmap = { version = "2.14.0", features = ["serde"] }
 inout = { version = "0.2.2", default-features = false, features = ["block-padding"] }
@@ -106,8 +105,7 @@ openapiv3 = { version = "2.2.0", default-features = false, features = ["skip_ser
 peg-runtime = { version = "0.8.5", default-features = false, features = ["std"] }
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
 percent-encoding = { version = "2.3.2" }
-petgraph-3b31131e45eafb45 = { package = "petgraph", version = "0.6.5", features = ["serde-1"] }
-petgraph-c38e5c1d305a1b54 = { package = "petgraph", version = "0.8.3", features = ["serde-1"] }
+petgraph = { version = "0.8.3", features = ["serde-1"] }
 portable-atomic = { version = "1.13.1" }
 postgres-types = { version = "0.2.14", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 ppv-lite86 = { version = "0.2.21", default-features = false, features = ["simd", "std"] }
@@ -231,15 +229,14 @@ getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", defaul
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng", "wasm_js"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown-3575ec1268b04181 = { package = "hashbrown", version = "0.15.5" }
-hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17.0", default-features = false, features = ["default-hasher"] }
-hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16.1" }
+hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17.1", default-features = false, features = ["allocator-api2", "default-hasher", "inline-more"] }
 heck = { version = "0.4.1", features = ["unicode"] }
 hex = { version = "0.4.3", features = ["serde"] }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hybrid-array = { version = "0.4.13", default-features = false, features = ["alloc", "ctutils", "extra-sizes", "subtle", "zeroize"] }
 hyper = { version = "1.10.1", features = ["full"] }
-iddqd = { version = "0.4.2", features = ["daft", "proptest", "schemars08"] }
+iddqd = { version = "0.5.0", features = ["daft", "proptest", "schemars08"] }
 idna = { version = "1.1.0" }
 indexmap = { version = "2.14.0", features = ["serde"] }
 inout = { version = "0.2.2", default-features = false, features = ["block-padding"] }
@@ -266,8 +263,7 @@ openapiv3 = { version = "2.2.0", default-features = false, features = ["skip_ser
 peg-runtime = { version = "0.8.5", default-features = false, features = ["std"] }
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
 percent-encoding = { version = "2.3.2" }
-petgraph-3b31131e45eafb45 = { package = "petgraph", version = "0.6.5", features = ["serde-1"] }
-petgraph-c38e5c1d305a1b54 = { package = "petgraph", version = "0.8.3", features = ["serde-1"] }
+petgraph = { version = "0.8.3", features = ["serde-1"] }
 portable-atomic = { version = "1.13.1" }
 postgres-types = { version = "0.2.14", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 ppv-lite86 = { version = "0.2.21", default-features = false, features = ["simd", "std"] }
