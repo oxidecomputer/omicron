@@ -1590,7 +1590,7 @@ mod tests {
     use dropshot::test_util::LogContext;
     use nexus_auth::authz;
     use nexus_db_lookup::LookupPath;
-use nexus_db_model::IpAttachState;
+    use nexus_db_model::IpAttachState;
     use nexus_db_model::IpPool;
     use nexus_db_model::IpPoolAssignment;
     use nexus_db_model::Name;
@@ -4902,8 +4902,9 @@ use nexus_db_model::IpAttachState;
     #[tokio::test]
     async fn cannot_delete_project_with_outstanding_external_subnet() {
         let context = setup_external_subnet_test(
-            "cannot_delete_project_with_outstanding_external_subnet"
-        ).await;
+            "cannot_delete_project_with_outstanding_external_subnet",
+        )
+        .await;
         let (opctx, datastore) = (context.db.opctx(), context.db.datastore());
         let authz_project = &context.authz_project;
         let fetch_project = async || {
@@ -4930,7 +4931,9 @@ use nexus_db_model::IpAttachState;
                     // Use the default IPv6 pool
                     allocator: ExternalSubnetAllocator::Auto {
                         prefix_length: 64,
-                        pool_selector: PoolSelector::Auto { ip_version: Some(IpVersion::V6) },
+                        pool_selector: PoolSelector::Auto {
+                            ip_version: Some(IpVersion::V6),
+                        },
                     },
                 },
             )
