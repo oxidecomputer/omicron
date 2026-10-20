@@ -951,7 +951,7 @@ mod tests {
         // task skips it entirely.
         //
         // Also, we are including the VMMs in `Creating` state. As mentioned
-        // earlier, these cannot be realiably tested to stop, but we can
+        // earlier, these cannot be reliably tested to stop, but we can
         // conveniently use them to simulate VMMs that failed to stop. We insert
         // them and mark them as needing to be stopped.
         for sled_id in [sled_a, sled_b] {
@@ -964,12 +964,6 @@ mod tests {
 
                 if !REAL_VMM_STATES.iter().any(|(_, real)| *real == state) {
                     let marked_id = if state == DbVmmState::Creating {
-                        // TODO-K: Fix comment The marked `Creating` VMM is the
-                        // active VMM of a real instance, as it would be while
-                        // the instance is starting. No sled agent knows about
-                        // it, so the task records it as `Failed`, and the
-                        // instance-update saga needs the instance to exist.
-
                         // For each desired VMM in the Creating state , we
                         // create a "real" instance as it would be while no
                         // sled agent knows about it yet.
