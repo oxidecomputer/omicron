@@ -11,7 +11,7 @@ use hickory_resolver::TokioResolver;
 use hickory_resolver::config::{
     NameServerConfig, ResolverConfig, ResolverOpts,
 };
-use hickory_resolver::name_server::TokioConnectionProvider;
+use hickory_resolver::net::runtime::TokioRuntimeProvider;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use thiserror::Error;
@@ -42,11 +42,13 @@ impl CustomDnsResolver {
     /// Make a new custom resolver that uses the DNS server at the specified
     /// address
     pub fn new(dns_addr: SocketAddr) -> anyhow::Result<CustomDnsResolver> {
-        let mut resolver_config = ResolverConfig::new();
-        resolver_config.add_name_server(NameServerConfig::new(
-            dns_addr,
-            hickory_resolver::proto::xfer::Protocol::Udp,
-        ));
+        let mut name_server_config = NameServerConfig::udp(dns_addr.ip());
+        for connection_config in &mut name_server_config.connections {
+            connection_config.port = dns_addr.port();
+        }
+        let resolver_config =
+            ResolverConfig::from_name_servers(vec![name_server_config]);
+
         let mut resolver_opts = ResolverOpts::default();
         // Enable edns for potentially larger records
         resolver_opts.edns0 = true;
@@ -54,10 +56,11 @@ impl CustomDnsResolver {
         let resolver = Arc::new(
             TokioResolver::builder_with_config(
                 resolver_config,
-                TokioConnectionProvider::default(),
+                TokioRuntimeProvider::new(),
             )
             .with_options(resolver_opts)
-            .build(),
+            .build()
+            .context("failed to build resolver")?,
         );
         Ok(CustomDnsResolver { dns_addr, resolver })
     }

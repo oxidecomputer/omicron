@@ -7,39 +7,27 @@ use hickory_resolver::config::{
     LookupIpStrategy, NameServerConfig, ResolveHosts, ResolverConfig,
     ResolverOpts,
 };
-use hickory_resolver::lookup::SrvLookup;
-use hickory_resolver::name_server::TokioConnectionProvider;
+use hickory_resolver::lookup::Lookup;
+use hickory_resolver::net::runtime::TokioRuntimeProvider;
+use hickory_resolver::proto::rr::RData;
 use internal_dns_types::names::ServiceName;
 use omicron_common::address::{
     AZ_PREFIX_LENGTH, DNS_PORT, Ipv6Subnet, get_internal_dns_server_addresses,
 };
 use slog::{debug, error, info, trace};
+use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ResolveError {
     #[error(transparent)]
-    Resolve(#[from] hickory_resolver::ResolveError),
+    Resolve(#[from] hickory_resolver::net::NetError),
 
     #[error("Record not found for SRV key: {}", .0.dns_name())]
     NotFound(ServiceName),
 
     #[error("Record not found for {0}")]
     NotFoundByString(String),
-}
-
-fn is_no_records_found(err: &hickory_resolver::ResolveError) -> bool {
-    match err.kind() {
-        hickory_resolver::ResolveErrorKind::Proto(proto_error) => {
-            match proto_error.kind() {
-                hickory_resolver::proto::ProtoErrorKind::NoRecordsFound {
-                    ..
-                } => true,
-                _ => false,
-            }
-        }
-        _ => false,
-    }
 }
 
 impl ResolveError {
@@ -49,11 +37,7 @@ impl ResolveError {
             ResolveError::NotFound(_) | ResolveError::NotFoundByString(_) => {
                 true
             }
-            ResolveError::Resolve(hickory_err)
-                if is_no_records_found(&hickory_err) =>
-            {
-                true
-            }
+            ResolveError::Resolve(err) if err.is_no_records_found() => true,
             _ => false,
         }
     }
@@ -131,7 +115,7 @@ impl Resolver {
         // Enable edns for potentially larger records
         builder.options_mut().edns0 = true;
 
-        let resolver = builder.build();
+        let resolver = builder.build()?;
 
         Ok(Self { log, resolver })
     }
@@ -143,13 +127,13 @@ impl Resolver {
     ) -> Result<Self, ResolveError> {
         info!(log, "new DNS resolver"; "addresses" => ?dns_addrs);
 
-        let mut rc = ResolverConfig::new();
+        let mut rc = ResolverConfig::default();
         let dns_server_count = dns_addrs.len();
         for &socket_addr in dns_addrs.into_iter() {
-            let mut ns_config = NameServerConfig::new(
-                socket_addr,
-                hickory_resolver::proto::xfer::Protocol::Udp,
-            );
+            let mut ns_config = NameServerConfig::udp(socket_addr.ip());
+            for conn in &mut ns_config.connections {
+                conn.port = socket_addr.port();
+            }
             // Intentionally continue trying other DNS servers if we get an
             // NXDOMAIN or NOERROR with no answer.  This should be a rare
             // circumstance.  If it occurs and the name is genuinely not
@@ -169,12 +153,10 @@ impl Resolver {
         // the IPv4 variant.
         opts.ip_strategy = LookupIpStrategy::Ipv6Only;
         opts.negative_max_ttl = Some(std::time::Duration::from_secs(15));
-        let resolver = TokioResolver::builder_with_config(
-            rc,
-            TokioConnectionProvider::default(),
-        )
-        .with_options(opts)
-        .build();
+        let resolver =
+            TokioResolver::builder_with_config(rc, TokioRuntimeProvider::new())
+                .with_options(opts)
+                .build()?;
 
         Ok(Self { log, resolver })
     }
@@ -257,8 +239,12 @@ impl Resolver {
         );
 
         Ok(response
+            .answers()
             .into_iter()
-            .map(|srv| (srv.target().to_string(), srv.port()))
+            .filter_map(|record| match &record.data {
+                RData::SRV(srv) => Some((srv.target.to_string(), srv.port)),
+                _ => None,
+            })
             .collect())
     }
 
@@ -369,29 +355,45 @@ impl Resolver {
 
     /// Returns an iterator of [`SocketAddrV6`]'s for the targets of the given
     /// SRV lookup response.
-    // SRV records have a target, which is itself another DNS name that needs
-    // to be looked up in order to get to the actual IP addresses. Many DNS
-    // servers (including ours) return these IP addresses directly in the
-    // response to the SRV query as Additional records. In theory
-    // `SrvLookup::ip_iter()` would suffice but some issues:
-    //   (1) it returns `IpAddr`'s rather than `SocketAddr`'s
-    //   (2) it doesn't actually return all the addresses from the Additional
-    //       section of the DNS server's response.
-    //       See hickory-dns/hickory-dns#1980
-    //
-    // (1) is not a huge deal as we can try to match up the targets ourselves
-    // to grab the port for creating a `SocketAddr` but (2) means we need to do
-    // the lookups explicitly.
     async fn lookup_service_targets(
         &self,
-        service_lookup: SrvLookup,
+        lookup: Lookup,
     ) -> impl Iterator<Item = SocketAddrV6> + Send + use<> {
+        // Collect the AAAA records from the additional section:
+        let additionals = lookup
+            .additionals()
+            .iter()
+            .filter_map(|record| match &record.data {
+                RData::AAAA(aaaa) => Some((&record.name, aaaa.0)),
+                _ => None,
+            })
+            // Correctness note: if any hostnames have multiple AAAA records,
+            // only the last one listed will be in this map. We don't do this
+            // in practice.
+            .collect::<BTreeMap<_, _>>();
+
+        // Convert the answers with matching additional records into socket
+        // addresses, and make a list of answers without matching additional
+        // records to look up separately.
+        let mut addresses = Vec::new();
+        let mut needs_lookup = Vec::new();
+        for record in lookup.answers() {
+            if let RData::SRV(srv) = &record.data {
+                if let Some(ip) = additionals.get(&srv.target) {
+                    addresses.push(SocketAddrV6::new(*ip, srv.port, 0, 0));
+                } else {
+                    needs_lookup.push((&srv.target, srv.port));
+                }
+            }
+        }
+        if needs_lookup.is_empty() {
+            return addresses.into_iter();
+        }
+
         let futures =
             std::iter::repeat((self.log.clone(), self.resolver.clone()))
-                .zip(service_lookup)
-                .map(|((log, resolver), srv)| async move {
-                    let target = srv.target();
-                    let port = srv.port();
+                .zip(needs_lookup)
+                .map(|((log, resolver), (target, port))| async move {
                     trace!(
                         log,
                         "lookup_service_targets: looking up SRV target";
@@ -400,8 +402,8 @@ impl Resolver {
                     resolver
                         .ipv6_lookup(target.clone())
                         .await
-                        .map(|ips| (ips, port))
-                        .map_err(|err| (target.clone(), err))
+                        .map(|lookup| (lookup, port))
+                        .map_err(|err| (target, err))
                 });
         // What do we do if some of these queries succeed while others fail?  We
         // may have some addresses, but the list might be incomplete.  That
@@ -409,25 +411,27 @@ impl Resolver {
         // simple thing and return as many as we got and log any errors.
         // In the future, we'll want a more cueball-like resolver interface
         // that better deals with these cases.
-        let log = self.log.clone();
-        futures::future::join_all(futures)
-            .await
-            .into_iter()
-            .flat_map(move |target| match target {
-                Ok((ips, port)) => Some(ips.into_iter().map(move |aaaa| {
-                    SocketAddrV6::new(aaaa.into(), port, 0, 0)
-                })),
+        for result in futures::future::join_all(futures).await {
+            match result {
+                Ok((lookup, port)) => {
+                    for record in lookup.answers() {
+                        if let RData::AAAA(aaaa) = record.data {
+                            addresses
+                                .push(SocketAddrV6::new(aaaa.0, port, 0, 0));
+                        }
+                    }
+                }
                 Err((target, err)) => {
                     error!(
-                        log,
+                        self.log,
                         "lookup_service_targets: failed looking up target";
                         "name" => ?target,
                         "error" => ?err,
                     );
-                    None
                 }
-            })
-            .flatten()
+            }
+        }
+        addresses.into_iter()
     }
 
     /// Lookup a specific record's IPv6 address
@@ -446,9 +450,12 @@ impl Resolver {
             .resolver
             .ipv6_lookup(query)
             .await?
+            .answers()
             .into_iter()
-            .next()
-            .map(move |aaaa| aaaa.into()))
+            .find_map(|record| match record.data {
+                RData::AAAA(aaaa) => Some(aaaa.0),
+                _ => None,
+            }))
     }
 }
 
@@ -462,7 +469,6 @@ mod test {
         ApiDescription, HandlerTaskMode, HttpError, HttpResponseOk,
         RequestContext, endpoint,
     };
-    use hickory_resolver::ResolveErrorKind;
     use internal_dns_types::config::DnsConfigBuilder;
     use internal_dns_types::config::DnsConfigParams;
     use internal_dns_types::names::DNS_ZONE;
@@ -581,6 +587,11 @@ mod test {
     async fn lookup_nonexistent_record_fails() {
         let logctx = test_setup_log("lookup_nonexistent_record_fails");
         let dns_server = DnsServer::create(&logctx.log).await;
+        // Ensure an empty zone is present to avoid SERVFAIL but still have
+        // no records.
+        let dns_config =
+            DnsConfigBuilder::new().build_full_config_for_initial_generation();
+        dns_server.update(&dns_config).await.unwrap();
         let resolver = dns_server.resolver().unwrap();
 
         let err = resolver
@@ -596,19 +607,12 @@ mod test {
 
     #[track_caller]
     fn expect_no_records(err: &ResolveError) {
-        let dns_error = match err {
-            ResolveError::Resolve(err) => err,
-            _ => panic!("Unexpected error: {err}"),
-        };
-
-        if let ResolveErrorKind::Proto(proto_err) = dns_error.kind() {
-            if let hickory_proto::ProtoErrorKind::NoRecordsFound { .. } =
-                proto_err.kind()
-            {
-                return;
-            }
+        if let ResolveError::Resolve(err) = err
+            && err.is_no_records_found()
+        {
+            return;
         }
-        panic!("Saw error: {dns_error}");
+        panic!("Unexpected error: {err}");
     }
 
     // Insert and retreive a single DNS record.

@@ -94,8 +94,7 @@
 
 use anyhow::{Context, anyhow};
 use camino::Utf8PathBuf;
-use hickory_proto::{op::LowerQuery, rr::LowerName};
-use hickory_resolver::Name;
+use hickory_proto::{op::LowerQuery, rr::LowerName, rr::Name};
 use internal_dns_types::{
     config::{DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord},
     names::ZONE_APEX_NAME,
@@ -989,7 +988,7 @@ mod test {
     use camino::Utf8PathBuf;
     use camino_tempfile::Utf8TempDir;
     use hickory_proto::rr::LowerName;
-    use hickory_resolver::Name;
+    use hickory_proto::rr::Name;
     use internal_dns_types::config::DnsConfigParams;
     use internal_dns_types::config::DnsConfigZone;
     use internal_dns_types::config::DnsRecord;
