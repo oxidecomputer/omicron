@@ -429,22 +429,30 @@ impl VmmStopForUpdate {
                                 "time_updated" => ?time_updated,
                             );
                         }
-                        // Propolis is alive but does not find a VMM. This
-                        // implies that it restarted and lost the previously
-                        // created VMM. The VMM is reported as Failed. It's
-                        // not necessary to stop it anymore, so we don't add
-                        // it to the `vmms_failed_by_sled` list.
+                        // `vmm_put_state` only reports the `VmmState::Failed`
+                        // state when Propolis is alive but does not find a VMM.
+                        // This implies that it restarted and lost the
+                        // previously created VMM.
+                        //
+                        // Additionally, When `vmm_put_state` returns a
+                        // `NO_SUCH_INSTANCE`` error, we transition the runtime
+                        // state to `VmmState::Failed` above.
                         //
                         // While a `VmmState::Failed` could also be due to a
                         // sled agent or sled restart, `vmm_put_state` would
                         // report those cases as an `Error`, so we don't
                         // need to handle those specific cases here.
+                        //
+                        // Because of this, it's not necessary to stop it
+                        // anymore, so we don't add it to the
+                        // `vmms_failed_by_sled` list. The instance
+                        // reincarnation task will automatically attempt to
+                        // restart any instance that is in a failed state.
                         VmmState::Failed(reason) => {
                             let description = reason.description();
                             slog::info!(
                                 opctx.log,
-                                "Unable to find VMM, possibly due to a \
-                                restart. No need to stop it";
+                                "Unable to find VMM. No need to stop it";
                                 "sled_id" => %sled_id,
                                 "vmm_id" => %vmm_id,
                                 "instance_id" => %instance_id,
