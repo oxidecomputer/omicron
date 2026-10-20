@@ -94,6 +94,7 @@ impl VmmStopForUpdateResult {
 pub struct VmmStopForUpdate {
     datastore: Arc<DataStore>,
     sagas: Arc<dyn StartSaga>,
+    reqwest_client: Option<ReqwestClient>,
 }
 
 impl VmmStopForUpdate {
@@ -101,38 +102,46 @@ impl VmmStopForUpdate {
         datastore: Arc<DataStore>,
         sagas: Arc<dyn StartSaga>,
     ) -> Self {
-        Self { datastore, sagas }
+        Self { datastore, sagas, reqwest_client: None }
     }
 
     /// Retrieves a list of VMMs marked to be stopped for update by sled, and
     /// stops them in batches.
-    async fn stop_all(&self, opctx: &OpContext) -> VmmStopForUpdateResult {
+    async fn stop_all(&mut self, opctx: &OpContext) -> VmmStopForUpdateResult {
         let mut result = VmmStopForUpdateResult::new();
 
         // Build the reqwest client beforehand to avoid building a new one per
         // page or sled below.
-        let reqwest_client =
-            match nexus_networking::default_reqwest_client_builder().build() {
-                Ok(client) => client,
-                Err(e) => {
-                    let err = InlineErrorChain::new(&e);
+        let reqwest_client = match self.reqwest_client.clone() {
+            Some(client) => client,
+            None => {
+                match nexus_networking::default_reqwest_client_builder().build()
+                {
+                    Ok(client) => {
+                        self.reqwest_client = Some(client.clone());
+                        client
+                    }
+                    Err(e) => {
+                        let err = InlineErrorChain::new(&e);
 
-                    slog::error!(
-                        opctx.log,
-                        "Failed to build the HTTP client";
-                        &err,
-                    );
+                        slog::error!(
+                            opctx.log,
+                            "Failed to build the HTTP client";
+                            &err,
+                        );
 
-                    result.errors.push(Error::InternalError {
-                        internal_message: format!(
-                            "failed to build the HTTP client: {}",
-                            err
-                        ),
-                    });
+                        result.errors.push(Error::InternalError {
+                            internal_message: format!(
+                                "failed to build the HTTP client: {}",
+                                err
+                            ),
+                        });
 
-                    return result;
+                        return result;
+                    }
                 }
-            };
+            }
+        };
 
         let mut tasks =
             ParallelTaskSet::new_with_parallelism(MAX_CONCURRENT_STOPS);
