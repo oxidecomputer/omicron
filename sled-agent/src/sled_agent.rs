@@ -5,7 +5,7 @@
 //! Sled agent implementation
 
 use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
-use crate::bootstrap::MultirackJoinCompleter;
+use crate::bootstrap::MultirackJoinAccessor;
 use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitorHandle;
 use crate::instance_manager::InstanceManager;
@@ -86,6 +86,7 @@ use sled_agent_types::instance::{
     VmmUnregisterResponse,
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig, SledRole};
+use sled_agent_types::multirack::MultirackJoinServiceStatus;
 use sled_agent_types::probes::ProbeCreate;
 use sled_agent_types::resolvable_files::{
     PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
@@ -528,7 +529,7 @@ struct SledAgentInner {
     measurements: Arc<MeasurementsHandle>,
 
     // A mechanism to complete a multirack join
-    multirack_join_completer: MultirackJoinCompleter,
+    multirack_join_completer: MultirackJoinAccessor,
 }
 
 impl SledAgentInner {
@@ -561,7 +562,7 @@ impl SledAgent {
         services: ServiceManager,
         long_running_task_handles: LongRunningTaskHandles,
         config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
-        multirack_join_completer: MultirackJoinCompleter,
+        multirack_join_completer: MultirackJoinAccessor,
     ) -> Result<SledAgent, Error> {
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
@@ -1724,6 +1725,15 @@ impl SledAgent {
     pub(crate) fn complete_multirack_join(&self) -> Result<(), Error> {
         self.inner.multirack_join_completer.complete_multirack_join()?;
         Ok(())
+    }
+
+    pub(crate) fn multirack_join_service_status(
+        &self,
+    ) -> Result<Option<MultirackJoinServiceStatus>, Error> {
+        Ok(self
+            .inner
+            .multirack_join_completer
+            .multirack_join_service_status()?)
     }
 }
 

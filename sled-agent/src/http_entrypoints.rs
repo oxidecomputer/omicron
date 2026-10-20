@@ -49,6 +49,7 @@ use sled_agent_types::instance::{
     VmmPutStateResponse, VmmUnregisterResponse, VpcPathParam,
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
+use sled_agent_types::multirack::MultirackJoinServiceStatus;
 use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::rot::{
     Attestation, CertificateChain, MeasurementLog, Nonce, RotPathParams,
@@ -1850,6 +1851,23 @@ impl SledAgentApi for SledAgentImpl {
             .instrument_dropshot_handler(&request_context, async {
                 sa.complete_multirack_join()?;
                 Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn multirack_join_service_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<MultirackJoinServiceStatus>, HttpError> {
+        let sa = request_context.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                match sa.multirack_join_service_status()? {
+                    Some(status) => Ok(HttpResponseOk(status)),
+                    None => Err(HttpError::for_not_found(
+                        None,
+                        "No multirack join service running".to_string(),
+                    )),
+                }
             })
             .await
     }

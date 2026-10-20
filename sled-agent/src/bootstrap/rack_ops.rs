@@ -17,6 +17,7 @@ use sled_agent_multirack_join::MultirackJoinServiceError;
 use sled_agent_multirack_join::MultirackJoinServiceHandle;
 use sled_agent_rack_setup::RackInitializeRequestParams;
 use sled_agent_rack_setup::SetupServiceError;
+use sled_agent_types::multirack::MultirackJoinServiceStatus;
 use slog_error_chain::InlineErrorChain;
 use std::mem;
 use std::sync::Arc;
@@ -51,6 +52,8 @@ pub enum RssAccessError {
     RackSubnetChangeNotAllowed,
     #[error("Multirack join has not yet started")]
     MultirackJoinNotYetStarted,
+    #[error("Multirack join service status is not yet available")]
+    MultirackJoinStatusNotYetAvailable,
     #[error("Multirack join task exited unexpectedly")]
     MultirackJoinTaskExitedUnexpectedly,
 }
@@ -80,6 +83,9 @@ impl RssAccessError {
             }
             RssAccessError::MultirackJoinNotYetStarted => {
                 "MultirackJoinNotYetStarted"
+            }
+            RssAccessError::MultirackJoinStatusNotYetAvailable => {
+                "MultirackJoinStatusNotYetAvailable"
             }
             RssAccessError::MultirackJoinTaskExitedUnexpectedly => {
                 "MultirackJoinTaskExitedUnexpectedly"
@@ -119,7 +125,8 @@ impl From<RssAccessError> for HttpError {
             | RssAccessError::MultirackJoinCompleted
             | RssAccessError::MembershipChangeNoLongerAllowed
             | RssAccessError::RackSubnetChangeNotAllowed
-            | RssAccessError::MultirackJoinNotYetStarted => {
+            | RssAccessError::MultirackJoinNotYetStarted
+            | RssAccessError::MultirackJoinStatusNotYetAvailable => {
                 HttpError::for_client_error(
                     Some(err.error_code().to_string()),
                     dropshot::ClientErrorStatusCode::CONFLICT,
@@ -130,19 +137,12 @@ impl From<RssAccessError> for HttpError {
     }
 }
 
-/// A mechanism for sled-agent to complete a multirack join request.
-///
-/// When a sled-agent that performed a multirack join becomes visible on the
-/// underlay network to an existing Nexus via inventory, it will receive a
-/// request telling it to complete the multirack join. We provide a newtype
-/// wrapper that allows triggering that completion without providing full access
-/// to `RssAccess`, which could be used to start initialization or multirack
-/// join requests outside of the official path.
+/// A mechanism for sled-agent to access its local multirack join service task.
 #[derive(Clone)]
-pub(crate) struct MultirackJoinCompleter(RssAccess);
+pub(crate) struct MultirackJoinAccessor(RssAccess);
 
-impl MultirackJoinCompleter {
-    pub fn new(rss_access: RssAccess) -> MultirackJoinCompleter {
+impl MultirackJoinAccessor {
+    pub fn new(rss_access: RssAccess) -> MultirackJoinAccessor {
         Self(rss_access)
     }
 
@@ -153,25 +153,12 @@ impl MultirackJoinCompleter {
         self.0.complete_multirack_join()
     }
 
-    /// Used to provide inventory with information about the particular
-    /// sled-agent that is performing the multirack join. This prevents Nexus
-    /// from having to guess or try all sled-agents.
-    //
-    // TODO: Remove this `unused` annotation when we add this functionality
-    // to inventory.
-    #[expect(unused)]
-    pub fn is_multirack_join_in_progress(&self) -> bool {
-        match &*self.0.status.lock().unwrap() {
-            RssStatus::MultirackJoinInProgress { .. } => true,
-            RssStatus::Uninitialized
-            | RssStatus::Initialized { .. }
-            | RssStatus::Initializing { .. }
-            | RssStatus::InitializationFailed { .. }
-            | RssStatus::InitializationPanicked { .. }
-            | RssStatus::MultirackJoinCompleted { .. }
-            | RssStatus::MultirackJoinFailed { .. }
-            | RssStatus::MultirackJoinPanicked { .. } => false,
-        }
+    /// Return the current status of the multirack join service if it is
+    /// running.
+    pub fn multirack_join_service_status(
+        &self,
+    ) -> Result<Option<MultirackJoinServiceStatus>, RssAccessError> {
+        self.0.multirack_join_service_status()
     }
 }
 
@@ -420,6 +407,7 @@ impl RssAccess {
                     join_handle,
                     input_tx,
                     output_rx,
+                    status_rx,
                     membership_change_still_possible,
                     rack_join_successful_tx,
                 } = MultirackJoinServiceHandle::spawn(ctx, request);
@@ -427,6 +415,7 @@ impl RssAccess {
                     id,
                     input_tx,
                     output_rx,
+                    status_rx,
                     membership_change_still_possible,
                     rack_join_successful_tx: Some(rack_join_successful_tx),
                 };
@@ -539,6 +528,29 @@ impl RssAccess {
         }
     }
 
+    pub(crate) fn multirack_join_service_status(
+        &self,
+    ) -> Result<Option<MultirackJoinServiceStatus>, RssAccessError> {
+        match &*self.status.lock().unwrap() {
+            RssStatus::MultirackJoinInProgress { status_rx, .. } => {
+                match status_rx.borrow().clone() {
+                    Some(status) => Ok(Some(status)),
+                    None => {
+                        Err(RssAccessError::MultirackJoinStatusNotYetAvailable)
+                    }
+                }
+            }
+            RssStatus::Uninitialized
+            | RssStatus::Initialized { .. }
+            | RssStatus::Initializing { .. }
+            | RssStatus::InitializationFailed { .. }
+            | RssStatus::InitializationPanicked { .. }
+            | RssStatus::MultirackJoinCompleted { .. }
+            | RssStatus::MultirackJoinFailed { .. }
+            | RssStatus::MultirackJoinPanicked { .. } => Ok(None),
+        }
+    }
+
     pub(crate) fn get_multirack_join_state(
         &self,
     ) -> Result<MultirackJoinServiceState, RssConflictError> {
@@ -611,6 +623,7 @@ enum RssStatus {
         id: MultirackJoinUuid,
         input_tx: watch::Sender<MultirackJoinRequest>,
         output_rx: watch::Receiver<MultirackJoinServiceState>,
+        status_rx: watch::Receiver<Option<MultirackJoinServiceStatus>>,
         membership_change_still_possible: Arc<AtomicBool>,
         rack_join_successful_tx: Option<oneshot::Sender<()>>,
     },

@@ -36,6 +36,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (58, ADD_MULTIRACK_JOIN_SERVICE_STATUS),
     (57, ADD_RACK_ID_TO_INVENTORY),
     (56, ADD_MULTIRACK_JOIN_COMPLETE),
     (55, ARTIFACT_HASH_SCHEMA),
@@ -1743,4 +1744,20 @@ pub trait SledAgentApi {
     async fn multirack_join_complete(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Return the status of this sled's multirack join service.
+    ///
+    /// Returns a 404 if no multirack join service is running, or a 409 if the
+    /// service is running but has not yet determined its status.
+    #[endpoint {
+        method = GET,
+        path = "/multirack-join-service-status",
+        versions = VERSION_ADD_MULTIRACK_JOIN_SERVICE_STATUS..,
+    }]
+    async fn multirack_join_service_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::multirack::MultirackJoinServiceStatus>,
+        HttpError,
+    >;
 }

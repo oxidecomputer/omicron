@@ -10,7 +10,7 @@ use super::http_entrypoints_lockstep::BootstrapServerContext;
 use crate::bootstrap::maghemite;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
 use crate::bootstrap::pumpkind;
-use crate::bootstrap::rack_ops::{MultirackJoinCompleter, RssAccess};
+use crate::bootstrap::rack_ops::{MultirackJoinAccessor, RssAccess};
 use crate::bootstrap::secret_retriever::{
     HardcodedSecretRetriever, TqOrLrtqSecretRetriever,
 };
@@ -205,7 +205,7 @@ impl Server {
 
         // Provide a mechanism for multirack join requests to be completed by sled-agent.
         let multirack_join_completer =
-            MultirackJoinCompleter::new(rss_access.clone());
+            MultirackJoinAccessor::new(rss_access.clone());
 
         // Start the bootstrap dropshot server.
         let bootstrap_context = BootstrapServerContext {
@@ -370,7 +370,7 @@ async fn start_sled_agent(
     long_running_task_handles: LongRunningTaskHandles,
     config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
     service_manager: ServiceManager,
-    multirack_join_completer: MultirackJoinCompleter,
+    multirack_join_completer: MultirackJoinAccessor,
     base_log: &Logger,
     log: &Logger,
 ) -> Result<SledAgentServer, SledAgentServerStartError> {
@@ -520,7 +520,7 @@ struct Inner {
     service_manager: ServiceManager,
     _sprockets_server_handle: JoinHandle<()>,
     base_log: Logger,
-    multirack_join_completer: MultirackJoinCompleter,
+    multirack_join_completer: MultirackJoinAccessor,
 }
 
 impl Inner {
