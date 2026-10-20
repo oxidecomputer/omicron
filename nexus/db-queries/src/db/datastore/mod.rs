@@ -116,7 +116,7 @@ mod oximeter;
 mod oximeter_read_policy;
 mod physical_disk;
 mod probe;
-mod problem;
+pub mod problem;
 mod project;
 mod quota;
 mod rack;
