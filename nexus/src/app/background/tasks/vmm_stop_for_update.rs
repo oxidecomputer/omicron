@@ -17,6 +17,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::instance::SledVmmState;
+use nexus_types::instance::VmmFailureReason;
 use nexus_types::instance::VmmRuntimeState;
 use nexus_types::instance::VmmState;
 use nexus_types::internal_api::background::VmmStopForUpdateStatus;
@@ -271,32 +272,56 @@ impl VmmStopForUpdate {
                 .await
             {
                 Ok(res) => res.into_inner().updated_runtime.map(Into::into),
-                // TODO-K: check if SledAgentInstanceError::vmm_gone returns
-                // true, and if so, synthesize a Failed instance state update
                 Err(e) => {
                     let err = SledAgentInstanceError(e);
 
-                    slog::error!(
-                        opctx.log,
-                        "Failed to mark VMM as Stopped";
-                        "sled_id" => %sled_id,
-                        "vmm_id" => %id,
-                        "instance_id" => %instance_id,
-                        InlineErrorChain::new(&err),
-                    );
+                    // First we check if the VMM is there, if it isn't, we
+                    // want to report it as such so we don't have to wait on the
+                    // instance watcher to find and restart this instance.
+                    if err.vmm_gone() {
+                        slog::error!(
+                            opctx.log,
+                            "Failed to mark VMM as Stopped; VMM was already \
+                             gone. Marking as Failed";
+                            "sled_id" => %sled_id,
+                            "vmm_id" => %id,
+                            "instance_id" => %instance_id,
+                            InlineErrorChain::new(&err),
+                        );
 
-                    result.errors.push(err.into());
-                    result
-                        .vmms_failed_by_sled
-                        .entry(sled_id)
-                        .or_insert_with(|| VmmsBySled {
-                            sled_id,
-                            vmm_ids: BTreeSet::new(),
+                        result.errors.push(err.into());
+                        Some(SledVmmState {
+                            vmm_state: vmm.runtime().transition(
+                                VmmState::Failed(
+                                    VmmFailureReason::NoSuchInstance,
+                                ),
+                            ),
+                            migration_in: None,
+                            migration_out: None,
                         })
-                        .vmm_ids
-                        .insert(*id);
+                    } else {
+                        slog::error!(
+                            opctx.log,
+                            "Failed to mark VMM as Stopped";
+                            "sled_id" => %sled_id,
+                            "vmm_id" => %id,
+                            "instance_id" => %instance_id,
+                            InlineErrorChain::new(&err),
+                        );
 
-                    return result;
+                        result.errors.push(err.into());
+                        result
+                            .vmms_failed_by_sled
+                            .entry(sled_id)
+                            .or_insert_with(|| VmmsBySled {
+                                sled_id,
+                                vmm_ids: BTreeSet::new(),
+                            })
+                            .vmm_ids
+                            .insert(*id);
+
+                        return result;
+                    }
                 }
             };
 
@@ -582,6 +607,7 @@ mod tests {
     use diesel::QueryDsl;
     use diesel::SelectableHelper;
     use nexus_db_lookup::AsyncConnection;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::Generation;
     use nexus_db_model::InstanceState;
     use nexus_db_model::Vmm;
@@ -589,6 +615,8 @@ mod tests {
     use nexus_db_model::VmmFailureReason;
     use nexus_db_model::VmmState as DbVmmState;
     use nexus_db_model::to_db_typed_generation;
+    use nexus_db_queries::authz;
+    use nexus_db_queries::db::pub_test_utils::helpers::create_instance_with_vmm;
     use nexus_test_utils::ControlPlaneBuilder;
     use nexus_test_utils::resource_helpers::create_anti_affinity_group;
     use nexus_test_utils::resource_helpers::create_default_ip_pools;
@@ -811,7 +839,12 @@ mod tests {
         let generation = UpdateDispositionGeneration::from(1);
 
         create_default_ip_pools(client).await;
-        create_project(client, PROJECT_NAME).await;
+        let project = create_project(client, PROJECT_NAME).await;
+        let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+            .project_id(project.identity.id)
+            .lookup_for(authz::Action::CreateChild)
+            .await
+            .expect("project should exist");
 
         // The simulated agent can only stop VMMs that are registered with it.
         // So, for each VMM that we intend to stop, we create a real instance
@@ -880,15 +913,41 @@ mod tests {
                 vmm_ids.push(unmarked.id);
 
                 if !REAL_VMM_STATES.iter().any(|(_, real)| *real == state) {
-                    let marked = insert_vmm_in_state(
-                        &datastore,
-                        &opctx,
-                        sled_id,
-                        state,
-                        Some(generation),
-                    )
-                    .await;
-                    vmm_ids.push(marked.id);
+                    let marked_id = if state == DbVmmState::Creating {
+                        // TODO-K: Fix comment The marked `Creating` VMM is the
+                        // active VMM of a real instance, as it would be while
+                        // the instance is starting. No sled agent knows about
+                        // it, so the task records it as `Failed`, and the
+                        // instance-update saga needs the instance to exist.
+
+                        // For each desired VMM in the Creating state , we
+                        // create a "real" instance as it would be while no
+                        // sled agent knows about it yet.
+                        let (_, vmm_id) = create_instance_with_vmm(
+                            &opctx,
+                            &datastore,
+                            &authz_project,
+                            &format!("creating-{sled_id}"),
+                            sled_id,
+                        )
+                        .await;
+                        let vmm_id = vmm_id.into_untyped_uuid();
+                        mark_vmm_stopped_for_update(&conn, vmm_id, generation)
+                            .await;
+                        vmm_id
+                    } else {
+                        insert_vmm_in_state(
+                            &datastore,
+                            &opctx,
+                            sled_id,
+                            state,
+                            Some(generation),
+                        )
+                        .await
+                        .id
+                    };
+
+                    vmm_ids.push(marked_id);
                 }
             }
         }
@@ -911,21 +970,22 @@ mod tests {
                 // to stop for the purposes of this test
                 && vmm.state != DbVmmState::Creating
         };
-        let (expected_rows_to_be_stopped, expected_rows_to_be_unchanged): (
+        let (expected_rows_to_be_stopped, expected_rows_to_not_be_stopped): (
             Vec<Vmm>,
             Vec<Vmm>,
         ) = vmms.values().cloned().partition(should_be_stopped);
 
         // Collect the ids of the VMMs in `Creating` state, which are the ones
-        // we expect to turn up as failed.
-        let expected_failed_ids: BTreeSet<Uuid> = expected_rows_to_be_unchanged
-            .iter()
-            .filter(|vmm| {
-                vmm.stop_for_update_disposition_generation.is_some()
-                    && vmm.state == DbVmmState::Creating
-            })
-            .map(|vmm| vmm.id)
-            .collect();
+        // we expect to turn up as `Failed`.
+        let expected_failed_ids: BTreeSet<Uuid> =
+            expected_rows_to_not_be_stopped
+                .iter()
+                .filter(|vmm| {
+                    vmm.stop_for_update_disposition_generation.is_some()
+                        && vmm.state == DbVmmState::Creating
+                })
+                .map(|vmm| vmm.id)
+                .collect();
 
         assert_eq!(expected_rows_to_be_stopped.len(), 6);
         assert_eq!(expected_failed_ids.len(), 2);
@@ -967,18 +1027,19 @@ mod tests {
             expected_stopped_ids
         );
 
-        // The VMMs we expected to fail to stop, failed.
-        let failed_count: usize = status
+        // No VMMs are expected to fail to stop
+        let failed_to_stop_count: usize = status
             .vmms_failed_by_sled
             .iter()
             .map(|sled| sled.vmm_ids.len())
             .sum();
-        assert_eq!(failed_count, expected_failed_ids.len());
-        assert_eq!(
-            vmm_ids_in_all_sleds(&status.vmms_failed_by_sled),
-            expected_failed_ids
-        );
-        assert_eq!(status.error_messages.len(), expected_failed_ids.len());
+        assert_eq!(failed_to_stop_count, 0);
+
+        // The VMMs that were in the `Creating` state will not have had a VMM
+        // registered with a sled agent yet. The task will then force a `Failed`
+        // state which means the VMMs will not be included in the
+        // `vmms_failed_by_sled` field. But, we still collect the "not found"
+        // errors.
         assert_eq!(
             status.error_messages,
             vec![
@@ -1021,8 +1082,27 @@ mod tests {
             );
         }
 
+        // The initial marked `Creating` VMMs should now be `Failed`. Also, the
+        // instance-update saga should have marked them as deleted.
+        for id in &expected_failed_ids {
+            let actual = &vmms_after[id];
+            assert_eq!(
+                actual.state,
+                DbVmmState::Failed,
+                "VMM {id} was not marked as failed",
+            );
+            assert_eq!(
+                actual.failure_reason,
+                Some(VmmFailureReason::NoSuchInstance),
+            );
+            assert!(actual.time_deleted.is_some(), "VMM {id} was not deleted");
+        }
+
         // Make sure all other rows are unchanged
-        for expected in &expected_rows_to_be_unchanged {
+        for expected in expected_rows_to_not_be_stopped
+            .iter()
+            .filter(|vmm| !expected_failed_ids.contains(&vmm.id))
+        {
             assert_eq!(
                 &vmms_after[&expected.id],
                 expected,
@@ -1039,19 +1119,9 @@ mod tests {
         // No new VMMs were marked to be stopped so nothing is stopped
         assert!(status_second_run.vmms_stopped_by_sled.is_empty());
 
-        // The VMMs in `Creating` state still fail because no sled agent is
-        // aware of them
-        let failed_count_second_run: usize = status_second_run
-            .vmms_failed_by_sled
-            .iter()
-            .map(|sled| sled.vmm_ids.len())
-            .sum();
-        assert_eq!(failed_count_second_run, expected_failed_ids.len());
-        assert_eq!(
-            vmm_ids_in_all_sleds(&status_second_run.vmms_failed_by_sled),
-            expected_failed_ids
-        );
-        assert_eq!(status_second_run.error_messages, status.error_messages);
+        // Nothing changed, so we expect no errors or failures
+        assert!(status_second_run.vmms_failed_by_sled.is_empty());
+        assert!(status_second_run.error_messages.is_empty());
 
         // The second run makes no changes to the VMMs
         let vmms_after_second_run = fetch_vmms(&conn, &vmm_ids).await;
