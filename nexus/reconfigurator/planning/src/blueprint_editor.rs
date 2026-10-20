@@ -15,6 +15,7 @@ pub use allocators::ExternalNetworkingError;
 pub use allocators::ExternalSnatNetworkingChoice;
 pub use sled_editor::DatasetsEditError;
 pub use sled_editor::DisksEditError;
+pub use sled_editor::EnsureMupdateOverrideError;
 pub use sled_editor::MultipleDatasetsOfKind;
 pub use sled_editor::SledEditError;
 pub use sled_editor::SledInputError;

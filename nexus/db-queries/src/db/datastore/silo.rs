@@ -161,6 +161,7 @@ impl DataStore {
                 opctx,
                 nexus_opctx,
                 new_silo_params,
+                true,
                 new_silo_dns_names,
                 dns_update,
             )
@@ -169,12 +170,14 @@ impl DataStore {
         Ok(silo)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn silo_create_conn(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         nexus_opctx: &OpContext,
         new_silo_params: silo_types::SiloCreate,
+        discoverable: bool,
         new_silo_dns_names: &[String],
         dns_update: DnsVersionUpdateBuilder,
     ) -> Result<Silo, TransactionError<Error>> {
@@ -183,7 +186,11 @@ impl DataStore {
 
         let silo_create_query = Self::silo_create_query(
             opctx,
-            db::model::Silo::new_with_id(silo_id, new_silo_params.clone())?,
+            db::model::Silo::new_with_id(
+                silo_id,
+                new_silo_params.clone(),
+                discoverable,
+            )?,
         )
         .await?;
 

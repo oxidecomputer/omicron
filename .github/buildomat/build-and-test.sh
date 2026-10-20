@@ -1,8 +1,20 @@
 #!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 
 set -o errexit
 set -o pipefail
 set -o xtrace
+
+#
+# Set up a custom temporary directory within whatever one we were given so that
+# we can check later whether we left detritus around.
+#
+TEST_TMPDIR='/var/tmp/omicron_tmp'
+echo "tests will store ephemeral output in $TEST_TMPDIR" >&2
+mkdir "$TEST_TMPDIR"
 
 #
 # Set up our PATH for the test suite.
@@ -24,13 +36,6 @@ cargo --version
 rustc --version
 curl -sSfL --retry 10 https://get.nexte.st/"$NEXTEST_VERSION"/"$1" | gunzip | tar -xvf - -C ~/.cargo/bin
 
-#
-# Set up a custom temporary directory within whatever one we were given so that
-# we can check later whether we left detritus around.
-#
-TEST_TMPDIR='/var/tmp/omicron_tmp'
-echo "tests will store ephemeral output in $TEST_TMPDIR" >&2
-mkdir "$TEST_TMPDIR"
 
 OUTPUT_DIR='/work'
 echo "tests will store non-ephemeral output in $OUTPUT_DIR" >&2
@@ -110,16 +115,6 @@ export CARGO_INCREMENTAL=0
 export RUSTC_BOOTSTRAP=1
 
 # Build all the packages and tests, and keep track of how long each took to build.
-#
-# The build graph ends up building several bin/test targets that depend on
-# omicron-nexus at the same time, which uses significant memory to compile on
-# illumos. To mitigate this we build everything except omicron-nexus's bin/test
-# targets first, then finish the build after.
-#
-# Both invocations use the same flags to avoid cache invalidation.
-# We collect timing data only from the second (full workspace) build.
-ptime -m cargo --config 'build.analysis.enabled=true' build -Zbuild-analysis \
-    --workspace --exclude=omicron-nexus --tests --locked --verbose
 ptime -m cargo --config 'build.analysis.enabled=true' build -Zbuild-analysis \
     --workspace --tests --locked --verbose
 cp "$(ls -t "${CARGO_HOME:-$HOME/.cargo}/log/"*.jsonl | head -1)" \

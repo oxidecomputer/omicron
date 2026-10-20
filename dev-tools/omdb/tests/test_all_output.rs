@@ -8,21 +8,27 @@
 //! sure you're only breaking what you intend.
 
 use dropshot::Method;
-use expectorate::assert_contents;
 use gateway_client::ClientInfo as _;
 use http::StatusCode;
+use nexus_db_model::DnsGroup;
+use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
+use nexus_test_utils::background::activate_background_task;
+use nexus_test_utils::background::run_blueprint_rendezvous;
 use nexus_test_utils::wait_for_producer;
 use nexus_test_utils::{OXIMETER_UUID, PRODUCER_UUID};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
+use omicron_test_utils::dev::test_cmds::EXIT_FAILURE;
+use omicron_test_utils::dev::test_cmds::OutputSnapshot;
 use omicron_test_utils::dev::test_cmds::Redactor;
+use omicron_test_utils::dev::test_cmds::assert_exit_code;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
-use std::fmt::Write;
 use std::net::IpAddr;
 use std::path::Path;
 use std::time::Duration;
@@ -65,7 +71,7 @@ fn assert_oximeter_list_producers_output(
 async fn test_omdb_usage_errors() {
     clear_omdb_env();
     let cmd_path = path_to_executable(CMD_OMDB);
-    let mut output = String::new();
+    let mut output = OutputSnapshot::new();
     let invocations: &[&[&'static str]] = &[
         // No arguments
         &[],
@@ -78,6 +84,14 @@ async fn test_omdb_usage_errors() {
         // Command help output
         &["db"],
         &["db", "--help"],
+        &["db", "alert"],
+        &["db", "alert", "list", "--help"],
+        // Nonexistent alert class
+        &["db", "alert", "list", "--classes", "test.foo.bar", "test.foo.box"],
+        &["db", "alert", "webhook", "delivery", "list", "--help"],
+        // Nonexistent webhook delivery state and trigger
+        &["db", "alert", "webhook", "delivery", "list", "--state", "bogus"],
+        &["db", "alert", "webhook", "delivery", "list", "--trigger", "bogus"],
         &["db", "disks"],
         &["db", "dns"],
         &["db", "dns", "diff"],
@@ -94,6 +108,12 @@ async fn test_omdb_usage_errors() {
         &["db", "ereport", "info", "--help"],
         &["db", "sleds", "--help"],
         &["db", "sitrep", "--help"],
+        &["db", "sitrep", "show", "--help"],
+        &["db", "sitrep", "analysis-report", "--help"],
+        // Invalid sitrep selectors: not a UUID, a version number, or "current"
+        &["db", "sitrep", "show", "not-a-sitrep"],
+        // Invalid sitrep selector: begins with 'v' but is not an integer.
+        &["db", "sitrep", "show", "v1.2.3"],
         &["db", "saga"],
         &["db", "snapshots"],
         &["db", "network"],
@@ -115,6 +135,7 @@ async fn test_omdb_usage_errors() {
         &["nexus", "sleds"],
         &["sled-agent"],
         &["sled-agent", "zones"],
+        &["sled-agent", "network-config"],
         &["oximeter", "--help"],
         &["oxql", "--help"],
         // Mispelled argument
@@ -122,13 +143,18 @@ async fn test_omdb_usage_errors() {
         &["reconfigurator"],
         &["reconfigurator", "export"],
         &["reconfigurator", "archive"],
+        // FM config help text. Mostly, let's check that the help text for the
+        // settings look reasonable.
+        &["nexus", "fm-config"],
+        &["nexus", "fm-config", "show", "--help"],
+        &["nexus", "fm-config", "set", "--help"],
     ];
 
     for args in invocations {
         do_run(&mut output, |exec| exec, &cmd_path, args).await;
     }
 
-    assert_contents("tests/usage_errors.out", &output);
+    output.assert_contents("tests/usage_errors.out");
 }
 
 #[tokio::test]
@@ -187,7 +213,75 @@ async fn test_omdb_success_cases() {
         .wait_for_at_least_one_inventory_collection(Duration::from_secs(60))
         .await;
 
-    let mut output = String::new();
+    // Drive the FM task pipeline to its steady state, so that the omdb
+    // snapshot of each task's last completed activation is deterministic
+    // rather than racing the tasks' watch-channel triggers:
+    //
+    // 1. `fm_config_loader` loads the default config for the FM system.
+    // 2. `fm_analysis` commits the first sitrep (unless its natural cadence
+    //    already has). This run reports "committed new sitrep".
+    // 3. `fm_sitrep_loader` loads that sitrep and publishes it on the sitrep
+    //    watch channel.
+    // 4. `fm_sitrep_history_pruner` runs with the loaded config and exactly
+    //    one sitrep in the history, so its status deterministically reports
+    //    the config it used and a count of 1, rather than "waiting for
+    //    config". If we didn't run it explicitly after the config was loaded,
+    //    its initial activation may race with the config loader and sometimes
+    //    display that it's waiting for config, and sometimes display that it
+    //    did nothing.
+    // 5. `fm_analysis` re-runs with the loaded sitrep as its parent and
+    //    reports "no changes" -- the steady-state output asserted below.
+    //    (No later activation ever commits another sitrep here: this
+    //    environment has no in-service control plane disks and no
+    //    consumable ereports, so every post-load analysis is a no-op.)
+    // 6. `fm_rendezvous` runs against the loaded sitrep, so its status shows
+    //    the executed operations rather than "no FM situation report loaded".
+    // 7. `fm_sitrep_history_pruner` runs, determines we have not reached the
+    //    sitrep history limit, and does nothing. However, this task's status
+    //    will print the count of sitrep history entries currently in the
+    //    database, so activating it explicitly *after* analysis has committed
+    //    the first sitrep ensures that its most recent status always says
+    //    there's 1 sitrep, rather than depending on whether it ran before or
+    //    after the analysis task.
+    let lockstep_client = &cptestctx.lockstep_client;
+    activate_background_task(lockstep_client, "fm_config_loader").await;
+    activate_background_task(lockstep_client, "fm_analysis").await;
+    activate_background_task(lockstep_client, "fm_sitrep_loader").await;
+    activate_background_task(lockstep_client, "fm_sitrep_history_pruner").await;
+    activate_background_task(lockstep_client, "fm_analysis").await;
+    activate_background_task(lockstep_client, "fm_rendezvous").await;
+    activate_background_task(lockstep_client, "fm_sitrep_history_pruner").await;
+
+    // Populate the `rendezvous_sled_bp_availability` table deterministically so
+    // the BP AVAIL column in `omdb db sleds` has data present in it. Run
+    // this twice: the first pass populates the table (unless a watch-triggered
+    // activation already did), and the second reaches the steady state
+    // asserted by the expectorate output.
+    run_blueprint_rendezvous(&cptestctx.lockstep_client).await;
+    run_blueprint_rendezvous(&cptestctx.lockstep_client).await;
+
+    // Update DNS to remove some names so that we can later verify the
+    // removed-names limit.
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+    let mut update = DnsVersionUpdateBuilder::new(
+        DnsGroup::External,
+        "test removed-names fetch limit".to_string(),
+        "test_omdb_success_cases".to_string(),
+    );
+    update.remove_name("@".to_string()).unwrap();
+    update.remove_name("ns1".to_string()).unwrap();
+    datastore
+        .dns_update_from_version(
+            &opctx,
+            update,
+            nexus_db_model::Generation::try_from(2).unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let mut output = OutputSnapshot::new();
 
     let invocations: &[&[&str]] = &[
         &["db", "db-metadata", "ls-nexus"],
@@ -208,6 +302,9 @@ async fn test_omdb_success_cases() {
         &["db", "disks", "list"],
         &["db", "dns", "show"],
         &["db", "dns", "diff", "external", "2"],
+        &["db", "dns", "diff", "external", "2", "--fetch-limit", "2"],
+        &["db", "dns", "diff", "external", "3", "--fetch-limit", "2"],
+        &["db", "dns", "diff", "external", "3", "--fetch-limit", "3"],
         &["db", "dns", "names", "external", "2"],
         &["db", "instances"],
         &["db", "sleds"],
@@ -276,6 +373,9 @@ async fn test_omdb_success_cases() {
         &["nexus", "blueprints", "diff", &initial_blueprint_id],
         // reconfigurator config: show and set
         &["nexus", "reconfigurator-config", "show", "current"],
+        // An explicit version that does not exist is an error, unlike something
+        // like "current" on a rack that has never had a config.
+        &["nexus", "reconfigurator-config", "show", "4294967295"],
         &["nexus", "update-status"],
         &["nexus", "update-status", "--details"],
         // NOTE: Enabling the planner here _may_ cause Nexus to start creating
@@ -295,8 +395,16 @@ async fn test_omdb_success_cases() {
             "nexus",
             "reconfigurator-config",
             "set",
-            "--add-zones-with-mupdate-override",
-            "true",
+            "--disruption-policy",
+            "migrate-or-terminate",
+        ],
+        &[
+            "-w",
+            "nexus",
+            "reconfigurator-config",
+            "set",
+            "--sled-update-reboot-policy",
+            "evacuate",
         ],
         &["nexus", "reconfigurator-config", "show", "current"],
         &["reconfigurator", "export", tmppath.as_str()],
@@ -311,6 +419,18 @@ async fn test_omdb_success_cases() {
             "001de000-5110-4000-8000-000000000000",
             "001de000-05e4-4000-8000-000000004007",
         ],
+        // The alert list command should accept multiple case IDs and multiple
+        // alert classes. Note that this command shouldn't actually print any
+        // alerts, which is fine; this is a test for the argument parsing.
+        &[
+            "db",
+            "alert",
+            "list",
+            "--cases",
+            "001de000-05e4-4000-8000-000000004007",
+            "98b11fa2-3437-4704-83f5-e4aa5163e672",
+        ],
+        &["db", "alert", "list", "--classes", "test.foo.bar", "test.foo.baz"],
         // This operation will set the "db_metadata_nexus" state to quiesced.
         //
         // This would normally only be set by a Nexus as it shuts itself down;
@@ -325,6 +445,31 @@ async fn test_omdb_success_cases() {
             "--skip-blueprint-validation",
             &cptestctx.server.server_context().nexus.id().to_string(),
         ],
+        // FM config: show and set
+        &["nexus", "fm-config", "show", "current"],
+        &[
+            "-w",
+            "nexus",
+            "fm-config",
+            "set",
+            "--sitrep-limit",
+            "3000",
+            "--comment",
+            "I am altering the config. Pray I do not alter it further.",
+        ],
+        &["nexus", "fm-config", "current"],
+        &[
+            "-w",
+            "nexus",
+            "fm-config",
+            "set",
+            "--analysis-enabled",
+            "false",
+            "--comment",
+            "oops i altered it further",
+        ],
+        &["nexus", "fm-config", "current"],
+        &["nexus", "fm-config", "show", "v1"],
     ];
 
     let mut redactor = Redactor::default();
@@ -357,6 +502,28 @@ async fn test_omdb_success_cases() {
         .field("list ok:", r"\d+")
         .field("triggered by", r"[\w ]+")
         .section(&["task: \"tuf_artifact_replication\"", "request ringbuf:"]);
+
+    // The `fm_analysis` task's input report includes a line comparing the
+    // current inventory collection against the parent sitrep's collection,
+    // which can be either "same" or "different" depending on whether a new
+    // inventory was collected between sitreps. Collapse both forms.
+    redactor.variable_regex(
+        "fm_input_inv_comparison",
+        r" --> (same collection as parent sitrep|different from parent sitrep \(collection [-a-f0-9]+\))",
+    );
+
+    // The `fm_sitrep_gc` task's orphan counts are racy. When two `fm_analysis`
+    // activations overlap (e.g. the boot-time activation and the explicit drive
+    // above), both can insert a first sitrep before either is made current; the
+    // loser's sitrep and its stashed analysis report are inserted but orphaned
+    // (see `DataStore::fm_sitrep_insert`'s `ParentNotCurrent` path), and a
+    // later GC pass deletes them. Whether that race happened before this
+    // snapshot is timing-dependent, so redact both counts. Other child tables
+    // stay zero: with no faults, orphaned sitreps carry no cases, facts,
+    // ereports, or bundles.
+    redactor
+        .field("orphaned sitreps deleted:", r"\d+")
+        .field("orphaned fm_sitrep_analysis_report rows deleted:", r"\d+");
 
     // The `sp_ereport_ingester` task's output depends on how many simulated
     // sled agents ahppen to register with Nexus before its first execution.
@@ -404,7 +571,7 @@ async fn test_omdb_success_cases() {
         .await;
     }
 
-    assert_contents("tests/successes.out", &output);
+    output.assert_contents("tests/successes.out");
 
     // The `reconfigurator-save` output is not easy to compare as a string.  But
     // let's make sure we can at least parse it and that it looks broadly like
@@ -436,8 +603,123 @@ async fn test_omdb_success_cases() {
     );
     assert!(!parsed.collections.is_empty());
 
+    // Exercise `omdb support-bundle collect` end-to-end. We don't add this
+    // to the `successes.out` snapshot because the output includes a
+    // randomly-generated bundle UUID, timing-dependent step durations,
+    // and per-sled step names that would all need redaction. Instead we
+    // run the command and verify the resulting zip is well-formed and
+    // contains the expected metadata files.
+    let bundle_path = tmpdir.path().join("bundle.zip");
+    let bundle_args: &[&str] = &[
+        "-w",
+        "support-bundle",
+        "collect",
+        "--output",
+        bundle_path.as_str(),
+        "--tempdir",
+        tmpdir.path().as_str(),
+        "--reason",
+        "integration test",
+    ];
+    let mut bundle_output = OutputSnapshot::new();
+    let p = postgres_url.clone();
+    let dns = cptestctx
+        .internal_dns
+        .dns_server
+        .sole_local_address()
+        .expect("exactly one internal DNS address")
+        .to_string();
+    do_run_no_redactions(
+        &mut bundle_output,
+        move |exec| exec.env("OMDB_DB_URL", &p).env("OMDB_DNS_SERVER", &dns),
+        &cmd_path,
+        bundle_args,
+    )
+    .await;
+    let zip_file = std::fs::File::open(&bundle_path).unwrap_or_else(|err| {
+        panic!(
+            "bundle zip not produced at {bundle_path}: {}\n\
+             omdb output was:\n{}",
+            InlineErrorChain::new(&err),
+            bundle_output.as_str(),
+        )
+    });
+    let mut archive =
+        zip::ZipArchive::new(zip_file).expect("bundle is a valid zip archive");
+    for required in [
+        "bundle_id.txt",
+        "meta/reason_for_creation.txt",
+        "meta/trace.json",
+        "sp_task_dumps/sled_0/dump-0.zip",
+        "sp_task_dumps/sled_1/dump-0.zip",
+        "sp_task_dumps/switch_0/dump-0.zip",
+        "sp_task_dumps/switch_1/dump-0.zip",
+    ] {
+        assert!(
+            archive.by_name(required).is_ok(),
+            "bundle zip is missing expected entry {required}",
+        );
+    }
+
+    // Now exercise the stdout-streaming path: omit `--output` and
+    // capture stdout as bytes. Verifies the data-descriptor zip variant
+    // produced by `bundle_to_stream` is well-formed and contains the
+    // expected metadata.
+    let stdout_path = tmpdir.path().join("bundle-stdout.zip");
+    let stdout_file =
+        std::fs::File::create(&stdout_path).expect("create stdout capture");
+    let cmd_path_owned = cmd_path.to_path_buf();
+    let p = postgres_url.clone();
+    let dns = cptestctx
+        .internal_dns
+        .dns_server
+        .sole_local_address()
+        .expect("exactly one internal DNS address")
+        .to_string();
+    let stream_tempdir = tmpdir.path().to_owned();
+    let exit_status = tokio::task::spawn_blocking(move || {
+        Exec::cmd(&cmd_path_owned)
+            .env("OMDB_DB_URL", &p)
+            .env("OMDB_DNS_SERVER", &dns)
+            .env("RUST_BACKTRACE", "1")
+            .env("RUST_LIB_BACKTRACE", "0")
+            .args(&[
+                "-w",
+                "support-bundle",
+                "collect",
+                "--tempdir",
+                stream_tempdir.as_str(),
+                "--reason",
+                "integration test (stdout)",
+            ])
+            .stdout(subprocess::Redirection::File(stdout_file))
+            .join()
+            .expect("running omdb to stream a bundle")
+    })
+    .await
+    .expect("spawn_blocking");
+    assert!(exit_status.success(), "stdout streaming failed: {exit_status:?}");
+    let zip_file = std::fs::File::open(&stdout_path)
+        .expect("captured stdout file should exist");
+    let mut archive = zip::ZipArchive::new(zip_file)
+        .expect("streamed bundle is a valid zip archive");
+    for required in [
+        "bundle_id.txt",
+        "meta/reason_for_creation.txt",
+        "meta/trace.json",
+        "sp_task_dumps/sled_0/dump-0.zip",
+        "sp_task_dumps/sled_1/dump-0.zip",
+        "sp_task_dumps/switch_0/dump-0.zip",
+        "sp_task_dumps/switch_1/dump-0.zip",
+    ] {
+        assert!(
+            archive.by_name(required).is_ok(),
+            "streamed bundle zip is missing expected entry {required}",
+        );
+    }
+
     let ox_invocation = &["oximeter", "list-producers"];
-    let mut ox_output = String::new();
+    let mut ox_output = OutputSnapshot::new();
     let ox = ox_url.clone();
 
     wait_for_producer(
@@ -453,7 +735,7 @@ async fn test_omdb_success_cases() {
     )
     .await;
     assert_oximeter_list_producers_output(
-        &ox_output,
+        ox_output.as_str(),
         &ox_url,
         ox_test_producer,
     );
@@ -481,8 +763,21 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     let ox_url = format!("http://{}/", cptestctx.oximeter.server_address());
     let ox_test_producer = cptestctx.producer.address().ip();
     let ch_url = format!("http://{}/", cptestctx.clickhouse.http_address());
-    let dns_sockaddr = cptestctx.internal_dns.dns_server.local_address();
-    let mut output = String::new();
+    let dns_sockaddr = cptestctx
+        .internal_dns
+        .dns_server
+        .sole_local_address()
+        .expect("exactly one internal DNS address");
+    let mut output = OutputSnapshot::new();
+
+    // The blueprint_rendezvous task needs an inventory collection to run.
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(Duration::from_secs(60))
+        .await;
+
+    // Populate the `rendezvous_sled_bp_availability` table deterministically so
+    // the BP AVAIL column in `omdb db sleds` has data present in it.
+    run_blueprint_rendezvous(&cptestctx.lockstep_client).await;
 
     // Database URL
     // Case 1: specified on the command line
@@ -587,13 +882,13 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    assert_contents("tests/env.out", &output);
+    output.assert_contents("tests/env.out");
 
     // Oximeter URL
     // Case 1: specified on the command line.
     // Case 2: is covered by the success tests above.
     let ox_args1 = &["oximeter", "--oximeter-url", &ox_url, "list-producers"];
-    let mut ox_output1 = String::new();
+    let mut ox_output1 = OutputSnapshot::new();
     wait_for_producer(
         &cptestctx.oximeter,
         PRODUCER_UUID.parse::<Uuid>().unwrap(),
@@ -607,14 +902,14 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
     assert_oximeter_list_producers_output(
-        &ox_output1,
+        ox_output1.as_str(),
         &ox_url,
         ox_test_producer,
     );
 }
 
 async fn do_run<F>(
-    output: &mut String,
+    output: &mut OutputSnapshot,
     modexec: F,
     cmd_path: &Path,
     args: &[&str],
@@ -625,7 +920,7 @@ async fn do_run<F>(
 }
 
 async fn do_run_no_redactions<F>(
-    output: &mut String,
+    output: &mut OutputSnapshot,
     modexec: F,
     cmd_path: &Path,
     args: &[&str],
@@ -636,7 +931,7 @@ async fn do_run_no_redactions<F>(
 }
 
 async fn do_run_extra<F>(
-    output: &mut String,
+    output: &mut OutputSnapshot,
     modexec: F,
     cmd_path: &Path,
     args: &[&str],
@@ -644,13 +939,11 @@ async fn do_run_extra<F>(
 ) where
     F: FnOnce(Exec) -> Exec + Send + 'static,
 {
-    write!(
-        output,
-        "EXECUTING COMMAND: {} {:?}\n",
+    let command_line = format!(
+        "EXECUTING COMMAND: {} {:?}",
         cmd_path.file_name().expect("missing command").to_string_lossy(),
         args.iter().map(|r| redactor.do_redact(r)).collect::<Vec<_>>()
-    )
-    .unwrap();
+    );
 
     // Using `subprocess`, the child process will be spawned synchronously.  In
     // some cases it then tries to make an HTTP request back into this process.
@@ -681,16 +974,51 @@ async fn do_run_extra<F>(
         .await
         .unwrap();
 
-    write!(output, "termination: {:?}\n", exit_status).unwrap();
-    write!(output, "---------------------------------------------\n").unwrap();
-    write!(output, "stdout:\n").unwrap();
-    output.push_str(&redactor.do_redact(&stdout_text));
+    output.push(
+        format_args!("{command_line}\ntermination: {exit_status:?}"),
+        redactor.do_redact(&stdout_text),
+        redactor.do_redact(&stderr_text),
+    );
+}
 
-    write!(output, "---------------------------------------------\n").unwrap();
-    write!(output, "stderr:\n").unwrap();
-    output.push_str(&redactor.do_redact(&stderr_text));
+#[test]
+fn test_omdb_unreachable_nexus_exits_nonzero() {
+    clear_omdb_env();
+    let cmd_path = path_to_executable(CMD_OMDB);
+    // Nothing can listen on port 1 (it is privileged and unassigned), so every
+    // request to this URL is refused immediately.
+    const UNREACHABLE_NEXUS: &str = "http://127.0.0.1:1/";
 
-    write!(output, "=============================================\n").unwrap();
+    let invocations: &[(&[&str], &str)] = &[
+        (
+            &["nexus", "clickhouse-policy", "get"],
+            "Error: retrieving clickhouse policy",
+        ),
+        (
+            &["nexus", "oximeter-read-policy", "get"],
+            "Error: retrieving oximeter read policy",
+        ),
+        (
+            &["nexus", "reconfigurator-config", "show", "current"],
+            "Error: retrieving reconfigurator config",
+        ),
+    ];
+
+    for &(invocation, expected_error) in invocations {
+        let exec = Exec::cmd(&cmd_path)
+            .args(invocation)
+            .env("OMDB_NEXUS_URL", UNREACHABLE_NEXUS);
+        let (exit_status, stdout_text, stderr_text) = run_command(exec);
+        assert_exit_code(exit_status, EXIT_FAILURE, &stderr_text);
+        assert_eq!(
+            stdout_text, "",
+            "{invocation:?} should print nothing on stdout"
+        );
+        assert!(
+            stderr_text.lines().any(|line| line == expected_error),
+            "{invocation:?}: missing {expected_error:?} in stderr:\n{stderr_text}"
+        );
+    }
 }
 
 // We're testing behavior that can be affected by OMDB-related environment

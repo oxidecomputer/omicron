@@ -18,12 +18,12 @@ use nexus_test_utils::resource_helpers::{
     create_default_ip_pools, create_instance, create_project, create_vpc,
 };
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::instance::InstanceState;
 use nexus_types::external_api::vpc::{
     VpcSubnet, VpcSubnetCreate, VpcSubnetUpdate,
 };
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Ipv6NetExt;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -212,7 +212,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     subnets_eq(&subnet, &same_subnet);
 
     // get subnet by ID, should retrieve the same subnet
-    let subnet_by_id_url = format!("/v1/vpc-subnets/{}", &subnet.identity.id);
+    let subnet_by_id_url = format!("/v1/vpc-subnets/{}", subnet.identity.id);
     let same_subnet_again = NexusRequest::object_get(client, &subnet_by_id_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()

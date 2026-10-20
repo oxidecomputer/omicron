@@ -1589,9 +1589,10 @@ mod tests {
     use dropshot::PaginationOrder;
     use dropshot::test_util::LogContext;
     use nexus_auth::authz;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::IpAttachState;
     use nexus_db_model::IpPool;
-    use nexus_db_model::IpPoolReservationType;
+    use nexus_db_model::IpPoolAssignment;
     use nexus_db_model::Name;
     use nexus_db_model::Project;
     use nexus_db_model::SubnetPool;
@@ -2383,6 +2384,7 @@ mod tests {
                             name: "my-project".parse().unwrap(),
                             description: String::new(),
                         },
+                        defaults: None,
                     },
                 ),
             )
@@ -3340,6 +3342,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn external_subnet_allocation_of_consecutive_single_addresses() {
+        let context = setup_external_subnet_test(
+            "external_subnet_allocation_of_consecutive_single_addresses",
+        )
+        .await;
+
+        // Add a member that permits allocating single addresses (/128s).
+        let member_subnet: IpNet = "2001:db8:4::/48".parse().unwrap();
+        context
+            .db
+            .datastore()
+            .add_subnet_pool_member(
+                context.db.opctx(),
+                &context.authz_pool,
+                &context.db_pool,
+                &SubnetPoolMemberAdd {
+                    subnet: member_subnet,
+                    min_prefix_length: Some(48),
+                    max_prefix_length: Some(128),
+                },
+            )
+            .await
+            .expect("able to add /128-capable pool member");
+
+        // Allocate two consecutive /128s. Only the new member can fit a /128,
+        // so both come from it, at its first two addresses.
+        let prefix_length = 128;
+        let mut subnets = Vec::with_capacity(2);
+        for i in 0..subnets.capacity() {
+            let subnet = context
+                .db
+                .datastore()
+                .create_external_subnet(
+                    context.db.opctx(),
+                    &DEFAULT_SILO_ID,
+                    &context.authz_project,
+                    ExternalSubnetCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: format!("single{i}").parse().unwrap(),
+                            description: String::new(),
+                        },
+                        allocator: ExternalSubnetAllocator::Auto {
+                            pool_selector: PoolSelector::Auto {
+                                ip_version: None,
+                            },
+                            prefix_length,
+                        },
+                    },
+                )
+                .await
+                .expect("able to allocate consecutive single-address subnets");
+            subnets.push(subnet);
+        }
+
+        // The two allocations must be distinct, and the second must be the
+        // address immediately following the first.
+        assert_ne!(subnets[0].subnet, subnets[1].subnet);
+        let first: IpNet = "2001:db8:4::/128".parse().unwrap();
+        let second: IpNet = "2001:db8:4::1/128".parse().unwrap();
+        assert_eq!(oxnet::IpNet::from(subnets[0].subnet), first);
+        assert_eq!(oxnet::IpNet::from(subnets[1].subnet), second);
+
+        // Explicitly request one of the /128s we just allocated to confirm
+        // we get the overlap error.
+        let err = context
+            .db
+            .datastore()
+            .create_external_subnet(
+                context.db.opctx(),
+                &DEFAULT_SILO_ID,
+                &context.authz_project,
+                ExternalSubnetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "explicit-dup".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    allocator: ExternalSubnetAllocator::Explicit {
+                        subnet: first,
+                    },
+                },
+            )
+            .await
+            .expect_err("cannot explicitly request an allocated subnet");
+        let Error::InvalidRequest { message } = &err else {
+            panic!("Expected InvalidRequest, found {err:#?}");
+        };
+        assert_eq!(
+            message.external_message(),
+            SUBNET_OVERLAPS_EXISTING_ERR_MSG,
+        );
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn external_subnet_allocation_takes_smallest_gap_in_member_middle() {
         let context = setup_external_subnet_test(
             "external_subnet_allocation_takes_smallest_gap_in_member_middle",
@@ -4076,6 +4174,7 @@ mod tests {
                             name: "my-project".parse().unwrap(),
                             description: String::new(),
                         },
+                        defaults: None,
                     },
                 ),
             )
@@ -4152,7 +4251,7 @@ mod tests {
                 IpPool::new(
                     &identity,
                     IpVersion::V6.into(),
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -4546,6 +4645,7 @@ mod tests {
                             name: "my-project".parse().unwrap(),
                             description: String::new(),
                         },
+                        defaults: None,
                     },
                 ),
             )
@@ -4671,6 +4771,7 @@ mod tests {
                             name: "my-project".parse().unwrap(),
                             description: String::new(),
                         },
+                        defaults: None,
                     },
                 ),
             )
@@ -4796,5 +4897,108 @@ mod tests {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_delete_project_with_outstanding_external_subnet() {
+        let context = setup_external_subnet_test(
+            "cannot_delete_project_with_outstanding_external_subnet",
+        )
+        .await;
+        let (opctx, datastore) = (context.db.opctx(), context.db.datastore());
+        let authz_project = &context.authz_project;
+        let fetch_project = async || {
+            LookupPath::new(opctx, datastore)
+                .project_id(authz_project.id())
+                .fetch()
+                .await
+                .expect("should be able to fetch test project")
+                .2
+        };
+        let db_project = fetch_project().await;
+
+        let subnet_name = "subnet";
+        let subnet = datastore
+            .create_external_subnet(
+                opctx,
+                &DEFAULT_SILO_ID,
+                &authz_project,
+                ExternalSubnetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: subnet_name.parse().unwrap(),
+                        description: String::new(),
+                    },
+                    // Use the default IPv6 pool
+                    allocator: ExternalSubnetAllocator::Auto {
+                        prefix_length: 64,
+                        pool_selector: PoolSelector::Auto {
+                            ip_version: Some(IpVersion::V6),
+                        },
+                    },
+                },
+            )
+            .await
+            .expect("able to create subnet in project");
+        let authz_subnet = authz::ExternalSubnet::new(
+            authz_project.clone(),
+            subnet.id(),
+            LookupType::ById(subnet.id().into_untyped_uuid()),
+        );
+
+        // We shouldn't be able to delete the project, because of the above
+        // subnet.
+        let err = datastore
+            .project_delete(opctx, authz_project, &db_project)
+            .await
+            .expect_err("failure deleting project with outstanding subnet");
+        let Error::InvalidRequest { message } = &err else {
+            panic!(
+                "Expected an InvalidRequest when deleting \
+                a project while it still has an outstanding \
+                external subnet, but found: {err:#?}",
+            );
+        };
+        assert_eq!(
+            message.external_message(),
+            &format!(
+                "project to be deleted contains an external subnet: \
+                {subnet_name}"
+            ),
+        );
+
+        // Delete the subnet and try again, which should work.
+        datastore
+            .delete_external_subnet(opctx, &authz_subnet)
+            .await
+            .expect("able to delete external subnet from project");
+
+        // Creating the subnet bumped the project's rcgen, so deleting with the
+        // stale record we got at creation time should fail.
+        let err = datastore
+            .project_delete(opctx, &authz_project, &db_project)
+            .await
+            .expect_err(
+                "should not be able to delete project with stale rcgen",
+            );
+        let Error::InvalidRequest { message } = &err else {
+            panic!(
+                "Expected an InvalidRequest when deleting a project \
+                with a stale rcgen, but found: {err:#?}",
+            );
+        };
+        assert_eq!(
+            message.external_message(),
+            "deletion failed due to concurrent modification",
+        );
+
+        // Refetching the project and deleting it should work.
+        let db_project = fetch_project().await;
+        datastore
+            .project_delete(opctx, &authz_project, &db_project)
+            .await
+            .expect("should be able to delete project after deleting subnet");
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
     }
 }

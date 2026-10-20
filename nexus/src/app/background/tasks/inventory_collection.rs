@@ -17,6 +17,7 @@ use nexus_networking::GatewayClient;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
+use omicron_common::http_client::internal_http_client;
 use omicron_uuid_kinds::CollectionUuid;
 use serde_json::json;
 use slog::{debug, o, warn};
@@ -154,7 +155,11 @@ async fn inventory_activate(
                 let log = opctx
                     .log
                     .new(o!("clickhouse_admin_keeper_url" => url.clone()));
-                clickhouse_admin_keeper_client::Client::new(&url, log)
+                clickhouse_admin_keeper_client::Client::new_with_client(
+                    &url,
+                    internal_http_client(),
+                    log,
+                )
             })
             .collect::<Vec<_>>(),
         // When DNS resolution fails because no clickhouse-keeper-admin
@@ -272,11 +277,11 @@ mod test {
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::LookupType;
     use omicron_uuid_kinds::CollectionUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use std::collections::BTreeSet;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -294,7 +299,11 @@ mod test {
 
         let resolver = internal_dns_resolver::Resolver::new_from_addrs(
             cptestctx.logctx.log.clone(),
-            &[cptestctx.internal_dns.dns_server.local_address()],
+            &cptestctx
+                .internal_dns
+                .dns_server
+                .local_addresses()
+                .collect::<Vec<_>>(),
         )
         .unwrap();
 
@@ -421,7 +430,7 @@ mod test {
         assert_eq!(initial_found_urls.len(), 2);
 
         // Insert some sleds.
-        let rack_id = Uuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let mut sleds = Vec::new();
         for i in 0..64 {
             let sled = SledUpdate::new(

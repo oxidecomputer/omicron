@@ -259,7 +259,16 @@ enum PolarSnippet {
     /// Generate it as a global resource, manipulable only to administrators
     FleetChild,
 
-    /// Generate it as resource nested under the Silo
+    /// Generate it as resource nested under the Silo. Grants modify/create
+    /// permissions to `limited-collaborator` and above.
+    ///
+    /// This is currently only used for images (`SiloImage` and the generic
+    /// `Image`), which users with limited permissions should be able to
+    /// manage, like their project-level counterparts (see
+    /// [`PolarSnippet::InProjectLimited`]). If a silo-level resource that
+    /// requires the full `collaborator` role ever needs this pattern, split
+    /// it into `InSiloLimited` and `InSiloFull` variants like the project
+    /// ones below.
     InSilo,
 
     /// Generate it as a resource nested within a Project (either directly or
@@ -379,8 +388,8 @@ fn do_authz_resource(
                     relations = {{ containing_silo: Silo }};
                     "list_children" if "viewer" on "containing_silo";
                     "read" if "viewer" on "containing_silo";
-                    "modify" if "collaborator" on "containing_silo";
-                    "create_child" if "collaborator" on "containing_silo";
+                    "modify" if "limited-collaborator" on "containing_silo";
+                    "create_child" if "limited-collaborator" on "containing_silo";
                 }}
 
                 has_relation(parent: Silo, "containing_silo", child: {})

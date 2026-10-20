@@ -4,12 +4,13 @@
 
 use super::InstanceIntendedState as IntendedState;
 use super::{
-    ByteCount, Disk, ExternalIp, Generation, InstanceAutoRestartPolicy,
-    InstanceCpuCount, InstanceCpuPlatform, InstanceState, Vmm, VmmState,
+    ByteCount, Disk, ExternalIp, InstanceAutoRestartPolicy, InstanceCpuCount,
+    InstanceCpuPlatform, InstanceState, Vmm, VmmState,
 };
 use crate::ExternalSubnet;
 use crate::collection::DatastoreAttachTargetConfig;
 use crate::serde_time_delta::optional_time_delta;
+use crate::typed_generation::DbTypedGeneration;
 use chrono::{DateTime, TimeDelta, Utc};
 use db_macros::Resource;
 use diesel::expression::{ValidGrouping, is_aggregate};
@@ -18,6 +19,10 @@ use diesel::prelude::*;
 use diesel::sql_types::{Bool, Nullable};
 use nexus_db_schema::schema::{disk, external_ip, external_subnet, instance};
 use nexus_types::external_api::instance as instance_types;
+use omicron_generation_kinds::{
+    InstanceStateGeneration, InstanceStateGenerationKind,
+    InstanceUpdaterGeneration, InstanceUpdaterGenerationKind,
+};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
 use serde::Serialize;
@@ -55,7 +60,7 @@ pub struct Instance {
     /// including the fallback state, the instance's active Propolis ID, and its
     /// migration IDs.
     #[diesel(column_name = state_generation)]
-    pub state_generation: Generation,
+    pub state_generation: DbTypedGeneration<InstanceStateGenerationKind>,
 
     /// The ID of the Propolis server hosting the current incarnation of this
     /// instance, or None if the instance has no active VMM.
@@ -103,7 +108,7 @@ pub struct Instance {
     /// `updater_id` field to ensure that the snapshot which indicated that the
     /// lock was not held is still valid when setting the lock ID.
     #[diesel(column_name = updater_gen)]
-    pub updater_gen: Generation,
+    pub updater_gen: DbTypedGeneration<InstanceUpdaterGenerationKind>,
 
     /// The "internal" state of this instance. The instance's externally-visible
     /// state may be delegated to the instance's active VMM, if it has one.
@@ -136,6 +141,13 @@ pub struct Instance {
     /// a sled by any other constraints the instance will be incarnated with the
     /// most general CPU platform supported by the selected sled.
     pub cpu_platform: Option<InstanceCpuPlatform>,
+
+    /// When true, the instance has opted in to jumbo frames (8500 byte MTU)
+    /// on its primary OPTE interface. The effective MTU also depends on the
+    /// fleet-wide setting in `system_networking_settings`; if that flag is off
+    /// the OPTE port is created with the default MTU regardless of this field.
+    /// Changes to this field only take effect on the next instance restart.
+    pub enable_jumbo_frames: bool,
 }
 
 impl Instance {
@@ -168,7 +180,7 @@ impl Instance {
             project_id,
             user_data: params.user_data.clone(),
             time_state_updated: creation_time,
-            state_generation: Generation::new(),
+            state_generation: InstanceStateGeneration::new().into(),
             propolis_id: None,
             dst_propolis_id: None,
             migration_id: None,
@@ -176,7 +188,7 @@ impl Instance {
             memory: params.memory.into(),
             hostname: params.hostname.to_string(),
             updater_id: None,
-            updater_gen: Generation::new(),
+            updater_gen: InstanceUpdaterGeneration::new().into(),
             nexus_state: InstanceState::Creating,
             time_last_auto_restarted: None,
             auto_restart,
@@ -185,6 +197,7 @@ impl Instance {
             boot_disk_id: None,
             intended_state,
             cpu_platform: params.cpu_platform.map(Into::into),
+            enable_jumbo_frames: params.enable_jumbo_frames,
         }
     }
 
@@ -328,7 +341,7 @@ pub struct InstanceRuntimeState {
     /// migration IDs.
     #[diesel(column_name = state_generation)]
     #[serde(rename = "gen")]
-    pub generation: Generation,
+    pub generation: DbTypedGeneration<InstanceStateGenerationKind>,
 
     /// The ID of the Propolis server hosting the current incarnation of this
     /// instance, or None if the instance has no active VMM.
@@ -426,8 +439,13 @@ pub enum Reincarnatability {
     /// The instance remains bound to the cycle of saṃsāra and can return in the
     /// next life.
     WillReincarnate,
-    /// The instance cannot reincarnate again until the specified time.
-    CoolingDown(TimeDelta),
+    /// The instance cannot reincarnate again until the cooldown period elapses
+    /// at the specified time.
+    CoolingDown {
+        /// The wall-clock time at which the cooldown period will expire and the
+        /// instance will once again be eligible to reincarnate.
+        until: DateTime<Utc>,
+    },
     /// The instance's auto-restart policy indicates that it has attained
     /// nirvāṇa and will not reincarnate.
     Nirvana,
@@ -469,13 +487,14 @@ impl InstanceAutoRestart {
             // Eventually, we may also allow a project-level default, so we will
             // need to consider that as well.
             let cooldown = self.cooldown.unwrap_or(Self::DEFAULT_COOLDOWN);
-            let time_since_last = Utc::now().signed_duration_since(last);
-            if time_since_last >= cooldown {
+            // The instance is eligible to reincarnate if the current time is
+            // greater than or equal to the last restart time plus the cooldown
+            // duration.
+            let until = last + cooldown;
+            if Utc::now() >= until {
                 return Reincarnatability::WillReincarnate;
             } else {
-                return Reincarnatability::CoolingDown(
-                    cooldown - time_since_last,
-                );
+                return Reincarnatability::CoolingDown { until };
             }
         }
 
@@ -562,4 +581,6 @@ pub struct InstanceUpdate {
     pub memory: ByteCount,
 
     pub cpu_platform: Option<InstanceCpuPlatform>,
+
+    pub enable_jumbo_frames: bool,
 }

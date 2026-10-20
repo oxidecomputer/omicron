@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! This is a dirt simple DHCP server for handing out addresses in a given
 //! range. Leases do not expire. If the server runs out of addresses, it
 //! panics. This is a stopgap program to hand out addresses to VMs in CI. It's

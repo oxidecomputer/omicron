@@ -4,8 +4,6 @@
 
 //! Definition of data points for OxQL.
 
-// Copyright 2026 Oxide Computer Company
-
 use anyhow::Context;
 use anyhow::Error;
 use chrono::DateTime;
@@ -728,9 +726,9 @@ impl Points {
                     let mut new = Vec::with_capacity(doubles.len());
                     for maybe_double in doubles.iter().copied() {
                         if let Some(d) = maybe_double {
-                            let as_int = d
-                                .to_i64()
-                                .context("Cannot cast double {d} to i64")?;
+                            let as_int = d.to_i64().with_context(|| {
+                                format!("Cannot cast double {d} to i64")
+                            })?;
                             new.push(Some(as_int));
                         } else {
                             new.push(None);
@@ -755,9 +753,9 @@ impl Points {
                     let mut new = Vec::with_capacity(strings.len());
                     for maybe_str in strings.iter() {
                         if let Some(s) = maybe_str {
-                            let as_int = s
-                                .parse()
-                                .context("Cannot cast string '{s}' to i64")?;
+                            let as_int = s.parse().with_context(|| {
+                                format!("Cannot cast string '{s}' to i64")
+                            })?;
                             new.push(Some(as_int));
                         } else {
                             new.push(None);
@@ -771,9 +769,12 @@ impl Points {
                     let mut new = Vec::with_capacity(ints.len());
                     for maybe_int in ints.iter().copied() {
                         if let Some(int) = maybe_int {
-                            let as_double = int.to_f64().context(
-                                "Cannot cast integer {int} as double",
-                            )?;
+                            let as_double =
+                                int.to_f64().with_context(|| {
+                                    format!(
+                                        "Cannot cast integer {int} as double"
+                                    )
+                                })?;
                             new.push(Some(as_double));
                         } else {
                             new.push(None);
@@ -803,9 +804,9 @@ impl Points {
                     let mut new = Vec::with_capacity(strings.len());
                     for maybe_str in strings.iter() {
                         if let Some(s) = maybe_str {
-                            let as_double = s
-                                .parse()
-                                .context("Cannot cast string '{s}' to f64")?;
+                            let as_double = s.parse().with_context(|| {
+                                format!("Cannot cast string '{s}' to f64")
+                            })?;
                             new.push(Some(as_double));
                         } else {
                             new.push(None);
@@ -2041,7 +2042,7 @@ mod tests {
         let expected = vec![now, meas0.timestamp()];
         let actual = points.start_times.as_ref().unwrap();
         assert_eq!(expected.len(), actual.len());
-        for (x, y) in expected.into_iter().zip(actual.into_iter()) {
+        for (x, y) in expected.into_iter().zip(actual) {
             assert!((*y - x).num_nanoseconds().unwrap() <= 1);
         }
     }

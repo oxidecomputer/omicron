@@ -10,7 +10,9 @@ use camino::Utf8PathBuf;
 use clickhouse_admin_keeper_client::Client as ClickhouseKeeperClient;
 use clickhouse_admin_server_client::Client as ClickhouseServerClient;
 use clickhouse_admin_single_client::Client as ClickhouseSingleClient;
-use clickhouse_admin_types::config::{ClickhouseHost, RaftServerSettings};
+use clickhouse_admin_types::config::{
+    ClickhouseHost, LogConfig, LogLevel, RaftServerSettings,
+};
 use clickhouse_admin_types::keeper::{
     KeeperConfigurableSettings, KeeperSettings,
 };
@@ -29,6 +31,7 @@ use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use omicron_common::address::CLICKHOUSE_ADMIN_PORT;
+use omicron_common::http_client::internal_http_client;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::error;
@@ -145,7 +148,11 @@ where
         let admin_url = format!("http://{admin_addr}");
         let log = log.new(slog::o!("admin_url" => admin_url.clone()));
         futs.push(Either::Left(async move {
-            let client = ClickhouseKeeperClient::new(&admin_url, log.clone());
+            let client = ClickhouseKeeperClient::new_with_client(
+                &admin_url,
+                internal_http_client(),
+                log.clone(),
+            );
             client
                 .generate_config_and_enable_svc(&config)
                 .await
@@ -174,7 +181,11 @@ where
         let admin_url = format!("http://{admin_addr}");
         let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
         futs.push(Either::Right(async move {
-            let client = ClickhouseServerClient::new(&admin_url, log.clone());
+            let client = ClickhouseServerClient::new_with_client(
+                &admin_url,
+                internal_http_client(),
+                log.clone(),
+            );
             if let Err(e) = client
                 .generate_config_and_enable_svc(&config)
                 .await
@@ -258,7 +269,11 @@ where
         ));
         let admin_url = format!("http://{admin_addr}");
         let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
-        let client = ClickhouseSingleClient::new(&admin_url, log.clone());
+        let client = ClickhouseSingleClient::new_with_client(
+            &admin_url,
+            internal_http_client(),
+            log.clone(),
+        );
         client.init_db().await.map(|_| ()).map_err(|e| {
             anyhow!(
                 "failed to initialize single-node clickhouse database: {e}",
@@ -316,6 +331,7 @@ where
                 listen_addr: *server_ips.get(zone_id).unwrap(),
                 keepers: keepers.clone(),
                 remote_servers: remote_servers.clone(),
+                logger: LogConfig::new(LogLevel::default()),
             },
         });
     }
@@ -371,6 +387,7 @@ where
                 // SAFETY: We already successfully performed the same lookup to compute
                 // `raft_servers` above.
                 listen_addr: *keeper_ips.get(zone_id).unwrap(),
+                logger: LogConfig::new(LogLevel::default()),
             },
         });
     }

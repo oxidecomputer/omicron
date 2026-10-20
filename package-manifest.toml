@@ -148,10 +148,9 @@ output.type = "zone"
 service_name = "oximeter-collector"
 only_for_targets.image = "standard"
 source.type = "local"
-source.rust.binary_names = ["oximeter", "clickhouse-schema-updater"]
+source.rust.binary_names = ["oximeter"]
 source.rust.release = true
 source.paths = [
-  { from = "oximeter/db/schema", to = "/opt/oxide/oximeter/schema" },
   { from = "smf/oximeter/{{clickhouse-topology}}/config.toml", to = "/var/svc/manifest/site/oximeter/config.toml" },
   { from = "smf/oximeter/manifest.xml", to = "/var/svc/manifest/site/oximeter/manifest.xml" },
 ]
@@ -183,6 +182,7 @@ source.paths = [
   { from = "smf/clickhouse/manifest.xml", to = "/var/svc/manifest/site/clickhouse/manifest.xml" },
   { from = "smf/clickhouse/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse.sh" },
   { from = "smf/clickhouse/config.xml", to = "/opt/oxide/clickhouse/config.xml" },
+  { from = "smf/clickhouse/users-and-roles.xml", to = "/opt/oxide/clickhouse/users-and-roles.xml" },
   { from = "smf/clickhouse-admin-single", to = "/var/svc/manifest/site/clickhouse-admin-single" },
 ]
 output.type = "zone"
@@ -252,12 +252,19 @@ setup_hint = "Run `cargo xtask download clickhouse` to download the necessary bi
 service_name = "omicron-clickhouse-admin"
 only_for_targets.image = "standard"
 source.type = "local"
-source.rust.binary_names = ["clickhouse-admin-keeper", "clickhouse-admin-server", "clickhouse-admin-single"]
+source.rust.binary_names = [
+    "clickhouse-admin-keeper",
+    "clickhouse-admin-server",
+    "clickhouse-admin-single",
+    "clickhouse-schema-updater"
+]
 source.rust.release = true
 # We specifically put the smf manifests with their corresponding container zones
 # so that both servers aren't started simultaneously
 # See [package.clickhouse_keeper_svc] and [package.clickhouse_server_svc]
-source.paths = []
+source.paths = [
+  { from = "oximeter/db/schema", to = "/opt/oxide/oximeter/schema" }
+]
 output.type = "zone"
 output.intermediate_only = true
 
@@ -605,8 +612,8 @@ source.type = "prebuilt"
 source.repo = "management-gateway-service"
 # In general, this commit should match the pinned revision of `gateway-sp-comms`
 # in `Cargo.toml`.
-source.commit = "0d7a8992f914ad6a5947409048779969bbe80e3d"
-source.sha256 = "ebd8e0edd3551bcc397dfbc72b0b1e35a032c5fcae925447eeb40279b3adbc84"
+source.commit = "c29e6832c4b230e361253bc9b5e1ae73413a124f"
+source.sha256 = "6b179f7974d0e72bdf7491381b287e5a0b7c56362f0d8cb56a49a9bf0cda9eb2"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -624,10 +631,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "7103cd3a3d7b0112d2949dd135db06fef0c156bb"
+source.commit = "f85cf0dc3631e2f0c13384787efb0efc1b642162"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "8e245572e4b8d1c018884268a6afdf7f79efc22e61b4ed5b5526957bf61ccdcd"
+source.sha256 = "9b98bea0fcac1f8af4b90b1f10449366b90729e3aa80be38c8cc2b6ac107b7d7"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -636,10 +643,10 @@ service_name = "crucible_pantry_prebuilt"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "7103cd3a3d7b0112d2949dd135db06fef0c156bb"
+source.commit = "f85cf0dc3631e2f0c13384787efb0efc1b642162"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "7998ddb0bda4c97e3d5fec7c8079bbdfb27ef06dba69ab2867278dc2cd7544f4"
+source.sha256 = "165a8ecacc68f0341fea7be28bd2660c5a852e5e79fdabff508378cf9efe6afc"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -653,10 +660,10 @@ service_name = "crucible_utils"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "7103cd3a3d7b0112d2949dd135db06fef0c156bb"
+source.commit = "f85cf0dc3631e2f0c13384787efb0efc1b642162"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-utils.sha256.txt
-source.sha256 = "cc661b84fd258467ec1961e8c9879f76d2d07903fb9161012afa75c37490e24f"
+source.sha256 = "e328635155dc16fc7ece959ed316cb0397a5bb7a9415390a064052b85eb0af0d"
 output.type = "tarball"
 
 # Refer to
@@ -667,10 +674,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "bc489ddf0f38f75e0c194b86cf6f0de377f68845"
+source.commit = "3b60af56ed99c4497f02ac9fe014c76adfcf978b"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "f4c742c766a7260f20d6ef3c0d68c362e7ba768037836bfa09abdf1c3c72e605"
+source.sha256 = "d28e918af20d6bb93462ac71506ddf821bdfef8510db055b8e3be5d6371f6dbb"
 output.type = "zone"
 
 [package.mg-ddm-gz]
@@ -683,10 +690,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "7696ee48d5ee29a917dea459e281fe2e8ff20513"
+source.commit = "389016069197dc8ca611f4b1dc63dfafbe634b7c"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "ce52b9094adf0ed567bd3ed1e3ac48ac1c983cc7859adacf4f392e415a1189ad"
+source.sha256 = "00750eed18c1cf3f358fcf440fc3ace285169b754b5985d021eb0a52003b607a"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -699,10 +706,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "7696ee48d5ee29a917dea459e281fe2e8ff20513"
+source.commit = "389016069197dc8ca611f4b1dc63dfafbe634b7c"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "23950a4e73a07fa7f087ba3312e4bc5a8981fd9ebad54af2350baaa86ad6bbf3"
+source.sha256 = "cf1885787185126c42bc05cc7e81fdee5f607098fc60373694526e313432af33"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -714,10 +721,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "7696ee48d5ee29a917dea459e281fe2e8ff20513"
+source.commit = "389016069197dc8ca611f4b1dc63dfafbe634b7c"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
-source.sha256 = "301d31ca481e4822f69484feacca31dd08a7c4aae87d96641d384bda3178d2f3"
+source.sha256 = "a050afaf62683569b7d9b1b308f43f4954b0b7a59e04918f65bb98051ba4ac39"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -725,8 +732,8 @@ output.intermediate_only = true
 service_name = "lldp"
 source.type = "prebuilt"
 source.repo = "lldp"
-source.commit = "61479b6922f9112fbe1e722414d2b8055212cb12"
-source.sha256 = "8f988c0b0fa3ad4121ab0e825298601035e56c5c054bdc3a1dfb4d6c8fd5b300"
+source.commit = "54b266174d4de9628bca9c97b0db176e16f12154"
+source.sha256 = "0c56ec13dcb11f724e158281947062aa4e70160b202728e85b05ca765673c819"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -765,8 +772,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "d147f0925d14ed6f00eb37cb81f3a1bcbcb3c7f3"
-source.sha256 = "ed93ba4cccbcf09450ee6c7962a229501d970855a9c8bd7e2c755fff77f15f91"
+source.commit = "e577a94678bf0a8d64d719acd3e19edd965f66a3"
+source.sha256 = "afd5c7574aeeea2736ad3f73fdd80b03c581ff4a65d92ad3c3e172d5ea564133"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -792,8 +799,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "d147f0925d14ed6f00eb37cb81f3a1bcbcb3c7f3"
-source.sha256 = "3c3dddd173eca91d6932b5d4f10a3a389fb8c361e42c1afa0895d3838d982764"
+source.commit = "e577a94678bf0a8d64d719acd3e19edd965f66a3"
+source.sha256 = "9a5531d907b2d7da89fcb059179edf61a755ec2c86e792b4971396936057dad6"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -812,8 +819,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "d147f0925d14ed6f00eb37cb81f3a1bcbcb3c7f3"
-source.sha256 = "fdf6734133dac3626699096d23a16088324af9334fa90eccca85c04988341a5e"
+source.commit = "e577a94678bf0a8d64d719acd3e19edd965f66a3"
+source.sha256 = "319d1f233b7f7df9d8c4d156a6236f7f1f9012cc95c03b0816bb959d7002c28d"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -840,7 +847,7 @@ output.intermediate_only = true
 
 # To package and install the asic variant of the switch, do:
 #
-# $ cargo run --release --bin omicron-package -- -t default target create -p dev -m gimlet -s asic
+# $ cargo run --release --bin omicron-package -- -t default target create -p dev -m gimlet
 # $ cargo run --release --bin omicron-package -- package
 # $ pfexec ./target/release/omicron-package install
 [package.switch-asic]
@@ -869,9 +876,12 @@ output.type = "zone"
 
 # To package and install the stub variant of the switch, do the following:
 #
-# $ cargo run --release --bin omicron-package -- -t default target create -p dev -m <gimlet|gimlet-standalone|non-gimlet> -s stub
+# $ cargo run --release --bin omicron-package -- -t default target create -p dev -m gimlet-standalone
 # $ cargo run --release --bin omicron-package -- package
 # $ pfexec ./target/release/omicron-package install
+#
+# The gimlet-standalone sled-agent config selects the stub Dendrite;
+# omicron-package derives the switch from the machine.
 [package.switch-stub]
 service_name = "switch"
 only_for_targets.switch = "stub"
@@ -896,9 +906,14 @@ output.type = "zone"
 
 # To package and install the softnpu variant of the switch, do the following:
 #
-# $ cargo run --release --bin omicron-package -- -t default target create -p dev -m <gimlet|gimlet-standalone|non-gimlet>
+# $ cargo run --release --bin omicron-package -- -t default target create -p dev
 # $ cargo run --release --bin omicron-package -- package
 # $ pfexec ./target/release/omicron-package install
+#
+# The non-gimlet sled-agent config selects a SoftNPU zone on this host
+# (deployment kind "standalone") whereas a propolis-hosted lab rewrites
+# it to "virtual", which detects the SoftNPU device at startup.
+# omicron-package derives the switch from the machine.
 [package.switch-softnpu]
 service_name = "switch"
 only_for_targets.switch = "softnpu"

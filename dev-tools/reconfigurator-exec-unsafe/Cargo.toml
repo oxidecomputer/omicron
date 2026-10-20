@@ -23,6 +23,7 @@ nexus-mgs-updates.workspace = true
 nexus-reconfigurator-execution.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+omicron-git-version.workspace = true
 omicron-uuid-kinds.workspace = true
 oxide-tokio-rt.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
@@ -33,7 +34,9 @@ serde_json.workspace = true
 slog.workspace = true
 supports-color.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
-update-engine.workspace = true
+oxide-update-engine.workspace = true
+oxide-update-engine-types.workspace = true
+oxide-update-engine-display.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 

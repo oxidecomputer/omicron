@@ -18,7 +18,7 @@
   </dependency>
 
   <exec_method type='method' name='start'
-    exec='/opt/oxide/zone-setup-cli/bin/zone-setup opte-interface -i %{config/interface} -g %{config/gateway} -p %{config/ip}'
+          exec='/opt/oxide/zone-setup-cli/bin/zone-setup opte-interface -i %{config/interface} -g %{config/gateway} -p %{config/ip} --create-ipv6 %{config/create_ipv6}'
     timeout_seconds='0' />
 
   <property_group name='startd' type='framework'>
@@ -29,6 +29,7 @@
     <propval name='gateway' type='astring' value='unknown' />
     <propval name='interface' type='astring' value='unknown' />
     <propval name='ip' type='astring' value='unknown' />
+    <propval name='create_ipv6' type='boolean' value='false' />
   </property_group>
 
   <stability value='Unstable' />

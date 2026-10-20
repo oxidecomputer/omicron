@@ -34,6 +34,7 @@ use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use slog::Logger;
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::num::NonZeroU32;
 use tabled::Tabled;
 
@@ -172,8 +173,11 @@ async fn cmd_reconfigurator_export(
         .write(true)
         .open(&output_path)
         .with_context(|| format!("open {:?}", output_path))?;
-    serde_json::to_writer_pretty(&file, &state)
+    // Serializing to an unbuffered file adds a huge amount of overhead.
+    let mut w = std::io::BufWriter::new(file);
+    serde_json::to_writer_pretty(&mut w, &state)
         .with_context(|| format!("write {:?}", output_path))?;
+    w.flush().with_context(|| format!("flush {:?}", output_path))?;
     eprintln!("done");
     Ok(state)
 }
@@ -412,7 +416,7 @@ async fn cmd_reconfigurator_config_history(
             .await
             .context("batch of reconfigurator configs")?;
         paginator = p.found_batch(&batch, &|b| SqlU32::new(b.version));
-        history.extend(batch.into_iter());
+        history.extend(batch);
     }
 
     #[derive(Tabled)]
@@ -420,8 +424,11 @@ async fn cmd_reconfigurator_config_history(
     struct SwitchesRow {
         version: String,
         planner_enabled: String,
-        add_zones_with_mupdate_override: String,
         tuf_repo_pruner_enabled: String,
+        disruption_policy: String,
+        sled_update_reboot_policy: String,
+        blueprint_pruner_enabled: String,
+        blueprint_pruner_nkeep: String,
         time_modified: String,
     }
 
@@ -434,17 +441,25 @@ async fn cmd_reconfigurator_config_history(
                     ReconfiguratorConfig {
                         planner_enabled,
                         planner_config:
-                            PlannerConfig { add_zones_with_mupdate_override },
+                            PlannerConfig {
+                                disruption_policy,
+                                sled_update_reboot_policy,
+                            },
                         tuf_repo_pruner_enabled,
+                        blueprint_pruner_enabled,
+                        blueprint_pruner_nkeep,
                     },
                 time_modified,
             } = s;
             SwitchesRow {
                 version: version.to_string(),
                 planner_enabled: planner_enabled.to_string(),
-                add_zones_with_mupdate_override:
-                    add_zones_with_mupdate_override.to_string(),
                 tuf_repo_pruner_enabled: tuf_repo_pruner_enabled.to_string(),
+                disruption_policy: disruption_policy.to_string(),
+                sled_update_reboot_policy: sled_update_reboot_policy
+                    .to_string(),
+                blueprint_pruner_enabled: blueprint_pruner_enabled.to_string(),
+                blueprint_pruner_nkeep: blueprint_pruner_nkeep.to_string(),
                 time_modified: time_modified.to_string(),
             }
         })

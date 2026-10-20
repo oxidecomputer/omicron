@@ -1,4 +1,8 @@
 #!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 #
 # Dump ClickHouse field and schema tables to disk in native format. Run against
 # a test rack with realistic oximeter data. Used to capture test data for
@@ -32,7 +36,7 @@ for table in timeseries_schema fields_{bool,i8,i16,i32,i64,ipaddr,string,u8,u16,
     fi
     output="$OUTPUT_DIR/${table}.native.gz"
     echo "Backing up $DATABASE.$table ($count rows) to $output"
-    clickhouse client --port "$PORT" \
+    clickhouse client --port "$PORT" --compression=1 \
         --query "SELECT * FROM $DATABASE.$table FORMAT Native" \
         | gzip > "$output"
 done

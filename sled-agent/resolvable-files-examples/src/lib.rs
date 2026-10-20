@@ -7,7 +7,7 @@
 //! This crate provides helpers for generating example values for zone image
 //! resolver types.
 
-use std::{collections::BTreeSet, fs, io, sync::LazyLock};
+use std::{fs, io, sync::LazyLock};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile_ext::{
@@ -116,7 +116,7 @@ impl WriteInstallDatasetContext {
 
         // For clickhouse, change the size.
         {
-            let mut zone2 = self.zones.get_mut(&ZoneKind::Clickhouse).unwrap();
+            let mut zone2 = self.zones.get_mut(ZoneKind::Clickhouse).unwrap();
             zone2.json_size = 1024;
             errors
                 .insert_unique(ZoneContentError {
@@ -133,7 +133,7 @@ impl WriteInstallDatasetContext {
 
         // For crucible, change the hash.
         {
-            let mut zone3 = self.zones.get_mut(&ZoneKind::Crucible).unwrap();
+            let mut zone3 = self.zones.get_mut(ZoneKind::Crucible).unwrap();
             let replaced_hash =
                 std::mem::replace(&mut zone3.json_hash, ArtifactHash([0; 32]));
             errors
@@ -150,7 +150,7 @@ impl WriteInstallDatasetContext {
         }
 
         // Don't write out internal DNS but include it in the JSON.
-        self.zones.get_mut(&ZoneKind::InternalDns).unwrap().write_to_disk =
+        self.zones.get_mut(ZoneKind::InternalDns).unwrap().write_to_disk =
             false;
         errors
             .insert_unique(ZoneContentError {
@@ -162,7 +162,7 @@ impl WriteInstallDatasetContext {
             .unwrap();
 
         // Write out nexus but don't include it in the JSON.
-        self.zones.get_mut(&ZoneKind::Nexus).unwrap().include_in_json = false;
+        self.zones.get_mut(ZoneKind::Nexus).unwrap().include_in_json = false;
         errors
             .insert_unique(ZoneContentError {
                 zone_kind: ZoneKind::Nexus,
@@ -182,12 +182,7 @@ impl WriteInstallDatasetContext {
 
     /// Returns the override information for the mupdate.
     pub fn override_info(&self) -> MupdateOverrideInfo {
-        MupdateOverrideInfo {
-            mupdate_uuid: self.mupdate_override_uuid,
-            // The hash IDs are not used for validation, so leave this
-            // empty.
-            hash_ids: BTreeSet::new(),
-        }
+        MupdateOverrideInfo { mupdate_uuid: self.mupdate_override_uuid }
     }
 
     pub fn zone_manifest(&self) -> OmicronInstallManifest {

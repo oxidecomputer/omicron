@@ -32,6 +32,7 @@ ipnetwork.workspace = true
 itertools.workspace = true
 macaddr.workspace = true
 nonempty.workspace = true
+omicron-generation-kinds.workspace = true
 oxnet.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
@@ -71,22 +72,30 @@ nexus-db-model.workspace = true
 nexus-db-lookup.workspace = true
 nexus-db-schema.workspace = true
 nexus-types.workspace = true
+nexus-types-versions.workspace = true
 sled-agent-types.workspace = true
 sled-hardware-types.workspace = true
 trust-quorum-types.workspace = true
 omicron-cockroach-metrics.workspace = true
 omicron-common.workspace = true
+omicron-git-version-types.workspace = true
 omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true
 oximeter.workspace = true
 omicron-workspace-hack.workspace = true
 
 # only enabled during tests or via the `testing` feature
+nexus-inventory = { workspace = true, optional = true }
+nexus-reconfigurator-planning = { workspace = true, optional = true }
 omicron-test-utils = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true
 
 [features]
 # Enable to export `TestDatabase`
-testing = ["omicron-test-utils"]
+testing = ["nexus-inventory", "nexus-reconfigurator-planning", "omicron-test-utils"]
 
 [dev-dependencies]
 assert_matches.workspace = true
@@ -99,6 +108,7 @@ gateway-types.workspace = true
 illumos-utils.workspace = true
 internal-dns-resolver.workspace = true
 itertools.workspace = true
+nexus-fm-slippy.workspace = true
 nexus-inventory.workspace = true
 nexus-reconfigurator-planning.workspace = true
 nexus-test-utils.workspace = true
@@ -111,12 +121,17 @@ pem.workspace = true
 petgraph.workspace = true
 predicates.workspace = true
 pretty_assertions.workspace = true
+proptest.workspace = true
 rcgen.workspace = true
 regex.workspace = true
 rustls.workspace = true
 sha2.workspace = true
 subprocess.workspace = true
 term.workspace = true
+
+[target.'cfg(target_os = "illumos")'.dev-dependencies]
+# socket2 is used for an illumos-only test.
+socket2.workspace = true
 
 [[bench]]
 name = "sled_reservation"

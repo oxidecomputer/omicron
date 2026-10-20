@@ -2979,17 +2979,19 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
+    use nexus_types::deployment::OperatorNexusConfig;
     use nexus_types::external_api::instance as instance_types;
     use nexus_types::external_api::instance::PrivateIpStackCreate;
     use nexus_types::external_api::project;
     use nexus_types::external_api::vpc;
     use nexus_types::identity::Asset;
     use omicron_common::api::external;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::SledConfigGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
+    use omicron_uuid_kinds::RackUuid;
     use oxnet::IpNet;
     use oxnet::Ipv4Net;
     use slog::info;
@@ -3018,6 +3020,7 @@ mod tests {
                 name: "project".parse().unwrap(),
                 description: String::from("test project"),
             },
+            defaults: None,
         };
         let project = Project::new(Uuid::new_v4(), project_params);
         let (authz_project, _) = datastore
@@ -3042,6 +3045,7 @@ mod tests {
                     },
                     ipv6_prefix: None,
                     dns_name: name.clone(),
+                    defaults: None,
                 },
             )
             .expect("failed to create incomplete VPC");
@@ -3083,6 +3087,7 @@ mod tests {
                 },
                 ipv6_prefix: None,
                 dns_name: name.clone(),
+                defaults: None,
             },
         )
         .expect("failed to create incomplete VPC");
@@ -3123,6 +3128,7 @@ mod tests {
                 name: "project".parse().unwrap(),
                 description: String::from("test project"),
             },
+            defaults: None,
         };
         let project = Project::new(Uuid::new_v4(), project_params);
         let (authz_project, _) = datastore
@@ -3147,6 +3153,7 @@ mod tests {
                     },
                     ipv6_prefix: None,
                     dns_name: name.clone(),
+                    defaults: None,
                 },
             )
             .expect("failed to create incomplete VPC");
@@ -3189,6 +3196,7 @@ mod tests {
                 },
                 ipv6_prefix: None,
                 dns_name: name.clone(),
+                defaults: None,
             },
         )
         .expect("failed to create incomplete VPC");
@@ -3262,7 +3270,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Set up our fake system with 5 sleds.
-        let rack_id = Uuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let mut system = SystemDescription::new();
         let mut sled_ids = Vec::new();
         for _ in 0..5 {
@@ -3279,10 +3287,11 @@ mod tests {
 
         // Helper to convert a zone's nic into an insertable nic.
         let db_nic_from_zone = |zone_config: &BlueprintZoneConfig| {
-            let (_, nic) = zone_config
+            let nic = zone_config
                 .zone_type
                 .external_networking()
-                .expect("external networking for zone type");
+                .expect("external networking for zone type")
+                .nic();
             let ip = nic
                 .ip_config
                 .ipv4_addr()
@@ -3352,13 +3361,15 @@ mod tests {
             .for_new_nexus()
             .expect("found external IP for Nexus");
             builder
-                .sled_add_zone_nexus_with_config(
+                .sled_add_zone_nexus(
                     sled_ids[2],
-                    false,
-                    Vec::new(),
                     BlueprintZoneImageSource::InstallDataset,
                     external_ip,
                     bp0.nexus_generation,
+                    &OperatorNexusConfig {
+                        external_tls: false,
+                        external_dns_servers: &[],
+                    },
                 )
                 .expect("added nexus to third sled");
             builder.build(BlueprintSource::Test)
@@ -3442,13 +3453,15 @@ mod tests {
                     .for_new_nexus()
                     .expect("found external IP for Nexus");
                 builder
-                    .sled_add_zone_nexus_with_config(
+                    .sled_add_zone_nexus(
                         sled_id,
-                        false,
-                        Vec::new(),
                         BlueprintZoneImageSource::InstallDataset,
                         external_ip,
                         bp2.nexus_generation,
+                        &OperatorNexusConfig {
+                            external_tls: false,
+                            external_dns_servers: &[],
+                        },
                     )
                     .expect("added nexus to third sled");
             }
@@ -3515,7 +3528,7 @@ mod tests {
                 bp4.sleds.get_mut(&sled_ids[3]).expect("config for sled");
             sled3.zones.iter_mut().next().unwrap().disposition =
                 BlueprintZoneDisposition::Expunged {
-                    as_of_generation: Generation::new(),
+                    as_of_generation: SledConfigGeneration::new(),
                     ready_for_cleanup: false,
                 };
             sled3.sled_agent_generation = sled3.sled_agent_generation.next();
@@ -3544,6 +3557,7 @@ mod tests {
                 name: "project".parse().unwrap(),
                 description: String::from("test project"),
             },
+            defaults: None,
         };
         let project = Project::new(DEFAULT_SILO.id(), project_params);
         let (authz_project, _) = datastore
@@ -3564,6 +3578,7 @@ mod tests {
                 },
                 ipv6_prefix: None,
                 dns_name: vpc_name.clone(),
+                defaults: None,
             },
         )
         .expect("failed to create incomplete VPC");
@@ -4008,7 +4023,7 @@ mod tests {
                             name: inst_name.clone(),
                             description: "An instance...".into(),
                         },
-                        ncpus: external::InstanceCpuCount(1),
+                        ncpus: instance_types::InstanceCpuCount(1),
                         memory: 10.into(),
                         hostname: "insty".parse().unwrap(),
                         user_data: vec![],
@@ -4023,6 +4038,7 @@ mod tests {
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
                         multicast_groups: Vec::new(),
+                        enable_jumbo_frames: false,
                     },
                 ),
             )

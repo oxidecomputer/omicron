@@ -39,7 +39,17 @@ use std::collections::btree_map::Entry;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    JsonSchema,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum ServiceZoneNatKind {
@@ -48,21 +58,35 @@ pub enum ServiceZoneNatKind {
     Nexus { external_ip: IpAddr },
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    JsonSchema,
+)]
 #[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct ServiceZoneNatEntry {
     pub zone_id: OmicronZoneUuid,
     pub sled_underlay_ip: Ipv6Addr,
     pub nic_mac: MacAddr,
+    #[cfg_attr(
+        any(test, feature = "testing"),
+        strategy(proptest::strategy::Just(Vni::SERVICES_VNI))
+    )]
     pub vni: Vni,
     pub kind: ServiceZoneNatKind,
 }
 
 impl IdOrdItem for ServiceZoneNatEntry {
-    type Key<'a> = OmicronZoneUuid;
+    type Key<'a> = (OmicronZoneUuid, IpAddr);
 
     fn key(&self) -> Self::Key<'_> {
-        self.zone_id
+        (self.zone_id, self.kind.external_ip())
     }
 
     iddqd::id_upcast!();

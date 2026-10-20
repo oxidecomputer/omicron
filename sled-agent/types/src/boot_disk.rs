@@ -4,7 +4,7 @@
 
 //! Common types related to boot disks.
 
-use omicron_common::disk::M2Slot;
+use crate::disk::M2Slot;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

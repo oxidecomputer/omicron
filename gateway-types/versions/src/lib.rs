@@ -35,3 +35,9 @@ pub mod latest;
 pub mod v1;
 #[path = "cosmo/mod.rs"]
 pub mod v2;
+#[path = "component_vpd/mod.rs"]
+pub mod v4;
+#[path = "rack_id/mod.rs"]
+pub mod v5;
+#[path = "artifact_hash_schema/mod.rs"]
+pub mod v6;

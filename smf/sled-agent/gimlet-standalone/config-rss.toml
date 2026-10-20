@@ -68,9 +68,10 @@ external_certificates = []
 # by services like NTP as their externally-facing address for NAT.
 #
 # For more on this and what to put here, see docs/how-to-run.adoc.
-[[internal_services_ip_pool_ranges]]
-first = "192.168.1.20"
-last = "192.168.1.29"
+[[service_ip_pools]]
+name = "oxide-service-pool-v4"
+description = "IPv4 IP Pool for Oxide Services"
+ranges = [ { first = "192.168.1.20", last = "192.168.1.29" } ]
 
 # TODO - this configuration is subject to change going forward. Ultimately these
 # parameters should be provided to the control plane via wicket, but we need to

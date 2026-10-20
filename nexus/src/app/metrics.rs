@@ -113,15 +113,7 @@ impl super::Nexus {
         self.timeseries_client
             .timeseries_schema_list(&pagination.page, limit)
             .await
-            .map_err(|e| match e {
-                oximeter_db::Error::DatabaseUnavailable(_)
-                | oximeter_db::Error::Connection(_) => {
-                    Error::ServiceUnavailable {
-                        internal_message: e.to_string(),
-                    }
-                }
-                _ => Error::InternalError { internal_message: e.to_string() },
-            })
+            .map_err(super::oximeter::map_oximeter_err)
     }
 
     /// Run an OxQL query against the timeseries database.
@@ -139,7 +131,7 @@ impl super::Nexus {
         self.timeseries_client
             .oxql_query(query, QueryAuthzScope::Fleet)
             .await
-            .map_err(map_timeseries_err)
+            .map_err(super::oximeter::map_oximeter_err)
     }
 
     /// Run an OxQL query against the timeseries database, scoped to a specific project.
@@ -161,18 +153,6 @@ impl super::Nexus {
                 },
             )
             .await
-            .map_err(map_timeseries_err)
-    }
-}
-
-fn map_timeseries_err(e: oximeter_db::Error) -> Error {
-    match e {
-        oximeter_db::Error::DatabaseUnavailable(_)
-        | oximeter_db::Error::Connection(_) => Error::unavail(&e.to_string()),
-        oximeter_db::Error::Oxql(_)
-        | oximeter_db::Error::TimeseriesNotFound(_) => {
-            Error::invalid_request(e.to_string())
-        }
-        _ => Error::internal_error(&e.to_string()),
+            .map_err(super::oximeter::map_oximeter_err)
     }
 }

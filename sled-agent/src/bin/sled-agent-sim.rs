@@ -4,9 +4,7 @@
 
 //! Executable program to run a simulated sled agent
 
-// TODO see the TODO for nexus.
-
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use camino::Utf8PathBuf;
 use clap::Parser;
 use dropshot::ConfigDropshot;
@@ -20,6 +18,7 @@ use omicron_sled_agent::sim::{
     Config, ConfigHardware, ConfigStorage, ConfigZpool, SimMode, ZpoolConfig,
     run_standalone_server,
 };
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::inventory::ZpoolHealth;
 use sled_hardware_types::{Baseboard, SledCpuFamily};
@@ -56,6 +55,18 @@ struct Args {
 
     #[clap(action)]
     nexus_lockstep_port: u16,
+
+    #[clap(
+        long = "rack-id",
+        name = "RACK_UUID",
+        default_value = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc",
+        action
+    )]
+    /// Rack ID that the simulated sled-agent acts as though it belongs to.
+    ///
+    /// The default matches a hardcoded value we use in a variety of existing
+    /// test cases.
+    rack_id: RackUuid,
 
     #[clap(long, name = "NEXUS_EXTERNAL_IP:PORT", action)]
     /// If specified, when the simulated sled agent initializes the rack, it
@@ -98,8 +109,6 @@ fn main() {
 async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
 
-    let tmp = camino_tempfile::tempdir()
-        .map_err(|e| CmdError::Failure(anyhow!(e)))?;
     let config = Config {
         dropshot: ConfigDropshot {
             bind_address: args.sled_agent_addr.into(),
@@ -129,9 +138,9 @@ async fn do_run() -> Result<(), CmdError> {
         },
         ..Config::for_testing(
             args.uuid,
+            args.rack_id,
             args.sim_mode,
             Some(args.nexus_addr),
-            Some(tmp.path()),
             ZpoolConfig::TenVirtualU2s,
             SledCpuFamily::AmdMilan,
         )
@@ -141,10 +150,10 @@ async fn do_run() -> Result<(), CmdError> {
         (None, None) => None,
         (Some(cert_path), Some(key_path)) => {
             let cert_bytes = std::fs::read_to_string(&cert_path)
-                .with_context(|| format!("read {:?}", &cert_path))
+                .with_context(|| format!("read {:?}", cert_path))
                 .map_err(CmdError::Failure)?;
             let key_bytes = std::fs::read_to_string(&key_path)
-                .with_context(|| format!("read {:?}", &key_path))
+                .with_context(|| format!("read {:?}", key_path))
                 .map_err(CmdError::Failure)?;
             Some(Certificate { cert: cert_bytes, key: key_bytes })
         }

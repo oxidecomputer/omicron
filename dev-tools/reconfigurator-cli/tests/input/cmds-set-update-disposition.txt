@@ -1,0 +1,26 @@
+# Exercise the per-sled update disposition edit command (RFD 666 plumbing).
+
+load-example --nsleds 3 --ndisks-per-sled 1
+sled-list
+
+# available -> evacuating (live-migrate or terminate): the kind changes and the
+# disposition generation is bumped from 1 to 2.
+blueprint-edit latest set-update-disposition serial0 evacuating migrate-or-terminate
+blueprint-diff latest
+
+# evacuating (migrate-or-terminate) -> evacuating (migrate-only): the policy
+# changes and the generation is bumped again.
+blueprint-edit latest set-update-disposition serial0 evacuating migrate-only
+blueprint-diff latest
+
+# evacuating -> available: back to available, generation bumped once more.
+blueprint-edit latest set-update-disposition serial0 available
+blueprint-diff latest
+
+# Setting available -> available is a no-op: the disposition is unchanged and
+# the generation is not bumped.
+blueprint-edit latest set-update-disposition serial0 available
+blueprint-diff latest
+
+# The final blueprint shows serial0 back at `available` and at generation 4.
+blueprint-show latest

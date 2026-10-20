@@ -209,7 +209,7 @@ impl Handle {
         &self,
         name: &str,
         cfg: VpcCfg,
-        _: bool,
+        _mtu: Option<u32>,
     ) -> Result<NoResp, OpteError> {
         let name = name.to_string();
         let IpCfg::Ipv4(ip_cfg) = cfg.ip_cfg else {

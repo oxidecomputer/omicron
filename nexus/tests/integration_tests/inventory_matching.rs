@@ -30,7 +30,7 @@ async fn test_sled_sp_inventory_matching(cptestctx: &ControlPlaneTestContext) {
                 .inventory_get_latest_collection(&opctx)
                 .await
                 .expect("failed to get inventory collection")
-                .ok_or(CondCheckError::<()>::NotYet)
+                .ok_or(CondCheckError::<()>::NotYet { status: None })
         },
         &Duration::from_millis(100),
         &Duration::from_secs(30),

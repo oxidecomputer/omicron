@@ -1,0 +1,27 @@
+UPDATE
+  ip_pool
+SET
+  assignment = $1, time_modified = now()
+WHERE
+  id = $2
+  AND time_deleted IS NULL
+  AND assignment = $3
+  AND CAST(
+      IF(
+        EXISTS(SELECT 1 FROM ip_pool_resource WHERE ip_pool_id = $4 LIMIT 1),
+        'bad-link-type',
+        'TRUE'
+      )
+        AS BOOL
+    )
+RETURNING
+  id,
+  name,
+  description,
+  time_created,
+  time_modified,
+  time_deleted,
+  ip_version,
+  rcgen,
+  assignment,
+  pool_type

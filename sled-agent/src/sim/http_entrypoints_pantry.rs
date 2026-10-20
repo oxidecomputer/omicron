@@ -89,6 +89,8 @@ pub struct VolumeStatus {
 
     /// How many job handles are there for this Volume?
     pub num_job_handles: usize,
+
+    pub info: crucible_client_types::VolumeInfo,
 }
 
 /// Get a current Volume's status

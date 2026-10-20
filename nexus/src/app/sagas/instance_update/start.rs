@@ -113,14 +113,22 @@ async fn siu_lock_instance(
     // However, there is a third possible outcome of the query that attempts to
     // lock the instance record: we may encounter a database error that does NOT
     // indicate that the lock is already held. In that case, this action MUST
-    // continue retrying the lock operation forever until it either succeeds or
-    // indicates that another saga has the lock, in order to satisfy the
-    // distributed saga requirement that exuting an action must be idempotent.
-    // Retrying indefinitely is necessary to ensure idempotency because it is
-    // possible that a previous execution of this action *did* succesfully
+    // continue retrying the lock operation forever until one of the following
+    // occurs:
+    //
+    // 1. the action successfully acquires the lock,
+    // 2. the query indicates that the lock is already held by another saga,
+    // 3. we encounter an error that indicates that no attempts to acquire the
+    //    lock will *ever* succeed --- or, to put it plainly, we discover that
+    //    the instance has been deleted, in which case we can give up.
+    //
+    // This is necessary in order to satisfy the distributed saga requirement
+    // that executing an action must be idempotent. Retrying transient database
+    // errors indefinitely is necessary to ensure idempotency because it is
+    // possible that a previous execution of this action *did* successfully
     // acquire the lock but crashed before it completed.
     //
-    // As aan example of why this is important, consider a particularly
+    // As an example of why this is important, consider a particularly
     // unlucky sequence of a Nexus crash followed by a transient database error
     // could leave the instance record permanently locked by this (now failed)
     // saga. The scenario in which this would occur is as follows:
@@ -146,6 +154,18 @@ async fn siu_lock_instance(
     // talk to the database, so we may as well retry. We will complain loudly if
     // we've been retrying for a long time, or if the error seems to be "our
     // fault" (a client error).
+    //
+    // `ObjectNotFound` errors, which indicate that the instance has been
+    // deleted, are the one error that does not indicate the instance has been
+    // locked by another saga but should NOT be retried. If the instance record
+    // is gone, we will never be able to lock it, and the saga will just retry
+    // forever until it is manually abandoned, which requires human
+    // intervention. Even if a previous execution of the action had acquired the
+    // lock before when the instance was deleted, it's safe to fail in this
+    // case, since the only consequence is that a deleted instance record would
+    // be left with a non-NULL updater lock ID. That seems a little messy, but
+    // is harmless, since nobody else is going to try to update a deleted
+    // instance either.
     backoff::retry_notify_ext(
         // This is an internal service query to CockroachDB.
         backoff::retry_policy_internal_service(),
@@ -176,6 +196,23 @@ async fn siu_lock_instance(
                         "saga_id" => %lock_id,
                     );
                     Ok(None)
+                }
+                // If the instance has been deleted between when this saga
+                // started and when we attempted to lock it, we can just give
+                // up, since there's nothing necessary for us to do here.
+                Err(instance::UpdaterLockError::Query(
+                    err @ Error::ObjectNotFound { .. },
+                )) => {
+                    const MSG: &str = "instance no longer exists; giving up";
+                    info!(
+                        osagactx.log(),
+                        "instance update: {MSG}";
+                        "instance_id" => %instance_id,
+                        "saga_id" => %lock_id,
+                    );
+                    Err(backoff::BackoffError::permanent(
+                        err.internal_context(MSG),
+                    ))
                 }
                 // Retry database errors that *don't* indicate the lock
                 // is already held forever.

@@ -24,7 +24,7 @@ use slog_error_chain::SlogInlineError;
 use sprockets_tls::keys::SprocketsConfig;
 use sprockets_tls::server::SprocketsAcceptor;
 use std::collections::BTreeSet;
-use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::{self, AbortHandle, JoinSet};
@@ -255,6 +255,21 @@ pub struct ConnMgrStatus {
     pub connections: Vec<ConnInfo>,
     pub num_conn_tasks: u64,
     pub total_tasks_spawned: u64,
+}
+
+impl ConnMgrStatus {
+    pub fn connected_peers(&self) -> Vec<(BaseboardId, Ipv6Addr)> {
+        self.connections
+            .iter()
+            .filter_map(|c| {
+                if let ConnState::Established(id) = &c.state {
+                    Some((id.clone(), *c.addr.ip()))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
 }
 
 /// The state of a proxy connection
@@ -610,7 +625,7 @@ impl ConnMgr {
         addr: SocketAddrV6,
         peer_id: BaseboardId,
     ) {
-        if let Some(task_handle) = self.accepting.remove2(&addr) {
+        if let Some(task_handle) = self.accepting.remove2(addr) {
             info!(
                 self.log,
                 "Established server connection";
@@ -664,7 +679,7 @@ impl ConnMgr {
         addr: SocketAddrV6,
         peer_id: BaseboardId,
     ) {
-        if let Some(task_handle) = self.connecting.remove2(&addr) {
+        if let Some(task_handle) = self.connecting.remove2(addr) {
             info!(
                 self.log,
                 "Established client connection";
@@ -871,7 +886,7 @@ impl ConnMgr {
         &mut self,
         addr: SocketAddrV6,
     ) -> Option<EstablishedTaskHandle> {
-        if let Some(handle) = self.connecting.remove2(&addr) {
+        if let Some(handle) = self.connecting.remove2(addr) {
             // The connection has not yet completed its handshake
             info!(
                 self.log,
@@ -880,7 +895,7 @@ impl ConnMgr {
             );
             handle.abort();
             None
-        } else if let Some(handle) = self.established.remove3(&addr) {
+        } else if let Some(handle) = self.established.remove3(addr) {
             info!(
                 self.log,
                 "Deleting established connection";
@@ -899,7 +914,7 @@ impl ConnMgr {
     /// Return a `DisconnectedPeer` for the given `task_id`.
     fn on_task_exit(&mut self, task_id: task::Id) -> DisconnectedPeer {
         // We're most likely to find the task as established so we start with that
-        if let Some(handle) = self.established.remove2(&task_id) {
+        if let Some(handle) = self.established.remove2(task_id) {
             info!(
                 self.log,
                 "Established connection task exited";
@@ -911,14 +926,14 @@ impl ConnMgr {
                 task_id,
                 peer_id: Some(handle.baseboard_id),
             };
-        } else if let Some(handle) = self.accepting.remove1(&task_id) {
+        } else if let Some(handle) = self.accepting.remove1(task_id) {
             info!(
                 self.log,
                 "Accepting task exited";
                 "task_id" => ?task_id,
                 "peer_addr" => %handle.addr()
             );
-        } else if let Some(handle) = self.connecting.remove1(&task_id) {
+        } else if let Some(handle) = self.connecting.remove1(task_id) {
             info!(
                 self.log,
                 "Connecting task exited";

@@ -91,6 +91,33 @@ versions = [
 ]
 
 [[metrics]]
+name = "bytes_discarded"
+description = "Number of bytes discarded from the disk"
+units = "bytes"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "discards"
+description = "Total number of discard operations to the disk"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "failed_discards"
+description = "Total number of failed discard operations to the disk"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "failure_reason" ] }
+]
+
+[[metrics]]
 name = "flushes"
 description = "Total number of flush operations on the disk"
 units = "count"

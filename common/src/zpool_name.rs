@@ -51,6 +51,15 @@ pub enum ZpoolName {
     Internal(InternalZpoolUuid),
 }
 
+impl fmt::Display for ZpoolKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ZpoolKind::External => write!(f, "external"),
+            ZpoolKind::Internal => write!(f, "internal"),
+        }
+    }
+}
+
 const ZPOOL_NAME_REGEX: &str = r"^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
 
 /// Custom JsonSchema implementation to encode the constraints on Name.

@@ -604,8 +604,7 @@ mod tests {
         // Hack the persistent state to make the rack secret for epoch 1
         // no longer available
         ctx.update_persistent_state(|ps| {
-            ps.configs.get_mut(&Epoch(2)).unwrap().encrypted_rack_secrets =
-                None;
+            ps.configs.get_mut(Epoch(2)).unwrap().encrypted_rack_secrets = None;
             true
         });
 

@@ -10,21 +10,32 @@ use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::networking::{
     Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
-    BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate, BgpPeer,
-    BgpPeerConfig, LinkConfigCreate, LldpLinkConfigCreate, Route, RouteConfig,
-    SwitchInterfaceConfigCreate, SwitchInterfaceKind, SwitchPort,
-    SwitchPortApplySettings, SwitchPortSettings, SwitchPortSettingsCreate,
+    AddressLotKind, BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfig,
+    BgpConfigCreate, BgpConfigUpdate, BgpPeer, BgpPeerConfig, LinkConfigCreate,
+    LldpLinkConfigCreate, Route, RouteConfig, SwitchInterfaceConfigCreate,
+    SwitchInterfaceKind, SwitchPort, SwitchPortApplySettings,
+    SwitchPortSettings, SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::rack::Rack;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::{
-    self, AddressLotKind, IdentityMetadataCreateParams, LinkFec, LinkSpeed,
-    NameOrId,
+    IdentityMetadataCreateParams, IdentityMetadataUpdateParams, NameOrId,
 };
+use omicron_sled_agent::sim;
+use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_test_utils::dev::poll::Error;
+use omicron_test_utils::dev::poll::wait_for_condition;
 use oxnet::IpNet;
-use sled_agent_types::early_networking::{ImportExportPolicy, RouterPeerType};
-use sled_agent_types::early_networking::{RouterLifetimeConfig, SwitchSlot};
+use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::LinkFec;
+use sled_agent_types::early_networking::LinkSpeed;
+use sled_agent_types::early_networking::MaxPathConfig;
+use sled_agent_types::early_networking::NumberedRouter;
+use sled_agent_types::early_networking::RouterLifetimeConfig;
+use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UnnumberedRouter;
 use std::str::FromStr;
+use std::time::Duration;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -229,7 +240,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let ifx0 = &created.interfaces[0];
     assert_eq!(&ifx0.interface_name.to_string(), "phy0");
     assert_eq!(ifx0.v6_enabled, true);
-    assert_eq!(ifx0.kind, external::SwitchInterfaceKind::Primary);
+    assert_eq!(ifx0.kind, SwitchInterfaceKind::Primary);
 
     let route0 = &created.routes[0];
     assert_eq!(route0.dst, IpNet::from_str("1.2.3.0/24").unwrap());
@@ -271,7 +282,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let ifx0 = &roundtrip.interfaces[0];
     assert_eq!(&ifx0.interface_name.to_string(), "phy0");
     assert_eq!(ifx0.v6_enabled, true);
-    assert_eq!(ifx0.kind, external::SwitchInterfaceKind::Primary);
+    assert_eq!(ifx0.kind, SwitchInterfaceKind::Primary);
 
     let route0 = &roundtrip.routes[0];
     assert_eq!(route0.dst, IpNet::from_str("1.2.3.0/24").unwrap());
@@ -314,9 +325,12 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             // Numbered peer - identified by address
             BgpPeer {
                 bgp_config: NameOrId::Name("as47".parse().unwrap()),
-                addr: RouterPeerType::Numbered {
-                    ip: "1.2.3.4".parse().unwrap(),
-                },
+                addr: NumberedRouter::new(
+                    "1.2.3.4".parse().unwrap(),
+                    Some("9.9.9.9".parse().unwrap()),
+                )
+                .unwrap()
+                .into(),
                 hold_time: 6,
                 idle_hold_time: 6,
                 delay_open: 0,
@@ -336,9 +350,10 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             // Unnumbered peer - identified by link from parent `BgpPeerConfig`
             BgpPeer {
                 bgp_config: NameOrId::Name("as47".parse().unwrap()),
-                addr: RouterPeerType::Unnumbered {
+                addr: UnnumberedRouter {
                     router_lifetime: RouterLifetimeConfig::new(123).unwrap(),
-                },
+                }
+                .into(),
                 hold_time: 6,
                 idle_hold_time: 6,
                 delay_open: 0,
@@ -384,8 +399,13 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         .expect("Should have a numbered peer");
     assert_eq!(
         numbered_peer.addr,
-        RouterPeerType::Numbered { ip: "1.2.3.4".parse().unwrap() },
-        "Numbered peer should have addr 1.2.3.4"
+        NumberedRouter::new(
+            "1.2.3.4".parse().unwrap(),
+            Some("9.9.9.9".parse().unwrap()),
+        )
+        .unwrap()
+        .into(),
+        "Numbered peer should have addr 1.2.3.4 and src_addr 9.9.9.9"
     );
 
     // Find the unnumbered peer (no address)
@@ -396,9 +416,10 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         .expect("Should have an unnumbered peer");
     assert_eq!(
         unnumbered_peer.addr,
-        RouterPeerType::Unnumbered {
+        UnnumberedRouter {
             router_lifetime: RouterLifetimeConfig::new(123).unwrap(),
         }
+        .into()
     );
     assert_eq!(
         unnumbered_peer.remote_asn,
@@ -456,9 +477,10 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         .expect("Roundtrip should have an unnumbered peer");
     assert_eq!(
         roundtrip_unnumbered.addr,
-        RouterPeerType::Unnumbered {
+        UnnumberedRouter {
             router_lifetime: RouterLifetimeConfig::new(123).unwrap(),
         }
+        .into()
     );
     assert_eq!(roundtrip_unnumbered.remote_asn, Some(65000));
     assert_eq!(roundtrip_unnumbered.communities, vec![65000]);
@@ -553,7 +575,7 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
 
     // Create port settings
     let settings_name =
-        Name::from_str("nacelle").expect("nacell should be a valid name");
+        Name::from_str("nacelle").expect("should be a valid name");
     let mut settings =
         SwitchPortSettingsCreate::new(IdentityMetadataCreateParams {
             name: settings_name.clone(),
@@ -625,12 +647,6 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(route.dst, IpNet::from_str("2000::/64").unwrap());
     assert_eq!(&route.gw.to_string(), "2000::1");
 
-    let mgd = &ctx.mgd[&SwitchSlot::Switch0];
-    let mgd_client = mg_admin_client::Client::new(
-        &format!("http://[::1]:{}", mgd.port),
-        ctx.logctx.log.clone(),
-    );
-
     // apply port settings
     let apply_settings = SwitchPortApplySettings {
         port_settings: NameOrId::Name(settings_name.clone()),
@@ -644,6 +660,14 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
             .all_items;
 
     let rack_id = racks[0].identity.id;
+
+    for (i, s) in ctx.sled_agents.iter().enumerate() {
+        wait_for_sled_agent_bootstore_gen(s.sled_agent(), 3)
+            .await
+            .unwrap_or_else(|_| {
+                panic!("sled-agent {i}'s bootstore should be 3 prior to update")
+            });
+    }
 
     NexusRequest::new(
         RequestBuilder::new(
@@ -659,22 +683,425 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
     .await
     .unwrap();
 
-    // wait for routes to be reconciled to mgd
-    for _ in 0..20 {
-        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-        match mgd_client.static_list_v6_routes().await {
-            Ok(routes) => {
-                let n = routes.len();
-                if n == 1 {
-                    return;
-                } else {
-                    println!("expected 1 route got {n}")
-                }
-            }
-            Err(e) => {
-                println!("failed to contact mgd: {e:?}");
-            }
-        }
+    // Verify that `sync_switch_configuration` propagates the changes to the
+    // bootstore via sled-agent (regression test for
+    // <https://github.com/oxidecomputer/omicron/issues/10958>).
+    // Run sync_switch_configuration.
+    let task = nexus_test_utils::background::activate_background_task(
+        &ctx.lockstep_client,
+        "switch_port_config_manager",
+    )
+    .await;
+
+    let nexus_lockstep_client::types::LastResult::Completed(result) = task.last
+    else {
+        panic!(
+            "switch_port_config_manager task did not complete: {:?}",
+            task.last
+        );
+    };
+    let status = serde_json::from_value::<
+        nexus_types::internal_api::background::SwitchPortSettingsManagerStatus,
+    >(result.details)
+    .expect(
+        "task details should deserialize as SwitchPortSettingsManagerStatus",
+    );
+    assert!(
+        status.incomplete_bootstore_configs.is_empty(),
+        "sync_switch_configuration should have successfully built a bootstore \
+         config for all racks: {status:?}",
+    );
+
+    // The task only writes to the sled-agent if it can build a valid config.
+    // Check the sim sled-agents' in-memory bootstores were actually updated,
+    // confirming both scrimlets were successfully contacted.
+    for (i, s) in ctx.sled_agents.iter().enumerate() {
+        wait_for_sled_agent_bootstore_gen(&s.sled_agent(), 4)
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "sync_switch_configuration should have written to sled-agent \
+                 {i}'s bootstore (generation was still 3, indicating it was \
+                 never contacted)",
+            )
+        });
     }
-    panic!("expected number of routes not found");
+}
+
+async fn wait_for_sled_agent_bootstore_gen(
+    sled_agent: &sim::SledAgent,
+    g: u64,
+) -> Result<(), Error<()>> {
+    wait_for_condition(
+        || async {
+            let generation =
+                sled_agent.current_bootstore_network_config().generation;
+            if generation == g {
+                Ok(())
+            } else {
+                Err(CondCheckError::<()>::NotYet { status: None })
+            }
+        },
+        &Duration::from_millis(50),
+        &Duration::from_secs(60),
+    )
+    .await
+}
+
+#[nexus_test]
+async fn test_bgp_config_update(ctx: &ControlPlaneTestContext) {
+    let client = &ctx.external_client;
+
+    let parkinglot: Name = "parkinglot".parse().unwrap();
+    let as47: Name = "as47".parse().unwrap();
+    let instances = NameOrId::Name("instances".parse().unwrap());
+
+    // Create an address lot for the announce set blocks.
+    let lot_params = AddressLotCreate {
+        identity: IdentityMetadataCreateParams {
+            name: parkinglot.clone(),
+            description: "an address parking lot".into(),
+        },
+        kind: AddressLotKind::Infra,
+        blocks: vec![AddressLotBlockCreate {
+            first_address: "1.2.3.0".parse().unwrap(),
+            last_address: "1.2.3.255".parse().unwrap(),
+        }],
+    };
+    NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/address-lot",
+        &lot_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Create two announce sets so the config can be moved between them.
+    for name in ["instances", "instances2"] {
+        let announce_set = BgpAnnounceSetCreate {
+            identity: IdentityMetadataCreateParams {
+                name: name.parse().unwrap(),
+                description: "an announce set".into(),
+            },
+            announcement: vec![BgpAnnouncementCreate {
+                address_lot_block: NameOrId::Name(parkinglot.clone()),
+                network: "1.2.3.0/24".parse().unwrap(),
+            }],
+        };
+        NexusRequest::object_put(
+            client,
+            "/v1/system/networking/bgp-announce-set",
+            Some(&announce_set),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    }
+
+    // Create the BGP config.
+    let bgp_config = BgpConfigCreate {
+        identity: IdentityMetadataCreateParams {
+            name: as47.clone(),
+            description: "autonomous system 47".into(),
+        },
+        bgp_announce_set_id: instances.clone(),
+        asn: 47,
+        vrf: None,
+        checker: None,
+        shaper: None,
+        max_paths: Default::default(),
+    };
+    NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/bgp",
+        &bgp_config,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    let valid_update = BgpConfigUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: Some(as47),
+            description: Some("autonomous system 47".into()),
+        },
+        bgp_announce_set_id: Some(instances),
+        max_paths: Some(MaxPathConfig::new(1).unwrap()),
+    };
+
+    // Updating a config that doesn't exist is a 404.
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::PUT,
+        "/v1/system/networking/bgp?name_or_id=does-not-exist",
+        &valid_update,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Referencing an announce set that doesn't exist is a 404.
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::PUT,
+        "/v1/system/networking/bgp?name_or_id=as47",
+        &BgpConfigUpdate {
+            bgp_announce_set_id: Some(NameOrId::Name(
+                "does-not-exist".parse().unwrap(),
+            )),
+            ..valid_update.clone()
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // A valid update returns the updated configuration.
+    let update = BgpConfigUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: Some("as47-renamed".parse().unwrap()),
+            description: Some("renamed config".into()),
+        },
+        bgp_announce_set_id: Some(NameOrId::Name(
+            "instances2".parse().unwrap(),
+        )),
+        max_paths: Some(MaxPathConfig::new(3).unwrap()),
+    };
+    let updated: BgpConfig = NexusRequest::object_put(
+        client,
+        "/v1/system/networking/bgp?name_or_id=as47",
+        Some(&update),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+
+    assert_eq!(updated.identity.name.to_string(), "as47-renamed");
+    assert_eq!(updated.identity.description, "renamed config");
+    assert_eq!(updated.asn, 47);
+    assert_eq!(updated.max_paths, MaxPathConfig::new(3).unwrap());
+}
+
+/// Verifies that scrimlet reconcilers are triggered when Nexus's
+/// `sync_switch_configuration` background task updates the sled-agent
+/// bootstore.
+///
+/// Tests the full pipeline:
+///   Nexus (sync_switch_configuration)
+///     → Nexus updates bootstore
+///     → sled-agent reconciles changes to switch services
+///     → configured route appears in switch0's mgd
+#[nexus_test(extra_sled_agents = 1)]
+async fn test_scrimlet_reconcilers_update_on_bootstore_change(
+    ctx: &ControlPlaneTestContext,
+) {
+    let client = &ctx.external_client;
+
+    // Create an address lot.
+    let lot_name =
+        Name::from_str("subspace").expect("subspace should be a valid name");
+    let lot_params = AddressLotCreate {
+        identity: IdentityMetadataCreateParams {
+            name: lot_name.clone(),
+            description: "where the comms happen".into(),
+        },
+        kind: AddressLotKind::Infra,
+        blocks: vec![AddressLotBlockCreate {
+            first_address: "1701::a".parse().unwrap(),
+            last_address: "1701::e".parse().unwrap(),
+        }],
+    };
+    NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/address-lot",
+        &lot_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Create port settings.
+    let settings_name =
+        Name::from_str("nacelle2").expect("should be a valid name");
+    let mut settings =
+        SwitchPortSettingsCreate::new(IdentityMetadataCreateParams {
+            name: settings_name.clone(),
+            description: "just a port".into(),
+        });
+    let link_name =
+        Name::from_str("phy0").expect("phy0 should be a valid name");
+    settings.links.push(LinkConfigCreate {
+        link_name: link_name.clone(),
+        mtu: 1500,
+        lldp: LldpLinkConfigCreate {
+            enabled: false,
+            link_name: None,
+            link_description: None,
+            chassis_id: None,
+            system_name: None,
+            system_description: None,
+            management_ip: None,
+        },
+        fec: None,
+        speed: LinkSpeed::Speed100G,
+        autoneg: false,
+        tx_eq: None,
+    });
+    settings.interfaces.push(SwitchInterfaceConfigCreate {
+        link_name: link_name.clone(),
+        v6_enabled: true,
+        kind: SwitchInterfaceKind::Primary,
+    });
+    settings.addresses.push(AddressConfig {
+        link_name: link_name.clone(),
+        addresses: vec![Address {
+            address: "1701::d/64".parse().unwrap(),
+            vlan_id: None,
+            address_lot: NameOrId::Name(lot_name.clone()),
+        }],
+    });
+    settings.routes.push(RouteConfig {
+        link_name: link_name.clone(),
+        routes: vec![Route {
+            dst: "2000::/64".parse().unwrap(),
+            gw: "2000::1".parse().unwrap(),
+            vid: None,
+            rib_priority: None,
+        }],
+    });
+    NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/switch-port-settings",
+        &settings,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Wait for the initial bootstore config (generation 3) to be written to
+    // all sled agents. This happens as part of test setup.
+    for (i, sled_agent) in ctx.sled_agents.iter().enumerate() {
+        wait_for_sled_agent_bootstore_gen(&sled_agent.sled_agent(), 3)
+            .await
+            .unwrap_or_else(|_| {
+                panic!("sled-agent {i}'s bootstore should be 3 prior to update")
+            });
+    }
+
+    // Apply port settings to switch0.
+    let apply_settings = SwitchPortApplySettings {
+        port_settings: NameOrId::Name(settings_name.clone()),
+    };
+    let racks: Vec<Rack> = NexusRequest::iter_collection_authn(
+        client,
+        "/v1/system/hardware/racks",
+        "",
+        None,
+    )
+    .await
+    .expect("failed to list racks")
+    .all_items;
+    let rack_id = racks[0].identity.id;
+
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            &format!(
+                "/v1/system/hardware/switch-port/qsfp0/settings?\
+                 rack_id={rack_id}&switch_slot=switch0"
+            ),
+        )
+        .body(Some(&apply_settings))
+        .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Activate `sync_switch_configuration`, which writes the updated config
+    // to sled-agent bootstores.
+    let task = nexus_test_utils::background::activate_background_task(
+        &ctx.lockstep_client,
+        "switch_port_config_manager",
+    )
+    .await;
+    let nexus_lockstep_client::types::LastResult::Completed(result) = task.last
+    else {
+        panic!(
+            "switch_port_config_manager task did not complete: {:?}",
+            task.last
+        );
+    };
+    let status = serde_json::from_value::<
+        nexus_types::internal_api::background::SwitchPortSettingsManagerStatus,
+    >(result.details)
+    .expect(
+        "task details should deserialize as SwitchPortSettingsManagerStatus",
+    );
+    assert!(
+        status.incomplete_bootstore_configs.is_empty(),
+        "sync_switch_configuration should have successfully built a bootstore \
+         config for all racks: {status:?}",
+    );
+
+    // Verify the sled-agent bootstores were updated to generation 4.
+    for (i, sled_agent) in ctx.sled_agents.iter().enumerate() {
+        wait_for_sled_agent_bootstore_gen(&sled_agent.sled_agent(), 4)
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "sync_switch_configuration should have written to sled-agent \
+                 {i}'s bootstore (generation was still 3, indicating it was \
+                 never contacted)",
+            )
+        });
+    }
+
+    // After the bootstore update the reconcilers' watch channel is updated,
+    // triggering the scrimlet reconcilers. Verify the full pipeline by polling
+    // switch0's mgd until the route we configured (`2000::/64` via `2000::1`)
+    // is present there.
+    let mgd_addr = ctx.mgd.get(&SwitchSlot::Switch0).unwrap().address();
+    let mgd_client = mg_admin_client::Client::new(
+        &format!("http://{mgd_addr}"),
+        ctx.logctx.log.clone(),
+    );
+    wait_for_condition(
+        || async {
+            let routes = mgd_client
+                .static_list_v6_routes()
+                .await
+                .expect("should be able to list mgd v6 routes")
+                .into_inner();
+            let expected_dst: oxnet::Ipv6Net = "2000::/64".parse().unwrap();
+            let expected_nexthop: std::net::IpAddr = "2000::1".parse().unwrap();
+            let found = routes.iter().any(|(prefix, paths)| {
+                prefix.parse::<oxnet::Ipv6Net>().ok() == Some(expected_dst)
+                    && paths.iter().any(|p| p.nexthop == expected_nexthop)
+            });
+            if found {
+                Ok(())
+            } else {
+                Err(CondCheckError::<()>::NotYet { status: None })
+            }
+        },
+        &Duration::from_millis(50),
+        &Duration::from_secs(60),
+    )
+    .await
+    .expect(
+        "switch0's mgd should have the configured route after bootstore update",
+    );
 }

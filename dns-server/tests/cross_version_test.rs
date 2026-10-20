@@ -34,17 +34,8 @@ mod v1_client {
         },
         interface = Positional,
         inner_type = slog::Logger,
+        hooks = Expected,
         derives = [schemars::JsonSchema, Clone, Eq, PartialEq],
-        pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-            slog::debug!(log, "client request";
-                "method" => %request.method(),
-                "uri" => %request.url(),
-                "body" => ?&request.body(),
-            );
-        }),
-        post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-            slog::debug!(log, "client response"; "result" => ?result);
-        }),
         replace = {
             DnsConfig = v1::config::DnsConfig,
             DnsConfigParams = v1::config::DnsConfigParams,
@@ -53,6 +44,8 @@ mod v1_client {
             Srv = v1::config::Srv,
         }
     );
+
+    progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
 
     pub async fn dns_records_create(
         client: &Client,
@@ -73,7 +66,7 @@ mod v1_client {
         assert!(our_zones.len() <= 1);
         let zone_records = if let Some(our_zone) = our_zones.into_iter().next()
         {
-            our_zone.records.into_iter().chain(records.into_iter()).collect()
+            our_zone.records.into_iter().chain(records).collect()
         } else {
             records
         };
@@ -226,9 +219,9 @@ async fn init_client_server(
     assert!(store.is_new());
 
     // launch a dns server
-    let dns_server_config = dns_server::dns_server::Config {
-        bind_address: "[::1]:0".parse().unwrap(),
-    };
+    let dns_server_config =
+        dns_server::dns_server::Config::new(vec!["[::1]:0".parse().unwrap()])
+            .context("building DNS configuration")?;
     let (dns_server, dropshot_server) = dns_server::start_servers(
         log.clone(),
         store,
@@ -300,7 +293,7 @@ async fn dns_records_create(
 
     assert!(our_zones.len() <= 1);
     let zone_records = if let Some(our_zone) = our_zones.into_iter().next() {
-        our_zone.records.into_iter().chain(records.into_iter()).collect()
+        our_zone.records.into_iter().chain(records).collect()
     } else {
         records
     };

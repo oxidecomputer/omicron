@@ -8,6 +8,7 @@ use dropshot::test_util::log_prefix_for_test;
 use omicron_test_utils::dev::file_checksum;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::test_setup_log;
+use oximeter_db::User;
 use oximeter_db::oxql::query::QueryAuthzScope;
 use oximeter_db::{Client, DbWrite, OxqlResult, Sample, TestDbWrite};
 use oximeter_test_utils::wait_for_keepers;
@@ -104,6 +105,7 @@ async fn test_schemas_disjoint() -> anyhow::Result<()> {
     deployment.deploy().context("failed to deploy")?;
 
     let client1 = Client::new_with_request_timeout(
+        User::Admin,
         deployment.native_addr(1.into()),
         log,
         request_timeout,
@@ -199,11 +201,13 @@ async fn test_cluster() -> anyhow::Result<()> {
     deployment.deploy().context("failed to deploy")?;
 
     let client1 = Client::new_with_request_timeout(
+        User::Admin,
         deployment.native_addr(1.into()),
         log,
         request_timeout,
     );
     let client2 = Client::new_with_request_timeout(
+        User::Admin,
         deployment.native_addr(2.into()),
         log,
         request_timeout,
@@ -289,6 +293,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     // Add a 3rd clickhouse server and wait for it to come up
     deployment.add_server().expect("failed to launch a 3rd clickhouse server");
     let client3 = Client::new_with_request_timeout(
+        User::Admin,
         deployment.native_addr(3.into()),
         log,
         request_timeout,
@@ -390,6 +395,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     // few hundred milliseconds. To shorten the length of our test, we create a
     // new client with a shorter timeout.
     let client1_short_timeout = Client::new_with_request_timeout(
+        User::Admin,
         deployment.native_addr(1.into()),
         log,
         Duration::from_secs(2),
@@ -491,7 +497,7 @@ async fn wait_for_num_points(
                     QueryAuthzScope::Fleet)
                 .await
                 .map_err(|_| {
-                    poll::CondCheckError::<oximeter_db::Error>::NotYet
+                    poll::CondCheckError::<oximeter_db::Error>::NotYet { status: None }
                 })?;
             if total_points(&oxql_res) != n_samples {
                 info!(
@@ -500,7 +506,7 @@ async fn wait_for_num_points(
                     total_points(&oxql_res),
                     n_samples
                 );
-                Err(poll::CondCheckError::<oximeter_db::Error>::NotYet)
+                Err(poll::CondCheckError::<oximeter_db::Error>::NotYet { status: None })
             } else {
                 Ok(())
             }
@@ -518,10 +524,11 @@ async fn wait_for_num_points(
 async fn wait_for_ping(log: &Logger, client: &Client) -> anyhow::Result<()> {
     poll::wait_for_condition(
         || async {
-            client
-                .ping()
-                .await
-                .map_err(|_| poll::CondCheckError::<oximeter_db::Error>::NotYet)
+            client.ping().await.map_err(|_| poll::CondCheckError::<
+                oximeter_db::Error,
+            >::NotYet {
+                status: None,
+            })
         },
         &Duration::from_millis(100),
         &Duration::from_secs(30),
@@ -540,10 +547,11 @@ async fn wait_for_insert(
 ) -> anyhow::Result<()> {
     poll::wait_for_condition(
         || async {
-            client
-                .insert_samples(&samples)
-                .await
-                .map_err(|_| poll::CondCheckError::<oximeter_db::Error>::NotYet)
+            client.insert_samples(&samples).await.map_err(|_| {
+                poll::CondCheckError::<oximeter_db::Error>::NotYet {
+                    status: None,
+                }
+            })
         },
         &Duration::from_millis(1000),
         &Duration::from_secs(60),

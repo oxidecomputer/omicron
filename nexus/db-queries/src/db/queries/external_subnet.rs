@@ -178,9 +178,7 @@ pub fn insert_subnet_pool_member_query(
         .sql("), \
             updated_pool AS (\
                 UPDATE subnet_pool \
-                SET \
-                    time_modified = NOW(), \
-                    rcgen = rcgen + 1 \
+                SET rcgen = rcgen + 1 \
                 WHERE \
                     id = "
         )
@@ -269,9 +267,7 @@ pub fn link_subnet_pool_to_silo_query(
         AND time_deleted IS NULL), \
     updated_pool AS (\
         UPDATE subnet_pool
-        SET \
-            time_modified = NOW(), \
-            rcgen = rcgen + 1 \
+        SET rcgen = rcgen + 1 \
         WHERE \
             id = "
     )
@@ -474,7 +470,7 @@ pub fn insert_external_subnet_query(
             pool_selector: PoolSelector::Auto { ip_version },
             prefix_length,
         } => {
-            // THis is the same as the above, but we're taking the pool by
+            // This is the same as the above, but we're taking the pool by
             // looking up the default pool linked to the current silo for the
             // current version.
             //
@@ -494,7 +490,10 @@ pub fn insert_external_subnet_query(
         }
     }
     builder.sql(", ");
-    push_cte_to_check_for_deleted_project(&mut builder, project_id);
+    push_cte_to_check_for_deleted_project_and_update_rcgen(
+        &mut builder,
+        project_id,
+    );
     builder.sql(", ");
     push_cte_to_check_for_deleted_silo(&mut builder, silo_id);
     builder.sql(", ");
@@ -622,25 +621,30 @@ fn push_cte_to_select_pool_from_explicit_subnet(
         .sql("') AS BOOL))");
 }
 
-// Add a CTE that fails with a bool-parse error if the Project we're trying to
-// create the External Subnet in is deleted.
-fn push_cte_to_check_for_deleted_project(
+// Add CTEs that bump the rcgen of the Project we're trying to create the
+// External Subnet in, and fail with a bool-parse error if that Project is
+// deleted. Bumping the rcgen of the project is used for OCC, to detect
+// concurrent creations of a new subnet and deletions of the project itself.
+fn push_cte_to_check_for_deleted_project_and_update_rcgen(
     builder: &mut QueryBuilder,
     project_id: &Uuid,
 ) {
     builder
         .sql(
-            "project_is_not_deleted AS MATERIALIZED(\
-        SELECT CAST(\
-            IF(EXISTS(\
-                SELECT 1 \
-                FROM project \
-                WHERE id = ",
+            "updated_project AS (\
+        UPDATE project \
+        SET rcgen = rcgen + 1 \
+        WHERE id = ",
         )
         .param()
         .bind::<sql_types::Uuid, _>(*project_id)
         .sql(
-            " AND time_deleted IS NULL LIMIT 1), \
+            " AND time_deleted IS NULL \
+        RETURNING 1\
+    ), \
+    project_is_not_deleted AS MATERIALIZED(\
+        SELECT CAST(\
+            IF(EXISTS(SELECT 1 FROM updated_project), \
             'true', \
             '",
         )
@@ -680,9 +684,7 @@ fn push_cte_to_update_subnet_pool_rcgen(builder: &mut QueryBuilder) {
     builder.sql(
         "updated_pool AS (\
         UPDATE subnet_pool \
-        SET \
-            time_modified = NOW(), \
-            rcgen = rcgen + 1 \
+        SET rcgen = rcgen + 1 \
         WHERE id = (SELECT subnet_pool_id FROM subnet_pool_and_member) \
           AND time_deleted IS NULL \
         RETURNING 1\
@@ -696,9 +698,7 @@ fn push_cte_to_update_subnet_pool_member_rcgen(builder: &mut QueryBuilder) {
     builder.sql(
         "updated_pool_member AS (\
         UPDATE subnet_pool_member \
-        SET \
-            time_modified = NOW(), \
-            rcgen = rcgen + 1 \
+        SET rcgen = rcgen + 1 \
         WHERE id = (SELECT subnet_pool_member_id FROM subnet_pool_and_member) \
           AND time_deleted IS NULL \
         RETURNING 1\
@@ -954,8 +954,8 @@ fn push_cte_to_select_next_subnet_from_pool(
                         family(subnet_end) = 4, \
                         '255.255.255.254'::INET,
                         'ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffe'::INET\
-                    ) + 1\
-                )\
+                    )\
+                ) + 1 \
             END AS gap_start, \
             CASE \
                 WHEN next_subnet_start IS NULL THEN member_end \
@@ -1161,14 +1161,27 @@ pub fn decode_insert_external_subnet_error(
                 public_error_from_diesel(e, ErrorHandler::Server)
             }
         }
-        DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _) => {
-            public_error_from_diesel(
-                e,
-                ErrorHandler::Conflict(
-                    ResourceType::ExternalSubnet,
-                    subnet_name,
-                ),
-            )
+        DieselError::DatabaseError(
+            DatabaseErrorKind::UniqueViolation,
+            info,
+        ) => {
+            match info.constraint_name() {
+                Some(EXTERNAL_SUBNET_NAME_CONSTRAINT) => {
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::Conflict(
+                            ResourceType::ExternalSubnet,
+                            subnet_name,
+                        ),
+                    )
+                }
+                Some(EXTERNAL_SUBNET_SUBNET_CONSTRAINT)
+                | Some(EXTERNAL_SUBNET_ADDRESS_CONSTRAINT) => {
+                    Error::invalid_request(SUBNET_OVERLAPS_EXISTING_ERR_MSG)
+                }
+                // Any other unique violation is unexpected and indicates a bug.
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
+            }
         }
         DieselError::NotFound => report_exhaustion(subnet),
         _ => public_error_from_diesel(e, ErrorHandler::Server),
@@ -1285,6 +1298,22 @@ The requested IP subnet is not contained in \
 const SUBNET_OVERLAPS_EXISTING_SENTINEL: &str = "overlap-existing";
 pub const SUBNET_OVERLAPS_EXISTING_ERR_MSG: &'static str =
     "The requested IP subnet overlaps with an existing external subnet";
+
+// Unique index names from `dbinit.sql`. CockroachDB reports these as the
+// constraint name on a unique violation, allowing us to match against them for
+// better error messaging.
+
+/// Uniqueness of (`project_id`, `name`).
+const EXTERNAL_SUBNET_NAME_CONSTRAINT: &str =
+    "external_subnet_project_id_name_key";
+
+/// Uniqueness of (`subnet`).
+const EXTERNAL_SUBNET_SUBNET_CONSTRAINT: &str =
+    "lookup_external_subnet_by_subnet";
+
+/// Uniqueness of (`first_address`, `last_address`).
+const EXTERNAL_SUBNET_ADDRESS_CONSTRAINT: &str =
+    "lookup_external_subnet_by_first_and_last_address";
 
 // Error sentinel emitted when we try to insert a subnet into a project that
 // has now been deleted.

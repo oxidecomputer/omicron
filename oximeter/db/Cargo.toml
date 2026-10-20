@@ -114,12 +114,12 @@ expectorate.workspace = true
 itertools.workspace = true
 omicron-test-utils.workspace = true
 oximeter-test-utils.workspace = true
+proptest.workspace = true
 rand.workspace = true
 slog-dtrace.workspace = true
 sqlformat.workspace = true
 sqlparser.workspace = true
 strum.workspace = true
-tempfile.workspace = true
 
 [features]
 default = [ "native-sql-shell", "oxql", "sql" ]
@@ -155,5 +155,9 @@ name = "protocol"
 harness = false
 
 [[bench]]
-name = "oxql"
+name = "oxql_field"
+harness = false
+
+[[bench]]
+name = "oxql_measurement"
 harness = false

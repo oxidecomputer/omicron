@@ -8,13 +8,15 @@ use crate::deployment::Blueprint;
 use crate::external_api::hardware::Baseboard;
 use crate::external_api::physical_disk::PhysicalDiskKind;
 use bootstrap_agent_lockstep_types::RecoverySiloConfig;
-use omicron_common::address::IpRange;
+pub use bootstrap_agent_lockstep_types::ServiceIpPoolConfig;
+pub use bootstrap_agent_lockstep_types::ServiceIpPoolError;
+use iddqd::IdOrdMap;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
 use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::api::internal::shared::AllowedSourceIps;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -22,16 +24,13 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::RackNetworkConfig;
-use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
-use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
-use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
@@ -186,9 +185,8 @@ pub struct RackInitializationRequest {
     // in `nexus-test-utils` and friends
     // (<https://github.com/oxidecomputer/omicron/issues/7081>).
     pub crucible_datasets: Vec<CrucibleDatasetCreateRequest>,
-    /// Ranges of the service IP pool which may be used for internal services,
-    /// such as Nexus.
-    pub internal_services_ip_pool_ranges: Vec<IpRange>,
+    /// Configuration for IP Pools used for system services.
+    pub service_ip_pools: IdOrdMap<ServiceIpPoolConfig>,
     /// x.509 Certificates used to encrypt communication with the external API.
     pub certs: Vec<Certificate>,
     /// initial internal DNS config
@@ -197,8 +195,6 @@ pub struct RackInitializationRequest {
     pub external_dns_zone_name: String,
     /// configuration for the initial (recovery) Silo
     pub recovery_silo: RecoverySiloConfig,
-    /// The external qsfp ports per sidecar
-    pub external_port_count: ExternalPortDiscovery,
     /// Initial rack network configuration
     pub rack_network_config: RackNetworkConfig,
     /// IPs or subnets allowed to make requests to user-facing services
@@ -210,15 +206,10 @@ pub struct RackInitializationRequest {
     ///   * Trust quorum is not fully complete yet, and we only want this to be
     ///     used in production once it is complete.
     pub initial_trust_quorum_configuration: Option<InitialTrustQuorumConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ExternalPortDiscovery {
-    // Automatically discover ports via Dendrite
-    Auto(HashMap<SwitchSlot, Ipv6Addr>),
-    // Static configuration pairing switches with a collection of ports
-    Static(HashMap<SwitchSlot, Vec<Name>>),
+    /// Fleet-wide jumbo-frames opt-in (defaults to false). Operators can change
+    /// this post-init via the Nexus API.
+    #[serde(default)]
+    pub external_jumbo_frames_opt_in_enabled: bool,
 }
 
 pub type DnsConfigParams = internal_dns_types::config::DnsConfigParams;

@@ -13,7 +13,7 @@ use iddqd::errors::DuplicateItem;
 use iddqd::id_upcast;
 use illumos_utils::zpool::ZpoolName;
 use internal_dns_types::config::{
-    DnsConfigBuilder, DnsConfigParams, Host, Zone,
+    DnsConfigBuilder, DnsConfigParams, Host, HostSwitchZonePorts, Zone,
 };
 use internal_dns_types::names::ServiceName;
 use nexus_types::deployment::LastAllocatedSubnetIpOffset;
@@ -21,36 +21,39 @@ use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
     BlueprintHostPhase2DesiredSlots, BlueprintMeasurements,
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
-    BlueprintSledConfig, BlueprintSource, BlueprintZoneConfig,
-    BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
-    CockroachDbPreserveDowngrade, OmicronZoneExternalFloatingAddr,
-    OmicronZoneExternalFloatingIp, OmicronZoneExternalSnatIp, OximeterReadMode,
+    BlueprintSledConfig, BlueprintSledUpdateDisposition, BlueprintSource,
+    BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneImageSource,
+    BlueprintZoneType, CockroachDbPreserveDowngrade,
+    OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingAddrs,
+    OmicronZoneExternalFloatingIp, OmicronZoneExternalFloatingIps,
+    OmicronZoneExternalSnat, OmicronZoneExternalSnatIp, OximeterReadMode,
     PendingMgsUpdates, blueprint_zone_type,
 };
 use nexus_types::external_api::sled::SledState;
 use omicron_common::address::{
-    CP_SERVICES_RESERVED_ADDRESSES, DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT,
-    Ipv6Subnet, MGD_PORT, MGS_PORT, NEXUS_INTERNAL_PORT, NEXUS_LOCKSTEP_PORT,
-    NTP_PORT, NUM_SOURCE_NAT_PORTS, REPO_DEPOT_PORT, ReservedRackSubnet,
-    SLED_PREFIX, SLED_RESERVED_ADDRESSES, get_sled_address,
-    get_switch_zone_address,
+    CP_SERVICES_RESERVED_ADDRESSES, DDMD_PORT, DENDRITE_PORT, DNS_HTTP_PORT,
+    DNS_PORT, Ipv6Subnet, MGD_PORT, MGS_PORT, NEXUS_INTERNAL_PORT,
+    NEXUS_LOCKSTEP_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS, REPO_DEPOT_PORT,
+    ReservedRackSubnet, SLED_PREFIX_LENGTH, SLED_RESERVED_ADDRESSES,
+    get_sled_address, get_switch_zone_address,
 };
-use omicron_common::api::external::{Generation, MacAddr, Vni};
+use omicron_common::api::external::{MacAddr, Vni};
 use omicron_common::api::internal::shared::{
     PrivateIpConfig, PrivateIpConfigError,
 };
 use omicron_common::backoff::{
     BackoffError, retry_notify_ext, retry_policy_internal_service_aggressive,
 };
-use omicron_common::disk::{
-    CompressionAlgorithm, DatasetConfig, DatasetKind, DatasetName, DiskVariant,
-    SharedDatasetConfig,
-};
+use omicron_common::disk::{DatasetKind, DatasetName};
+use omicron_common::http_client::internal_http_client_builder;
 use omicron_common::policy::{
     BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY,
     CRUCIBLE_PANTRY_REDUNDANCY, INTERNAL_DNS_REDUNDANCY, NEXUS_REDUNDANCY,
     OXIMETER_REDUNDANCY, RESERVED_INTERNAL_DNS_REDUNDANCY,
     SINGLE_NODE_CLICKHOUSE_REDUNDANCY,
+};
+use omicron_generation_kinds::{
+    Generation, NexusGeneration, SledConfigGeneration, TargetReleaseGeneration,
 };
 use omicron_uuid_kinds::{
     BlueprintUuid, DatasetUuid, ExternalIpUuid, GenericUuid, OmicronZoneUuid,
@@ -62,6 +65,11 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
+use sled_agent_types::disk::CompressionAlgorithm;
+use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::disk::DiskVariant;
+use sled_agent_types::disk::PerDiskDatasetKind;
+use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::SourceNatConfigError;
@@ -74,10 +82,32 @@ use slog_error_chain::SlogInlineError;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::num::Wrapping;
+use strum::IntoEnumIterator;
 use thiserror::Error;
 use uuid::Uuid;
 
-const MINIMUM_U2_COUNT: usize = 3;
+/// The fewest U.2 disks a sled may report before it can be included in the
+/// rack setup plan.
+///
+/// This can never be zero, because every sled in the plan hosts an NTP
+/// zone, whose filesystem must live on one of the sled's U.2 pools.
+const MINIMUM_U2_COUNT: usize = 1;
+
+/// Returns `true` if a sled reports enough U.2 disks to be included in the
+/// rack setup plan.
+///
+/// Sleds whose inventory does not (yet) satisfy this check are not rejected;
+/// plan generation waits for them to report more disks. Disks are enumerated
+/// asynchronously as a sled boots, so this also keeps plan generation from
+/// acting on an incomplete snapshot of a sled's storage.
+fn sled_has_minimum_u2s(inventory: &Inventory) -> bool {
+    inventory
+        .disks
+        .iter()
+        .filter(|disk| matches!(disk.variant, DiskVariant::U2))
+        .count()
+        >= MINIMUM_U2_COUNT
+}
 
 /// Describes errors which may occur while generating a plan for services.
 #[derive(Error, Debug, SlogInlineError)]
@@ -103,9 +133,6 @@ pub enum PlanError {
 
     #[error("Ran out of sleds / U2 storage pools")]
     NotEnoughSleds,
-
-    #[error("Unexpected dataset kind: {0}")]
-    UnexpectedDataset(String),
 
     #[error("invalid private IP configuration")]
     InvalidPrivateIpConfig(#[from] PrivateIpConfigError),
@@ -178,7 +205,7 @@ impl SledConfig {
 pub struct PlannedSledDescription {
     pub underlay_address: SocketAddrV6,
     pub sled_id: SledUuid,
-    pub subnet: Ipv6Subnet<SLED_PREFIX>,
+    pub subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     pub config: SledConfig,
     pub last_allocated_ip_subnet_offset: LastAllocatedSubnetIpOffset,
 }
@@ -250,7 +277,7 @@ impl ServicePlan {
         address: SocketAddrV6,
     ) -> Result<Inventory, PlanError> {
         let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
+        let client = internal_http_client_builder()
             .connect_timeout(dur)
             .timeout(dur)
             .build()
@@ -270,13 +297,7 @@ impl ServicePlan {
                     BackoffError::transient(PlanError::SledApi(err))
                 })?;
 
-            if inventory
-                .disks
-                .iter()
-                .filter(|disk| matches!(disk.variant, DiskVariant::U2))
-                .count()
-                < MINIMUM_U2_COUNT
-            {
+            if !sled_has_minimum_u2s(&inventory) {
                 return Err(BackoffError::transient(
                     PlanError::SledInitialization("Awaiting disks".to_string()),
                 ));
@@ -338,9 +359,12 @@ impl ServicePlan {
                 .host_zone_switch(
                     sled.sled_id,
                     address,
-                    DENDRITE_PORT,
-                    MGS_PORT,
-                    MGD_PORT,
+                    HostSwitchZonePorts {
+                        dendrite: DENDRITE_PORT,
+                        mgs: MGS_PORT,
+                        mgd: MGD_PORT,
+                        ddm: DDMD_PORT,
+                    },
                 )
                 .unwrap();
         }
@@ -370,70 +394,17 @@ impl ServicePlan {
                 .map(|disk| ZpoolName::new_external(disk.pool_id))
                 .collect();
 
-            // Add all non-discretionary datasets, self-provisioned on the U.2,
-            // to the blueprint.
+            // Add the datasets that every U.2 has to the blueprint. After RSS,
+            // the Reconfigurator planner maintains these same datasets.
             for zpool in &sled_info.u2_zpools {
-                for intrinsic_dataset in
-                    sled_storage::dataset::U2_EXPECTED_DATASETS
-                {
-                    let name = intrinsic_dataset.get_name();
-                    let kind = match name {
-                        sled_storage::dataset::ZONE_DATASET => {
-                            DatasetKind::TransientZoneRoot
-                        }
-                        sled_storage::dataset::U2_DEBUG_DATASET => {
-                            DatasetKind::Debug
-                        }
-                        _ => {
-                            return Err(PlanError::UnexpectedDataset(
-                                name.to_string(),
-                            ));
-                        }
-                    };
-
+                for kind in PerDiskDatasetKind::iter() {
                     let config = DatasetConfig {
                         id: DatasetUuid::new_v4(),
-                        name: DatasetName::new(*zpool, kind),
-                        inner: SharedDatasetConfig {
-                            compression: intrinsic_dataset.get_compression(),
-                            quota: intrinsic_dataset.get_quota(),
-                            reservation: None,
-                        },
+                        name: DatasetName::new(*zpool, kind.into()),
+                        inner: kind.config(),
                     };
                     sled_info.request.datasets.insert(config.id, config);
                 }
-
-                // Both types of LocalStorage are not in the
-                // U2_EXPECTED_DATASETS list, add them here. We expect Nexus to
-                // take over after RSS and not need to make any changes to the
-                // resulting current target blueprint - note the
-                // `rss_blueprint_is_blippy_clean` test will fail if this isn't
-                // true.
-
-                let config = DatasetConfig {
-                    id: DatasetUuid::new_v4(),
-                    name: DatasetName::new(*zpool, DatasetKind::LocalStorage),
-                    inner: SharedDatasetConfig {
-                        compression: CompressionAlgorithm::Off,
-                        quota: None,
-                        reservation: None,
-                    },
-                };
-                sled_info.request.datasets.insert(config.id, config);
-
-                let config = DatasetConfig {
-                    id: DatasetUuid::new_v4(),
-                    name: DatasetName::new(
-                        *zpool,
-                        DatasetKind::LocalStorageUnencrypted,
-                    ),
-                    inner: SharedDatasetConfig {
-                        compression: CompressionAlgorithm::Off,
-                        quota: None,
-                        reservation: None,
-                    },
-                };
-                sled_info.request.datasets.insert(config.id, config);
             }
         }
 
@@ -577,7 +548,10 @@ impl ServicePlan {
                                 pool_name: *dataset_name.pool(),
                             },
                             http_address,
-                            dns_address,
+                            dns_addresses:
+                                OmicronZoneExternalFloatingAddrs::from_single(
+                                    dns_address,
+                                ),
                             nic,
                         },
                     ),
@@ -611,9 +585,12 @@ impl ServicePlan {
                         blueprint_zone_type::Nexus {
                             internal_address,
                             lockstep_port: NEXUS_LOCKSTEP_PORT,
-                            external_ip: from_ipaddr_to_external_floating_ip(
-                                external_ip,
-                            ),
+                            external_ips:
+                                OmicronZoneExternalFloatingIps::from_single(
+                                    from_ipaddr_to_external_floating_ip(
+                                        external_ip,
+                                    ),
+                                ),
                             nic,
                             // Tell Nexus to use TLS if and only if the caller
                             // provided TLS certificates.  This effectively
@@ -625,7 +602,7 @@ impl ServicePlan {
                                 .external_certificates
                                 .is_empty(),
                             external_dns_servers: config.dns_servers.clone(),
-                            nexus_generation: Generation::new(),
+                            nexus_generation: NexusGeneration::new(),
                         },
                     ),
                     filesystem_pool,
@@ -801,10 +778,11 @@ impl ServicePlan {
                             dns_servers: config.dns_servers.clone(),
                             domain: None,
                             nic,
-                            external_ip:
+                            external_ip: OmicronZoneExternalSnat::from_single(
                                 from_source_nat_config_to_external_snat_ip(
                                     snat_cfg,
                                 ),
+                            ),
                         },
                     ),
                     ServiceName::BoundaryNtp,
@@ -890,7 +868,7 @@ impl ServicePlan {
 
     pub fn to_blueprint(
         &self,
-        sled_agent_config_generation: Generation,
+        sled_agent_config_generation: SledConfigGeneration,
     ) -> anyhow::Result<Blueprint> {
         let mut blueprint_sleds = BTreeMap::new();
         for sled_description in &self.all_sleds {
@@ -942,6 +920,8 @@ impl ServicePlan {
                 sled_description.sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
+                    update_disposition: BlueprintSledUpdateDisposition::initial(
+                    ),
                     subnet: sled_description.subnet,
                     last_allocated_ip_subnet_offset: sled_description
                         .last_allocated_ip_subnet_offset,
@@ -968,8 +948,8 @@ impl ServicePlan {
             // initial generation of 1. Nexus will bump this up when it updates
             // external DNS (including creating the recovery silo).
             external_dns_version: Generation::new(),
-            target_release_minimum_generation: Generation::new(),
-            nexus_generation: Generation::new(),
+            target_release_minimum_generation: TargetReleaseGeneration::new(),
+            nexus_generation: NexusGeneration::new(),
             external_networking_generation: Generation::new(),
             // Nexus will fill in the CockroachDB values during initialization.
             cockroachdb_fingerprint: String::new(),
@@ -992,12 +972,12 @@ impl ServicePlan {
 
 struct AddressBumpAllocator {
     sled_id: SledUuid,
-    subnet: Ipv6Subnet<SLED_PREFIX>,
+    subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     last_addr_offset: u16,
 }
 
 impl AddressBumpAllocator {
-    fn new(sled_id: SledUuid, subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
+    fn new(sled_id: SledUuid, subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>) -> Self {
         Self { sled_id, subnet, last_addr_offset: SLED_RESERVED_ADDRESSES }
     }
 
@@ -1035,7 +1015,7 @@ pub struct SledInfo {
     /// unique id for the sled agent
     pub sled_id: SledUuid,
     /// the sled's unique IPv6 subnet
-    subnet: Ipv6Subnet<SLED_PREFIX>,
+    subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     /// the address of the Sled Agent on the sled's subnet
     pub sled_address: SocketAddrV6,
     /// the inventory returned by the Sled
@@ -1056,7 +1036,7 @@ pub struct SledInfo {
 impl SledInfo {
     pub fn new(
         sled_id: SledUuid,
-        subnet: Ipv6Subnet<SLED_PREFIX>,
+        subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
         sled_address: SocketAddrV6,
         inventory: Inventory,
         is_scrimlet: bool,
@@ -1147,14 +1127,18 @@ impl ServicePortBuilder {
             .collect::<BTreeSet<IpAddr>>();
         let internal_services_ip_pool = Box::new(
             config
-                .internal_services_ip_pool_ranges
-                .clone()
+                .service_ip_pools
+                .iter()
+                .flat_map(|config| config.ranges().iter().copied())
+                // Collect here is unavoidable, otherwise the iterator borrows
+                // the source data from &config. But at least we're collecting
+                // the _ranges_, not individual addresses.
+                .collect::<Vec<_>>()
                 .into_iter()
                 .flat_map(|range| range.iter())
-                // External DNS IPs are required to be present in
-                // `internal_services_ip_pool_ranges`, but we want to skip them
-                // when choosing IPs for non-DNS services, so filter them out
-                // here.
+                // External DNS IPs are required to be present in the ranges of
+                // all the `service_ip_pools`, but we want to skip them when
+                // choosing IPs for non-DNS services, so filter them out here.
                 .filter(move |ip| !external_dns_ips_set.contains(ip)),
         );
         let external_dns_ips = config.external_dns_ips.clone().into_iter();
@@ -1354,18 +1338,25 @@ mod tests {
     use super::*;
     use bootstrap_agent_lockstep_types::BootstrapAddressDiscovery;
     use bootstrap_agent_lockstep_types::RecoverySiloConfig;
+    use bootstrap_agent_lockstep_types::ServiceIpPoolConfig;
     use omicron_common::address::IpRange;
     use omicron_common::address::SLED_RESERVED_ADDRESSES;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::RackUuid;
     use oxnet::Ipv6Net;
+    use sled_agent_types::disk::DiskIdentity;
+    use sled_agent_types::early_networking::PortConfig;
     use sled_agent_types::early_networking::RackNetworkConfig;
+    use sled_agent_types::early_networking::UplinkPorts;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types::inventory::FmdInventory;
+    use sled_agent_types::inventory::InstanceManagerStatus;
     use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
-    use sled_hardware_types::Baseboard;
+    use sled_hardware_types::BaseboardId;
 
     const DISK_COUNT: usize = 10;
 
@@ -1374,7 +1365,7 @@ mod tests {
         let logctx = test_setup_log("bump_allocator_basics");
 
         let address = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0);
-        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(address);
+        let subnet = Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(address);
 
         let mut allocator =
             AddressBumpAllocator::new(SledUuid::new_v4(), subnet);
@@ -1413,7 +1404,7 @@ mod tests {
         let logctx = test_setup_log("bump_allocator_exhaustion");
 
         let address = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0);
-        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(address);
+        let subnet = Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(address);
 
         let mut allocator =
             AddressBumpAllocator::new(SledUuid::new_v4(), subnet);
@@ -1437,11 +1428,6 @@ mod tests {
         let ip = |string: &str| -> IpAddr { string.parse().unwrap() };
 
         // We still need these values to provision external services
-        let ip_pools = [
-            (ip("192.168.1.10"), ip("192.168.1.14")),
-            (ip("fd00::20"), ip("fd00::23")),
-            (ip("fd01::100"), ip("fd01::103")),
-        ];
         let dns_ips = [
             ip("192.168.1.10"),
             ip("192.168.1.13"),
@@ -1449,17 +1435,59 @@ mod tests {
             ip("fd01::100"),
             ip("fd01::103"),
         ];
+        let mut service_ip_pools = IdOrdMap::new();
+        service_ip_pools
+            .insert_unique(
+                ServiceIpPoolConfig::new(
+                    "ipv4-service-pool".parse().unwrap(),
+                    String::new(),
+                    vec![
+                        IpRange::try_from((
+                            ip("192.168.1.10"),
+                            ip("192.168.1.14"),
+                        ))
+                        .unwrap(),
+                    ],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        service_ip_pools
+            .insert_unique(
+                ServiceIpPoolConfig::new(
+                    "ipv6-service-pool".parse().unwrap(),
+                    String::new(),
+                    vec![
+                        IpRange::try_from((ip("fd00::20"), ip("fd00::23")))
+                            .unwrap(),
+                        IpRange::try_from((ip("fd01::100"), ip("fd01::103")))
+                            .unwrap(),
+                    ],
+                )
+                .unwrap(),
+            )
+            .unwrap();
 
-        let config = Config {
+        let config =
+            config_with_service_pools(service_ip_pools, dns_ips.to_vec());
+
+        (dns_ips.to_vec(), config)
+    }
+
+    // Build a `Config` with the given service IP pools and external DNS IPs,
+    // filling in placeholder values for the fields these service-plan tests
+    // don't exercise.
+    fn config_with_service_pools(
+        service_ip_pools: IdOrdMap<ServiceIpPoolConfig>,
+        external_dns_ips: Vec<IpAddr>,
+    ) -> Config {
+        Config {
             trust_quorum_peers: None,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
             ntp_servers: Vec::new(),
             dns_servers: Vec::new(),
-            internal_services_ip_pool_ranges: ip_pools
-                .iter()
-                .map(|(a, b)| IpRange::try_from((*a, *b)).unwrap())
-                .collect(),
-            external_dns_ips: dns_ips.to_vec(),
+            service_ip_pools,
+            external_dns_ips,
             external_dns_zone_name: "".to_string(),
             external_certificates: Vec::new(),
             recovery_silo: RecoverySiloConfig {
@@ -1476,29 +1504,43 @@ mod tests {
                 rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
                 infra_ip_first: std::net::IpAddr::V4(Ipv4Addr::LOCALHOST),
                 infra_ip_last: std::net::IpAddr::V4(Ipv4Addr::LOCALHOST),
-                ports: Vec::new(),
+                // The list of ports must be non-empty -- this test doesn't
+                // exercise uplinks, so use a placeholder port here.
+                ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
+                    "qsfp0",
+                )])
+                .expect("placeholder port list is non-empty"),
                 bgp: Vec::new(),
                 bfd: Vec::new(),
             },
             allowed_source_ips: AllowedSourceIps::Any,
-        };
-
-        (dns_ips.to_vec(), config)
+            external_jumbo_frames_opt_in_enabled: false,
+        }
     }
 
-    fn test_sled_info() -> SledInfo {
+    struct TestSled {
+        /// Determines the sled's subnet; each test sled needs a distinct
+        /// index.
+        sled_index: u16,
+        /// How many U.2 disks the sled reports in inventory.
+        u2_count: usize,
+    }
+
+    fn test_sled_info(TestSled { sled_index, u2_count }: TestSled) -> SledInfo {
         let sled_id = SledUuid::new_v4();
-        let address = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0);
-        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(address);
+        let address = Ipv6Addr::new(0xfd00, 0, 0, sled_index, 0, 0, 0, 0);
+        let subnet = Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(address);
         let sled_address = get_sled_address(subnet);
+        // Just a placeholder - no tests in this mod care about this:
+        let rack_id = RackUuid::nil();
         let is_scrimlet = true;
 
-        let disks: Vec<_> = (0..DISK_COUNT)
+        let disks: Vec<_> = (0..u2_count)
             .map(|i| sled_agent_types::inventory::InventoryDisk {
-                identity: omicron_common::disk::DiskIdentity {
+                identity: DiskIdentity {
                     vendor: "vendor".to_string(),
                     model: "model".to_string(),
-                    serial: format!("test-{i}"),
+                    serial: format!("test-{sled_index}-{i}"),
                 },
                 variant: DiskVariant::U2,
                 slot: i as i64,
@@ -1518,7 +1560,11 @@ mod tests {
                 sled_id,
                 sled_agent_address: sled_address,
                 sled_role: SledRole::Scrimlet,
-                baseboard: Baseboard::Unknown,
+                baseboard_id: BaseboardId {
+                    part_number: "test".to_string(),
+                    serial_number: "test".to_string(),
+                },
+                rack_id,
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::try_from(1_u64 << 40).unwrap(),
                 cpu_family: SledCpuFamily::AmdMilan,
@@ -1529,14 +1575,28 @@ mod tests {
                 ledgered_sled_config: None,
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
+                instance_manager_status: InstanceManagerStatus::available(0),
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
                 smf_services_enabled_not_online:
                     SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: IdOrdMap::new(),
+                fmd: Ok(FmdInventory::default()),
             },
             is_scrimlet,
         )
+    }
+
+    #[test]
+    fn single_u2_sled_is_admitted() {
+        // Compute-heavy sleds may carry a single U.2. Plan generation must
+        // accept such a sled's inventory rather than waiting indefinitely for
+        // more disks to appear.
+        let sled = test_sled_info(TestSled { sled_index: 0, u2_count: 1 });
+        assert!(
+            sled_has_minimum_u2s(&sled.inventory),
+            "a sled with one U.2 should pass the inventory disk-count check"
+        );
     }
 
     #[test]
@@ -1578,6 +1638,68 @@ mod tests {
         assert_eq!(internal_service_ips, expected_internal_service_ips);
     }
 
+    // Ensure that we correctly generate addresses for the external service
+    // zones when we only have a v6 pool to draw from.
+    #[test]
+    fn service_port_builder_v6_only() {
+        use omicron_common::address::DNS_OPTE_IPV6_SUBNET;
+        use omicron_common::address::NEXUS_OPTE_IPV6_SUBNET;
+        use omicron_common::address::NTP_OPTE_IPV6_SUBNET;
+
+        let ip = |string: &str| -> IpAddr { string.parse().unwrap() };
+
+        // A single v6 pool of four addresses. The first is used for external
+        // DNS; the rest are available for other services.
+        let dns_ips = vec![ip("fd00::20")];
+        let mut service_ip_pools = IdOrdMap::new();
+        service_ip_pools
+            .insert_unique(
+                ServiceIpPoolConfig::new(
+                    "ipv6-service-pool".parse().unwrap(),
+                    String::new(),
+                    vec![
+                        IpRange::try_from((ip("fd00::20"), ip("fd00::23")))
+                            .unwrap(),
+                    ],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let config = config_with_service_pools(service_ip_pools, dns_ips);
+
+        let mut svp = ServicePortBuilder::new(&config);
+
+        // External DNS: v6 external IP on a v6 OPTE NIC.
+        let (dns_nic, dns_ip) =
+            svp.next_dns(OmicronZoneUuid::new_v4()).expect("got external DNS");
+        assert!(dns_ip.is_ipv6());
+        assert!(dns_nic.ip_config.is_ipv6_only());
+        assert_eq!(
+            dns_nic.ip_config.ipv6_subnet(),
+            Some(&*DNS_OPTE_IPV6_SUBNET)
+        );
+
+        // Nexus: v6 external IP on a v6 OPTE NIC.
+        let (nexus_nic, nexus_ip) =
+            svp.next_nexus(OmicronZoneUuid::new_v4()).expect("got Nexus");
+        assert!(nexus_ip.is_ipv6());
+        assert!(nexus_nic.ip_config.is_ipv6_only());
+        assert_eq!(
+            nexus_nic.ip_config.ipv6_subnet(),
+            Some(&*NEXUS_OPTE_IPV6_SUBNET),
+        );
+
+        // Boundary NTP: v6 SNAT external IP on a v6 OPTE NIC.
+        let (ntp_nic, snat_cfg) =
+            svp.next_snat(OmicronZoneUuid::new_v4()).expect("got boundary NTP");
+        assert!(snat_cfg.ip.is_ipv6());
+        assert!(ntp_nic.ip_config.is_ipv6_only());
+        assert_eq!(
+            ntp_nic.ip_config.ipv6_subnet(),
+            Some(&*NTP_OPTE_IPV6_SUBNET),
+        );
+    }
+
     #[test]
     fn test_dataset_and_zone_count() {
         let logctx = test_setup_log("test_dataset_and_zone_count");
@@ -1590,7 +1712,10 @@ mod tests {
             .expect_err("Should have failed to create plan");
 
         // Try again, with a sled that has ten U.2 disks
-        let sleds = vec![test_sled_info()];
+        let sleds = vec![test_sled_info(TestSled {
+            sled_index: 0,
+            u2_count: DISK_COUNT,
+        })];
         let plan = ServicePlan::create_transient(&logctx.log, &config, sleds)
             .expect("Should have created plan");
 
@@ -1641,12 +1766,111 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// Asserts the per-sled properties a plan must uphold even when sleds
+    /// have a single U.2: an NTP zone on every sled, and CockroachDB zones on
+    /// distinct sleds (a sled cannot host two CockroachDB datasets unless it
+    /// has two pools).
+    fn assert_zones_spread_across_sleds(plan: &ServicePlan) {
+        let mut total_cockroach = 0;
+        for sled in &plan.all_sleds {
+            let ntp_count = sled
+                .config
+                .zones
+                .iter()
+                .filter(|zone| {
+                    matches!(
+                        zone.zone_type,
+                        BlueprintZoneType::InternalNtp(_)
+                            | BlueprintZoneType::BoundaryNtp(_)
+                    )
+                })
+                .count();
+            assert_eq!(
+                ntp_count, 1,
+                "expected exactly one NTP zone on sled {}",
+                sled.sled_id
+            );
+
+            let cockroach_count = sled
+                .config
+                .zones
+                .iter()
+                .filter(|zone| {
+                    matches!(zone.zone_type, BlueprintZoneType::CockroachDb(_))
+                })
+                .count();
+            assert!(
+                cockroach_count <= 1,
+                "expected at most one CockroachDB zone on sled {}, saw {}",
+                sled.sled_id,
+                cockroach_count
+            );
+            total_cockroach += cockroach_count;
+        }
+        assert_eq!(total_cockroach, COCKROACHDB_REDUNDANCY);
+    }
+
+    #[test]
+    fn test_plan_with_one_u2_per_sled() {
+        let logctx = test_setup_log("test_plan_with_one_u2_per_sled");
+
+        let (_dns_ips, config) = test_dns_ips_and_config();
+
+        // CockroachDB has the largest count of same-kind datasets, and
+        // same-kind datasets must land on distinct pools. With one pool per
+        // sled, the rack needs at least one sled per CockroachDB zone.
+        let sleds: Vec<_> = (0..COCKROACHDB_REDUNDANCY)
+            .map(|i| {
+                test_sled_info(TestSled {
+                    sled_index: u16::try_from(i).unwrap(),
+                    u2_count: 1,
+                })
+            })
+            .collect();
+        let plan = ServicePlan::create_transient(&logctx.log, &config, sleds)
+            .expect("Should have created plan with one U.2 per sled");
+
+        assert_zones_spread_across_sleds(&plan);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_plan_with_heterogeneous_u2_counts() {
+        let logctx = test_setup_log("test_plan_with_heterogeneous_u2_counts");
+
+        let (_dns_ips, config) = test_dns_ips_and_config();
+
+        // A mix of storage-heavy sleds and compute-heavy sleds carrying a
+        // single U.2.
+        let u2_counts = [DISK_COUNT, DISK_COUNT, 1, 1, 1];
+        let sleds: Vec<_> = u2_counts
+            .iter()
+            .enumerate()
+            .map(|(i, &count)| {
+                test_sled_info(TestSled {
+                    sled_index: u16::try_from(i).unwrap(),
+                    u2_count: count,
+                })
+            })
+            .collect();
+        let plan = ServicePlan::create_transient(&logctx.log, &config, sleds)
+            .expect("Should have created plan with mixed U.2 counts");
+
+        assert_zones_spread_across_sleds(&plan);
+
+        logctx.cleanup_successful();
+    }
+
     #[test]
     fn test_last_allocated_subnet_ip_offset() {
         let logctx = test_setup_log("test_last_allocated_subnet_ip_offset");
 
         let (_dns_ips, config) = test_dns_ips_and_config();
-        let sled_info = vec![test_sled_info()];
+        let sled_info = vec![test_sled_info(TestSled {
+            sled_index: 0,
+            u2_count: DISK_COUNT,
+        })];
         let plan =
             ServicePlan::create_transient(&logctx.log, &config, sled_info)
                 .expect("should've created a plan");

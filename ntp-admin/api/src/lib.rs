@@ -9,7 +9,9 @@ use ntp_admin_types_versions::latest;
 api_versions!([
     // Do not create new versions of this client-side versioned API.
     // https://github.com/oxidecomputer/omicron/issues/9290
-    (1, INITIAL),
+    (2, ADD_MAX_ERROR_AND_OFFSET),
+    // Versions before this have been retired. We no longer support them in any
+    // server, nor expect them from any client.
 ]);
 
 #[dropshot::api_description]

@@ -5,6 +5,7 @@
 //! [`DataStore`] methods for webhook event deliveries
 
 use super::DataStore;
+use crate::authz;
 use crate::context::OpContext;
 use crate::db::IncompleteOnConflictExt;
 use crate::db::datastore::RunnableQuery;
@@ -12,6 +13,7 @@ use crate::db::model::Alert;
 use crate::db::model::AlertClass;
 use crate::db::model::AlertDeliveryState;
 use crate::db::model::AlertDeliveryTrigger;
+use crate::db::model::SqlU32;
 use crate::db::model::WebhookDelivery;
 use crate::db::model::WebhookDeliveryAttempt;
 use crate::db::model::WebhookDeliveryAttemptResult;
@@ -34,6 +36,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_uuid_kinds::AlertReceiverUuid;
+use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use uuid::Uuid;
@@ -58,7 +61,115 @@ pub struct DeliveryConfig {
 pub struct DeliveryAndEvent {
     pub delivery: WebhookDelivery,
     pub alert_class: AlertClass,
+    pub alert_version: SqlU32,
     pub event: serde_json::Value,
+}
+
+/// Filters applied to [`DataStore::webhook_delivery_list`].
+#[derive(Debug, Default)]
+pub struct WebhookDeliveryFilters {
+    /// Include only deliveries created before this timestamp.
+    before: Option<DateTime<Utc>>,
+
+    /// Include only deliveries created after this timestamp.
+    after: Option<DateTime<Utc>>,
+
+    /// Include only deliveries to the receiver with this UUID.
+    rx_id: Option<AlertReceiverUuid>,
+
+    /// Include only deliveries for the alert with this UUID.
+    alert_id: Option<AlertUuid>,
+
+    /// Include only deliveries in the specified delivery states.
+    ///
+    /// If multiple states are provided, deliveries in any of those states are
+    /// included in the output.
+    states: Vec<AlertDeliveryState>,
+
+    /// Include only deliveries with the specified triggers.
+    ///
+    /// If multiple triggers are provided, deliveries with any of those triggers
+    /// are included in the output.
+    triggers: Vec<AlertDeliveryTrigger>,
+}
+
+impl WebhookDeliveryFilters {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Includes only deliveries created at or after `time`.
+    ///
+    /// Returns an error if `time` is after a previously set `before` time.
+    pub fn after(mut self, time: DateTime<Utc>) -> Result<Self, Error> {
+        if let Some(before) = self.before {
+            if time > before {
+                return Err(Error::invalid_request(
+                    "`after` timestamp must be earlier than `before` \
+                    timestamp",
+                ));
+            }
+        }
+        self.after = Some(time);
+        Ok(self)
+    }
+
+    /// Includes only deliveries created at or before `time`.
+    ///
+    /// Returns an error if `time` is before a previously set `after` time.
+    pub fn before(mut self, time: DateTime<Utc>) -> Result<Self, Error> {
+        if let Some(after) = self.after {
+            if after > time {
+                return Err(Error::invalid_request(
+                    "`before` timestamp must be later than `after` \
+                    timestamp",
+                ));
+            }
+        }
+        self.before = Some(time);
+        Ok(self)
+    }
+
+    /// Includes only deliveries to the provided alert receiver.
+    pub fn for_receiver(mut self, authz_rx: &authz::AlertReceiver) -> Self {
+        self.rx_id = Some(authz_rx.id());
+        self
+    }
+
+    /// Includes only deliveries for the provided alert.
+    pub fn for_alert(mut self, authz_alert: &authz::Alert) -> Self {
+        self.alert_id = Some(authz_alert.id());
+        self
+    }
+
+    /// Add a set of delivery states to filter by.
+    ///
+    /// Multiple calls to this method are additive; the filters will include
+    /// deliveries in any of the states provided by *any* time this method was
+    /// called on a given instance of `WebhookDeliveryFilters`.
+    pub fn with_states<I>(mut self, states: impl IntoIterator<Item = I>) -> Self
+    where
+        I: Into<AlertDeliveryState>,
+    {
+        self.states.extend(states.into_iter().map(Into::into));
+        self
+    }
+
+    /// Add a set of delivery triggers to filter by.
+    ///
+    /// Multiple calls to this method are additive; the filters will include
+    /// deliveries with any of the triggers provided by *any* time this method
+    /// was called on a given instance of `WebhookDeliveryFilters`.
+    pub fn with_triggers<I>(
+        mut self,
+        triggers: impl IntoIterator<Item = I>,
+    ) -> Self
+    where
+        I: Into<AlertDeliveryTrigger>,
+    {
+        self.triggers.extend(triggers.into_iter().map(Into::into));
+        self
+    }
 }
 
 impl DataStore {
@@ -80,18 +191,18 @@ impl DataStore {
 
     /// Returns a list of all permanently-failed deliveries which are eligible
     /// to resend should a liveness probe with `resend=true` succeed.
-    pub async fn webhook_rx_list_resendable_events(
+    pub async fn webhook_rx_list_resendable_alerts(
         &self,
         opctx: &OpContext,
         rx_id: &AlertReceiverUuid,
     ) -> ListResultVec<Alert> {
-        Self::rx_list_resendable_events_query(*rx_id)
+        Self::rx_list_resendable_alerts_query(*rx_id)
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    fn rx_list_resendable_events_query(
+    fn rx_list_resendable_alerts_query(
         rx_id: AlertReceiverUuid,
     ) -> impl RunnableQuery<Alert> {
         use diesel::dsl::*;
@@ -99,15 +210,24 @@ impl DataStore {
             schema::webhook_delivery as delivery,
             schema::webhook_delivery as also_delivery
         );
+
+        let rx_id = rx_id.into_untyped_uuid();
+
         alert_dsl::alert
             .filter(alert_dsl::alert_class.ne(AlertClass::Probe))
             .inner_join(
                 delivery.on(delivery.field(dsl::alert_id).eq(alert_dsl::id)),
             )
-            .filter(delivery.field(dsl::rx_id).eq(rx_id.into_untyped_uuid()))
+            .filter(delivery.field(dsl::rx_id).eq(rx_id))
+            // Select only failed deliveries for which no successful delivery
+            // attempt exists for the same alert and receiver.
             .filter(not(exists(
                 also_delivery
                     .select(also_delivery.field(dsl::id))
+                    // We only want to check for successful deliveries to
+                    // the receiver we are listing resendable alerts for.
+                    .filter(also_delivery.field(dsl::rx_id).eq(rx_id))
+                    // ...and for the alert we are currently filtering.
                     .filter(
                         also_delivery.field(dsl::alert_id).eq(alert_dsl::id),
                     )
@@ -240,14 +360,20 @@ impl DataStore {
             .select((
                 WebhookDelivery::as_select(),
                 alert_dsl::alert_class,
+                alert_dsl::alert_version,
                 alert_dsl::payload,
             ))
             .load_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Ok(rows.into_iter().map(|(delivery, alert_class, event)| {
-            DeliveryAndEvent { delivery, alert_class, event }
-        }))
+        Ok(rows.into_iter().map(
+            |(delivery, alert_class, alert_version, event)| DeliveryAndEvent {
+                delivery,
+                alert_class,
+                alert_version,
+                event,
+            },
+        ))
     }
 
     pub async fn webhook_delivery_start_attempt(
@@ -442,6 +568,70 @@ impl DataStore {
 
         Err(Error::internal_error(MSG))
     }
+
+    /// List webhook deliveries matching the provided [`WebhookDeliveryFilters`].
+    ///
+    /// This backs the `omdb db alert webhook delivery list` command.
+    pub async fn webhook_delivery_list(
+        &self,
+        opctx: &OpContext,
+        filters: &WebhookDeliveryFilters,
+        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
+    ) -> ListResultVec<WebhookDelivery> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        Self::webhook_delivery_list_query(filters, pagparams)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    fn webhook_delivery_list_query(
+        filters: &WebhookDeliveryFilters,
+        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
+    ) -> impl RunnableQuery<WebhookDelivery> + Send + use<> {
+        let mut query = paginated_multicolumn(
+            dsl::webhook_delivery,
+            (dsl::time_created, dsl::id),
+            pagparams,
+        )
+        .select(WebhookDelivery::as_select());
+
+        let &WebhookDeliveryFilters {
+            before,
+            after,
+            rx_id,
+            alert_id,
+            ref states,
+            ref triggers,
+        } = filters;
+
+        if let Some(before) = before {
+            query = query.filter(dsl::time_created.le(before));
+        }
+
+        if let Some(after) = after {
+            query = query.filter(dsl::time_created.ge(after));
+        }
+
+        if let Some(rx_id) = rx_id {
+            query = query.filter(dsl::rx_id.eq(rx_id.into_untyped_uuid()));
+        }
+
+        if let Some(alert_id) = alert_id {
+            query =
+                query.filter(dsl::alert_id.eq(alert_id.into_untyped_uuid()));
+        }
+
+        if !states.is_empty() {
+            query = query.filter(dsl::state.eq_any(states.clone()));
+        }
+
+        if !triggers.is_empty() {
+            query = query.filter(dsl::triggered_by.eq_any(triggers.clone()));
+        }
+
+        query
+    }
 }
 
 #[cfg(test)]
@@ -452,27 +642,23 @@ mod test {
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
+    use nexus_types::alert::test_alerts;
     use nexus_types::external_api::alert;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::AlertUuid;
 
-    #[tokio::test]
-    async fn test_dispatched_deliveries_are_unique_per_rx() {
-        // Test setup
-        let logctx =
-            dev::test_setup_log("test_dispatched_deliveries_are_unique_per_rx");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-        // As webhook receivers are a collection that owns the delivery
-        // resource, we must create a "real" receiver before assigning
-        // deliveries to it.
+    async fn create_receiver(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        name: &str,
+    ) -> AlertReceiverUuid {
         let rx = datastore
             .webhook_rx_create(
                 opctx,
                 alert::WebhookCreate {
                     identity: IdentityMetadataCreateParams {
-                        name: "test-webhook".parse().unwrap(),
+                        name: name.parse().unwrap(),
                         description: String::new(),
                     },
                     endpoint: "http://webhooks.example.com".parse().unwrap(),
@@ -484,15 +670,28 @@ mod test {
             )
             .await
             .unwrap();
-        let rx_id = rx.rx.identity.id.into();
+        rx.rx.identity.id.into()
+    }
+
+    #[tokio::test]
+    async fn test_dispatched_deliveries_are_unique_per_rx() {
+        // Test setup
+        let logctx =
+            dev::test_setup_log("test_dispatched_deliveries_are_unique_per_rx");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        // As webhook receivers are a collection that owns the delivery
+        // resource, we must create a "real" receiver before assigning
+        // deliveries to it.
+        let rx_id = create_receiver(datastore, opctx, "test-webhook").await;
         let alert_id = AlertUuid::new_v4();
         let alert = model::Alert::new(
             alert_id,
-            model::AlertClass::TestFoo,
-            serde_json::json!({
+            &test_alerts::Foo(serde_json::json!({
                 "answer": 42,
-            }),
-        );
+            })),
+        )
+        .expect("alert payload should serialize");
         datastore
             .alert_create(&opctx, alert)
             .await
@@ -583,27 +782,105 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    // Regression test for https://github.com/oxidecomputer/omicron/issues/11235
+    //
+    // This reproduces a bug where, if an alert has been successfully delivered
+    // to one receiver, but delivering that alert to another receiver has
+    // failed, the alert will not be returned by the resendable-alert-list
+    // query.
+    #[tokio::test]
+    async fn test_successful_delivery_to_other_rx_is_still_resendable() {
+        let logctx = dev::test_setup_log(
+            "test_successful_delivery_to_other_rx_is_still_resendable",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create two webhook receivers. One will have a failed delivery of an
+        // alert, and the other will have a successful one.
+        let failed_rx_id = create_receiver(datastore, opctx, "failed-rx").await;
+        let successful_rx_id =
+            create_receiver(datastore, opctx, "successful-rx").await;
+
+        let alert_id = AlertUuid::new_v4();
+        let alert = model::Alert::new(
+            alert_id,
+            &test_alerts::Foo(serde_json::json!({
+                "answer": 42,
+            })),
+        )
+        .expect("alert payload should serialize");
+        datastore
+            .alert_create(opctx, alert.clone())
+            .await
+            .expect("alert should be created");
+
+        let completed_at = Utc::now();
+
+        // Create a failed delivery of the alert to `failed-rx`...
+        let mut failed_delivery = WebhookDelivery::new(
+            &alert_id,
+            &failed_rx_id,
+            AlertDeliveryTrigger::Alert,
+        );
+        failed_delivery.attempts = model::SqlU8::new(3);
+        failed_delivery.time_completed = Some(completed_at);
+        failed_delivery.state = AlertDeliveryState::Failed;
+
+        // ...and a successful delivery to `successful-rx`.
+        let mut successful_delivery = WebhookDelivery::new(
+            &alert_id,
+            &successful_rx_id,
+            AlertDeliveryTrigger::Alert,
+        );
+        successful_delivery.attempts = model::SqlU8::new(1);
+        successful_delivery.time_completed = Some(completed_at);
+        successful_delivery.state = AlertDeliveryState::Delivered;
+
+        let inserted = datastore
+            .webhook_delivery_create_batch(
+                opctx,
+                vec![failed_delivery, successful_delivery],
+            )
+            .await
+            .expect("deliveries should be created");
+        assert_eq!(inserted, 2);
+
+        let resendable = datastore
+            .webhook_rx_list_resendable_alerts(opctx, &failed_rx_id)
+            .await
+            .expect("resendable alerts should be listed");
+        assert_eq!(
+            resendable,
+            vec![alert],
+            "the alert with a failed delivery should be returned"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     #[tokio::test]
     async fn expectorate_rx_list_resendable() {
-        let query = DataStore::rx_list_resendable_events_query(
+        let query = DataStore::rx_list_resendable_alerts_query(
             AlertReceiverUuid::nil(),
         );
 
         expectorate_query_contents(
             &query,
-            "tests/output/webhook_rx_list_resendable_events.sql",
+            "tests/output/webhook_rx_list_resendable_alerts.sql",
         )
         .await;
     }
 
     #[tokio::test]
-    async fn explain_rx_list_resendable_events() {
-        let logctx = dev::test_setup_log("explain_rx_list_resendable_events");
+    async fn explain_rx_list_resendable_alerts() {
+        let logctx = dev::test_setup_log("explain_rx_list_resendable_alerts");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
-        let query = DataStore::rx_list_resendable_events_query(
+        let query = DataStore::rx_list_resendable_alerts_query(
             AlertReceiverUuid::nil(),
         );
         let explanation = query
@@ -617,6 +894,150 @@ mod test {
             !explanation.contains("FULL SCAN"),
             "Found an unexpected FULL SCAN: {}",
             explanation
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_webhook_delivery_list_default() {
+        explain_delivery_list_query(
+            "explain_webhook_delivery_list_default",
+            WebhookDeliveryFilters::default(),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_webhook_delivery_list_created_time() {
+        let now = Utc::now();
+        explain_delivery_list_query(
+            "explain_webhook_delivery_list_created_time",
+            WebhookDeliveryFilters::new()
+                .after(now - chrono::TimeDelta::hours(1))
+                .expect("`after` is before `before`")
+                .before(now)
+                .expect("`before` is after `after`"),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_webhook_delivery_list_only_receiver() {
+        explain_delivery_list_query(
+            "explain_webhook_delivery_list_only_receiver",
+            // Build the filter struct directly rather than going through the
+            // `for_receiver` builder, which requires an `authz::AlertReceiver`
+            // for a receiver that doesn't exist in this empty test database.
+            WebhookDeliveryFilters {
+                rx_id: Some(AlertReceiverUuid::new_v4()),
+                ..Default::default()
+            },
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_webhook_delivery_list_only_alert() {
+        explain_delivery_list_query(
+            "explain_webhook_delivery_list_only_alert",
+            WebhookDeliveryFilters {
+                alert_id: Some(AlertUuid::new_v4()),
+                ..Default::default()
+            },
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_webhook_delivery_list_only_states() {
+        explain_delivery_list_query(
+            "explain_webhook_delivery_list_only_states",
+            WebhookDeliveryFilters::new().with_states([
+                model::AlertDeliveryState::Pending,
+                model::AlertDeliveryState::Failed,
+            ]),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_webhook_delivery_list_only_triggers() {
+        explain_delivery_list_query(
+            "explain_webhook_delivery_list_only_triggers",
+            WebhookDeliveryFilters::new().with_triggers([
+                model::AlertDeliveryTrigger::Alert,
+                model::AlertDeliveryTrigger::Resend,
+            ]),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_webhook_delivery_list_receiver_and_states() {
+        explain_delivery_list_query(
+            "explain_webhook_delivery_list_receiver_and_states",
+            WebhookDeliveryFilters {
+                rx_id: Some(AlertReceiverUuid::new_v4()),
+                states: vec![model::AlertDeliveryState::Pending],
+                ..Default::default()
+            },
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_webhook_delivery_list_all_filters() {
+        let now = Utc::now();
+        explain_delivery_list_query(
+            "explain_webhook_delivery_list_all_filters",
+            WebhookDeliveryFilters {
+                before: Some(now),
+                after: Some(now - chrono::TimeDelta::hours(2)),
+                rx_id: Some(AlertReceiverUuid::new_v4()),
+                alert_id: Some(AlertUuid::new_v4()),
+                states: vec![
+                    model::AlertDeliveryState::Pending,
+                    model::AlertDeliveryState::Failed,
+                ],
+                triggers: vec![
+                    model::AlertDeliveryTrigger::Alert,
+                    model::AlertDeliveryTrigger::Resend,
+                ],
+            },
+        )
+        .await
+    }
+
+    async fn explain_delivery_list_query(
+        test_name: &str,
+        filters: WebhookDeliveryFilters,
+    ) {
+        let logctx = dev::test_setup_log(test_name);
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let pagparams = DataPageParams::<'_, (DateTime<Utc>, Uuid)> {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit: std::num::NonZeroU32::new(100).unwrap(),
+        };
+        eprintln!("--- filters: {filters:#?}\n");
+
+        let query =
+            DataStore::webhook_delivery_list_query(&filters, &pagparams);
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        eprintln!("--- explanation: {explanation}");
+
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {explanation}",
         );
 
         db.terminate().await;

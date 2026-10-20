@@ -61,6 +61,7 @@ use nexus_db_model::VmmState;
 use nexus_types::identity::Asset;
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
+use omicron_common::http_client::internal_http_client;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
@@ -614,7 +615,10 @@ async fn notify_pantry_upstairs(
     };
 
     let endpoint = format!("http://{}", pantry_address);
-    let client = crucible_pantry_client::Client::new(&endpoint);
+    let client = crucible_pantry_client::Client::new_with_client(
+        &endpoint,
+        internal_http_client(),
+    );
 
     let replace_request = crucible_pantry_client::types::ReplaceRequest {
         volume_construction_request,

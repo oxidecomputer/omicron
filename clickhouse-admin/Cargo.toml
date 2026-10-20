@@ -16,6 +16,7 @@ flume = {workspace = true, features = ["async"]}
 http.workspace = true
 illumos-utils.workspace = true
 omicron-common.workspace = true
+omicron-generation-kinds.workspace = true
 omicron-uuid-kinds.workspace = true
 oxide-tokio-rt.workspace = true
 oximeter-db.workspace = true
@@ -48,6 +49,8 @@ serde_json.workspace = true
 slog-term.workspace = true
 subprocess.workspace = true
 url.workspace = true
+uuid.workspace = true
+chrono-tz.workspace = true
 
 [lints]
 workspace = true

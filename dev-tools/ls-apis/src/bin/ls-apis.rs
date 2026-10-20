@@ -10,8 +10,8 @@ use clap::{Args, Parser, Subcommand};
 use indent_write::indentable::Indentable;
 use omicron_ls_apis::{
     AllApiMetadata, ApiConsumerStatus, ApiDependencyFilter, ApiMetadata,
-    FailedConsumerCheck, LoadArgs, ServerComponentName, SystemApis,
-    VersionedHow, plural,
+    FailedConsumerCheck, LoadArgs, PatchedDepPolicy, ServerComponentName,
+    SystemApis, VersionedHow, plural,
 };
 use parse_display::{Display, FromStr};
 
@@ -25,6 +25,14 @@ struct LsApis {
     /// path to metadata about APIs
     #[arg(long)]
     api_manifest: Option<Utf8PathBuf>,
+
+    /// Assume that any related-repo dependency that has been overridden by a
+    /// local Cargo `[patch]` corresponds to the commit pinned in
+    /// `package-manifest.toml`.  Without this flag, the tool will report an
+    /// error if it encounters such a dependency and cannot find a match by
+    /// commit.
+    #[arg(long, env = "LS_APIS_ASSUME_PATCHED_DEPS_MATCH")]
+    assume_patched_deps_match: bool,
 
     #[command(subcommand)]
     cmd: Cmds,
@@ -172,13 +180,21 @@ fn run_apis(apis: &SystemApis, args: ShowDepsArgs) -> Result<()> {
         for c in apis.api_consumers(&api.client_package_name, args.filter)? {
             let (repo_name, package_path) =
                 apis.package_label(c.server_pkgname)?;
+            let note = match metadata
+                .server_component(c.server_pkgname)
+                .and_then(|component| component.display_note())
+            {
+                Some(note) => format!(" [{note}]"),
+                None => String::new(),
+            };
             println!(
-                "    consumed by: {} ({}/{}) via {} path{}",
+                "    consumed by: {} ({}/{}) via {} path{}{}",
                 c.server_pkgname,
                 repo_name,
                 package_path,
                 c.dep_paths.len(),
                 if c.dep_paths.len() == 1 { "" } else { "s" },
+                note,
             );
             if args.show_deps {
                 for (i, dep_path) in c.dep_paths.iter().enumerate() {
@@ -266,7 +282,15 @@ fn print_server_components<'a>(
 ) -> Result<()> {
     for s in server_components.into_iter() {
         let (repo_name, pkg_path) = apis.package_label(s)?;
-        println!("{}{} ({}/{})", prefix, s, repo_name, pkg_path);
+        match metadata.server_component(s).and_then(|c| c.display_note()) {
+            Some(note) => println!(
+                "{}{} ({}/{}) [{}]",
+                prefix, s, repo_name, pkg_path, note,
+            ),
+            None => {
+                println!("{}{} ({}/{})", prefix, s, repo_name, pkg_path)
+            }
+        }
         for api in metadata
             .apis()
             .filter(|a| apis.is_producer_of(s, &a.client_package_name))
@@ -307,7 +331,7 @@ fn run_servers(apis: &SystemApis, args: DotArgs) -> Result<()> {
             print_server_components(
                 apis,
                 metadata,
-                metadata.server_components(),
+                metadata.server_components().map(|c| c.name()),
                 "",
                 args.show_deps,
                 args.filter,
@@ -324,11 +348,24 @@ impl TryFrom<&LsApis> for LoadArgs {
         let self_manifest_dir_str = std::env::var("CARGO_MANIFEST_DIR")
             .context("expected CARGO_MANIFEST_DIR in environment")?;
         let self_manifest_dir = Utf8PathBuf::from(self_manifest_dir_str);
+        // The API manifest is at the root of this particular package.
         let api_manifest_path = args
             .api_manifest
             .clone()
             .unwrap_or_else(|| self_manifest_dir.join("api-manifest.toml"));
-        Ok(LoadArgs { api_manifest_path })
+
+        // This package is two levels down from the workspace root.
+        let mut workspace_root = self_manifest_dir;
+        workspace_root.pop();
+        workspace_root.pop();
+
+        let patched_dep_policy = if args.assume_patched_deps_match {
+            PatchedDepPolicy::AssumeMatch
+        } else {
+            PatchedDepPolicy::Reject
+        };
+
+        Ok(LoadArgs { workspace_root, api_manifest_path, patched_dep_policy })
     }
 }
 

@@ -28,7 +28,9 @@ use nexus_types::external_api::internet_gateway::{
 };
 use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::ip_pool::IpPool;
+use nexus_types::external_api::ip_pool::IpPoolAssignment;
 use nexus_types::external_api::ip_pool::IpPoolCreate;
+use nexus_types::external_api::ip_pool::IpPoolType;
 use nexus_types::external_api::ip_pool::IpVersion;
 use nexus_types::external_api::policy::SiloRole;
 use nexus_types::external_api::project;
@@ -367,13 +369,15 @@ async fn test_vpc_create_attaches_all_default_pools_to_igw(
     let pool_v4: IpPool = NexusRequest::objects_post(
         client,
         "/v1/system/ip-pools",
-        &IpPoolCreate::new(
-            IdentityMetadataCreateParams {
+        &IpPoolCreate {
+            identity: IdentityMetadataCreateParams {
                 name: "pool-v4".parse().unwrap(),
                 description: "IPv4 pool".to_string(),
             },
-            IpVersion::V4,
-        ),
+            ip_version: IpVersion::V4,
+            pool_type: IpPoolType::Unicast,
+            assignment: IpPoolAssignment::Silos,
+        },
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute_and_parse_unwrap()
@@ -382,13 +386,15 @@ async fn test_vpc_create_attaches_all_default_pools_to_igw(
     let pool_v6: IpPool = NexusRequest::objects_post(
         client,
         "/v1/system/ip-pools",
-        &IpPoolCreate::new(
-            IdentityMetadataCreateParams {
+        &IpPoolCreate {
+            identity: IdentityMetadataCreateParams {
                 name: "pool-v6".parse().unwrap(),
                 description: "IPv6 pool".to_string(),
             },
-            IpVersion::V6,
-        ),
+            ip_version: IpVersion::V6,
+            pool_type: IpPoolType::Unicast,
+            assignment: IpPoolAssignment::Silos,
+        },
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute_and_parse_unwrap()
@@ -396,8 +402,7 @@ async fn test_vpc_create_attaches_all_default_pools_to_igw(
 
     // Create a silo and link both pools as silo defaults.
     let silo =
-        create_silo(client, "test-silo", true, SiloIdentityMode::LocalOnly)
-            .await;
+        create_silo(client, "test-silo", SiloIdentityMode::LocalOnly).await;
     link_ip_pool(client, "pool-v4", &silo.identity.id, true).await;
     link_ip_pool(client, "pool-v6", &silo.identity.id, true).await;
 
@@ -428,6 +433,7 @@ async fn test_vpc_create_attaches_all_default_pools_to_igw(
                 name: "test-project".parse().unwrap(),
                 description: "".to_string(),
             },
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(user.id))
@@ -444,6 +450,7 @@ async fn test_vpc_create_attaches_all_default_pools_to_igw(
             },
             ipv6_prefix: None,
             dns_name: "test-vpc".parse().unwrap(),
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(user.id))
@@ -504,13 +511,15 @@ async fn test_vpc_create_attaches_only_ipv4_default_pool_to_igw(
     let pool_v4: IpPool = NexusRequest::objects_post(
         client,
         "/v1/system/ip-pools",
-        &IpPoolCreate::new(
-            IdentityMetadataCreateParams {
+        &IpPoolCreate {
+            identity: IdentityMetadataCreateParams {
                 name: "pool-v4".parse().unwrap(),
                 description: "IPv4 pool".to_string(),
             },
-            IpVersion::V4,
-        ),
+            ip_version: IpVersion::V4,
+            pool_type: IpPoolType::Unicast,
+            assignment: IpPoolAssignment::Silos,
+        },
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute_and_parse_unwrap()
@@ -519,13 +528,15 @@ async fn test_vpc_create_attaches_only_ipv4_default_pool_to_igw(
     let _pool_v6: IpPool = NexusRequest::objects_post(
         client,
         "/v1/system/ip-pools",
-        &IpPoolCreate::new(
-            IdentityMetadataCreateParams {
+        &IpPoolCreate {
+            identity: IdentityMetadataCreateParams {
                 name: "pool-v6".parse().unwrap(),
                 description: "IPv6 pool".to_string(),
             },
-            IpVersion::V6,
-        ),
+            ip_version: IpVersion::V6,
+            pool_type: IpPoolType::Unicast,
+            assignment: IpPoolAssignment::Silos,
+        },
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute_and_parse_unwrap()
@@ -533,8 +544,7 @@ async fn test_vpc_create_attaches_only_ipv4_default_pool_to_igw(
 
     // Create a silo and link both pools, but only the IPv4 pool as a default.
     let silo =
-        create_silo(client, "test-silo", true, SiloIdentityMode::LocalOnly)
-            .await;
+        create_silo(client, "test-silo", SiloIdentityMode::LocalOnly).await;
     link_ip_pool(client, "pool-v4", &silo.identity.id, true).await;
     link_ip_pool(client, "pool-v6", &silo.identity.id, false).await;
 
@@ -565,6 +575,7 @@ async fn test_vpc_create_attaches_only_ipv4_default_pool_to_igw(
                 name: "test-project".parse().unwrap(),
                 description: "".to_string(),
             },
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(user.id))
@@ -581,6 +592,7 @@ async fn test_vpc_create_attaches_only_ipv4_default_pool_to_igw(
             },
             ipv6_prefix: None,
             dns_name: "test-vpc".parse().unwrap(),
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(user.id))

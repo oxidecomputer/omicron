@@ -5,8 +5,6 @@
 //! Benchmarks for the implementation of the P² algorithm with
 //! quantile estimation.
 
-// Copyright 2024 Oxide Computer Company
-
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use oximeter_types::Quantile;
 use rand_distr::{Distribution, Normal};

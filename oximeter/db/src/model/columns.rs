@@ -4,8 +4,6 @@
 
 //! Constants used for common column names.
 
-// Copyright 2024 Oxide Computer Company
-
 pub const TIMESERIES_NAME: &str = "timeseries_name";
 pub const TIMESERIES_KEY: &str = "timeseries_key";
 pub const DATUM_TYPE: &str = "datum_type";

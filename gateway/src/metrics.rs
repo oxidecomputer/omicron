@@ -17,6 +17,8 @@ use gateway_sp_comms::VersionedSpState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::backoff;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use oximeter::MetricsError;
 use oximeter::types::Cumulative;
 use oximeter::types::ProducerRegistry;
@@ -46,7 +48,7 @@ pub struct Metrics {
 
 struct Handles {
     addrs_tx: watch::Sender<Vec<SocketAddrV6>>,
-    rack_id_tx: Option<oneshot::Sender<Uuid>>,
+    rack_id_tx: Option<oneshot::Sender<RackUuid>>,
     server: JoinHandle<anyhow::Result<()>>,
 }
 
@@ -90,7 +92,7 @@ struct SpPoller {
     known_state: Option<SpUnderstanding>,
     components: HashMap<SpComponent, ComponentMetrics>,
     log: slog::Logger,
-    rack_id: Uuid,
+    rack_id: RackUuid,
     mgs_id: Uuid,
     sample_tx: broadcast::Sender<Vec<Sample>>,
 }
@@ -269,7 +271,7 @@ impl Metrics {
         Self { inner: Some(Handles { addrs_tx, rack_id_tx, server }) }
     }
 
-    pub fn set_rack_id(&mut self, rack_id: Uuid) {
+    pub fn set_rack_id(&mut self, rack_id: RackUuid) {
         let tx = self.inner.as_mut().and_then(|i| i.rack_id_tx.take());
         if let Some(tx) = tx {
             // If the task that starts sensor pollers has gone away already,
@@ -379,7 +381,7 @@ impl oximeter::Producer for Producer {
 async fn start_pollers(
     log: slog::Logger,
     apictx: Arc<ServerContext>,
-    rack_id: oneshot::Receiver<Uuid>,
+    rack_id: oneshot::Receiver<RackUuid>,
     mgs_id: Uuid,
     sample_tx: broadcast::Sender<Vec<Sample>>,
 ) -> anyhow::Result<()> {
@@ -636,7 +638,7 @@ impl SpPoller {
                             // These are supposed to always be strings. But, if we
                             // see one that's not a string, fall back to the hex
                             // representation rather than panicking.
-                            let hex = hex::encode(dev.component.id);
+                            let hex = hex::encode(dev.component.id());
                             slog::warn!(
                                 &self.log,
                                 "a SP component ID was not a string! this isn't \
@@ -652,7 +654,7 @@ impl SpPoller {
                     // every device on the SP...it would be cool if Oximeter let us
                     // reference count them...
                     let target = metric::HardwareComponent {
-                        rack_id: self.rack_id,
+                        rack_id: self.rack_id.into_untyped_uuid(),
                         gateway_id: self.mgs_id,
                         chassis_model: Cow::Owned(model.clone()),
                         chassis_revision: current_state.revision,
@@ -1277,6 +1279,12 @@ fn comms_error_str(error: CommunicationError) -> &'static str {
         }
         CommunicationError::BadDecompressionSize { .. } => {
             "bad_decompression_size"
+        }
+        CommunicationError::HostPanicDataChanged { .. } => {
+            "host_panic_data_changed"
+        }
+        CommunicationError::HostBootfailDataChanged { .. } => {
+            "host_boot_fail_data_changed"
         }
     }
 }

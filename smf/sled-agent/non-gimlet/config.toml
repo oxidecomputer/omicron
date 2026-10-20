@@ -1,47 +1,33 @@
 # Sled Agent Configuration
 
-# Identifies whether sled agent treats itself as a scrimlet or a gimlet.
+# How this sled is deployed. One of:
 #
-# If this is set to "scrimlet", the sled agent treats itself as a scrimlet.
-# If this is set to "gimlet", the sled agent treats itself as a gimlet.
-# If this is set to "auto":
-# - On illumos, the sled automatically detects whether or not it is a scrimlet.
-# - On all other platforms, the sled assumes it is a gimlet.
-sled_mode = "scrimlet"
-
-# Identifies the revision of the sidecar that is attached, if one is attached.
-# TODO: This field should be removed once Gimlets have the ability to auto-detect
-# this information.
-sidecar_revision.soft_zone = { front_port_count = 1, rear_port_count = 1 }
+#   kind = "production"
+#     Oxide rack. The hardware monitor detects the Tofino ASIC.
+#     Optional: sidecar_revision (default "b").
+#
+#   kind = "virtual"
+#     Propolis-hosted lab. A SoftNPU device, detected at startup, makes the
+#     sled a scrimlet. Requires front_port_count and rear_port_count.
+#
+#   kind = "standalone"
+#     One host running a SoftNPU zone. Always a scrimlet.
+#     Requires front_port_count and rear_port_count.
+#
+#   kind = "custom"
+#     Explicit sled_mode and switch table.
+#     sled_mode: "auto", "sled", or "scrimlet".
+#     switch.kind: "tofino_asic" or "tofino_stub" (optional sidecar_revision),
+#       "soft_npu_propolis_device" or "soft_npu_zone" (front_port_count and
+#       rear_port_count).
+#     "tofino_asic" and "soft_npu_propolis_device" are detected, so they take
+#       sled_mode "auto"; "tofino_stub" and "soft_npu_zone" are not, so they
+#       take "scrimlet". "sled" ignores the switch and never runs one.
+deployment = { kind = "standalone", front_port_count = 1, rear_port_count = 1 }
 
 # Setting this to true causes sled-agent to always report that its time is
 # in-sync, rather than querying its NTP zone.
 skip_timesync = false
-
-# For testing purposes, a file-backed virtual disk can be manually created with
-# the following:
-#
-# # truncate -s 10GB <name>.vdev
-#
-# Note that you'll need to create one such file for each disk below.
-# `cargo xtask virtual-hardware create` does this for you.
-#
-# These paths have the prefix of either "u2" or "m2", followed by an underscore,
-# followed by a string that is embedded into their fake serial values.
-vdevs = [
-  "m2_0.vdev",
-  "m2_1.vdev",
-
-  "u2_0.vdev",
-  "u2_1.vdev",
-  "u2_2.vdev",
-  "u2_3.vdev",
-  "u2_4.vdev",
-  "u2_5.vdev",
-  "u2_6.vdev",
-  "u2_7.vdev",
-  "u2_8.vdev",
-]
 
 # The amount of memory held back for services which exist between zero and one
 # times on this system. As this is a non-Gimlet target, it is likely that
@@ -105,7 +91,37 @@ swap_device_size_gb = 64
 # as-is.
 switch_zone_maghemite_links = ["tfportrear0_0"]
 
-data_links = ["net0", "net1"]
+# For testing purposes, a file-backed virtual disk can be manually created with
+# the following:
+#
+# # truncate -s 10GB <name>.vdev
+#
+# Note that you'll need to create one such file for each disk below.
+# `cargo xtask virtual-hardware create` does this for you.
+#
+# These paths have the prefix of either "u2" or "m2", followed by an underscore,
+# followed by a string that is embedded into their fake serial values.
+[external_disks]
+kind = "hardcoded"
+vdevs = [
+  "m2_0.vdev",
+  "m2_1.vdev",
+
+  "u2_0.vdev",
+  "u2_1.vdev",
+  "u2_2.vdev",
+  "u2_3.vdev",
+  "u2_4.vdev",
+  "u2_5.vdev",
+  "u2_6.vdev",
+  "u2_7.vdev",
+  "u2_8.vdev",
+]
+disks = []
+
+[data_links]
+kind = "virtual"
+devices = ["net0", "net1"]
 
 [dropshot]
 default_request_body_max_bytes = 1048576
@@ -123,3 +139,4 @@ if_exists = "append"
 resolve = { which = "local", priv_key = "/opt/oxide/sled-agent/pkg/test-sprockets-auth-1.key.pem", cert_chain = "/opt/oxide/sled-agent/pkg/test-sprockets-auth-1.certlist.pem" }
 attest = { which = "local", priv_key = "/opt/oxide/sled-agent/pkg/test-alias-1.key.pem", cert_chain = "/opt/oxide/sled-agent/pkg/test-alias-1.certlist.pem", log = "/opt/oxide/sled-agent/pkg/sprockets-log.bin", test_corpus = [ "/opt/oxide/sled-agent/pkg/testing-measurements/corim-rot.cbor", "/opt/oxide/sled-agent/pkg/testing-measurements/corim-sp.cbor"] }
 roots = ["/opt/oxide/sled-agent/pkg/test-root-a.cert.pem"]
+enforce = "Enforced"

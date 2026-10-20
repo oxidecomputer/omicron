@@ -4,10 +4,10 @@
 
 //! OxQL shell implementation.
 
-// Copyright 2026 Oxide Computer
-
 use super::{list_timeseries, prepare_columns};
-use crate::{Client, OxqlResult, make_client, oxql::query::QueryAuthzScope};
+use crate::User;
+use crate::{Client, OxqlResult, oxql::query::QueryAuthzScope};
+use anyhow::Context as _;
 use clap::Args;
 use crossterm::style::Stylize;
 use oxql_types::Table;
@@ -16,7 +16,7 @@ use reedline::DefaultPromptSegment;
 use reedline::Reedline;
 use reedline::Signal;
 use slog::Logger;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 
 /// Ouptut formats for printing the results of an OxQL query.
 #[derive(Clone, Copy, Debug, Default, clap::ValueEnum)]
@@ -219,11 +219,14 @@ async fn make_oxql_client(
     port: u16,
     log: &Logger,
 ) -> anyhow::Result<Client> {
-    let client = make_client(address, port, log).await?;
+    let addr = SocketAddr::new(address, port);
+    let client = Client::new(User::Reader, addr, &log);
 
     // Workaround to ensure the client has all available timeseries.
     let dummy = "foo:bar".parse().unwrap();
-    let _ = client.schema_for_timeseries(&dummy).await;
+    client.schema_for_timeseries(&dummy).await.context(
+        "Error fetching timeseries schema, database may not be initialized",
+    )?;
 
     Ok(client)
 }

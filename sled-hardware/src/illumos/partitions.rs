@@ -15,8 +15,9 @@ use crate::is_oxide_sled;
 use camino::Utf8Path;
 use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolName;
-use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::DiskVariant;
 use slog::Logger;
 use slog::info;
 
@@ -429,8 +430,16 @@ mod test {
     use super::*;
     use crate::DiskPaths;
     use camino::Utf8PathBuf;
-    use omicron_test_utils::dev::{mock_disk_identity, test_setup_log};
+    use omicron_test_utils::dev::test_setup_log;
     use std::path::Path;
+
+    fn mock_disk_identity() -> DiskIdentity {
+        DiskIdentity {
+            vendor: "MockVendor".to_string(),
+            serial: "MOCKSERIAL".to_string(),
+            model: "MOCKMODEL".to_string(),
+        }
+    }
 
     struct FakePartition {
         index: usize,

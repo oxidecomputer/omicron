@@ -24,11 +24,11 @@ use iddqd::id_upcast;
 use illumos_utils::zone::OmicronZoneConfigExt;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
-use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use sled_agent_types::disk::DatasetConfig;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::OmicronZoneConfig;
 use sled_agent_types::inventory::OrphanedDataset;
@@ -203,7 +203,7 @@ impl OmicronDatasets {
 
         // Actually remove the gone-from-config datasets
         for dataset_id in datasets_to_remove {
-            self.datasets.remove(&dataset_id);
+            self.datasets.remove(dataset_id);
         }
 
         // Check against the filesystem for any orphaned datasets and attempt to

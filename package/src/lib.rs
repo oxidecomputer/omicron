@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Common code shared between `omicron-package` and `thing-flinger` binaries.
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -61,10 +65,6 @@ pub enum TargetCommand {
         /// The kind of machine to build for.
         #[clap(short, long, help_heading = "Preset overrides")]
         machine: Option<crate::target::Machine>,
-
-        /// The switch to use for the target.
-        #[clap(short, long, help_heading = "Preset overrides")]
-        switch: Option<crate::target::Switch>,
 
         #[clap(short, long, help_heading = "Preset overrides")]
         /// Specify whether nexus will run in a single-sled or multi-sled

@@ -4,12 +4,10 @@
 
 //! Server for sprockets-secured requests over the bootstrap network.
 
-use crate::bootstrap::params::Request;
-use crate::bootstrap::params::RequestEnvelope;
-use crate::bootstrap::params::version;
-use crate::bootstrap::views::Response;
-use crate::bootstrap::views::ResponseEnvelope;
-use crate::bootstrap::views::SledAgentResponse;
+use sled_agent_bootstrap_common::sprockets::{
+    Request, RequestEnvelope, Response, ResponseEnvelope, SledAgentResponse,
+    version,
+};
 use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;

@@ -1,0 +1,93 @@
+# omicron-generation-kinds
+
+In omicron and other Oxide projects, we use generation numbers to track many
+different kinds of monotonically-increasing counters: configuration versions,
+per-resource versions used for optimistic concurrency control, and so on. Using
+a single `Generation` type for all of them risks mixing up all the different
+kinds of counters.
+
+To address that, we're actively moving towards typed generation numbers with the
+https://github.com/oxidecomputer/oxide-generation[oxide-generation]
+crate. The goal is that each kind of counter will have a marker type
+representing a _generation kind_ associated with it. Then, the type system will
+make it significantly harder to mix different kinds of counters.
+
+*`omicron-generation-kinds` is a centralized registry for generation kinds*, one
+that can be shared across Oxide repos. `omicron-generation-kinds` supports
+no-std so the kinds can be shared with embedded code as well.
+
+This crate is the generation-number analogue of `omicron-uuid-kinds`; see
+`uuid-kinds/README.adoc` for the broader rationale, which applies here as well.
+
+## Adding a new generation kind
+
+Start by adding a new element to the invocation of the
+`impl_typed_generation_kinds!` macro in `src/lib.rs`. For example:
+
+[source,rust]
+```
+impl_typed_generation_kinds! {
+    // ...
+    kinds = {
+        // ...
+        Widget = {},
+        // ...
+    },
+}
+```
+
+This will:
+
+- Create a new `TypedGenerationKind` called `WidgetGenerationKind`. This kind
+  will become the type parameter to `TypedGeneration` and other related generic
+  types. (The `Generation` infix keeps these distinct from the `WidgetKind` UUID
+  kinds in `omicron-uuid-kinds`.)
+- Create a type alias
+  `type WidgetGeneration = TypedGeneration<WidgetGenerationKind>`.
+
+Then, start changing your generation types over. It's generally easiest to
+change the type of a generation number in a struct or enum field, and start
+pulling that thread.
+
+- If your generation number isn't used in too many places, you can usually just
+  change all users in one go.
+
+- If your generation number is widely used, you may need to break your change up
+  across several commits. It's easiest to carve out a section of your code to
+  make changes in, and use the `GenericGeneration` conversions into and out of
+  this code.
+
+[IMPORTANT]
+.Using type aliases
+====
+For `TypedGeneration<T>`, prefer to use the type aliases. For example,
+`AlertGeneration` rather than `TypedGeneration<AlertGenerationKind>`.
+
+Other types that use the same kinds, like
+`nexus_db_model::DbTypedGeneration<T>`, don't have aliases defined for them.
+That's because their frequency of use falls below the threshold at which the
+benefits of type aliases outweigh the costs.
+====
+
+Some special cases:
+
+. If part of your change is at an OpenAPI schema boundary, then you generally
+also want to have clients use the same generation types. The best way to do that
+currently is to use a `replace` directive. Note that changing the type of a
+field in a versioned API type changes the OpenAPI document, and so requires
+going through the usual API versioning process.
+
+. For Nexus database storage, `nexus-db-model` has a `DbTypedGeneration` generic
+type which can be used. `DbTypedGeneration` should not appear in public fields
+or signatures above the datastore layer; instead, prefer to use the regular
+`TypedGeneration` and only convert to `DbTypedGeneration` within the lowest
+layers (i.e. using getters/setters). This is because the regular `TypedGeneration`
+has much more infrastructure built around it.
+
+## Relationship to `omicron_common::api::external::Generation`
+
+`omicron_common::api::external::Generation` -- the untyped `Generation` that
+appears in omicron's OpenAPI documents -- is a re-export of
+`oxide_generation::Generation`, which this crate also re-exports. The two
+paths name the same type, so untyped values move freely between them, and the
+`GenericGeneration` trait converts between untyped and typed values.

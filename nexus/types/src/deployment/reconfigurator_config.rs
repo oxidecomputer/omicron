@@ -4,11 +4,10 @@
 
 //! Runtime configuration for reconfigurator
 
-use std::fmt::{self, Write};
+use std::fmt;
 
 use chrono::{DateTime, TimeZone, Utc};
 use daft::Diffable;
-use indent_write::fmt::IndentWriter;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -116,9 +115,19 @@ impl fmt::Display for ReconfiguratorConfigViewDisplay<'_> {
 )]
 pub struct ReconfiguratorConfig {
     pub planner_enabled: bool,
+    #[serde(default)]
     pub planner_config: PlannerConfig,
     pub tuf_repo_pruner_enabled: bool,
+    pub blueprint_pruner_enabled: bool,
+    pub blueprint_pruner_nkeep: u32,
 }
+
+/// Default value for `ReconfiguratorConfig::blueprint_pruner_nkeep`
+///
+/// This is intended to cover 1-2 upgrades' worth of blueprints so that
+/// developers and support can debug a live system back through its last
+/// upgrade.
+pub const DEFAULT_BLUEPRINT_PRUNER_NKEEP: u32 = 1000;
 
 impl ReconfiguratorConfig {
     pub fn display(&self) -> ReconfiguratorConfigDisplay<'_> {
@@ -132,6 +141,61 @@ impl Default for ReconfiguratorConfig {
             planner_enabled: true,
             planner_config: PlannerConfig::default(),
             tuf_repo_pruner_enabled: true,
+            blueprint_pruner_enabled: true,
+            blueprint_pruner_nkeep: DEFAULT_BLUEPRINT_PRUNER_NKEEP,
+        }
+    }
+}
+
+/// Controls how instances are disrupted during updates.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Diffable,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    strum::VariantArray,
+)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum ReconfiguratorDisruptionPolicy {
+    /// Terminate instances during updates -- do not attempt to migrate
+    /// instances. This is currently the default.
+    #[default]
+    Terminate,
+
+    /// Attempt to live-migrate instances, and terminate instances if migration
+    /// is not possible.
+    MigrateOrTerminate,
+
+    /// Live-migrate any potentially migratable instances, and block
+    /// reconfigurator progress if migration is not currently possible for
+    /// operational reasons.
+    ///
+    /// This will still cause instances to be terminated if it is impossible for
+    /// them to be live-migrated, such as if they use local storage.
+    MigrateOnly,
+}
+
+impl ReconfiguratorDisruptionPolicy {
+    pub const ALL_VARIANTS: &[Self] = <Self as strum::VariantArray>::VARIANTS;
+}
+
+impl fmt::Display for ReconfiguratorDisruptionPolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ReconfiguratorDisruptionPolicy::Terminate => write!(f, "terminate"),
+            ReconfiguratorDisruptionPolicy::MigrateOrTerminate => {
+                write!(f, "live-migrate or terminate")
+            }
+            ReconfiguratorDisruptionPolicy::MigrateOnly => {
+                write!(f, "live-migrate only")
+            }
         }
     }
 }
@@ -149,15 +213,15 @@ impl fmt::Display for ReconfiguratorConfigDisplay<'_> {
                     planner_enabled,
                     planner_config,
                     tuf_repo_pruner_enabled,
+                    blueprint_pruner_enabled,
+                    blueprint_pruner_nkeep,
                 },
         } = self;
         writeln!(f, "tuf repo pruner enabled: {}", tuf_repo_pruner_enabled)?;
+        writeln!(f, "blueprint pruner enabled: {}", blueprint_pruner_enabled)?;
+        writeln!(f, "blueprint pruner nkeep: {}", blueprint_pruner_nkeep)?;
         writeln!(f, "planner enabled: {}", planner_enabled)?;
-        writeln!(f, "planner config:")?;
-        // planner_config does its own indentation, so it's not necessary to
-        // use IndentWriter here -- and it adds its own newlines so we don't
-        // need to add any more.
-        write!(f, "{}", planner_config.display())?;
+        writeln!(f, "planner config:\n{}", planner_config.display())?;
 
         Ok(())
     }
@@ -179,23 +243,83 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
             planner_enabled,
             planner_config,
             tuf_repo_pruner_enabled,
+            blueprint_pruner_enabled,
+            blueprint_pruner_nkeep,
         } = self.diff;
 
-        let list = KvList::new(
-            None,
-            vec![
-                diff_row!(tuf_repo_pruner_enabled, "tuf repo pruner enabled"),
-                diff_row!(planner_enabled, "planner enabled"),
-            ],
-        );
+        // Add all our (direct) rows...
+        let mut kv_pairs = vec![
+            diff_row!(tuf_repo_pruner_enabled, "tuf repo pruner enabled"),
+            diff_row!(planner_enabled, "planner enabled"),
+            diff_row!(blueprint_pruner_enabled, "blueprint pruner enabled"),
+            diff_row!(blueprint_pruner_nkeep, "blueprint pruner nkeep"),
+        ];
+
+        // ... then append all the rows under `planner_config`.
+        kv_pairs.append(&mut planner_config.kv_pairs());
+
+        let list = KvList::new(None, kv_pairs);
+
         // No need for writeln! here because KvList adds its own newlines.
         write!(f, "{list}")?;
 
-        let mut indented = IndentWriter::new("    ", f);
-        writeln!(indented, "planner config:")?;
-        write!(indented, "{}", planner_config.display())?;
-
         Ok(())
+    }
+}
+
+/// Controls how the planner interacts with sleds that it needs to reboot to
+/// perform an update (e.g., of the SP or host OS).
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Diffable,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum SledUpdateRebootPolicy {
+    /// Reboot sleds without evacuating them first.
+    ///
+    /// This results in the fastest update time, but is the most disruptive to
+    /// instances on the sled: the sled will be rebooted out from under them.
+    ///
+    /// This is currently the default, but we expect to change the default to
+    /// `Evacuate` once all the supporting work to enable that is complete.
+    //
+    // TODO-correctness: This must remain the default until all the pieces
+    // required for sled evacuation land (in particular: the planner bits to
+    // mark sleds for evacuation and the Nexus bg task to enact sled
+    // evacuation). Once those are in place, we'll need to change this to
+    // `Evacuate` and update any existing configs persisted in the db to
+    // flip from this setting to `Evacuate`.
+    #[default]
+    ImmediateNoEvacuation,
+
+    /// Evacuate sleds before rebooting.
+    ///
+    /// With this policy, when the planner needs to schedule an update that will
+    /// cause a sled to reboot, it will first mark the sled for evacuation and
+    /// then wait for the sled to be fully evacuated before scheduling that
+    /// update.
+    Evacuate,
+}
+
+impl fmt::Display for SledUpdateRebootPolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ImmediateNoEvacuation => {
+                write!(f, "immediate (no evacuation)")
+            }
+            Self::Evacuate => {
+                write!(f, "evacuate")
+            }
+        }
     }
 }
 
@@ -203,6 +327,7 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
     Clone,
     Copy,
     Debug,
+    Default,
     Diffable,
     PartialEq,
     Eq,
@@ -212,44 +337,30 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
 )]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PlannerConfig {
-    /// Whether to add zones even if a mupdate override is present.
+    /// Policy for how the planner schedules updates that will induce reboots on
+    /// sleds.
     ///
-    /// Once Nexus-driven update is active on a customer system, we must not add
-    /// new zones while the system is recovering from a MUPdate.
-    ///
-    /// This setting, which is off by default, allows us to add zones
-    /// even if we've detected a recent MUPdate on the system.
-    pub add_zones_with_mupdate_override: bool,
+    /// If `sled_update_reboot_policy` is
+    /// [`SledUpdateRebootPolicy::ImmediateNoEvacuation`], the planner will not
+    /// mark sleds for evacuation at all, which means `disruption_policy` will
+    /// be ignored.
+    //
+    // We could combine this field with `disruption_policy` at the typesystem
+    // level to make it clear that `disruption_policy` is only applicable for
+    // certain `sled_update_reboot_policy` values, but that's less ergonomic
+    // from an omdb perspective: in most cases we expect to be adjusting only
+    // one or the other of these, and if we want to temporarily disable
+    // evacuation, we'll almost certainly want to preserve the existing
+    // `disruption_policy` whenever we reenable it.
+    pub sled_update_reboot_policy: SledUpdateRebootPolicy,
+
+    /// Disruption policy applied to sleds being evacuated.
+    pub disruption_policy: ReconfiguratorDisruptionPolicy,
 }
 
 impl PlannerConfig {
     pub fn display(&self) -> PlannerConfigDisplay<'_> {
         PlannerConfigDisplay { config: self }
-    }
-}
-
-// Allow the clippy::derivable_impls lint: spell out the default values for
-// these config values for clarity.
-#[expect(clippy::derivable_impls)]
-impl Default for PlannerConfig {
-    fn default() -> Self {
-        // By default, we block zone additions on mupdate overrides being
-        // present (see the docs on `add_zones_with_mupdate_override` above).
-        Self { add_zones_with_mupdate_override: false }
-    }
-}
-
-impl slog::KV for PlannerConfig {
-    fn serialize(
-        &self,
-        _record: &slog::Record,
-        serializer: &mut dyn slog::Serializer,
-    ) -> slog::Result {
-        let Self { add_zones_with_mupdate_override } = self;
-        serializer.emit_bool(
-            slog::Key::from("add_zones_with_mupdate_override"),
-            *add_zones_with_mupdate_override,
-        )
     }
 }
 
@@ -259,44 +370,45 @@ pub struct PlannerConfigDisplay<'a> {
 
 impl<'a> fmt::Display for PlannerConfigDisplay<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { config: PlannerConfig { add_zones_with_mupdate_override } } =
-            self;
-        let list = KvList::new(
-            None,
-            vec![KvPair::new_unchanged(
-                "add zones with mupdate override",
-                add_zones_with_mupdate_override.to_string(),
-            )],
-        );
-        // No need for writeln! here because KvList adds its own newlines.
-        write!(f, "{list}")
+        let Self {
+            config:
+                PlannerConfig { disruption_policy, sled_update_reboot_policy },
+        } = self;
+        writeln!(f, "    disruption policy : {}", disruption_policy)?;
+        writeln!(
+            f,
+            "    sled update reboot policy: {}",
+            sled_update_reboot_policy
+        )?;
+        Ok(())
     }
 }
 
 impl<'a> PlannerConfigDiff<'a> {
-    pub fn display<'b>(&'b self) -> PlannerConfigDiffDisplay<'a, 'b> {
+    pub fn display(&self) -> PlannerConfigDiffDisplay<'a, '_> {
         PlannerConfigDiffDisplay { diff: self }
+    }
+
+    fn kv_pairs(&self) -> Vec<KvPair> {
+        let Self { disruption_policy, sled_update_reboot_policy } = self;
+        vec![
+            diff_row!(disruption_policy, "disruption policy"),
+            diff_row!(sled_update_reboot_policy, "sled update reboot policy"),
+        ]
     }
 }
 
-#[derive(Clone, Debug)]
 pub struct PlannerConfigDiffDisplay<'a, 'b> {
     diff: &'b PlannerConfigDiff<'a>,
 }
 
 impl fmt::Display for PlannerConfigDiffDisplay<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let PlannerConfigDiff { add_zones_with_mupdate_override } = self.diff;
-
-        let list = KvList::new(
-            None,
-            vec![diff_row!(
-                add_zones_with_mupdate_override,
-                "add zones with mupdate override"
-            )],
-        );
+        let list = KvList::new(None, self.diff.kv_pairs());
 
         // No need for writeln! here because KvList adds its own newlines.
-        write!(f, "{list}")
+        write!(f, "{list}")?;
+
+        Ok(())
     }
 }

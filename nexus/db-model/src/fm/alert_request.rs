@@ -6,6 +6,7 @@
 
 use crate::AlertClass;
 use crate::DbTypedUuid;
+use crate::SqlU32;
 use nexus_db_schema::schema::fm_alert_request;
 use nexus_types::fm;
 use omicron_uuid_kinds::{AlertKind, CaseKind, SitrepKind};
@@ -29,6 +30,10 @@ pub struct AlertRequest {
     /// emit a different comment string for an analogous determination across
     /// different software versions.
     pub comment: String,
+    /// The version of the alert class' schema that this alert's payload
+    /// conforms to.
+    #[diesel(column_name = "alert_version")]
+    pub version: SqlU32,
 }
 
 impl AlertRequest {
@@ -42,6 +47,7 @@ impl AlertRequest {
             requested_sitrep_id,
             payload,
             class,
+            version,
             comment,
         } = req;
         AlertRequest {
@@ -50,6 +56,7 @@ impl AlertRequest {
             requested_sitrep_id: requested_sitrep_id.into(),
             case_id: case_id.into(),
             class: class.into(),
+            version: SqlU32::new(version),
             payload,
             comment,
         }
@@ -63,6 +70,7 @@ impl From<AlertRequest> for fm::case::AlertRequest {
             requested_sitrep_id: req.requested_sitrep_id.into(),
             payload: req.payload,
             class: req.class.into(),
+            version: u32::from(req.version),
             comment: req.comment,
         }
     }

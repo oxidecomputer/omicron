@@ -14,6 +14,8 @@ use omicron_uuid_kinds::CaseEreportKind;
 use omicron_uuid_kinds::CaseEreportUuid;
 use omicron_uuid_kinds::CaseKind;
 use omicron_uuid_kinds::CaseUuid;
+use omicron_uuid_kinds::FactKind;
+use omicron_uuid_kinds::FactUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SupportBundleKind;
 use omicron_uuid_kinds::SupportBundleUuid;
@@ -64,6 +66,7 @@ pub(super) struct CaseBuilderRng {
     ereport_assignment_rng: TypedUuidRng<CaseEreportKind>,
     alert_rng: TypedUuidRng<AlertKind>,
     support_bundle_rng: TypedUuidRng<SupportBundleKind>,
+    fact_rng: TypedUuidRng<FactKind>,
 }
 
 impl CaseBuilderRng {
@@ -85,7 +88,11 @@ impl CaseBuilderRng {
             &mut sitrep.parent,
             (case_id, "support-bundle"),
         );
-        Self { alert_rng, ereport_assignment_rng, support_bundle_rng }
+        let fact_rng = TypedUuidRng::from_parent_rng(
+            &mut sitrep.parent,
+            (case_id, "case-fact"),
+        );
+        Self { alert_rng, ereport_assignment_rng, support_bundle_rng, fact_rng }
     }
 
     pub(super) fn next_alert(&mut self) -> AlertUuid {
@@ -98,5 +105,9 @@ impl CaseBuilderRng {
 
     pub(super) fn next_support_bundle(&mut self) -> SupportBundleUuid {
         self.support_bundle_rng.next()
+    }
+
+    pub(super) fn next_fact(&mut self) -> FactUuid {
+        self.fact_rng.next()
     }
 }

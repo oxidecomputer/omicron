@@ -5,9 +5,14 @@
 use crate::Responsiveness;
 use crate::config::Config;
 use crate::config::NetworkConfig;
+use crate::ereport;
+use crate::ereport::EreportState;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use futures::Future;
+use futures::future;
+use gateway_messages::SpPort;
 use gateway_messages::sp_impl;
 use gateway_messages::sp_impl::Sender;
 use gateway_messages::sp_impl::SpHandler;
@@ -18,10 +23,17 @@ use slog::error;
 use slog::info;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use tokio::net::UdpSocket;
+use tokio::select;
+use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::mpsc;
+use tokio::sync::oneshot;
+use tokio::sync::watch;
 
 /// Thin wrapper pairing a [`UdpSocket`] with a buffer sized for gateway
 /// messages.
@@ -97,6 +109,19 @@ impl UdpServer {
             local_addr,
             buf: [0; gateway_messages::MAX_SERIALIZED_SIZE],
         })
+    }
+
+    /// Binds one `UdpServer` for each of a simulated SP's two ports.
+    pub(crate) async fn bind_pair(
+        network_configs: &[NetworkConfig; 2],
+        log: &Logger,
+    ) -> Result<[Self; 2]> {
+        let (server0, server1) = future::try_join(
+            Self::new(&network_configs[0], log),
+            Self::new(&network_configs[1], log),
+        )
+        .await?;
+        Ok([server0, server1])
     }
 
     pub(crate) fn socket(&self) -> &Arc<UdpSocket> {
@@ -189,4 +214,168 @@ pub(crate) trait SimSpHandler: SpHandler {
         &mut self,
         signal: Box<dyn FnOnce() + Send>,
     );
+
+    /// Borrows the simulated SP handler's counter of power state changes.
+    ///
+    /// The simulated handler increments this every time the power state
+    /// changes.
+    fn power_state_changes(&self) -> &Arc<AtomicUsize>;
+}
+
+/// Commands sent from a simulated SP's handle to its [`UdpTask`].
+#[derive(Debug)]
+pub(crate) enum Command {
+    SetResponsiveness(Responsiveness, oneshot::Sender<Ack>),
+    SetThrottler(Option<mpsc::UnboundedReceiver<usize>>, oneshot::Sender<Ack>),
+    Ereport(ereport::Command),
+}
+
+#[derive(Debug)]
+pub(crate) struct Ack;
+
+/// A task that drives a [`SimSpHandler`] implementation (of type `H`) and its
+/// associated UDP ports.
+///
+/// This task receives `gateway-messages` requests on the simulated SP's two UDP
+/// ports ereport requests on the two (optional) ereport UDP ports, and
+/// [`Command`]s sent by the test framework. Control-plane `gateway-messages`
+/// requests are dispatched to the board-specific handler implementation. The
+/// handler is locked for the duration of each request.
+pub(crate) struct UdpTask<H> {
+    udp0: UdpServer,
+    udp1: UdpServer,
+    ereport_servers: Option<[UdpServer; 2]>,
+    ereport_state: EreportState,
+    handler: Arc<TokioMutex<H>>,
+    commands: mpsc::UnboundedReceiver<Command>,
+    responses_sent_count: watch::Sender<usize>,
+}
+
+impl<H> UdpTask<H>
+where
+    H: SimSpHandler<VLanId = SpPort>,
+{
+    /// Returns the task, along with a receiver for the count of responses it
+    /// has sent.
+    pub(crate) fn new(
+        servers: [UdpServer; 2],
+        ereport_servers: Option<[UdpServer; 2]>,
+        ereport_state: EreportState,
+        handler: Arc<TokioMutex<H>>,
+        commands: mpsc::UnboundedReceiver<Command>,
+    ) -> (Self, watch::Receiver<usize>) {
+        let [udp0, udp1] = servers;
+        let responses_sent_count = watch::Sender::new(0);
+        let responses_sent_count_rx = responses_sent_count.subscribe();
+        (
+            Self {
+                udp0,
+                udp1,
+                ereport_servers,
+                ereport_state,
+                handler,
+                commands,
+                responses_sent_count,
+            },
+            responses_sent_count_rx,
+        )
+    }
+
+    /// Runs the UDP task, handling requests in a loop until the handle is
+    /// dropped.
+    pub(crate) async fn run(mut self) -> Result<()> {
+        let mut out_buf = [0; gateway_messages::MAX_SERIALIZED_SIZE];
+        let mut responsiveness = Responsiveness::Responsive;
+        let mut throttle_count = usize::MAX;
+        let mut throttler: Option<mpsc::UnboundedReceiver<usize>> = None;
+
+        loop {
+            let incr_throttle_count: Pin<
+                Box<dyn Future<Output = Option<usize>> + Send>,
+            > = if let Some(throttler) = throttler.as_mut() {
+                Box::pin(throttler.recv())
+            } else {
+                Box::pin(future::pending())
+            };
+            let (ereport0, ereport1) = match self.ereport_servers.as_mut() {
+                Some([e0, e1]) => (Some(e0), Some(e1)),
+                None => (None, None),
+            };
+            select! {
+                Some(n) = incr_throttle_count => {
+                    throttle_count = throttle_count.saturating_add(n);
+                }
+
+                recv0 = self.udp0.recv_from(), if throttle_count > 0 => {
+                    if let Some((resp, addr)) = handle_request(
+                        &mut *self.handler.lock().await,
+                        recv0,
+                        &mut out_buf,
+                        responsiveness,
+                        SpPort::One,
+                    ).await? {
+                        throttle_count -= 1;
+                        self.udp0.send_to(resp, addr).await?;
+                        self.responses_sent_count.send_modify(|n| *n += 1);
+                    }
+                }
+
+                recv1 = self.udp1.recv_from(), if throttle_count > 0 => {
+                    if let Some((resp, addr)) = handle_request(
+                        &mut *self.handler.lock().await,
+                        recv1,
+                        &mut out_buf,
+                        responsiveness,
+                        SpPort::Two,
+                    ).await? {
+                        throttle_count -= 1;
+                        self.udp1.send_to(resp, addr).await?;
+                        self.responses_sent_count.send_modify(|n| *n += 1);
+                    }
+                }
+
+                recv = ereport::recv_request(ereport0) => {
+                    let (req, addr, sock) = recv?;
+                    let rsp = self.ereport_state.handle_request(&req, addr, &mut out_buf);
+                    sock.send_to(rsp, addr).await?;
+                }
+
+                recv = ereport::recv_request(ereport1) => {
+                    let (req, addr, sock) = recv?;
+                    let rsp = self.ereport_state.handle_request(&req, addr, &mut out_buf);
+                    sock.send_to(rsp, addr).await?;
+                }
+
+                command = self.commands.recv() => {
+                    // if sending half is gone, we're about to be killed anyway
+                    let command = match command {
+                        Some(command) => command,
+                        None => return Ok(()),
+                    };
+
+                    match command {
+                        Command::SetResponsiveness(r, tx) => {
+                            responsiveness = r;
+                            tx.send(Ack)
+                                .map_err(|_| "receiving half died").unwrap();
+                        }
+                        Command::SetThrottler(thr, tx) => {
+                            throttler = thr;
+
+                            // Either immediately start throttling, or
+                            // immediately stop throttling.
+                            if throttler.is_some() {
+                                throttle_count = 0;
+                            } else {
+                                throttle_count = usize::MAX;
+                            }
+                            tx.send(Ack)
+                                .map_err(|_| "receiving half died").unwrap();
+                        }
+                        Command::Ereport(cmd) => self.ereport_state.handle_command(cmd),
+                    }
+                }
+            }
+        }
+    }
 }

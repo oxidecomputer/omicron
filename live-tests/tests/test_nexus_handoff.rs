@@ -22,7 +22,7 @@ use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::blueprint_zone_type;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::NexusGeneration;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -179,7 +179,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         blueprint_edit_current_target(
             log,
             &nexus,
-            &|builder: &mut BlueprintBuilder| {
+            |builder: &mut BlueprintBuilder| {
                 let mut external_networking_alloc =
                     ExternalNetworkingAllocator::from_current_zones(
                         builder,
@@ -188,6 +188,9 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
                     .context(
                         "failed to construct external networking allocator",
                     )?;
+                let nexus_config = planning_input
+                    .external_service_networking_policy()
+                    .operator_nexus_config();
                 for current_nexus in current_nexus_zones.values() {
                     let external_ip = external_networking_alloc
                         .for_new_nexus()
@@ -198,6 +201,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
                             current_nexus.image_source.clone(),
                             external_ip,
                             next_generation,
+                            &nexus_config,
                         )
                         .context("adding Nexus zone")?;
                 }
@@ -275,7 +279,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         blueprint_edit_current_target(
             log,
             &nexus,
-            &|builder: &mut BlueprintBuilder| {
+            |builder: &mut BlueprintBuilder| {
                 builder.set_nexus_generation(next_generation);
                 Ok(())
             },
@@ -306,7 +310,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
                 );
                 match qq.state {
                     QuiesceState::DrainingSagas { .. } => Ok(()),
-                    _ => Err(CondCheckError::<()>::NotYet),
+                    _ => Err(CondCheckError::<()>::NotYet { status: None }),
                 }
             },
             &Duration::from_secs(1),
@@ -377,7 +381,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
                 );
                 match qq.state {
                     QuiesceState::Quiesced { .. } => Ok(()),
-                    _ => Err(CondCheckError::<()>::NotYet),
+                    _ => Err(CondCheckError::<()>::NotYet { status: None }),
                 }
             },
             &Duration::from_secs(1),
@@ -403,7 +407,9 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
                         );
                         match qq.state {
                             QuiesceState::Undetermined => {
-                                Err(CondCheckError::<()>::NotYet)
+                                Err(CondCheckError::<()>::NotYet {
+                                    status: None,
+                                })
                             }
                             QuiesceState::Running => Ok(()),
                             _ => panic!("unexpected new Nexus quiesce state"),
@@ -415,7 +421,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
                             "error fetching new Nexus quiesce state";
                             InlineErrorChain::new(&error),
                         );
-                        Err(CondCheckError::NotYet)
+                        Err(CondCheckError::NotYet { status: None })
                     }
                 }
             },
@@ -435,7 +441,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         blueprint_edit_current_target(
             log,
             new_nexus,
-            &|builder: &mut BlueprintBuilder| {
+            |builder: &mut BlueprintBuilder| {
                 for (id, current_zone) in &current_nexus_zones {
                     builder
                         .sled_expunge_zone(current_zone.sled_id, *id)
@@ -489,7 +495,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
 async fn check_internal_dns(
     log: &slog::Logger,
     blueprint: &Blueprint,
-    active_generation: Generation,
+    active_generation: NexusGeneration,
 ) -> Result<(), CondCheckError<anyhow::Error>> {
     // Compute what we expect to find, based on which Nexus instances in the
     // blueprint have the specified generation.
@@ -529,7 +535,7 @@ async fn check_internal_dns(
     let found_nexus_addrs = resolver
         .lookup_all_socket_v6(ServiceName::Nexus)
         .await
-        .map_err(|_| CondCheckError::NotYet)?
+        .map_err(|_| CondCheckError::NotYet { status: None })?
         .into_iter()
         .collect::<BTreeSet<_>>();
     debug!(
@@ -542,7 +548,7 @@ async fn check_internal_dns(
     if expected_nexus_addrs == found_nexus_addrs {
         Ok(())
     } else {
-        Err(CondCheckError::NotYet)
+        Err(CondCheckError::NotYet { status: None })
     }
 }
 
@@ -553,15 +559,17 @@ async fn check_internal_dns(
 async fn check_external_dns(
     log: &slog::Logger,
     blueprint: &Blueprint,
-    active_generation: Generation,
+    active_generation: NexusGeneration,
 ) -> Result<(), CondCheckError<anyhow::Error>> {
     // Compute which Nexus instances we expect to find in external DNS based on
     // what's in-service in the blueprint.
     let expected_nexus_addrs = blueprint
         .in_service_nexus_zones()
-        .filter_map(|(_sled_id, _zone_cfg, nexus_config)| {
-            (nexus_config.nexus_generation == active_generation)
-                .then_some(nexus_config.external_ip.ip)
+        .filter(|(_sled_id, _zone_cfg, nexus_config)| {
+            nexus_config.nexus_generation == active_generation
+        })
+        .flat_map(|(_sled_id, _zone_cfg, nexus_config)| {
+            nexus_config.external_ips.iter().map(|e| e.ip)
         })
         .collect::<BTreeSet<_>>();
 
@@ -588,7 +596,7 @@ async fn check_external_dns(
     let config = client
         .dns_config_get()
         .await
-        .map_err(|_| CondCheckError::NotYet)?
+        .map_err(|_| CondCheckError::NotYet { status: None })?
         .into_inner();
 
     let found_nexus_addrs = config
@@ -626,6 +634,6 @@ async fn check_external_dns(
     if expected_nexus_addrs == found_nexus_addrs {
         Ok(())
     } else {
-        Err(CondCheckError::NotYet)
+        Err(CondCheckError::NotYet { status: None })
     }
 }

@@ -14,6 +14,7 @@ impl_enum_type!(
         Clone,
         Debug,
         PartialEq,
+        Eq,
         Serialize,
         Deserialize,
         AsExpression,

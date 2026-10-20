@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 async-trait.workspace = true
+atomicwrites.workspace = true
 camino.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -28,6 +28,7 @@ use illumos_utils::zone::OmicronZoneConfigExt;
 use illumos_utils::zone::Zones;
 use ntp_admin_client::types::TimeSync;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::http_client::internal_http_client;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::OmicronZoneConfig;
@@ -279,12 +280,12 @@ impl OmicronZones {
         for (zone_id, result) in shutdown_results {
             match result {
                 Ok(()) => {
-                    self.zones.remove(&zone_id);
+                    self.zones.remove(zone_id);
                 }
                 Err((state, err)) => {
                     nfailed += 1;
                     self.zones
-                        .get_mut(&zone_id)
+                        .get_mut(zone_id)
                         .expect("shutdown task operates on existing zone")
                         .state = ZoneState::PartiallyShutDown { state, err };
                 }
@@ -532,7 +533,19 @@ impl OmicronZones {
         match &self.timesync_config {
             TimeSyncConfig::Normal => {
                 match self.timesync_status_from_ntp_zone(log).await {
-                    Ok(timesync) => TimeSyncStatus::TimeSync(timesync),
+                    Ok(timesync) => {
+                        if !timesync.sync {
+                            // TODO:
+                            // https://github.com/oxidecomputer/omicron/issues/10446.
+                            warn!(
+                                log,
+                                "time is not yet synchronized";
+                                "correction_s" => timesync.correction,
+                                "stratum" => timesync.stratum,
+                            );
+                        }
+                        TimeSyncStatus::TimeSync(timesync)
+                    }
                     Err(err) => {
                         TimeSyncStatus::FailedToGetSyncStatus(Arc::new(err))
                     }
@@ -575,8 +588,9 @@ impl OmicronZones {
             return Err(TimeSyncError::MultipleRunningNtpZones);
         }
 
-        let client = ntp_admin_client::Client::new(
+        let client = ntp_admin_client::Client::new_with_client(
             &format!("http://{ntp_admin_address}"),
+            internal_http_client(),
             log.clone(),
         );
 
@@ -1289,11 +1303,9 @@ mod tests {
     use illumos_utils::zpool::PathInPool;
     use illumos_utils::zpool::ZpoolName;
     use illumos_utils::zpool::ZpoolOrRamdisk;
-    use omicron_common::address::SLED_PREFIX;
-    use omicron_common::disk::DatasetConfig;
+    use omicron_common::address::SLED_PREFIX_LENGTH;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
-    use omicron_common::disk::SharedDatasetConfig;
     use omicron_common::resolvable_files::ResolvableFileSource;
     use omicron_common::update::OmicronInstallManifest;
     use omicron_common::update::OmicronInstallManifestSource;
@@ -1302,6 +1314,8 @@ mod tests {
     use omicron_uuid_kinds::MupdateOverrideUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_resolvable_files_examples::deserialize_error;
+    use sled_agent_types::disk::DatasetConfig;
+    use sled_agent_types::disk::SharedDatasetConfig;
     use sled_agent_types::inventory::OmicronZoneDataset;
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::ZoneKind;
@@ -1499,7 +1513,7 @@ mod tests {
     #[derive(Debug)]
     struct FakeSledAgentFacilitiesInner {
         start_responses: VecDeque<anyhow::Result<RunningZone>>,
-        removed_ddm_prefixes: BTreeSet<Ipv6Subnet<SLED_PREFIX>>,
+        removed_ddm_prefixes: BTreeSet<Ipv6Subnet<SLED_PREFIX_LENGTH>>,
         resolver_status: ResolverStatus,
     }
 
@@ -1618,7 +1632,7 @@ mod tests {
 
         fn ddm_remove_internal_dns_prefix(
             &self,
-            prefix: Ipv6Subnet<SLED_PREFIX>,
+            prefix: Ipv6Subnet<SLED_PREFIX_LENGTH>,
         ) {
             self.inner.lock().unwrap().removed_ddm_prefixes.insert(prefix);
         }

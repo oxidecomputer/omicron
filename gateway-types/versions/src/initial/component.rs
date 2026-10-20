@@ -36,12 +36,14 @@ pub enum SpType {
     Copy,
     PartialEq,
     Eq,
+    Hash,
     PartialOrd,
     Ord,
     Serialize,
     Deserialize,
     JsonSchema,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct SpIdentifier {
     #[serde(rename = "type")]
     pub typ: SpType,
@@ -113,6 +115,7 @@ pub struct SpState {
     Copy,
     PartialEq,
     Eq,
+    Hash,
     PartialOrd,
     Ord,
     Serialize,
@@ -150,7 +153,9 @@ pub struct SpComponentInfo {
     pub presence: SpComponentPresence,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 /// Description of the presence or absence of a component.
 ///

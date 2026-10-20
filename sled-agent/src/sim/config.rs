@@ -4,12 +4,12 @@
 
 //! Interfaces for working with sled agent configuration
 
-use crate::updates::ConfigUpdates;
-use camino::Utf8Path;
 use dropshot::ConfigDropshot;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::ZpoolHealth;
 pub use sled_hardware_types::{Baseboard, SledCpuFamily};
 use sp_sim::FAKE_GIMLET_MODEL;
@@ -74,6 +74,8 @@ pub struct ConfigHardware {
 pub struct Config {
     /// unique id for the sled
     pub id: SledUuid,
+    /// ID for the simulated rack
+    pub rack_id: RackUuid,
     /// how to simulate asynchronous Instance and Disk transitions
     pub sim_mode: SimMode,
     /// IP address and TCP port for Nexus instance to register with
@@ -82,10 +84,10 @@ pub struct Config {
     pub dropshot: ConfigDropshot,
     /// configuration for the sled agent's storage
     pub storage: ConfigStorage,
-    /// configuration for the sled agent's updates
-    pub updates: ConfigUpdates,
     /// configuration to emulate the sled agent's hardware
     pub hardware: ConfigHardware,
+    /// is this sled a normal gimlet, or a scrimlet?
+    pub sled_role: SledRole,
 }
 
 pub enum ZpoolConfig {
@@ -99,42 +101,40 @@ pub enum ZpoolConfig {
 impl Config {
     pub fn for_testing(
         id: SledUuid,
+        rack_id: RackUuid,
         sim_mode: SimMode,
         nexus_address: Option<SocketAddr>,
-        update_directory: Option<&Utf8Path>,
         zpool_config: ZpoolConfig,
         cpu_family: SledCpuFamily,
     ) -> Config {
         Self::for_testing_with_baseboard(
             id,
+            rack_id,
             sim_mode,
             nexus_address,
-            update_directory,
             zpool_config,
             cpu_family,
             None,
+            SledRole::Gimlet,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn for_testing_with_baseboard(
         id: SledUuid,
+        rack_id: RackUuid,
         sim_mode: SimMode,
         nexus_address: Option<SocketAddr>,
-        update_directory: Option<&Utf8Path>,
         zpool_config: ZpoolConfig,
         cpu_family: SledCpuFamily,
         baseboard_serial: Option<String>,
+        sled_role: SledRole,
     ) -> Config {
         // This IP range is guaranteed by RFC 6666 to discard traffic.
         // For tests that don't use a Nexus, we use this address to simulate a
         // non-functioning Nexus.
         let nexus_address =
             nexus_address.unwrap_or_else(|| "[100::1]:12345".parse().unwrap());
-
-        // If the caller doesn't care to provide a directory in which to put
-        // updates, make up a path that doesn't exist.
-        let update_directory =
-            update_directory.unwrap_or_else(|| "/nonexistent".into());
 
         let zpools = match zpool_config {
             ZpoolConfig::None => vec![],
@@ -154,6 +154,7 @@ impl Config {
 
         Config {
             id,
+            rack_id,
             sim_mode,
             nexus_address,
             dropshot: ConfigDropshot {
@@ -164,9 +165,6 @@ impl Config {
             storage: ConfigStorage {
                 zpools,
                 ip: IpAddr::from(Ipv6Addr::LOCALHOST),
-            },
-            updates: ConfigUpdates {
-                zone_artifact_path: update_directory.to_path_buf(),
             },
             hardware: ConfigHardware {
                 hardware_threads: TEST_HARDWARE_THREADS,
@@ -179,6 +177,7 @@ impl Config {
                     revision: 3,
                 },
             },
+            sled_role,
         }
     }
 }

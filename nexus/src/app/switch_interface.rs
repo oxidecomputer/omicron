@@ -13,6 +13,8 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::{
     CreateResult, DataPageParams, DeleteResult, ListResultVec,
 };
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use oxnet::IpNet;
 use sled_agent_types::early_networking::SwitchSlot;
 use std::sync::Arc;
@@ -22,7 +24,7 @@ impl super::Nexus {
     pub fn loopback_address_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         switch_slot: SwitchSlot,
         address: IpNet,
     ) -> LookupResult<lookup::LoopbackAddress<'a>> {
@@ -41,7 +43,8 @@ impl super::Nexus {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
         // Just a check to make sure a valid rack id was passed in.
-        self.rack_lookup(&opctx, &params.rack_id).await?;
+        self.rack_lookup(&opctx, &RackUuid::from_untyped_uuid(params.rack_id))
+            .await?;
 
         let address_lot_lookup =
             self.address_lot_lookup(&opctx, params.address_lot.clone())?;
@@ -64,7 +67,7 @@ impl super::Nexus {
     pub(crate) async fn loopback_address_delete(
         self: &Arc<Self>,
         opctx: &OpContext,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         switch_slot: SwitchSlot,
         address: IpNet,
     ) -> DeleteResult {

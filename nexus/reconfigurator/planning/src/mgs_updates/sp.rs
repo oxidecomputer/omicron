@@ -17,10 +17,12 @@ use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::planning_report::FailedSpUpdateReason;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
-use omicron_common::api::external::TufRepoDescription;
-use slog::{debug, warn};
+use nexus_types::tuf_repo::TufRepoDescription;
+use slog::debug;
 use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::KnownArtifactKind;
+use tufaceous_artifact::KnownArtifactTags;
+use tufaceous_artifact::SpTags;
+use tufaceous_artifact::artifact_set::GetError;
 
 /// Compares a configured SP update with information from inventory and
 /// determines the current status of the update.  See `MgsUpdateStatus`.
@@ -88,60 +90,24 @@ pub(super) fn try_make_update(
         }
     };
 
-    let board = &active_caboose.caboose.board;
-    let matching_artifacts: Vec<_> = current_artifacts
-        .artifacts
-        .iter()
-        .filter(|a| {
-            // A matching SP artifact will have:
-            //
-            // - "board" matching the board name (found above from caboose)
-            // - "kind" matching one of the known SP kinds
-
-            if a.board.as_ref() != Some(board) {
-                return false;
+    let sp_board = active_caboose.caboose.board.clone();
+    let tags = KnownArtifactTags::Sp(SpTags { sp_board });
+    let artifact =
+        current_artifacts.artifacts.get_only(&tags).map_err(|err| {
+            let tags = tags.to_string();
+            match err {
+                GetError::NotFound => {
+                    FailedSpUpdateReason::NoMatchingArtifactFound(tags)
+                }
+                GetError::TooMany => {
+                    FailedSpUpdateReason::TooManyMatchingArtifacts(tags)
+                }
             }
-
-            match a.id.kind.to_known() {
-                None => false,
-                Some(
-                    KnownArtifactKind::GimletSp
-                    | KnownArtifactKind::PscSp
-                    | KnownArtifactKind::SwitchSp,
-                ) => true,
-                Some(
-                    KnownArtifactKind::GimletRot
-                    | KnownArtifactKind::Host
-                    | KnownArtifactKind::Trampoline
-                    | KnownArtifactKind::InstallinatorDocument
-                    | KnownArtifactKind::ControlPlane
-                    | KnownArtifactKind::Zone
-                    | KnownArtifactKind::MeasurementCorpus
-                    | KnownArtifactKind::PscRot
-                    | KnownArtifactKind::SwitchRot
-                    | KnownArtifactKind::GimletRotBootloader
-                    | KnownArtifactKind::PscRotBootloader
-                    | KnownArtifactKind::SwitchRotBootloader,
-                ) => false,
-            }
-        })
-        .collect();
-    if matching_artifacts.is_empty() {
-        return Err(FailedSpUpdateReason::NoMatchingArtifactFound);
-    }
-
-    if matching_artifacts.len() > 1 {
-        // This should be impossible unless we shipped a TUF repo with multiple
-        // artifacts for the same board.  But it doesn't prevent us from picking
-        // one and proceeding.  Make a note and proceed.
-        warn!(log, "found more than one matching artifact for SP update");
-    }
-
-    let artifact = matching_artifacts[0];
+        })?;
 
     // If the artifact's version matches what's deployed, then no update is
     // needed.
-    if artifact.id.version == expected_active_version {
+    if artifact.version == expected_active_version {
         debug!(log, "no SP update needed for board"; baseboard_id);
         return Ok(MgsUpdateOutcome::NoUpdateNeeded);
     }
@@ -181,12 +147,13 @@ pub(super) fn try_make_update(
             expected_inactive_version,
         }),
         artifact_hash: artifact.hash,
-        artifact_version: artifact.id.version.clone(),
+        artifact_version: artifact.version.clone(),
     }))
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::mgs_updates::EvacuatingSleds;
     use crate::mgs_updates::ImpossibleUpdatePolicy;
     use crate::mgs_updates::MgsUpdatePlanner;
     use crate::mgs_updates::PlannedMgsUpdates;
@@ -205,8 +172,10 @@ mod tests {
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdateSpDetails;
     use nexus_types::deployment::PendingMgsUpdates;
+    use nexus_types::deployment::PlannerConfig;
     use nexus_types::deployment::TargetReleaseDescription;
     use nexus_types::inventory::SpType;
+    use omicron_generation_kinds::SledConfigGeneration;
     use std::collections::BTreeSet;
 
     // Short hand-rolled update sequence that exercises some basic behavior for
@@ -220,11 +189,17 @@ mod tests {
         );
         let log = &logctx.log;
         let test_boards = TestBoards::new(test_name);
+        let sled_0_evacuating = EvacuatingSleds::new_for_test([(
+            test_boards.sled_id(0).expect("have sled 0"),
+            SledConfigGeneration::new(),
+        )]);
+        let planner_config = PlannerConfig::default();
 
         // Test that with no updates pending and no TUF repo specified, there
         // will remain no updates pending.
         let collection = test_boards
             .collection_builder()
+            .sled_evacuated(0, SledConfigGeneration::new())
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
         let current_boards = UpdateableBoard::all_from_collection(&collection);
@@ -235,9 +210,11 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &sled_0_evacuating,
                 current_updates: &initial_updates,
                 current_artifacts: &TargetReleaseDescription::Initial,
                 nmax_updates,
@@ -252,9 +229,11 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &sled_0_evacuating,
                 current_updates: &initial_updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -277,9 +256,11 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: later_updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &sled_0_evacuating,
                 current_updates: &updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -295,15 +276,18 @@ mod tests {
         // nmax_updates).
         let later_collection = test_boards
             .collection_builder()
+            .sled_evacuated(0, SledConfigGeneration::new())
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .sp_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .build();
         let PlannedMgsUpdates { pending_updates: later_updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &later_collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &sled_0_evacuating,
                 current_updates: &updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -320,14 +304,17 @@ mod tests {
         // second that we noticed another thing needed an update
         let later_collection = test_boards
             .collection_builder()
+            .sled_evacuated(0, SledConfigGeneration::new())
             .sp_active_version_exception(SpType::Switch, 1, ARTIFACT_VERSION_1)
             .build();
         let PlannedMgsUpdates { pending_updates: later_updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &later_collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &sled_0_evacuating,
                 current_updates: &updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -348,13 +335,18 @@ mod tests {
 
         // Finally, test that when all SPs are in spec, then no updates are
         // configured.
-        let updated_collection = test_boards.collection_builder().build();
+        let updated_collection = test_boards
+            .collection_builder()
+            .sled_evacuated(0, SledConfigGeneration::new())
+            .build();
         let PlannedMgsUpdates { pending_updates: later_updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &updated_collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &sled_0_evacuating,
                 current_updates: &later_updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -369,14 +361,17 @@ mod tests {
         // `current_boards`, even if they're in inventory and outdated.
         let collection = test_boards
             .collection_builder()
+            .sled_evacuated(0, SledConfigGeneration::new())
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
         let PlannedMgsUpdates { pending_updates: updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards: &BTreeSet::new(),
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &sled_0_evacuating,
                 current_updates: &PendingMgsUpdates::new(),
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -389,11 +384,13 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards: &UpdateableBoard::all_from_collection(
                     &collection,
                 ),
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &sled_0_evacuating,
                 current_updates: &PendingMgsUpdates::new(),
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -427,6 +424,7 @@ mod tests {
         // a new update reflecting that.
         let collection = test_boards
             .collection_builder()
+            .sled_evacuated(0, SledConfigGeneration::new())
             .sp_versions(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::Version(ARTIFACT_VERSION_1),
@@ -436,11 +434,13 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: new_updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards: &UpdateableBoard::all_from_collection(
                     &collection,
                 ),
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &sled_0_evacuating,
                 current_updates: &updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -476,16 +476,19 @@ mod tests {
         // a new update reflecting that.
         let collection = test_boards
             .collection_builder()
+            .sled_evacuated(0, SledConfigGeneration::new())
             .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1_5)
             .build();
         let PlannedMgsUpdates { pending_updates: new_updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards: &UpdateableBoard::all_from_collection(
                     &collection,
                 ),
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &sled_0_evacuating,
                 current_updates: &updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),

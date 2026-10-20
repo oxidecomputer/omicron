@@ -6,17 +6,16 @@ use crate::latest::instance::ExternalIpConfig;
 use crate::latest::instance::ExternalIpv4Config;
 use crate::latest::instance::ExternalIpv6Config;
 use crate::latest::instance::MigrationState;
-use crate::latest::instance::Migrations;
-use crate::latest::instance::SledVmmState;
 use crate::latest::instance::VmmSpec;
 use crate::latest::instance::VmmState;
 use crate::latest::instance::VmmStateRequested;
 use crate::latest::inventory::SourceNatConfig;
-use propolis_api_types::instance_spec::{
-    Component, SpecKey,
+use propolis_api_types::instance_spec::SpecKey;
+use propolis_api_types_versions::latest::{
     components::backends::{
         CrucibleStorageBackend, FileStorageBackend, VirtioNetworkBackend,
     },
+    instance_spec::Component,
 };
 use std::collections::BTreeSet;
 use std::net::Ipv4Addr;
@@ -46,21 +45,6 @@ impl VmmStateRequested {
             VmmStateRequested::Running => "running",
             VmmStateRequested::Stopped => "stopped",
             VmmStateRequested::Reboot => "reboot",
-        }
-    }
-}
-
-impl From<VmmState> for omicron_common::api::external::InstanceState {
-    fn from(state: VmmState) -> Self {
-        match state {
-            VmmState::Starting => Self::Starting,
-            VmmState::Running => Self::Running,
-            VmmState::Stopping => Self::Stopping,
-            VmmState::Stopped => Self::Stopped,
-            VmmState::Rebooting => Self::Rebooting,
-            VmmState::Migrating => Self::Migrating,
-            VmmState::Failed => Self::Failed,
-            VmmState::Destroyed => Self::Destroyed,
         }
     }
 }
@@ -108,21 +92,6 @@ impl VmmStateRequested {
             VmmStateRequested::Running => false,
             VmmStateRequested::Stopped => true,
             VmmStateRequested::Reboot => false,
-        }
-    }
-}
-
-impl Migrations<'_> {
-    pub fn empty() -> Self {
-        Self { migration_in: None, migration_out: None }
-    }
-}
-
-impl SledVmmState {
-    pub fn migrations(&self) -> Migrations<'_> {
-        Migrations {
-            migration_in: self.migration_in.as_ref(),
-            migration_out: self.migration_out.as_ref(),
         }
     }
 }

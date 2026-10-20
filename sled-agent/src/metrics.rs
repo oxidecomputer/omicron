@@ -4,6 +4,8 @@
 
 //! Metrics produced by the sled-agent for collection by oximeter.
 
+use illumos_utils::opte::Port;
+use illumos_utils::opte::PortInfo;
 use illumos_utils::running_zone::RunningZone;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
@@ -11,6 +13,7 @@ use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_uuid_kinds::GenericUuid;
 use oximeter_instruments::http::HttpService;
 use oximeter_instruments::http::LatencyTracker;
+use oximeter_instruments::kstat;
 use oximeter_instruments::kstat::CollectionDetails;
 use oximeter_instruments::kstat::Error as KstatError;
 use oximeter_instruments::kstat::KstatSampler;
@@ -19,10 +22,14 @@ use oximeter_instruments::kstat::cpu::SledCpu;
 use oximeter_instruments::kstat::cpu::SledCpuTarget;
 use oximeter_instruments::kstat::link::SledDataLink;
 use oximeter_instruments::kstat::link::SledDataLinkTarget;
+use oximeter_instruments::kstat::opte_port::OptePort;
+use oximeter_instruments::kstat::opte_port::OptePortTarget;
 use oximeter_instruments::kstat::zone::Zone;
 use oximeter_instruments::kstat::zone::ZoneTarget;
+use oximeter_instruments::zfs::usage::ZfsUsageProducer;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
+use sled_agent_types::inventory::NetworkInterfaceKind;
 use slog::Logger;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -34,6 +41,7 @@ use tokio::sync::mpsc::error::TrySendError;
 use uuid::Uuid;
 
 type TrackedLinks = HashMap<String, Target>;
+type TrackedOptePorts = HashMap<String, TargetOptePort>;
 
 /// The interval on which we ask `oximeter` to poll us for metric data.
 const METRIC_COLLECTION_INTERVAL: Duration = Duration::from_secs(30);
@@ -48,9 +56,28 @@ const METRIC_COLLECTION_INTERVAL: Duration = Duration::from_secs(30);
 // now.
 const LINK_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
 
+/// The maximum number of samples retained for links.
+const N_MAX_LINK_SAMPLES: usize = 512;
+
 const CPU_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
 
+/// The maximum number of CPU usage samples.
+fn n_max_cpu_samples() -> usize {
+    // Enough for 10 collection intervals before dropping.
+    kstat::cpu::max_cardinality()
+        * samples_per_collection(CPU_SAMPLE_INTERVAL)
+        * 10
+}
+
 const ZONE_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
+
+/// The maximum number of zone CPU usage samples.
+fn n_max_zone_cpu_samples() -> usize {
+    // Enough for 10 collection intervals before dropping.
+    kstat::zone::max_cardinality()
+        * samples_per_collection(ZONE_SAMPLE_INTERVAL)
+        * 10
+}
 
 /// The interval after which we expire kstat-based collection of transient
 /// links.
@@ -103,7 +130,13 @@ pub enum Message {
     /// Stop tracking the named VNIC.
     UntrackVnic { name: String },
     /// Track the named OPTE port.
-    TrackOptePort { zone_name: String, name: String },
+    TrackOptePort {
+        port_name: String,
+        interface_kind: String,
+        interface_id: Uuid,
+        parent_id: Uuid,
+        zone_name: String,
+    },
     /// Stop tracking the named OPTE port.
     UntrackOptePort { name: String },
     /// Notify the task that a sled has been synced with NTP.
@@ -129,14 +162,20 @@ struct Target {
     sled_datalink: SledDataLink,
 }
 
+struct TargetOptePort {
+    id: TargetId,
+    opte_port: OptePort,
+}
+
 fn get_collection_details(kind: &str) -> CollectionDetails {
     if is_transient_link(kind) {
         CollectionDetails::duration(
             LINK_SAMPLE_INTERVAL,
             TRANSIENT_LINK_EXPIRATION_INTERVAL,
+            N_MAX_LINK_SAMPLES,
         )
     } else {
-        CollectionDetails::never(LINK_SAMPLE_INTERVAL)
+        CollectionDetails::never(LINK_SAMPLE_INTERVAL, N_MAX_LINK_SAMPLES)
     }
 }
 
@@ -144,11 +183,12 @@ fn get_collection_details(kind: &str) -> CollectionDetails {
 async fn metrics_task(
     sled_identifiers: SledIdentifiers,
     kstat_sampler: KstatSampler,
-    _server: ProducerServer,
+    server: ProducerServer,
     log: Logger,
     mut rx: mpsc::Receiver<Message>,
 ) {
     let mut tracked_links: TrackedLinks = HashMap::new();
+    let mut tracked_opte_ports: TrackedOptePorts = HashMap::new();
     let mut tracked_zone: Option<Zone> = None;
     let mut tracked_sled_cpu: Option<SledCpu> = None;
     let mut sled_time_synced: bool = false;
@@ -215,24 +255,62 @@ async fn metrics_task(
                 remove_datalink(&log, &mut tracked_links, &kstat_sampler, name)
                     .await
             }
-            Message::TrackOptePort { zone_name, name } => {
+            Message::TrackOptePort {
+                zone_name,
+                port_name,
+                interface_id,
+                interface_kind,
+                parent_id,
+            } => {
                 let target = SledDataLinkTarget {
                     kind: LinkKind::OPTE.into(),
-                    link_name: name.into(),
+                    link_name: port_name.clone().into(),
                     rack_id: sled_identifiers.rack_id,
                     sled_id: sled_identifiers.sled_id,
                     sled_model: sled_identifiers.model.clone().into(),
                     sled_revision: sled_identifiers.revision,
                     sled_serial: sled_identifiers.serial.clone().into(),
-                    zone_name: zone_name.into(),
+                    zone_name: zone_name.clone().into(),
                 };
                 let link = SledDataLink::new(target, sled_time_synced);
                 add_datalink(&log, &mut tracked_links, &kstat_sampler, link)
                     .await;
+                let port_target = OptePortTarget {
+                    port_name: port_name.into(),
+                    interface_id,
+                    interface_kind: interface_kind.into(),
+                    parent_id,
+                    zone_name: zone_name.into(),
+                    rack_id: sled_identifiers.rack_id,
+                    sled_id: sled_identifiers.sled_id,
+                    sled_model: sled_identifiers.model.clone().into(),
+                    sled_revision: sled_identifiers.revision,
+                    sled_serial: sled_identifiers.serial.clone().into(),
+                };
+                let port = OptePort::new(port_target, sled_time_synced);
+                add_opte_port(
+                    &log,
+                    &mut tracked_opte_ports,
+                    &kstat_sampler,
+                    port,
+                )
+                .await;
             }
             Message::UntrackOptePort { name } => {
-                remove_datalink(&log, &mut tracked_links, &kstat_sampler, name)
-                    .await
+                remove_datalink(
+                    &log,
+                    &mut tracked_links,
+                    &kstat_sampler,
+                    name.clone(),
+                )
+                .await;
+                remove_opte_port(
+                    &log,
+                    &mut tracked_opte_ports,
+                    &kstat_sampler,
+                    name,
+                )
+                .await;
             }
             Message::TimeSynced { sled_id } => {
                 assert!(
@@ -247,9 +325,22 @@ async fn metrics_task(
                         &kstat_sampler,
                     )
                     .await;
+                    sync_sled_opte_ports(
+                        &log,
+                        &mut tracked_opte_ports,
+                        &kstat_sampler,
+                    )
+                    .await;
                     sync_zone(&log, &mut tracked_zone, &kstat_sampler).await;
                     sync_sled_cpu(&log, &mut tracked_sled_cpu, &kstat_sampler)
                         .await;
+
+                    let zfs_producer =
+                        ZfsUsageProducer::new(log.clone(), &sled_identifiers);
+                    server
+                        .registry()
+                        .register_producer(zfs_producer.clone())
+                        .expect("actually infallible");
                 }
             }
         }
@@ -377,6 +468,125 @@ fn is_transient_link(kind: &str) -> bool {
     kind == LinkKind::VNIC || kind == LinkKind::OPTE
 }
 
+/// Start tracking a new OPTE port of the specified kind.
+async fn add_opte_port(
+    log: &Logger,
+    tracked_ports: &mut HashMap<String, TargetOptePort>,
+    kstat_sampler: &KstatSampler,
+    port: OptePort,
+) {
+    match tracked_ports.entry(port.name().to_string()) {
+        Entry::Vacant(entry) => {
+            let details = CollectionDetails::duration(
+                LINK_SAMPLE_INTERVAL,
+                TRANSIENT_LINK_EXPIRATION_INTERVAL,
+                N_MAX_LINK_SAMPLES,
+            );
+            let port_to_add = port.clone();
+            match kstat_sampler.add_target(port_to_add, details).await {
+                Ok(id) => {
+                    debug!(
+                        log,
+                        "added new port to kstat sampler";
+                        "port_name" => entry.key(),
+                    );
+                    entry.insert(TargetOptePort { id, opte_port: port });
+                }
+                Err(err) => {
+                    error!(
+                        log,
+                        "failed to add port to kstat sampler, \
+                         no metrics will be collected for it";
+                        "port_name" => entry.key(),
+                        "error" => ?err,
+                    );
+                }
+            }
+        }
+        Entry::Occupied(entry) => {
+            debug!(
+                log,
+                "received message to track port, \
+                but it is already being tracked";
+                "port_name" => entry.key(),
+            );
+        }
+    }
+}
+
+/// Stop tracking a port by name.
+async fn remove_opte_port(
+    log: &Logger,
+    tracked_ports: &mut HashMap<String, TargetOptePort>,
+    kstat_sampler: &KstatSampler,
+    name: String,
+) {
+    match tracked_ports.remove(&name) {
+        Some(target) => match kstat_sampler.remove_target(target.id).await {
+            Ok(_) => {
+                debug!(
+                    log,
+                    "removed port from tracked ports";
+                    "port_name" => name,
+                );
+            }
+            Err(err) => {
+                error!(
+                    log,
+                    "failed to remove port from kstat sampler, \
+                     metrics may still be produced for it";
+                    "port_name" => name,
+                    "error" => ?err,
+                );
+            }
+        },
+        None => {
+            debug!(
+                log,
+                "received message to delete port, but \
+                it is not in the list of tracked ports";
+                "port_name" => name,
+            );
+        }
+    }
+}
+
+/// Update tracked ports when a sled is synced.
+async fn sync_sled_opte_ports(
+    log: &Logger,
+    tracked_ports: &mut TrackedOptePorts,
+    kstat_sampler: &KstatSampler,
+) {
+    for (port_name, target) in tracked_ports.iter_mut() {
+        target.opte_port.time_synced = true;
+        let details = CollectionDetails::duration(
+            LINK_SAMPLE_INTERVAL,
+            TRANSIENT_LINK_EXPIRATION_INTERVAL,
+            N_MAX_LINK_SAMPLES,
+        );
+        match kstat_sampler
+            .update_target(target.opte_port.clone(), details)
+            .await
+        {
+            Ok(_) => {
+                debug!(
+                    log,
+                    "updated port already tracked by kstat sampler";
+                    "port_name" => port_name,
+                );
+            }
+            Err(err) => {
+                error!(
+                    log,
+                    "failed to update port already tracked by kstat sampler";
+                    "port_name" => port_name,
+                    "error" => ?err,
+                );
+            }
+        }
+    }
+}
+
 /// Start tracking zone metrics for the sled.
 async fn add_zone(
     log: &Logger,
@@ -401,7 +611,10 @@ async fn add_zone(
 
     // We have one target per sled that samples all zones, so there's no
     // need to expire it.
-    let details = CollectionDetails::never(ZONE_SAMPLE_INTERVAL);
+    let details = CollectionDetails::never(
+        ZONE_SAMPLE_INTERVAL,
+        n_max_zone_cpu_samples(),
+    );
     match kstat_sampler.add_target(zone.clone(), details).await {
         Ok(_id) => {
             debug!(log, "added zone metrics to kstat sampler");
@@ -428,7 +641,10 @@ async fn sync_zone(
     };
 
     zone.time_synced = true;
-    let details = CollectionDetails::never(ZONE_SAMPLE_INTERVAL);
+    let details = CollectionDetails::never(
+        ZONE_SAMPLE_INTERVAL,
+        n_max_zone_cpu_samples(),
+    );
     match kstat_sampler.update_target(zone.clone(), details).await {
         Ok(_) => {
             debug!(log, "updated zone metrics after time sync");
@@ -467,7 +683,8 @@ async fn add_sled_cpu(
 
     // We have one target per sled that samples all CPUs, so there's no
     // need to expire it.
-    let details = CollectionDetails::never(CPU_SAMPLE_INTERVAL);
+    let details =
+        CollectionDetails::never(CPU_SAMPLE_INTERVAL, n_max_cpu_samples());
     match kstat_sampler.add_target(cpu.clone(), details).await {
         Ok(_id) => {
             debug!(log, "added CPU metrics to kstat sampler");
@@ -494,7 +711,8 @@ async fn sync_sled_cpu(
     };
 
     cpu.time_synced = true;
-    let details = CollectionDetails::never(CPU_SAMPLE_INTERVAL);
+    let details =
+        CollectionDetails::never(CPU_SAMPLE_INTERVAL, n_max_cpu_samples());
     match kstat_sampler.update_target(cpu.clone(), details).await {
         Ok(_) => {
             debug!(log, "updated sled CPU metrics after time sync");
@@ -656,12 +874,20 @@ impl MetricsRequestQueue {
     pub fn track_opte_port(
         &self,
         zone_name: impl Into<String>,
-        name: impl Into<String>,
+        port_info: &PortInfo,
     ) -> Result<(), Error> {
+        let (parent_kind, parent_id) = match port_info.nic_kind {
+            NetworkInterfaceKind::Instance { id } => ("instance", id),
+            NetworkInterfaceKind::Service { id } => ("service", id),
+            NetworkInterfaceKind::Probe { id } => ("probe", id),
+        };
         self.0
             .try_send(Message::TrackOptePort {
                 zone_name: zone_name.into(),
-                name: name.into(),
+                port_name: port_info.port.name().into(),
+                interface_id: port_info.nic_id,
+                interface_kind: parent_kind.into(),
+                parent_id,
             })
             .map_err(|e| Error::SendFailed(e))
     }
@@ -670,12 +896,9 @@ impl MetricsRequestQueue {
     ///
     /// This is non-blocking, and returns an error if the task is currently
     /// unavailable.
-    pub fn untrack_opte_port(
-        &self,
-        name: impl Into<String>,
-    ) -> Result<(), Error> {
+    pub fn untrack_opte_port(&self, port: &Port) -> Result<(), Error> {
         self.0
-            .try_send(Message::UntrackOptePort { name: name.into() })
+            .try_send(Message::UntrackOptePort { name: port.name().into() })
             .map_err(|e| Error::SendFailed(e))
     }
 
@@ -708,8 +931,8 @@ impl MetricsRequestQueue {
                 errors.push(e);
             }
         }
-        for port in running_zone.opte_port_names() {
-            if let Err(e) = self.track_opte_port(zone_name, port) {
+        for port_info in running_zone.opte_port_info() {
+            if let Err(e) = self.track_opte_port(zone_name, &port_info) {
                 errors.push(e);
             }
         }
@@ -736,7 +959,7 @@ impl MetricsRequestQueue {
                 errors.push(e);
             }
         }
-        for port in running_zone.opte_port_names() {
+        for port in running_zone.opte_ports() {
             if let Err(e) = self.untrack_opte_port(port) {
                 errors.push(e);
             }
@@ -780,4 +1003,34 @@ fn start_producer_server(
         log: LogConfig::Logger(log),
     };
     ProducerServer::start(&config).map_err(Error::ProducerServer)
+}
+
+// Compute the number of samples expected per collection interval,
+// per-timeseries.
+//
+// # Panics
+//
+// This panics if the sample interval is more than 10k times smaller than the
+// metric collection interval. That should be enough for anybody...
+fn samples_per_collection(sample_interval: Duration) -> usize {
+    let collection = METRIC_COLLECTION_INTERVAL.as_secs_f64();
+    let sample = sample_interval.as_secs_f64();
+    let ratio = (collection / sample).ceil();
+    assert!(ratio > 0.0);
+    assert!(
+        ratio <= 10000.0,
+        "Sample interval is too small to appropriately buffer"
+    );
+    ratio as usize
+}
+
+#[cfg(test)]
+#[test]
+fn test_samples_per_collection() {
+    assert_eq!(samples_per_collection(CPU_SAMPLE_INTERVAL), 3);
+    assert_eq!(samples_per_collection(ZONE_SAMPLE_INTERVAL), 3);
+    assert_eq!(samples_per_collection(METRIC_COLLECTION_INTERVAL), 1);
+    // Edge case, but if we're generating samples less often than each
+    // collection interval, just pin that at 1.
+    assert_eq!(samples_per_collection(METRIC_COLLECTION_INTERVAL * 2), 1);
 }

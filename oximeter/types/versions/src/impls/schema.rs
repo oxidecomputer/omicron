@@ -89,7 +89,7 @@ where
 }
 
 fn validate_timeseries_name(s: &str) -> Result<&str, MetricsError> {
-    if regex::Regex::new(TIMESERIES_NAME_REGEX).unwrap().is_match(s) {
+    if TIMESERIES_NAME_REGEX.is_match(s) {
         Ok(s)
     } else {
         Err(MetricsError::InvalidTimeseriesName)

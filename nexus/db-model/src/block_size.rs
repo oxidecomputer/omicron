@@ -35,6 +35,13 @@ impl Into<external::ByteCount> for BlockSize {
     }
 }
 
+impl From<BlockSize> for external::BlockSize {
+    fn from(bs: BlockSize) -> external::BlockSize {
+        // `to_bytes` only ever returns valid block sizes.
+        external::BlockSize(bs.to_bytes())
+    }
+}
+
 impl TryFrom<disk::BlockSize> for BlockSize {
     type Error = anyhow::Error;
     fn try_from(block_size: disk::BlockSize) -> Result<Self, Self::Error> {

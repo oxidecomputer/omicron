@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Test that generating a new blueprint on a freshly-installed system will not
 //! change anything.
 
@@ -44,7 +48,7 @@ async fn new_blueprint_noop() {
                         "obtaining a working Nexus client failed";
                         InlineErrorChain::new(&e),
                     );
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             }
         },

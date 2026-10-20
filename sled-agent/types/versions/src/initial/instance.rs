@@ -9,11 +9,11 @@ use std::net::{IpAddr, SocketAddr};
 
 use chrono::{DateTime, Utc};
 use omicron_common::api::external;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::Hostname;
 use omicron_common::api::internal::nexus::HostIdentifier;
 use omicron_common::api::internal::shared::DhcpConfig;
-use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
+use omicron_generation_kinds::Generation;
+use omicron_uuid_kinds::PropolisUuid;
 use propolis_api_types_versions::v1::instance_spec::InstanceSpec;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -103,12 +103,6 @@ pub struct SledVmmState {
     pub migration_out: Option<MigrationRuntimeState>,
 }
 
-#[derive(Copy, Clone, Debug, Default)]
-pub struct Migrations<'state> {
-    pub migration_in: Option<&'state MigrationRuntimeState>,
-    pub migration_out: Option<&'state MigrationRuntimeState>,
-}
-
 /// An update from a sled regarding the state of a migration, indicating the
 /// role of the VMM whose migration state was updated.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
@@ -145,36 +139,6 @@ pub enum MigrationState {
     Failed,
     /// The migration has completed.
     Completed,
-}
-
-/// The body of a request to ensure that a instance and VMM are known to a sled
-/// agent.
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct InstanceEnsureBody {
-    /// The virtual hardware configuration this virtual machine should have when
-    /// it is started.
-    pub vmm_spec: VmmSpec,
-
-    /// Information about the sled-local configuration that needs to be
-    /// established to make the VM's virtual hardware fully functional.
-    pub local_config: InstanceSledLocalConfig,
-
-    /// The initial VMM runtime state for the VMM being registered.
-    pub vmm_runtime: VmmRuntimeState,
-
-    /// The ID of the instance for which this VMM is being created.
-    pub instance_id: InstanceUuid,
-
-    /// The ID of the migration in to this VMM, if this VMM is being
-    /// ensured is part of a migration in. If this is `None`, the VMM is not
-    /// being created due to a migration.
-    pub migration_id: Option<Uuid>,
-
-    /// The address at which this VMM should serve a Propolis server API.
-    pub propolis_addr: SocketAddr,
-
-    /// Metadata used to track instance statistics.
-    pub metadata: InstanceMetadata,
 }
 
 /// Describes sled-local configuration that a sled-agent must establish to make
@@ -250,6 +214,18 @@ pub struct VmmPutStateResponse {
     pub updated_runtime: Option<SledVmmState>,
 }
 
+// Hi! The doc link here broke by moving `InstanceState` out of omicron-common
+// well after the initial version of sled-agent types. `VmmStateRequested` is
+// still used in the latest version of the sled-agent API, so changing docs is
+// rejected as an incompatible change. Our options are to either add a new
+// sled-agent API version just to change this doc string, or allow the broken
+// link.
+//
+// Adding a new sled-agent API version (and version of this enum) just to change
+// a doc link seems pretty confusing for later readers, so allow the doc link.
+// We should probably not have doc links in API types to types outside the same
+// API version, to avoid this problem in the future..
+#[allow(rustdoc::broken_intra_doc_links)]
 /// Requestable running state of an Instance.
 ///
 /// A subset of [`omicron_common::api::external::InstanceState`].

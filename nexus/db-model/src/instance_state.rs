@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use omicron_common::api::external;
+use nexus_types::external_api::instance;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
@@ -38,8 +38,8 @@ impl InstanceState {
     pub const NOT_INCARNATED_STATES: &'static [InstanceState] =
         &[InstanceState::NoVmm, InstanceState::Creating, InstanceState::Failed];
 
-    pub fn state(&self) -> external::InstanceState {
-        external::InstanceState::from(*self)
+    pub fn state(&self) -> instance::InstanceState {
+        instance::InstanceState::from(*self)
     }
 
     pub fn label(&self) -> &'static str {
@@ -62,9 +62,9 @@ impl fmt::Display for InstanceState {
     }
 }
 
-impl From<InstanceState> for omicron_common::api::external::InstanceState {
+impl From<InstanceState> for instance::InstanceState {
     fn from(value: InstanceState) -> Self {
-        use omicron_common::api::external::InstanceState as Output;
+        use instance::InstanceState as Output;
         match value {
             InstanceState::Creating => Output::Creating,
             InstanceState::NoVmm => Output::Stopped,

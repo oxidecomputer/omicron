@@ -452,7 +452,7 @@ impl Fsm {
                 Ok(Some(ApiOutput::PeerInitialized))
             }
             State::InitialMember { pkg, .. } => {
-                // Return sucess on idempotence
+                // Return success on idempotence
                 if pkg == &new_pkg {
                     self.push_response(from, request_id, ResponseType::InitAck);
                 } else {

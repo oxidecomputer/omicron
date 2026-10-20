@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 
 set -o pipefail
 set -o errexit
@@ -35,11 +39,15 @@ function update_dendrite_stub_shas {
     ILLUMOS_SHA=$(get_sha "$REPO" "$TARGET_COMMIT" "dendrite-stub" "image")
     LINUX_DPD_SHA=$(get_sha "$REPO" "$TARGET_COMMIT" "dpd" "linux-bin")
     LINUX_SWADM_SHA=$(get_sha "$REPO" "$TARGET_COMMIT" "swadm" "linux-bin")
+    MACOS_AARCH64_DPD_SHA=$(get_sha "$REPO" "$TARGET_COMMIT" "dpd" "macos-aarch64")
+    MACOS_AARCH64_SWADM_SHA=$(get_sha "$REPO" "$TARGET_COMMIT" "swadm" "macos-aarch64")
     OUTPUT=$(printf \
-        "CIDL_SHA256_ILLUMOS=\"%s\"\nCIDL_SHA256_LINUX_DPD=\"%s\"\nCIDL_SHA256_LINUX_SWADM=\"%s\"\n" \
+        "CIDL_SHA256_ILLUMOS=\"%s\"\nCIDL_SHA256_LINUX_DPD=\"%s\"\nCIDL_SHA256_LINUX_SWADM=\"%s\"\nCIDL_SHA256_MACOS_AARCH64_DPD=\"%s\"\nCIDL_SHA256_MACOS_AARCH64_SWADM=\"%s\"\n" \
         "$ILLUMOS_SHA" \
         "$LINUX_DPD_SHA" \
         "$LINUX_SWADM_SHA" \
+        "$MACOS_AARCH64_DPD_SHA" \
+        "$MACOS_AARCH64_SWADM_SHA" \
     )
     if [ -n "$DRY_RUN" ]; then
         STUB_CHECKSUM_PATH="/dev/null"

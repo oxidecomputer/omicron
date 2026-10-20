@@ -6,7 +6,6 @@
 
 use crate::inventory::SpType;
 use chrono::{DateTime, Utc};
-use omicron_common::api::external::Error;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SitrepUuid;
@@ -17,8 +16,18 @@ use std::fmt;
 
 pub use ereport_types::{Ena, EreportId};
 
+/// A complete representation of an ereport that has been ingested by the
+/// control plane.
+///
+/// This type includes the [`data`](EreportData) payload of the ereport, its
+/// [ID](EreportId), the [`reporter`](Reporter) from which it was collected, and
+/// metadata describing its collection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ereport {
+    #[serde(flatten)]
+    pub id: EreportId,
+    pub time_collected: DateTime<Utc>,
+    pub collector_id: OmicronZoneUuid,
     #[serde(flatten)]
     pub data: EreportData,
     #[serde(flatten)]
@@ -28,12 +37,21 @@ pub struct Ereport {
 }
 
 impl Ereport {
-    pub fn new(data: EreportData, reporter: Reporter) -> Self {
-        Self { data, reporter, marked_seen_in: None }
-    }
-
-    pub fn id(&self) -> &EreportId {
-        &self.data.id
+    pub fn new(
+        id: EreportId,
+        time_collected: DateTime<Utc>,
+        collector_id: OmicronZoneUuid,
+        data: EreportData,
+        reporter: Reporter,
+    ) -> Self {
+        Self {
+            id,
+            time_collected,
+            collector_id,
+            data,
+            reporter,
+            marked_seen_in: None,
+        }
     }
 }
 
@@ -47,18 +65,16 @@ impl core::ops::Deref for Ereport {
 impl iddqd::IdOrdItem for Ereport {
     type Key<'a> = &'a EreportId;
     fn key(&self) -> Self::Key<'_> {
-        self.id()
+        &self.id
     }
 
     iddqd::id_upcast!();
 }
 
+/// Per-ereport data, including the VPD identity of the reporter, the ereport's
+/// class, and the actual JSON body of the ereport.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EreportData {
-    #[serde(flatten)]
-    pub id: EreportId,
-    pub time_collected: DateTime<Utc>,
-    pub collector_id: OmicronZoneUuid,
     pub serial_number: Option<String>,
     pub part_number: Option<String>,
     pub class: Option<String>,
@@ -67,8 +83,9 @@ pub struct EreportData {
 }
 
 impl EreportData {
-    /// Interpret a service processor ereport from a raw JSON blobule, plus the
-    /// restart ID and collection metadata.
+    /// Interpret a service processor ereport from a raw JSON blobule and
+    /// restart ID, returning a tuple of the [`Ena`] and [`EreportData`]
+    /// suitable for insertion into the database.
     ///
     /// This conversion is lossy; if some information is not present in the raw
     /// ereport JSON, such as the SP's VPD identity, we log a warning, rather
@@ -82,9 +99,7 @@ impl EreportData {
         log: &slog::Logger,
         restart_id: EreporterRestartUuid,
         ereport: ereport_types::Ereport,
-        time_collected: DateTime<Utc>,
-        collector_id: OmicronZoneUuid,
-    ) -> Self {
+    ) -> (Ena, EreportData) {
         const MISSING_VPD: &str = " (perhaps the SP doesn't know its own VPD?)";
         let part_number = get_sp_metadata_string(
             "baseboard_part_number",
@@ -139,15 +154,15 @@ impl EreportData {
             }
         };
 
-        EreportData {
-            id: EreportId { restart_id, ena },
-            time_collected,
-            collector_id,
-            part_number,
-            serial_number,
-            class,
-            report: serde_json::Value::Object(ereport.data),
-        }
+        (
+            ena,
+            EreportData {
+                part_number,
+                serial_number,
+                class,
+                report: serde_json::Value::Object(ereport.data),
+            },
+        )
     }
 }
 
@@ -233,29 +248,15 @@ fn get_sp_metadata_string(
 /// ```
 /// # use nexus_types::fm::ereport::EreportFilters;
 /// let filters = EreportFilters::new()
-///     .with_start_time(chrono::Utc::now() - chrono::Days::new(7))
-///     .expect("no end time set")
 ///     .with_serials(["BRM6900420"])
 ///     .with_classes(["hw.pwr.*"]);
 /// ```
 ///
-/// Note: JSON deserialization validates the start_time/end_time constraints
-/// using `TryFrom<EreportFiltersParams>`.
+/// Time bounds are not part of these filters: ereport collection is bounded
+/// by the bundle-wide time range on
+/// [`BundleDataSelection`](crate::support_bundle::BundleDataSelection).
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(try_from = "EreportFiltersParams")]
 pub struct EreportFilters {
-    /// If present, include only ereports that were collected at the specified
-    /// timestamp or later.
-    ///
-    /// If `end_time` is also present, this value *must* be at or before
-    /// `end_time`. This invariant is enforced by [`Self::with_start_time`].
-    start_time: Option<DateTime<Utc>>,
-    /// If present, include only ereports that were collected at the specified
-    /// timestamp or before.
-    ///
-    /// If `start_time` is also present, this value *must* be at or after
-    /// `start_time`. This invariant is enforced by [`Self::with_end_time`].
-    end_time: Option<DateTime<Utc>>,
     /// If this list is non-empty, include only ereports that were reported by
     /// systems with the provided serial numbers.
     only_serials: Vec<String>,
@@ -265,83 +266,25 @@ pub struct EreportFilters {
     only_classes: Vec<String>,
 }
 
-/// Helper for [`EreportFilters`] that validates the `start_time <= end_time`
-/// invariant. Used by serde deserialization above, as well as in conversions
-/// from Diesel `Ereports` model types.
-#[derive(Deserialize)]
-#[must_use = "this struct does nothing unless converted to EreportFilters"]
-pub struct EreportFiltersParams {
-    pub start_time: Option<DateTime<Utc>>,
-    pub end_time: Option<DateTime<Utc>>,
-    pub only_serials: Vec<String>,
-    pub only_classes: Vec<String>,
-}
-
-impl TryFrom<EreportFiltersParams> for EreportFilters {
-    type Error = Error;
-
-    fn try_from(params: EreportFiltersParams) -> Result<Self, Self::Error> {
-        let EreportFiltersParams {
-            start_time,
-            end_time,
-            only_serials,
-            only_classes,
-        } = params;
-        let mut f = Self::new();
-        if let Some(t) = start_time {
-            f = f.with_start_time(t)?;
-        }
-        if let Some(t) = end_time {
-            f = f.with_end_time(t)?;
-        }
-        f = f.with_serials(only_serials).with_classes(only_classes);
-        Ok(f)
-    }
-}
-
 /// Displayer for pretty-printing [`EreportFilters`].
 #[must_use = "this struct does nothing unless displayed"]
 pub struct DisplayEreportFilters<'a> {
     filters: &'a EreportFilters,
+    colored: bool,
+}
+
+impl DisplayEreportFilters<'_> {
+    /// If `colored` is true, style the output with ANSI terminal colors.
+    pub fn colored(mut self, colored: bool) -> Self {
+        self.colored = colored;
+        self
+    }
 }
 
 impl EreportFilters {
     /// Creates an empty set of filters (no filtering).
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Includes only ereports collected at or after `time`.
-    ///
-    /// Returns an error if `time` is after a previously set end time.
-    pub fn with_start_time(
-        mut self,
-        time: DateTime<Utc>,
-    ) -> Result<Self, Error> {
-        if let Some(end) = self.end_time {
-            if time > end {
-                return Err(Error::invalid_request(
-                    "start time must be before end time",
-                ));
-            }
-        }
-        self.start_time = Some(time);
-        Ok(self)
-    }
-
-    /// Includes only ereports collected at or before `time`.
-    ///
-    /// Returns an error if `time` is before a previously set start time.
-    pub fn with_end_time(mut self, time: DateTime<Utc>) -> Result<Self, Error> {
-        if let Some(start) = self.start_time {
-            if start > time {
-                return Err(Error::invalid_request(
-                    "start time must be before end time",
-                ));
-            }
-        }
-        self.end_time = Some(time);
-        Ok(self)
     }
 
     /// Adds serial numbers to the inclusion filter.
@@ -368,16 +311,6 @@ impl EreportFilters {
         self
     }
 
-    /// Returns the start time filter, if set.
-    pub fn start_time(&self) -> Option<DateTime<Utc>> {
-        self.start_time
-    }
-
-    /// Returns the end time filter, if set.
-    pub fn end_time(&self) -> Option<DateTime<Utc>> {
-        self.end_time
-    }
-
     /// Returns the serial number inclusion filter.
     pub fn only_serials(&self) -> &[String] {
         &self.only_serials
@@ -389,7 +322,7 @@ impl EreportFilters {
     }
 
     pub fn display(&self) -> DisplayEreportFilters<'_> {
-        DisplayEreportFilters { filters: self }
+        DisplayEreportFilters { filters: self, colored: false }
     }
 }
 
@@ -398,6 +331,8 @@ impl fmt::Display for DisplayEreportFilters<'_> {
         use itertools::Itertools;
 
         let filters = self.filters;
+        let styles = super::display::Styles::new(self.colored);
+        let heading = styles.heading();
 
         // Writes a semicolon-separated part to the formatter, tracking whether
         // we've written anything yet.
@@ -411,17 +346,12 @@ impl fmt::Display for DisplayEreportFilters<'_> {
                 f.write_fmt(args)
             };
 
-        if let Some(start) = filters.start_time() {
-            fmt_part(f, format_args!("start: {start}"))?;
-        }
-        if let Some(end) = filters.end_time() {
-            fmt_part(f, format_args!("end: {end}"))?;
-        }
         if !filters.only_serials().is_empty() {
             fmt_part(
                 f,
                 format_args!(
-                    "serials: {}",
+                    "{}: {}",
+                    heading.style("serials"),
                     filters.only_serials().iter().format(", ")
                 ),
             )?;
@@ -430,7 +360,8 @@ impl fmt::Display for DisplayEreportFilters<'_> {
             fmt_part(
                 f,
                 format_args!(
-                    "classes: {}",
+                    "{}: {}",
+                    heading.style("classes"),
                     filters.only_classes().iter().format(", ")
                 ),
             )?;
@@ -438,7 +369,7 @@ impl fmt::Display for DisplayEreportFilters<'_> {
 
         // If no filters are set, display "none" rather than empty output.
         if empty {
-            write!(f, "none")?;
+            write!(f, "{}", styles.missing().style("none"))?;
         }
         Ok(())
     }
@@ -449,41 +380,17 @@ pub(crate) mod test_utils {
     use super::*;
     use proptest::prelude::*;
 
-    fn arb_datetime() -> impl Strategy<Value = DateTime<Utc>> {
-        // Generate timestamps in a reasonable range (2020-2030).
-        (1577836800i64..1893456000i64)
-            .prop_map(|secs| DateTime::from_timestamp(secs, 0).unwrap())
-    }
-
     impl Arbitrary for EreportFilters {
         type Parameters = ();
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
             (
-                prop::option::of(arb_datetime()),
-                prop::option::of(arb_datetime()),
                 prop::collection::vec(".*", 0..=3),
                 prop::collection::vec(".*", 0..=3),
             )
-                .prop_map(|(time_a, time_b, only_serials, only_classes)| {
-                    // Ensure start <= end when both are present.
-                    let (start_time, end_time) = match (time_a, time_b) {
-                        (Some(a), Some(b)) if a > b => (Some(b), Some(a)),
-                        other => other,
-                    };
-                    let mut filters = EreportFilters::new();
-                    if let Some(t) = start_time {
-                        filters = filters
-                            .with_start_time(t)
-                            .expect("no end time set yet");
-                    }
-                    if let Some(t) = end_time {
-                        filters = filters
-                            .with_end_time(t)
-                            .expect("start <= end by construction");
-                    }
-                    filters
+                .prop_map(|(only_serials, only_classes)| {
+                    EreportFilters::new()
                         .with_serials(only_serials)
                         .with_classes(only_classes)
                 })

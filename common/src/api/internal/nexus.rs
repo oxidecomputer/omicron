@@ -4,10 +4,9 @@
 
 //! APIs exposed by Nexus.
 
-use crate::api::external::{
-    ByteCount, DiskState, Generation, Hostname, InstanceCpuCount, Vni,
-};
+use crate::api::external::{DiskState, Vni};
 use chrono::{DateTime, Utc};
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::DownstairsRegionKind;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsRepairKind;
@@ -44,16 +43,6 @@ pub struct DiskRuntimeState {
     pub generation: Generation,
     /// timestamp for this information
     pub time_updated: DateTime<Utc>,
-}
-
-/// The "static" properties of an instance: information about the instance that
-/// doesn't change while the instance is running.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceProperties {
-    pub ncpus: InstanceCpuCount,
-    pub memory: ByteCount,
-    /// RFC1035-compliant hostname for the instance.
-    pub hostname: Hostname,
 }
 
 // Oximeter producer/collector objects.

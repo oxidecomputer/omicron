@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use std::net::SocketAddr;
 
 use omicron_common::api::external::Hostname;
@@ -63,20 +67,6 @@ pub struct InstanceSledLocalConfig {
     pub firewall_rules: Vec<ResolvedVpcFirewallRule>,
     pub dhcp_config: DhcpConfig,
     pub delegated_zvols: Vec<DelegatedZvol>,
-}
-
-impl From<v17::instance::InstanceEnsureBody> for InstanceEnsureBody {
-    fn from(v17: v17::instance::InstanceEnsureBody) -> InstanceEnsureBody {
-        InstanceEnsureBody {
-            vmm_spec: v17.vmm_spec,
-            local_config: v17.local_config.into(),
-            vmm_runtime: v17.vmm_runtime,
-            instance_id: v17.instance_id,
-            migration_id: v17.migration_id,
-            propolis_addr: v17.propolis_addr,
-            metadata: v17.metadata,
-        }
-    }
 }
 
 impl From<v17::instance::InstanceSledLocalConfig> for InstanceSledLocalConfig {

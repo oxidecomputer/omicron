@@ -13,7 +13,8 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pools, create_local_user, create_project, create_vpc,
-    create_vpc_with_error, grant_iam, objects_list_page_authz, test_params,
+    create_vpc_with_error, grant_iam, object_create, objects_list_page_authz,
+    test_params,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::floating_ip;
@@ -25,9 +26,9 @@ use nexus_types::external_api::project;
 use nexus_types::external_api::silo;
 use nexus_types::external_api::vpc;
 use nexus_types::identity::{Asset, Resource};
+use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::Instance;
 use omicron_common::api::external::{
     RouteDestination, RouteTarget, VpcFirewallRuleAction,
     VpcFirewallRuleDirection, VpcFirewallRuleFilter, VpcFirewallRulePriority,
@@ -50,6 +51,44 @@ fn get_subnet_url(vpc_name: &str, subnet_name: &str) -> String {
         "/v1/vpc-subnets/{subnet_name}?project={}&vpc={}",
         PROJECT_NAME, vpc_name
     )
+}
+
+#[nexus_test]
+async fn test_vpc_create_without_default_subnet(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let _ = create_project(client, PROJECT_NAME).await;
+
+    let vpc_name = "no-default-subnet";
+    let vpcs_url = format!("/v1/vpcs?project={PROJECT_NAME}");
+    let _: vpc::Vpc = object_create(
+        client,
+        &vpcs_url,
+        &vpc::VpcCreate {
+            identity: IdentityMetadataCreateParams {
+                name: vpc_name.parse().unwrap(),
+                description: String::new(),
+            },
+            ipv6_prefix: None,
+            dns_name: vpc_name.parse().unwrap(),
+            defaults: Some(vpc::VpcCreateDefaults { subnet: None }),
+        },
+    )
+    .await;
+
+    let subnets = objects_list_page_authz::<vpc::VpcSubnet>(
+        client,
+        &format!("/v1/vpc-subnets?project={PROJECT_NAME}&vpc={vpc_name}"),
+    )
+    .await;
+    assert!(subnets.items.is_empty());
+
+    NexusRequest::object_delete(client, &get_vpc_url(vpc_name))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("VPC without a default subnet should be deletable");
 }
 
 #[nexus_test]
@@ -102,6 +141,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
                 },
                 ipv6_prefix: Some(bad_prefix),
                 dns_name: "abc".parse().unwrap(),
+                defaults: None,
             })),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -327,6 +367,7 @@ async fn test_vpc_limited_collaborator_role(
             },
             ipv6_prefix: None,
             dns_name: "test".parse().unwrap(),
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -348,6 +389,7 @@ async fn test_vpc_limited_collaborator_role(
             },
             ipv6_prefix: None,
             dns_name: "test2".parse().unwrap(),
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::UnprivilegedUser)
@@ -386,6 +428,7 @@ async fn test_vpc_limited_collaborator_role(
                 },
                 ipv6_prefix: None,
                 dns_name: "forbidden".parse().unwrap(),
+                defaults: None,
             }))
             .expect_status(Some(StatusCode::FORBIDDEN)),
     )
@@ -465,7 +508,7 @@ async fn test_limited_collaborator_can_create_instance(
                 description: "test instance created by limited-collaborator"
                     .to_string(),
             },
-            ncpus: omicron_common::api::external::InstanceCpuCount(2),
+            ncpus: instance::InstanceCpuCount(2),
             memory:
                 omicron_common::api::external::ByteCount::from_gibibytes_u32(4),
             hostname: "test-instance".parse().unwrap(),
@@ -481,6 +524,7 @@ async fn test_limited_collaborator_can_create_instance(
             start: true,
             auto_restart_policy: None,
             anti_affinity_groups: vec![],
+            enable_jumbo_frames: false,
         },
     )
     .authn_as(AuthnMode::SiloUser(limited_user.id))
@@ -543,6 +587,7 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
                 },
                 ipv6_prefix: None,
                 dns_name: "forbidden".parse().unwrap(),
+                defaults: None,
             }))
             .expect_status(Some(StatusCode::FORBIDDEN)),
     )

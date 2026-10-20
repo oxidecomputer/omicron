@@ -356,6 +356,7 @@ mod test {
     use diesel::prelude::*;
     use nexus_db_queries::db;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::alert::test_alerts;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_uuid_kinds::AlertReceiverUuid;
     use omicron_uuid_kinds::AlertUuid;
@@ -454,9 +455,11 @@ mod test {
         let alert_id = AlertUuid::new_v4();
         let alert = db::model::Alert::new(
             alert_id,
-            db::model::AlertClass::TestQuuxBar,
-            serde_json::json!({"msg": "help im trapped in a webhook event factory"}),
-        );
+            &test_alerts::QuuxBar(serde_json::json!(
+                {"msg": "help im trapped in a webhook event factory"}
+            )),
+        )
+        .expect("alert payload should serialize");
         datastore
             .alert_create(&opctx, alert)
             .await

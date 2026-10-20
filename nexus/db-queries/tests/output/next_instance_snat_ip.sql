@@ -211,6 +211,26 @@ WITH
               parent_id = $29 AND time_deleted IS NULL AND is_primary
           )
             AS nic
+    ),
+  pool_still_assignable
+    AS MATERIALIZED (
+      SELECT
+        CAST(
+          CASE
+          WHEN EXISTS(
+            SELECT
+              1
+            FROM
+              ip_pool_resource
+            WHERE
+              ip_pool_id = $30 AND resource_type = 'silo' AND resource_id = $31
+          )
+          AND (SELECT assignment FROM ip_pool WHERE id = $32 AND time_deleted IS NULL) = 'silos'
+          THEN 'TRUE'
+          ELSE $33
+          END
+            AS BOOL
+        )
     )
 SELECT
   *

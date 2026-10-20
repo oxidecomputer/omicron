@@ -1,0 +1,106 @@
+:showtitle:
+:toc: left
+:icons: font
+
+= reconfigurator-exec-unsafe
+
+`reconfigurator-exec-unsafe` executes a blueprint against a live system from the command line.  It reads the blueprint from a JSON file and then runs the same execution code that Nexus runs (the `nexus-reconfigurator-execution` package).  It talks directly to the internal DNS servers and to CockroachDB, so it must run somewhere with access to the underlay network.
+
+This is a tool for development and testing.  It is not part of the shipping product.
+
+For background on Reconfigurator, blueprints, and the rest of the tooling, see:
+
+* xref:../../docs/reconfigurator.adoc[Reconfigurator documentation]
+* xref:../../docs/reconfigurator-dev-guide.adoc[Reconfigurator developer guide]
+* xref:../../docs/reconfigurator-ops-guide.adoc[Reconfigurator operator guide]
+
+== When to use it
+
+This tool was built to test execution of a blueprint in development where you haven't yet implemented database serialization for part of the blueprint.  Specifically, when initially building MGS-managed updates, we added some complex stuff to the blueprint.  This was implemented in Rust and so was easy to serialize to a JSON file, too, but it would have been a bunch more work to put this into the database.  We wanted to be able to test execution using these blueprints _before_ implementing the database serialization for them so that we could iterate more quickly as we found we needed to change what we stored in the blueprint.
+
+This is a pretty narrow use case.
+
+== Why "unsafe"
+
+This tool is dangerous because it can deploy something to, say, sled agents that's different than what Nexus is deploying for the same blueprint. One of these will "win" on a per-sled basis. The other will see blueprint execution errors. For example, if you're changing `BlueprintSledConfig`, which affects the set of zones deployed to each sled agent, and you generate a new blueprint with your new representation: an existing Nexus and your Nexus will compute different contents for the sled agent config generation `N`.  If your `reconfigurator-exec-unsafe` invocation reaches a particular sled first, it will get your version.  Otherwise, it will get Nexus's.  That will become sticky for that sled, since it won't accept different versions of generation `N`.
+
+This discrepancy would generally get resolved if ever Nexus had to bump the associated generation for some other reason. But it could have long-term consequences. The specific behavior and impact would depend on how the blueprint differed between Nexus and this tool.
+
+== Before you run it
+
+For safety and predictability, this tool requires that:
+
+- Your blueprint is the current target blueprint.  (The system is designed so that it should always be safe to execute an older target blueprint.)
+- Blueprint execution is disabled.  This helps ensure that your execution will "win" as the blueprint is executed (see above).
+
+From the switch zone, you can use `omdb` to do this.  If the blueprint isn't in the database yet, import it first:
+
+```
+$ omdb --destructive nexus blueprints import my-blueprint.json
+```
+
+Then make it the target with execution disabled:
+
+```
+$ omdb --destructive nexus blueprints target set BLUEPRINT_ID disabled
+```
+
+If the blueprint is already the target, you can just disable execution for it:
+
+```
+$ omdb --destructive nexus blueprints target disable BLUEPRINT_ID
+```
+
+Confirm that both conditions hold before you continue:
+
+```
+$ omdb nexus blueprints target show
+target blueprint: f48b5b5a-05dd-4fab-95a9-e062ae8704b1
+made target at:   2025-05-27 18:36:12.227236 UTC
+enabled:          false
+```
+
+Remember that you can only make a blueprint the target if its parent is the current target.  See the developer guide for details.
+
+When you're finished with the tool, re-enable execution so that the system resumes managing itself:
+
+```
+$ omdb --destructive nexus blueprints target enable BLUEPRINT_ID
+```
+
+== Usage
+
+```
+reconfigurator-exec-unsafe [OPTIONS] <BLUEPRINT_FILE>
+```
+
+`<BLUEPRINT_FILE>` is the path to a JSON-serialized blueprint.  `reconfigurator-cli` writes files in this format with its `blueprint-save` command.
+
+.Options
+[cols="1,3",options="header"]
+|===
+|Option
+|Description
+
+|`--dns-server <ADDR>`
+|Address of an internal DNS server in this deployment.  The tool uses this to find CockroachDB and the other services it needs.  You will probably need to specify this option for your system.
+
+|`--log-level <LEVEL>`
+|Log level filter, `info` by default.  Logs go to stderr.  You can also set this with the `LOG_LEVEL` environment variable.
+
+|`--mgs-updates`
+|Run a driver for MGS-managed updates (service processor software and the like).  Off by default.  See <<_mgs_managed_updates>>.
+
+|`--color <WHEN>`
+|Whether to colorize the execution report: `auto` (the default), `always`, or `never`.
+|===
+
+When execution finishes, the tool prints a report of every execution step to stdout.  It exits non-zero if execution failed.
+
+== MGS-managed updates
+
+Blueprint execution doesn't apply MGS-managed updates itself.  It hands the set of pending updates to a separate driver, which lives in Nexus on a real system.  If you want those updates to actually happen, pass `--mgs-updates`.  The tool then starts its own driver, picks an in-service sled to serve as its repo depot, and keeps running after blueprint execution completes so that the driver can do its work.
+
+The tool waits until at least one update has completed and no updates are in progress, then shuts the driver down.  This means you should only pass `--mgs-updates` when the blueprint actually contains pending MGS updates.  If it doesn't, the tool will wait forever, and you'll have to interrupt it.
+
+For developing or testing the update driver on its own, `reconfigurator-sp-updater` is usually the easier tool.

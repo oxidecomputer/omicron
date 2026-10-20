@@ -25,6 +25,10 @@ use nexus_types::quiesce::SagaQuiesceHandle;
 use omicron_common::api::external::DataPageParams;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use oxide_update_engine_display::LineDisplay;
+use oxide_update_engine_display::LineDisplayStyles;
+use oxide_update_engine_types::buffer::EventBuffer;
+use oxide_update_engine_types::spec::SerializableError;
 use qorb::resolver::Resolver;
 use qorb::resolvers::fixed::FixedResolver;
 use slog::info;
@@ -34,10 +38,6 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
-use update_engine::EventBuffer;
-use update_engine::NestedError;
-use update_engine::display::LineDisplay;
-use update_engine::display::LineDisplayStyles;
 
 fn main() -> Result<(), anyhow::Error> {
     let args = ReconfiguratorExec::parse();
@@ -62,17 +62,10 @@ struct ReconfiguratorExec {
     )]
     log_level: dropshot::ConfigLoggingLevel,
 
-    /// an internal DNS server in this deployment
-    // This default value is currently appropriate for all deployed systems.
-    // That relies on two assumptions:
-    //
-    // 1. The internal DNS servers' underlay addresses are at a fixed location
-    //    from the base of the AZ subnet.  This is unlikely to change, since the
-    //    DNS servers must be discoverable with virtually no other information.
-    // 2. The AZ subnet used for all deployments today is fixed.
-    //
-    // For simulated systems (e.g., `cargo xtask omicron-dev run-all`), or if
-    // these assumptions change in the future, we may need to adjust this.
+    /// an internal DNS server in this deployment (likely needs to be specified
+    /// for each deployment)
+    // This default value was once appropriate for deployed systems, but isn't
+    // any more since they have different AZ subnets today.
     #[arg(long, default_value = "[fd00:1122:3344:3::1]:53")]
     dns_server: SocketAddr,
 
@@ -108,9 +101,20 @@ impl ReconfiguratorExec {
             internal_dns_resolver::QorbResolver::new(vec![self.dns_server]);
 
         info!(&log, "setting up database pool");
-        let pool = Arc::new(db::Pool::new(&log, &qorb_resolver));
+        let pool = Arc::new(db::Pool::new(
+            &log,
+            &qorb_resolver,
+            db::ClaimBacktraceSetting::Capture,
+        ));
+        // Passing in omicron_git_version::current is probably not necessary
+        // since the types that depend on the Git version will probably not be
+        // constructed by this binary. But we do it anyway, because this is a
+        // leaf node, so recompiling it if the commit changes is not a huge
+        // deal. If this becomes a problem in the future, we could pass in a
+        // dummy version, at the cost of making this code path that much harder
+        // to reason about.
         let datastore = Arc::new(
-            DataStore::new_failfast(&log, pool)
+            DataStore::new_failfast(&log, pool, omicron_git_version::current())
                 .await
                 .context("creating datastore")?,
         );
@@ -149,7 +153,7 @@ impl ReconfiguratorExec {
             .with_context(|| format!("open {:?}", input_path))?;
         let bufread = std::io::BufReader::new(file);
         let blueprint: Blueprint = serde_json::from_reader(bufread)
-            .with_context(|| format!("read and parse {:?}", &input_path))?;
+            .with_context(|| format!("read and parse {:?}", input_path))?;
 
         // Check that the blueprint is the current system target.
         // (This is currently redundant with a check done early during blueprint
@@ -166,7 +170,7 @@ impl ReconfiguratorExec {
             );
         }
 
-        let (sender, mut receiver) = update_engine::channel();
+        let (sender, mut receiver) = oxide_update_engine::channel();
 
         let receiver_task = tokio::spawn(async move {
             let mut event_buffer = EventBuffer::default();
@@ -257,8 +261,9 @@ impl ReconfiguratorExec {
         .context("blueprint execution failed");
 
         // Get and dump the report from the receiver task.
-        let event_buffer =
-            receiver_task.await.map_err(|error| NestedError::new(&error))?;
+        let event_buffer = receiver_task
+            .await
+            .map_err(|error| SerializableError::new(&error))?;
         let mut line_display = LineDisplay::new(std::io::stdout());
         let should_colorize = match self.color {
             ColorChoice::Always => true,

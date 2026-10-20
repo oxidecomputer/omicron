@@ -7,11 +7,14 @@ use crate::config::Ereport;
 use crate::config::EreportConfig;
 use crate::config::EreportRestart;
 use crate::server::UdpServer;
+use crate::update::SimSpUpdate;
+use crate::vpd::BaseboardVpd;
 use gateway_ereport_messages::Ena;
 use gateway_ereport_messages::Request;
 use gateway_ereport_messages::ResponseHeader;
 use gateway_ereport_messages::ResponseHeaderV0;
 use gateway_ereport_messages::RestartId;
+use gateway_messages::SpComponent;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::io::Cursor;
@@ -26,6 +29,68 @@ pub(crate) struct EreportState {
     next_ena: Ena,
     restart_id: RestartId,
     log: slog::Logger,
+}
+
+#[derive(
+    Debug, Clone, Default, PartialEq, serde::Deserialize, serde::Serialize,
+)]
+#[serde(transparent)]
+pub struct Metadata(toml::Table);
+
+impl Metadata {
+    pub(crate) fn populate_defaults(
+        &mut self,
+        vpd: &BaseboardVpd,
+        update_state: &SimSpUpdate,
+    ) {
+        // see: https://github.com/oxidecomputer/hubris/blob/f6e5849734d4e7d965a2f1cd71ca4ed4b24532de/task/packrat/src/ereport.rs#L550-L570
+        let caboose = {
+            let mut buf = [0u8; 256];
+            let mut get_caboose_value_string =
+                |key: [u8; 4]| -> anyhow::Result<String> {
+                    let len = update_state.get_component_caboose_value(
+                        SpComponent::SP_ITSELF,
+                        0,
+                        key,
+                        &mut buf[..],
+                    )?;
+                    Ok(std::str::from_utf8(&buf[..len])?.to_string())
+                };
+
+            let mut map = toml::Table::new();
+            let gitc = get_caboose_value_string(*b"GITC")
+                .expect("SimUpdateState should provide a valid caboose GITC")
+                .into();
+            let vers = get_caboose_value_string(*b"VERS")
+                .expect("SimUpdateState should provide a valid caboose VERS")
+                .into();
+            let bord = get_caboose_value_string(*b"BORD")
+                .expect("SimUpdateState should provide a valid caboose BORD")
+                .into();
+
+            map.insert("board".to_string(), bord);
+            map.insert("version".to_string(), vers);
+            map.insert("commit".to_string(), gitc);
+
+            map
+        };
+
+        self.0.insert("hubris_caboose".to_string(), caboose.into());
+        self.0.insert(
+            "baseboard_serial_number".to_string(),
+            vpd.serial_number().to_string().into(),
+        );
+        self.0.insert(
+            "baseboard_part_number".to_string(),
+            vpd.part_number().to_string().into(),
+        );
+        // TODO(eliza): SP sim should really learn about baseboard rev
+        // numbers...
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 #[derive(Debug)]
@@ -61,9 +126,11 @@ pub(crate) async fn recv_request(
 impl EreportState {
     pub(crate) fn new(
         EreportConfig { restart, ereports }: EreportConfig,
+        vpd: &BaseboardVpd,
+        update_state: &SimSpUpdate,
         log: slog::Logger,
     ) -> Self {
-        let EreportRestart { metadata, restart_id } = restart;
+        let EreportRestart { mut metadata, restart_id } = restart;
         slog::info!(
             log,
             "configuring sim ereports";
@@ -71,6 +138,17 @@ impl EreportState {
             "n_ereports" => ereports.len(),
             "metadata" => ?metadata,
         );
+
+        if metadata.is_empty() {
+            metadata.populate_defaults(vpd, update_state);
+            slog::debug!(
+                log,
+                "sim ereport restart metadata is empty, using defaults";
+                "restart_id" => ?restart_id,
+                "n_ereports" => ereports.len(),
+                "metadata" => ?metadata,
+            );
+        }
 
         let ereports: VecDeque<_> =
             // The ereport queue always begins with an initial loss record. This
@@ -88,7 +166,7 @@ impl EreportState {
                 .collect();
         let restart_id = RestartId::new(restart_id.as_u128());
         let next_ena = Ena::new(ereports.len() as u64);
-        Self { ereports, next_ena, restart_id, meta: metadata, log }
+        Self { ereports, next_ena, restart_id, meta: metadata.0, log }
     }
 
     pub(crate) fn handle_command(&mut self, cmd: Command) {
@@ -116,7 +194,11 @@ impl EreportState {
             "metadata" => ?metadata,
         );
         self.restart_id = RestartId::new(restart_id.as_u128());
-        self.meta = metadata;
+        // N.B.: if the metadata map is empty here, we assume that the caller
+        // did that on purpose in order to test empty metadata. If the caller
+        // wanted to populate the metadata for the new restart, they would have
+        // provided values.
+        self.meta = metadata.0;
         self.ereports.clear();
         // Initial loss record. This is used to indicate that the SP has
         // restarted, and any ereports that were previously buffered but not

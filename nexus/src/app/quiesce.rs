@@ -531,7 +531,6 @@ mod test {
     use std::time::Duration;
     use std::time::Instant;
     use tokio::sync::watch;
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -554,7 +553,9 @@ mod test {
                 if matches!(rv.state, QuiesceState::Quiesced { .. }) {
                     Ok(rv)
                 } else {
-                    Err(CondCheckError::<NexusClientError>::NotYet)
+                    Err(CondCheckError::<NexusClientError>::NotYet {
+                        status: None,
+                    })
                 }
             },
             &Duration::from_millis(50),
@@ -742,7 +743,9 @@ mod test {
             || async {
                 use nexus_db_schema::schema::saga::dsl;
                 let saga_state: nexus_db_model::SagaState = dsl::saga
-                    .filter(dsl::id.eq(demo_saga.saga_id))
+                    .filter(dsl::id.eq(nexus_db_model::to_db_typed_uuid(
+                        demo_saga.saga_id,
+                    )))
                     .select(dsl::saga_state)
                     .first_async(&*conn)
                     .await
@@ -750,7 +753,7 @@ mod test {
                 if saga_state == nexus_db_model::SagaState::Done {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &Duration::from_millis(50),
@@ -770,7 +773,9 @@ mod test {
                     .into_inner();
                 debug!(log, "found quiesce state"; "state" => ?rv);
                 if !matches!(rv.state, QuiesceState::DrainingDb { .. }) {
-                    return Err(CondCheckError::<NexusClientError>::NotYet);
+                    return Err(CondCheckError::<NexusClientError>::NotYet {
+                        status: None,
+                    });
                 }
                 assert!(rv.sagas.sagas_pending.is_empty());
                 // The database claim we took is still held.
@@ -956,7 +961,7 @@ mod test {
         let saga_ref = nexus_qq1
             .sagas()
             .saga_create(
-                steno::SagaId(Uuid::new_v4()),
+                steno::SagaId::new_v4(),
                 &steno::SagaName::new("test-saga"),
             )
             .expect("create saga while not quiesced");
@@ -995,7 +1000,7 @@ mod test {
                     .iter()
                     .all(|q| matches!(q.state(), QuiesceState::Quiesced { .. }))
                 {
-                    return Err(CondCheckError::<()>::NotYet);
+                    return Err(CondCheckError::<()>::NotYet { status: None });
                 }
 
                 Ok(())

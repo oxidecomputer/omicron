@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
-
 //! Tools for collecting and inspecting service bundles for zones.
 
 use anyhow::Context;
@@ -353,10 +351,13 @@ impl ZoneBundler {
         zone: &RunningZone,
         cause: ZoneBundleCause,
     ) -> Result<ZoneBundleMetadata, BundleError> {
-        // NOTE: [Self::await_completion_of_prior_bundles] relies on this lock
-        // being held across this whole function. If we want more concurrency,
-        // we'll need to add a barrier-like mechanism to let callers know when
-        // prior bundles have completed.
+        // NOTE: Previously (Prior to #8064),
+        // [Self::await_completion_of_prior_bundles] relied on this lock being
+        // held across this whole function.
+        //
+        // That method was unused, but the lock was left in place. The method
+        // has since been removed, but the lock was kept to avoid changing
+        // behavior in an unrelated [PR](#11476).
         let inner = self.inner.lock().await;
         let storage_dirs = inner.bundle_directories().await;
         let extra_log_dirs = inner
@@ -373,14 +374,6 @@ impl ZoneBundler {
             "context" => ?context,
         );
         create(&self.log, zone, &context).await
-    }
-
-    /// Awaits the completion of all prior calls to [ZoneBundler::create].
-    ///
-    /// This is critical for disk expungement, which wants to ensure that the
-    /// Sled Agent is no longer using devices after they have been expunged.
-    pub async fn await_completion_of_prior_bundles(&self) {
-        let _ = self.inner.lock().await;
     }
 
     /// Return the paths for all bundles of the provided zone and ID.
@@ -1703,11 +1696,11 @@ mod illumos_tests {
     use chrono::TimeZone;
     use chrono::Timelike;
     use chrono::Utc;
-    use omicron_common::disk::DiskIdentity;
     use rand::RngCore;
     use sled_agent_config_reconciler::AvailableDatasetsReceiver;
     use sled_agent_config_reconciler::InternalDiskDetails;
     use sled_agent_config_reconciler::InternalDisksReceiver;
+    use sled_agent_types::disk::DiskIdentity;
     use slog::Drain;
     use slog::Logger;
     use std::sync::Arc;
@@ -2256,7 +2249,8 @@ mod illumos_tests {
     #[tokio::test]
     async fn test_find_archived_log_files() {
         let log = test_logger();
-        let tmpdir = tempfile::tempdir().expect("Failed to make tempdir");
+        let tmpdir =
+            camino_tempfile::tempdir().expect("Failed to make tempdir");
 
         for prefix in ["oxide", "system-illumos"] {
             let mut should_match = [
@@ -2274,10 +2268,7 @@ mod illumos_tests {
                     .expect("failed to create dummy file");
             }
 
-            let path = Utf8PathBuf::try_from(
-                tmpdir.path().as_os_str().to_str().unwrap(),
-            )
-            .unwrap();
+            let path = tmpdir.path().to_owned();
             let mut files = find_archived_log_files(
                 &log,
                 "zone-name", // unused here, for logging only

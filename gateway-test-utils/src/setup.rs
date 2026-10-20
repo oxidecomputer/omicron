@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
-
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use dropshot::test_util::LogContext;
@@ -14,6 +12,7 @@ use omicron_gateway::SwitchPortConfig;
 pub use omicron_gateway::metrics::MetricsConfig;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_uuid_kinds::RackUuid;
 use qorb::resolver::AllBackends;
 use qorb::resolver::Resolver;
 use qorb::resolvers::fixed::FixedResolver;
@@ -38,7 +37,7 @@ pub const DEFAULT_SP_SIM_CONFIG: &str =
 pub struct GatewayTestContext {
     pub client: gateway_client::Client,
     pub server: omicron_gateway::Server,
-    pub port: u16,
+    port: u16,
     pub simrack: SimRack,
     pub logctx: LogContext,
     pub gateway_id: Uuid,
@@ -47,6 +46,10 @@ pub struct GatewayTestContext {
 }
 
 impl GatewayTestContext {
+    pub fn address(&self) -> SocketAddrV6 {
+        SocketAddrV6::new(Ipv6Addr::LOCALHOST, self.port, 0, 0)
+    }
+
     pub fn mgs_backends(&self) -> watch::Receiver<AllBackends> {
         self.resolver_backends.clone()
     }
@@ -188,7 +191,10 @@ pub async fn test_setup_with_config(
                 let sled = &simrack.gimlets[usize::from(target_sp.slot)];
                 (sled.local_addr(sp_port), sled.local_ereport_addr(sp_port))
             }
-            SpType::Power => todo!(),
+            SpType::Power => {
+                let psc = &simrack.pscs[usize::from(target_sp.slot)];
+                (psc.local_addr(sp_port), psc.local_ereport_addr(sp_port))
+            }
         };
         match &mut port_description.config {
             SwitchPortConfig::Simulated { addr, ereport_addr, .. } => {
@@ -203,7 +209,7 @@ pub async fn test_setup_with_config(
     }
 
     // Start gateway server
-    let rack_id = Some(Uuid::parse_str(RACK_UUID).unwrap());
+    let rack_id = Some(RACK_UUID.parse::<RackUuid>().unwrap());
     let gateway_id = Uuid::new_v4();
     let args = MgsArguments { id: gateway_id, addresses, rack_id };
     let server = omicron_gateway::Server::start(
@@ -246,7 +252,7 @@ pub async fn test_setup_with_config(
                 }) {
                 Ok(())
             } else {
-                Err(CondCheckError::NotYet)
+                Err(CondCheckError::NotYet { status: None })
             };
             future::ready(result)
         },

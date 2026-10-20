@@ -55,12 +55,7 @@ pub fn script_with_cwd(
 
     // Everything is deterministic, so we don't need to redact UUIDs.
     // However, it's necessary to redact paths from generated log entries.
-    let stdout_text = Redactor::default()
-        .uuids(false)
-        .field("assembling repository in", ".*")
-        .field("extracting uploaded archive to", ".*")
-        .field("created directory to store extracted artifacts, path:", ".*")
-        .do_redact(&stdout_text);
+    let stdout_text = Redactor::default().uuids(false).do_redact(&stdout_text);
 
     // This is the file name without the extension.
     let test_name = path.file_stem().unwrap();

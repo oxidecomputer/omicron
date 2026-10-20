@@ -807,9 +807,11 @@ impl DataStore {
     /// Runs pre-computed verification SQL (from a `.verify.sql` file) in a
     /// **separate transaction** from the DDL that was just applied.
     /// The verification SQL is generated at test time by parsing each
-    /// migration and detecting operations that involve async backfill in
-    /// CockroachDB (CREATE INDEX, ALTER COLUMN SET NOT NULL, ADD CONSTRAINT,
-    /// ADD COLUMN with backfill).
+    /// migration and detecting operations whose async backfill or validation
+    /// can outlast the statement that issued it (CREATE INDEX and validating
+    /// ADD CONSTRAINT). Operations like ALTER COLUMN SET NOT NULL and ADD
+    /// COLUMN are excluded: their issuing statement blocks on the
+    /// schema-change job, so on success the change has already landed.
     ///
     /// If verification fails, the error propagates immediately — the outer
     /// startup retry loop will re-attempt the entire migration.
@@ -1444,6 +1446,7 @@ fn version_validation_query(current: &Version, target: &Version) -> String {
 mod test {
     use super::*;
     use crate::db::datastore::IdentityCheckPolicy;
+    use crate::db::pub_test_utils::TEST_GIT_VERSION;
     use crate::db::pub_test_utils::TestDatabase;
     use camino::Utf8Path;
     use camino_tempfile::Utf8TempDir;
@@ -1513,8 +1516,11 @@ mod test {
             .await
             .expect("Failed to set version");
 
-        let datastore =
-            DataStore::new_unchecked(logctx.log.clone(), pool.clone());
+        let datastore = DataStore::new_unchecked(
+            logctx.log.clone(),
+            pool.clone(),
+            TEST_GIT_VERSION,
+        );
         let checked_action = datastore
             .check_schema_and_access(
                 IdentityCheckPolicy::DontCare,
@@ -1719,6 +1725,7 @@ mod test {
                     pool,
                     Some(&all_versions),
                     IdentityCheckPolicy::DontCare,
+                    TEST_GIT_VERSION,
                 )
                 .await?;
 
@@ -1848,7 +1855,11 @@ mod test {
         // Manually construct the datastore to avoid the backoff timeout.
         // We want to trigger errors, but have no need to wait.
 
-        let datastore = DataStore::new_unchecked(log.clone(), pool.clone());
+        let datastore = DataStore::new_unchecked(
+            log.clone(),
+            pool.clone(),
+            TEST_GIT_VERSION,
+        );
         let checked_action = datastore
             .check_schema_and_access(
                 IdentityCheckPolicy::DontCare,
@@ -1904,8 +1915,11 @@ mod test {
         let logctx =
             dev::test_setup_log("test_attempt_handoff_with_active_records");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
-        let datastore =
-            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+        let datastore = DataStore::new_unchecked(
+            logctx.log.clone(),
+            db.pool().clone(),
+            TEST_GIT_VERSION,
+        );
 
         // Set up test data: create some nexus records, including one active
         let nexus1_id = OmicronZoneUuid::new_v4();
@@ -1954,8 +1968,11 @@ mod test {
         let logctx =
             dev::test_setup_log("test_attempt_handoff_nexus_not_registered");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
-        let datastore =
-            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+        let datastore = DataStore::new_unchecked(
+            logctx.log.clone(),
+            db.pool().clone(),
+            TEST_GIT_VERSION,
+        );
 
         // Set up test data: create some other nexus records but not the one we're trying to handoff
         let nexus1_id = OmicronZoneUuid::new_v4();
@@ -2003,8 +2020,11 @@ mod test {
         let logctx =
             dev::test_setup_log("test_attempt_handoff_nexus_wrong_state");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
-        let datastore =
-            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+        let datastore = DataStore::new_unchecked(
+            logctx.log.clone(),
+            db.pool().clone(),
+            TEST_GIT_VERSION,
+        );
 
         // Set up test data: create nexus records where our target is in wrong state
         let nexus1_id = OmicronZoneUuid::new_v4();
@@ -2062,8 +2082,11 @@ mod test {
     async fn test_attempt_handoff_success() {
         let logctx = dev::test_setup_log("test_attempt_handoff_success");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
-        let datastore =
-            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+        let datastore = DataStore::new_unchecked(
+            logctx.log.clone(),
+            db.pool().clone(),
+            TEST_GIT_VERSION,
+        );
 
         // Set up test data: create multiple nexus records in not_yet and
         // quiesced states
@@ -2163,8 +2186,11 @@ mod test {
             "test_check_schema_and_access_empty_table_permits_access",
         );
         let db = TestDatabase::new_with_pool(&logctx.log).await;
-        let datastore =
-            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+        let datastore = DataStore::new_unchecked(
+            logctx.log.clone(),
+            db.pool().clone(),
+            TEST_GIT_VERSION,
+        );
 
         let nexus_id = OmicronZoneUuid::new_v4();
 
@@ -2209,8 +2235,11 @@ mod test {
         let logctx =
             dev::test_setup_log("test_check_schema_and_access_nexus_id");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
-        let datastore =
-            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+        let datastore = DataStore::new_unchecked(
+            logctx.log.clone(),
+            db.pool().clone(),
+            TEST_GIT_VERSION,
+        );
 
         // Add an active record, for some Nexus ID.
         datastore
@@ -2255,8 +2284,11 @@ mod test {
             "test_check_schema_and_access_lockout_refuses_access",
         );
         let db = TestDatabase::new_with_pool(&logctx.log).await;
-        let datastore =
-            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+        let datastore = DataStore::new_unchecked(
+            logctx.log.clone(),
+            db.pool().clone(),
+            TEST_GIT_VERSION,
+        );
 
         let nexus_id = OmicronZoneUuid::new_v4();
 
@@ -2296,8 +2328,11 @@ mod test {
         let logctx =
             dev::test_setup_log("test_check_schema_and_access_schema_too_new");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
-        let datastore =
-            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+        let datastore = DataStore::new_unchecked(
+            logctx.log.clone(),
+            db.pool().clone(),
+            TEST_GIT_VERSION,
+        );
 
         let nexus_id = OmicronZoneUuid::new_v4();
 
@@ -2345,8 +2380,11 @@ mod test {
             "test_check_schema_and_access_wait_for_handoff",
         );
         let db = TestDatabase::new_with_pool(&logctx.log).await;
-        let datastore =
-            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+        let datastore = DataStore::new_unchecked(
+            logctx.log.clone(),
+            db.pool().clone(),
+            TEST_GIT_VERSION,
+        );
 
         let nexus_id = OmicronZoneUuid::new_v4();
 
@@ -2390,8 +2428,11 @@ mod test {
         let logctx =
             dev::test_setup_log("test_check_schema_and_access_normal_use");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
-        let datastore =
-            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+        let datastore = DataStore::new_unchecked(
+            logctx.log.clone(),
+            db.pool().clone(),
+            TEST_GIT_VERSION,
+        );
 
         let nexus_id = OmicronZoneUuid::new_v4();
 
@@ -2427,8 +2468,11 @@ mod test {
         let logctx =
             dev::test_setup_log("test_check_schema_and_access_update_now");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
-        let datastore =
-            DataStore::new_unchecked(logctx.log.clone(), db.pool().clone());
+        let datastore = DataStore::new_unchecked(
+            logctx.log.clone(),
+            db.pool().clone(),
+            TEST_GIT_VERSION,
+        );
 
         let nexus_id = OmicronZoneUuid::new_v4();
 

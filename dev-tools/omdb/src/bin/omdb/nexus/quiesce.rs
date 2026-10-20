@@ -7,7 +7,6 @@
 use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
 use anyhow::Context;
-use chrono::TimeDelta;
 use chrono::Utc;
 use clap::Args;
 use clap::Subcommand;
@@ -15,7 +14,6 @@ use nexus_lockstep_client::types::PendingRecovery;
 use nexus_lockstep_client::types::QuiesceState;
 use nexus_lockstep_client::types::QuiesceStatus;
 use nexus_lockstep_client::types::SagaQuiesceStatus;
-use std::time::Duration;
 
 #[derive(Debug, Args)]
 pub struct QuiesceArgs {
@@ -77,7 +75,7 @@ async fn quiesce_show(
             println!(
                 "quiescing since {} ({} ago)",
                 humantime::format_rfc3339_millis(time_requested.into()),
-                format_time_delta(now - time_requested),
+                omicron_common::format_time_delta(now - time_requested),
             );
             println!("details: waiting for running sagas to finish");
         }
@@ -89,14 +87,16 @@ async fn quiesce_show(
             println!(
                 "quiescing since {} ({} ago)",
                 humantime::format_rfc3339_millis(time_requested.into()),
-                format_time_delta(now - time_requested),
+                omicron_common::format_time_delta(now - time_requested),
             );
             println!(
                 "details: waiting for database connections to be released"
             );
             println!(
                 "    previously: waiting for sagas took {}",
-                format_duration_ms(duration_draining_sagas.into()),
+                omicron_common::format_duration_ms(
+                    duration_draining_sagas.into()
+                ),
             );
         }
         QuiesceState::RecordingQuiesce {
@@ -108,15 +108,17 @@ async fn quiesce_show(
             println!(
                 "quiescing since {} ({} ago)",
                 humantime::format_rfc3339_millis(time_requested.into()),
-                format_time_delta(now - time_requested),
+                omicron_common::format_time_delta(now - time_requested),
             );
             println!(
                 "    waiting for sagas took {}",
-                format_duration_ms(duration_draining_sagas.into()),
+                omicron_common::format_duration_ms(
+                    duration_draining_sagas.into()
+                ),
             );
             println!(
                 "    waiting for db quiesce took {}",
-                format_duration_ms(duration_draining_db.into()),
+                omicron_common::format_duration_ms(duration_draining_db.into()),
             );
         }
         QuiesceState::Quiesced {
@@ -130,23 +132,27 @@ async fn quiesce_show(
             println!(
                 "quiesced since {} ({} ago)",
                 humantime::format_rfc3339_millis(time_quiesced.into()),
-                format_time_delta(now - time_quiesced),
+                omicron_common::format_time_delta(now - time_quiesced),
             );
             println!(
                 "    waiting for sagas took {}",
-                format_duration_ms(duration_draining_sagas.into()),
+                omicron_common::format_duration_ms(
+                    duration_draining_sagas.into()
+                ),
             );
             println!(
                 "    waiting for db quiesce took {}",
-                format_duration_ms(duration_draining_db.into()),
+                omicron_common::format_duration_ms(duration_draining_db.into()),
             );
             println!(
                 "    recording quiesce took {}",
-                format_duration_ms(duration_recording_quiesce.into()),
+                omicron_common::format_duration_ms(
+                    duration_recording_quiesce.into()
+                ),
             );
             println!(
                 "    total quiesce time: {}",
-                format_duration_ms(duration_total.into()),
+                omicron_common::format_duration_ms(duration_total.into()),
             );
         }
     }
@@ -225,7 +231,7 @@ async fn quiesce_show(
             "    claim {} held since {} ({} ago)",
             claim.id,
             claim.held_since,
-            format_time_delta(Utc::now() - claim.held_since),
+            omicron_common::format_time_delta(Utc::now() - claim.held_since),
         );
         if args.stacks {
             println!("    acquired by:");
@@ -242,19 +248,4 @@ async fn quiesce_start(
 ) -> Result<(), anyhow::Error> {
     client.quiesce_start().await.context("quiescing Nexus")?;
     quiesce_show(client, &QuiesceShowArgs { stacks: false }).await
-}
-
-fn format_duration_ms(duration: Duration) -> String {
-    // Ignore units smaller than a millisecond.
-    let elapsed = Duration::from_millis(
-        u64::try_from(duration.as_millis()).unwrap_or(u64::MAX),
-    );
-    humantime::format_duration(elapsed).to_string()
-}
-
-fn format_time_delta(time_delta: TimeDelta) -> String {
-    match time_delta.to_std() {
-        Ok(d) => format_duration_ms(d),
-        Err(_) => String::from("<time delta out of range>"),
-    }
 }

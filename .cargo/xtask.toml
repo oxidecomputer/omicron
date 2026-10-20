@@ -24,7 +24,7 @@
 [libraries."libsocket.so.1"]
 [libraries."libssl.so.3"]
 [libraries."libumem.so.1"]
-[libraries."libxml2.so.2"]
+[libraries."libxml2.so.16"]
 [libraries."libxmlsec1.so.1"]
 
 # libipcc should only be depended on by binaries that communicate with ipcc.
@@ -47,6 +47,15 @@ binary_allow_list = [
   "omicron-dev",
   "omicron-package",
   "services-ledger-check-migrate",
+  "sled-agent",
+  "sled-agent-sim",
+]
+
+# libfmd_adm is the illumos Fault Management Daemon admin library, used by
+# sled-agent to collect FMD case/resource information for inventory.
+[libraries."libfmd_adm.so.1"]
+binary_allow_list = [
+  "omicron-dev",
   "sled-agent",
   "sled-agent-sim",
 ]

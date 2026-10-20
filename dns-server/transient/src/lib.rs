@@ -22,7 +22,7 @@ pub use dns_server::http_server::Context as HttpServerContext;
 
 pub struct TransientDnsServer {
     /// Server storage dir.
-    pub storage_dir: tempfile::TempDir,
+    pub storage_dir: camino_tempfile::Utf8TempDir,
     /// DNS server.
     pub dns_server: ServerHandle,
     /// Dropshot server.
@@ -38,7 +38,7 @@ impl TransientDnsServer {
         log: &slog::Logger,
         dns_bind_address: SocketAddr,
     ) -> Result<Self, anyhow::Error> {
-        let storage_dir = tempfile::tempdir()?;
+        let storage_dir = camino_tempfile::tempdir()?;
 
         let dns_log = log.new(o!("kind" => "dns"));
 
@@ -46,11 +46,7 @@ impl TransientDnsServer {
             log.new(o!("component" => "store")),
             &dns_server::storage::Config {
                 keep_old_generations: 3,
-                storage_path: storage_dir
-                    .path()
-                    .to_string_lossy()
-                    .to_string()
-                    .into(),
+                storage_path: storage_dir.path().to_owned(),
             },
         )
         .context("initializing DNS storage")?;
@@ -58,7 +54,8 @@ impl TransientDnsServer {
         let (dns_server, dropshot_server) = dns_server::start_servers(
             dns_log,
             store,
-            &dns_server::dns_server::Config { bind_address: dns_bind_address },
+            &dns_server::dns_server::Config::new(vec![dns_bind_address])
+                .context("building DNS configuration")?,
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),
                 default_request_body_max_bytes: 4 * 1024 * 1024,
@@ -90,7 +87,7 @@ impl TransientDnsServer {
     pub async fn resolver(&self) -> Result<TokioResolver, anyhow::Error> {
         let mut resolver_config = ResolverConfig::new();
         resolver_config.add_name_server(NameServerConfig::new(
-            self.dns_server.local_address(),
+            self.dns_server.sole_local_address()?,
             hickory_proto::xfer::Protocol::Udp,
         ));
         let mut resolver_opts = ResolverOpts::default();

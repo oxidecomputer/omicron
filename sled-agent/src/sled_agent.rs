@@ -5,6 +5,7 @@
 //! Sled agent implementation
 
 use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
+use crate::bootstrap::MultirackJoinCompleter;
 use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitorHandle;
 use crate::instance_manager::InstanceManager;
@@ -26,8 +27,6 @@ use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use derive_more::From;
 use dropshot::HttpError;
-use futures::StreamExt;
-use futures::stream::FuturesUnordered;
 use iddqd::IdHashMap;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::RunningZone;
@@ -37,16 +36,18 @@ use illumos_utils::zfs::DatasetVolumeDeleteArgs;
 use illumos_utils::zfs::DatasetVolumeEnsureArgs;
 use illumos_utils::zfs::DestroyDatasetErrorVariant;
 use illumos_utils::zfs::Mountpoint;
+use illumos_utils::zfs::RemoveReservationError;
+use illumos_utils::zfs::RemoveReservationErrorInner;
 use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
-use internal_dns_resolver::Resolver;
 use itertools::Itertools as _;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
-use omicron_common::address::{Ipv6Subnet, SLED_PREFIX, get_sled_address};
+use omicron_common::address::{
+    Ipv6Subnet, SLED_PREFIX_LENGTH, get_sled_address,
+};
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
-use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
@@ -59,6 +60,9 @@ use omicron_uuid_kinds::{
 };
 use oximeter_instruments::http::LatencyTracker;
 use oxnet::IpNet;
+use sled_agent_bootstrap_common::sprockets::{
+    SprocketsClient, SprocketsClientError,
+};
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
@@ -66,12 +70,14 @@ use sled_agent_config_reconciler::{
 };
 use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_measurements::MeasurementsHandle;
-use sled_agent_rack_setup::EarlyNetworkSetupError;
+use sled_agent_scrimlet_reconcilers::{
+    ScrimletReconcilersMode, SledAgentNetworkingInfo,
+};
 use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
-use sled_agent_types::disk::DiskStateRequested;
+use sled_agent_types::disk::CompressionAlgorithm;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::instance::ResolvedVpcFirewallRule;
 use sled_agent_types::instance::{
@@ -89,7 +95,6 @@ use sled_agent_types::sled::{
     StartSledAgentRequest, ThisSledSwitchZoneUnderlayIpAddr,
 };
 use sled_agent_types::system_networking::SystemNetworkingConfig;
-use sled_agent_types::uplink::HostPortConfig;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleMetadata,
@@ -104,9 +109,12 @@ use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeMap;
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
+use tokio::net::TcpStream;
 use tokio::sync::watch;
+use tokio::task::JoinSet;
+use trust_quorum::platform_id_to_baseboard_id;
 use uuid::Uuid;
 
 use illumos_utils::dladm::{Dladm, EtherstubVnic};
@@ -154,9 +162,6 @@ pub enum Error {
     #[error("Error managing instances")]
     Instance(#[from] crate::instance_manager::Error),
 
-    #[error("Error updating")]
-    Download(#[from] crate::updates::Error),
-
     #[error("Error managing guest networking")]
     Opte(#[from] illumos_utils::opte::Error),
 
@@ -168,9 +173,6 @@ pub enum Error {
 
     #[error(transparent)]
     ZpoolList(#[from] illumos_utils::zpool::ListError),
-
-    #[error(transparent)]
-    EarlyNetworkError(#[from] EarlyNetworkSetupError),
 
     #[error("Bootstore Error")]
     Bootstore(#[from] bootstore::NodeRequestError),
@@ -198,6 +200,9 @@ pub enum Error {
 
     #[error(transparent)]
     Rot(#[from] crate::rot::RotError),
+
+    #[error("Failed to complete multirack join request")]
+    MultirackJoin(#[from] crate::bootstrap::RssAccessError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -215,6 +220,8 @@ impl From<Error> for omicron_common::api::external::Error {
 // Provide a more specific HTTP error for some sled agent errors.
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
+        use crate::instance::Error as InstanceError;
+        use crate::instance_manager::Error as InstanceManagerError;
         use dropshot::ClientErrorStatusCode;
         use dropshot::ErrorStatusCode;
 
@@ -222,14 +229,12 @@ impl From<Error> for dropshot::HttpError {
         const INSTANCE_CHANNEL_FULL: &str = "INSTANCE_CHANNEL_FULL";
         const SUBNET_ALREADY_ATTACHED: &str = "SUBNET_ALREADY_ATTACHED";
         match err {
-            Error::Instance(crate::instance_manager::Error::Instance(
-                instance_error,
-            )) => {
+            Error::Instance(InstanceManagerError::Instance(instance_error)) => {
                 match instance_error {
                     // The instance's request channel is full, so it cannot
                     // currently process this request. Shed load, but indicate
                     // to the client that it can try again later.
-                    err @ crate::instance::Error::FailedSendChannelFull => {
+                    err @ InstanceError::FailedSendChannelFull => {
                         HttpError::for_unavail(
                             Some(INSTANCE_CHANNEL_FULL.to_string()),
                             // InlineErrorChain isn't really necessary here, but include it anyway,
@@ -237,7 +242,7 @@ impl From<Error> for dropshot::HttpError {
                             InlineErrorChain::new(&err).to_string(),
                         )
                     }
-                    crate::instance::Error::Propolis(propolis_error) => {
+                    InstanceError::Propolis(propolis_error) => {
                         if let Some(status_code) =
                             propolis_error.status().and_then(|status| {
                                 ErrorStatusCode::try_from(status).ok()
@@ -265,13 +270,13 @@ impl From<Error> for dropshot::HttpError {
                             propolis_error.to_string(),
                         )
                     }
-                    crate::instance::Error::Transition(omicron_error) => {
+                    InstanceError::Transition(omicron_error) => {
                         // Preserve the status associated with the wrapped
                         // Omicron error so that Nexus will see it in the
                         // Progenitor client error it gets back.
                         HttpError::from(omicron_error)
                     }
-                    crate::instance::Error::Terminating => {
+                    InstanceError::Terminating => {
                         HttpError::for_client_error(
                             Some(NO_SUCH_INSTANCE.to_string()),
                             ClientErrorStatusCode::GONE,
@@ -281,7 +286,7 @@ impl From<Error> for dropshot::HttpError {
                             InlineErrorChain::new(&instance_error).to_string(),
                         )
                     }
-                    err @ crate::instance::Error::SubnetAlreadyAttached(_) => {
+                    err @ InstanceError::SubnetAlreadyAttached(_) => {
                         HttpError::for_client_error(
                             Some(SUBNET_ALREADY_ATTACHED.to_string()),
                             ClientErrorStatusCode::CONFLICT,
@@ -289,19 +294,62 @@ impl From<Error> for dropshot::HttpError {
                             InlineErrorChain::new(&err).to_string(),
                         )
                     }
-                    e => HttpError::for_internal_error(
-                        InlineErrorChain::new(&e).to_string(),
-                    ),
+                    err @ (InstanceError::Timeout(_)
+                    | InstanceError::VnicCreation(_)
+                    | InstanceError::Notification(_)
+                    | InstanceError::Migration(_)
+                    | InstanceError::NicNotInPropolisSpec(_)
+                    | InstanceError::ZoneCommand(_)
+                    | InstanceError::ZoneBoot(_)
+                    | InstanceError::ZoneEnsureAddress(_)
+                    | InstanceError::ZoneInstall(_)
+                    | InstanceError::SerdeJsonError(_)
+                    | InstanceError::Opte(_)
+                    | InstanceError::InvalidHostname(_)
+                    | InstanceError::ResolveError(_)
+                    | InstanceError::VmNotRunning(_)
+                    | InstanceError::PropolisAlreadyRegistered(_)
+                    | InstanceError::U2NotFound
+                    | InstanceError::Io(_)
+                    | InstanceError::FailedSendChannelClosed
+                    | InstanceError::FailedSendClientClosed
+                    | InstanceError::RequestDropped(_)) => {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&err).to_string(),
+                        )
+                    }
                 }
             }
+            Error::Instance(e @ InstanceManagerError::NoSuchVmm(_)) => {
+                HttpError::for_not_found(
+                    Some(NO_SUCH_INSTANCE.to_string()),
+                    // NoSuchVmm has no source error, so it's currently not
+                    // necessary to use a chain-logging adapter here, but if
+                    // that changes in the future, the compiler won't complain.
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            }
             Error::Instance(
-                e @ crate::instance_manager::Error::NoSuchVmm(_),
-            ) => HttpError::for_not_found(
-                Some(NO_SUCH_INSTANCE.to_string()),
-                // NoSuchVmm has no source error, so it's currently not necessary to use a
-                // chain-logging adapter here, but if that changes in the future, the compiler
-                // won't complain.
-                InlineErrorChain::new(&e).to_string(),
+                e @ InstanceManagerError::VmmRegistrationDisallowed(reason),
+            ) => {
+                HttpError::for_unavail(
+                    Some(reason.http_error_code().to_string()),
+                    // VmmRegistrationDisallowed has no source error, so it's
+                    // currently not necessary to use a chain-logging adapter
+                    // here, but if that changes in the future, the compiler
+                    // won't complain.
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            }
+            err @ Error::Instance(
+                InstanceManagerError::Opte(_)
+                | InstanceManagerError::Underlay(_)
+                | InstanceManagerError::ZoneBundle(_)
+                | InstanceManagerError::FailedSendInstanceManagerClosed
+                | InstanceManagerError::FailedSendClientClosed
+                | InstanceManagerError::RequestDropped(_),
+            ) => HttpError::for_internal_error(
+                InlineErrorChain::new(&err).to_string(),
             ),
             Error::ZoneBundle(ref inner) => match inner {
                 BundleError::NoStorage | BundleError::Unavailable { .. } => {
@@ -322,7 +370,32 @@ impl From<Error> for dropshot::HttpError {
                         inner.to_string(),
                     )
                 }
-                _ => HttpError::for_internal_error(
+                err @ (BundleError::Command { .. }
+                | BundleError::CreateDirectory { .. }
+                | BundleError::OpenBundleFile { .. }
+                | BundleError::AddBundleData { .. }
+                | BundleError::ReadBundleData { .. }
+                | BundleError::CopyArchive { .. }
+                | BundleError::ReadDirectory { .. }
+                | BundleError::Metadata { .. }
+                | BundleError::Serialization(_)
+                | BundleError::Deserialization(_)
+                | BundleError::Task(_)
+                | BundleError::FailedSend(_)
+                | BundleError::DroppedRequest(_)
+                | BundleError::BundleFailed(_)
+                | BundleError::Zone(_)
+                | BundleError::PathBuf(_)
+                | BundleError::Cleanup(_)
+                | BundleError::CreateSnapshot(_)
+                | BundleError::DestroySnapshot(_)
+                | BundleError::ListSnapshot(_)
+                | BundleError::EnsureDataset(_)
+                | BundleError::DestroyDataset(_)
+                | BundleError::ListDatasets(_)
+                | BundleError::SetProperty(_)
+                | BundleError::GetProperty(_)
+                | BundleError::WalkDir(_)) => HttpError::for_internal_error(
                     InlineErrorChain::new(&err).to_string(),
                 ),
             },
@@ -330,8 +403,30 @@ impl From<Error> for dropshot::HttpError {
                 let err = omicron_common::api::external::Error::from(err);
                 err.into()
             }
-            e => HttpError::for_internal_error(
-                InlineErrorChain::new(&e).to_string(),
+            Error::MultirackJoin(err) => err.into(),
+            err @ (Error::BootDiskNotFound
+            | Error::Config(_)
+            | Error::BackingFs(_)
+            | Error::SwapDevice(_)
+            | Error::Etherstub(_)
+            | Error::EtherstubVnic(_)
+            | Error::Bootstrap(_)
+            | Error::DeleteAddress(_)
+            | Error::Underlay(_)
+            | Error::SledSubnet { .. }
+            | Error::Opte(_)
+            | Error::Hardware(_)
+            | Error::ResolveError(_)
+            | Error::ZpoolList(_)
+            | Error::Bootstore(_)
+            | Error::EarlyNetworkDeserialize(_)
+            | Error::SupportBundle(_)
+            | Error::Metrics(_)
+            | Error::UnexpectedRevision(_)
+            | Error::RepoDepotStart(_)
+            | Error::TimeNotSynchronized
+            | Error::Rot(_)) => HttpError::for_internal_error(
+                InlineErrorChain::new(&err).to_string(),
             ),
         }
     }
@@ -378,7 +473,7 @@ struct SledAgentInner {
     // Subnet of the Sled's underlay.
     //
     // The Sled Agent's address can be derived from this value.
-    subnet: Ipv6Subnet<SLED_PREFIX>,
+    subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
 
     // The request that was used to start the sled-agent
     // This is used for idempotence checks during RSS/Add-Sled internal APIs
@@ -431,6 +526,9 @@ struct SledAgentInner {
 
     // Handle to access reference measurements for Sprockets/TrustQuorum
     measurements: Arc<MeasurementsHandle>,
+
+    // A mechanism to complete a multirack join
+    multirack_join_completer: MultirackJoinCompleter,
 }
 
 impl SledAgentInner {
@@ -454,6 +552,7 @@ pub struct SledAgent {
 
 impl SledAgent {
     /// Initializes a new [`SledAgent`] object.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         config: &Config,
         log: Logger,
@@ -462,6 +561,7 @@ impl SledAgent {
         services: ServiceManager,
         long_running_task_handles: LongRunningTaskHandles,
         config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
+        multirack_join_completer: MultirackJoinCompleter,
     ) -> Result<SledAgent, Error> {
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
@@ -540,7 +640,7 @@ impl SledAgent {
         // Start collecting metric data.
         let baseboard = long_running_task_handles.hardware_manager.baseboard();
         let identifiers = SledIdentifiers {
-            rack_id: request.body.rack_id,
+            rack_id: request.body.rack_id.into_untyped_uuid(),
             sled_id: request.body.id.into_untyped_uuid(),
             model: baseboard.model().to_string(),
             revision: baseboard.revision(),
@@ -619,10 +719,13 @@ impl SledAgent {
             long_running_task_handles.zone_bundler.clone(),
             vmm_reservoir_manager.clone(),
             metrics_manager.request_queue(),
+            config_reconciler_spawn_token.subscribe_update_disposition(),
         )?;
 
-        let svc_config =
-            services::Config::new(identifiers, config.sidecar_revision.clone());
+        let svc_config = services::Config::new(
+            identifiers,
+            config.deployment.sidecar_revision(),
+        );
 
         // Get our system network config from the bootstore; we cannot proceed
         // until we have this, as we need to set up uplinks inside the switch
@@ -688,6 +791,19 @@ impl SledAgent {
                 .new(o!("component" => "NetworkConfigDeserializationTask")),
         ));
 
+        // Hand our scrimlet reconcilers the information they need, now that we
+        // have it available.
+        let this_sled_switch_zone_ip =
+            ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(&request);
+        long_running_task_handles
+            .scrimlet_reconcilers
+            .set_sled_agent_networking_info_once(SledAgentNetworkingInfo {
+                system_networking_config_rx: network_config_rx,
+                mode: ScrimletReconcilersMode::SwitchZone(
+                    this_sled_switch_zone_ip,
+                ),
+            });
+
         // Start reconciling against our ledgered sled config.
         config_reconciler.spawn_reconciliation_task(
             ReconcilerFacilities {
@@ -706,17 +822,9 @@ impl SledAgent {
             .sled_agent_started(SledAgentInfo {
                 config: svc_config,
                 port_manager: port_manager.clone(),
-                resolver: Resolver::new_from_ip(
-                    parent_log.new(o!("component" => "DnsResolver")),
-                    *sled_address.ip(),
-                )?,
                 underlay_address: *sled_address.ip(),
-                local_switch_zone_ip:
-                    ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(
-                        &request,
-                    ),
+                local_switch_zone_ip: this_sled_switch_zone_ip,
                 rack_id: request.body.rack_id,
-                network_config_rx,
                 metrics_queue: metrics_manager.request_queue(),
             })
             .await?;
@@ -783,6 +891,7 @@ impl SledAgent {
                 metrics_manager,
                 repo_depot,
                 measurements: long_running_task_handles.measurements.clone(),
+                multirack_join_completer,
             }),
             log: log.clone(),
             sprockets: config.sprockets.clone(),
@@ -951,15 +1060,6 @@ impl SledAgent {
         self.inner.config_reconciler.set_sled_config(config).await
     }
 
-    /// Returns whether or not the sled believes itself to be a scrimlet
-    pub fn get_role(&self) -> SledRole {
-        if self.inner.hardware.is_scrimlet() {
-            SledRole::Scrimlet
-        } else {
-            SledRole::Gimlet
-        }
-    }
-
     /// Idempotently ensures that a given instance is registered with this sled,
     /// i.e., that it can be addressed by future calls to
     /// [`Self::instance_ensure_state`].
@@ -1072,19 +1172,6 @@ impl SledAgent {
             .map_err(|e| Error::Instance(e))
     }
 
-    /// Idempotently ensures that the given virtual disk is attached (or not) as
-    /// specified.
-    ///
-    /// NOTE: Not yet implemented.
-    pub async fn disk_ensure(
-        &self,
-        _disk_id: Uuid,
-        _initial_state: DiskRuntimeState,
-        _target: DiskStateRequested,
-    ) -> Result<DiskRuntimeState, Error> {
-        todo!("Disk attachment not yet implemented");
-    }
-
     pub fn artifact_store(&self) -> &ArtifactStore<InternalDisksReceiver> {
         &self.inner.repo_depot.app_private()
     }
@@ -1137,17 +1224,6 @@ impl SledAgent {
         self.inner
             .port_manager
             .unset_virtual_nic_host(mapping)
-            .map_err(Error::from)
-    }
-
-    pub async fn ensure_scrimlet_host_ports(
-        &self,
-        uplinks: Vec<HostPortConfig>,
-    ) -> Result<(), Error> {
-        self.inner
-            .services
-            .ensure_scrimlet_host_ports(uplinks)
-            .await
             .map_err(Error::from)
     }
 
@@ -1246,7 +1322,7 @@ impl SledAgent {
     pub(crate) fn sled_identifiers(&self) -> SledIdentifiers {
         let baseboard = self.inner.hardware.baseboard();
         SledIdentifiers {
-            rack_id: self.inner.start_request.body.rack_id,
+            rack_id: self.inner.start_request.body.rack_id.into_untyped_uuid(),
             sled_id: self.inner.id.into_untyped_uuid(),
             model: baseboard.model().to_string(),
             revision: baseboard.revision(),
@@ -1263,6 +1339,7 @@ impl SledAgent {
         let sled_agent_address = self.inner.sled_address();
         let is_scrimlet = self.inner.hardware.is_scrimlet();
         let baseboard = self.inner.hardware.baseboard();
+        let rack_id = self.inner.start_request.body.rack_id;
         let usable_hardware_threads =
             self.inner.hardware.online_processor_count();
         let usable_physical_ram =
@@ -1277,6 +1354,8 @@ impl SledAgent {
         let smf_services_enabled_not_online =
             self.inner.health_monitor.to_inventory();
 
+        let fmd = crate::fmd::collect_fmd_inventory(&self.log).await;
+
         let ReconcilerInventory {
             disks,
             zpools,
@@ -1290,7 +1369,8 @@ impl SledAgent {
             sled_id,
             sled_agent_address,
             sled_role,
-            baseboard,
+            baseboard_id: baseboard.into(),
+            rack_id,
             usable_hardware_threads,
             usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
             cpu_family,
@@ -1302,8 +1382,10 @@ impl SledAgent {
             reconciler_status,
             last_reconciliation,
             file_source_resolver,
+            instance_manager_status: self.inner.instances.status(),
             smf_services_enabled_not_online,
             reference_measurements: self.inner.measurements.to_inventory(),
+            fmd,
         })
     }
 
@@ -1435,7 +1517,7 @@ impl SledAgent {
             size_details: Some(SizeDetails {
                 quota: Some(dataset_size),
                 reservation: Some(dataset_size),
-                compression: omicron_common::disk::CompressionAlgorithm::Off,
+                compression: CompressionAlgorithm::Off,
             }),
             id: None,
             additional_options: None,
@@ -1538,9 +1620,27 @@ impl SledAgent {
         // the volume, remove the reservation set for the parent dataset if one
         // exists.
 
-        Zfs::remove_reservation(&delegated_zvol.parent_dataset_name())
-            .await
-            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        let result =
+            Zfs::remove_reservation(&delegated_zvol.parent_dataset_name())
+                .await;
+
+        if let Err(e) = result {
+            let RemoveReservationError { name: _, err } = &e;
+            match err {
+                RemoveReservationErrorInner::DatasetNotFound => {
+                    // If the parent dataset is no longer found, then a
+                    // concurrent deletion occurred. Return Ok
+                    return Ok(());
+                }
+
+                _ => {
+                    // Anything else is a 500
+                    return Err(HttpError::for_internal_error(
+                        InlineErrorChain::new(&e).to_string(),
+                    ));
+                }
+            }
+        }
 
         // Then proceed with deleting the child volume dataset, then the parent
         // dataset
@@ -1619,6 +1719,12 @@ impl SledAgent {
             .await
             .map_err(|e| Error::Instance(e))
     }
+
+    /// Complete a multirack join operation
+    pub(crate) fn complete_multirack_join(&self) -> Result<(), Error> {
+        self.inner.multirack_join_completer.complete_multirack_join()?;
+        Ok(())
+    }
 }
 
 #[derive(From, thiserror::Error, Debug, SlogInlineError)]
@@ -1627,7 +1733,7 @@ pub enum AddSledError {
     BootstrapAgentClient {
         sled_id: Baseboard,
         #[source]
-        err: bootstrap_agent_client::Error,
+        err: SprocketsClientError,
     },
     #[error("Failed to connect to DDM")]
     DdmAdminClient(#[source] omicron_ddm_admin_client::DdmError),
@@ -1635,9 +1741,9 @@ pub enum AddSledError {
     NotFound(BaseboardId),
     #[error("Failed to initialize {sled_id}")]
     BootstrapTcpClient {
-        sled_id: Baseboard,
+        sled_id: BaseboardId,
         #[source]
-        err: crate::bootstrap::client::Error,
+        err: SprocketsClientError,
     },
 }
 
@@ -1649,77 +1755,107 @@ pub async fn sled_add(
     sled_id: BaseboardId,
     request: StartSledAgentRequest,
 ) -> Result<(), AddSledError> {
+    let (bootstrap_addr, stream) = find_sprockets_stream(
+        &log,
+        sprockets_config,
+        measurements,
+        sled_id.clone(),
+    )
+    .await?;
+
+    SprocketsClient::start_sled_agent_with_stream(stream, &request)
+        .await
+        .map_err(|err| AddSledError::BootstrapTcpClient {
+            sled_id: sled_id.clone(),
+            err,
+        })?;
+
+    info!(
+        log,
+        "Peer agent initialized";
+        "peer_bootstrap_addr" => %bootstrap_addr,
+        "peer_id" => %sled_id
+    );
+
+    Ok(())
+}
+
+/// Connect to each bootstrap address with sprockets until the one with a
+/// matching `BaseboardId` is found. Return that connection.
+async fn find_sprockets_stream(
+    log: &Logger,
+    sprockets_config: SprocketsConfig,
+    measurements: Arc<MeasurementsHandle>,
+    sled_id: BaseboardId,
+) -> Result<(Ipv6Addr, sprockets_tls::Stream<TcpStream>), AddSledError> {
     // Get all known bootstrap addresses via DDM
     let ddm_admin_client = DdmAdminClient::localhost(&log)?;
     let addrs = ddm_admin_client
         .derive_bootstrap_addrs_from_prefixes(&[BootstrapInterface::GlobalZone])
         .await?;
 
-    // Create a set of futures to concurrently map the baseboard to bootstrap ip
-    // for each sled
-    let mut addrs_to_sleds = addrs
-        .map(|ip| {
-            let log = log.clone();
-            async move {
-                let client = bootstrap_agent_client::Client::new(
-                    &format!("http://[{ip}]"),
-                    log,
+    let mut set = JoinSet::new();
+
+    for ip in addrs {
+        let sprockets_config = sprockets_config.clone();
+        let measurements = measurements.clone();
+        let bootstrap_addr =
+            SocketAddrV6::new(ip, BOOTSTRAP_AGENT_RACK_INIT_PORT, 0, 0);
+        let log =
+            log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string()));
+        set.spawn(async move {
+            let client = SprocketsClient::new(
+                bootstrap_addr,
+                sprockets_config,
+                measurements,
+                log,
+            );
+            (ip, client.connect().await)
+        });
+    }
+
+    let mut found = None;
+    while let Some(res) = set.join_next().await {
+        match res {
+            Ok((ip, Ok(stream))) => {
+                // Safety: We guarantee the format of the platform id at manufacturing time.
+                let baseboard_id = platform_id_to_baseboard_id(
+                    stream.peer_platform_id().as_str(),
                 );
-                let result = client.baseboard_get().await;
 
-                (ip, result)
-            }
-        })
-        .collect::<FuturesUnordered<_>>();
+                if baseboard_id == sled_id {
+                    // We found the stream for our new client.
+                    let log =
+                        log.new(o!("BootstrapAgentClient" => ip.to_string()));
+                    info!(
+                        log,
+                        "Found bootstrap IP for sled";
+                        "baseboard_id" => %baseboard_id
+                    );
+                    found = Some((ip, stream));
 
-    // Execute the futures until we find our matching sled or are done searching
-    let mut target_ip = None;
-    let mut found_baseboard = None;
-    while let Some((ip, result)) = addrs_to_sleds.next().await {
-        match result {
-            Ok(baseboard) => {
-                // Convert from progenitor type back to `sled-hardware`
-                // type.
-                let found: Baseboard = baseboard.into_inner().into();
-                if sled_id.serial_number == found.identifier()
-                    && sled_id.part_number == found.model()
-                {
-                    target_ip = Some(ip);
-                    found_baseboard = Some(found);
+                    // This aborts the rest of the tasks in `set`, which is what
+                    // we want in this case. They are only trying to establish
+                    // connections and so cancellation is fine.
                     break;
                 }
             }
+            Ok((ip, Err(err))) => {
+                let log = log.new(o!("BootstrapAgentClient" => ip.to_string()));
+                warn!(log, "Failed to get baseboard for {ip}"; "err" => #%err);
+            }
             Err(err) => {
                 warn!(
-                    log, "Failed to get baseboard for {ip}";
-                    "err" => #%err,
+                    log,
+                    "Failed to join sprockets connection task";
+                    "err" => #%err
                 );
             }
         }
     }
 
-    // Contact the sled and initialize it
-    let bootstrap_addr =
-        target_ip.ok_or_else(|| AddSledError::NotFound(sled_id.clone()))?;
-    let bootstrap_addr =
-        SocketAddrV6::new(bootstrap_addr, BOOTSTRAP_AGENT_RACK_INIT_PORT, 0, 0);
-    let client = crate::bootstrap::client::Client::new(
-        bootstrap_addr,
-        sprockets_config,
-        measurements,
-        log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
-    );
-
-    // Safe to unwrap, because we would have bailed when checking target_ip
-    // above otherwise. baseboard and target_ip are set together.
-    let baseboard = found_baseboard.unwrap();
-
-    client.start_sled_agent(&request).await.map_err(|err| {
-        AddSledError::BootstrapTcpClient { sled_id: baseboard.clone(), err }
-    })?;
-
-    info!(log, "Peer agent initialized"; "peer_bootstrap_addr" => %bootstrap_addr, "peer_id" => %baseboard);
-    Ok(())
+    let ip_and_stream = found.ok_or_else(|| AddSledError::NotFound(sled_id))?;
+    Ok(ip_and_stream)
 }
 
 // Long-running task that updates the contents of `network_config_tx` any
@@ -1852,7 +1988,10 @@ impl SledAgentFacilities for ReconcilerFacilities {
         }
     }
 
-    fn ddm_remove_internal_dns_prefix(&self, prefix: Ipv6Subnet<SLED_PREFIX>) {
+    fn ddm_remove_internal_dns_prefix(
+        &self,
+        prefix: Ipv6Subnet<SLED_PREFIX_LENGTH>,
+    ) {
         self.service_manager
             .ddm_reconciler()
             .remove_internal_dns_subnet(prefix);

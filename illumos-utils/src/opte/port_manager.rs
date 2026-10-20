@@ -13,7 +13,6 @@ use crate::opte::Handle;
 use crate::opte::Port;
 use crate::opte::Vni;
 use crate::opte::opte_firewall_rules;
-use crate::opte::port::PortData;
 use ipnetwork::Ipv4Network;
 use ipnetwork::Ipv6Network;
 use macaddr::MacAddr6;
@@ -147,6 +146,9 @@ pub struct PortCreateParams<'a> {
     pub firewall_rules: &'a [ResolvedVpcFirewallRule],
     pub dhcp_config: DhcpCfg,
     pub attached_subnets: Vec<AttachedSubnet>,
+    /// MTU to set on the xde device, in bytes. If `None`, OPTE applies its
+    /// default (1500). Used by jumbo-frame opt-in.
+    pub mtu: Option<u32>,
 }
 
 impl<'a> TryFrom<&PortCreateParams<'a>> for IpCfg {
@@ -371,6 +373,7 @@ impl PortManager {
             firewall_rules,
             dhcp_config,
             attached_subnets: _,
+            mtu,
         } = params;
         let is_service =
             matches!(nic.kind, NetworkInterfaceKind::Service { .. });
@@ -410,19 +413,18 @@ impl PortManager {
         );
         let hdl = {
             let hdl = Handle::new()?;
-            hdl.create_xde(&port_name, vpc_cfg, /* passthru = */ false)?;
+            hdl.create_xde(&port_name, vpc_cfg, mtu)?;
             hdl
         };
         let (port, ticket) = {
             let ticket = PortTicket::new(nic.id, nic.kind, self.inner.clone());
-            let port = Port::new(PortData {
-                name: port_name.clone(),
-                ip: nic.ip_config.clone(),
+            let port = Port::new(
+                port_name.clone(),
+                nic.ip_config.clone(),
                 mac,
-                slot: nic.slot,
+                nic.slot,
                 vni,
-                gateway,
-            });
+            );
 
             // NOTE: We may add external IPs below, which can fail. If that
             // does, we drop the `ticket` on the way out of this block. That
@@ -1152,6 +1154,14 @@ impl PortTicket {
         Self { id, kind, manager }
     }
 
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn kind(&self) -> NetworkInterfaceKind {
+        self.kind
+    }
+
     fn release_inner(&mut self) -> Result<(), Error> {
         let mut ports = self.manager.ports.lock().unwrap();
         let Some(port) = ports.remove(&(self.id, self.kind)) else {
@@ -1335,6 +1345,7 @@ mod tests {
                     dns6_servers: Vec::new(),
                 },
                 attached_subnets: vec![],
+                mtu: None,
             })
             .unwrap();
 
@@ -1514,6 +1525,7 @@ mod tests {
                     dns6_servers: Vec::new(),
                 },
                 attached_subnets: vec![],
+                mtu: None,
             })
             .unwrap();
 
@@ -1685,6 +1697,7 @@ mod tests {
                 dns6_servers: vec![],
             },
             attached_subnets: vec![],
+            mtu: None,
         };
         let IpCfg::Ipv4(oxide_vpc::api::Ipv4Cfg {
             vpc_subnet,
@@ -1758,6 +1771,7 @@ mod tests {
                 dns6_servers: vec![],
             },
             attached_subnets: vec![],
+            mtu: None,
         };
         let IpCfg::Ipv6(oxide_vpc::api::Ipv6Cfg {
             vpc_subnet,
@@ -1842,6 +1856,7 @@ mod tests {
                 dns6_servers: vec![],
             },
             attached_subnets: vec![],
+            mtu: None,
         };
         let IpCfg::DualStack { ipv4, ipv6 } = IpCfg::try_from(&prs).unwrap()
         else {
@@ -1932,6 +1947,7 @@ mod tests {
                 dns6_servers: vec![],
             },
             attached_subnets: vec![],
+            mtu: None,
         };
         let _ = IpCfg::try_from(&prs).expect_err(
             "Should fail to convert with public IPv6 and private IPv4",
@@ -1978,6 +1994,7 @@ mod tests {
                 dns6_servers: vec![],
             },
             attached_subnets: vec![],
+            mtu: None,
         };
         let _ = IpCfg::try_from(&prs).expect_err(
             "Should fail to convert with public IPv4 and private IPv6",

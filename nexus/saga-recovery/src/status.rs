@@ -6,6 +6,7 @@
 
 use super::recovery;
 use chrono::{DateTime, Utc};
+use nexus_db_model::SecId;
 use omicron_common::api::external::Error;
 use serde::{Deserialize, Serialize};
 use slog_error_chain::InlineErrorChain;
@@ -98,7 +99,39 @@ pub struct RecoverySuccess {
 pub struct RecoveryFailure {
     pub time: DateTime<Utc>,
     pub saga_id: SagaId,
+    pub current_sec: Option<SecId>,
+    /// Whether this failure is worth retrying on a future recovery pass.
+    pub kind: RecoveryFailureKind,
     pub message: String,
+}
+
+/// Whether a saga recovery failure is transient or permanent.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveryFailureKind {
+    /// The failure is likely temporary. The next recovery pass should retry.
+    Transient,
+    /// The failure is permanent. Retrying recovery will not change anything.
+    Permanent,
+}
+
+impl RecoveryFailureKind {
+    /// Classify a saga-recovery error as transient or permanent.
+    ///
+    /// We treat an error as transient when the condition it describes may
+    /// resolve on its own (see [`Error::retryable`]), so retrying recovery on
+    /// a later pass could succeed.
+    ///
+    /// Everything else is permanent. Retrying won't change the outcome. In
+    /// particular, [`Error::InternalError`] (HTTP 500), which is how a failed
+    /// `saga_resume`/`saga_start` surfaces, means the saga cannot be
+    /// recovered, so it should be abandoned rather than retried forever.
+    pub fn classify(error: &Error) -> Self {
+        match error.retryable() {
+            true => Self::Transient,
+            false => Self::Permanent,
+        }
+    }
 }
 
 /// Describes what happened during the last saga recovery pass

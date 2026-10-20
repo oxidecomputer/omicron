@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use anyhow::Result;
 use end_to_end_tests::helpers::ctx::{ClientParams, Context};
 use end_to_end_tests::helpers::{
@@ -6,8 +10,8 @@ use end_to_end_tests::helpers::{
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use oxide_client::types::{
     ByteCount, DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify,
-    DiskBackend, DiskCreate, DiskSource, IpPoolCreate, IpPoolLinkSilo,
-    IpPoolType, IpVersion, NameOrId, SiloQuotasUpdate,
+    DiskBackend, DiskCreate, DiskSource, IpPoolAssignment, IpPoolCreate,
+    IpPoolLinkSilo, IpPoolType, IpVersion, NameOrId, SiloQuotasUpdate,
 };
 use oxide_client::{
     ClientConsoleAuthExt, ClientDisksExt, ClientProjectsExt,
@@ -29,11 +33,11 @@ async fn run_test() -> Result<()> {
     eprintln!("waiting for nexus to come up...");
     wait_for_condition(
         || async {
-            client
-                .project_list()
-                .send()
-                .await
-                .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet)
+            client.project_list().send().await.map_err(|_| CondCheckError::<
+                oxide_client::Error,
+            >::NotYet {
+                status: None,
+            })
         },
         &Duration::from_secs(1),
         &Duration::from_secs(300),
@@ -54,6 +58,7 @@ async fn run_test() -> Result<()> {
             description: "Default IP pool".to_string(),
             ip_version,
             pool_type: IpPoolType::Unicast,
+            assignment: IpPoolAssignment::Silos,
         })
         .send()
         .await?;
@@ -92,6 +97,7 @@ async fn run_test() -> Result<()> {
             description: "Default IPv6 pool".to_string(),
             ip_version,
             pool_type: IpPoolType::Unicast,
+            assignment: IpPoolAssignment::Silos,
         })
         .send()
         .await?;
@@ -143,7 +149,9 @@ async fn run_test() -> Result<()> {
                 })
                 .send()
                 .await
-                .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet)
+                .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet {
+                    status: None,
+                })
         },
         &Duration::from_secs(1),
         &Duration::from_secs(120),

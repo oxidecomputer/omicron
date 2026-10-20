@@ -56,7 +56,7 @@ async fn test_demo_saga(cptestctx: &ControlPlaneTestContext) {
             if matches!(found.state, SagaState::Succeeded) {
                 Ok(found)
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &Duration::from_millis(50),

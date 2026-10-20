@@ -9,11 +9,14 @@
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
 use sled_agent_config_reconciler::RawDisksSender;
+use sled_agent_scrimlet_reconcilers::ScrimletReconcilers;
+use sled_agent_scrimlet_reconcilers::ScrimletStatus;
 use sled_agent_types::debug::OperatorSwitchZonePolicy;
 use sled_hardware::{HardwareManager, HardwareView};
 use sled_hardware_types::Baseboard;
 use sled_storage::disk::RawDisk;
 use slog::Logger;
+use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 
@@ -74,6 +77,10 @@ pub struct HardwareMonitor {
     /// or policy changes.
     service_manager: Option<ServiceManager>,
 
+    /// Handle to the scrimlet reconcilers, which we notify to activate or
+    /// deactivate based on whether we're a scrimlet.
+    scrimlet_reconcilers: Arc<ScrimletReconcilers>,
+
     /// Whether or not the tofino is available.  This implies that the ASIC is
     /// present, the driver has been loaded, and that we are able to use the
     /// driver to interact with the ASIC.
@@ -85,6 +92,7 @@ impl HardwareMonitor {
         log: &Logger,
         hardware_manager: &HardwareManager,
         raw_disks_tx: RawDisksSender,
+        scrimlet_reconcilers: Arc<ScrimletReconcilers>,
     ) -> (
         HardwareMonitorHandle,
         oneshot::Sender<SledAgent>,
@@ -108,6 +116,7 @@ impl HardwareMonitor {
             raw_disks_tx,
             sled_agent: None,
             service_manager: None,
+            scrimlet_reconcilers,
             is_tofino_available: false,
         };
         tokio::spawn(monitor.run());
@@ -227,12 +236,16 @@ impl HardwareMonitor {
         };
 
         if should_activate {
+            self.scrimlet_reconcilers
+                .set_scrimlet_status(ScrimletStatus::Scrimlet);
             if let Err(e) =
                 service_manager.activate_switch(self.baseboard.clone()).await
             {
                 error!(self.log, "Failed to activate switch"; e);
             }
         } else {
+            self.scrimlet_reconcilers
+                .set_scrimlet_status(ScrimletStatus::NotScrimlet);
             if let Err(e) = service_manager.deactivate_switch().await {
                 warn!(self.log, "Failed to deactivate switch"; e);
             }

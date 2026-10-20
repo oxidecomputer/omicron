@@ -288,7 +288,7 @@ where
 
         let mut bins = Bins::try_from(bins.as_slice())?.0;
         let mut n_samples = 0;
-        for (bin, count) in bins.iter_mut().zip(counts.into_iter()) {
+        for (bin, count) in bins.iter_mut().zip(counts) {
             bin.count = count;
             n_samples += count;
         }
@@ -686,8 +686,8 @@ macro_rules! impl_int_sample {
                     ensure_finite(value)?;
 
                     if self.n_samples == 0 {
-                        self.min = <$type>::max_value();
-                        self.max = <$type>::min_value();
+                        self.min = <$type>::MAX;
+                        self.max = <$type>::MIN;
                     }
 
                     // For squared mean (M2) calculation, before we update the

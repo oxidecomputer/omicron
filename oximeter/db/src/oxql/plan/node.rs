@@ -4,8 +4,6 @@
 
 //! Nodes in an OxQL query plan.
 
-// Copyright 2024 Oxide Computer Company
-
 use crate::oxql::plan::Plan;
 use crate::oxql::plan::align::Align;
 use crate::oxql::plan::delta::Delta;

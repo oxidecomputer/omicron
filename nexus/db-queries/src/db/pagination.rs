@@ -23,41 +23,64 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use ref_cast::RefCast;
 use std::num::NonZeroU32;
 
-// Shorthand alias for "the SQL type of the whole table".
-type TableSqlType<T> = <T as AsQuery>::SqlType;
-
-// Shorthand alias for the type made from "table.into_boxed()".
-type BoxedQuery<T> = diesel::helper_types::IntoBoxed<'static, T, Pg>;
-type BoxedDslOutput<T> = diesel::internal::table_macro::BoxedSelectStatement<
-    'static,
-    TableSqlType<T>,
-    diesel::internal::table_macro::FromClause<T>,
-    Pg,
->;
-
-/// Uses `pagparams` to list a subset of rows in `table`, ordered by `column`.
+/// Uses `pagparams` to list a subset of rows in `query`, ordered by `column`.
 pub fn paginated<T, C, M>(
-    table: T,
+    query: T,
     column: C,
     pagparams: &DataPageParams<'_, M>,
-) -> BoxedQuery<T>
+) -> <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output
 where
-    // T is a table which can create a BoxedQuery.
-    T: diesel::Table,
-    T: query_methods::BoxedDsl<'static, Pg, Output = BoxedDslOutput<T>>,
-    // C is a column which appears in T.
+// T is a table^H^H^H^H^Hquery source which can create a BoxedQuery.
+    T: QuerySource,
+    T: AsQuery,
+    <T as QuerySource>::DefaultSelection:
+        Expression<SqlType = <T as AsQuery>::SqlType>,
+    T::Query: query_methods::BoxedDsl<'static, Pg>,
+// Required for...everything.
+    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output: QueryDsl,
+// C is a column which appears in T.
     C: 'static + Column + Copy + ExpressionMethods + AppearsOnTable<T>,
-    // Required to compare the column with the marker type.
+// Required to compare the column with the marker type.
     C::SqlType: SqlType,
     M: Clone + AsExpression<C::SqlType>,
-    // Defines the methods which can be called on "query", and tells
-    // the compiler we're gonna output a BoxedQuery each time.
-    BoxedQuery<T>: query_methods::OrderDsl<Desc<C>, Output = BoxedQuery<T>>,
-    BoxedQuery<T>: query_methods::OrderDsl<Asc<C>, Output = BoxedQuery<T>>,
-    BoxedQuery<T>: query_methods::FilterDsl<Gt<C, M>, Output = BoxedQuery<T>>,
-    BoxedQuery<T>: query_methods::FilterDsl<Lt<C, M>, Output = BoxedQuery<T>>,
+// Defines the methods which can be called on "query", and tells
+// the compiler we're gonna output a BoxedQuery each time.
+//
+// Necessary for query.order(column.desc())
+    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::OrderDsl<
+            Desc<C>,
+            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
+        >,
+// Necessary for query.order(column.asc())
+    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::OrderDsl<
+            Asc<C>,
+            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
+        >,
+// Necessary for query.filter(column.gt(...))
+    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::FilterDsl<
+            Gt<C, M>,
+            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
+        >,
+// Necessary for query.filter(column.lt(...))
+    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::FilterDsl<
+            Lt<C, M>,
+            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
+        >,
+// Necessary for `query.limit(...)`
+    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::LimitDsl<
+            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
+        >,
 {
-    let mut query = table.into_boxed().limit(pagparams.limit.get().into());
+    use query_methods::BoxedDsl;
+    let mut query = query
+        .as_query()
+        .internal_into_boxed()
+        .limit(pagparams.limit.get().into());
     let marker = pagparams.marker.map(|m| m.clone());
     match pagparams.direction {
         dropshot::PaginationOrder::Ascending => {
@@ -537,6 +560,8 @@ mod test {
     use std::num::NonZeroU32;
     use uuid::Uuid;
 
+    type BoxedQuery<T> = diesel::helper_types::IntoBoxed<'static, T, Pg>;
+
     mod schema {
         use diesel::prelude::*;
 
@@ -968,7 +993,7 @@ mod test {
                     let records_batch = query(&p.current_pagparams());
                     paginator =
                         p.found_batch(&records_batch, &|i: &Item| i.marker);
-                    all_records.extend(records_batch.into_iter());
+                    all_records.extend(records_batch);
                 }
                 all_records
             };

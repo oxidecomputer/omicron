@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write};
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 
 use camino::Utf8PathBuf;
@@ -13,25 +13,29 @@ use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use omicron_common::address::Ip;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
-use omicron_common::api::external::Generation;
-use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
-use omicron_common::update::{ArtifactId, OmicronInstallManifestSource};
+use omicron_common::disk::{DatasetKind, DatasetName};
+use omicron_common::update::OmicronInstallManifestSource;
+use omicron_generation_kinds::{Generation, SledConfigGeneration};
 use omicron_uuid_kinds::MupdateUuid;
-use tufaceous_artifact::{ArtifactHash, KnownArtifactKind};
+use tufaceous_artifact::ArtifactHash;
 
+use crate::latest::disk::M2Slot;
 use crate::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-    HostPhase2DesiredContents, HostPhase2DesiredSlots, ManifestBootInventory,
+    CurrentUpdateDisposition, ExternalDnsAddrs, FmdHostCase, FmdInventory,
+    FmdInventoryError, FmdResource, HostPhase2DesiredContents,
+    HostPhase2DesiredSlots, InstanceManagerStatus, ManifestBootInventory,
     ManifestInventory, ManifestNonBootInventory, MupdateOverrideBootInventory,
     MupdateOverrideInventory, MupdateOverrideNonBootInventory,
-    NetworkInterface, OmicronFileSourceResolverInventory, OmicronSledConfig,
-    OmicronZoneConfig, OmicronZoneImageSource, OmicronZoneType,
-    OmicronZonesConfig, RemoveMupdateOverrideBootSuccessInventory,
-    RemoveMupdateOverrideInventory, SingleMeasurementInventory,
-    SourceNatConfig, SourceNatConfigGeneric, SourceNatConfigV4,
-    SourceNatConfigV6, SvcEnabledNotOnlineState, SvcState,
-    SvcsEnabledNotOnline, ZoneArtifactInventory, ZoneKind, ZpoolHealth,
+    NetworkInterface, NexusExternalIps, OmicronFileSourceResolverInventory,
+    OmicronSledConfig, OmicronSledUpdateDisposition, OmicronZoneConfig,
+    OmicronZoneImageSource, OmicronZoneType, OmicronZonesConfig,
+    RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
+    SingleMeasurementInventory, SourceNatConfig, SourceNatConfigGeneric,
+    SourceNatConfigV4, SourceNatConfigV6, SvcEnabledNotOnlineState, SvcState,
+    SvcsEnabledNotOnline, ZoneArtifactInventory, ZoneKind, ZoneSnatConfig,
+    ZpoolHealth,
 };
 
 impl ZoneKind {
@@ -161,20 +165,6 @@ impl ZoneKind {
         }
     }
 
-    /// Return true if an artifact represents a control plane zone image
-    /// of this kind.
-    pub fn is_control_plane_zone_artifact(
-        self,
-        artifact_id: &ArtifactId,
-    ) -> bool {
-        artifact_id
-            .kind
-            .to_known()
-            .map(|kind| matches!(kind, KnownArtifactKind::Zone))
-            .unwrap_or(false)
-            && artifact_id.name == self.artifact_id_name()
-    }
-
     /// Map an artifact ID name to the corresponding file name in the install
     /// dataset.
     ///
@@ -291,18 +281,6 @@ impl OmicronZoneType {
     /// Identifies whether this is a Crucible (not Crucible pantry) zone.
     pub fn is_crucible(&self) -> bool {
         matches!(self, OmicronZoneType::Crucible { .. })
-    }
-
-    /// This zone's external IP.
-    pub fn external_ip(&self) -> Option<IpAddr> {
-        match self {
-            OmicronZoneType::Nexus { external_ip, .. } => Some(*external_ip),
-            OmicronZoneType::ExternalDns { dns_address, .. } => {
-                Some(dns_address.ip())
-            }
-            OmicronZoneType::BoundaryNtp { snat_cfg, .. } => Some(snat_cfg.ip),
-            _ => None,
-        }
     }
 
     /// The service vNIC providing external connectivity to this zone.
@@ -584,6 +562,17 @@ impl SvcsEnabledNotOnline {
     /// for tests.
     pub fn new_fake() -> Self {
         Self { services: vec![], errors: vec![], time_of_status: Utc::now() }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        let SvcsEnabledNotOnline { services, errors, time_of_status: _ } = self;
+        services.is_empty() && errors.is_empty()
+    }
+
+    /// Removes all services that are not in the `Maintenance` state.
+    pub fn retain_in_maintenance(&mut self) {
+        self.services
+            .retain(|svc| svc.state == SvcEnabledNotOnlineState::Maintenance);
     }
 }
 
@@ -872,13 +861,14 @@ impl HostPhase2DesiredSlots {
 impl Default for OmicronSledConfig {
     fn default() -> Self {
         Self {
-            generation: Generation::new(),
+            generation: SledConfigGeneration::new(),
             disks: IdOrdMap::default(),
             datasets: IdOrdMap::default(),
             zones: IdOrdMap::default(),
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
             measurements: BTreeSet::new(),
+            update_disposition: OmicronSledUpdateDisposition::Available,
         }
     }
 }
@@ -906,6 +896,116 @@ impl fmt::Display for SingleMeasurementInventoryDisplay<'_> {
                 writeln!(f, "entry error : {message}")?
             }
         }
+        Ok(())
+    }
+}
+
+/// a displayer for the FMD inventory result on a sled
+pub struct FmdInventoryResultDisplay<'a> {
+    inner: &'a Result<FmdInventory, FmdInventoryError>,
+}
+
+impl<'a> FmdInventoryResultDisplay<'a> {
+    pub fn new(result: &'a Result<FmdInventory, FmdInventoryError>) -> Self {
+        Self { inner: result }
+    }
+}
+
+impl fmt::Display for FmdInventoryResultDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.inner {
+            Ok(inv) => write!(f, "{}", inv.display()),
+            Err(err) => writeln!(f, "FMD collection failed: {err}"),
+        }
+    }
+}
+
+impl FmdInventory {
+    pub fn display(&self) -> FmdInventoryDisplay<'_> {
+        FmdInventoryDisplay { inner: self }
+    }
+}
+
+/// a displayer for [`FmdInventory`]
+pub struct FmdInventoryDisplay<'a> {
+    inner: &'a FmdInventory,
+}
+
+impl fmt::Display for FmdInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FmdInventory { cases, resources } = self.inner;
+        if cases.is_empty() && resources.is_empty() {
+            writeln!(f, "no faults reported")?;
+            return Ok(());
+        }
+        writeln!(f, "cases ({}):", cases.len())?;
+        for case in cases {
+            let mut indent = IndentWriter::new("  ", &mut *f);
+            write!(indent, "{}", case.display())?;
+        }
+        writeln!(f, "resources ({}):", resources.len())?;
+        for resource in resources {
+            let mut indent = IndentWriter::new("  ", &mut *f);
+            write!(indent, "{}", resource.display())?;
+        }
+        Ok(())
+    }
+}
+
+impl FmdHostCase {
+    pub fn display(&self) -> FmdHostCaseDisplay<'_> {
+        FmdHostCaseDisplay { inner: self }
+    }
+}
+
+/// a displayer for [`FmdHostCase`]
+pub struct FmdHostCaseDisplay<'a> {
+    inner: &'a FmdHostCase,
+}
+
+impl fmt::Display for FmdHostCaseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FmdHostCase { uuid, code, url, event } = self.inner;
+        writeln!(f, "case {uuid} ({code})")?;
+        writeln!(f, "  url: {url}")?;
+        // The event payload is the FMD nvlist serialized to JSON. We
+        // intentionally do not interpret it; round-trip pretty-printing
+        // is enough to make it human-readable.
+        if let Some(event) = event {
+            match serde_json::to_string_pretty(event) {
+                Ok(rendered) => {
+                    writeln!(f, "  event:")?;
+                    let mut indent = IndentWriter::new("    ", &mut *f);
+                    writeln!(indent, "{rendered}")?;
+                }
+                Err(_) => writeln!(f, "  event: <unrenderable>")?,
+            }
+        }
+        Ok(())
+    }
+}
+
+impl FmdResource {
+    pub fn display(&self) -> FmdResourceDisplay<'_> {
+        FmdResourceDisplay { inner: self }
+    }
+}
+
+/// a displayer for [`FmdResource`]
+pub struct FmdResourceDisplay<'a> {
+    inner: &'a FmdResource,
+}
+
+impl fmt::Display for FmdResourceDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FmdResource { uuid, fmri, case_id, faulty, unusable, invisible } =
+            self.inner;
+        writeln!(f, "resource {uuid} (case {case_id})")?;
+        writeln!(f, "  fmri: {fmri}")?;
+        writeln!(
+            f,
+            "  faulty: {faulty:<5}  unusable: {unusable:<5}  invisible: {invisible:<5}"
+        )?;
         Ok(())
     }
 }
@@ -953,6 +1053,7 @@ impl From<SvcEnabledNotOnlineState> for SvcState {
             SvcEnabledNotOnlineState::Degraded => Self::Degraded,
             SvcEnabledNotOnlineState::Maintenance => Self::Maintenance,
             SvcEnabledNotOnlineState::Offline => Self::Offline,
+            SvcEnabledNotOnlineState::Unrecognized => Self::Unrecognized,
         }
     }
 }
@@ -967,6 +1068,7 @@ impl fmt::Display for SvcState {
             SvcState::Maintenance => "maintenance",
             SvcState::Disabled => "disabled",
             SvcState::LegacyRun => "legacy_run",
+            SvcState::Unrecognized => "unrecognized",
         };
 
         write!(f, "{state}")
@@ -979,6 +1081,7 @@ impl fmt::Display for SvcEnabledNotOnlineState {
             SvcEnabledNotOnlineState::Offline => "offline",
             SvcEnabledNotOnlineState::Degraded => "degraded",
             SvcEnabledNotOnlineState::Maintenance => "maintenance",
+            SvcEnabledNotOnlineState::Unrecognized => "unrecognized",
         };
 
         write!(f, "{state}")
@@ -1031,6 +1134,26 @@ impl SourceNatConfigGeneric {
     }
 }
 
+impl From<SourceNatConfigV4> for SourceNatConfigGeneric {
+    fn from(c: SourceNatConfigV4) -> Self {
+        SourceNatConfig {
+            ip: IpAddr::V4(c.ip),
+            first_port: c.first_port,
+            last_port: c.last_port,
+        }
+    }
+}
+
+impl From<SourceNatConfigV6> for SourceNatConfigGeneric {
+    fn from(c: SourceNatConfigV6) -> Self {
+        SourceNatConfig {
+            ip: IpAddr::V6(c.ip),
+            first_port: c.first_port,
+            last_port: c.last_port,
+        }
+    }
+}
+
 #[cfg(any(test, feature = "testing"))]
 impl<T> proptest::arbitrary::Arbitrary for SourceNatConfig<T>
 where
@@ -1064,4 +1187,290 @@ pub enum SourceNatConfigError {
          ({first_port}, {last_port})"
     )]
     UnalignedPortPair { first_port: u16, last_port: u16 },
+}
+
+impl ZoneSnatConfig {
+    /// Return the IPv4 SNAT config, if any.
+    pub fn as_ipv4(&self) -> Option<&SourceNatConfigV4> {
+        match self {
+            ZoneSnatConfig::Ipv4Only(ipv4)
+            | ZoneSnatConfig::DualStack { ipv4, .. } => Some(ipv4),
+            ZoneSnatConfig::Ipv6Only(_) => None,
+        }
+    }
+
+    /// Return the IPv6 SNAT config, if any.
+    pub fn as_ipv6(&self) -> Option<&SourceNatConfigV6> {
+        match self {
+            ZoneSnatConfig::Ipv6Only(ipv6)
+            | ZoneSnatConfig::DualStack { ipv6, .. } => Some(ipv6),
+            ZoneSnatConfig::Ipv4Only(_) => None,
+        }
+    }
+}
+
+impl NexusExternalIps {
+    /// Construct from a single IP address.
+    pub fn from_single(ip: IpAddr) -> Self {
+        Self::new(BTreeSet::from_iter(std::iter::once(ip)))
+            .expect("one IP is always valid")
+    }
+
+    /// If this consists of a single element, return it, or None.
+    ///
+    /// NOTE: This is a temporary method used while inventory supports multiple
+    /// addresses, but `BlueprintZoneType` does not. It should be removed when
+    /// that's fixed.
+    pub fn into_single(self) -> Option<IpAddr> {
+        if self.0.len() == 1 { self.0.into_iter().next() } else { None }
+    }
+
+    /// Iterate over the external IPs.
+    pub fn iter(&self) -> impl Iterator<Item = &IpAddr> {
+        self.0.iter()
+    }
+}
+
+impl From<&NexusExternalIps> for crate::latest::instance::ExternalIpConfig {
+    fn from(ips: &NexusExternalIps) -> Self {
+        external_ip_config_from_ips(ips.iter().copied())
+    }
+}
+
+impl From<&ExternalDnsAddrs> for crate::latest::instance::ExternalIpConfig {
+    fn from(addrs: &ExternalDnsAddrs) -> Self {
+        external_ip_config_from_ips(addrs.0.keys().copied())
+    }
+}
+
+fn external_ip_config_from_ips(
+    ips: impl Iterator<Item = IpAddr>,
+) -> crate::latest::instance::ExternalIpConfig {
+    let mut v4 = BTreeSet::new();
+    let mut v6 = BTreeSet::new();
+    for ip in ips {
+        match ip {
+            IpAddr::V4(ip) => {
+                v4.insert(ip);
+            }
+            IpAddr::V6(ip) => {
+                v6.insert(ip);
+            }
+        }
+    }
+    crate::latest::instance::ExternalIpConfig {
+        v4: (!v4.is_empty()).then(|| crate::latest::instance::ExternalIps {
+            floating_ips: v4,
+            ..Default::default()
+        }),
+        v6: (!v6.is_empty()).then(|| crate::latest::instance::ExternalIps {
+            floating_ips: v6,
+            ..Default::default()
+        }),
+    }
+}
+
+impl From<&ZoneSnatConfig> for crate::latest::instance::ExternalIpConfig {
+    fn from(snat: &ZoneSnatConfig) -> Self {
+        let (v4, v6) = match snat {
+            ZoneSnatConfig::Ipv4Only(c) => (Some(*c), None),
+            ZoneSnatConfig::Ipv6Only(c) => (None, Some(*c)),
+            ZoneSnatConfig::DualStack { ipv4, ipv6 } => {
+                (Some(*ipv4), Some(*ipv6))
+            }
+        };
+        Self {
+            v4: v4.map(|snat| crate::latest::instance::ExternalIps {
+                source_nat: Some(snat),
+                ..Default::default()
+            }),
+            v6: v6.map(|snat| crate::latest::instance::ExternalIps {
+                source_nat: Some(snat),
+                ..Default::default()
+            }),
+        }
+    }
+}
+
+impl ExternalDnsAddrs {
+    /// Construct from a single socket address.
+    pub fn from_single(addr: SocketAddr) -> Self {
+        Self(BTreeMap::from([(addr.ip(), addr.port())]))
+    }
+
+    /// If this consists of a single element, return it, or None.
+    ///
+    /// NOTE: This is a temporary method used while inventory supports multiple
+    /// addresses, but `BlueprintZoneType` does not. It should be removed when
+    /// that's fixed.
+    pub fn into_single(self) -> Option<SocketAddr> {
+        if self.0.len() == 1 {
+            self.0
+                .into_iter()
+                .next()
+                .map(|(ip, port)| SocketAddr::new(ip, port))
+        } else {
+            None
+        }
+    }
+
+    /// Iterate over the external addresses.
+    pub fn iter(&self) -> impl Iterator<Item = SocketAddr> {
+        self.0.iter().map(|(ip, port)| SocketAddr::new(*ip, *port))
+    }
+
+    /// Return the "primary" address, either IPv4 or IPv6 in that order.
+    ///
+    /// NOTE: This is a temporary method used while we don't fully support
+    /// multiple IP addresses. It should be removed when that support is done.
+    pub fn temporary_primary_address(&self) -> SocketAddr {
+        self.0
+            .iter()
+            .find_map(|(ip, port)| {
+                if ip.is_ipv4() {
+                    Some(SocketAddr::new(*ip, *port))
+                } else {
+                    None
+                }
+            })
+            .or_else(|| {
+                self.0
+                    .iter()
+                    .next()
+                    .map(|(ip, port)| SocketAddr::new(*ip, *port))
+            })
+            .expect("ExternalDnsAddrs is non-empty by construction")
+    }
+}
+
+impl InstanceManagerStatus {
+    /// Helper (primarily for tests) that constructs an
+    /// [`InstanceManagerStatus`] with the
+    /// [`OmicronSledUpdateDisposition::Available`] disposition and the given
+    /// number of registered VMMs.
+    pub fn available(num_registered_vmms: usize) -> Self {
+        Self {
+            update_disposition: CurrentUpdateDisposition::Known(
+                OmicronSledUpdateDisposition::Available,
+            ),
+            num_registered_vmms,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::latest::inventory::{FmdInventoryError, FmdInventoryErrorKind};
+    use iddqd::IdOrdMap;
+    use omicron_uuid_kinds::{FmdHostCaseUuid, FmdResourceUuid, GenericUuid};
+    use std::net::Ipv4Addr;
+    use uuid::Uuid;
+
+    #[test]
+    fn fmd_inventory_result_display_snapshot() {
+        let case_uuid = FmdHostCaseUuid::from_untyped_uuid(Uuid::from_u128(
+            0xfeed_face_dead_beef_dead_beef_dead_beef,
+        ));
+        let case_uuid_2 = FmdHostCaseUuid::from_untyped_uuid(Uuid::from_u128(
+            0xfeed_face_dead_beef_dead_beef_dead_b00f,
+        ));
+        let resource_uuid = FmdResourceUuid::from_untyped_uuid(
+            Uuid::from_u128(0xbada_55ca_fe00_0000_0000_0000_0000_0001),
+        );
+        let resource_uuid_2 = FmdResourceUuid::from_untyped_uuid(
+            Uuid::from_u128(0xbada_55ca_fe00_0000_0000_0000_0000_0002),
+        );
+
+        let mut cases = IdOrdMap::new();
+        cases
+            .insert_unique(FmdHostCase {
+                uuid: case_uuid,
+                code: "JOKE-9001-FAKE".to_string(),
+                url: "http://example.invalid/msg/JOKE-9001-FAKE".to_string(),
+                event: Some(serde_json::json!({
+                    "class": "fault.vibes.off",
+                    "spookiness": 9001,
+                    "suspects": ["casper", "slimer"],
+                })),
+            })
+            .expect("case uuid is unique");
+        cases
+            .insert_unique(FmdHostCase {
+                uuid: case_uuid_2,
+                code: "BOO-0000-FAKE".to_string(),
+                url: "http://example.invalid/msg/BOO-0000-FAKE".to_string(),
+                event: None,
+            })
+            .expect("case uuid is unique");
+
+        let mut resources = IdOrdMap::new();
+        resources
+            .insert_unique(FmdResource {
+                uuid: resource_uuid,
+                fmri: "ghost:///not/a/real/fmri".to_string(),
+                case_id: case_uuid,
+                faulty: true,
+                unusable: false,
+                invisible: false,
+            })
+            .expect("resource uuid is unique");
+        resources
+            .insert_unique(FmdResource {
+                uuid: resource_uuid_2,
+                fmri: "ghost:///also/not/a/real/fmri".to_string(),
+                case_id: case_uuid_2,
+                faulty: false,
+                unusable: true,
+                invisible: true,
+            })
+            .expect("resource uuid is unique");
+
+        let ok: Result<FmdInventory, FmdInventoryError> =
+            Ok(FmdInventory { cases, resources });
+        let err: Result<FmdInventory, FmdInventoryError> =
+            Err(FmdInventoryError {
+                kind: FmdInventoryErrorKind::FmdError,
+                message: "haunted by an absent fmd daemon".to_string(),
+            });
+
+        let mut out = String::new();
+        out.push_str("--- ok variant ---\n");
+        out.push_str(&FmdInventoryResultDisplay::new(&ok).to_string());
+        out.push_str("--- err variant ---\n");
+        out.push_str(&FmdInventoryResultDisplay::new(&err).to_string());
+
+        expectorate::assert_contents(
+            "tests/output/fmd_inventory_display.txt",
+            &out,
+        );
+    }
+
+    #[test]
+    fn test_zone_snat_config_as_ip_types() {
+        let ipv4 = SourceNatConfig::new(
+            "10.0.0.1".parse::<Ipv4Addr>().unwrap(),
+            0,
+            NUM_SOURCE_NAT_PORTS - 1,
+        )
+        .unwrap();
+        let ipv6 = SourceNatConfig::new(
+            "fd00::1".parse::<Ipv6Addr>().unwrap(),
+            0,
+            NUM_SOURCE_NAT_PORTS - 1,
+        )
+        .unwrap();
+        let ipv4_only = ZoneSnatConfig::Ipv4Only(ipv4);
+        let ipv6_only = ZoneSnatConfig::Ipv6Only(ipv6);
+        let dual_stack = ZoneSnatConfig::DualStack { ipv4, ipv6 };
+
+        assert_eq!(ipv4_only.as_ipv4().unwrap(), &ipv4);
+        assert!(ipv4_only.as_ipv6().is_none());
+
+        assert!(ipv6_only.as_ipv4().is_none());
+        assert_eq!(ipv6_only.as_ipv6().unwrap(), &ipv6);
+
+        assert_eq!(dual_stack.as_ipv4().unwrap(), &ipv4);
+        assert_eq!(dual_stack.as_ipv6().unwrap(), &ipv6);
+    }
 }

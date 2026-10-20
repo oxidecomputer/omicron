@@ -1,0 +1,131 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PsuRemovedV0",
+  "description": "An alert indicating that a power supply unit (PSU) has been removed from a power shelf.",
+  "type": "object",
+  "required": [
+    "power_shelf",
+    "psu",
+    "rack_id",
+    "time"
+  ],
+  "properties": {
+    "power_shelf": {
+      "$ref": "#/definitions/PowerShelf"
+    },
+    "psu": {
+      "$ref": "#/definitions/Psu"
+    },
+    "rack_id": {
+      "description": "The ID of the rack containing the power shelf.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "definitions": {
+    "Baseboard": {
+      "description": "Properties that uniquely identify an Oxide hardware component",
+      "type": "object",
+      "required": [
+        "part",
+        "revision",
+        "serial"
+      ],
+      "properties": {
+        "part": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "serial": {
+          "type": "string"
+        }
+      }
+    },
+    "PowerShelf": {
+      "description": "Describes the power shelf involved in an alert.",
+      "type": "object",
+      "required": [
+        "shelf"
+      ],
+      "properties": {
+        "baseboard": {
+          "description": "The baseboard FRU identity of the power shelf controller that was installed in the power shelf at the time the event occurred.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Baseboard"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "shelf": {
+          "description": "The physical shelf number of the power shelf involved in the alert.\n\nThis will always be either 0 or 1.",
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 1.0,
+          "minimum": 0.0
+        }
+      }
+    },
+    "Psu": {
+      "description": "Describes a power supply unit (PSU) involved in an alert.",
+      "type": "object",
+      "required": [
+        "slot"
+      ],
+      "properties": {
+        "identity": {
+          "description": "The FRU identity of the PSU, if it could be determined.\n\nThis value may be NULL if the identity of the PSU could not be read due to a hardware failure.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PsuIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "slot": {
+          "description": "The slot number of the PSU within the power shelf.\n\nThis will always be an integer between 0 and 5 (inclusive), since each power shelf can contain up to 6 PSUs.",
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 5.0,
+          "minimum": 0.0
+        }
+      }
+    },
+    "PsuIdentity": {
+      "description": "Describes the FRU identity of a power supply unit (PSU).\n\nNote that this is *not* in the same format as Oxide FRU identities.",
+      "type": "object",
+      "required": [
+        "firmware_revision",
+        "manufacturer",
+        "part",
+        "serial"
+      ],
+      "properties": {
+        "firmware_revision": {
+          "type": "string"
+        },
+        "manufacturer": {
+          "type": "string"
+        },
+        "part": {
+          "type": "string"
+        },
+        "serial": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

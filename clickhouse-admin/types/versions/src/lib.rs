@@ -35,3 +35,7 @@ pub mod latest;
 pub mod v1;
 #[path = "add_retention_policy_and_table_usage/mod.rs"]
 pub mod v2;
+#[path = "add_retention_policy_for_all_tables/mod.rs"]
+pub mod v3;
+#[path = "log_to_console/mod.rs"]
+pub mod v4;

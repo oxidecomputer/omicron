@@ -10,7 +10,6 @@ use oxnet::{IpNet, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
-use std::net::Ipv6Addr;
 use std::num::NonZeroU8;
 
 /// Network configuration required to bring up the control plane
@@ -56,147 +55,6 @@ pub enum ConversionError {
     NotIpv4 { field: String, addr: std::net::IpAddr },
     #[error("{field} should be Ipv4Net, but is {net}")]
     NotIpv4Net { field: String, net: oxnet::IpNet },
-}
-
-impl TryFrom<EarlyNetworkConfig> for v1::EarlyNetworkConfig {
-    type Error = ConversionError;
-
-    fn try_from(value: EarlyNetworkConfig) -> Result<Self, Self::Error> {
-        let rack_network_config = value
-            .body
-            .rack_network_config
-            .map(|v2_config| {
-                let ports = v2_config
-                    .ports
-                    .into_iter()
-                    .map(|p| {
-                        let bgp_peers = p
-                            .bgp_peers
-                            .into_iter()
-                            .map(|peer| {
-                                let addr = match peer.addr {
-                                    IpAddr::V4(v4) => Ok(v4),
-                                    other => {
-                                        let err = ConversionError::NotIpv4 {
-                                            field: "BgpPeerConfig.addr".into(),
-                                            addr: other,
-                                        };
-                                        Err(err)
-                                    }
-                                }?;
-                                Ok(v1::BgpPeerConfig {
-                                    asn: peer.asn,
-                                    port: peer.port,
-                                    addr,
-                                    hold_time: peer.hold_time,
-                                    idle_hold_time: peer.idle_hold_time,
-                                    delay_open: peer.delay_open,
-                                    connect_retry: peer.connect_retry,
-                                    keepalive: peer.keepalive,
-                                    remote_asn: peer.remote_asn,
-                                    min_ttl: peer.min_ttl,
-                                    md5_auth_key: peer.md5_auth_key,
-                                    multi_exit_discriminator: peer
-                                        .multi_exit_discriminator,
-                                    communities: peer.communities,
-                                    local_pref: peer.local_pref,
-                                    enforce_first_as: peer.enforce_first_as,
-                                    allowed_import: peer.allowed_import,
-                                    allowed_export: peer.allowed_export,
-                                    vlan_id: peer.vlan_id,
-                                })
-                            })
-                            .collect::<Result<Vec<_>, _>>()?;
-
-                        Ok(v1::PortConfig {
-                            routes: p.routes,
-                            addresses: p
-                                .addresses
-                                .into_iter()
-                                .map(|a| v1::UplinkAddressConfig {
-                                    address: a.address.unwrap_or_else(|| {
-                                        IpNet::host_net(IpAddr::V6(
-                                            Ipv6Addr::UNSPECIFIED,
-                                        ))
-                                    }),
-                                    vlan_id: a.vlan_id,
-                                })
-                                .collect(),
-                            switch: p.switch,
-                            port: p.port,
-                            uplink_port_speed: p.uplink_port_speed,
-                            uplink_port_fec: p.uplink_port_fec,
-                            bgp_peers,
-                            autoneg: p.autoneg,
-                            lldp: p.lldp,
-                            tx_eq: p.tx_eq,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                let infra_ip_first = match v2_config.infra_ip_first {
-                    IpAddr::V4(ipv4_addr) => Ok(ipv4_addr),
-                    _ => Err(ConversionError::NotIpv4 {
-                        field: "RackNetworkConfig.infra_ip_first".into(),
-                        addr: v2_config.infra_ip_first,
-                    }),
-                }?;
-
-                let infra_ip_last = match v2_config.infra_ip_last {
-                    IpAddr::V4(ipv4_addr) => Ok(ipv4_addr),
-                    _ => Err(ConversionError::NotIpv4 {
-                        field: "RackNetworkConfig.infra_ip_last".into(),
-                        addr: v2_config.infra_ip_last,
-                    }),
-                }?;
-
-                let mut bgp = vec![];
-
-                for bgp_config in v2_config.bgp {
-                    let mut originate = vec![];
-
-                    for prefix in bgp_config.originate {
-                        match prefix {
-                            IpNet::V4(ipv4_net) => {
-                                originate.push(ipv4_net);
-                                Ok(())
-                            }
-                            _ => Err(ConversionError::NotIpv4Net {
-                                field: "BgpConfig.originate".into(),
-                                net: prefix,
-                            }),
-                        }?
-                    }
-                    let converted_config = v1::BgpConfig {
-                        asn: bgp_config.asn,
-                        originate,
-                        shaper: bgp_config.shaper,
-                        checker: bgp_config.checker,
-                    };
-
-                    bgp.push(converted_config);
-                }
-
-                Ok(v1::RackNetworkConfig {
-                    rack_subnet: v2_config.rack_subnet,
-                    infra_ip_first,
-                    infra_ip_last,
-                    ports,
-                    bgp,
-                    bfd: v2_config.bfd,
-                })
-            })
-            .transpose()?;
-
-        Ok(Self {
-            generation: value.generation,
-            schema_version: value.schema_version,
-            body: v1::EarlyNetworkConfigBody {
-                ntp_servers: value.body.ntp_servers,
-                rack_network_config,
-            },
-        })
-    }
 }
 
 /// This is the actual configuration of EarlyNetworking.
@@ -309,9 +167,9 @@ pub struct PortConfig {
     /// Nmae of the port this config applies to.
     pub port: String,
     /// Port speed.
-    pub uplink_port_speed: v1::PortSpeed,
+    pub uplink_port_speed: v1::LinkSpeed,
     /// Port forward error correction type.
-    pub uplink_port_fec: Option<v1::PortFec>,
+    pub uplink_port_fec: Option<v1::LinkFec>,
     /// BGP peers on this port
     pub bgp_peers: Vec<BgpPeerConfig>,
     /// Whether or not to set autonegotiation
@@ -371,8 +229,17 @@ pub struct BgpConfig {
     pub max_paths: MaxPathConfig,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize)]
-pub struct MaxPathConfig(u8);
+#[derive(
+    Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, daft::Diffable,
+)]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub struct MaxPathConfig(
+    #[cfg_attr(
+        any(test, feature = "testing"),
+        strategy(MaxPathConfig::MIN..=MaxPathConfig::MAX)
+    )]
+    u8,
+);
 
 impl MaxPathConfig {
     const MIN: u8 = 1;
@@ -388,6 +255,17 @@ impl MaxPathConfig {
         }
 
         Ok(Self(v))
+    }
+
+    pub fn new_saturating(v: NonZeroU8) -> Self {
+        let mut v = v.get();
+        // We know v >= Self::MIN because it's from a NonZeroU8. Explicitly
+        // document that via an assertion.
+        debug_assert!(v >= Self::MIN);
+        if v > Self::MAX {
+            v = Self::MAX;
+        }
+        Self(v)
     }
 
     pub fn as_u8(&self) -> u8 {
@@ -459,7 +337,14 @@ pub enum MaxPathConfigError {
 #[derive(
     Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize,
 )]
-pub struct RouterLifetimeConfig(u16);
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub struct RouterLifetimeConfig(
+    #[cfg_attr(
+        any(test, feature = "testing"),
+        strategy(0..=RouterLifetimeConfig::MAX)
+    )]
+    u16,
+);
 
 impl RouterLifetimeConfig {
     /// Default router lifetime: 0 seconds (disabled)

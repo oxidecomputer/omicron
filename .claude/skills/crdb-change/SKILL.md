@@ -36,15 +36,15 @@ Prompt the user to ask where the schema changes are:
 
 - **Uncommitted changes**: Changes not yet committed.
   - git: `git diff -- schema/crdb/dbinit.sql` (unstaged) or `git diff --cached -- schema/crdb/dbinit.sql` (staged)
-  - jj: `jj diff -- schema/crdb/dbinit.sql`
+  - jj: `jj diff --git -- schema/crdb/dbinit.sql`
 
 - **This commit only** (stacked diff workflow): Changes are in the current commit only.
   - git: `git diff HEAD^ -- schema/crdb/dbinit.sql`
-  - jj: `jj diff --from @-- -- schema/crdb/dbinit.sql`
+  - jj: `jj diff --git --from @-- -- schema/crdb/dbinit.sql`
 
 - **This branch** (feature branch workflow): Changes span the entire branch.
   - git: `git diff $(git merge-base HEAD main) -- schema/crdb/dbinit.sql`
-  - jj: `jj diff --from 'fork_point(trunk() | @)' -- schema/crdb/dbinit.sql`
+  - jj: `jj diff --git --from 'fork_point(trunk() | @)' -- schema/crdb/dbinit.sql`
 
 If the diff doesn't show anything, ask the user which ref to diff from.
 

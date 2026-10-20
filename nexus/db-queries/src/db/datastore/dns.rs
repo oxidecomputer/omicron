@@ -267,7 +267,7 @@ impl DataStore {
                     )
                     .await?;
                 paginator = p.found_batch(&names_batch, &|(n, _)| n.clone());
-                zone_records.extend(names_batch.into_iter());
+                zone_records.extend(names_batch);
             }
 
             debug!(log, "found all DNS names for zone";
@@ -687,7 +687,7 @@ impl DnsVersionUpdateBuilder {
             Err(Error::internal_error(&format!(
                 "DNS update ({:?}) attempted to remove name {:?} \
                 multiple times",
-                self.comment, &name,
+                self.comment, name,
             )))
         } else {
             assert!(self.names_removed.insert(name));
@@ -714,7 +714,7 @@ pub trait DataStoreDnsTest: Send + Sync {
         &'a self,
         opctx: &'a OpContext,
         dns_group: DnsGroup,
-        version: omicron_common::api::external::Generation,
+        version: omicron_generation_kinds::Generation,
     ) -> BoxFuture<'a, Result<DnsConfigParams, Error>>;
 }
 
@@ -723,7 +723,7 @@ impl DataStoreDnsTest for DataStore {
         &'a self,
         opctx: &'a OpContext,
         dns_group: DnsGroup,
-        version: omicron_common::api::external::Generation,
+        version: omicron_generation_kinds::Generation,
     ) -> BoxFuture<'a, Result<DnsConfigParams, Error>> {
         async move {
             use nexus_db_schema::schema::dns_version::dsl;
@@ -808,7 +808,7 @@ mod test {
         {
             use crate::db::model::DnsVersion;
             use nexus_db_schema::schema::dns_version::dsl;
-            use omicron_common::api::external::Generation;
+            use omicron_generation_kinds::Generation;
 
             diesel::insert_into(dsl::dns_version)
                 .values(DnsVersion {

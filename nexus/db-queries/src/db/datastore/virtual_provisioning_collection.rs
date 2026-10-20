@@ -395,6 +395,7 @@ mod test {
                             name: "myproject".parse().unwrap(),
                             description: "It's a project".into(),
                         },
+                        defaults: None,
                     },
                 ),
             )
@@ -462,6 +463,7 @@ mod test {
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
                         multicast_groups: Vec::new(),
+                        enable_jumbo_frames: false,
                     },
                 ),
             )

@@ -635,12 +635,18 @@ mod tests {
                                 tokio::fs::read_to_string(&listen_addr_path)
                                     .await
                             else {
-                                return Err(poll::CondCheckError::<()>::NotYet);
+                                return Err(
+                                    poll::CondCheckError::<()>::NotYet {
+                                        status: None,
+                                    },
+                                );
                             };
                             let addr: SocketAddrV6 = match contents.parse() {
                                 Ok(addr) => addr,
                                 Err(_) => {
-                                    return Err(poll::CondCheckError::NotYet);
+                                    return Err(poll::CondCheckError::NotYet {
+                                        status: None,
+                                    });
                                 }
                             };
                             Ok(addr)

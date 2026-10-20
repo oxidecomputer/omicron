@@ -9,9 +9,9 @@ sled-list
 # Create a TUF repository from a fake manifest. (The output TUF repo is
 # written to a temporary directory that this invocation of `reconfigurator-cli`
 # is running out of as its working directory.)
-tuf-assemble ../../update-common/manifests/fake.toml
+generate-fake-repo 1.0.0
 # Create a second TUF repository from a different fake manifest.
-tuf-assemble ../../update-common/manifests/fake-non-semver.toml --allow-non-semver
+generate-fake-repo 2.0.0
 
 # Load the target release from the first TUF repository.
 set target-release repo-1.0.0.zip
@@ -28,6 +28,10 @@ sled-update-install-dataset serial1 --with-manifest-error
 sled-update-install-dataset serial2 --to-target-release
 sled-set serial2 mupdate-override ffffffff-ffff-ffff-ffff-ffffffffffff
 blueprint-edit latest set-remove-mupdate-override serial2 ffffffff-ffff-ffff-ffff-ffffffffffff
+# Apply the latest blueprint to serial2's inventory so that the noop check
+# exercises the mupdate-override-set-in-blueprint path rather than firing
+# inventory-stale on the bumped sled-agent generation.
+sled-set serial2 omicron-config latest
 
 # On a fourth sled, simulate an error validating the install dataset image on one zone.
 # We pick ntp because internal-ntp is non-discretionary.
@@ -57,6 +61,14 @@ blueprint-diff latest
 
 # Bring the hidden sled back.
 sled-set serial6 inventory-visible
+
+# The first plan bumped the sled-agent generation on the sleds where it did
+# noop conversions (serial0, serial3) and where it set remove_mupdate_override
+# (serial2). Apply that blueprint to those sleds' inventories so the next
+# plan's noop check doesn't fire the inventory-stale path for them.
+sled-set serial0 omicron-config latest
+sled-set serial2 omicron-config latest
+sled-set serial3 omicron-config latest
 
 # Run another inventory and blueprint planning step.
 inventory-generate

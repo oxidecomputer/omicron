@@ -22,12 +22,15 @@ use internal_dns_resolver::ResolveError;
 use internal_dns_types::names::ServiceName;
 use nexus_db_lookup::DataStoreConnection;
 use nexus_db_model::Saga;
+use nexus_db_model::SagaExecState;
 use nexus_db_model::SagaNodeEvent;
 use nexus_db_model::SagaState;
 use nexus_db_model::SecId;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
+use nexus_db_queries::db::datastore::SagaStateDbFields;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use owo_colors::OwoColorize;
@@ -90,16 +93,20 @@ enum SagaCommands {
 
 #[derive(Clone, Debug, Args)]
 struct SagaInjectErrorArgs {
-    saga_id: Uuid,
+    saga_id: steno::SagaId,
 
     /// Skip checking if the SEC is up
     #[clap(long, default_value_t = false)]
     bypass_sec_check: bool,
 }
 
-#[derive(Clone, Copy, Debug, Args)]
+#[derive(Clone, Debug, Args)]
 struct SagaAbandonArgs {
-    saga_id: Uuid,
+    saga_id: steno::SagaId,
+
+    #[clap(long, default_value = "manually abandoned")]
+    /// Additional comment as to why the saga was abandoned
+    comment: String,
 
     /// Skip checking if the SEC is up
     #[clap(long, default_value_t = false)]
@@ -108,7 +115,7 @@ struct SagaAbandonArgs {
 
 #[derive(Clone, Copy, Debug, Args)]
 struct SagaShowArgs {
-    saga_id: Uuid,
+    saga_id: steno::SagaId,
 }
 
 impl SagaArgs {
@@ -129,7 +136,7 @@ impl SagaArgs {
 
             SagaCommands::Abandon(args) => {
                 let token = omdb.check_allow_destructive()?;
-                cmd_sagas_abandon(omdb, opctx, datastore, *args, token).await
+                cmd_sagas_abandon(omdb, opctx, datastore, args, token).await
             }
 
             SagaCommands::Show(args) => {
@@ -160,7 +167,7 @@ async fn cmd_sagas_running(
 
 #[derive(Tabled)]
 struct SagaRow {
-    id: Uuid,
+    id: steno::SagaId,
     current_sec: String,
     #[tabled(display_with = "datetime_rfc3339_concise")]
     time_created: DateTime<Utc>,
@@ -182,7 +189,7 @@ impl From<Saga> for SagaRow {
             adopt_time: _,
         } = saga;
         Self {
-            id: id.0.into(),
+            id,
             current_sec: if let Some(current_sec) = current_sec {
                 current_sec.0.to_string()
             } else {
@@ -190,7 +197,7 @@ impl From<Saga> for SagaRow {
             },
             time_created,
             name,
-            state: format!("{saga_state:?}"),
+            state: format!("{:?}", SagaState::from(saga_state)),
         }
     }
 }
@@ -235,8 +242,9 @@ You should only do this if:
         let saga: Saga = {
             use nexus_db_schema::schema::saga::dsl;
             dsl::saga
-                .filter(dsl::id.eq(args.saga_id))
-                .first_async(&*conn)
+                .filter(dsl::id.eq(to_db_typed_uuid(args.saga_id)))
+                .select(Saga::as_select())
+                .first_async::<Saga>(&*conn)
                 .await?
         };
 
@@ -267,7 +275,7 @@ You should only do this if:
         use nexus_db_schema::schema::saga_node_event::dsl;
 
         dsl::saga_node_event
-            .filter(dsl::saga_id.eq(args.saga_id))
+            .filter(dsl::saga_id.eq(to_db_typed_uuid(args.saga_id)))
             .filter(dsl::event_type.eq(SagaNodeEventType::Started.label()))
             .load_async(&*conn)
             .await?
@@ -286,7 +294,7 @@ You should only do this if:
             SagaNodeEventType::Failed(ActionError::InjectedError).label();
 
         dsl::saga_node_event
-            .filter(dsl::saga_id.eq(args.saga_id))
+            .filter(dsl::saga_id.eq(to_db_typed_uuid(args.saga_id)))
             .filter(
                 dsl::event_type
                     .eq(succeeded_label)
@@ -361,7 +369,7 @@ async fn cmd_sagas_abandon(
     omdb: &Omdb,
     opctx: &OpContext,
     datastore: &DataStore,
-    SagaAbandonArgs { saga_id, bypass_sec_check }: SagaAbandonArgs,
+    args: &SagaAbandonArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> anyhow::Result<()> {
     use nexus_db_schema::schema::saga::dsl;
@@ -369,17 +377,20 @@ async fn cmd_sagas_abandon(
     let should_print_color =
         should_colorize(omdb.output.color, supports_color::Stream::Stdout);
     let conn = datastore.pool_connection_for_tests().await?;
-    let saga: Saga =
-        { dsl::saga.filter(dsl::id.eq(saga_id)).first_async(&*conn).await? };
+    let saga: Saga = dsl::saga
+        .filter(dsl::id.eq(to_db_typed_uuid(args.saga_id)))
+        .select(Saga::as_select())
+        .first_async::<Saga>(&*conn)
+        .await?;
 
     match saga.saga_state {
-        SagaState::Done => {
-            bail!("saga {saga_id} is already done executing");
+        SagaExecState::Done => {
+            bail!("saga {} is already done executing", args.saga_id);
         }
-        SagaState::Abandoned => {
-            bail!("saga {saga_id} is already abandoned");
+        SagaExecState::Abandoned(_) => {
+            bail!("saga {} is already abandoned", args.saga_id);
         }
-        SagaState::Running | SagaState::Unwinding => {}
+        SagaExecState::Running | SagaExecState::Unwinding => {}
     }
 
     let text = r#"
@@ -409,10 +420,12 @@ execute even if it is abandoned. You should only proceed if:
 
     // Before doing anything: find the current SEC for the saga, and ping it to
     // ensure that the Nexus is down.
-    if !bypass_sec_check {
-        let saga: Saga = {
-            dsl::saga.filter(dsl::id.eq(saga_id)).first_async(&*conn).await?
-        };
+    if !args.bypass_sec_check {
+        let saga = dsl::saga
+            .filter(dsl::id.eq(to_db_typed_uuid(args.saga_id)))
+            .select(Saga::as_select())
+            .first_async::<Saga>(&*conn)
+            .await?;
 
         let status = get_saga_sec_status(omdb, opctx, &saga).await;
         status.display_message(should_print_color);
@@ -432,9 +445,16 @@ execute even if it is abandoned. You should only proceed if:
     prompt.read_and_validate("y/N", "y")?;
     drop(prompt);
 
+    let new_state = SagaStateDbFields {
+        saga_state: SagaState::Abandoned,
+        abandon_reason: Some(nexus_db_model::SagaReasonAbandoned::Omdb),
+        abandon_comment: Some(args.comment.to_string()),
+        abandon_time: Some(Utc::now()),
+    };
+
     diesel::update(dsl::saga)
-        .filter(dsl::id.eq(saga_id))
-        .set(dsl::saga_state.eq(SagaState::Abandoned))
+        .filter(dsl::id.eq(to_db_typed_uuid(args.saga_id)))
+        .set(new_state)
         .execute_async(&*conn)
         .await?;
 
@@ -455,14 +475,25 @@ async fn get_all_sagas_in_state(
         let records_batch =
             paginated(dsl::saga, dsl::id, &p.current_pagparams())
                 .filter(dsl::saga_state.eq(state))
-                .select(Saga::as_select())
-                .load_async(&**conn)
+                .select(nexus_db_model::LoadedSaga::as_select())
+                .load_async::<nexus_db_model::LoadedSaga>(&**conn)
                 .await
                 .context("fetching sagas")?;
 
-        paginator = p.found_batch(&records_batch, &|s: &Saga| s.id);
+        paginator = p
+            .found_batch(&records_batch, &|s: &nexus_db_model::LoadedSaga| {
+                to_db_typed_uuid(s.id())
+            });
 
-        sagas.extend(records_batch);
+        for row in records_batch {
+            let saga_id = row.id();
+            match Saga::try_from(row) {
+                Ok(saga) => sagas.push(saga),
+                Err(e) => {
+                    eprintln!("WARNING: Skipping saga with id {saga_id}: {e}")
+                }
+            };
+        }
     }
 
     // Sort them by creation time (equivalently: how long they've been running)
@@ -735,7 +766,7 @@ async fn cmd_sagas_show(
             dsl::event_time,
             &p.current_pagparams(),
         )
-        .filter(dsl::saga_id.eq(saga_id))
+        .filter(dsl::saga_id.eq(to_db_typed_uuid(saga_id)))
         .order_by(dsl::event_time)
         .select(SagaNodeEvent::as_select())
         .load_async(&*conn)
@@ -749,9 +780,9 @@ async fn cmd_sagas_show(
     let saga = {
         use nexus_db_schema::schema::saga::dsl;
         dsl::saga
-            .filter(dsl::id.eq(saga_id))
+            .filter(dsl::id.eq(to_db_typed_uuid(saga_id)))
             .select(Saga::as_select())
-            .first_async(&*conn)
+            .first_async::<Saga>(&*conn)
             .await
             .with_context(|| format!("error fetching saga {saga_id}"))?
     };

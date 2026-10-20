@@ -4,8 +4,6 @@
 
 //! The top-level query plan itself.
 
-// Copyright 2025 Oxide Computer Company
-
 use crate::oxql::ast::Query;
 use crate::oxql::ast::table_ops::BasicTableOp;
 use crate::oxql::ast::table_ops::GroupedTableOp;
@@ -1265,7 +1263,7 @@ mod tests {
         let optimized_nodes = plan.optimized_nodes();
         assert_eq!(optimized_nodes.len(), 2);
         let Node::Get(get) = &optimized_nodes[0] else {
-            panic!("Expected a get node, found {:?}", &optimized_nodes[0]);
+            panic!("Expected a get node, found {:?}", optimized_nodes[0]);
         };
         assert_eq!(get.filters.len(), 1);
         assert!(matches!(&optimized_nodes[1], Node::Delta(_)));
@@ -1288,7 +1286,7 @@ mod tests {
         let optimized_nodes = plan.optimized_nodes();
         assert_eq!(optimized_nodes.len(), 4);
         let Node::Get(get) = &optimized_nodes[0] else {
-            panic!("Expected a get node, found {:?}", &optimized_nodes[0]);
+            panic!("Expected a get node, found {:?}", optimized_nodes[0]);
         };
         assert_eq!(get.filters.len(), 1);
         assert_eq!(
@@ -1313,13 +1311,13 @@ mod tests {
         let optimized_nodes = plan.optimized_nodes();
         assert_eq!(optimized_nodes.len(), 3);
         let Node::Subquery(subqueries) = &optimized_nodes[0] else {
-            panic!("Expected a subquery node, found {:?}", &optimized_nodes[0]);
+            panic!("Expected a subquery node, found {:?}", optimized_nodes[0]);
         };
         for subq in subqueries.iter() {
             let nodes = subq.optimized_nodes();
             assert_eq!(nodes.len(), 2);
             let Node::Get(get) = &nodes[0] else {
-                panic!("Expected a get node, found {:?}", &nodes[0]);
+                panic!("Expected a get node, found {:?}", nodes[0]);
             };
             assert_eq!(get.filters.len(), 1);
             assert!(matches!(&nodes[1], Node::Delta(_)));
@@ -1345,13 +1343,13 @@ mod tests {
         let optimized_nodes = plan.optimized_nodes();
         assert_eq!(optimized_nodes.len(), 1);
         let Node::Subquery(subqueries) = &optimized_nodes[0] else {
-            panic!("Expected a subquery node, found {:?}", &optimized_nodes[0]);
+            panic!("Expected a subquery node, found {:?}", optimized_nodes[0]);
         };
         for subq in subqueries.iter() {
             let nodes = subq.optimized_nodes();
             assert_eq!(nodes.len(), 2);
             let Node::Get(get) = &nodes[0] else {
-                panic!("Expected a get node, found {:?}", &nodes[0]);
+                panic!("Expected a get node, found {:?}", nodes[0]);
             };
             assert_eq!(get.filters.len(), 1);
             assert!(matches!(&nodes[1], Node::Delta(_)));
