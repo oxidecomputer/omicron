@@ -8382,7 +8382,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep (
     -- from a stale sitrep. (It is the `rendezvous_support_bundle_created`
     -- marker, not this generation, that prevents a deleted bundle from being
     -- resurrected.)
-    support_bundle_generation INT8 NOT NULL
+    support_bundle_generation INT8 NOT NULL,
 
     -- Generation counter for Active Problems. This is incremented every time
     -- the set of Active Problems which exist in the sitrep differs from the
@@ -8390,8 +8390,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep (
     -- generation only applies to the set of Active Problems which *exist*;
     -- changes to active problems once they are created are tracked by the
     -- individual active problems' revision counters.
-    active_problem_generation INT8 NOT NULL,
-    --
+    active_problem_generation INT8 NOT NULL
 );
 
 -- Index for looking up all potential children of a given parent sitrep.
@@ -9824,15 +9823,33 @@ CREATE TABLE IF NOT EXISTS omicron.public.active_problem_revision (
     PRIMARY KEY (problem_id, revision)
 );
 
+-- The fault management sitrep's representation of an Active Problem.
+--
+-- Records in this table are inserted when a sitrep is created, and are deleted
+-- when the sitrep corresponding to the record's `sitrep_id` is deleted. Active
+-- Problems are carried forwards into subsequent sitreps until they are
+-- resolved.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_active_problem (
+    -- UUID of the Active Problem.
+    id UUID NOT NULL,
+    -- UUID of the current sitrep that this record is part of.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the original sitrep in which the Active Problem was first
+    -- requested.
+    requested_sitrep_id UUID NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id)
+);
+
 -- Marker written by `SitrepGuardedInsert` atomically with a corresponding
 -- Active Problem row when FM rendezvous successfully creates an Active Problem.
 -- This serves as a guard against resurrection: if the Active Problem is deleted
 -- after its initial creation, but an executing sitrep still contains an
--- fm_active_problem_request for the same Active Problem, this marker prevents
--- `SitrepGuardedInsert` from re-creating the Active.
+-- fm_active_problem record for the same Active Problem, this marker prevents
+-- `SitrepGuardedInsert` from re-creating the Active Problem.
 --
 -- A marker can be GC'ed in FM rendezvous when:
---   * its problem_id is not present in any fm_active_problem_request in
+--   * its problem_id is not present in any fm_active_problem record in
 --     the executing sitrep,
 --   * its created_at_generation is less than that of the
 --     active_problem_generation on the sitrep being executed.
@@ -9843,7 +9860,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_active_problem_created (
     created_at_generation INT8 NOT NULL
 );
 
-
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
@@ -9853,7 +9869,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '310.0.0', NULL)
+    (TRUE, NOW(), NOW(), '311.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

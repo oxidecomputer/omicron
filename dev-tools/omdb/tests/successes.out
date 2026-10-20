@@ -893,6 +893,8 @@ task: "fm_sitrep_gc"
     batch size:                                                                1000
     orphaned sitreps deleted:                                                     <ORPHANED_SITREPS_DELETED_REDACTED>
       batches:                                                                    1
+    orphaned fm_active_problem rows deleted:                                      0
+      batches:                                                                    1
     orphaned fm_alert_request rows deleted:                                       0
       batches:                                                                    1
     orphaned fm_case rows deleted:                                                0
@@ -1641,6 +1643,8 @@ task: "fm_sitrep_gc"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     batch size:                                                                1000
     orphaned sitreps deleted:                                                     <ORPHANED_SITREPS_DELETED_REDACTED>
+      batches:                                                                    1
+    orphaned fm_active_problem rows deleted:                                      0
       batches:                                                                    1
     orphaned fm_alert_request rows deleted:                                       0
       batches:                                                                    1

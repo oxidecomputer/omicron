@@ -392,7 +392,8 @@ async fn cmd_db_sitrep_show(
         return Ok(());
     }
 
-    let fm::Sitrep { metadata, cases, ereports_by_id } = sitrep;
+    let fm::Sitrep { metadata, cases, ereports_by_id, active_problems } =
+        sitrep;
     let fm::SitrepMetadata {
         id,
         creator_id,
@@ -403,6 +404,7 @@ async fn cmd_db_sitrep_show(
         next_inv_min_time_started,
         alert_generation,
         support_bundle_generation,
+        active_problem_generation,
     } = metadata;
 
     const ID: &'static str = "ID";
@@ -420,7 +422,10 @@ async fn cmd_db_sitrep_show(
         "  next inventory minimum start time";
     const ALERT_GEN: &'static str = "alert generation";
     const SUPPORT_BUNDLE_GEN: &'static str = "support bundle generation";
+    const ACTIVE_PROBLEM_GEN: &'static str = "active problem generation";
     const TOTAL_EREPORTS: &'static str = "ereports in this sitrep";
+    const TOTAL_ACTIVE_PROBLEMS: &'static str =
+        "active problems in this sitrep";
 
     const WIDTH: usize = const_max_len(&[
         ID,
@@ -437,7 +442,9 @@ async fn cmd_db_sitrep_show(
         NEXT_INV_MIN_START,
         ALERT_GEN,
         SUPPORT_BUNDLE_GEN,
+        ACTIVE_PROBLEM_GEN,
         TOTAL_EREPORTS,
+        TOTAL_ACTIVE_PROBLEMS,
     ]);
 
     println!("\n{:=<80}", "== FAULT MANAGEMENT SITUATION REPORT ");
@@ -515,8 +522,10 @@ async fn cmd_db_sitrep_show(
     println!("    rendezvous resource generation numbers:");
     println!("    {ALERT_GEN:>WIDTH$}: {alert_generation}");
     println!("    {SUPPORT_BUNDLE_GEN:>WIDTH$}: {support_bundle_generation}");
+    println!("    {ACTIVE_PROBLEM_GEN:>WIDTH$}: {active_problem_generation}");
     println!("    ");
     println!("    {TOTAL_EREPORTS}: {}", ereports_by_id.len());
+    println!("    {TOTAL_ACTIVE_PROBLEMS}: {}", active_problems.len());
     // TODO(eliza): perhaps display a table summarizing those ereports? possibly
     // behind a verbose flag?
 

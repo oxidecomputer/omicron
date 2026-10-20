@@ -23,6 +23,7 @@ use nexus_types::inventory;
 use nexus_types::inventory::ZpoolHealth;
 use nexus_types::observed_certificate::ObservedSiloCertificates;
 use nexus_types::observed_saga::ObservedSaga;
+use omicron_generation_kinds::SitrepActiveProblemGeneration;
 use omicron_generation_kinds::SitrepAlertGeneration;
 use omicron_generation_kinds::SitrepSupportBundleGeneration;
 use omicron_test_utils::dev;
@@ -597,8 +598,10 @@ pub fn make_parent_sitrep(
             comment: String::new(),
             alert_generation: SitrepAlertGeneration::new(),
             support_bundle_generation: SitrepSupportBundleGeneration::new(),
+            active_problem_generation: SitrepActiveProblemGeneration::new(),
         },
         cases: case_map,
         ereports_by_id: Default::default(),
+        active_problems: Default::default(),
     }
 }

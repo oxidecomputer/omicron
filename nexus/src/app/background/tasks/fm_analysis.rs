@@ -1037,6 +1037,7 @@ mod tests {
     use nexus_types::fm::SitrepMetadata;
     use nexus_types::fm::SitrepVersion;
     use nexus_types::fm::case;
+    use omicron_generation_kinds::SitrepActiveProblemGeneration;
     use omicron_generation_kinds::SitrepAlertGeneration;
     use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_test_utils::dev;
@@ -1108,9 +1109,12 @@ mod tests {
                     alert_generation: SitrepAlertGeneration::new(),
                     support_bundle_generation:
                         SitrepSupportBundleGeneration::new(),
+                    active_problem_generation:
+                        SitrepActiveProblemGeneration::new(),
                 },
                 cases: Default::default(),
                 ereports_by_id: Default::default(),
+                active_problems: Default::default(),
             },
         ))
     }
@@ -1401,9 +1405,11 @@ mod tests {
                 time_created: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases,
             ereports_by_id: Default::default(),
+            active_problems: Default::default(),
         };
 
         // Insert the sitrep, then satisfy one of the closed cases' alert
