@@ -36,6 +36,7 @@ use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{
     GenericUuid, InstanceUuid, OmicronZoneUuid, PropolisUuid,
 };
+use opte_ioctl::OpteHdl;
 use oxnet::IpNet;
 use propolis_api_types::instance::ErrorCode as PropolisErrorCode;
 use propolis_client::Client as PropolisClient;
@@ -2577,17 +2578,31 @@ impl InstanceRunner {
         // some other one.
         let datasets: Vec<zone::Dataset> = vec![];
 
-        // For delegated devices, include the default list plus any for the
-        // delegated zvol devices.
-        let mut devices = vec![
-            zone::Device { name: "/dev/vmm/*".to_string() },
-            zone::Device { name: "/dev/vmmctl".to_string() },
-            zone::Device { name: "/dev/viona".to_string() },
-        ];
+        // Build the list of delegated devices.
+        let devices = {
+            // Default list...
+            let mut devices = vec![
+                zone::Device { name: "/dev/vmm/*".to_string() },
+                zone::Device { name: "/dev/vmmctl".to_string() },
+                zone::Device { name: "/dev/viona".to_string() },
+            ];
 
-        for delegated_zvol in &self.delegated_zvols {
-            devices.push(zone::Device { name: delegated_zvol.zvol_device() });
-        }
+            // ... XDE device for OPTE, if needed ...
+            if !opte_ports.is_empty() {
+                // TODO-john need to restrict access to only the ports
+                // associated with this zone
+                devices
+                    .push(zone::Device { name: OpteHdl::XDE_CTL.to_string() });
+            }
+
+            // ... and any delegated zvols.
+            for delegated_zvol in &self.delegated_zvols {
+                devices
+                    .push(zone::Device { name: delegated_zvol.zvol_device() });
+            }
+
+            devices
+        };
 
         // Create a zone for the propolis instance, using the previously
         // configured VNICs.

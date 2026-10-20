@@ -62,6 +62,7 @@ omicron-generation-kinds.workspace = true
 omicron-ledger.workspace = true
 omicron-ddm-admin-client.workspace = true
 omicron-uuid-kinds.workspace = true
+opte-ioctl.workspace = true
 omicron-workspace-hack.workspace = true
 oxide-tokio-rt.workspace = true
 oximeter.workspace = true
@@ -138,7 +139,6 @@ fmd-adm.workspace = true
 # Direct dep on fmd-adm-sys so this crate sees DEP_FMD_ADM_LIBDIRS in build.rs
 # and can configure RPATH via omicron-rpaths.
 fmd-adm-sys.workspace = true
-opte-ioctl.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
