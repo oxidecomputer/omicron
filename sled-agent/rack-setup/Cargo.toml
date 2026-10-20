@@ -7,6 +7,9 @@ license = "MPL-2.0"
 [lints]
 workspace = true
 
+[build-dependencies]
+omicron-rpaths.workspace = true
+
 [dependencies]
 anyhow.workspace = true
 bootstore.workspace = true
@@ -33,6 +36,7 @@ omicron-ledger.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 oxnet.workspace = true
+pq-sys = "*"
 rand.workspace = true
 reqwest = { workspace = true, features = ["rustls", "stream"] }
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
@@ -61,3 +65,7 @@ nexus-reconfigurator-blippy.workspace = true
 nexus-test-utils.workspace = true
 omicron-test-utils.workspace = true
 rcgen.workspace = true
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true
