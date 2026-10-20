@@ -28,7 +28,9 @@ pub mod display;
 use case::AlertRequest;
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
-use omicron_generation_kinds::{AlertGeneration, SupportBundleGeneration};
+use omicron_generation_kinds::{
+    SitrepAlertGeneration, SitrepSupportBundleGeneration,
+};
 use omicron_uuid_kinds::{
     CaseUuid, CollectionUuid, OmicronZoneUuid, SitrepUuid,
 };
@@ -182,14 +184,14 @@ pub struct SitrepMetadata {
     /// request set differs from its parent's. Alert creation is guarded on this
     /// value: a rendezvous task working from a sitrep whose generation no
     /// longer matches the current sitrep's has its inserts rejected as stale.
-    pub alert_generation: AlertGeneration,
+    pub alert_generation: SitrepAlertGeneration,
 
     /// `SitrepBuilder` increments this each time it builds a sitrep whose
     /// support bundle request set differs from its parent's. Support bundle
     /// creation is guarded on this value: a rendezvous task working from
     /// a sitrep whose generation no longer matches the current sitrep's has
     /// its inserts rejected as stale.
-    pub support_bundle_generation: SupportBundleGeneration,
+    pub support_bundle_generation: SitrepSupportBundleGeneration,
 }
 
 pub struct SitrepStateComparison<'sitrep> {
