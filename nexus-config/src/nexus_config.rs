@@ -10,7 +10,6 @@ use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use nexus_types::deployment::ReconfiguratorConfig;
-use nexus_types::support_bundle::SupportBundleSizeLimit;
 use omicron_common::address::Ipv6Subnet;
 pub use omicron_common::address::MAX_VPC_IPV4_SUBNET_PREFIX_LENGTH;
 pub use omicron_common::address::MIN_VPC_IPV4_SUBNET_PREFIX_LENGTH;
@@ -621,18 +620,6 @@ pub struct SupportBundleCollectorConfig {
     /// Default: Off
     #[serde(default)]
     pub disable: bool,
-
-    /// Size, in bytes, at which support bundle collection stops.
-    ///
-    /// Default: [`SupportBundleSizeLimit::DEFAULT`]
-    #[serde(default = "SupportBundleCollectorConfig::default_size_limit")]
-    pub size_limit_bytes: SupportBundleSizeLimit,
-}
-
-impl SupportBundleCollectorConfig {
-    fn default_size_limit() -> SupportBundleSizeLimit {
-        SupportBundleSizeLimit::DEFAULT
-    }
 }
 
 #[serde_as]
@@ -1583,8 +1570,6 @@ mod test {
                             SupportBundleCollectorConfig {
                                 period_secs: Duration::from_secs(30),
                                 disable: false,
-                                size_limit_bytes:
-                                    SupportBundleSizeLimit::DEFAULT,
                             },
                         physical_disk_adoption: PhysicalDiskAdoptionConfig {
                             period_secs: Duration::from_secs(30),

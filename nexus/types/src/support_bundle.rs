@@ -449,8 +449,7 @@ impl fmt::Display for DisplaySledSelection<'_> {
 
 /// A support bundle size limit, in bytes, no larger than
 /// [`SupportBundleSizeLimit::MAX`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(try_from = "u64", into = "u64")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SupportBundleSizeLimit(u64);
 
 impl SupportBundleSizeLimit {
@@ -469,20 +468,6 @@ impl SupportBundleSizeLimit {
 
     pub fn bytes(self) -> u64 {
         self.0
-    }
-}
-
-impl TryFrom<u64> for SupportBundleSizeLimit {
-    type Error = SupportBundleSizeLimitTooLarge;
-
-    fn try_from(bytes: u64) -> Result<Self, Self::Error> {
-        Self::new(bytes)
-    }
-}
-
-impl From<SupportBundleSizeLimit> for u64 {
-    fn from(limit: SupportBundleSizeLimit) -> Self {
-        limit.0
     }
 }
 
@@ -564,12 +549,6 @@ mod tests {
         let max = SupportBundleSizeLimit::MAX.bytes();
         assert_eq!(SupportBundleSizeLimit::new(max).unwrap().bytes(), max);
         SupportBundleSizeLimit::new(max + 1).unwrap_err();
-
-        let limit: SupportBundleSizeLimit =
-            serde_json::from_str(&max.to_string()).unwrap();
-        assert_eq!(limit, SupportBundleSizeLimit::MAX);
-        serde_json::from_str::<SupportBundleSizeLimit>(&(max + 1).to_string())
-            .unwrap_err();
     }
 
     #[proptest]
