@@ -79,10 +79,6 @@ async fn collect_sp_components(
     sp: SpIdentifier,
     dir: &Utf8Path,
 ) -> anyhow::Result<CollectionStepOutput> {
-    if !collection.data_selection().contains_sp_components() {
-        return Ok(CollectionStepOutput::Skipped);
-    }
-
     save_sp_components(collection, mgs_client, sp, dir).await.with_context(
         || format!("failed to save SP components from: {} {}", sp.typ, sp.slot),
     )?;
