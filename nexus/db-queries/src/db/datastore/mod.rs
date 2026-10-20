@@ -72,7 +72,7 @@ use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-mod active_problem;
+pub mod active_problem;
 mod address_lot;
 mod affinity;
 mod alert;

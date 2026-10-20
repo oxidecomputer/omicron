@@ -9753,7 +9753,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.active_problem (
     -- select the current revision from the `active_problem_revision` table.
     current_revision INT8 NOT NULL,
 
-    CONSTRAINT revision_is_non_zero CHECK (current_revision > 0)
+    -- An Active Problem is allowed to exist at its zeroth revision if and only
+    -- if it is in the process of being created. Such Active Problems are not
+    -- returned when listing Active Problems.
+    CONSTRAINT revision_is_non_negative CHECK (current_revision >= 0)
 );
 
 CREATE INDEX IF NOT EXISTS

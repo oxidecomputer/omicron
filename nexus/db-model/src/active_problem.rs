@@ -46,6 +46,12 @@ pub struct ActiveProblem {
     pub current_revision: DbTypedGeneration<ActiveProblemGenerationKind>,
 }
 
+impl ActiveProblem {
+    pub fn current_revision(&self) -> ActiveProblemGeneration {
+        self.current_revision.into()
+    }
+}
+
 /// A revision of an Active Problem.
 ///
 /// This corresponds to a record in the `active_problem_revision` table.
