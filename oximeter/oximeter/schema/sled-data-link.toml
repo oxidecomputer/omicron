@@ -93,3 +93,48 @@ datum_type = "cumulative_u64"
 versions = [
     { added_in = 1, fields = [] }
 ]
+
+[[metrics]]
+name = "fec_high_symbol_errors"
+description = "FEC symbol error threshold exceeded"
+units = "none"
+datum_type = "bool"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "fec_sync_aligned"
+description = "All lanes synchronized and aligned"
+units = "none"
+datum_type = "bool"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "fec_corrected_blocks"
+description = "Total number of FEC blocks that were corrected"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "fec_uncorrected_blocks"
+description = "Total number of FEC blocks that were uncorrected"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "fec_symbol_errors"
+description = "Total number of FEC symbol errors"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
