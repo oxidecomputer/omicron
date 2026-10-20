@@ -7442,7 +7442,7 @@ dependencies = [
  "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-generation-kinds",
- "omicron-git-version",
+ "omicron-git-version-types",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-uuid-kinds",
@@ -7525,6 +7525,7 @@ dependencies = [
  "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-generation-kinds",
+ "omicron-git-version-types",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
@@ -9199,10 +9200,18 @@ dependencies = [
 name = "omicron-git-version"
 version = "0.1.0"
 dependencies = [
+ "omicron-git-version-types",
+ "omicron-workspace-hack",
+ "vergen-gitcl",
+]
+
+[[package]]
+name = "omicron-git-version-types"
+version = "0.1.0"
+dependencies = [
  "omicron-workspace-hack",
  "serde",
  "serde_with 3.21.0",
- "vergen-gitcl",
 ]
 
 [[package]]
@@ -9245,6 +9254,7 @@ dependencies = [
  "nexus-types",
  "omicron-common",
  "omicron-generation-kinds",
+ "omicron-git-version",
  "omicron-rpaths",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -9389,6 +9399,7 @@ dependencies = [
  "omicron-common",
  "omicron-debug-dropbox",
  "omicron-generation-kinds",
+ "omicron-git-version",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
@@ -9579,6 +9590,7 @@ dependencies = [
  "omicron-common",
  "omicron-generation-kinds",
  "omicron-git-version",
+ "omicron-git-version-types",
  "omicron-nexus",
  "omicron-rpaths",
  "omicron-test-utils",
@@ -9708,6 +9720,7 @@ dependencies = [
  "nexus-reconfigurator-execution",
  "nexus-types",
  "omicron-common",
+ "omicron-git-version",
  "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",

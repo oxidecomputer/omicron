@@ -374,6 +374,7 @@ impl Nexus {
                 all_versions.as_ref(),
                 config.pkg.tunables.load_timeout,
                 IdentityCheckPolicy::CheckAndTakeover { nexus_id },
+                omicron_git_version::current(),
             )
             .await?,
         );

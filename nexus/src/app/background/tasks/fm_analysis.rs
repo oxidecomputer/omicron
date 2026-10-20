@@ -859,6 +859,7 @@ impl FmAnalysis {
             match nexus_db_model::fm::SitrepAnalysisReport::new(
                 input_report,
                 &report,
+                self.datastore.git_version(),
             ) {
                 Ok(analysis_report) => Some(analysis_report),
                 Err(e) => {
