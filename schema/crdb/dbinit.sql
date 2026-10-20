@@ -9912,6 +9912,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.problem (
     -- select the current revision from the `problem_revision` table.
     current_revision INT8 NOT NULL,
 
+    -- A problem is allowed to exist at its zeroth revision if and only if it
+    -- is in the process of being created. Such problems are not returned when
+    -- listing problems.
     CONSTRAINT revision_is_non_negative CHECK (current_revision >= 0)
 );
 
