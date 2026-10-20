@@ -389,6 +389,10 @@ pub enum ClickHouseError {
 
 const SINGLE_NODE_CONFIG_FILE: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../smf/clickhouse/config.xml");
+const SINGLE_NODE_USERS_FILE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../smf/clickhouse/users-and-roles.xml"
+);
 
 impl ClickHouseProcess {
     /// Start a new single node ClickHouse server listening on the provided
@@ -408,6 +412,16 @@ impl ClickHouseProcess {
                     "failed to copy config file from {} to test data path {}",
                     SINGLE_NODE_CONFIG_FILE,
                     data_dir.config_file_path(),
+                )
+            })?;
+
+        tokio::fs::copy(SINGLE_NODE_USERS_FILE, data_dir.users_file_path())
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to copy users file from {} to test data path {}",
+                    SINGLE_NODE_USERS_FILE,
+                    data_dir.users_file_path(),
                 )
             })?;
         let args = vec![
@@ -750,6 +764,10 @@ impl ClickHouseDataDir {
 
     fn config_file_path(&self) -> Utf8PathBuf {
         self.root_path().join("config.xml")
+    }
+
+    fn users_file_path(&self) -> Utf8PathBuf {
+        self.root_path().join("users-and-roles.xml")
     }
 
     fn datastore_path(&self) -> Utf8PathBuf {

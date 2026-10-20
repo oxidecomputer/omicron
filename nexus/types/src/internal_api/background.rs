@@ -1118,8 +1118,10 @@ pub struct SpEreporterStatus {
     pub status: EreporterStatus,
 }
 
-#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct EreporterStatus {
+    /// the UUID of the rack in which this thing lives.
+    pub rack_id: RackUuid,
     /// total number of ereports received from this reporter
     pub ereports_received: usize,
     /// number of new ereports ingested from this reporter (this may be less
@@ -1567,6 +1569,20 @@ pub struct AuditLogCleanupStatus {
     pub cutoff: DateTime<Utc>,
     /// Configured max rows to delete in this activation.
     pub max_deleted_per_activation: u32,
+    /// Error encountered during this activation, if any.
+    pub error: Option<String>,
+}
+
+/// The status of a `vmm_mark_stop_for_update` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct VmmMarkStopForUpdateStatus {
+    /// Number of VMMs that were marked as needing to be stopped for update in
+    /// this activation.
+    pub vmms_marked: usize,
+    /// The number of batches that marked at least one VMM in this activation.
+    pub batches: usize,
+    /// The maximum number of VMMs marked per batch.
+    pub batch_size: u32,
     /// Error encountered during this activation, if any.
     pub error: Option<String>,
 }

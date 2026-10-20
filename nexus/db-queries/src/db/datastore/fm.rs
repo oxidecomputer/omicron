@@ -40,6 +40,7 @@ use nexus_db_schema::schema::ereport::dsl as ereport_dsl;
 use nexus_db_schema::schema::fm_alert_request::dsl as alert_req_dsl;
 use nexus_db_schema::schema::fm_case::dsl as case_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
+use nexus_db_schema::schema::fm_fact_certificate::dsl as fact_cert_dsl;
 use nexus_db_schema::schema::fm_fact_physical_disk::dsl as fact_pd_dsl;
 use nexus_db_schema::schema::fm_fact_saga::dsl as fact_saga_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
@@ -132,10 +133,12 @@ sitrep_child_tables! {
     SupportBundleRequestDataSelectionFlags => { table: "fm_support_bundle_request_data_selection_flags" },
     SupportBundleRequestDataSelectionHostInfo => { table: "fm_support_bundle_request_data_selection_host_info" },
     SupportBundleRequestDataSelectionEreports => { table: "fm_support_bundle_request_data_selection_ereports" },
+    SupportBundleRequestDataSelectionTimeRange => { table: "fm_support_bundle_request_data_selection_time_range" },
     SupportBundleRequest => { table: "fm_support_bundle_request" },
     Case => { table: "fm_case" },
     FmFactPhysicalDisk => { table: "fm_fact_physical_disk" },
     FmFactSaga => { table: "fm_fact_saga" },
+    FmFactCertificate => { table: "fm_fact_certificate" },
     AnalysisReport => { table: "fm_sitrep_analysis_report" },
 }
 
@@ -641,6 +644,31 @@ impl DataStore {
             }
         }
 
+        // --- certificate diagnosis engine facts ---
+        let mut paginator: Paginator<DbTypedUuid<FactKind>> =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated(
+                fact_cert_dsl::fm_fact_certificate,
+                fact_cert_dsl::id,
+                &p.current_pagparams(),
+            )
+            .filter(fact_cert_dsl::sitrep_id.eq(id.into_untyped_uuid()))
+            .select(model::fm::FmFactCertificate::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to load certificate case facts")
+            })?;
+
+            paginator = p.found_batch(&batch, &|f| f.id);
+            for row in batch {
+                let case_id: CaseUuid = row.case_id.into();
+                insert_fact_for_case(&mut by_case, case_id, row.into_fact())?;
+            }
+        }
+
         Ok(by_case)
     }
 
@@ -723,6 +751,7 @@ impl DataStore {
         use nexus_db_schema::schema::fm_support_bundle_request_data_selection_ereports::dsl as ereports_dsl;
         use nexus_db_schema::schema::fm_support_bundle_request_data_selection_flags::dsl as flags_dsl;
         use nexus_db_schema::schema::fm_support_bundle_request_data_selection_host_info::dsl as host_info_dsl;
+        use nexus_db_schema::schema::fm_support_bundle_request_data_selection_time_range::dsl as time_range_dsl;
 
         let sitrep_uuid = id.into_untyped_uuid();
         let mut selections =
@@ -746,6 +775,11 @@ impl DataStore {
                 ereports_dsl::fm_support_bundle_request_data_selection_ereports
                     .on(ereports_dsl::sitrep_id.eq(flags_dsl::sitrep_id)
                         .and(ereports_dsl::request_id.eq(flags_dsl::request_id))),
+            )
+            .left_join(
+                time_range_dsl::fm_support_bundle_request_data_selection_time_range
+                    .on(time_range_dsl::sitrep_id.eq(flags_dsl::sitrep_id)
+                        .and(time_range_dsl::request_id.eq(flags_dsl::request_id))),
             )
             .select(DbBundleDataSelection::as_select())
             .load_async(conn)
@@ -895,6 +929,7 @@ impl DataStore {
         let mut case_ereports = Vec::new();
         let mut physical_disk_facts = Vec::new();
         let mut saga_facts = Vec::new();
+        let mut certificate_facts = Vec::new();
         for case in sitrep.cases {
             let case_id = case.id;
             cases.push(model::fm::CaseMetadata::from_sitrep(sitrep_id, &case));
@@ -938,6 +973,16 @@ impl DataStore {
                             &fact.metadata,
                             saga_fact,
                         ));
+                    }
+                    fm::FactPayload::Certificate(cert_fact) => {
+                        certificate_facts.push(
+                            model::fm::FmFactCertificate::from_sitrep(
+                                sitrep_id,
+                                case_id,
+                                &fact.metadata,
+                                cert_fact,
+                            ),
+                        );
                     }
                 }
             }
@@ -1023,6 +1068,19 @@ impl DataStore {
                 })?;
         }
 
+        if !certificate_facts.is_empty() {
+            diesel::insert_into(fact_cert_dsl::fm_fact_certificate)
+                .values(certificate_facts)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to insert certificate case facts",
+                        )
+                })?;
+        }
+
         if !cases.is_empty() {
             diesel::insert_into(case_dsl::fm_case)
                 .values(cases)
@@ -1073,11 +1131,12 @@ impl DataStore {
         requests: Vec<model::fm::SupportBundleRequest>,
         data_selections: Vec<(SupportBundleUuid, BundleDataSelection)>,
     ) -> Result<(), InsertSitrepError> {
-        use model::fm::{DataSelectionFlags, Ereports, HostInfo};
+        use model::fm::{DataSelectionFlags, Ereports, HostInfo, TimeRange};
         use nexus_db_schema::schema::fm_support_bundle_request::dsl as support_bundle_req_dsl;
         use nexus_db_schema::schema::fm_support_bundle_request_data_selection_ereports::dsl as ereports_dsl;
         use nexus_db_schema::schema::fm_support_bundle_request_data_selection_flags::dsl as flags_dsl;
         use nexus_db_schema::schema::fm_support_bundle_request_data_selection_host_info::dsl as host_info_dsl;
+        use nexus_db_schema::schema::fm_support_bundle_request_data_selection_time_range::dsl as time_range_dsl;
 
         if !requests.is_empty() {
             diesel::insert_into(
@@ -1096,6 +1155,7 @@ impl DataStore {
         let mut flags_rows = Vec::new();
         let mut host_info_rows = Vec::new();
         let mut ereports_rows = Vec::new();
+        let mut time_range_rows = Vec::new();
 
         for (req_id, data_selection) in data_selections {
             flags_rows.push(DataSelectionFlags::from_sitrep(
@@ -1103,6 +1163,13 @@ impl DataStore {
                 req_id,
                 &data_selection,
             ));
+            // Row absence is the canonical encoding of an unbounded
+            // range; only write a row when some bound is set.
+            let range = data_selection.time_range();
+            if range.has_bounds() {
+                time_range_rows
+                    .push(TimeRange::from_sitrep(sitrep_id, req_id, range));
+            }
             for data in data_selection {
                 match data {
                     BundleData::Reconfigurator
@@ -1156,6 +1223,18 @@ impl DataStore {
             .map_err(|e| {
                 public_error_from_diesel(e, ErrorHandler::Server)
                     .internal_context("failed to insert sb_req_ereports rows")
+            })?;
+        }
+        if !time_range_rows.is_empty() {
+            diesel::insert_into(
+                time_range_dsl::fm_support_bundle_request_data_selection_time_range,
+            )
+            .values(time_range_rows)
+            .execute_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to insert sb_req_time_range rows")
             })?;
         }
 
@@ -2092,6 +2171,7 @@ mod tests {
     use super::test_utils::*;
     use super::*;
     use crate::db::explain::ExplainableAsync;
+    use crate::db::pub_test_utils::TEST_GIT_VERSION;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use chrono::Utc;
@@ -2100,8 +2180,8 @@ mod tests {
     use nexus_types::alert::AlertClass;
     use nexus_types::fm;
     use nexus_types::fm::ereport::{EreportData, Reporter};
-    use omicron_generation_kinds::AlertGeneration;
-    use omicron_generation_kinds::SupportBundleGeneration;
+    use omicron_generation_kinds::SitrepAlertGeneration;
+    use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CaseEreportUuid;
     use omicron_uuid_kinds::CollectionUuid;
@@ -2318,8 +2398,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2371,8 +2451,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2392,8 +2472,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.id()),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2437,8 +2517,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2459,8 +2539,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(nonexistent_id),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2498,8 +2578,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2519,8 +2599,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.id()),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2541,8 +2621,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.id()),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2795,7 +2875,8 @@ mod tests {
                 })
                 .unwrap();
             // A request with a nontrivial data_selection, including
-            // HostInfo(Specific) and ereport time filters.
+            // HostInfo(Specific), ereport filters, and a bundle-wide
+            // time range.
             {
                 use nexus_types::fm::ereport::EreportFilters;
                 use nexus_types::support_bundle::*;
@@ -2807,11 +2888,14 @@ mod tests {
                         omicron_uuid_kinds::SledUuid::new_v4(),
                     ])
                     .with_ereports(
-                        EreportFilters::new()
-                            .with_start_time(now - chrono::Duration::hours(1))
-                            .unwrap()
-                            .with_end_time(now)
-                            .unwrap(),
+                        EreportFilters::new().with_serials(["FAKE-SERIAL-01"]),
+                    )
+                    .with_time_range(
+                        BundleTimeRange::new(
+                            Some(now - chrono::Duration::hours(1)),
+                            Some(now),
+                        )
+                        .unwrap(),
                     );
                 support_bundles_requested
                     .insert_unique(fm::case::SupportBundleRequest {
@@ -2911,7 +2995,7 @@ mod tests {
         // Saga cases, exercising the fm_fact_saga read/write/GC paths, split
         // across two cases so each is a shape the engine actually produces.
         let case3 = {
-            let stuck_saga_id = steno::SagaId(uuid::Uuid::new_v4());
+            let stuck_saga_id = steno::SagaId::new_v4();
             let mut facts = iddqd::IdOrdMap::new();
             facts
                 .insert_unique(fm::case::Fact {
@@ -2983,7 +3067,7 @@ mod tests {
                     },
                     payload: fm::FactPayload::Saga(fm::SagaFact::Abandoned(
                         fm::SagaAbandonedFactPayload {
-                            saga_id: steno::SagaId(uuid::Uuid::new_v4()),
+                            saga_id: steno::SagaId::new_v4(),
                         },
                     )),
                 })
@@ -3005,11 +3089,60 @@ mod tests {
             }
         };
 
+        // Certificate cases, exercising the fm_fact_certificate
+        // read/write/GC paths: one per fact kind, since a certificate case
+        // carries exactly one fact at a time.
+        let certificate_case = |kind: fn(
+            fm::CertificateExpiryFactPayload,
+        ) -> fm::CertificateFact,
+                                comment: &str| {
+            let mut facts = iddqd::IdOrdMap::new();
+            facts
+                .insert_unique(fm::case::Fact {
+                    metadata: fm::case::FactMetadata {
+                        id: FactUuid::new_v4(),
+                        created_sitrep_id: sitrep_id,
+                        comment: format!("a representative {comment} fact"),
+                    },
+                    payload: fm::FactPayload::Certificate(kind(
+                        fm::CertificateExpiryFactPayload {
+                            silo_id: Uuid::new_v4(),
+                            certificate_id: Uuid::new_v4(),
+                            not_after: omicron_common::now_db_precision(),
+                        },
+                    )),
+                })
+                .unwrap();
+            fm::Case {
+                id: omicron_uuid_kinds::CaseUuid::new_v4(),
+                metadata: fm::case::Metadata {
+                    created_sitrep_id: sitrep_id,
+                    closed_sitrep_id: None,
+                    de: fm::DiagnosisEngineKind::Certificate,
+                    comment: format!("a silo whose {comment}"),
+                },
+                ereports: iddqd::IdOrdMap::new(),
+                alerts_requested: iddqd::IdOrdMap::new(),
+                support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts,
+            }
+        };
+        let case5 = certificate_case(
+            fm::CertificateFact::BestCertificateExpiring,
+            "best certificate is expiring",
+        );
+        let case6 = certificate_case(
+            fm::CertificateFact::BestCertificateExpired,
+            "best certificate has expired",
+        );
+
         let mut cases = iddqd::IdOrdMap::new();
         cases.insert_unique(case1.clone()).expect("failed to insert case 1");
         cases.insert_unique(case2.clone()).expect("failed to insert case 2");
         cases.insert_unique(case3).expect("failed to insert case 3");
         cases.insert_unique(case4).expect("failed to insert case 4");
+        cases.insert_unique(case5).expect("failed to insert case 5");
+        cases.insert_unique(case6).expect("failed to insert case 6");
         let mut ereports_by_id = iddqd::IdOrdMap::new();
         for case in cases.iter() {
             ereports_by_id
@@ -3025,8 +3158,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases,
             ereports_by_id,
@@ -3053,11 +3186,14 @@ mod tests {
             parent_inv_id: None,
             num_ereporter_restarts: 0,
             inv_id: sitrep.inv_id(),
+            reference_time: None,
             new_ereport_ids: Default::default(),
             open_cases: Default::default(),
             closed_cases_copied_forward: Default::default(),
             in_service_disks: Default::default(),
             observed_sagas: Default::default(),
+            observed_silo_certificates: Default::default(),
+            config: None,
         };
         let analysis_report = AnalysisReport {
             log: Default::default(),
@@ -3068,8 +3204,12 @@ mod tests {
             ),
             cases: Default::default(),
         };
-        model::fm::SitrepAnalysisReport::new(&input_report, &analysis_report)
-            .expect("failed to serialize analysis report")
+        model::fm::SitrepAnalysisReport::new(
+            &input_report,
+            &analysis_report,
+            &TEST_GIT_VERSION,
+        )
+        .expect("failed to serialize analysis report")
     }
 
     #[tokio::test]
@@ -3166,8 +3306,8 @@ mod tests {
                 comment: String::new(),
             })
             .unwrap();
-        // A request with HostInfo(Specific) and Ereports with time-range
-        // filters, plus SpDumps.
+        // A request with HostInfo(Specific), Ereports with serial and class
+        // filters, SpDumps, and a bundle-wide time range.
         {
             use nexus_types::fm::ereport::EreportFilters;
             use nexus_types::support_bundle::*;
@@ -3179,12 +3319,15 @@ mod tests {
                 .with_specific_sleds([sled1, sled2])
                 .with_ereports(
                     EreportFilters::new()
-                        .with_start_time(now - chrono::Duration::hours(2))
-                        .unwrap()
-                        .with_end_time(now)
-                        .unwrap()
                         .with_serials(["BRM42"])
                         .with_classes(["ereport.io"]),
+                )
+                .with_time_range(
+                    BundleTimeRange::new(
+                        Some(now - chrono::Duration::hours(2)),
+                        Some(now),
+                    )
+                    .unwrap(),
                 );
             support_bundles_requested
                 .insert_unique(fm::case::SupportBundleRequest {
@@ -3221,8 +3364,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases,
             ereports_by_id: Default::default(),
@@ -3279,9 +3422,9 @@ mod tests {
                         comment: "my cool sitrep".to_string(),
                         inv_collection_id: CollectionUuid::new_v4(),
                         next_inv_min_time_started: Utc::now(),
-                        alert_generation: AlertGeneration::new(),
-                        support_bundle_generation: SupportBundleGeneration::new(
-                        ),
+                        alert_generation: SitrepAlertGeneration::new(),
+                        support_bundle_generation:
+                            SitrepSupportBundleGeneration::new(),
                     },
                     cases: Default::default(),
                     ereports_by_id: Default::default(),
@@ -3308,7 +3451,7 @@ mod tests {
             .get_result_async::<i64>(&*conn)
             .await
             .expect("failed to count cases before deletion");
-        assert_eq!(cases_before, 4, "four cases should exist before deletion");
+        assert_eq!(cases_before, 6, "six cases should exist before deletion");
 
         let case_ereports_before: i64 = case_ereport_dsl::fm_ereport_in_case
             .filter(
@@ -3438,8 +3581,8 @@ mod tests {
                 comment: "my cool sitrep".to_string(),
                 inv_collection_id: CollectionUuid::new_v4(),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -3576,8 +3719,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -3684,12 +3827,15 @@ mod tests {
                 parent_sitrep_id: Some(sitrep1_id),
                 parent_inv_id: None,
                 inv_id: CollectionUuid::new_v4(),
+                reference_time: None,
                 new_ereport_ids: Default::default(),
                 open_cases: Default::default(),
                 closed_cases_copied_forward: Default::default(),
                 num_ereporter_restarts: 0,
                 in_service_disks: Default::default(),
                 observed_sagas: Default::default(),
+                observed_silo_certificates: Default::default(),
+                config: None,
             };
             let analysis_report = AnalysisReport {
                 log: Default::default(),
@@ -3700,6 +3846,7 @@ mod tests {
             model::fm::SitrepAnalysisReport::new(
                 &input_report,
                 &analysis_report,
+                &TEST_GIT_VERSION,
             )
             .expect("ghost analysis report should be valid")
         };
@@ -3888,8 +4035,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -4018,8 +4165,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -4175,8 +4322,8 @@ mod tests {
                 comment: "child sitrep".to_string(),
                 inv_collection_id: CollectionUuid::new_v4(),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),

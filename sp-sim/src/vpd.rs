@@ -2,14 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Runtime component VPD responses constructed from simulator configuration.
+//! Runtime baseboard and component VPD constructed from simulator
+//! configuration.
 
 use crate::config::ComponentVpdConfig;
 use crate::config::PmbusBlockConfig;
+use crate::config::SpCommonConfig;
 use crate::config::SpComponentConfig;
 
 use gateway_messages::SpComponent;
 use gateway_messages::SpError;
+use gateway_messages::VpdError;
 use gateway_messages::vpd as gw;
 
 use anyhow::Context;
@@ -17,13 +20,87 @@ use anyhow::anyhow;
 use anyhow::bail;
 use std::collections::HashMap;
 
+/// A simulated SP's baseboard identity, used to populate the identity fields in
+/// [`gateway_messages::SpStateV2`] and in ereport metadata.
+#[derive(Clone, Debug)]
+pub(crate) struct BaseboardVpd {
+    serial_number: String,
+    part_number: String,
+}
+
+impl BaseboardVpd {
+    const MAX_LEN: usize = 32;
+
+    /// Builds the baseboard VPD for a simulated SP from its config.
+    /// `default_part_number` is used if the config does not set a part number.
+    pub(crate) fn from_config(
+        config: &SpCommonConfig,
+        default_part_number: &str,
+    ) -> anyhow::Result<Self> {
+        fn check_len(value: &str) -> anyhow::Result<()> {
+            if value.len() > BaseboardVpd::MAX_LEN {
+                bail!(
+                    "{value:?} is {} bytes long, but must be at most {} bytes",
+                    value.len(),
+                    BaseboardVpd::MAX_LEN,
+                );
+            }
+            Ok(())
+        }
+
+        let serial_number = config.serial_number.clone();
+        let part_number = config
+            .part_number
+            .clone()
+            .unwrap_or_else(|| default_part_number.to_string());
+
+        check_len(&serial_number)
+            .context("invalid simulated SP serial number")?;
+        check_len(&part_number).context("invalid simulated SP part number")?;
+
+        Ok(Self { serial_number, part_number })
+    }
+
+    /// Returns the serial number as an `&str`, without NUL-padding.
+    pub(crate) fn serial_number(&self) -> &str {
+        &self.serial_number
+    }
+
+    /// Returns the part number as an `&str`, without NUL-padding.
+    pub(crate) fn part_number(&self) -> &str {
+        &self.part_number
+    }
+
+    /// Returns the serial number, NUL-padded for `SpStateV2::serial_number`.
+    pub(crate) fn padded_serial_number(&self) -> [u8; Self::MAX_LEN] {
+        Self::nul_padded(&self.serial_number)
+    }
+
+    /// Returns the part number, NUL-padded for `SpStateV2::model`.
+    pub(crate) fn padded_part_number(&self) -> [u8; Self::MAX_LEN] {
+        Self::nul_padded(&self.part_number)
+    }
+
+    fn nul_padded(value: &str) -> [u8; Self::MAX_LEN] {
+        let mut padded = [0; Self::MAX_LEN];
+        padded
+            .get_mut(..value.len())
+            .expect(
+                "`BaseboardVpd::from_config` checked that every value fits \
+                 in an `SpStateV2` field",
+            )
+            .copy_from_slice(value.as_bytes());
+        padded
+    }
+}
+
 pub(crate) struct ComponentVpds {
     by_component: HashMap<SpComponent, ComponentVpd>,
 }
 
 #[derive(Debug)]
 struct ComponentVpd {
-    vpd: gw::Vpd,
+    vpd: Result<gw::Vpd, VpdError>,
 }
 
 impl ComponentVpds {
@@ -59,9 +136,14 @@ impl ComponentVpds {
         let vpd = self
             .by_component
             .get(component)
-            .ok_or(SpError::RequestUnsupportedForComponent)?;
-        // TODO(eliza): allow simulating errors as well here?
-        match gateway_messages::serialize(buf, &vpd.vpd) {
+            .ok_or(SpError::RequestUnsupportedForComponent)?
+            .vpd
+            .as_ref()
+            .map_err(|e| {
+                // oh, we were asked to simulate a read error!
+                SpError::Vpd(*e)
+            })?;
+        match gateway_messages::serialize(buf, vpd) {
             Ok(len) => Ok(len),
             Err(e) => {
                 panic!(
@@ -95,13 +177,14 @@ impl ComponentVpd {
                     ic_device_rev: pmbus_block(config.ic_device_rev.as_ref())
                         .context("invalid PMBus ic_device_rev")?,
                 };
-                gw::Vpd::Pmbus(vpd)
+                Ok(gw::Vpd::Pmbus(vpd))
             }
-            ComponentVpdConfig::Barcode(vpd) => gw::Vpd::Barcode(*vpd),
+            ComponentVpdConfig::Barcode(vpd) => Ok(gw::Vpd::Barcode(*vpd)),
             ComponentVpdConfig::SledFanTray(vpd) => {
-                gw::Vpd::SledFanTray((**vpd).clone())
+                Ok(gw::Vpd::SledFanTray((**vpd).clone()))
             }
-            ComponentVpdConfig::Tmp11x(vpd) => gw::Vpd::Tmp11x(vpd.clone()),
+            ComponentVpdConfig::Tmp11x(vpd) => Ok(gw::Vpd::Tmp11x(vpd.clone())),
+            ComponentVpdConfig::ReadError(e) => Err(*e),
         };
         Ok(Self { vpd })
     }

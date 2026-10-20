@@ -1382,8 +1382,7 @@
             "name": "saga_id",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/SagaId"
             }
           }
         ],
@@ -2324,8 +2323,15 @@
             "type": "object",
             "properties": {
               "hash": {
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.1.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "type": {
                 "type": "string",
@@ -2619,8 +2625,15 @@
         "type": "object",
         "properties": {
           "hash": {
+            "x-rust-type": {
+              "crate": "byte-wrapper",
+              "path": "byte_wrapper::HexArray::<32>",
+              "version": "0.1.0"
+            },
             "type": "string",
-            "format": "hex string (32 bytes)"
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "minLength": 64,
+            "maxLength": 64
           },
           "version": {
             "$ref": "#/components/schemas/BlueprintArtifactVersion"
@@ -3093,8 +3106,15 @@
             "type": "object",
             "properties": {
               "hash": {
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.1.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "type": {
                 "type": "string",
@@ -4138,8 +4158,7 @@
             "$ref": "#/components/schemas/DemoSagaUuid"
           },
           "saga_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/SagaId"
           }
         },
         "required": [
@@ -4838,6 +4857,37 @@
               "type",
               "value"
             ]
+          },
+          {
+            "description": "An update to the given component could be scheduled, but we're waiting for the sled to evacuate",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "waiting_on_sled_evacuation"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "component": {
+                    "$ref": "#/components/schemas/MgsUpdateComponent"
+                  },
+                  "details": {
+                    "$ref": "#/components/schemas/WaitingOnSledEvacuationDetails"
+                  }
+                },
+                "required": [
+                  "component",
+                  "details"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
           }
         ]
       },
@@ -5238,7 +5288,7 @@
         ]
       },
       "FmConfig": {
-        "description": "A fault management configuration.\n\n# Validation\n\nFor a config to be valid, the following requirements must be upheld:\n\n- [`Self::sitrep_limit`] must be at least [`Self::MIN_SITREP_LIMIT`], and no more than [`Self::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be at least [`Self::MIN_HISTORY_PRUNING_THRESHOLD`], and no more than [`Self::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be strictly less than [`Self::sitrep_limit`],\n\nThese rules are checked by the [`Self::validate`] method, which is called prior to accepting a config update.",
+        "description": "A fault management configuration.\n\n# Validation\n\nFor a config to be valid, the following requirements must be upheld:\n\n- [`Self::sitrep_limit`] must be at least [`Self::MIN_SITREP_LIMIT`], and no more than [`Self::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be at least [`Self::MIN_HISTORY_PRUNING_THRESHOLD`], and no more than [`Self::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be strictly less than [`Self::sitrep_limit`], - [`Self::certificate_expiry_warning_days`] must be no more than [`Self::MAX_CERTIFICATE_EXPIRY_WARNING_DAYS`] (it is a `NonZeroU32`, so it is always at least 1).\n\nThese rules are checked by the [`Self::validate`] method, which is called prior to accepting a config update.",
         "type": "object",
         "properties": {
           "analysis_enabled": {
@@ -5246,6 +5296,14 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/FmConfigBooleanSetting"
+              }
+            ]
+          },
+          "certificate_expiry_warning_days": {
+            "description": "How many days before a silo's external TLS certificate expires the certificate diagnosis engine opens a case and requests a `silo.certificate.expiring` alert.\n\nThe window applies to the certificate Nexus actually serves for the silo (the one with the latest expiration time), so a case opens only when no later-expiring replacement is installed. Time is measured against the completion time of the inventory collection each sitrep is generated from, not the wall clock.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FmConfigNonZeroU32Setting"
               }
             ]
           },
@@ -5268,6 +5326,7 @@
         },
         "required": [
           "analysis_enabled",
+          "certificate_expiry_warning_days",
           "history_pruning_threshold",
           "sitrep_limit"
         ]
@@ -6347,6 +6406,15 @@
           "sp"
         ]
       },
+      "MgsUpdateComponent": {
+        "type": "string",
+        "enum": [
+          "sp",
+          "rot",
+          "rot_bootloader",
+          "host_os"
+        ]
+      },
       "MgsUpdateDriverStatus": {
         "description": "Status of ongoing update attempts, recently completed attempts, and update requests that are waiting for retry.",
         "type": "object",
@@ -7246,8 +7314,15 @@
         "properties": {
           "artifact_hash": {
             "description": "which artifact to apply to this device",
+            "x-rust-type": {
+              "crate": "byte-wrapper",
+              "path": "byte_wrapper::HexArray::<32>",
+              "version": "0.1.0"
+            },
             "type": "string",
-            "format": "hex string (32 bytes)"
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "minLength": 64,
+            "maxLength": 64
           },
           "artifact_version": {
             "$ref": "#/components/schemas/ArtifactVersion"
@@ -7423,8 +7498,15 @@
               },
               "expected_active_phase_1_hash": {
                 "description": "The hash of the phase 1 slot specified by `expected_active_phase_1_hash`.\n\nWe should always be able to fetch this. Even if the phase 1 contents themselves have been corrupted (very scary for the active slot!), the SP can still hash those contents.",
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.1.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "expected_active_phase_1_slot": {
                 "description": "Which slot is currently active according to the SP.\n\nThis controls which slot will be used the next time the sled boots; it will _usually_ match `boot_disk`, but differs in the window of time between telling the SP to change which slot to use and the host OS rebooting to actually use that slot.",
@@ -7436,8 +7518,15 @@
               },
               "expected_active_phase_2_hash": {
                 "description": "The hash of the currently-active phase 2 artifact.\n\nIt's possible sled-agent won't be able to report this value, but that would indicate that we don't know the version currently running. The planner wouldn't stage an update without knowing the current version, so if something has gone wrong in the meantime we won't proceede either.",
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.1.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "expected_boot_disk": {
                 "description": "Which slot the host OS most recently booted from.",
@@ -7449,13 +7538,27 @@
               },
               "expected_inactive_phase_1_hash": {
                 "description": "The hash of the phase 1 slot specified by toggling `expected_active_phase_1_slot` to the other slot.\n\nWe should always be able to fetch this. Even if the phase 1 contents of the inactive slot are entirely bogus, the SP can still hash those contents.",
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.1.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "expected_inactive_phase_2_hash": {
                 "description": "The hash of the currently-inactive phase 2 artifact.\n\nIt's entirely possible that a sled needing a host OS update has no valid artifact in its inactive slot. However, a precondition for us performing a phase 1 update is that `sled-agent` on the target sled has already written the paired phase 2 artifact to the inactive slot; therefore, we don't need to be able to represent an invalid inactive slot.",
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.1.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "sled_agent_address": {
                 "description": "Address for contacting sled-agent to check phase 2 contents.",
@@ -7536,8 +7639,7 @@
             "type": "boolean"
           },
           "saga_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/SagaId"
           },
           "saga_name": {
             "type": "string"
@@ -7642,11 +7744,25 @@
         "type": "object",
         "properties": {
           "disruption_policy": {
-            "$ref": "#/components/schemas/ReconfiguratorDisruptionPolicy"
+            "description": "Disruption policy applied to sleds being evacuated.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReconfiguratorDisruptionPolicy"
+              }
+            ]
+          },
+          "sled_update_reboot_policy": {
+            "description": "Policy for how the planner schedules updates that will induce reboots on sleds.\n\nIf `sled_update_reboot_policy` is [`SledUpdateRebootPolicy::ImmediateNoEvacuation`], the planner will not mark sleds for evacuation at all, which means `disruption_policy` will be ignored.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledUpdateRebootPolicy"
+              }
+            ]
           }
         },
         "required": [
-          "disruption_policy"
+          "disruption_policy",
+          "sled_update_reboot_policy"
         ]
       },
       "PlanningAddOutOfEligibleSleds": {
@@ -7981,11 +8097,18 @@
           },
           "pending_mgs_updates": {
             "$ref": "#/components/schemas/PendingMgsUpdates"
+          },
+          "update_disposition_changes": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BlueprintSledUpdateDispositionKind"
+            }
           }
         },
         "required": [
           "blocked_mgs_updates",
-          "pending_mgs_updates"
+          "pending_mgs_updates",
+          "update_disposition_changes"
         ]
       },
       "PlanningNexusGenerationBumpReport": {
@@ -8235,8 +8358,15 @@
             "type": "object",
             "properties": {
               "artifact_hash": {
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.1.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "file_name": {
                 "type": "string"
@@ -9079,7 +9209,8 @@
           },
           "planner_config": {
             "default": {
-              "disruption_policy": "terminate"
+              "disruption_policy": "terminate",
+              "sled_update_reboot_policy": "immediate_no_evacuation"
             },
             "allOf": [
               {
@@ -9360,8 +9491,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/SagaId"
           },
           "state": {
             "$ref": "#/components/schemas/SagaState"
@@ -9459,6 +9589,15 @@
             ]
           }
         ]
+      },
+      "SagaId": {
+        "x-rust-type": {
+          "crate": "steno",
+          "path": "steno::SagaId",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "SagaQuiesceStatus": {
         "type": "object",
@@ -9876,6 +10015,25 @@
             "type": "string",
             "enum": [
               "decommissioned"
+            ]
+          }
+        ]
+      },
+      "SledUpdateRebootPolicy": {
+        "description": "Controls how the planner interacts with sleds that it needs to reboot to perform an update (e.g., of the SP or host OS).",
+        "oneOf": [
+          {
+            "description": "Reboot sleds without evacuating them first.\n\nThis results in the fastest update time, but is the most disruptive to instances on the sled: the sled will be rebooted out from under them.\n\nThis is currently the default, but we expect to change the default to `Evacuate` once all the supporting work to enable that is complete.",
+            "type": "string",
+            "enum": [
+              "immediate_no_evacuation"
+            ]
+          },
+          {
+            "description": "Evacuate sleds before rebooting.\n\nWith this policy, when the planner needs to schedule an update that will cause a sled to reboot, it will first mark the sled for evacuation and then wait for the sled to be fully evacuated before scheduling that update.",
+            "type": "string",
+            "enum": [
+              "evacuate"
             ]
           }
         ]
@@ -10579,6 +10737,125 @@
         "format": "uint32",
         "minimum": 0
       },
+      "WaitingOnSledEvacuationDetails": {
+        "description": "Describes the details of what we're waiting on when a sled is being evacuated",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_from_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_ledgered_sled_config"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_sled_config_generation"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "current": {
+                    "$ref": "#/components/schemas/SledConfigGeneration"
+                  },
+                  "desired": {
+                    "$ref": "#/components/schemas/SledConfigGeneration"
+                  }
+                },
+                "required": [
+                  "current",
+                  "desired"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance_manager_no_config"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance_manager_available"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance_manager_registered_vmms"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "num_registered_vmms": {
+                    "type": "integer",
+                    "format": "uint",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "num_registered_vmms"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
       "WaitingStatus": {
         "description": "externally-exposed status for waiting updates",
         "type": "object",
@@ -10885,6 +11162,21 @@
                 "type": "string",
                 "enum": [
                   "pending_mgs_updates"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Waiting on sled update disposition changes in support of MGS updates",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sled_update_disposition_changes"
                 ]
               }
             },

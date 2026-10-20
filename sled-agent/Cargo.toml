@@ -113,7 +113,7 @@ thiserror.workspace = true
 tofino.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-stream.workspace = true
-tokio-util.workspace = true
+tokio-util = { workspace = true, features = ["rt"] }
 toml.workspace = true
 trust-quorum.workspace = true
 trust-quorum-protocol.workspace = true
@@ -179,6 +179,3 @@ doc = false
 
 [features]
 image-trampoline = []
-switch-asic = []
-switch-stub = []
-switch-softnpu = []

@@ -66,6 +66,7 @@ ntp-admin-client.workspace = true
 omicron-common.workspace = true
 omicron-generation-kinds.workspace = true
 omicron-git-version.workspace = true
+omicron-git-version-types.workspace = true
 omicron-nexus.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
@@ -96,6 +97,7 @@ strum.workspace = true
 support-bundle-collection.workspace = true
 support-bundle-viewer.workspace = true
 supports-color.workspace = true
+swrite.workspace = true
 tabled.workspace = true
 textwrap.workspace = true
 tokio = { workspace = true, features = ["full"] }

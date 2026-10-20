@@ -445,7 +445,7 @@ fn target_missing_from_its_own_file() {
     // because only the second file provides the target blueprint that lets
     // `read_series` finish successfully.
     let mut missing = state.clone();
-    missing.blueprints.remove(&target_id).expect("target blueprint present");
+    missing.blueprints.remove(target_id).expect("target blueprint present");
 
     let bytes_missing = serialize(&missing);
     let bytes_full = serialize(&state);

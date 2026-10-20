@@ -6,6 +6,7 @@
 
 use crate::ControlPlaneStarter;
 use crate::ControlPlaneTestContextSledAgent;
+use crate::RACK_UUID;
 use crate::starter::PopulateCrdb;
 use crate::starter::SledIndexAllocator;
 use crate::starter::setup_with_config_impl;
@@ -338,6 +339,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
             )),
             nexus_address,
             sled_id,
+            RACK_UUID,
             sled_index,
             sim_mode,
             cpu_family,
@@ -355,6 +357,21 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         self.add_sled_to_target_blueprint(sled_id).await;
 
         sled_agent
+    }
+
+    /// Returns the number of simulated service processors in this test.
+    pub fn num_sps(&self) -> usize {
+        self.gateway
+            .values()
+            // because all gateways in a given `ControlPlaneTestContext` share
+            // the same sp-sim config, just pick the first one.
+            //
+            // N.B. that if this changes in the future (such as if we add
+            // support for simulating management network partitions?) this may
+            // become wrong!
+            .next()
+            .map(|gwctx| gwctx.simrack.num_sps())
+            .unwrap_or(0)
     }
 
     /// Run an inventory collection and load it, ensuring that the loaded

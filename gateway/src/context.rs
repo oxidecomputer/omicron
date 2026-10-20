@@ -6,6 +6,7 @@ use crate::error::StartupError;
 use crate::management_switch::ManagementSwitch;
 use crate::management_switch::SwitchConfig;
 use gateway_sp_comms::InMemoryHostPhase2Provider;
+use omicron_uuid_kinds::RackUuid;
 use slog::{Logger, info};
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -15,7 +16,7 @@ use uuid::Uuid;
 pub struct ServerContext {
     pub mgmt_switch: ManagementSwitch,
     pub host_phase2_provider: Arc<InMemoryHostPhase2Provider>,
-    pub rack_id: OnceLock<Uuid>,
+    pub rack_id: OnceLock<RackUuid>,
     pub latencies: oximeter_instruments::http::LatencyTracker,
     pub log: Logger,
 }
@@ -25,7 +26,7 @@ impl ServerContext {
         id: Uuid,
         host_phase2_provider: Arc<InMemoryHostPhase2Provider>,
         switch_config: SwitchConfig,
-        rack_id_config: Option<Uuid>,
+        rack_id_config: Option<RackUuid>,
         log: &Logger,
     ) -> Result<Arc<Self>, StartupError> {
         let mgmt_switch =

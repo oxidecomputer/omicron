@@ -191,18 +191,18 @@ impl DataStore {
 
     /// Returns a list of all permanently-failed deliveries which are eligible
     /// to resend should a liveness probe with `resend=true` succeed.
-    pub async fn webhook_rx_list_resendable_events(
+    pub async fn webhook_rx_list_resendable_alerts(
         &self,
         opctx: &OpContext,
         rx_id: &AlertReceiverUuid,
     ) -> ListResultVec<Alert> {
-        Self::rx_list_resendable_events_query(*rx_id)
+        Self::rx_list_resendable_alerts_query(*rx_id)
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    fn rx_list_resendable_events_query(
+    fn rx_list_resendable_alerts_query(
         rx_id: AlertReceiverUuid,
     ) -> impl RunnableQuery<Alert> {
         use diesel::dsl::*;
@@ -210,15 +210,24 @@ impl DataStore {
             schema::webhook_delivery as delivery,
             schema::webhook_delivery as also_delivery
         );
+
+        let rx_id = rx_id.into_untyped_uuid();
+
         alert_dsl::alert
             .filter(alert_dsl::alert_class.ne(AlertClass::Probe))
             .inner_join(
                 delivery.on(delivery.field(dsl::alert_id).eq(alert_dsl::id)),
             )
-            .filter(delivery.field(dsl::rx_id).eq(rx_id.into_untyped_uuid()))
+            .filter(delivery.field(dsl::rx_id).eq(rx_id))
+            // Select only failed deliveries for which no successful delivery
+            // attempt exists for the same alert and receiver.
             .filter(not(exists(
                 also_delivery
                     .select(also_delivery.field(dsl::id))
+                    // We only want to check for successful deliveries to
+                    // the receiver we are listing resendable alerts for.
+                    .filter(also_delivery.field(dsl::rx_id).eq(rx_id))
+                    // ...and for the alert we are currently filtering.
                     .filter(
                         also_delivery.field(dsl::alert_id).eq(alert_dsl::id),
                     )
@@ -639,22 +648,17 @@ mod test {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::AlertUuid;
 
-    #[tokio::test]
-    async fn test_dispatched_deliveries_are_unique_per_rx() {
-        // Test setup
-        let logctx =
-            dev::test_setup_log("test_dispatched_deliveries_are_unique_per_rx");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-        // As webhook receivers are a collection that owns the delivery
-        // resource, we must create a "real" receiver before assigning
-        // deliveries to it.
+    async fn create_receiver(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        name: &str,
+    ) -> AlertReceiverUuid {
         let rx = datastore
             .webhook_rx_create(
                 opctx,
                 alert::WebhookCreate {
                     identity: IdentityMetadataCreateParams {
-                        name: "test-webhook".parse().unwrap(),
+                        name: name.parse().unwrap(),
                         description: String::new(),
                     },
                     endpoint: "http://webhooks.example.com".parse().unwrap(),
@@ -666,7 +670,20 @@ mod test {
             )
             .await
             .unwrap();
-        let rx_id = rx.rx.identity.id.into();
+        rx.rx.identity.id.into()
+    }
+
+    #[tokio::test]
+    async fn test_dispatched_deliveries_are_unique_per_rx() {
+        // Test setup
+        let logctx =
+            dev::test_setup_log("test_dispatched_deliveries_are_unique_per_rx");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        // As webhook receivers are a collection that owns the delivery
+        // resource, we must create a "real" receiver before assigning
+        // deliveries to it.
+        let rx_id = create_receiver(datastore, opctx, "test-webhook").await;
         let alert_id = AlertUuid::new_v4();
         let alert = model::Alert::new(
             alert_id,
@@ -765,27 +782,105 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    // Regression test for https://github.com/oxidecomputer/omicron/issues/11235
+    //
+    // This reproduces a bug where, if an alert has been successfully delivered
+    // to one receiver, but delivering that alert to another receiver has
+    // failed, the alert will not be returned by the resendable-alert-list
+    // query.
+    #[tokio::test]
+    async fn test_successful_delivery_to_other_rx_is_still_resendable() {
+        let logctx = dev::test_setup_log(
+            "test_successful_delivery_to_other_rx_is_still_resendable",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create two webhook receivers. One will have a failed delivery of an
+        // alert, and the other will have a successful one.
+        let failed_rx_id = create_receiver(datastore, opctx, "failed-rx").await;
+        let successful_rx_id =
+            create_receiver(datastore, opctx, "successful-rx").await;
+
+        let alert_id = AlertUuid::new_v4();
+        let alert = model::Alert::new(
+            alert_id,
+            &test_alerts::Foo(serde_json::json!({
+                "answer": 42,
+            })),
+        )
+        .expect("alert payload should serialize");
+        datastore
+            .alert_create(opctx, alert.clone())
+            .await
+            .expect("alert should be created");
+
+        let completed_at = Utc::now();
+
+        // Create a failed delivery of the alert to `failed-rx`...
+        let mut failed_delivery = WebhookDelivery::new(
+            &alert_id,
+            &failed_rx_id,
+            AlertDeliveryTrigger::Alert,
+        );
+        failed_delivery.attempts = model::SqlU8::new(3);
+        failed_delivery.time_completed = Some(completed_at);
+        failed_delivery.state = AlertDeliveryState::Failed;
+
+        // ...and a successful delivery to `successful-rx`.
+        let mut successful_delivery = WebhookDelivery::new(
+            &alert_id,
+            &successful_rx_id,
+            AlertDeliveryTrigger::Alert,
+        );
+        successful_delivery.attempts = model::SqlU8::new(1);
+        successful_delivery.time_completed = Some(completed_at);
+        successful_delivery.state = AlertDeliveryState::Delivered;
+
+        let inserted = datastore
+            .webhook_delivery_create_batch(
+                opctx,
+                vec![failed_delivery, successful_delivery],
+            )
+            .await
+            .expect("deliveries should be created");
+        assert_eq!(inserted, 2);
+
+        let resendable = datastore
+            .webhook_rx_list_resendable_alerts(opctx, &failed_rx_id)
+            .await
+            .expect("resendable alerts should be listed");
+        assert_eq!(
+            resendable,
+            vec![alert],
+            "the alert with a failed delivery should be returned"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     #[tokio::test]
     async fn expectorate_rx_list_resendable() {
-        let query = DataStore::rx_list_resendable_events_query(
+        let query = DataStore::rx_list_resendable_alerts_query(
             AlertReceiverUuid::nil(),
         );
 
         expectorate_query_contents(
             &query,
-            "tests/output/webhook_rx_list_resendable_events.sql",
+            "tests/output/webhook_rx_list_resendable_alerts.sql",
         )
         .await;
     }
 
     #[tokio::test]
-    async fn explain_rx_list_resendable_events() {
-        let logctx = dev::test_setup_log("explain_rx_list_resendable_events");
+    async fn explain_rx_list_resendable_alerts() {
+        let logctx = dev::test_setup_log("explain_rx_list_resendable_alerts");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
-        let query = DataStore::rx_list_resendable_events_query(
+        let query = DataStore::rx_list_resendable_alerts_query(
             AlertReceiverUuid::nil(),
         );
         let explanation = query
