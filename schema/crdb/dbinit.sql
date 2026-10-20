@@ -8389,6 +8389,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep (
     -- marker, not this generation, that prevents a deleted bundle from being
     -- resurrected.)
     support_bundle_generation INT8 NOT NULL
+
+    -- Generation counter for Active Problems. This is incremented every time
+    -- the set of Active Problems which exist in the sitrep differs from the
+    -- parent, like the alert and support bundle generations. Note that this
+    -- generation only applies to the set of Active Problems which *exist*;
+    -- changes to active problems once they are created are tracked by the
+    -- individual active problems' revision counters.
+    active_problem_generation INT8 NOT NULL,
+    --
 );
 
 -- Index for looking up all potential children of a given parent sitrep.
@@ -9885,6 +9894,26 @@ CREATE TABLE IF NOT EXISTS omicron.public.active_problem_revision (
 
     PRIMARY KEY (problem_id, revision)
 );
+
+-- Marker written by `SitrepGuardedInsert` atomically with a corresponding
+-- Active Problem row when FM rendezvous successfully creates an Active Problem.
+-- This serves as a guard against resurrection: if the Active Problem is deleted
+-- after its initial creation, but an executing sitrep still contains an
+-- fm_active_problem_request for the same Active Problem, this marker prevents
+-- `SitrepGuardedInsert` from re-creating the Active.
+--
+-- A marker can be GC'ed in FM rendezvous when:
+--   * its problem_id is not present in any fm_active_problem_request in
+--     the executing sitrep,
+--   * its created_at_generation is less than that of the
+--     active_problem_generation on the sitrep being executed.
+-- Taken together, these two conditions ensure that no sitrep will ever attempt
+-- to resurrect a deleted active problem, meaning the marker is no longer needed.
+CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_active_problem_created (
+    problem_id UUID PRIMARY KEY,
+    created_at_generation INT8 NOT NULL
+);
+
 
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.

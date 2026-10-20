@@ -383,6 +383,7 @@ mod revision_tests {
     use dropshot::PaginationOrder;
     use nexus_db_lookup::LookupPath;
     use nexus_types::fm::active_problem::ProblemCode;
+    use nexus_types::identity::Asset;
     use omicron_common::api::external::LookupType;
     use omicron_test_utils::dev;
     use std::num::NonZeroU32;
@@ -805,6 +806,263 @@ mod revision_tests {
             problem.identity.time_modified,
             revisions.last().unwrap().time_created,
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Creates an Active Problem with the provided `time_created`, and inserts
+    /// and makes current its first revision.
+    ///
+    /// If `resolved` is true, the first revision is resolved.
+    async fn create_current_problem(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        time_created: DateTime<Utc>,
+        resolved: bool,
+    ) -> authz::ActiveProblem {
+        let id = ActiveProblemUuid::new_v4();
+        let identity = ActiveProblemIdentity {
+            id: id.into(),
+            time_created,
+            time_modified: time_created,
+        };
+        datastore
+            .active_problem_create(opctx, identity)
+            .await
+            .expect("creating an active problem should succeed");
+        let (authz_problem,) = LookupPath::new(opctx, datastore)
+            .active_problem_id(id)
+            .lookup_for(authz::Action::Modify)
+            .await
+            .unwrap();
+
+        let mut revision = make_revision(id, 1, time_created);
+        if resolved {
+            revision.time_resolved = Some(revision.time_created);
+        }
+        datastore
+            .active_problem_revision_insert(opctx, &authz_problem, revision)
+            .await
+            .expect("inserting a revision should succeed");
+        datastore
+            .active_problem_set_current_revision(opctx, &authz_problem, rev(1))
+            .await
+            .expect("making a revision current should succeed");
+        authz_problem
+    }
+
+    /// Lists every Active Problem matching `filter`, fetching `page_size`
+    /// problems at a time.
+    async fn list_all(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        filter: api::ActiveProblemListParams,
+        direction: PaginationOrder,
+        page_size: u32,
+    ) -> Vec<ActiveProblemView> {
+        // Guards against a pagination bug that never returns an empty page.
+        const MAX_PAGES: usize = 100;
+
+        let limit = NonZeroU32::new(page_size).unwrap();
+        let mut marker: Option<(DateTime<Utc>, Uuid)> = None;
+        let mut all = Vec::new();
+        for _ in 0..MAX_PAGES {
+            let pagparams =
+                DataPageParams { marker: marker.as_ref(), direction, limit };
+            let page = datastore
+                .active_problem_list(opctx, &filter, &pagparams)
+                .await
+                .expect("listing active problems should succeed");
+            assert!(page.len() <= page_size as usize, "page: {page:#?}");
+            let Some(last) = page.last() else {
+                return all;
+            };
+            marker = Some((last.time_created(), last.id().into_untyped_uuid()));
+            all.extend(page);
+        }
+        panic!("listing active problems did not finish in {MAX_PAGES} pages");
+    }
+
+    fn ids(problems: &[ActiveProblemView]) -> Vec<ActiveProblemUuid> {
+        problems.iter().map(|problem| problem.id()).collect()
+    }
+
+    /// The state filter selects Active Problems by the state of their
+    /// *current* revision, and Active Problems which are deleted or have no
+    /// current revision are never listed.
+    #[tokio::test]
+    async fn test_active_problem_list_state_filter() {
+        let logctx =
+            dev::test_setup_log("test_active_problem_list_state_filter");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let now = omicron_common::now_db_precision();
+
+        let active = create_current_problem(opctx, datastore, now, false).await;
+        let resolved =
+            create_current_problem(opctx, datastore, now, true).await;
+
+        // A problem whose current revision is active, but which also has a
+        // later revision that is resolved and not yet current.
+        let pending_resolution =
+            create_current_problem(opctx, datastore, now, false).await;
+        let mut resolving_revision =
+            make_revision(pending_resolution.id(), 2, now);
+        resolving_revision.time_resolved =
+            Some(resolving_revision.time_created);
+        datastore
+            .active_problem_revision_insert(
+                opctx,
+                &pending_resolution,
+                resolving_revision,
+            )
+            .await
+            .expect("inserting a revision should succeed");
+
+        // A problem with no current revision.
+        datastore
+            .active_problem_create(
+                opctx,
+                ActiveProblemIdentity::new(ActiveProblemUuid::new_v4()),
+            )
+            .await
+            .expect("creating an active problem should succeed");
+
+        // A deleted problem.
+        let deleted =
+            create_current_problem(opctx, datastore, now, false).await;
+        {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            diesel::update(problem_dsl::active_problem)
+                .filter(problem_dsl::id.eq(deleted.id().into_untyped_uuid()))
+                .set(problem_dsl::time_deleted.eq(Utc::now()))
+                .execute_async(&*conn)
+                .await
+                .expect("deleting the active problem should succeed");
+        }
+
+        let list = |state| {
+            list_all(
+                opctx,
+                datastore,
+                api::ActiveProblemListParams { state },
+                PaginationOrder::Ascending,
+                100,
+            )
+        };
+        let sorted_ids = |problems: Vec<ActiveProblemView>| {
+            let mut ids = ids(&problems);
+            ids.sort_unstable();
+            ids
+        };
+        let sorted = |mut ids: Vec<ActiveProblemUuid>| {
+            ids.sort_unstable();
+            ids
+        };
+
+        let all = list(None).await;
+        let listed_pending = all
+            .iter()
+            .find(|problem| problem.id() == pending_resolution.id())
+            .expect("the problem pending resolution should be listed");
+        assert_eq!(listed_pending.revision, rev(1));
+        assert_eq!(listed_pending.time_resolved, None);
+        assert_eq!(
+            sorted_ids(all),
+            sorted(vec![active.id(), resolved.id(), pending_resolution.id()]),
+        );
+
+        assert_eq!(
+            sorted_ids(list(Some(api::ActiveProblemState::Active)).await),
+            sorted(vec![active.id(), pending_resolution.id()]),
+        );
+
+        let listed_resolved =
+            list(Some(api::ActiveProblemState::Resolved)).await;
+        assert_eq!(ids(&listed_resolved), vec![resolved.id()]);
+        assert!(listed_resolved[0].time_resolved.is_some());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Paginating through the Active Problem list returns every problem
+    /// exactly once, ordered by `time_created` and then by ID, in either
+    /// direction and with or without a state filter.
+    #[tokio::test]
+    async fn test_active_problem_list_pagination() {
+        let logctx = dev::test_setup_log("test_active_problem_list_pagination");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Several problems share a `time_created`, so that their order is
+        // decided by their IDs. Every third problem is resolved.
+        let base = omicron_common::now_db_precision();
+        let offsets = [0, 1, 2, 2, 2, 3, 4];
+        let mut expected = Vec::new();
+        for (i, offset) in offsets.into_iter().enumerate() {
+            let time_created = base + chrono::TimeDelta::seconds(offset);
+            let resolved = i % 3 == 2;
+            let problem = create_current_problem(
+                opctx,
+                datastore,
+                time_created,
+                resolved,
+            )
+            .await;
+            expected.push((time_created, problem.id(), resolved));
+        }
+        expected.sort_by_key(|&(time_created, id, _)| {
+            (time_created, id.into_untyped_uuid())
+        });
+        let expected_all: Vec<_> =
+            expected.iter().map(|&(_, id, _)| id).collect();
+        let expected_active: Vec<_> = expected
+            .iter()
+            .filter(|&&(_, _, resolved)| !resolved)
+            .map(|&(_, id, _)| id)
+            .collect();
+
+        for page_size in [1, 2, 100] {
+            let ascending = list_all(
+                opctx,
+                datastore,
+                api::ActiveProblemListParams { state: None },
+                PaginationOrder::Ascending,
+                page_size,
+            )
+            .await;
+            assert_eq!(ids(&ascending), expected_all, "page size {page_size}");
+
+            let descending = list_all(
+                opctx,
+                datastore,
+                api::ActiveProblemListParams { state: None },
+                PaginationOrder::Descending,
+                page_size,
+            )
+            .await;
+            let mut expected_descending = expected_all.clone();
+            expected_descending.reverse();
+            assert_eq!(
+                ids(&descending),
+                expected_descending,
+                "page size {page_size}"
+            );
+
+            let active = list_all(
+                opctx,
+                datastore,
+                api::ActiveProblemListParams {
+                    state: Some(api::ActiveProblemState::Active),
+                },
+                PaginationOrder::Ascending,
+                page_size,
+            )
+            .await;
+            assert_eq!(ids(&active), expected_active, "page size {page_size}");
+        }
 
         db.terminate().await;
         logctx.cleanup_successful();
