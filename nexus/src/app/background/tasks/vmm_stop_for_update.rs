@@ -26,6 +26,7 @@ use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::SledUuid;
 use parallel_task_set::ParallelTaskSet;
 use reqwest::Client as ReqwestClient;
 use serde_json::json;
@@ -263,10 +264,9 @@ impl VmmStopForUpdate {
 
         async move {
             let mut result = VmmStopForUpdateResult::new();
-            let id = &vmm_id;
             let response = match sled_client
                 .vmm_put_state(
-                    id,
+                    &vmm_id,
                     &VmmPutStateBody { state: VmmStateRequested::Stopped },
                 )
                 .await
@@ -284,7 +284,7 @@ impl VmmStopForUpdate {
                             "Failed to mark VMM as Stopped; VMM was already \
                              gone. Marking as Failed";
                             "sled_id" => %sled_id,
-                            "vmm_id" => %id,
+                            "vmm_id" => %vmm_id,
                             "instance_id" => %instance_id,
                             InlineErrorChain::new(&err),
                         );
@@ -304,7 +304,7 @@ impl VmmStopForUpdate {
                             opctx.log,
                             "Failed to mark VMM as Stopped";
                             "sled_id" => %sled_id,
-                            "vmm_id" => %id,
+                            "vmm_id" => %vmm_id,
                             "instance_id" => %instance_id,
                             InlineErrorChain::new(&err),
                         );
@@ -318,7 +318,7 @@ impl VmmStopForUpdate {
                                 vmm_ids: BTreeSet::new(),
                             })
                             .vmm_ids
-                            .insert(*id);
+                            .insert(vmm_id);
 
                         return result;
                     }
@@ -331,76 +331,51 @@ impl VmmStopForUpdate {
                         opctx.log,
                         "VMM already stopped, no changes to state";
                         "sled_id" => %sled_id,
-                        "vmm_id" => %id,
+                        "vmm_id" => %vmm_id,
                         "instance_id" => %instance_id,
                     );
                 }
                 Some(sled_vmm_state) => {
-                    // We attempt to write the new VMM state to the db.
-                    // This will reduce the time it takes for an instance
-                    // to be reported as `Stopped`.
-                    match instance::process_vmm_update(
-                        &datastore,
+                    // Updating the VMM as we have done above is, in practice,
+                    // enough to stop the VMM itself. The instance on the other
+                    // hand, is not updated instantaneously to report the new
+                    // state the VMM is in.
+                    //
+                    // There are a few ways in which the instance will know the
+                    // state of the VMM has changed, and therefore its own state
+                    // should change to reflect the VMM's new state:
+                    //
+                    //   - The instance watcher backgraound task continuously
+                    //     makes sure the instances' states are correct in
+                    //     relation to their VMMs.
+                    //   - Sled agent will attempt to publish the new state to
+                    //     Nexus when the VMM process exits.
+                    //
+                    // Both of these methods are not immediate, and it will take
+                    // some time for the instance to report itself as `Stopped`.
+                    // To reduce the latency from the time we change the Vmm's
+                    // state to the time this is reflected in the instance, we
+                    // do two things:
+                    //
+                    //  - Attempt to write the new VMM state to the db with
+                    //    `instance::process_vmm_update`.
+                    //  - Execute the instance update saga that
+                    //    `instance::process_vmm_update` returns to reconcile
+                    //     the instance to the new VMM state.
+                    //
+                    // We don't care if either of the previous two steps fails.
+                    // We are running these steps as an _optimisation_ only. The
+                    // instance state will be updated eventually by either the
+                    // instance watcher task, or sled agent.
+                    optimise_instance_state_update(
+                        &mut result,
+                        datastore,
+                        sagas,
                         &opctx,
-                        *id,
-                        &sled_vmm_state,
+                        AssociatedIds { vmm_id, instance_id, sled_id },
+                        sled_vmm_state.clone(),
                     )
-                    .await
-                    {
-                        Err(err) => {
-                            // Sled agent will attempt to publish the new
-                            // state to Nexus when the VMM process exits,
-                            // and we also have the instance watcher
-                            // background task which is constantly trying to
-                            // read instances' states. So, it's not a huge
-                            // deal if we fail here. The instance state will
-                            // be updated eventually.
-                            slog::warn!(
-                                opctx.log,
-                                "Failed to record new VMM state";
-                                "sled_id" => %sled_id,
-                                "vmm_id" => %id,
-                                "state" => ?sled_vmm_state,
-                                "instance_id" => %instance_id,
-                                InlineErrorChain::new(&err),
-                            );
-                            result.errors.push(err);
-                            return result;
-                        }
-                        Ok(Some((_, saga))) => {
-                            match sagas.saga_run(saga).await {
-                                Ok((saga_id, completed)) => {
-                                    if let Err(err) = completed.await {
-                                        slog::warn!(
-                                            opctx.log,
-                                            "Instance update saga failed";
-                                            "sled_id" => %sled_id,
-                                            "vmm_id" => %id,
-                                            "saga_id" => %saga_id,
-                                            "instance_id" => %instance_id,
-                                            InlineErrorChain::new(&err),
-                                        );
-                                        result.errors.push(err);
-                                        return result;
-                                    }
-                                }
-                                Err(err) => {
-                                    slog::warn!(
-                                        opctx.log,
-                                        "Instance update saga could not \
-                                         be started";
-                                        "sled_id" => %sled_id,
-                                        "vmm_id" => %id,
-                                        "instance_id" => %instance_id,
-                                        InlineErrorChain::new(&err),
-                                    );
-                                    result.errors.push(err);
-                                    return result;
-                                }
-                            }
-                        }
-                        Ok(None) => {}
-                    }
+                    .await;
 
                     let SledVmmState {
                         vmm_state,
@@ -441,14 +416,14 @@ impl VmmStopForUpdate {
                                     vmm_ids: BTreeSet::new(),
                                 })
                                 .vmm_ids
-                                .insert(*id);
+                                .insert(vmm_id);
 
                             slog::debug!(
                                 opctx.log,
                                 "Stopped VMM for sled evacuation during \
                                 an update";
                                 "sled_id" => %sled_id,
-                                "vmm_id" => %id,
+                                "vmm_id" => %vmm_id,
                                 "vmm_generation" => ?generation,
                                 "instance_id" => %instance_id,
                                 "time_updated" => ?time_updated,
@@ -471,7 +446,7 @@ impl VmmStopForUpdate {
                                 "Unable to find VMM, possibly due to a \
                                 restart. No need to stop it";
                                 "sled_id" => %sled_id,
-                                "vmm_id" => %id,
+                                "vmm_id" => %vmm_id,
                                 "instance_id" => %instance_id,
                                 "reason" => description,
                                 "state" => ?state,
@@ -490,7 +465,7 @@ impl VmmStopForUpdate {
                                 "Failed to mark VMM as Stopped, \
                                 unexpected state reported";
                                 "sled_id" => %sled_id,
-                                "vmm_id" => %id,
+                                "vmm_id" => %vmm_id,
                                 "state" => ?state,
                                 "vmm_generation" => ?generation,
                                 "instance_id" => %instance_id,
@@ -500,7 +475,7 @@ impl VmmStopForUpdate {
                                 internal_message: format!(
                                     "failed to mark VMM {} on sled {} as \
                                         Stopped; unexpected state reported {}",
-                                    id, sled_id, state
+                                    vmm_id, sled_id, state
                                 ),
                             });
                         }
@@ -590,6 +565,81 @@ impl BackgroundTask for VmmStopForUpdate {
                 }
             }
         })
+    }
+}
+
+// This struct exists solely to avoid a clippy "too_many_arguments" error
+struct AssociatedIds {
+    vmm_id: PropolisUuid,
+    instance_id: InstanceUuid,
+    sled_id: SledUuid,
+}
+
+// Attempt to update the instance state
+async fn optimise_instance_state_update(
+    result: &mut VmmStopForUpdateResult,
+    datastore: Arc<DataStore>,
+    sagas: Arc<dyn StartSaga>,
+    opctx: &Arc<OpContext>,
+    ids: AssociatedIds,
+    sled_vmm_state: SledVmmState,
+) {
+    let AssociatedIds { vmm_id, instance_id, sled_id } = ids;
+
+    // Attempt to write the new VMM state to the db.
+    match instance::process_vmm_update(
+        &datastore,
+        opctx,
+        vmm_id,
+        &sled_vmm_state,
+    )
+    .await
+    {
+        Err(err) => {
+            // As mentioned earlier, it's not a huge deal if we
+            // fail here. The instance state will be updated
+            // eventually by the instance watcher task or sled
+            // agent.
+            slog::warn!(
+                opctx.log,
+                "Failed to record new VMM state";
+                "sled_id" => %sled_id,
+                "vmm_id" => %vmm_id,
+                "state" => ?sled_vmm_state,
+                "instance_id" => %instance_id,
+                InlineErrorChain::new(&err),
+            );
+            result.errors.push(err);
+        }
+        Ok(Some((_, saga))) => match sagas.saga_run(saga).await {
+            Ok((saga_id, completed)) => {
+                if let Err(err) = completed.await {
+                    slog::warn!(
+                        opctx.log,
+                        "Instance update saga failed";
+                        "sled_id" => %sled_id,
+                        "vmm_id" => %vmm_id,
+                        "saga_id" => %saga_id,
+                        "instance_id" => %instance_id,
+                        InlineErrorChain::new(&err),
+                    );
+                    result.errors.push(err);
+                }
+            }
+            Err(err) => {
+                slog::warn!(
+                    opctx.log,
+                    "Instance update saga could not \
+                     be started";
+                    "sled_id" => %sled_id,
+                    "vmm_id" => %vmm_id,
+                    "instance_id" => %instance_id,
+                    InlineErrorChain::new(&err),
+                );
+                result.errors.push(err);
+            }
+        },
+        Ok(None) => {}
     }
 }
 
