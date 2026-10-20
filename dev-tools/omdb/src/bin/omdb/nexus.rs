@@ -1523,7 +1523,7 @@ fn print_task_vmm_stop_for_update(details: &serde_json::Value) {
         ),
         Ok(VmmStopForUpdateStatus {
             vmms_stopped_by_sled,
-            vmms_failed_by_sled,
+            vmms_failed_to_stop_by_sled,
             error_messages,
         }) => {
             let total: usize =
@@ -1536,13 +1536,15 @@ fn print_task_vmm_stop_for_update(details: &serde_json::Value) {
                     sled.vmm_ids.len()
                 );
             }
-            if !vmms_failed_by_sled.is_empty() {
-                let total_failed: usize =
-                    vmms_failed_by_sled.iter().map(|s| s.vmm_ids.len()).sum();
+            if !vmms_failed_to_stop_by_sled.is_empty() {
+                let total_failed: usize = vmms_failed_to_stop_by_sled
+                    .iter()
+                    .map(|s| s.vmm_ids.len())
+                    .sum();
                 println!("    VMMs that failed to stop: {total_failed} total");
-                for sled in vmms_failed_by_sled {
+                for sled in vmms_failed_to_stop_by_sled {
                     println!(
-                        "      sled_id={} n_failed={}",
+                        "      sled_id={} n_failed_to_stop={}",
                         sled.sled_id,
                         sled.vmm_ids.len()
                     );

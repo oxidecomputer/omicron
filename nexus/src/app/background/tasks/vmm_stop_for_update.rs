@@ -46,7 +46,7 @@ const MAX_CONCURRENT_STOPS: usize = 16;
 
 struct VmmStopForUpdateResult {
     vmms_stopped_by_sled: IdOrdMap<VmmsBySled>,
-    vmms_failed_by_sled: IdOrdMap<VmmsBySled>,
+    vmms_failed_to_stop_by_sled: IdOrdMap<VmmsBySled>,
     errors: Vec<Error>,
 }
 
@@ -54,7 +54,7 @@ impl VmmStopForUpdateResult {
     fn new() -> Self {
         Self {
             vmms_stopped_by_sled: IdOrdMap::new(),
-            vmms_failed_by_sled: IdOrdMap::new(),
+            vmms_failed_to_stop_by_sled: IdOrdMap::new(),
             errors: Vec::new(),
         }
     }
@@ -63,7 +63,7 @@ impl VmmStopForUpdateResult {
     fn merge(&mut self, other: VmmStopForUpdateResult) {
         let VmmStopForUpdateResult {
             vmms_stopped_by_sled,
-            vmms_failed_by_sled,
+            vmms_failed_to_stop_by_sled,
             errors,
         } = other;
 
@@ -77,8 +77,8 @@ impl VmmStopForUpdateResult {
                 .vmm_ids
                 .extend(vmm_ids);
         }
-        for VmmsBySled { sled_id, vmm_ids } in vmms_failed_by_sled {
-            self.vmms_failed_by_sled
+        for VmmsBySled { sled_id, vmm_ids } in vmms_failed_to_stop_by_sled {
+            self.vmms_failed_to_stop_by_sled
                 .entry(sled_id)
                 .or_insert_with(|| VmmsBySled {
                     sled_id,
@@ -311,7 +311,7 @@ impl VmmStopForUpdate {
 
                         result.errors.push(err.into());
                         result
-                            .vmms_failed_by_sled
+                            .vmms_failed_to_stop_by_sled
                             .entry(sled_id)
                             .or_insert_with(|| VmmsBySled {
                                 sled_id,
@@ -445,7 +445,7 @@ impl VmmStopForUpdate {
                         //
                         // Because of this, it's not necessary to stop it
                         // anymore, so we don't add it to the
-                        // `vmms_failed_by_sled` list. The instance
+                        // `vmms_failed_to_stop_by_sled` list. The instance
                         // reincarnation task will automatically attempt to
                         // restart any instance that is in a failed state.
                         VmmState::Failed(reason) => {
@@ -501,7 +501,7 @@ impl VmmStopForUpdate {
     ) -> VmmStopForUpdateStatus {
         let VmmStopForUpdateResult {
             vmms_stopped_by_sled,
-            vmms_failed_by_sled,
+            vmms_failed_to_stop_by_sled,
             errors,
         } = self.stop_all(opctx).await;
 
@@ -528,8 +528,8 @@ impl VmmStopForUpdate {
             }
         }
 
-        if !vmms_failed_by_sled.is_empty() {
-            for sled in &vmms_failed_by_sled {
+        if !vmms_failed_to_stop_by_sled.is_empty() {
+            for sled in &vmms_failed_to_stop_by_sled {
                 let VmmsBySled { sled_id, vmm_ids } = sled;
                 slog::info!(
                     &opctx.log,
@@ -551,7 +551,7 @@ impl VmmStopForUpdate {
 
         VmmStopForUpdateStatus {
             vmms_stopped_by_sled,
-            vmms_failed_by_sled,
+            vmms_failed_to_stop_by_sled,
             error_messages,
         }
     }
@@ -1081,7 +1081,7 @@ mod tests {
 
         // No VMMs are expected to fail to stop
         let failed_to_stop_count: usize = status
-            .vmms_failed_by_sled
+            .vmms_failed_to_stop_by_sled
             .iter()
             .map(|sled| sled.vmm_ids.len())
             .sum();
@@ -1090,7 +1090,7 @@ mod tests {
         // The VMMs that were in the `Creating` state will not have had a VMM
         // registered with a sled agent yet. The task will then force a `Failed`
         // state which means the VMMs will not be included in the
-        // `vmms_failed_by_sled` field. But, we still collect the "not found"
+        // `vmms_failed_to_stop_by_sled` field. But, we still collect the "not found"
         // errors.
         assert_eq!(
             status.error_messages,
@@ -1172,7 +1172,7 @@ mod tests {
         assert!(status_second_run.vmms_stopped_by_sled.is_empty());
 
         // Nothing changed, so we expect no errors or failures
-        assert!(status_second_run.vmms_failed_by_sled.is_empty());
+        assert!(status_second_run.vmms_failed_to_stop_by_sled.is_empty());
         assert!(status_second_run.error_messages.is_empty());
 
         // The second run makes no changes to the VMMs

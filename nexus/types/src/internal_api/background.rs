@@ -133,7 +133,7 @@ pub struct VmmStopForUpdateStatus {
     pub vmms_stopped_by_sled: IdOrdMap<VmmsBySled>,
     /// Number of VMMs that failed to stop in this activation, keyed by the sled
     /// they are running on.
-    pub vmms_failed_by_sled: IdOrdMap<VmmsBySled>,
+    pub vmms_failed_to_stop_by_sled: IdOrdMap<VmmsBySled>,
     /// Errors encountered during this activation, if any.
     pub error_messages: Vec<String>,
 }
