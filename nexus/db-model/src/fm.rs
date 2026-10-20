@@ -20,10 +20,13 @@ use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::{fm_sitrep, fm_sitrep_history};
 use omicron_generation_kinds::{
-    SitrepAlertGenerationKind, SitrepSupportBundleGenerationKind,
+    SitrepActiveProblemGenerationKind, SitrepAlertGenerationKind,
+    SitrepSupportBundleGenerationKind,
 };
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind, SitrepKind};
 
+mod active_problem;
+pub use active_problem::*;
 mod alert_request;
 pub use alert_request::*;
 mod case;
@@ -58,6 +61,8 @@ pub struct SitrepMetadata {
     pub alert_generation: DbTypedGeneration<SitrepAlertGenerationKind>,
     pub support_bundle_generation:
         DbTypedGeneration<SitrepSupportBundleGenerationKind>,
+    pub active_problem_generation:
+        DbTypedGeneration<SitrepActiveProblemGenerationKind>,
 }
 
 impl From<SitrepMetadata> for nexus_types::fm::SitrepMetadata {
@@ -72,6 +77,7 @@ impl From<SitrepMetadata> for nexus_types::fm::SitrepMetadata {
             next_inv_min_time_started,
             alert_generation,
             support_bundle_generation,
+            active_problem_generation,
         } = db_meta;
         Self {
             id: id.into(),
@@ -83,6 +89,7 @@ impl From<SitrepMetadata> for nexus_types::fm::SitrepMetadata {
             time_created,
             alert_generation: alert_generation.into(),
             support_bundle_generation: support_bundle_generation.into(),
+            active_problem_generation: active_problem_generation.into(),
         }
     }
 }
@@ -99,6 +106,7 @@ impl From<nexus_types::fm::SitrepMetadata> for SitrepMetadata {
             next_inv_min_time_started,
             alert_generation,
             support_bundle_generation,
+            active_problem_generation,
         } = db_meta;
         Self {
             id: id.into(),
@@ -110,6 +118,7 @@ impl From<nexus_types::fm::SitrepMetadata> for SitrepMetadata {
             next_inv_min_time_started,
             alert_generation: alert_generation.into(),
             support_bundle_generation: support_bundle_generation.into(),
+            active_problem_generation: active_problem_generation.into(),
         }
     }
 }

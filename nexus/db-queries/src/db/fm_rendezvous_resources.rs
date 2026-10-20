@@ -6,16 +6,17 @@
 //! schema types.
 //!
 //! When executing a sitrep, FM rendezvous can create resources (currently
-//! alerts and support bundles) in the database. To prevent wrongly creating
-//! resources that have already been deleted by the user/operator, inserts are
-//! guarded by a "creation marker" and a CTE that understands the semantics of
-//! that marker (see [`crate::db::sitrep_guard`]). Once no sitrep can request a
-//! resource again, its marker is garbage-collected (see
-//! `crate::db::datastore::fm_rendezvous_gc`).
+//! alerts, support bundles, and Active Problems) in the database. To prevent
+//! wrongly creating resources that have already been deleted by the
+//! user/operator, inserts are guarded by a "creation marker" and a CTE that
+//! understands the semantics of that marker (see [`crate::db::sitrep_guard`]).
+//! Once no sitrep can request a resource again, its marker is garbage-collected
+//! (see `crate::db::datastore::fm_rendezvous_gc`).
 //!
 //! The [`FmRendezvousResource`] trait gathers the Diesel schema types that the
 //! guard CTE and the GC sweep need for a given resource. Implementations are
-//! provided for the two supported resource types, `Alert` and `SupportBundle`.
+//! provided for the supported resource types, `Alert`, `SupportBundle`, and
+//! `ActiveProblem`.
 
 use diesel::Column;
 use diesel::associations::HasTable;
@@ -51,6 +52,10 @@ impl SitrepGenerationColumn for schema::fm_sitrep::alert_generation {
 
 impl SitrepGenerationColumn for schema::fm_sitrep::support_bundle_generation {
     type Kind = omicron_generation_kinds::SitrepSupportBundleGenerationKind;
+}
+
+impl SitrepGenerationColumn for schema::fm_sitrep::active_problem_generation {
+    type Kind = omicron_generation_kinds::SitrepActiveProblemGenerationKind;
 }
 
 /// A resource created by FM rendezvous, comprising the Diesel schema types
@@ -132,6 +137,12 @@ impl FmRendezvousResource for nexus_db_model::SupportBundle {
     type RequestTable = schema::fm_support_bundle_request::table;
 }
 
+impl FmRendezvousResource for nexus_db_model::ActiveProblem {
+    type GenerationColumn = schema::fm_sitrep::active_problem_generation;
+    type IdColumn = schema::rendezvous_active_problem_created::dsl::problem_id;
+    type RequestTable = schema::fm_active_problem::table;
+}
+
 /// Test fixtures shared by the insert (`sitrep_guard`) and GC
 /// (`fm_rendezvous_gc`) test suites: a synthetic [`FmRendezvousResource`] and
 /// the throwaway schema its queries reference.
@@ -153,6 +164,7 @@ pub(crate) mod test_utils {
     use nexus_db_lookup::DbConnection;
     use nexus_types::fm::Sitrep;
     use nexus_types::fm::SitrepMetadata;
+    use omicron_generation_kinds::SitrepActiveProblemGeneration;
     use omicron_generation_kinds::SitrepAlertGeneration;
     use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_generation_kinds::TypedGenerationKind;
@@ -278,9 +290,11 @@ pub(crate) mod test_utils {
                 time_created: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases: IdOrdMap::new(),
             ereports_by_id: IdOrdMap::new(),
+            active_problems: IdOrdMap::new(),
         };
         datastore.fm_sitrep_insert(opctx, sitrep, None).await.unwrap();
 

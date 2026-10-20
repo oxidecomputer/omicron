@@ -7,7 +7,12 @@
 //! These are *not* part of the external API; for that, see the
 //! [`crate::external_api::active_problem`] module.
 
+use iddqd::IdOrdMap;
 use omicron_common::api::external::Error;
+use omicron_generation_kinds::ActiveProblemRevNum;
+use omicron_uuid_kinds::ActiveProblemUuid;
+use omicron_uuid_kinds::SitrepUuid;
+use serde::{Deserialize, Serialize};
 
 /// A structured internal representation of problem codes.
 ///
@@ -27,7 +32,15 @@ use omicron_common::api::external::Error;
 ///
 /// [§7.2 RFD 699]: https://rfd.shared.oxide.computer/rfd/0699#problem-codes
 #[derive(
-    Copy, Clone, Debug, PartialEq, Eq, strum::VariantArray, strum::FromRepr,
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    strum::VariantArray,
+    strum::FromRepr,
+    Serialize,
+    Deserialize,
 )]
 #[repr(u32)]
 pub enum ProblemCode {
@@ -164,6 +177,51 @@ impl ProblemCodeDescription {
     pub fn is_retired(&self) -> bool {
         self.retired_in.is_some()
     }
+}
+
+/// The sitrep internal representation of an Active Problem.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct SitrepActiveProblem {
+    pub id: ActiveProblemUuid,
+    pub requested_sitrep_id: SitrepUuid,
+    pub revisions: IdOrdMap<SitrepRevision>,
+}
+
+impl iddqd::IdOrdItem for SitrepActiveProblem {
+    type Key<'a> = &'a ActiveProblemUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
+    }
+
+    iddqd::id_upcast!();
+}
+
+impl SitrepActiveProblem {
+    pub fn current_revision(&self) -> &SitrepRevision {
+        self.revisions.last().expect(
+            "an active problem in the sitrep must always have at least one \
+            revision!",
+        )
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct SitrepRevision {
+    pub number: ActiveProblemRevNum,
+    pub requested_sitrep_id: SitrepUuid,
+    pub code: ProblemCode,
+    pub summary: String,
+    pub description: String,
+    pub action_required: String,
+}
+
+impl iddqd::IdOrdItem for SitrepRevision {
+    type Key<'a> = &'a ActiveProblemRevNum;
+    fn key(&self) -> Self::Key<'_> {
+        &self.number
+    }
+
+    iddqd::id_upcast!();
 }
 
 #[cfg(test)]

@@ -24,7 +24,7 @@ use nexus_types::external_api::active_problem as api;
 use nexus_types::fm::active_problem::ProblemCode;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::Error;
-use omicron_generation_kinds::ActiveProblemRevGenerationKind;
+use omicron_generation_kinds::ActiveProblemRevKind;
 use omicron_generation_kinds::ActiveProblemRevNum;
 use omicron_uuid_kinds::ActiveProblemKind;
 use omicron_uuid_kinds::ActiveProblemUuid;
@@ -43,7 +43,7 @@ pub struct ActiveProblem {
     ///
     /// This selects the current revision from the `active_problem_revision`
     /// table.
-    pub current_revision: DbTypedGeneration<ActiveProblemRevGenerationKind>,
+    pub current_revision: DbTypedGeneration<ActiveProblemRevKind>,
 }
 
 impl ActiveProblem {
@@ -59,7 +59,7 @@ impl ActiveProblem {
 #[diesel(table_name = active_problem_revision)]
 pub struct ActiveProblemRevision {
     pub problem_id: DbTypedUuid<ActiveProblemKind>,
-    pub revision: DbTypedGeneration<ActiveProblemRevGenerationKind>,
+    pub revision: DbTypedGeneration<ActiveProblemRevKind>,
     /// The time at which this revision was created.
     ///
     /// This is *not* the time at which the Active Problem itself was created.
