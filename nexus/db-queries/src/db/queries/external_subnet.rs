@@ -178,9 +178,7 @@ pub fn insert_subnet_pool_member_query(
         .sql("), \
             updated_pool AS (\
                 UPDATE subnet_pool \
-                SET \
-                    time_modified = NOW(), \
-                    rcgen = rcgen + 1 \
+                SET rcgen = rcgen + 1 \
                 WHERE \
                     id = "
         )
@@ -269,9 +267,7 @@ pub fn link_subnet_pool_to_silo_query(
         AND time_deleted IS NULL), \
     updated_pool AS (\
         UPDATE subnet_pool
-        SET \
-            time_modified = NOW(), \
-            rcgen = rcgen + 1 \
+        SET rcgen = rcgen + 1 \
         WHERE \
             id = "
     )
@@ -637,9 +633,7 @@ fn push_cte_to_check_for_deleted_project_and_update_rcgen(
         .sql(
             "updated_project AS (\
         UPDATE project \
-        SET \
-            time_modified = NOW(), \
-            rcgen = rcgen + 1 \
+        SET rcgen = rcgen + 1 \
         WHERE id = ",
         )
         .param()
@@ -690,9 +684,7 @@ fn push_cte_to_update_subnet_pool_rcgen(builder: &mut QueryBuilder) {
     builder.sql(
         "updated_pool AS (\
         UPDATE subnet_pool \
-        SET \
-            time_modified = NOW(), \
-            rcgen = rcgen + 1 \
+        SET rcgen = rcgen + 1 \
         WHERE id = (SELECT subnet_pool_id FROM subnet_pool_and_member) \
           AND time_deleted IS NULL \
         RETURNING 1\
@@ -706,9 +698,7 @@ fn push_cte_to_update_subnet_pool_member_rcgen(builder: &mut QueryBuilder) {
     builder.sql(
         "updated_pool_member AS (\
         UPDATE subnet_pool_member \
-        SET \
-            time_modified = NOW(), \
-            rcgen = rcgen + 1 \
+        SET rcgen = rcgen + 1 \
         WHERE id = (SELECT subnet_pool_member_id FROM subnet_pool_and_member) \
           AND time_deleted IS NULL \
         RETURNING 1\
