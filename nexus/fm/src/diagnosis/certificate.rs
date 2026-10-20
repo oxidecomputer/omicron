@@ -365,7 +365,9 @@ mod tests {
     use nexus_types::fm::{Sitrep, SitrepVersion};
     use nexus_types::inventory;
     use omicron_common::api::external::Name;
-    use omicron_generation_kinds::{AlertGeneration, SupportBundleGeneration};
+    use omicron_generation_kinds::{
+        SitrepAlertGeneration, SitrepSupportBundleGeneration,
+    };
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, SitrepUuid};
     use std::num::NonZeroU32;
@@ -582,8 +584,8 @@ mod tests {
                 time_created: Utc::now(),
                 next_inv_min_time_started: Utc::now(),
                 comment: String::new(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: case_map,
             ereports_by_id: Default::default(),
