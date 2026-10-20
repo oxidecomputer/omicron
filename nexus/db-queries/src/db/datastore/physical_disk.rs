@@ -770,7 +770,7 @@ mod test {
     use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::{RackUuid, ZpoolUuid};
+    use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::disk::DiskVariant;
     use sled_agent_types::inventory::{
@@ -1123,6 +1123,7 @@ mod test {
                     sled_role: SledRole::Gimlet,
                     sled_agent_address: "[::1]:56792".parse().unwrap(),
                     sled_id: sled.id(),
+                    rack_id: sled.rack_id(),
                     usable_hardware_threads: 10,
                     usable_physical_ram: ByteCount::from(1024 * 1024),
                     cpu_family: SledCpuFamily::AmdMilan,
@@ -1312,7 +1313,7 @@ mod test {
         let collection = builder.build();
         let collection_id = collection.id;
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
 
@@ -1528,7 +1529,7 @@ mod test {
         let collection = builder.build();
         let collection_id = collection.id;
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
 
@@ -1688,7 +1689,7 @@ mod test {
         let collection = builder.build();
         let collection_id = collection.id;
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
 
@@ -1740,7 +1741,7 @@ mod test {
         let collection_id = collection.id;
 
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
 

@@ -375,13 +375,6 @@ impl CollectionDisplayIncludeRacks {
             }
         }
     }
-
-    fn include_unknown_racks(&self) -> bool {
-        match self {
-            CollectionDisplayIncludeRacks::All => false,
-            CollectionDisplayIncludeRacks::OnlyIds(_) => true,
-        }
-    }
 }
 
 fn display_header(
@@ -775,14 +768,24 @@ fn display_sleds(
     include_racks: &CollectionDisplayIncludeRacks,
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
+    let mut sled_agent_sort_order: Vec<_> = collection
+        .sled_agents
+        .iter()
+        .map(|sa| (&sa.rack_id, &sa.sled_id))
+        .collect();
+    sled_agent_sort_order.sort();
+
     let mut f = f;
     writeln!(f, "SLED AGENTS")?;
-    for sled in &collection.sled_agents {
+    for (_rack_id, sled_id) in sled_agent_sort_order {
+        // Safe to unwrap since `sled_id` came from a map key right above here
+        let sled = &collection.sled_agents.get(sled_id).unwrap();
         let SledAgent {
             time_collected,
             source,
             sled_id,
             baseboard_id,
+            rack_id,
             sled_agent_address,
             sled_role,
             usable_hardware_threads,
@@ -802,18 +805,9 @@ fn display_sleds(
             fmd,
         } = sled;
 
-        let rack_id = baseboard_id
-            .as_ref()
-            .and_then(|id| collection.sps.get(id))
-            .map(|sp| sp.rack_id);
-
-        // Should we display this sled? If we were asked to filter by rack ID,
-        // display the sled if and only if its baseboard ID corresponds to a
-        // service processor that was found in one of the requested racks.
-        if !rack_id
-            .map(|rack| include_racks.include_rack(rack))
-            .unwrap_or(include_racks.include_unknown_racks())
-        {
+        // If we were asked to filter by rack ID, display the sled if and only
+        // if its rack ID is included by the filter:
+        if !include_racks.include_rack(*rack_id) {
             continue;
         }
 
@@ -829,10 +823,8 @@ fn display_sleds(
         )?;
 
         let mut indented = IndentWriter::new("    ", f);
-        match rack_id.as_ref() {
-            Some(rack_id) => writeln!(indented, "rack ID:     {rack_id}",)?,
-            None => writeln!(indented, "rack ID:     unknown",)?,
-        };
+
+        writeln!(indented, "rack ID:     {rack_id}",)?;
 
         writeln!(
             indented,

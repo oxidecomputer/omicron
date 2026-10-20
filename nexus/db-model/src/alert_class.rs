@@ -31,6 +31,8 @@ impl_enum_type!(
     TestQuuxBarBaz => b"test.quux.bar.baz"
     PsuInserted => b"hardware.power_shelf.psu.insert"
     PsuRemoved => b"hardware.power_shelf.psu.remove"
+    SiloCertificateExpiring => b"silo.certificate.expiring"
+    SiloCertificateExpired => b"silo.certificate.expired"
 );
 
 impl AlertClass {
@@ -66,6 +68,8 @@ impl From<nexus_types::alert::AlertClass> for AlertClass {
             In::TestQuuxBarBaz => Self::TestQuuxBarBaz,
             In::PsuInserted => Self::PsuInserted,
             In::PsuRemoved => Self::PsuRemoved,
+            In::SiloCertificateExpiring => Self::SiloCertificateExpiring,
+            In::SiloCertificateExpired => Self::SiloCertificateExpired,
         }
     }
 }
@@ -81,6 +85,10 @@ impl From<AlertClass> for nexus_types::alert::AlertClass {
             AlertClass::TestQuuxBarBaz => Self::TestQuuxBarBaz,
             AlertClass::PsuInserted => Self::PsuInserted,
             AlertClass::PsuRemoved => Self::PsuRemoved,
+            AlertClass::SiloCertificateExpiring => {
+                Self::SiloCertificateExpiring
+            }
+            AlertClass::SiloCertificateExpired => Self::SiloCertificateExpired,
         }
     }
 }

@@ -7,7 +7,7 @@ use std::net::SocketAddrV6;
 use iddqd::IdOrdMap;
 use omicron_common::api::external::ByteCount;
 use omicron_common::snake_case_result::{self, SnakeCaseResult};
-use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::{RackUuid, SledUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware_types::{BaseboardId, SledCpuFamily};
@@ -20,11 +20,11 @@ use crate::v24::inventory::InventoryZpool;
 use crate::v40::inventory::{FmdInventory, FmdInventoryError};
 use crate::v46::inventory::SvcsEnabledNotOnlineResult;
 use crate::v53::inventory::InstanceManagerStatus;
-use crate::v55;
 use crate::v55::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
     OmicronFileSourceResolverInventory, OmicronSledConfig,
 };
+use crate::v57;
 
 /// Identifies information about disks which may be attached to Sleds.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -91,6 +91,7 @@ pub struct Inventory {
     pub sled_agent_address: SocketAddrV6,
     pub sled_role: SledRole,
     pub baseboard_id: BaseboardId,
+    pub rack_id: RackUuid,
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
     pub cpu_family: SledCpuFamily,
@@ -112,13 +113,14 @@ pub struct Inventory {
     pub fmd: Result<FmdInventory, FmdInventoryError>,
 }
 
-impl From<Inventory> for v55::inventory::Inventory {
+impl From<Inventory> for v57::inventory::Inventory {
     fn from(new: Inventory) -> Self {
         let Inventory {
             sled_id,
             sled_agent_address,
             sled_role,
             baseboard_id,
+            rack_id,
             usable_hardware_threads,
             usable_physical_ram,
             cpu_family,
@@ -140,6 +142,7 @@ impl From<Inventory> for v55::inventory::Inventory {
             sled_agent_address,
             sled_role,
             baseboard_id,
+            rack_id,
             usable_hardware_threads,
             usable_physical_ram,
             cpu_family,

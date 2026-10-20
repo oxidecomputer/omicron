@@ -2559,6 +2559,7 @@ impl fmt::Display for BlueprintHostPhase2DesiredContents {
     Serialize,
     PartialEq,
     Eq,
+    Hash,
     Diffable,
     PartialOrd,
     JsonSchema,

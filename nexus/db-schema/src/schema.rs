@@ -3306,6 +3306,7 @@ table! {
         analysis_enabled -> Nullable<Bool>,
         sitrep_limit -> Nullable<Int8>,
         history_pruning_threshold -> Nullable<Int8>,
+        certificate_expiry_warning_days -> Nullable<Int8>,
     }
 }
 
@@ -3454,6 +3455,20 @@ table! {
 }
 
 table! {
+    fm_fact_certificate (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        case_id -> Uuid,
+        created_sitrep_id -> Uuid,
+        comment -> Text,
+        silo_id -> Uuid,
+        kind -> crate::enums::FmFactCertificateKindEnum,
+        certificate_id -> Uuid,
+        not_after -> Timestamptz,
+    }
+}
+
+table! {
     fm_ereport_in_case (sitrep_id, id) {
         id -> Uuid,
         restart_id -> Uuid,
@@ -3472,6 +3487,8 @@ allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_physical_disk);
 allow_tables_to_appear_in_same_query!(fm_case, fm_fact_physical_disk);
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_saga);
 allow_tables_to_appear_in_same_query!(fm_case, fm_fact_saga);
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_certificate);
+allow_tables_to_appear_in_same_query!(fm_case, fm_fact_certificate);
 
 table! {
     fm_alert_request (sitrep_id, id) {

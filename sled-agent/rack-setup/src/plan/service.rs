@@ -1344,6 +1344,7 @@ mod tests {
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::RackUuid;
     use oxnet::Ipv6Net;
     use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::early_networking::PortConfig;
@@ -1530,6 +1531,8 @@ mod tests {
         let address = Ipv6Addr::new(0xfd00, 0, 0, sled_index, 0, 0, 0, 0);
         let subnet = Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(address);
         let sled_address = get_sled_address(subnet);
+        // Just a placeholder - no tests in this mod care about this:
+        let rack_id = RackUuid::nil();
         let is_scrimlet = true;
 
         let disks: Vec<_> = (0..u2_count)
@@ -1562,6 +1565,7 @@ mod tests {
                     part_number: "test".to_string(),
                     serial_number: "test".to_string(),
                 },
+                rack_id,
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::try_from(1_u64 << 40).unwrap(),
                 cpu_family: SledCpuFamily::AmdMilan,

@@ -13,6 +13,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::DataStore;
 use crate::db::datastore::IdentityCheckPolicy;
+use omicron_git_version_types::GitVersion;
 use omicron_test_utils::dev::db::CockroachInstance;
 use omicron_uuid_kinds::RackUuid;
 use slog::Logger;
@@ -24,6 +25,22 @@ pub mod fm;
 pub mod helpers;
 pub mod multicast;
 pub mod simulated_sleds;
+
+/// A fixed Git version for datastores built by test utilities.
+///
+/// Notes:
+///
+/// * This is deliberately not `omicron_git_version::current()`, since that would
+///   introduce a lot of unnecessary recompiles. See #10692.
+/// * This is also not a commit hash, since we aren't trying to treat it as
+///   anything other than an opaque string. (There is an argument for
+///   parsing it as a 20-byte hex string. But as things currently stand, we
+///   don't do that.)
+/// * It is fine that this is a dummy value that's always the same regardless
+///   of the actual Git version, since the test database is not expected to
+///   emit any information that might be read by tools compiled with a different
+///   schema. (Or, at least that doing so would be quite strange.)
+pub const TEST_GIT_VERSION: GitVersion = GitVersion::new_static("test", false);
 
 enum Populate {
     Nothing,
@@ -128,6 +145,7 @@ impl TestDatabaseBuilder {
                                 pool,
                                 None,
                                 IdentityCheckPolicy::DontCare,
+                                TEST_GIT_VERSION,
                             )
                             .await
                             .unwrap(),
@@ -264,9 +282,15 @@ impl TestDatabase {
     pub async fn extra_datastore(&self, log: &Logger) -> Arc<DataStore> {
         let pool = new_pool(log, &self.db);
         Arc::new(
-            DataStore::new(&log, pool, None, IdentityCheckPolicy::DontCare)
-                .await
-                .unwrap(),
+            DataStore::new(
+                &log,
+                pool,
+                None,
+                IdentityCheckPolicy::DontCare,
+                TEST_GIT_VERSION,
+            )
+            .await
+            .unwrap(),
         )
     }
 
@@ -335,9 +359,15 @@ async fn datastore_test(
         db::ClaimBacktraceSetting::Capture,
     ));
     let datastore = Arc::new(
-        DataStore::new(&log, pool, None, IdentityCheckPolicy::DontCare)
-            .await
-            .unwrap(),
+        DataStore::new(
+            &log,
+            pool,
+            None,
+            IdentityCheckPolicy::DontCare,
+            TEST_GIT_VERSION,
+        )
+        .await
+        .unwrap(),
     );
 
     // Create an OpContext with the credentials of "db-init" just for the

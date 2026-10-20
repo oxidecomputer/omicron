@@ -1,0 +1,629 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RackUpdateStatusEnvelope",
+  "description": "A versioned envelope, where `versioned_data` is interpreted according to `version`.",
+  "type": "object",
+  "required": [
+    "version",
+    "versioned_data"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "format": "uint32",
+      "enum": [
+        1
+      ],
+      "minimum": 0.0
+    },
+    "versioned_data": {
+      "$ref": "#/definitions/RackUpdateStatus"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Duration": {
+      "type": "object",
+      "required": [
+        "nanos",
+        "secs"
+      ],
+      "properties": {
+        "nanos": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "GetUpdateProgressResponse": {
+      "description": "The response to a request for update progress.",
+      "type": "object",
+      "required": [
+        "repository",
+        "sps"
+      ],
+      "properties": {
+        "repository": {
+          "description": "Information about the uploaded repository.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RepositoryDescription"
+            }
+          ]
+        },
+        "sps": {
+          "title": "IdOrdMap",
+          "description": "The service processors that have update state, and their progress.\n\nA service processor appears here only once an update has been started for it, and disappears when any of the following occur:\n\n* The update state is cleared.\n\n* A TUF repository is uploaded.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SpUpdateProgress"
+          },
+          "uniqueItems": true,
+          "x-rust-type": {
+            "crate": "iddqd",
+            "parameters": [
+              {
+                "$ref": "#/definitions/SpUpdateProgress"
+              }
+            ],
+            "path": "iddqd::IdOrdMap",
+            "version": "*"
+          }
+        }
+      }
+    },
+    "RackUpdateStatus": {
+      "description": "The data inside the JSON emitted by `wicket rack-update status --json`.",
+      "type": "object",
+      "required": [
+        "update_progress"
+      ],
+      "properties": {
+        "update_progress": {
+          "description": "The update progress reported by wicketd.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/GetUpdateProgressResponse"
+            }
+          ]
+        }
+      }
+    },
+    "RepositoryDescription": {
+      "description": "A description of the TUF repository currently held by wicketd.",
+      "type": "object",
+      "properties": {
+        "system_version": {
+          "description": "The system version of the uploaded TUF repository, if one is present.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+        }
+      }
+    },
+    "RunningProgress": {
+      "description": "The most recent progress reported by a running step.",
+      "oneOf": [
+        {
+          "description": "The update engine has not received any progress message for this step attempt yet.\n\nThe engine reports this immediately after a step starts, and again after a retry or progress reset. It does not indicate a stall or timeout.",
+          "type": "object",
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "waiting_for_progress"
+              ]
+            }
+          }
+        },
+        {
+          "description": "The step reported progress.\n\n`progress` carries the counter if the report included one.",
+          "type": "object",
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "progress": {
+              "description": "The reported progress counter, if the report included one.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/StepProgress"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "progress"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "SpIdentifier": {
+      "type": "object",
+      "required": [
+        "slot",
+        "type"
+      ],
+      "properties": {
+        "slot": {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "type": {
+          "$ref": "#/definitions/SpType"
+        }
+      }
+    },
+    "SpType": {
+      "type": "string",
+      "enum": [
+        "sled",
+        "power",
+        "switch"
+      ]
+    },
+    "SpUpdateProgress": {
+      "description": "Update progress for a single service processor.\n\nAn SP's update progress is only provided once an update has been started for it.",
+      "type": "object",
+      "required": [
+        "progress",
+        "sp"
+      ],
+      "properties": {
+        "progress": {
+          "description": "The update progress for that service processor.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UpdateProgress"
+            }
+          ]
+        },
+        "sp": {
+          "description": "The service processor this progress describes.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SpIdentifier"
+            }
+          ]
+        }
+      }
+    },
+    "StepOutcome": {
+      "description": "The outcome of a step that ran to completion.",
+      "oneOf": [
+        {
+          "description": "The step succeeded, optionally with a message.",
+          "type": "object",
+          "required": [
+            "outcome"
+          ],
+          "properties": {
+            "message": {
+              "description": "An optional message describing the success.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "success"
+              ]
+            }
+          }
+        },
+        {
+          "description": "The step succeeded but produced a warning.",
+          "type": "object",
+          "required": [
+            "message",
+            "outcome"
+          ],
+          "properties": {
+            "message": {
+              "description": "The warning message.",
+              "type": "string"
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "warning"
+              ]
+            }
+          }
+        },
+        {
+          "description": "The step was skipped.",
+          "type": "object",
+          "required": [
+            "message",
+            "outcome"
+          ],
+          "properties": {
+            "message": {
+              "description": "The message describing why the step was skipped.",
+              "type": "string"
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "skipped"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "StepProgress": {
+      "description": "A step's progress towards completion.",
+      "type": "object",
+      "required": [
+        "current",
+        "units"
+      ],
+      "properties": {
+        "current": {
+          "description": "The current progress value.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "total": {
+          "description": "The total value this progress counts towards, if known.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "units": {
+          "description": "The units of `current` and `total` (for example, \"bytes\").",
+          "type": "string"
+        }
+      }
+    },
+    "UpdateProgress": {
+      "description": "The progress of a single update execution: its overall state and its steps.",
+      "type": "object",
+      "required": [
+        "state",
+        "steps"
+      ],
+      "properties": {
+        "state": {
+          "description": "The overall rollup state of this execution.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UpdateState"
+            }
+          ]
+        },
+        "steps": {
+          "description": "The steps of this execution, in order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UpdateStep"
+          }
+        }
+      }
+    },
+    "UpdateState": {
+      "description": "The state of an update execution.",
+      "oneOf": [
+        {
+          "description": "An update has been started, but execution has not begun yet.",
+          "type": "object",
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "waiting"
+              ]
+            }
+          }
+        },
+        {
+          "description": "The update is currently running.",
+          "type": "object",
+          "required": [
+            "elapsed",
+            "state"
+          ],
+          "properties": {
+            "elapsed": {
+              "description": "The time elapsed since the update started.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Duration"
+                }
+              ]
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "running"
+              ]
+            }
+          }
+        },
+        {
+          "description": "The update ran to completion.\n\nWhether individual steps performed work or were skipped (for example, because a component was already at its target version) is recorded in the per-step outcomes.",
+          "type": "object",
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "elapsed": {
+              "description": "The time it took for the update to complete.\n\nAbsent when the update was interrupted, and completion was inferred rather than reported.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "completed"
+              ]
+            }
+          }
+        },
+        {
+          "description": "The update failed.",
+          "type": "object",
+          "required": [
+            "message",
+            "state"
+          ],
+          "properties": {
+            "elapsed": {
+              "description": "The time it took for the update to fail.\n\nAbsent when the update was interrupted, and failure was inferred rather than reported.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "message": {
+              "description": "A human-readable description of the failure, combining the failed step and its error message (including any nested causes).",
+              "type": "string"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "failed"
+              ]
+            }
+          }
+        },
+        {
+          "description": "The update was aborted.",
+          "type": "object",
+          "required": [
+            "message",
+            "state"
+          ],
+          "properties": {
+            "elapsed": {
+              "description": "The time it took for the update to abort.\n\nAbsent when the update was interrupted, and the abort was inferred rather than reported.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "message": {
+              "description": "A human-readable description of the abort, combining the aborted step and its message.",
+              "type": "string"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "aborted"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "UpdateStep": {
+      "description": "A single node in the update step tree.\n\nA step may spawn nested executions (for example, a per-component update that runs its own engine). Those executions appear in `children`.",
+      "type": "object",
+      "required": [
+        "children",
+        "description",
+        "status"
+      ],
+      "properties": {
+        "children": {
+          "description": "The nested executions this step spawned, in order. Empty if the step ran no nested engine.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UpdateProgress"
+          }
+        },
+        "description": {
+          "description": "A human-readable description of this step.",
+          "type": "string"
+        },
+        "status": {
+          "description": "The status of this step.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UpdateStepStatus"
+            }
+          ]
+        }
+      }
+    },
+    "UpdateStepStatus": {
+      "description": "The status of a single step in the update step tree.",
+      "oneOf": [
+        {
+          "description": "The step has not started yet.",
+          "type": "object",
+          "required": [
+            "status"
+          ],
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "not_started"
+              ]
+            }
+          }
+        },
+        {
+          "description": "The step is currently running.",
+          "type": "object",
+          "required": [
+            "progress",
+            "status"
+          ],
+          "properties": {
+            "progress": {
+              "description": "The most recent progress reported by the step.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/RunningProgress"
+                }
+              ]
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "running"
+              ]
+            }
+          }
+        },
+        {
+          "description": "The step completed.",
+          "type": "object",
+          "required": [
+            "outcome",
+            "status"
+          ],
+          "properties": {
+            "outcome": {
+              "description": "The outcome of the completed step.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/StepOutcome"
+                }
+              ]
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "completed"
+              ]
+            }
+          }
+        },
+        {
+          "description": "The step failed.",
+          "type": "object",
+          "required": [
+            "causes",
+            "message",
+            "status"
+          ],
+          "properties": {
+            "causes": {
+              "description": "The chain of underlying causes for the failure, outermost first.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "message": {
+              "description": "A human-readable description of the failure.",
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "failed"
+              ]
+            }
+          }
+        },
+        {
+          "description": "The step was aborted while running.",
+          "type": "object",
+          "required": [
+            "message",
+            "status"
+          ],
+          "properties": {
+            "message": {
+              "description": "A human-readable description of the abort.",
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "aborted"
+              ]
+            }
+          }
+        },
+        {
+          "description": "The step will not be run because a prior step failed or was aborted.",
+          "type": "object",
+          "required": [
+            "reason",
+            "status"
+          ],
+          "properties": {
+            "reason": {
+              "description": "A human-readable description of why the step will not be run, naming the causal step.",
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "will_not_be_run"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -650,6 +650,7 @@ impl CollectionBuilder {
             sled_agent_address: inventory.sled_agent_address,
             sled_role: inventory.sled_role,
             baseboard_id,
+            rack_id: inventory.rack_id,
             usable_hardware_threads: inventory.usable_hardware_threads,
             usable_physical_ram: inventory.usable_physical_ram,
             cpu_family: inventory.cpu_family,

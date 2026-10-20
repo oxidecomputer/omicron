@@ -27,7 +27,6 @@ use illumos_utils::opte::{
 };
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
-use illumos_utils::zpool::ZpoolOrRamdisk;
 use omicron_common::api::internal::shared::{DelegatedZvol, SledIdentifiers};
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
@@ -216,13 +215,15 @@ struct RunningState {
     running_zone: RunningZone,
     // Handle to the zpool monitor task, so that it is aborted once the zone
     // no longer exists.
-    _zpool_monitor_handle: Option<AbortOnDropHandle<()>>,
+    _zpool_monitor_handle: AbortOnDropHandle<()>,
 }
 
 // Named type for values returned during propolis zone creation
 struct PropolisSetup {
     client: Arc<PropolisClient>,
     running_zone: RunningZone,
+    // Zpool chosen for the zone's filesystem.
+    filesystem_zpool: ZpoolName,
 }
 
 // Requests that can be made of instances
@@ -1401,7 +1402,7 @@ impl InstanceRunner {
     /// Panics if this routine is called more than once for a given Instance.
     fn install_running_state(
         &mut self,
-        PropolisSetup { client, running_zone }: PropolisSetup,
+        PropolisSetup { client, running_zone, filesystem_zpool }: PropolisSetup,
     ) {
         // Monitor propolis for state changes in the background.
         //
@@ -1427,25 +1428,22 @@ impl InstanceRunner {
         });
 
         // Spawn a task to monitor for whether the Propolis zone's zpool has
-        // gone away, if we are using a zpool for the zone root filesystem.
-        let zpool_monitor_handle = match running_zone.root_zpool() {
-            ZpoolOrRamdisk::Zpool(zpool_name) => {
-                let log = self.log.new(o!(
-                    "instance_runner_task" => "zpool_monitor",
-                    "zpool_name" => zpool_name.to_string(),
-                ));
-                let task = tokio::spawn(zpool_monitor(
-                    log,
-                    *zpool_name,
-                    self.currently_managed_zpools_rx.clone(),
-                    self.terminator.clone(),
-                ));
-                // Once the running zone is destroyed, the zpool monitor task
-                // will no longer be needed, so ensure that dropping the running
-                // zone aborts it rather than leaking it forever.
-                Some(AbortOnDropHandle::new(task))
-            }
-            ZpoolOrRamdisk::Ramdisk => None,
+        // gone away.
+        let zpool_monitor_handle = {
+            let log = self.log.new(o!(
+                "instance_runner_task" => "zpool_monitor",
+                "zpool_name" => filesystem_zpool.to_string(),
+            ));
+            let task = tokio::spawn(zpool_monitor(
+                log,
+                filesystem_zpool,
+                self.currently_managed_zpools_rx.clone(),
+                self.terminator.clone(),
+            ));
+            // Once the running zone is destroyed, the zpool monitor task will
+            // no longer be needed, so ensure that dropping the running zone
+            // aborts it rather than leaking it forever.
+            AbortOnDropHandle::new(task)
         };
         self.monitor_handle = Some(monitor_handle);
         self.running_state = Some(RunningState {
@@ -2506,19 +2504,20 @@ impl InstanceRunner {
         let zname = propolis_zone_name(&self.propolis_id);
         let mut rng = rand::rngs::StdRng::from_os_rng();
 
-        let root = self
+        let zone_root_path = self
             .available_datasets_rx
             .all_mounted_zone_root_datasets()
             .into_iter()
             .choose(&mut rng)
             .ok_or_else(|| Error::U2NotFound)?;
+        let filesystem_zpool = zone_root_path.pool();
 
         let installed_zone = self
             .zone_builder_factory
             .builder()
             .with_log(self.log.clone())
             .with_underlay_vnic_allocator(&self.vnic_allocator)
-            .with_zone_root_path(root)
+            .with_zone_root_path(zone_root_path.into_path())
             .with_file_source(&ramdisk_file_source("propolis-server"))
             .with_zone_type("propolis-server")
             .with_unique_name(OmicronZoneUuid::from_untyped_uuid(
@@ -2606,7 +2605,7 @@ impl InstanceRunner {
         wait_for_http_server(&self.log, &client).await?;
         info!(self.log, "Propolis HTTP server online");
 
-        Ok(PropolisSetup { client, running_zone })
+        Ok(PropolisSetup { client, running_zone, filesystem_zpool })
     }
 
     /// Forcibly moves this VMM to the Failed state, then goes through the
@@ -2879,7 +2878,7 @@ mod tests {
     use omicron_generation_kinds::Generation;
 
     use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
-    use omicron_uuid_kinds::InternalZpoolUuid;
+    use omicron_uuid_kinds::{ExternalZpoolUuid, InternalZpoolUuid};
     use propolis_client::ClientInfo;
     use propolis_client::types::{
         InstanceMigrateStatusResponse, InstanceStateMonitorResponse,
@@ -3043,7 +3042,6 @@ mod tests {
         log: &Logger,
         propolis_addr: SocketAddr,
         nexus_client: NexusClient,
-        available_datasets_rx: AvailableDatasetsReceiver,
         temp_dir: &str,
     ) -> (Instance, MetricsRx) {
         let id = InstanceUuid::new_v4();
@@ -3053,13 +3051,8 @@ mod tests {
 
         let initial_state = fake_instance_initial_state(propolis_addr);
 
-        let (services, rx) = fake_instance_manager_services(
-            log,
-            available_datasets_rx,
-            nexus_client,
-            temp_dir,
-        )
-        .await;
+        let (services, rx) =
+            fake_instance_manager_services(log, nexus_client, temp_dir).await;
 
         let metadata = InstanceMetadata {
             silo_id: Uuid::new_v4(),
@@ -3193,7 +3186,6 @@ mod tests {
 
     async fn fake_instance_manager_services(
         log: &Logger,
-        available_datasets_rx: AvailableDatasetsReceiver,
         nexus_client: NexusClient,
         temp_dir: &str,
     ) -> (InstanceManagerServices, MetricsRx) {
@@ -3207,6 +3199,9 @@ mod tests {
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
         );
 
+        let fake_zpool = ZpoolName::External(ExternalZpoolUuid::new_v4());
+        let available_datasets_rx =
+            AvailableDatasetsReceiver::fake_in_tempdir_for_tests(fake_zpool);
         let cleanup_context = CleanupContext::default();
         let zone_bundler = ZoneBundler::new(
             log.new(o!("component" => "ZoneBundler")),
@@ -3243,7 +3238,9 @@ mod tests {
             ),
             metrics_queue,
             currently_managed_zpools_rx:
-                CurrentlyManagedZpoolsReceiver::fake_static(std::iter::empty()),
+                CurrentlyManagedZpoolsReceiver::fake_static(std::iter::once(
+                    fake_zpool,
+                )),
         };
         (services, rx)
     }
@@ -3277,9 +3274,6 @@ mod tests {
             let temp_guard = Utf8TempDir::new().unwrap();
             let (services, metrics_rx) = fake_instance_manager_services(
                 log,
-                AvailableDatasetsReceiver::fake_in_tempdir_for_tests(
-                    ZpoolOrRamdisk::Ramdisk,
-                ),
                 nexus.nexus_client.clone(),
                 temp_guard.path().as_str(),
             )
@@ -3348,9 +3342,6 @@ mod tests {
                 &log,
                 propolis_addr,
                 nexus_client,
-                AvailableDatasetsReceiver::fake_in_tempdir_for_tests(
-                    ZpoolOrRamdisk::Ramdisk,
-                ),
                 temp_guard.path().as_str(),
             ),
         )
@@ -3455,9 +3446,6 @@ mod tests {
                         0,
                     )),
                     nexus_client,
-                    AvailableDatasetsReceiver::fake_in_tempdir_for_tests(
-                        ZpoolOrRamdisk::Ramdisk,
-                    ),
                     temp_guard.path().as_str(),
                 ),
             )
@@ -4173,9 +4161,6 @@ mod tests {
             let temp_guard = Utf8TempDir::new().unwrap();
             let (services, _metrics_rx) = fake_instance_manager_services(
                 &log,
-                AvailableDatasetsReceiver::fake_in_tempdir_for_tests(
-                    ZpoolOrRamdisk::Ramdisk,
-                ),
                 nexus_client,
                 temp_guard.path().as_str(),
             )

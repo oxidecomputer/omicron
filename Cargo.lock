@@ -167,7 +167,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -178,7 +178,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1715,7 +1715,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3857,7 +3857,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4822,10 +4822,11 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.17.0"
+version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f467dd6dccf739c208452f8014c75c18bb8301b050ad1cfb27153803edb0f51"
+checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 dependencies = [
+ "allocator-api2",
  "foldhash 0.2.0",
 ]
 
@@ -5537,15 +5538,15 @@ dependencies = [
 
 [[package]]
 name = "iddqd"
-version = "0.4.2"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7721c885a97a7c67bc8645958710f3f43b5e7ad8644ce6f43b188a77f05fda7"
+checksum = "c9c6a3a37e36cfd4170bf01265cb987a40993369198fb072c1a0041c0cc485cf"
 dependencies = [
  "allocator-api2",
  "daft",
  "equivalent",
  "foldhash 0.2.0",
- "hashbrown 0.16.1",
+ "hashbrown 0.17.1",
  "proptest",
  "ref-cast",
  "schemars 0.8.22",
@@ -5717,7 +5718,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
 dependencies = [
  "equivalent",
- "hashbrown 0.17.0",
+ "hashbrown 0.17.1",
  "serde",
  "serde_core",
 ]
@@ -6108,7 +6109,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi 0.5.2",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7459,7 +7460,7 @@ dependencies = [
  "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-generation-kinds",
- "omicron-git-version",
+ "omicron-git-version-types",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-uuid-kinds",
@@ -7542,6 +7543,7 @@ dependencies = [
  "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-generation-kinds",
+ "omicron-git-version-types",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
@@ -7872,6 +7874,7 @@ dependencies = [
  "camino",
  "chrono",
  "dropshot",
+ "fmd-adm-sys",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -7883,12 +7886,15 @@ dependencies = [
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
+ "nexus-test-utils",
  "nexus-types",
  "omicron-common",
  "omicron-generation-kinds",
+ "omicron-rpaths",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "pq-sys",
  "qorb",
  "rand 0.9.2",
  "repo-depot-api",
@@ -8610,7 +8616,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8821,7 +8827,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2e5a6c098c7a3b6547378093f5cc30bc54fd361ce711e05293a5cc589562739b"
 dependencies = [
  "crc32fast",
- "hashbrown 0.17.0",
+ "hashbrown 0.17.1",
  "indexmap 2.14.0",
  "memchr",
 ]
@@ -8851,6 +8857,7 @@ dependencies = [
 name = "omicron-certificates"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "display-error-chain",
  "foreign-types 0.3.2",
  "omicron-common",
@@ -9211,10 +9218,18 @@ dependencies = [
 name = "omicron-git-version"
 version = "0.1.0"
 dependencies = [
+ "omicron-git-version-types",
+ "omicron-workspace-hack",
+ "vergen-gitcl",
+]
+
+[[package]]
+name = "omicron-git-version-types"
+version = "0.1.0"
+dependencies = [
  "omicron-workspace-hack",
  "serde",
  "serde_with 3.21.0",
- "vergen-gitcl",
 ]
 
 [[package]]
@@ -9257,6 +9272,7 @@ dependencies = [
  "nexus-types",
  "omicron-common",
  "omicron-generation-kinds",
+ "omicron-git-version",
  "omicron-rpaths",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -9396,10 +9412,12 @@ dependencies = [
  "nexus-types-versions",
  "ntp-admin-client",
  "num-integer",
+ "omicron-certificates",
  "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-debug-dropbox",
  "omicron-generation-kinds",
+ "omicron-git-version",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
@@ -9590,6 +9608,7 @@ dependencies = [
  "omicron-common",
  "omicron-generation-kinds",
  "omicron-git-version",
+ "omicron-git-version-types",
  "omicron-nexus",
  "omicron-rpaths",
  "omicron-test-utils",
@@ -9719,6 +9738,7 @@ dependencies = [
  "nexus-reconfigurator-execution",
  "nexus-types",
  "omicron-common",
+ "omicron-git-version",
  "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -10078,8 +10098,7 @@ dependencies = [
  "getrandom 0.4.3",
  "group 0.13.0",
  "hashbrown 0.15.5",
- "hashbrown 0.16.1",
- "hashbrown 0.17.0",
+ "hashbrown 0.17.1",
  "heck 0.4.1",
  "hex",
  "hickory-proto 0.25.2",
@@ -10524,6 +10543,17 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+]
+
+[[package]]
+name = "oxide-versioned-envelope"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a36c6e7ec2aac34233572f24c8546dd7cd2c5fa01c8fec5a5126af37b9499c62"
+dependencies = [
+ "schemars 0.8.22",
+ "serde_core",
+ "serde_json",
 ]
 
 [[package]]
@@ -13325,7 +13355,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -13392,7 +13422,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -13630,7 +13660,7 @@ dependencies = [
 [[package]]
 name = "scim2-rs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/scim2-rs?rev=9730595245fc7969c4ffeee5a32345ab7b3167b7#9730595245fc7969c4ffeee5a32345ab7b3167b7"
+source = "git+https://github.com/oxidecomputer/scim2-rs?rev=a024c0918bea9133bd545bc06c42a4a0e14c7915#a024c0918bea9133bd545bc06c42a4a0e14c7915"
 dependencies = [
  "anyhow",
  "chrono",
@@ -13649,7 +13679,7 @@ dependencies = [
 [[package]]
 name = "scim2-test-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/scim2-rs?rev=9730595245fc7969c4ffeee5a32345ab7b3167b7#9730595245fc7969c4ffeee5a32345ab7b3167b7"
+source = "git+https://github.com/oxidecomputer/scim2-rs?rev=a024c0918bea9133bd545bc06c42a4a0e14c7915#a024c0918bea9133bd545bc06c42a4a0e14c7915"
 dependencies = [
  "anyhow",
  "clap",
@@ -14556,6 +14586,7 @@ dependencies = [
  "chrono",
  "cockroach-admin-client",
  "dns-service-client",
+ "fmd-adm-sys",
  "futures",
  "http",
  "iddqd",
@@ -14565,16 +14596,19 @@ dependencies = [
  "itertools 0.14.0",
  "nexus-lockstep-client",
  "nexus-reconfigurator-blippy",
+ "nexus-test-utils",
  "nexus-types",
  "ntp-admin-client",
  "omicron-common",
  "omicron-ddm-admin-client",
  "omicron-generation-kinds",
  "omicron-ledger",
+ "omicron-rpaths",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
+ "pq-sys",
  "rand 0.9.2",
  "rcgen",
  "reqwest",
@@ -15141,7 +15175,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -15838,7 +15872,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -15858,7 +15892,7 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8c27177b12a6399ffc08b98f76f7c9a1f4fe9fc967c784c5a071fa8d93cf7e1"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -17884,13 +17918,13 @@ dependencies = [
  "indexmap 2.14.0",
  "indicatif",
  "itertools 0.14.0",
- "maplit",
  "omicron-common",
  "omicron-passwords",
  "omicron-workspace-hack",
  "owo-colors 4.3.0",
  "oxide-update-engine-display",
  "oxide-update-engine-types",
+ "oxide-versioned-envelope",
  "proptest",
  "ratatui",
  "reqwest",
@@ -17917,11 +17951,25 @@ dependencies = [
  "tufaceous-artifact 0.2.0",
  "tui-tree-widget",
  "unicode-width 0.1.14",
+ "wicket-cli-types",
  "wicket-common",
  "wicketd-client",
  "wicketd-commission-client",
  "wicketd-commission-types",
  "zeroize",
+]
+
+[[package]]
+name = "wicket-cli-types"
+version = "0.1.0"
+dependencies = [
+ "expectorate",
+ "omicron-workspace-hack",
+ "oxide-versioned-envelope",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "wicketd-commission-types-versions",
 ]
 
 [[package]]
@@ -17942,7 +17990,6 @@ dependencies = [
  "oxide-update-engine-types",
  "oxnet",
  "schemars 0.8.22",
- "semver 1.0.28",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -18037,6 +18084,7 @@ dependencies = [
  "oxide-tokio-rt",
  "oxide-update-engine",
  "oxide-update-engine-types",
+ "oxide-versioned-envelope",
  "oxnet",
  "rand 0.9.2",
  "reqwest",
@@ -18068,6 +18116,7 @@ dependencies = [
  "tufaceous-artifact 0.2.0",
  "uuid",
  "wicket",
+ "wicket-cli-types",
  "wicket-common",
  "wicketd-api",
  "wicketd-client",
@@ -18219,7 +18268,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

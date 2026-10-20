@@ -921,7 +921,8 @@ impl ServiceInner {
                 .map_err(BackoffError::transient)
         };
         let log_failure = |err, _| {
-            info!(self.log, "Failed to handoff to nexus: {err}");
+            info!(self.log, "Failed to handoff to nexus";
+                InlineErrorChain::new(&err));
         };
 
         retry_notify(
@@ -1635,6 +1636,7 @@ mod test {
     };
     use iddqd::IdOrdMap;
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
+    use nexus_test_utils::RACK_UUID;
     use omicron_common::{
         address::{
             AZ_PREFIX_LENGTH, IpRange, Ipv6Subnet, RACK_PREFIX_LENGTH,
@@ -1671,6 +1673,7 @@ mod test {
 
     fn make_sled_info(
         sled_id: SledUuid,
+        rack_id: RackUuid,
         subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
         u2_count: usize,
     ) -> SledInfo {
@@ -1687,6 +1690,7 @@ mod test {
                     part_number: "test".to_string(),
                     serial_number: "test".to_string(),
                 },
+                rack_id,
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::from_gibibytes_u32(16),
                 cpu_family: SledCpuFamily::AmdMilan,
@@ -1729,6 +1733,7 @@ mod test {
         vec![
             make_sled_info(
                 SledUuid::new_v4(),
+                RACK_UUID,
                 Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:101::1".parse().unwrap(),
                 ),
@@ -1736,6 +1741,7 @@ mod test {
             ),
             make_sled_info(
                 SledUuid::new_v4(),
+                RACK_UUID,
                 Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:102::1".parse().unwrap(),
                 ),
@@ -1743,6 +1749,7 @@ mod test {
             ),
             make_sled_info(
                 SledUuid::new_v4(),
+                RACK_UUID,
                 Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:103::1".parse().unwrap(),
                 ),

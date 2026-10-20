@@ -337,7 +337,7 @@ impl ExternalDisks {
         target_epoch: Epoch,
     ) {
         for &disk_id in &result.succeeded {
-            if let Some(mut disk_state) = self.disks.get_mut(&disk_id) {
+            if let Some(mut disk_state) = self.disks.get_mut(disk_id) {
                 disk_state.epoch = Some(target_epoch);
             }
         }
@@ -410,7 +410,7 @@ impl ExternalDisks {
 
         // Remove the disks not present in `config`.
         for disk_id in &disk_ids_to_remove {
-            self.disks.remove(disk_id);
+            self.disks.remove(*disk_id);
         }
 
         // If we made any changes, update the set of disks visbile to external
