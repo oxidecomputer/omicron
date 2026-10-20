@@ -1589,7 +1589,8 @@ mod tests {
     use dropshot::PaginationOrder;
     use dropshot::test_util::LogContext;
     use nexus_auth::authz;
-    use nexus_db_model::IpAttachState;
+    use nexus_db_lookup::LookupPath;
+use nexus_db_model::IpAttachState;
     use nexus_db_model::IpPool;
     use nexus_db_model::IpPoolAssignment;
     use nexus_db_model::Name;
@@ -4896,5 +4897,105 @@ mod tests {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_delete_project_with_outstanding_external_subnet() {
+        let context = setup_external_subnet_test(
+            "cannot_delete_project_with_outstanding_external_subnet"
+        ).await;
+        let (opctx, datastore) = (context.db.opctx(), context.db.datastore());
+        let authz_project = &context.authz_project;
+        let fetch_project = async || {
+            LookupPath::new(opctx, datastore)
+                .project_id(authz_project.id())
+                .fetch()
+                .await
+                .expect("should be able to fetch test project")
+                .2
+        };
+        let db_project = fetch_project().await;
+
+        let subnet_name = "subnet";
+        let subnet = datastore
+            .create_external_subnet(
+                opctx,
+                &DEFAULT_SILO_ID,
+                &authz_project,
+                ExternalSubnetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: subnet_name.parse().unwrap(),
+                        description: String::new(),
+                    },
+                    // Use the default IPv6 pool
+                    allocator: ExternalSubnetAllocator::Auto {
+                        prefix_length: 64,
+                        pool_selector: PoolSelector::Auto { ip_version: Some(IpVersion::V6) },
+                    },
+                },
+            )
+            .await
+            .expect("able to create subnet in project");
+        let authz_subnet = authz::ExternalSubnet::new(
+            authz_project.clone(),
+            subnet.id(),
+            LookupType::ById(subnet.id().into_untyped_uuid()),
+        );
+
+        // We shouldn't be able to delete the project, because of the above
+        // subnet.
+        let err = datastore
+            .project_delete(opctx, authz_project, &db_project)
+            .await
+            .expect_err("failure deleting project with outstanding subnet");
+        let Error::InvalidRequest { message } = &err else {
+            panic!(
+                "Expected an InvalidRequest when deleting \
+                a project while it still has an outstanding \
+                external subnet, but found: {err:#?}",
+            );
+        };
+        assert_eq!(
+            message.external_message(),
+            &format!(
+                "project to be deleted contains an external subnet: \
+                {subnet_name}"
+            ),
+        );
+
+        // Delete the subnet and try again, which should work.
+        datastore
+            .delete_external_subnet(opctx, &authz_subnet)
+            .await
+            .expect("able to delete external subnet from project");
+
+        // Creating the subnet bumped the project's rcgen, so deleting with the
+        // stale record we got at creation time should fail.
+        let err = datastore
+            .project_delete(opctx, &authz_project, &db_project)
+            .await
+            .expect_err(
+                "should not be able to delete project with stale rcgen",
+            );
+        let Error::InvalidRequest { message } = &err else {
+            panic!(
+                "Expected an InvalidRequest when deleting a project \
+                with a stale rcgen, but found: {err:#?}",
+            );
+        };
+        assert_eq!(
+            message.external_message(),
+            "deletion failed due to concurrent modification",
+        );
+
+        // Refetching the project and deleting it should work.
+        let db_project = fetch_project().await;
+        datastore
+            .project_delete(opctx, &authz_project, &db_project)
+            .await
+            .expect("should be able to delete project after deleting subnet");
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
     }
 }
