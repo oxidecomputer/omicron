@@ -2390,13 +2390,11 @@ impl InstanceRunner {
                 if self.running_state.is_none() {
                     self.state.force_state_to_destroyed();
                     self.terminate().await;
-                    (None, None)
-                } else {
-                    (
-                        Some(PropolisRequest::Stop),
-                        Some(PublishedVmmState::Stopping),
-                    )
+                    // There's no propolis to send a stop request to, so just
+                    // bail out now.
+                    return Ok(self.state.sled_instance_state());
                 }
+                (Some(PropolisRequest::Stop), Some(PublishedVmmState::Stopping))
             }
             VmmStateRequested::Reboot => {
                 if self.running_state.is_none() {
@@ -4478,6 +4476,79 @@ mod tests {
                 .await
                 .expect("termination of an exited runner should complete");
         assert_eq!(state.vmm_state.state, VmmState::Destroyed);
+
+        logctx.cleanup_successful();
+    }
+
+    /// A request to stop a VMM that was registered but never started (so no
+    /// Propolis zone exists yet) should move the VMM straight to `Destroyed`
+    /// and tear down the runner.
+    ///
+    /// Regression test for
+    /// <https://github.com/oxidecomputer/omicron/issues/11536>
+    #[tokio::test]
+    async fn test_stop_before_start() {
+        let logctx =
+            omicron_test_utils::dev::test_setup_log("test_stop_before_start");
+        let log = logctx.log.new(o!(FileKv));
+
+        let TestInstanceRunner {
+            runner_task,
+            state_rx,
+            terminator: _terminator,
+            monitor_tx: _mt,
+            cmd_tx,
+            mut remove_rx,
+            _nexus_server,
+            _dns_server,
+        } = TestInstanceRunner::new(&log).await;
+
+        let (tx, rx) = oneshot::channel();
+        cmd_tx
+            .send(InstanceRequest::PutState {
+                state: VmmStateRequested::Stopped,
+                tx,
+            })
+            .await
+            .expect("runner should be accepting requests");
+
+        let resp = match timeout(TIMEOUT_DURATION, rx)
+            .await
+            .expect("PutState(Stopped) should succeed")
+        {
+            Ok(resp) => resp,
+            // The runner dropped the reply sender without answering. This can
+            // only happen if it panics.
+            Err(_) => {
+                let err = runner_task.await.expect_err(
+                    "runner dropped a PutState reply sender without panicking",
+                );
+                panic!("runner panicked handling PutState(Stopped): {err}");
+            }
+        };
+        let state = resp
+            .expect("stopping a never-started VMM should succeed")
+            .updated_runtime
+            .expect("PutState should return the updated runtime state");
+        assert_eq!(state.vmm_state.state, VmmState::Destroyed);
+
+        // The runner should publish that it has stopped, and then deregister
+        // itself.
+        timeout(TIMEOUT_DURATION, remove_rx.recv())
+            .await
+            .expect("stopped runner should request removal")
+            .expect("removal channel should still be open");
+        let published = state_rx.borrow().clone();
+        let ReceivedInstanceState::InstancePut(published) = published else {
+            panic!("expected a published VMM state, got {published:?}");
+        };
+        assert_eq!(published.vmm_state.state, VmmState::Destroyed);
+
+        drop(cmd_tx);
+        timeout(TIMEOUT_DURATION, runner_task)
+            .await
+            .expect("runner should exit after its command channel closes")
+            .expect("runner task should not panic");
 
         logctx.cleanup_successful();
     }
