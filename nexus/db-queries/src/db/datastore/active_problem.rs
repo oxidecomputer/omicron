@@ -34,7 +34,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
-use omicron_generation_kinds::ActiveProblemGeneration;
+use omicron_generation_kinds::ActiveProblemRevNum;
 use omicron_uuid_kinds::ActiveProblemUuid;
 use omicron_uuid_kinds::GenericUuid;
 use std::cmp::Ordering;
@@ -176,7 +176,7 @@ impl DataStore {
             .values(ActiveProblem {
                 identity,
                 time_deleted: None,
-                current_revision: ActiveProblemGeneration::from_u32(0).into(),
+                current_revision: ActiveProblemRevNum::from_u32(0).into(),
             })
             .on_conflict(problem_dsl::id)
             .do_nothing()
@@ -263,7 +263,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_problem: &authz::ActiveProblem,
-        new_revision: ActiveProblemGeneration,
+        new_revision: ActiveProblemRevNum,
     ) -> UpdateResult<SetCurrentRevisionOutcome> {
         opctx.authorize(authz::Action::Modify, authz_problem).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -334,7 +334,7 @@ impl DataStore {
     /// `tests/output/active_problem_set_current_revision.sql`.
     fn active_problem_set_current_revision_query(
         problem_id: ActiveProblemUuid,
-        new_revision: ActiveProblemGeneration,
+        new_revision: ActiveProblemRevNum,
     ) -> impl RunnableQuery<(Option<Uuid>, Option<Uuid>, ActiveProblem)> {
         let revision_num = DbTypedGeneration::from(new_revision);
         let revision_row = rev_dsl::active_problem_revision
@@ -369,7 +369,7 @@ pub enum SetCurrentRevisionOutcome {
     /// The problem was already at a later revision, so nothing was changed.
     Superseded {
         /// The problem's current revision.
-        current_revision: ActiveProblemGeneration,
+        current_revision: ActiveProblemRevNum,
     },
 }
 
@@ -388,8 +388,8 @@ mod revision_tests {
     use omicron_test_utils::dev;
     use std::num::NonZeroU32;
 
-    fn rev(revision: u32) -> ActiveProblemGeneration {
-        ActiveProblemGeneration::from_u32(revision)
+    fn rev(revision: u32) -> ActiveProblemRevNum {
+        ActiveProblemRevNum::from_u32(revision)
     }
 
     /// Returns revision `revision` of the problem `id`.
@@ -533,7 +533,7 @@ mod revision_tests {
             "creating an active problem a second time should not overwrite the \
              existing record's `time_created`"
         );
-        assert_eq!(problem.current_revision(), ActiveProblemGeneration::ZERO);
+        assert_eq!(problem.current_revision(), ActiveProblemRevNum::ZERO);
 
         let err = datastore
             .active_problem_fetch(opctx, &authz_problem)
@@ -573,7 +573,7 @@ mod revision_tests {
             create_with_revisions(opctx, datastore, 2).await;
 
         for revision in &revisions {
-            let number = ActiveProblemGeneration::from(revision.revision);
+            let number = ActiveProblemRevNum::from(revision.revision);
             let outcome = datastore
                 .active_problem_set_current_revision(
                     opctx,
@@ -671,7 +671,7 @@ mod revision_tests {
         assert_matches!(err, Error::InternalError { .. });
 
         let problem = load_problem(datastore, &authz_problem).await;
-        assert_eq!(problem.current_revision(), ActiveProblemGeneration::ZERO);
+        assert_eq!(problem.current_revision(), ActiveProblemRevNum::ZERO);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -800,7 +800,7 @@ mod revision_tests {
         let problem = load_problem(datastore, &authz_problem).await;
         assert_eq!(
             problem.current_revision(),
-            ActiveProblemGeneration::from_u32(REVISIONS)
+            ActiveProblemRevNum::from_u32(REVISIONS)
         );
         assert_eq!(
             problem.identity.time_modified,
