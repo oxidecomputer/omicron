@@ -412,7 +412,7 @@ impl UpdatePane {
                         style::plain_text(),
                     ));
                     spans.push(Span::styled(
-                        value.step_info().description.as_ref(),
+                        &*value.step_info().description,
                         style::selected(),
                     ));
                 }
@@ -472,7 +472,7 @@ impl UpdatePane {
                         style::plain_text(),
                     ));
                     spans.push(Span::styled(
-                        value.step_info().description.as_ref(),
+                        &*value.step_info().description,
                         style::selected(),
                     ));
                 }
@@ -512,7 +512,7 @@ impl UpdatePane {
                         style::plain_text(),
                     ));
                     spans.push(Span::styled(
-                        value.step_info().description.as_ref(),
+                        &*value.step_info().description,
                         style::selected(),
                     ));
                     if let Some(following_desc) = following_desc {

@@ -35,6 +35,10 @@ pub struct CurrentRssUserConfigInsensitive {
     pub external_dns_ips: Vec<IpAddr>,
     pub external_dns_zone_name: String,
     pub rack_network_config: Option<UserSpecifiedRackNetworkConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing: Option<
+        wicketd_commission_types::rack_setup::UserSpecifiedRoutingConfig,
+    >,
     pub allowed_source_ips: Option<AllowedSourceIps>,
     /// Enable the fleet-wide jumbo-frames opt-in. Operators can also toggle
     /// this at runtime via the Nexus API after handoff.

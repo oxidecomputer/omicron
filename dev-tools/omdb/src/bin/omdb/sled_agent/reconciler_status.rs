@@ -22,12 +22,7 @@ use bootstrap_agent_lockstep_types::scrimlet_reconcilers::dpd::DpdPortOperationF
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::dpd::DpdPortReconcilerStatus;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::dpd::DpdReconcilerStatus;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::lldpd::LldpdReconcilerStatus;
-use bootstrap_agent_lockstep_types::scrimlet_reconcilers::mgd::MgdBfdOperationFailure;
-use bootstrap_agent_lockstep_types::scrimlet_reconcilers::mgd::MgdBfdReconcilerStatus;
-use bootstrap_agent_lockstep_types::scrimlet_reconcilers::mgd::MgdBgpReconcilerStatus;
-use bootstrap_agent_lockstep_types::scrimlet_reconcilers::mgd::MgdBgpReconcilerStatusOpCount;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::mgd::MgdReconcilerStatus;
-use bootstrap_agent_lockstep_types::scrimlet_reconcilers::mgd::MgdStaticRouteReconcilerStatus;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::uplinkd::UplinkdReconcilerStatus;
 use indent_write::fmt::IndentWriter;
 use std::fmt;
@@ -688,298 +683,20 @@ impl DisplayableStatus for MgdReconcilerStatus {
 struct MgdReconcilerStatusDisplay<'a>(&'a MgdReconcilerStatus);
 
 impl fmt::Display for MgdReconcilerStatusDisplay<'_> {
-    fn fmt(&self, mut f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let MgdReconcilerStatus {
-            bfd_status,
-            bgp_status,
-            static_routes_status,
-        } = self.0;
-        writeln!(f, "static routes:")?;
-        write_block(
-            IndentWriter::new(INDENT, &mut f),
-            MgdStaticRouteReconcilerStatusDisplay(&static_routes_status),
-        )?;
-        writeln!(f, "BGP:")?;
-        write_block(
-            IndentWriter::new(INDENT, &mut f),
-            MgdBgpReconcilerStatusDisplay(&bgp_status),
-        )?;
-        writeln!(f, "BFD:")?;
-        write!(
-            IndentWriter::new(INDENT, &mut f),
-            "{}",
-            MgdBfdReconcilerStatusDisplay(&bfd_status)
-        )
-    }
-}
-
-struct MgdBfdReconcilerStatusDisplay<'a>(&'a MgdBfdReconcilerStatus);
-
-impl fmt::Display for MgdBfdReconcilerStatusDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
-            MgdBfdReconcilerStatus::FailedReadingBfdPeers(err) => {
-                write!(f, "failed to read current bfd peers: {err}")
+            MgdReconcilerStatus::FailedGeneratingDesiredConfig(err) => {
+                write!(f, "failed to generate desired router set: {err}")
             }
-            MgdBfdReconcilerStatus::Complete {
-                unchanged,
-                remove_success,
-                remove_failure,
-                add_success,
-                add_failure,
-            } => {
-                writeln!(f, "reconciliation completed")?;
-                let mut f = IndentWriter::new(INDENT, f);
-                if !unchanged.is_empty() {
-                    writeln!(
-                        f,
-                        "peers unchanged: {}",
-                        unchanged
-                            .iter()
-                            .map(|ip| ip.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )?;
-                }
-                if !add_success.is_empty() {
-                    writeln!(
-                        f,
-                        "peers added: {}",
-                        add_success
-                            .iter()
-                            .map(|ip| ip.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )?;
-                }
-                if !remove_success.is_empty() {
-                    writeln!(
-                        f,
-                        "peers removed: {}",
-                        remove_success
-                            .iter()
-                            .map(|ip| ip.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )?;
-                }
-                if remove_failure.is_empty() {
-                    writeln!(f, "remove failures: none")?;
-                } else {
-                    writeln!(f, "remove failures:")?;
-                    write_lines(
-                        &mut IndentWriter::new(INDENT, &mut f),
-                        remove_failure,
-                        |f, MgdBfdOperationFailure { peer, error }| {
-                            write!(f, "* {peer}: {error}")
-                        },
-                    )?;
-                }
-                if add_failure.is_empty() {
-                    write!(f, "add failures: none")?;
-                } else {
-                    writeln!(f, "add failures:")?;
-                    write_lines(
-                        &mut IndentWriter::new(INDENT, &mut f),
-                        add_failure,
-                        |f, MgdBfdOperationFailure { peer, error }| {
-                            write!(f, "* {peer}: {error}")
-                        },
-                    )?;
-                }
-                Ok(())
+            MgdReconcilerStatus::FailedApplying { routers, error } => {
+                write!(
+                    f,
+                    "failed to apply desired router set \
+                     ({routers} routers): {error}"
+                )
             }
-        }
-    }
-}
-
-struct MgdBgpReconcilerStatusOpCountDisplay<'a>(
-    &'a MgdBgpReconcilerStatusOpCount,
-);
-
-impl fmt::Display for MgdBgpReconcilerStatusOpCountDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let MgdBgpReconcilerStatusOpCount {
-            routers_deleted,
-            routers_updated,
-            routers_created,
-            origin4_deleted,
-            origin4_updated,
-            origin4_created,
-            origin6_deleted,
-            origin6_updated,
-            origin6_created,
-            shapers_deleted,
-            shapers_updated,
-            shapers_created,
-            checkers_deleted,
-            checkers_updated,
-            checkers_created,
-            numbered_peers_deleted,
-            numbered_peers_updated,
-            numbered_peers_created,
-            unnumbered_peers_deleted,
-            unnumbered_peers_updated,
-            unnumbered_peers_created,
-        } = self.0;
-        let lines = [
-            ("routers", routers_created, routers_updated, routers_deleted),
-            ("origin4", origin4_created, origin4_updated, origin4_deleted),
-            ("origin6", origin6_created, origin6_updated, origin6_deleted),
-            ("shapers", shapers_created, shapers_updated, shapers_deleted),
-            ("checkers", checkers_created, checkers_updated, checkers_deleted),
-            (
-                "numbered peers",
-                numbered_peers_created,
-                numbered_peers_updated,
-                numbered_peers_deleted,
-            ),
-            (
-                "unnumbered peers",
-                unnumbered_peers_created,
-                unnumbered_peers_updated,
-                unnumbered_peers_deleted,
-            ),
-        ];
-        write_lines(f, lines, |f, (name, &created, &updated, &deleted)| {
-            if created == 0 && updated == 0 && deleted == 0 {
-                write!(f, "{name}: unchanged")
-            } else {
-                writeln!(f, "{name}:")?;
-                let mut f = IndentWriter::new(INDENT, f);
-                writeln!(f, "created: {created}")?;
-                writeln!(f, "updated: {updated}")?;
-                write!(f, "deleted: {deleted}")
-            }
-        })
-    }
-}
-
-struct MgdBgpReconcilerStatusDisplay<'a>(&'a MgdBgpReconcilerStatus);
-
-impl fmt::Display for MgdBgpReconcilerStatusDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {
-            MgdBgpReconcilerStatus::FailedReadingBgpConfig(err) => {
-                write!(f, "failed to read current bgp config: {err}")
-            }
-            MgdBgpReconcilerStatus::FailedGeneratingDesiredConfig(err) => {
-                write!(f, "failed to generate desired bgp config: {err}")
-            }
-            MgdBgpReconcilerStatus::Complete {
-                counts,
-                did_change_max_paths,
-                errors,
-            } => {
-                writeln!(f, "reconciliation completed")?;
-                let mut f = IndentWriter::new(INDENT, f);
-                writeln!(f, "did change max paths: {did_change_max_paths}")?;
-                write_block(
-                    &mut f,
-                    MgdBgpReconcilerStatusOpCountDisplay(&counts),
-                )?;
-                if errors.is_empty() {
-                    write!(f, "errors: none")?;
-                } else {
-                    writeln!(f, "errors:")?;
-                    write_lines(
-                        &mut IndentWriter::new(INDENT, f),
-                        errors,
-                        |f, err| write!(f, "* {err}"),
-                    )?;
-                }
-                Ok(())
-            }
-        }
-    }
-}
-
-struct MgdStaticRouteReconcilerStatusDisplay<'a>(
-    &'a MgdStaticRouteReconcilerStatus,
-);
-
-impl fmt::Display for MgdStaticRouteReconcilerStatusDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {
-            MgdStaticRouteReconcilerStatus::FailedReadingStaticRoutes(err) => {
-                write!(f, "failed to read current static routes: {err}")
-            }
-            MgdStaticRouteReconcilerStatus::FailedGeneratingPlan(err) => {
-                write!(f, "failed to generate reconciliation plan: {err}")
-            }
-            MgdStaticRouteReconcilerStatus::Complete {
-                unchanged,
-                delete_v4_result,
-                delete_v6_result,
-                add_v4_result,
-                add_v6_result,
-            } => {
-                writeln!(f, "reconciliation completed")?;
-                let mut f = IndentWriter::new(INDENT, f);
-
-                writeln!(f, "routes left unchanged: {unchanged}")?;
-
-                if let (&Ok(deleted), &Ok(added)) =
-                    (delete_v4_result, add_v4_result)
-                {
-                    if deleted == 0 && added == 0 {
-                        writeln!(f, "v4 routes modified: none")?;
-                    } else {
-                        writeln!(f, "v4 routes:")?;
-                        let mut f = IndentWriter::new(INDENT, &mut f);
-                        writeln!(f, "deleted: {deleted}")?;
-                        writeln!(f, "added: {added}")?;
-                    }
-                } else {
-                    match delete_v4_result {
-                        Ok(n) => {
-                            writeln!(f, "v4 routes deleted: {n}")?;
-                        }
-                        Err(err) => {
-                            writeln!(f, "failed to delete v4 routes: {err}")?;
-                        }
-                    }
-                    match add_v4_result {
-                        Ok(n) => {
-                            writeln!(f, "v4 routes added: {n}")?;
-                        }
-                        Err(err) => {
-                            writeln!(f, "failed to add v4 routes: {err}")?;
-                        }
-                    }
-                }
-
-                if let (&Ok(deleted), &Ok(added)) =
-                    (delete_v6_result, add_v6_result)
-                {
-                    if deleted == 0 && added == 0 {
-                        write!(f, "v6 routes modified: none")?;
-                    } else {
-                        writeln!(f, "v6 routes:")?;
-                        let mut f = IndentWriter::new(INDENT, &mut f);
-                        writeln!(f, "deleted: {deleted}")?;
-                        write!(f, "added: {added}")?;
-                    }
-                } else {
-                    match delete_v6_result {
-                        Ok(n) => {
-                            writeln!(f, "v6 routes deleted: {n}")?;
-                        }
-                        Err(err) => {
-                            writeln!(f, "failed to delete v6 routes: {err}")?;
-                        }
-                    }
-                    match add_v6_result {
-                        Ok(n) => {
-                            write!(f, "v6 routes added: {n}")?;
-                        }
-                        Err(err) => {
-                            write!(f, "failed to add v6 routes: {err}")?;
-                        }
-                    }
-                }
-
-                Ok(())
+            MgdReconcilerStatus::Success { routers } => {
+                write!(f, "applied desired router set ({routers} routers)")
             }
         }
     }
@@ -1037,10 +754,6 @@ mod tests {
         );
     }
 
-    fn peer_ip(last_octet: u8) -> IpAddr {
-        IpAddr::V4(Ipv4Addr::new(198, 51, 100, last_octet))
-    }
-
     fn port_failure(port_id: &str, error: &str) -> DpdPortOperationFailure {
         DpdPortOperationFailure {
             port_id: port_id.to_string(),
@@ -1054,13 +767,6 @@ mod tests {
     ) -> DpdNatReconcilerStatusNatEntryFailure {
         DpdNatReconcilerStatusNatEntryFailure {
             entry: nat_entry(last_octet),
-            error: error.to_string(),
-        }
-    }
-
-    fn bfd_failure(last_octet: u8, error: &str) -> MgdBfdOperationFailure {
-        MgdBfdOperationFailure {
-            peer: peer_ip(last_octet),
             error: error.to_string(),
         }
     }
@@ -1136,42 +842,12 @@ mod tests {
             },
             mgd_reconciler: ReconcilerStatus {
                 current_status: ReconcilerCurrentStatus::Idle,
-                last_completion: completed(MgdReconcilerStatus {
-                    static_routes_status:
-                        MgdStaticRouteReconcilerStatus::Complete {
-                            unchanged: 4,
-                            delete_v4_result: Err("delete failed".to_string()),
-                            add_v4_result: Ok(2),
-                            delete_v6_result: Ok(3),
-                            add_v6_result: Ok(5),
-                        },
-                    bgp_status: MgdBgpReconcilerStatus::Complete {
-                        counts: MgdBgpReconcilerStatusOpCount {
-                            routers_created: 1,
-                            numbered_peers_updated: 2,
-                            numbered_peers_deleted: 1,
-                            ..Default::default()
-                        },
-                        did_change_max_paths: true,
-                        errors: vec![
-                            "bgp failed".to_string(),
-                            "bgp failed again".to_string(),
-                        ],
+                last_completion: completed(
+                    MgdReconcilerStatus::FailedApplying {
+                        routers: 2,
+                        error: "apply failed".to_string(),
                     },
-                    bfd_status: MgdBfdReconcilerStatus::Complete {
-                        unchanged: BTreeSet::from([peer_ip(1), peer_ip(2)]),
-                        remove_success: vec![peer_ip(3)],
-                        remove_failure: vec![
-                            bfd_failure(4, "remove failed"),
-                            bfd_failure(5, "remove failed again"),
-                        ],
-                        add_success: vec![peer_ip(6)],
-                        add_failure: vec![
-                            bfd_failure(7, "add failed"),
-                            bfd_failure(8, "add failed again"),
-                        ],
-                    },
-                }),
+                ),
             },
             uplinkd_reconciler: ReconcilerStatus {
                 current_status: ReconcilerCurrentStatus::Idle,
@@ -1237,27 +913,8 @@ mod tests {
             },
             mgd_reconciler: ReconcilerStatus {
                 current_status: ReconcilerCurrentStatus::Idle,
-                last_completion: completed(MgdReconcilerStatus {
-                    static_routes_status:
-                        MgdStaticRouteReconcilerStatus::Complete {
-                            unchanged: 0,
-                            delete_v4_result: Ok(0),
-                            add_v4_result: Ok(0),
-                            delete_v6_result: Ok(0),
-                            add_v6_result: Ok(0),
-                        },
-                    bgp_status: MgdBgpReconcilerStatus::Complete {
-                        counts: MgdBgpReconcilerStatusOpCount::default(),
-                        did_change_max_paths: false,
-                        errors: Vec::new(),
-                    },
-                    bfd_status: MgdBfdReconcilerStatus::Complete {
-                        unchanged: BTreeSet::new(),
-                        remove_success: Vec::new(),
-                        remove_failure: Vec::new(),
-                        add_success: Vec::new(),
-                        add_failure: Vec::new(),
-                    },
+                last_completion: completed(MgdReconcilerStatus::Success {
+                    routers: 0,
                 }),
             },
             uplinkd_reconciler: ReconcilerStatus {

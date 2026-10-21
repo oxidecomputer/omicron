@@ -473,6 +473,7 @@ impl DataStore {
     ) -> UpdateResult<SwitchPortSettingsCombinedResult> {
         let delete_err = OptionalError::new();
         let create_err = OptionalError::new();
+        let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
 
         // TODO https://github.com/oxidecomputer/omicron/issues/2811
@@ -481,6 +482,7 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let delete_err = delete_err.clone();
                 let create_err = create_err.clone();
+                let err = err.clone();
                 let selector = NameOrId::Id(id.into_untyped_uuid());
                 async move {
                     use nexus_db_schema::schema::switch_port_settings_port_config::dsl as port_config_dsl;
@@ -507,14 +509,28 @@ impl DataStore {
                             .await?;
 
                     do_switch_port_settings_delete(&conn, &selector, delete_err).await?;
-                    do_switch_port_settings_create(
+                    let result = do_switch_port_settings_create(
                         &conn, Some(id), params, allow_ddm_traffic, create_err,
-                    ).await
+                    ).await?;
+
+                    use nexus_db_schema::schema::switch_port::dsl as port_dsl;
+                    let ports = port_dsl::switch_port
+                        .filter(port_dsl::port_settings_id.eq(to_db_typed_uuid(id)))
+                        .select((port_dsl::switch_slot, port_dsl::port_name))
+                        .load_async::<(DbSwitchSlot, String)>(&conn)
+                        .await?;
+                    Self::ensure_port_settings_neighbors_unused(
+                        &conn, id.into_untyped_uuid(), &ports, &err,
+                    ).await?;
+                    Ok(result)
                 }
             })
             .await
             .map_err(|e| {
-                if let Some(err) = delete_err.take() {
+                if let Some(err) = err.take() {
+                    err
+                }
+                else if let Some(err) = delete_err.take() {
                     match err {
                         SwitchPortSettingsDeleteError::SwitchPortSettingsNotFound => {
                             Error::invalid_request("port settings not found")
@@ -1063,6 +1079,21 @@ impl DataStore {
                             }
                         }
 
+                    }
+
+                    if let Some(psid) = port_settings_id {
+                        let port = switch_port_dsl::switch_port
+                            .filter(switch_port_dsl::id.eq(switch_port_id))
+                            .select(switch_port_dsl::port_name)
+                            .first_async::<String>(&conn)
+                            .await?;
+                        Self::ensure_port_settings_neighbors_unused(
+                            &conn,
+                            psid.into_untyped_uuid(),
+                            &[(switch, port)],
+                            &err,
+                        )
+                        .await?;
                     }
 
                     // perform the requested update

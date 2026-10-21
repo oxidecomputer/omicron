@@ -9,6 +9,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use ipnetwork::IpNetwork;
 use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::BfdSession;
 use nexus_db_model::DbSwitchSlot;
@@ -59,12 +60,32 @@ impl DataStore {
             switch_slot: config.switch_slot.into(),
         };
 
-        diesel::insert_into(dsl::bfd_session)
-            .values(session)
-            .returning(BfdSession::as_returning())
-            .get_result_async(&*conn)
+        let err = OptionalError::new();
+        self.transaction_retry_wrapper("bfd_session_create")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let session = session.clone();
+                async move {
+                    Self::ensure_bfd_peer_unused(
+                        &conn,
+                        session.switch_slot,
+                        session.remote.ip(),
+                        &err,
+                    )
+                    .await?;
+                    diesel::insert_into(dsl::bfd_session)
+                        .values(session)
+                        .returning(BfdSession::as_returning())
+                        .get_result_async(&conn)
+                        .await
+                }
+            })
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| {
+                err.take().unwrap_or_else(|| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })
+            })
     }
 
     pub async fn bfd_session_delete(

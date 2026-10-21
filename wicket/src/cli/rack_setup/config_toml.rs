@@ -105,6 +105,15 @@ impl TomlTemplate {
             config.rack_network_config.as_ref(),
         );
 
+        if let Some(routing) = &config.routing {
+            let routing_doc = toml_edit::ser::to_document(routing)
+                .expect("routing configuration serializes to TOML");
+            let mut routing = routing_doc.into_table();
+            expand_announce_sets(&mut routing);
+            expand_router_configurations(&mut routing);
+            doc.insert("routing", Item::Table(routing));
+        }
+
         Self { doc }
     }
 }
@@ -282,6 +291,48 @@ fn build_sleds_array(sleds: &IdOrdMap<BootstrapSledDescription>) -> Array {
     }
 
     array
+}
+
+/// Write each announce set as a table of its own.
+fn expand_announce_sets(routing: &mut Table) {
+    let Some(item) = routing.remove("announce_sets") else {
+        return;
+    };
+    let mut sets = item.into_table().expect("announce sets are a table");
+    // No `[routing.announce_sets]` header of its own.
+    sets.set_implicit(true);
+    for (_, set) in sets.iter_mut() {
+        let table = std::mem::take(set)
+            .into_table()
+            .expect("an announce set is a table");
+        *set = Item::Table(table);
+    }
+    routing.insert("announce_sets", Item::Table(sets));
+}
+
+/// Write each router configuration, and each of its switches, as a table of
+/// its own instead of one inline table for all of them.
+fn expand_router_configurations(routing: &mut Table) {
+    let Some(item) = routing.remove("router_configurations") else {
+        return;
+    };
+    let mut rcs = item.into_table().expect("router configurations are a table");
+    // No `[routing.router_configurations]` header of its own.
+    rcs.set_implicit(true);
+    for (_, rc) in rcs.iter_mut() {
+        let mut table = std::mem::take(rc)
+            .into_table()
+            .expect("a router configuration is a table");
+        for switch in ["switch0", "switch1"] {
+            if let Some(block) = table.remove(switch) {
+                let block =
+                    block.into_table().expect("switch settings are a table");
+                table.insert(switch, Item::Table(block));
+            }
+        }
+        *rc = Item::Table(table);
+    }
+    routing.insert("router_configurations", Item::Table(rcs));
 }
 
 fn populate_network_table(
@@ -745,6 +796,27 @@ mod tests {
     use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 
     #[test]
+    fn round_trip_named_routing_without_secrets() {
+        let example = ExampleRackSetupData::with_named_routing();
+        let template =
+            TomlTemplate::populate(&example.current_insensitive).to_string();
+        let parsed: PutRssUserConfigInsensitive =
+            toml::from_str(&template).unwrap();
+        assert_eq!(parsed, example.put_insensitive);
+        let routing = parsed.routing.unwrap();
+        let rc = routing.router_configurations.values().next().unwrap();
+        assert_eq!(rc.switches().count(), 2);
+        assert!(routing.recovery_silo_router_configurations.is_empty());
+        // The rendered data references keys; it never contains a secret field.
+        let data: toml::Value = toml::from_str(&template).unwrap();
+        assert!(!data["routing"].to_string().contains("md5_auth_key"));
+        expectorate::assert_contents(
+            "tests/output/example_named_routing.toml",
+            &template,
+        );
+    }
+
+    #[test]
     fn round_trip_nonempty_config() {
         let example = ExampleRackSetupData::non_empty();
         let template =
@@ -767,6 +839,7 @@ mod tests {
         // empty values, since it provides a useful comment and example for the
         // operator to create their own data from.
         let empty = CurrentRssUserConfigInsensitive {
+            routing: None,
             bootstrap_sleds: IdOrdMap::new(),
             ntp_servers: Vec::new(),
             dns_servers: Vec::new(),

@@ -73,26 +73,7 @@ impl super::Nexus {
                             format!("unnumbered peer {}", p.bgp_config)
                         }
                     };
-                    if key.len() > 80 {
-                        return Err(Error::invalid_value(
-                            "md5_auth_key",
-                            format!(
-                                "md5 auth key for {} is longer than 80 characters",
-                                peer_id
-                            ),
-                        ));
-                    }
-                    for c in key.chars() {
-                        if !c.is_ascii() || c.is_ascii_control() {
-                            return Err(Error::invalid_value(
-                                "md5_auth_key",
-                                format!(
-                                    "md5 auth key for {} must be printable ascii",
-                                    peer_id
-                                ),
-                            ));
-                        }
-                    }
+                    validate_md5_auth_key(&peer_id, key)?;
                 }
             }
         }
@@ -358,4 +339,43 @@ pub(crate) async fn list_switch_ports_with_uplinks(
 ) -> ListResultVec<SwitchPort> {
     opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
     datastore.switch_ports_with_uplinks(opctx).await
+}
+
+/// Refuse a BGP MD5 key that is longer than 80 characters or isn't printable
+/// ASCII. `peer_id` names the peer in the error.
+pub(crate) fn validate_md5_auth_key(
+    peer_id: &str,
+    key: &str,
+) -> Result<(), Error> {
+    if key.len() > 80 {
+        return Err(Error::invalid_value(
+            "md5_auth_key",
+            format!(
+                "md5 auth key for {} is longer than 80 characters",
+                peer_id
+            ),
+        ));
+    }
+    for c in key.chars() {
+        if !c.is_ascii() || c.is_ascii_control() {
+            return Err(Error::invalid_value(
+                "md5_auth_key",
+                format!("md5 auth key for {} must be printable ascii", peer_id),
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use super::validate_md5_auth_key;
+
+    #[test]
+    fn md5_auth_key_check() {
+        assert!(validate_md5_auth_key("peer", &"a".repeat(80)).is_ok());
+        assert!(validate_md5_auth_key("peer", &"a".repeat(81)).is_err());
+        assert!(validate_md5_auth_key("peer", "a\tb").is_err());
+        assert!(validate_md5_auth_key("peer", "caf\u{e9}").is_err());
+    }
 }

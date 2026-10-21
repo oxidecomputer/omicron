@@ -27,7 +27,7 @@ oxnet.workspace = true
 oxql-types.workspace = true
 parse-display.workspace = true
 regex.workspace = true
-schemars.workspace = true
+schemars = { workspace = true, features = ["url"] }
 semver.workspace = true
 sled-agent-types-versions.workspace = true
 sled-hardware-types.workspace = true
@@ -38,5 +38,5 @@ strum.workspace = true
 thiserror.workspace = true
 tough.workspace = true
 tufaceous-artifact.workspace = true
-url.workspace = true
+url = { workspace = true, features = ["serde"] }
 uuid.workspace = true

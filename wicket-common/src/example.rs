@@ -58,6 +58,29 @@ impl ExampleRackSetupData {
         Self::new(&[ExampleRackSetupDataTweak::OneBgpPeerPerPort])
     }
 
+    /// Named routing on both switches, with a separately uploaded BGP key.
+    pub fn with_named_routing() -> Self {
+        let mut example = Self::non_empty();
+        let routing = serde_json::from_value(serde_json::json!({
+            "announce_sets": {"external-prefixes": {"description": "External pool", "prefixes": ["198.51.100.0/24"]}},
+            "router_configurations": {"external": {"description": "Both switches",
+                "switch0": {"bgp": {"asn": 65000, "max_paths": 2, "announce_set": "external-prefixes"},
+                 "bgp_peers": [{"name": "customer", "addr": "198.51.101.1", "src_addr": "198.51.101.2", "auth_key_id": "named-bgp"}],
+                 "routes": [{"name": "default", "destination": "0.0.0.0/0", "nexthop": "198.51.101.1"}],
+                 "bfd_peers": [{"name": "customer", "remote": "198.51.101.1", "local": "198.51.101.2", "mode": "single_hop", "detection_threshold": 3, "required_rx": 1000000}]},
+                "switch1": {"bgp": {"asn": 65001, "max_paths": 1, "announce_set": "external-prefixes"},
+                 "routes": [{"name": "default", "destination": "0.0.0.0/0", "nexthop": "198.51.101.5"}]}
+            }},
+            "control_plane_router_configurations": [{"router_configuration": "external", "priority": 100}],
+            "recovery_silo_router_configurations": []
+        })).unwrap();
+        example.current_insensitive.routing = Some(routing);
+        example.put_insensitive.routing =
+            example.current_insensitive.routing.clone();
+        example.bgp_auth_keys.push("named-bgp".parse().unwrap());
+        example
+    }
+
     fn new(tweaks: &[ExampleRackSetupDataTweak]) -> Self {
         let bgp_key_1_id: BgpAuthKeyId = "bgp-key-1".parse().unwrap();
         let bgp_key_2_id: BgpAuthKeyId = "bgp-key-2".parse().unwrap();
@@ -330,6 +353,7 @@ impl ExampleRackSetupData {
         };
 
         let mut current_insensitive = CurrentRssUserConfigInsensitive {
+            routing: None,
             bootstrap_sleds,
             dns_servers,
             external_dns_zone_name,
@@ -354,6 +378,7 @@ impl ExampleRackSetupData {
 
         // Build the PutRssUserConfigInsensitive from the tweaked data.
         let put_insensitive = PutRssUserConfigInsensitive {
+            routing: current_insensitive.routing.clone(),
             bootstrap_sleds: current_insensitive
                 .bootstrap_sleds
                 .iter()
