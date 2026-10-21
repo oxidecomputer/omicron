@@ -724,10 +724,8 @@ struct InstanceRunner {
 
 impl InstanceRunner {
     /// How long to wait for VMM shutdown to complete before forcefully
-    /// terminating the zone.
-    // TODO(lif): need to ignore this for graceful stops, which can have
-    // much longer (3600 seconds max!) timeouts. the 600 second grace period
-    // here was written at a time when all stops/reboots were forceful
+    /// terminating the zone. This is added to the stop request's ACPI
+    /// shutdown timeout, if any.
     const STOP_GRACE_PERIOD: Duration = Duration::from_secs(60 * 10);
 
     #[expect(clippy::too_many_arguments)]

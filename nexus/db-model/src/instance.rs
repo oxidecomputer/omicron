@@ -20,9 +20,7 @@ use diesel::pg;
 use diesel::prelude::*;
 use diesel::sql_types::{Bool, Nullable};
 use nexus_db_schema::schema::{disk, external_ip, external_subnet, instance};
-use nexus_types::external_api::instance::{
-    self as instance_types, InstanceShutdownPolicy,
-};
+use nexus_types::external_api::instance as instance_types;
 use omicron_generation_kinds::{
     InstanceStateGeneration, InstanceStateGenerationKind,
     InstanceUpdaterGeneration, InstanceUpdaterGenerationKind,
@@ -190,31 +188,29 @@ impl Instance {
             IntendedState::Stopped
         };
 
-        let (shutdown_policy_action, shutdown_policy_timeout) =
-            match params.shutdown_policy {
-                Some(InstanceShutdownPolicy::HardOff) => {
-                    (InstanceShutdownAction::HardOff, None)
-                }
-                // RFD 622: "A user-configurable timeout for the instance to
-                // finish stopping itself should be present, bounded between
-                // 1 and 3600 seconds, inclusive"
-                Some(InstanceShutdownPolicy::PowerButton { timeout_secs })
-                    if (1..=3600).contains(&timeout_secs) =>
-                {
-                    (
-                        InstanceShutdownAction::PowerButton,
-                        Some(TimeDelta::seconds(timeout_secs as i64)),
-                    )
-                }
-                // RFD 622: "To generally match the behavior of other cloud
-                // providers, the default action for an instance that does not
-                // have an explicit policy should be graceful-stop with a
-                // timeout of 600 seconds."
-                _ => (
-                    InstanceShutdownAction::PowerButton,
-                    Some(TimeDelta::minutes(10)),
-                ),
-            };
+        use instance_types::InstanceShutdownPolicy;
+        let (shutdown_policy_action, shutdown_policy_timeout) = match params
+            .shutdown_policy
+        {
+            Some(InstanceShutdownPolicy::HardOff) => {
+                (InstanceShutdownAction::HardOff, None)
+            }
+            // RFD 622: "A user-configurable timeout for the instance to
+            // finish stopping itself should be present, bounded between
+            // 1 and 3600 seconds, inclusive"
+            Some(InstanceShutdownPolicy::PowerButton { timeout_secs }) => (
+                InstanceShutdownAction::PowerButton,
+                Some(TimeDelta::seconds(timeout_secs.clamp(1, 3600) as i64)),
+            ),
+            // RFD 622: "To generally match the behavior of other cloud
+            // providers, the default action for an instance that does not
+            // have an explicit policy should be graceful-stop with a
+            // timeout of 600 seconds."
+            None => (
+                InstanceShutdownAction::PowerButton,
+                Some(TimeDelta::minutes(10)),
+            ),
+        };
 
         Self {
             identity,
@@ -322,7 +318,10 @@ impl Instance {
         }
     }
 
-    pub fn shutdown_policy(&self) -> Option<InstanceShutdownPolicy> {
+    pub fn shutdown_policy(
+        &self,
+    ) -> Option<instance_types::InstanceShutdownPolicy> {
+        use instance_types::InstanceShutdownPolicy;
         // return None if timeout NULL or negative (enforced by sql-side check)
         let timeout_secs: u64 =
             self.shutdown_policy_timeout?.num_seconds().try_into().ok()?;
@@ -626,7 +625,7 @@ impl InstanceAutoRestart {
     }
 }
 
-impl_enum_type!(
+crate::impl_enum_type!(
     InstanceShutdownActionEnum:
 
     #[derive(
@@ -649,6 +648,7 @@ impl_enum_type!(
     PowerButton => b"power_button"
 );
 
+#[allow(clippy::derivable_impls)] // impl_enum_type doesn't afford #[default]
 impl Default for InstanceShutdownAction {
     fn default() -> Self {
         Self::HardOff

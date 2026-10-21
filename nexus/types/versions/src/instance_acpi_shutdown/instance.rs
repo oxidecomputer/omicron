@@ -88,7 +88,7 @@ impl From<v2026_06_08_00::instance::Instance> for Instance {
             boot_disk_id: value.boot_disk_id,
             runtime: value.runtime,
             auto_restart_status: value.auto_restart_status,
-            cpu_platform: value.cpu_platform.map(Into::into),
+            cpu_platform: value.cpu_platform,
             enable_jumbo_frames: value.enable_jumbo_frames,
             shutdown_policy: None,
         }
@@ -345,6 +345,7 @@ pub struct InstanceStopOrRebootParams {
     pub project: Option<NameOrId>,
     /// Whether to override the instance's configured Shutdown Policy, if any,
     /// and hard-cut the power of the VM guest for this stop or reboot request.
-    // TODO(lif): rename to 'force' before PR?
+    // TODO(lif): rename to 'force' before undrafting PR?
+    // (easier to grep for 'skip_os_shutdown' than 'force' in codebase)
     pub skip_os_shutdown: Option<bool>,
 }
