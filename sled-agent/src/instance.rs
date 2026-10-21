@@ -1458,6 +1458,16 @@ impl InstanceRunner {
     ///
     /// This routine is safe to call even if the instance's zone was never
     /// started. It is also safe to call multiple times on a single instance.
+    ///
+    /// # Notes
+    ///
+    /// This method needs to remain cancel-safe. It's possible for the
+    /// `InstanceRunner` to construct a future that calls this, and then have
+    /// new termination requests cancel it. (See the construction of the `op`
+    /// future in `InstanceRunner::run()`, for example.)
+    ///
+    /// That means this must be resumable from any internal await point, so take
+    /// care when updating this method.
     async fn remove_propolis_zone(&mut self) {
         let zname = propolis_zone_name(&self.propolis_id);
 
@@ -1465,14 +1475,15 @@ impl InstanceRunner {
         //
         // If there is nothing here, then there is no `RunningZone`, and so
         // there's no zone or resources to clean up at all.
-        let mut running_state = if let Some(state) = self.running_state.take() {
-            state
-        } else {
+        //
+        // See note on the method about cancel-safety, but we don't take out of
+        // this option until we're completely finished.
+        let Some(running_state) = self.running_state.as_mut() else {
             debug!(
                 self.log,
-                "Instance::terminate() called with no running state"
+                "InstanceRunner::remove_propolis_zone() called with \
+                no running state"
             );
-
             return;
         };
 
@@ -1512,45 +1523,87 @@ impl InstanceRunner {
 
         // Ensure that no zone exists. This succeeds even if no zone was ever
         // created.
-        // NOTE: we call`Zones::halt_and_remove_logged` directly instead of
-        // `RunningZone::stop` in case we're called between creating the
-        // zone and assigning `running_state`.
+        //
+        // NOTE: we call `Zones::halt_and_remove_logged` directly instead of
+        // `RunningZone::stop()`, because that cannot be retried (see #7881)
+        // on failure.
         warn!(self.log, "Halting and removing zone: {}", zname);
-        let result = tokio::time::timeout(
-            Duration::from_secs(60 * 5),
-            omicron_common::backoff::retry(
-                omicron_common::backoff::retry_policy_local(),
-                || async {
-                    self.zone_builder_factory
-                        .zones_api()
-                        .halt_and_remove_logged(&self.log, &zname)
-                        .await
-                        .map_err(|e| {
-                            if e.is_invalid_state() {
-                                BackoffError::transient(e)
-                            } else {
-                                BackoffError::permanent(e)
-                            }
-                        })
-                },
-            ),
+        omicron_common::backoff::retry_notify_ext(
+            omicron_common::backoff::retry_policy_local(),
+            || async {
+                self.zone_builder_factory
+                    .zones_api()
+                    .halt_and_remove_logged(&self.log, &zname)
+                    .await
+                    .map_err(BackoffError::transient)
+            },
+            |e, count, duration| {
+                const WARN_DURATION: Duration = Duration::from_mins(2);
+                const ERR_DURATION: Duration = Duration::from_mins(5);
+                if duration > ERR_DURATION {
+                    error!(
+                        &self.log,
+                        "failed to stop Propolis zone after more than \
+                        {ERR_DURATION:?}. Retries will continue, but the \
+                        zone could be stuck";
+                        "zone_name" => &zname,
+                        "attempts" => count,
+                        "duration" => ?duration,
+                        "error" => InlineErrorChain::new(&e),
+                    );
+                } else if duration > WARN_DURATION {
+                    warn!(
+                        &self.log,
+                        "failed to stop Propolis zone after more than \
+                        {WARN_DURATION:?}, retrying";
+                        "zone_name" => &zname,
+                        "attempts" => count,
+                        "duration" => ?duration,
+                        "error" => InlineErrorChain::new(&e),
+                    );
+                } else {
+                    debug!(
+                        &self.log,
+                        "failed to stop Propolis zone, retrying";
+                        "zone_name" => &zname,
+                        "attempts" => count,
+                        "duration" => ?duration,
+                        "error" => InlineErrorChain::new(&e),
+                    );
+                }
+            },
         )
-        .await;
-        match result {
-            Ok(Ok(_)) => {}
-            Ok(Err(e)) => panic!("{e}"),
-            Err(_) => {
-                panic!("Zone {zname:?} could not be halted within 5 minutes")
-            }
-        }
+        .await
+        .expect("infinite retry loop stopping Propolis zone");
 
         // See if there are any runtime objects to clean up.
         //
-        // We already removed the zone above but mark it as stopped
-        running_state.running_zone.stop().await.unwrap();
+        // We already removed the zone using the "direct" zones API above. While
+        // that does actually operate on the zone on the host, it doesn't touch
+        // the in-memory state in `running_state`. Calling this again here will
+        // update that to reflect the actual state of the zone. This should only
+        // fail if something like `zoneadm list` also fails, since the zone must
+        // be stopped. But regardless, log an error and continue if it does
+        // fail.
+        if let Err(e) = running_state.running_zone.stop().await {
+            error!(
+                &self.log,
+                "RunningZone::stop() failed after Propolis \
+                zone was already stopped";
+                "zone_name" => &zname,
+                "error" => e,
+            );
+        }
 
         // Remove any OPTE ports from the port manager.
         running_state.running_zone.release_opte_ports();
+
+        // Now that we're done, we can actually take the running state out of
+        // the option.
+        //
+        // NOTE: No more await points after this line. This method needs to
+        // remain cancel-safe.
+        let _ = self.running_state.take();
     }
 
     fn merge_existing_ip_stack_with_request(
