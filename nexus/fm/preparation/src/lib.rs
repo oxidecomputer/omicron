@@ -819,6 +819,7 @@ mod tests {
                     alerts_requested,
                     support_bundles_requested: iddqd::IdOrdMap::new(),
                     facts: iddqd::IdOrdMap::new(),
+                    problems: iddqd::IdOrdMap::new(),
                 }
             };
 

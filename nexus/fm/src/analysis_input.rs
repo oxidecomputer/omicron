@@ -726,6 +726,7 @@ mod tests {
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
                     facts: Default::default(),
+                    problems: Default::default(),
                 }
             };
             let open_case2 = {
@@ -747,6 +748,7 @@ mod tests {
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
                     facts: Default::default(),
+                    problems: Default::default(),
                 }
             };
             let closed_case_with_unmarked = {
@@ -775,6 +777,7 @@ mod tests {
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
                     facts: Default::default(),
+                    problems: Default::default(),
                 }
             };
             let closed_case_without_unmarked = {
@@ -797,6 +800,7 @@ mod tests {
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
                     facts: Default::default(),
+                    problems: Default::default(),
                 }
             };
 
@@ -1234,6 +1238,7 @@ mod tests {
             .collect(),
             support_bundles_requested: IdOrdMap::new(),
             facts: IdOrdMap::new(),
+            problems: IdOrdMap::new(),
         };
 
         let mut builder = builder_with_closed_case(closed_case);
@@ -1286,6 +1291,7 @@ mod tests {
             .collect(),
             support_bundles_requested: IdOrdMap::new(),
             facts: IdOrdMap::new(),
+            problems: IdOrdMap::new(),
         };
 
         let mut builder = builder_with_closed_case(closed_case);
@@ -1338,6 +1344,7 @@ mod tests {
             .into_iter()
             .collect(),
             facts: IdOrdMap::new(),
+            problems: IdOrdMap::new(),
         };
 
         let mut builder = builder_with_closed_case(closed_case);
@@ -1386,6 +1393,7 @@ mod tests {
             .into_iter()
             .collect(),
             facts: IdOrdMap::new(),
+            problems: IdOrdMap::new(),
         };
 
         let mut builder = builder_with_closed_case(closed_case);
