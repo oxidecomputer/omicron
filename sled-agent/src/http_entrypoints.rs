@@ -19,8 +19,8 @@ use dropshot::{
 };
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::{
-    ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
-    SledIdentifiers, VirtualNetworkInterfaceHost,
+    ExternalIpGatewayMap, PortRouterList, ResolvedVpcRouteSet,
+    ResolvedVpcRouteState, SledIdentifiers, VirtualNetworkInterfaceHost,
 };
 use range_requests::PotentialRange;
 use sled_agent_api::*;
@@ -81,7 +81,9 @@ use trust_quorum_types::messages::{
 use trust_quorum_types::status::{CommitStatus, NodeStatus};
 
 // Fixed identifiers for prior versions only
-use sled_agent_types_versions::{v20, v25, v26, v30, v33, v39, v42, v47, v48};
+use sled_agent_types_versions::{
+    v20, v25, v26, v30, v33, v39, v42, v47, v48, v63,
+};
 use sled_diagnostics::{
     SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
 };
@@ -898,6 +900,55 @@ impl SledAgentApi for SledAgentImpl {
                 Ok(HttpResponseOk(vnics))
             })
             .await
+    }
+
+    async fn set_router_list(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<PortRouterList>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let body_args = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.set_port_router_list(&body_args)
+                    .await
+                    .map_err(Error::from)?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn list_router_lists(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<PortRouterList>>, HttpError> {
+        let sa = rqctx.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let lists =
+                    sa.list_port_router_lists().await.map_err(Error::from)?;
+                Ok(HttpResponseOk(lists))
+            })
+            .await
+    }
+
+    async fn write_network_bootstore_config_v63(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v63::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let bs = sa.bootstore();
+        let body = body.into_inner();
+        let config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+
+        bs.update_network_config(config).await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failed to write updated config to boot store: {}",
+                InlineErrorChain::new(&e),
+            ))
+        })?;
+
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn write_network_bootstore_config_v48(

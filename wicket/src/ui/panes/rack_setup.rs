@@ -577,6 +577,7 @@ fn rss_config_text<'a>(
         external_dns_ips,
         external_dns_zone_name,
         rack_network_config,
+        routing,
         allowed_source_ips,
         external_jumbo_frames_opt_in_enabled,
     } = &config.insensitive;
@@ -1182,6 +1183,102 @@ fn rss_config_text<'a>(
         }
     } else {
         append_list(&mut spans, "Uplinks: ".into(), vec![]);
+    }
+
+    if let Some(routing) = routing {
+        for (label, assignments) in [
+            (
+                "Control-plane routers: ",
+                &routing.control_plane_router_configurations,
+            ),
+            (
+                "Recovery-silo routers: ",
+                &routing.recovery_silo_router_configurations,
+            ),
+        ] {
+            let items = if assignments.is_empty() {
+                vec![vec![Span::styled(
+                    "  None (external routing disabled)",
+                    warn_style,
+                )]]
+            } else {
+                assignments
+                    .iter()
+                    .map(|entry| {
+                        plain_list_item(format!(
+                            "{} (priority {})",
+                            entry.router_configuration, entry.priority
+                        ))
+                    })
+                    .collect()
+            };
+            append_list(&mut spans, label.into(), items);
+        }
+        for set in &routing.announce_sets {
+            append_list(
+                &mut spans,
+                format!("Announce set {}: ", set.name).into(),
+                set.prefixes
+                    .iter()
+                    .map(|p| plain_list_item(p.to_string()))
+                    .collect(),
+            );
+        }
+        for rc in &routing.router_configurations {
+            if rc.switches.is_empty() {
+                append_list(
+                    &mut spans,
+                    format!("Router {} switches: ", rc.name).into(),
+                    vec![],
+                );
+            }
+            for block in &rc.switches {
+                let switch = match block.switch {
+                    SwitchSlot::Switch0 => "switch0",
+                    SwitchSlot::Switch1 => "switch1",
+                };
+                let mut items = Vec::new();
+                if let Some(bgp) = &block.bgp_config {
+                    items.push(plain_list_item(format!(
+                        "BGP ASN {}; max paths {}; announce set {}",
+                        bgp.asn, bgp.max_paths, bgp.bgp_announce_set
+                    )));
+                }
+                for peer in &block.bgp_peers {
+                    let key = peer
+                        .auth_key_id
+                        .as_ref()
+                        .map(|id| format!("; authentication key {id}"))
+                        .unwrap_or_default();
+                    items.push(plain_list_item(format!(
+                        "BGP peer {}{key}",
+                        peer.name
+                    )));
+                }
+                for route in &block.routes {
+                    items.push(plain_list_item(format!(
+                        "Route {}: {} via {}",
+                        route.name, route.dst, route.gw
+                    )));
+                }
+                for peer in &block.bfd_peers {
+                    items.push(plain_list_item(format!(
+                        "BFD peer {}: {}",
+                        peer.name, peer.remote
+                    )));
+                }
+                append_list(
+                    &mut spans,
+                    format!("Router {} / {switch}: ", rc.name).into(),
+                    items,
+                );
+            }
+        }
+    } else {
+        spans.push(Line::from(vec![
+            Span::styled("Routing: ", label_style),
+            Span::styled("Legacy default", ok_style),
+        ]));
     }
 
     append_list(

@@ -10,6 +10,7 @@ workspace = true
 [dependencies]
 bootstrap-agent-lockstep-types.workspace = true
 iddqd.workspace = true
+nexus-types-versions.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-workspace-hack.workspace = true
@@ -19,5 +20,6 @@ sled-hardware-types.workspace = true
 toml.workspace = true
 
 [dev-dependencies]
+serde_json.workspace = true
 camino-tempfile.workspace = true
 sled-agent-rack-setup.workspace = true

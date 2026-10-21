@@ -38,6 +38,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::internal::shared::RouterListEntry;
 use omicron_uuid_kinds::GenericUuid as _;
 use omicron_uuid_kinds::ProbeUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -45,6 +46,7 @@ use ref_cast::RefCast;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::probes::ProbeCreate;
 use slog_error_chain::InlineErrorChain;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 impl super::DataStore {
@@ -296,10 +298,14 @@ impl super::DataStore {
     /// all of them (in batches) and constructs the creation parameters. It
     /// makes enough queries to get all records, so should be used in
     /// latency-insensitive contexts like background tasks.
+    ///
+    /// Each probe gets its silo's router list from `silo_router_lists`; a
+    /// silo with no entry gets an empty list.
     pub async fn list_all_probe_create_params_for_sled_batched(
         &self,
         opctx: &OpContext,
         sled_id: SledUuid,
+        silo_router_lists: &HashMap<Uuid, Vec<RouterListEntry>>,
     ) -> Result<IdHashMap<ProbeCreate>, Error> {
         opctx.check_complex_operations_allowed()?;
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
@@ -316,9 +322,14 @@ impl super::DataStore {
                     &p.current_pagparams(),
                 )
                 .await?;
-            paginator =
-                p.found_batch(&batch, &|probe| probe.id.into_untyped_uuid());
-            for probe in batch {
+            paginator = p.found_batch(&batch, &|(probe, _)| {
+                probe.id.into_untyped_uuid()
+            });
+            for (mut probe, silo_id) in batch {
+                probe.router_list = silo_router_lists
+                    .get(&silo_id)
+                    .cloned()
+                    .unwrap_or_default();
                 all_probes_for_sled.insert_unique(probe).map_err(|err| {
                     Error::internal_error(format!(
                         "encountered multiple probe create parameters for \
@@ -339,9 +350,9 @@ impl super::DataStore {
         opctx: &OpContext,
         sled_id: SledUuid,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<ProbeCreate> {
+    ) -> ListResultVec<(ProbeCreate, Uuid)> {
         use nexus_db_schema::schema::{
-            external_ip, network_interface, probe, vpc, vpc_subnet,
+            external_ip, network_interface, probe, project, vpc, vpc_subnet,
         };
 
         // TODO-correctness: This inner join below assumes exactly one external
@@ -372,6 +383,10 @@ impl super::DataStore {
             .inner_join(
                 vpc::dsl::vpc.on(vpc::dsl::id.eq(vpc_subnet::dsl::vpc_id)),
             )
+            .inner_join(
+                project::dsl::project
+                    .on(project::dsl::id.eq(probe::dsl::project_id)),
+            )
             .filter(probe::dsl::sled.eq(sled_id.into_untyped_uuid()))
             .filter(probe::dsl::time_deleted.is_null())
             .filter(external_ip::dsl::time_deleted.is_null())
@@ -388,6 +403,7 @@ impl super::DataStore {
                 vpc_subnet::dsl::ipv4_block,
                 vpc_subnet::dsl::ipv6_block,
                 vpc::dsl::vni,
+                project::dsl::silo_id,
             ))
             .get_results_async::<(
                 Uuid,
@@ -399,6 +415,7 @@ impl super::DataStore {
                 nexus_db_model::Ipv4Net,
                 nexus_db_model::Ipv6Net,
                 nexus_db_model::Vni,
+                Uuid,
             )>(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -415,6 +432,7 @@ impl super::DataStore {
                             ipv4_block,
                             ipv6_block,
                             vni,
+                            silo_id,
                         )| {
                             let kind = db_ip_kind_to_sled(kind);
                             let external_ips =
@@ -428,11 +446,18 @@ impl super::DataStore {
                                 vni: vni.0,
                                 ..nic.into_internal(*ipv4_block, *ipv6_block)?
                             };
-                            Ok(ProbeCreate {
-                                id: ProbeUuid::from_untyped_uuid(probe_id),
-                                external_ips,
-                                interface,
-                            })
+                            Ok((
+                                ProbeCreate {
+                                    id: ProbeUuid::from_untyped_uuid(probe_id),
+                                    external_ips,
+                                    interface,
+                                    // Filled in from the silo's router
+                                    // list by
+                                    // `list_all_probe_create_params_for_sled_batched`.
+                                    router_list: Vec::new(),
+                                },
+                                silo_id,
+                            ))
                         },
                     )
                     .collect::<Result<_, _>>()

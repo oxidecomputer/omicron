@@ -105,6 +105,12 @@ impl TomlTemplate {
             config.rack_network_config.as_ref(),
         );
 
+        if let Some(routing) = &config.routing {
+            let routing_doc = toml_edit::ser::to_document(routing)
+                .expect("routing configuration serializes to TOML");
+            doc.insert("routing", Item::Table(routing_doc.into_table()));
+        }
+
         Self { doc }
     }
 }
@@ -745,6 +751,26 @@ mod tests {
     use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 
     #[test]
+    fn round_trip_named_routing_without_secrets() {
+        let example = ExampleRackSetupData::with_named_routing();
+        let template =
+            TomlTemplate::populate(&example.current_insensitive).to_string();
+        let parsed: PutRssUserConfigInsensitive =
+            toml::from_str(&template).unwrap();
+        assert_eq!(parsed, example.put_insensitive);
+        let routing = parsed.routing.unwrap();
+        assert_eq!(routing.router_configurations[0].switches.len(), 2);
+        assert!(routing.recovery_silo_router_configurations.is_empty());
+        // The rendered data references keys; it never contains a secret field.
+        let data: toml::Value = toml::from_str(&template).unwrap();
+        assert!(!data["routing"].to_string().contains("md5_auth_key"));
+        expectorate::assert_contents(
+            "tests/output/example_named_routing.toml",
+            &template,
+        );
+    }
+
+    #[test]
     fn round_trip_nonempty_config() {
         let example = ExampleRackSetupData::non_empty();
         let template =
@@ -767,6 +793,7 @@ mod tests {
         // empty values, since it provides a useful comment and example for the
         // operator to create their own data from.
         let empty = CurrentRssUserConfigInsensitive {
+            routing: None,
             bootstrap_sleds: IdOrdMap::new(),
             ntp_servers: Vec::new(),
             dns_servers: Vec::new(),

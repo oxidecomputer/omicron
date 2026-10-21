@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::handle::BgpSocketConfig;
-
 use super::*;
 use assert_matches::assert_matches;
 use httpmock::MockServer;
@@ -52,7 +50,6 @@ fn test_reconciler(server: &MockServer, log: &Logger) -> DdmdReconciler {
             dpd_addr: dummy_addr,
             mgd_addr: dummy_addr,
             ddmd_addr: *server.address(),
-            bgp_socket_config: BgpSocketConfig::for_test(dummy_addr),
         },
         OUR_SLOT,
         log,
@@ -63,6 +60,9 @@ fn networking_config(config: RackNetworkConfig) -> SystemNetworkingConfig {
     SystemNetworkingConfig {
         rack_network_config: config,
         blueprint_external_networking_config: None,
+        switch_router_configs: Default::default(),
+        control_plane_router_list:
+            sled_agent_types::router_config::default_router_list(),
     }
 }
 

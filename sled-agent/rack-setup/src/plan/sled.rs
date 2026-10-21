@@ -23,6 +23,8 @@ pub struct SledPlan {
 
     // Store the provided RSS configuration as part of the sled plan.
     pub config: Config,
+    pub routing:
+        Option<bootstrap_agent_lockstep_types::routing::RoutingInitialization>,
 }
 
 impl SledPlan {
@@ -68,6 +70,11 @@ impl SledPlan {
             sleds.insert(addr, allocation);
         }
 
-        Self { rack_id, sleds, config: config.clone() }
+        Self {
+            rack_id,
+            sleds,
+            config: config.clone(),
+            routing: config.routing.as_ref().map(|r| r.allocate()),
+        }
     }
 }

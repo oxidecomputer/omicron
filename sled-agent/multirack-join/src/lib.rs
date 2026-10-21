@@ -28,6 +28,7 @@ use sled_agent_bootstrap_common::{RssContext, RunRssError};
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::multirack::SledAgentStartState;
 use sled_agent_types::rack_init::rack_init_bootstore_generation;
+use sled_agent_types::router_config::default_router_list;
 use sled_agent_types::sled::{
     StartSledAgentRequest, StartSledAgentRequestBody,
 };
@@ -379,6 +380,8 @@ impl MultirackJoinServiceTask {
         let config = SystemNetworkingConfig {
             rack_network_config,
             blueprint_external_networking_config: None,
+            switch_router_configs: Default::default(),
+            control_plane_router_list: default_router_list(),
         };
 
         info!(

@@ -197,6 +197,10 @@ pub struct RackInitializationRequest {
     pub recovery_silo: RecoverySiloConfig,
     /// Initial rack network configuration
     pub rack_network_config: RackNetworkConfig,
+    /// Named RCs and IDs already installed by RSS.
+    #[serde(default)]
+    pub routing:
+        Option<bootstrap_agent_lockstep_types::routing::RoutingInitialization>,
     /// IPs or subnets allowed to make requests to user-facing services
     pub allowed_source_ips: AllowedSourceIps,
     /// Data used to write the initial trust quorum configuration to CRDB

@@ -8,6 +8,10 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
+nexus-types-versions.workspace = true
+mg-api-types.workspace = true
+oxnet.workspace = true
+uuid.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 iddqd.workspace = true

@@ -15,7 +15,11 @@ pub use bootstrap_agent_lockstep_types::RecoverySiloConfig;
 pub use bootstrap_agent_lockstep_types::RssStep;
 pub use bootstrap_agent_lockstep_types::ServiceIpPoolConfig;
 pub use bootstrap_agent_lockstep_types::ServiceIpPoolError;
+pub use bootstrap_agent_lockstep_types::routing::{
+    InitialRouterConfiguration, RoutingConfig, RoutingInitialization,
+};
 pub use iddqd::IdOrdMap;
+pub use nexus_types_versions::latest::networking::RouterConfigurationSwitch;
 pub use omicron_common::address::IpRange;
 pub use omicron_common::address::Ipv4Range;
 pub use omicron_common::address::Ipv6Range;
@@ -152,6 +156,7 @@ mod tests {
             allow_ddm_traffic: false,
         };
         RackInitializeRequest {
+            routing: None,
             trust_quorum_peers: Some(trust_quorum_peers()),
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyThese {
                 addrs: bootstrap_addrs(),
@@ -270,5 +275,73 @@ mod tests {
         let parsed = rack_initialize_request_from_file(example)
             .expect("parse the in-tree example config-rss.toml");
         assert_round_trips(&parsed);
+    }
+    #[test]
+    fn named_routing_round_trips_and_validates_before_initialization() {
+        let mut request = static_bfd_request();
+        let routing: RoutingConfig = serde_json::from_value(serde_json::json!({
+            "announce_sets": [{"name": "prefixes", "description": "test", "prefixes": ["198.51.100.0/24"]}],
+            "router_configurations": [{"name": "shared", "description": "test", "switches": [{
+                "switch": "switch0", "bgp_config": {"asn": 65042, "max_paths": 2, "bgp_announce_set": "prefixes"},
+                "bgp_peers": [{"name": "peer", "peer": {"type": "numbered", "addr": "203.0.113.9", "src_addr": "203.0.113.10"},
+                    "hold_time": 6, "keepalive": 2, "connect_retry": 3, "delay_open": 0, "idle_hold_time": 3,
+                    "enforce_first_as": false, "md5_auth_key": "routing-test-secret"}],
+                "routes": [{"name": "default", "dst": "0.0.0.0/0", "gw": "203.0.113.9"}],
+                "bfd_peers": [{"name": "bfd", "remote": "203.0.113.11", "mode": "multi_hop", "detection_threshold": 3, "required_rx": 4294967295u32}]
+            }]}],
+            "control_plane_router_configurations": [{"router_configuration": "shared", "priority": 100}],
+            "recovery_silo_router_configurations": []
+        })).unwrap();
+        let mut routing = routing;
+        let mut second = routing.router_configurations[0].switches[0].clone();
+        second.switch = SwitchSlot::Switch1;
+        routing.router_configurations[0].switches.push(second);
+        routing.validate(&request.rack_network_config).unwrap();
+        let plan = routing.allocate();
+        let specs = plan.switch_router_configs();
+        assert_eq!(
+            specs[&SwitchSlot::Switch0][0].id,
+            specs[&SwitchSlot::Switch1][0].id
+        );
+        assert_eq!(
+            plan.control_plane_router_list()[0].router_id,
+            Some(specs[&SwitchSlot::Switch0][0].id)
+        );
+        assert_eq!(
+            specs[&SwitchSlot::Switch0][0].bfd_peers[0].required_rx,
+            u64::from(u32::MAX)
+        );
+        assert!(routing.recovery_silo_router_configurations.is_empty());
+        request.routing = Some(routing.clone());
+        assert_round_trips(&request);
+        assert!(!format!("{request:?}").contains("routing-test-secret"));
+
+        let mut duplicate = routing.clone();
+        let repeated = duplicate.router_configurations[0].switches[0].clone();
+        duplicate.router_configurations[0].switches.push(repeated);
+        assert!(duplicate.validate(&request.rack_network_config).is_err());
+        let mut duplicate = routing.clone();
+        let mut other = duplicate.router_configurations[0].clone();
+        other.name = "another".parse().unwrap();
+        duplicate.router_configurations.push(other);
+        assert!(
+            duplicate.validate(&request.rack_network_config).is_err(),
+            "same-switch peer ownership conflict"
+        );
+        let mut invalid = routing.clone();
+        invalid.control_plane_router_configurations[0].router_configuration =
+            "missing".parse().unwrap();
+        assert!(invalid.validate(&request.rack_network_config).is_err());
+        let mut conflict = routing.clone();
+        conflict.router_configurations[0].switches[0].bfd_peers[0].remote =
+            request.rack_network_config.bfd[0].remote;
+        assert!(
+            conflict.validate(&request.rack_network_config).is_err(),
+            "legacy BFD conflict"
+        );
+        routing.control_plane_router_configurations.clear();
+        request.routing = Some(routing.clone());
+        assert_round_trips(&request);
+        assert!(routing.allocate().control_plane_router_list().is_empty());
     }
 }

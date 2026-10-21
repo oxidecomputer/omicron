@@ -85,7 +85,7 @@ fn borrow_line<'a>(line: &'a Line<'_>) -> Line<'a> {
     let spans = line
         .spans
         .iter()
-        .map(|span| Span::styled(span.content.as_ref(), span.style))
+        .map(|span| Span::styled(&*span.content, span.style))
         .collect::<Vec<_>>();
     Line::from(spans)
 }

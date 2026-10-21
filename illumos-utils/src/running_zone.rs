@@ -1139,6 +1139,7 @@ mod tests {
                 },
                 attached_subnets: vec![],
                 mtu: None,
+                router_list: &[],
             })
             .expect("Failed to create port");
         let port_name = port.name().to_string();

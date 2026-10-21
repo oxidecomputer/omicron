@@ -111,6 +111,7 @@ progenitor::generate_api!(
         RouteConfig = sled_agent_types_versions::latest::early_networking::RouteConfig,
         RouterId = omicron_common::api::internal::shared::RouterId,
         RouterLifetimeConfig = sled_agent_types_versions::latest::early_networking::RouterLifetimeConfig,
+        RouterListEntry = omicron_common::api::internal::shared::RouterListEntry,
         RouterTarget = omicron_common::api::internal::shared::RouterTarget,
         RouterVersion = omicron_common::api::internal::shared::RouterVersion,
         ServiceZoneNatEntries = sled_agent_types_versions::latest::system_networking::ServiceZoneNatEntries,
