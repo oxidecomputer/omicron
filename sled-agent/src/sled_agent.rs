@@ -528,8 +528,8 @@ struct SledAgentInner {
     // Handle to access reference measurements for Sprockets/TrustQuorum
     measurements: Arc<MeasurementsHandle>,
 
-    // A mechanism to complete a multirack join
-    multirack_join_completer: MultirackJoinAccessor,
+    // A mechanism to access a multirack join service task
+    multirack_join_accessor: MultirackJoinAccessor,
 }
 
 impl SledAgentInner {
@@ -562,7 +562,7 @@ impl SledAgent {
         services: ServiceManager,
         long_running_task_handles: LongRunningTaskHandles,
         config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
-        multirack_join_completer: MultirackJoinAccessor,
+        multirack_join_accessor: MultirackJoinAccessor,
     ) -> Result<SledAgent, Error> {
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
@@ -892,7 +892,7 @@ impl SledAgent {
                 metrics_manager,
                 repo_depot,
                 measurements: long_running_task_handles.measurements.clone(),
-                multirack_join_completer,
+                multirack_join_accessor,
             }),
             log: log.clone(),
             sprockets: config.sprockets.clone(),
@@ -1723,7 +1723,7 @@ impl SledAgent {
 
     /// Complete a multirack join operation
     pub(crate) fn complete_multirack_join(&self) -> Result<(), Error> {
-        self.inner.multirack_join_completer.complete_multirack_join()?;
+        self.inner.multirack_join_accessor.complete_multirack_join()?;
         Ok(())
     }
 
@@ -1732,7 +1732,7 @@ impl SledAgent {
     ) -> Result<MultirackJoinServiceStatus, RssAccessError> {
         Ok(self
             .inner
-            .multirack_join_completer
+            .multirack_join_accessor
             .multirack_join_service_status()?)
     }
 }
