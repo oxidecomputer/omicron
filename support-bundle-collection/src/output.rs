@@ -4,11 +4,12 @@
 
 //! Writing collected data into a bundle, within a size limit.
 //!
-//! Steps write files through a [`BundleOutput`], which charges them against
-//! a [`SizeBudget`] shared by the whole collection. A write is accepted only
-//! if it fits under the limit. The first refusal cancels the stop token, so
-//! no new steps start, but writes already in progress continue while they
-//! fit.
+//! Files are written through [`BundleOutput`], which charges the size of each
+//! write to a [`SizeBudget`] shared by the whole collection. A write is
+//! accepted only if it fits under the limit. When a write is refused, the
+//! stop token is cancelled, so that no new collection steps are started.
+//! Any writes already in progress are allowed to continue as long as they fit
+//! within the limit.
 //!
 //! The limit applies to the collected directory, not the zip. Compressed
 //! data (zone logs, SP dumps) is stored as-is and the rest is deflated, so
