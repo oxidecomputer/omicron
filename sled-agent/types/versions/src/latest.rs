@@ -126,10 +126,10 @@ pub mod instance {
     pub use crate::v32::instance::ExternalIps;
     pub use crate::v32::instance::ExternalIpv4Config;
     pub use crate::v32::instance::ExternalIpv6Config;
-    pub use crate::v41::instance::InstanceSledLocalConfig;
-
-    pub use crate::v44::instance::InstanceEnsureBody;
     pub use crate::v44::instance::VmmSpec;
+
+    pub use crate::v57::instance::InstanceEnsureBody;
+    pub use crate::v57::instance::InstanceSledLocalConfig;
 }
 
 pub mod inventory {
@@ -233,8 +233,9 @@ pub mod inventory {
 pub mod probes {
     pub use crate::v10::probes::ExternalIp;
     pub use crate::v10::probes::IpKind;
-    pub use crate::v10::probes::ProbeCreate;
-    pub use crate::v10::probes::ProbeSet;
+
+    pub use crate::v57::probes::ProbeCreate;
+    pub use crate::v57::probes::ProbeSet;
 }
 
 pub mod rot {
@@ -274,8 +275,23 @@ pub mod system_networking {
 
     pub use crate::v39::system_networking::BlueprintExternalNetworkingConfig;
 
-    pub use crate::v48::system_networking::SystemNetworkingConfig;
-    pub use crate::v48::system_networking::WriteNetworkConfigRequest;
+    pub use crate::v58::system_networking::SystemNetworkingConfig;
+    pub use crate::v58::system_networking::WriteNetworkConfigRequest;
+}
+
+pub mod router_config {
+    pub use crate::v58::router_config::DEFAULT_ROUTER_LIST_PRIORITY;
+    pub use crate::v58::router_config::RouterConfigBfdPeer;
+    pub use crate::v58::router_config::RouterConfigBgpPeer;
+    pub use crate::v58::router_config::RouterConfigBgpPeerParameters;
+    pub use crate::v58::router_config::RouterConfigBgpSpec;
+    pub use crate::v58::router_config::RouterConfigListEntry;
+    pub use crate::v58::router_config::RouterConfigSpec;
+    pub use crate::v58::router_config::RouterConfigStaticRoute4;
+    pub use crate::v58::router_config::RouterConfigStaticRoute6;
+    pub use crate::v58::router_config::RouterConfigUnnumberedBgpPeer;
+    pub use crate::v58::router_config::SwitchRouterConfigs;
+    pub use crate::v58::router_config::default_router_list;
 }
 
 pub mod trust_quorum {

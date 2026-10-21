@@ -20,6 +20,7 @@ pub mod probes;
 pub mod rack_init;
 pub mod resolvable_files;
 pub mod rot;
+pub mod router_config;
 pub mod sled;
 pub mod support_bundle;
 pub mod system_networking;

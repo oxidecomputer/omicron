@@ -549,6 +549,7 @@ impl nexus_test_interface::NexusServer for Server {
                 &opctx,
                 config.deployment.rack_id,
                 internal_api::params::RackInitializationRequest {
+                    routing: None,
                     blueprint,
                     physical_disks,
                     zpools,

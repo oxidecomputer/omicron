@@ -46,6 +46,7 @@ pub use wicketd_commission_types::rack_setup::MultirackJoinRequest;
 pub use wicketd_commission_types::rack_setup::ServiceIpPoolConfig;
 pub use wicketd_commission_types::rack_setup::ServiceIpPoolError;
 
+pub mod routing;
 pub mod scrimlet_reconcilers;
 
 /// Configuration for the "rack setup service".
@@ -92,6 +93,10 @@ pub struct RackInitializeRequest {
     /// Initial rack network configuration
     pub rack_network_config: RackNetworkConfig,
 
+    /// Optional named routing and explicit initial assignments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing: Option<routing::RoutingConfig>,
+
     /// IPs or subnets allowed to make requests to user-facing services
     pub allowed_source_ips: AllowedSourceIps,
 
@@ -119,6 +124,7 @@ impl std::fmt::Debug for RackInitializeRequest {
             external_certificates: _,
             recovery_silo,
             rack_network_config,
+            routing,
             allowed_source_ips,
             external_jumbo_frames_opt_in_enabled,
         } = &self;
@@ -134,6 +140,7 @@ impl std::fmt::Debug for RackInitializeRequest {
             .field("external_certificates", &"<redacted>")
             .field("recovery_silo", recovery_silo)
             .field("rack_network_config", rack_network_config)
+            .field("routing", routing)
             .field("allowed_source_ips", allowed_source_ips)
             .field(
                 "external_jumbo_frames_opt_in_enabled",
@@ -177,6 +184,8 @@ struct UnvalidatedRackInitializeRequest {
     external_certificates: Vec<Certificate>,
     recovery_silo: RecoverySiloConfig,
     rack_network_config: RackNetworkConfig,
+    #[serde(default)]
+    routing: Option<routing::RoutingConfig>,
     // TODO-cleanup Can we remove the `#[serde(default)]? All callers should be
     // passing this field.
     #[serde(default = "default_allowed_source_ips")]
@@ -198,6 +207,9 @@ impl TryFrom<UnvalidatedRackInitializeRequest> for RackInitializeRequest {
             anyhow::bail!("at least one service IP pool is required");
         }
         validate_external_dns(&value.external_dns_ips, &service_ip_pools)?;
+        if let Some(routing) = &value.routing {
+            routing.validate(&value.rack_network_config)?;
+        }
 
         Ok(Self {
             trust_quorum_peers: value.trust_quorum_peers,
@@ -210,6 +222,7 @@ impl TryFrom<UnvalidatedRackInitializeRequest> for RackInitializeRequest {
             external_certificates: value.external_certificates,
             recovery_silo: value.recovery_silo,
             rack_network_config: value.rack_network_config,
+            routing: value.routing,
             allowed_source_ips: value.allowed_source_ips,
             external_jumbo_frames_opt_in_enabled: value
                 .external_jumbo_frames_opt_in_enabled,

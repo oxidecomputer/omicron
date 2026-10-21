@@ -115,6 +115,10 @@ pub mod v53;
 pub mod v54;
 #[path = "artifact_hash_schema/mod.rs"]
 pub mod v55;
+#[path = "add_router_lists/mod.rs"]
+pub mod v57;
+#[path = "router_configs_in_bootstore/mod.rs"]
+pub mod v58;
 #[path = "add_probe_put_endpoint/mod.rs"]
 pub mod v6;
 #[path = "multicast_support/mod.rs"]

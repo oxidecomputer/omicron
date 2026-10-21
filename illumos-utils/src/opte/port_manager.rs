@@ -21,6 +21,7 @@ use omicron_common::address::IPV6_MULTICAST_RANGE;
 use omicron_common::api::external;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
 use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
+use omicron_common::api::internal::shared::PortRouterList;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::api::internal::shared::PrivateIpv4Config;
 use omicron_common::api::internal::shared::PrivateIpv6Config;
@@ -29,6 +30,7 @@ use omicron_common::api::internal::shared::ResolvedVpcRouteSet;
 use omicron_common::api::internal::shared::ResolvedVpcRouteState;
 use omicron_common::api::internal::shared::RouterId;
 use omicron_common::api::internal::shared::RouterKind;
+use omicron_common::api::internal::shared::RouterListEntry;
 use omicron_common::api::internal::shared::RouterTarget as ApiRouterTarget;
 use omicron_common::api::internal::shared::RouterVersion;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
@@ -149,6 +151,9 @@ pub struct PortCreateParams<'a> {
     /// MTU to set on the xde device, in bytes. If `None`, OPTE applies its
     /// default (1500). Used by jumbo-frame opt-in.
     pub mtu: Option<u32>,
+    /// The tunnel-router list the port is born with. Empty means no tunnel
+    /// routers (no external egress) until a list is set.
+    pub router_list: &'a [RouterListEntry],
 }
 
 impl<'a> TryFrom<&PortCreateParams<'a>> for IpCfg {
@@ -374,6 +379,7 @@ impl PortManager {
             dhcp_config,
             attached_subnets: _,
             mtu,
+            router_list,
         } = params;
         let is_service =
             matches!(nic.kind, NetworkInterfaceKind::Service { .. });
@@ -473,6 +479,23 @@ impl PortManager {
             rules,
         })?;
 
+        // Install the port's tunnel-router list before it can pass traffic,
+        // whatever the xde default is: an empty list means no tunnel routers.
+        let tunnel_routers = oxide_vpc::api::RouterList::new(
+            router_list.iter().map(|entry| (entry.priority, entry.router_id)),
+        )
+        .map_err(Error::InvalidRouterList)?;
+        debug!(
+            self.inner.log,
+            "Setting port router list";
+            "port_name" => &port_name,
+            "list" => ?&tunnel_routers,
+        );
+        hdl.set_router_list(&oxide_vpc::api::SetRouterListReq {
+            port_name: port_name.clone(),
+            list: tunnel_routers,
+        })?;
+
         // Create the default set of routes for a new port.
         //
         // This creates an empty route set for instance ports, but adds a rule
@@ -530,7 +553,10 @@ impl PortManager {
                     class,
                     port_name: port_name.clone(),
                     dest: super::net_to_cidr(route.dest),
-                    target: super::router_target_opte(&route.target),
+                    target: super::router_target_opte(
+                        &route.target,
+                        is_instance,
+                    ),
                 };
                 hdl.add_router_entry(&request)?;
                 debug!(
@@ -628,7 +654,10 @@ impl PortManager {
         let hdl = Handle::new()?;
 
         // Propagate deltas out to all ports.
-        for port in ports.values() {
+        for ((_, nic_kind), port) in ports.iter() {
+            let is_instance =
+                matches!(nic_kind, NetworkInterfaceKind::Instance { .. });
+
             // Fetch deltas for all router keys: system, IPv4 subnet, and IPv6
             // subnet.
             let system_delta = deltas.get(&port.system_router_key());
@@ -658,7 +687,10 @@ impl PortManager {
                         class,
                         port_name: port.name().into(),
                         dest: super::net_to_cidr(route.dest),
-                        target: super::router_target_opte(&route.target),
+                        target: super::router_target_opte(
+                            &route.target,
+                            is_instance,
+                        ),
                     };
 
                     hdl.del_router_entry(&route)?;
@@ -676,7 +708,10 @@ impl PortManager {
                         class,
                         port_name: port.name().into(),
                         dest: super::net_to_cidr(route.dest),
-                        target: super::router_target_opte(&route.target),
+                        target: super::router_target_opte(
+                            &route.target,
+                            is_instance,
+                        ),
                     };
 
                     hdl.add_router_entry(&route)?;
@@ -961,6 +996,59 @@ impl PortManager {
         })?;
 
         Ok(())
+    }
+
+    pub fn set_router_list(&self, list: &PortRouterList) -> Result<(), Error> {
+        info!(
+            self.inner.log,
+            "Setting port router list";
+            "list" => ?&list,
+        );
+        let port_name = {
+            let ports = self.inner.ports.lock().unwrap();
+            let Some(port) = ports
+                .iter()
+                .find(|((id, _), _)| *id == list.nic_id)
+                .map(|(_, port)| port)
+            else {
+                return Err(Error::RouterListMissingPort(list.nic_id));
+            };
+            port.name().to_string()
+        };
+        let opte_list = oxide_vpc::api::RouterList::new(
+            list.routers.iter().map(|entry| (entry.priority, entry.router_id)),
+        )
+        .map_err(Error::InvalidRouterList)?;
+        let hdl = Handle::new()?;
+        hdl.set_router_list(&oxide_vpc::api::SetRouterListReq {
+            port_name,
+            list: opte_list,
+        })?;
+        Ok(())
+    }
+
+    pub fn list_router_lists(&self) -> Result<Vec<PortRouterList>, Error> {
+        let hdl = Handle::new()?;
+        let ports = self.inner.ports.lock().unwrap();
+        let mut lists = Vec::with_capacity(ports.len());
+        for ((nic_id, _), port) in ports.iter() {
+            let resp =
+                hdl.dump_router_list(&oxide_vpc::api::DumpRouterListReq {
+                    port_name: port.name().to_string(),
+                })?;
+            lists.push(PortRouterList {
+                nic_id: *nic_id,
+                routers: resp
+                    .list
+                    .entries()
+                    .map(|(priority, router_id)| RouterListEntry {
+                        priority,
+                        router_id,
+                    })
+                    .collect(),
+            });
+        }
+        Ok(lists)
     }
 
     pub fn attached_subnets_ensure(
@@ -1346,6 +1434,7 @@ mod tests {
                 },
                 attached_subnets: vec![],
                 mtu: None,
+                router_list: &[],
             })
             .unwrap();
 
@@ -1526,6 +1615,7 @@ mod tests {
                 },
                 attached_subnets: vec![],
                 mtu: None,
+                router_list: &[],
             })
             .unwrap();
 
@@ -1658,6 +1748,118 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    // Probe ports have no EIP<->IGW mappings installed in OPTE, so their EIPs
+    // are only usable through routes targeting an IGW without an ID.
+    #[test]
+    fn probe_routes_strip_internet_gateway_ids() {
+        let logctx = test_setup_log("probe_routes_strip_internet_gateway_ids");
+        let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
+        let handle = Handle::new().unwrap();
+        handle.set_xde_underlay("foo0", "foo1").unwrap();
+
+        let vni = Vni::try_from(Vni::MIN_GUEST_VNI).unwrap();
+        let private_subnet =
+            Ipv4Net::new(Ipv4Addr::new(172, 30, 0, 0), 22).unwrap();
+        let create_probe = |n: u8| {
+            manager
+                .create_port(PortCreateParams {
+                    nic: &NetworkInterface {
+                        id: Uuid::new_v4(),
+                        kind: NetworkInterfaceKind::Probe {
+                            id: Uuid::new_v4(),
+                        },
+                        name: format!("probe{n}").parse().unwrap(),
+                        ip_config: PrivateIpConfig::new_ipv4(
+                            Ipv4Addr::new(172, 30, 0, 5 + n),
+                            private_subnet,
+                        )
+                        .unwrap(),
+                        mac: MacAddr(MacAddr6::new(
+                            0xa8, 0x40, 0x25, 0xf0, 0x00, n,
+                        )),
+                        vni,
+                        primary: true,
+                        slot: 0,
+                    },
+                    external_ips: &ExternalIpConfig {
+                        v4: Some(ExternalIpv4Config {
+                            ephemeral_ip: Some(Ipv4Addr::new(10, 0, 0, 5 + n)),
+                            ..Default::default()
+                        }),
+                        v6: None,
+                    },
+                    firewall_rules: &[],
+                    dhcp_config: DhcpCfg {
+                        hostname: None,
+                        host_domain: None,
+                        domain_search_list: Vec::new(),
+                        dns4_servers: Vec::new(),
+                        dns6_servers: Vec::new(),
+                    },
+                    attached_subnets: vec![],
+                    mtu: None,
+                    router_list: &[],
+                })
+                .unwrap()
+        };
+
+        // Nexus resolves the default route of a project VPC to its IGW, with
+        // that IGW's ID.
+        let (port0, _ticket0) = create_probe(0);
+        let system_router_id = Uuid::new_v4();
+        let default_route = |igw: Uuid, version: u64| {
+            vec![ResolvedVpcRouteSet {
+                id: port0.system_router_key(),
+                version: Some(RouterVersion {
+                    router_id: system_router_id,
+                    version,
+                }),
+                routes: HashSet::from([ResolvedVpcRoute {
+                    dest: IpNet::V4(
+                        Ipv4Net::new(Ipv4Addr::UNSPECIFIED, 0).unwrap(),
+                    ),
+                    target: RouterTarget::InternetGateway(
+                        InternetGatewayRouterTarget::Instance(igw),
+                    ),
+                }]),
+            }]
+        };
+        let assert_default_route_has_no_igw_id = || {
+            let state = handle.state().lock().unwrap();
+            assert_eq!(state.ports.len(), 2);
+            for (port_name, port) in &state.ports {
+                let igw_routes = port
+                    .routes
+                    .iter()
+                    .filter(|rt| {
+                        matches!(
+                            rt.target,
+                            oxide_vpc::api::RouterTarget::InternetGateway(_)
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(igw_routes.len(), 1, "{port_name}: {igw_routes:?}");
+                assert!(
+                    igw_routes[0].is_system_default_ipv4_route(),
+                    "{port_name}: {igw_routes:?}",
+                );
+            }
+        };
+
+        // Routes are applied both to existing ports and to ports created
+        // afterwards.
+        manager.vpc_routes_ensure(default_route(Uuid::new_v4(), 1)).unwrap();
+        let (_port1, _ticket1) = create_probe(1);
+        assert_default_route_has_no_igw_id();
+
+        // Moving the default route to another IGW must leave exactly one
+        // default route on each port.
+        manager.vpc_routes_ensure(default_route(Uuid::new_v4(), 2)).unwrap();
+        assert_default_route_has_no_igw_id();
+
+        logctx.cleanup_successful();
+    }
+
     #[test]
     fn ip_cfg_from_ipv4_params() {
         let priv_ip = Ipv4Addr::new(172, 30, 2, 5);
@@ -1698,6 +1900,7 @@ mod tests {
             },
             attached_subnets: vec![],
             mtu: None,
+            router_list: &[],
         };
         let IpCfg::Ipv4(oxide_vpc::api::Ipv4Cfg {
             vpc_subnet,
@@ -1772,6 +1975,7 @@ mod tests {
             },
             attached_subnets: vec![],
             mtu: None,
+            router_list: &[],
         };
         let IpCfg::Ipv6(oxide_vpc::api::Ipv6Cfg {
             vpc_subnet,
@@ -1857,6 +2061,7 @@ mod tests {
             },
             attached_subnets: vec![],
             mtu: None,
+            router_list: &[],
         };
         let IpCfg::DualStack { ipv4, ipv6 } = IpCfg::try_from(&prs).unwrap()
         else {
@@ -1948,6 +2153,7 @@ mod tests {
             },
             attached_subnets: vec![],
             mtu: None,
+            router_list: &[],
         };
         let _ = IpCfg::try_from(&prs).expect_err(
             "Should fail to convert with public IPv6 and private IPv4",
@@ -1995,6 +2201,7 @@ mod tests {
             },
             attached_subnets: vec![],
             mtu: None,
+            router_list: &[],
         };
         let _ = IpCfg::try_from(&prs).expect_err(
             "Should fail to convert with public IPv4 and private IPv6",

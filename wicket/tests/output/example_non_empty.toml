@@ -191,3 +191,27 @@ post2 = 0
 asn = 47
 originate = ["10.0.0.0/16"]
 max_paths = 1
+
+# Optional named routing. Omit [routing] to keep legacy default initialization.
+# When present, both assignment lists are required; an empty list disables
+# external routing for that context. Port addresses stay in rack_network_config.
+# Other routing lists default to empty; descriptions default to an empty string.
+# Named BGP defaults: max_paths=1; hold_time=6, keepalive=2, connect_retry=3,
+# delay_open=0, idle_hold_time=3 (seconds). Explicit values are retained.
+# BGP peers use auth_key_id and the existing separate BGP-key upload command;
+# never put md5_auth_key or other authentication secrets in this file.
+# Example: one router configuration with separate static routes on two switches.
+# Replace the gateways below with reachable addresses on your configured ports.
+#
+# [routing]
+# control_plane_router_configurations = [{ router_configuration = "external", priority = 100 }]
+# recovery_silo_router_configurations = [{ router_configuration = "external", priority = 100 }]
+# [[routing.router_configurations]]
+# name = "external"
+# description = "External routing on both switches"
+# [[routing.router_configurations.switches]]
+# switch = "switch0"
+# routes = [{ name = "default", dst = "0.0.0.0/0", gw = "192.0.2.1" }]
+# [[routing.router_configurations.switches]]
+# switch = "switch1"
+# routes = [{ name = "default", dst = "0.0.0.0/0", gw = "192.0.2.5" }]

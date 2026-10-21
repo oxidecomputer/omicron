@@ -25,6 +25,7 @@ use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use dropshot::endpoint;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
+use omicron_common::api::internal::shared::PortRouterList;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use omicron_common::api::internal::shared::{
@@ -87,6 +88,7 @@ use sled_agent_types_versions::v39;
 use sled_agent_types_versions::v42;
 use sled_agent_types_versions::v47;
 use sled_agent_types_versions::v48;
+use sled_agent_types_versions::v58;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
@@ -368,6 +370,42 @@ impl SledAgentApi for SledAgentSimImpl {
         let vnics = sa.list_virtual_nics().map_err(HttpError::from)?;
 
         Ok(HttpResponseOk(vnics))
+    }
+
+    async fn set_router_list(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<PortRouterList>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let body_args = body.into_inner();
+
+        sa.set_port_router_list(&body_args)
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn list_router_lists(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<PortRouterList>>, HttpError> {
+        let sa = rqctx.context();
+
+        let lists = sa.list_port_router_lists().map_err(HttpError::from)?;
+
+        Ok(HttpResponseOk(lists))
+    }
+
+    async fn write_network_bootstore_config_v58(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v58::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let body = body.into_inner();
+        sa.set_bootstore_network_config(
+            EarlyNetworkConfigEnvelope::from(&body.body)
+                .serialize_to_bootstore_with_generation(body.generation),
+        );
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn write_network_bootstore_config_v48(

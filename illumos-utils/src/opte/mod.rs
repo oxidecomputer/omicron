@@ -139,7 +139,16 @@ pub fn cidr_to_net(cidr: IpCidr) -> IpNet {
 /// We map internet gateways that target the (single) "system" VPC IG to
 /// `InternetGateway(None)`. Everything else is mapped directly, translating IP
 /// address types as needed.
-fn router_target_opte(target: &shared::RouterTarget) -> RouterTarget {
+///
+/// We also strip InternetGateway IDs from any routes targeting non-instance
+/// NICs, because we need to actively store the full set (and division of)
+/// SNAT/ephemeral/floating IPs to install EIP<->IGW mappings in OPTE.
+/// Sled-agent only holds this today for instances, and OPTE only allows an
+/// unmapped EIP to be used through an IGW without an ID.
+fn router_target_opte(
+    target: &shared::RouterTarget,
+    is_instance: bool,
+) -> RouterTarget {
     use shared::InternetGatewayRouterTarget;
     use shared::RouterTarget::*;
     match target {
@@ -147,8 +156,13 @@ fn router_target_opte(target: &shared::RouterTarget) -> RouterTarget {
         InternetGateway(InternetGatewayRouterTarget::System) => {
             RouterTarget::InternetGateway(None)
         }
-        InternetGateway(InternetGatewayRouterTarget::Instance(id)) => {
+        InternetGateway(InternetGatewayRouterTarget::Instance(id))
+            if is_instance =>
+        {
             RouterTarget::InternetGateway(Some(*id))
+        }
+        InternetGateway(InternetGatewayRouterTarget::Instance(_)) => {
+            RouterTarget::InternetGateway(None)
         }
         Ip(ip) => RouterTarget::Ip((*ip).into()),
         VpcSubnet(net) => RouterTarget::VpcSubnet(net_to_cidr(*net)),
@@ -250,13 +264,18 @@ pub struct EnsureAttachedSubnetResult {
 mod tests {
     use super::Gateway;
     use super::GatewayIps;
+    use super::router_target_opte;
+    use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
     use omicron_common::api::internal::shared::PrivateIpConfig;
     use omicron_common::api::internal::shared::PrivateIpv4Config;
     use omicron_common::api::internal::shared::PrivateIpv6Config;
+    use omicron_common::api::internal::shared::RouterTarget;
+    use oxide_vpc::api::RouterTarget as OpteRouterTarget;
     use oxnet::Ipv4Net;
     use oxnet::Ipv6Net;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
+    use uuid::Uuid;
 
     #[test]
     fn convert_private_ip_config_to_gateway_ips() {
@@ -295,5 +314,30 @@ mod tests {
         };
         assert_eq!(ipv4, expected_v4_gateway);
         assert_eq!(ipv6, expected_v6_gateway);
+    }
+
+    #[test]
+    fn router_target_opte_strips_igw_ids_for_non_instances() {
+        let id = Uuid::new_v4();
+        let system =
+            RouterTarget::InternetGateway(InternetGatewayRouterTarget::System);
+        let project = RouterTarget::InternetGateway(
+            InternetGatewayRouterTarget::Instance(id),
+        );
+
+        assert!(matches!(
+            router_target_opte(&project, true),
+            OpteRouterTarget::InternetGateway(Some(igw)) if igw == id
+        ));
+        assert!(matches!(
+            router_target_opte(&project, false),
+            OpteRouterTarget::InternetGateway(None)
+        ));
+        for is_instance in [true, false] {
+            assert!(matches!(
+                router_target_opte(&system, is_instance),
+                OpteRouterTarget::InternetGateway(None)
+            ));
+        }
     }
 }

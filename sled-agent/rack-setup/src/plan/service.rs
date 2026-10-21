@@ -1481,6 +1481,7 @@ mod tests {
         external_dns_ips: Vec<IpAddr>,
     ) -> Config {
         Config {
+            routing: None,
             trust_quorum_peers: None,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
             ntp_servers: Vec::new(),

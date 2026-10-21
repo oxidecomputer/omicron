@@ -16,6 +16,8 @@ use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zpool::ZpoolOrRamdisk;
+use omicron_common::api::internal::shared::RouterListEntry;
+
 use omicron_common::api::external::{
     VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRulePriority,
     VpcFirewallRuleStatus,
@@ -153,6 +155,10 @@ struct ProbeState {
     /// If we've built this object from a request through the sled-agent API,
     /// then we always have this.
     interface: Option<NetworkInterface>,
+    /// The tunnel-router list the probe's OPTE port is created with. Empty
+    /// means no tunnel routers (no external egress). Empty when the state was
+    /// reconstructed from a running zone (the port already exists then).
+    router_list: Vec<RouterListEntry>,
 }
 
 impl IdHashItem for ProbeState {
@@ -172,6 +178,7 @@ impl From<ProbeCreate> for ProbeState {
             status: zone::State::Running,
             external_ips: params.external_ips,
             interface: Some(params.interface),
+            router_list: params.router_list,
         }
     }
 }
@@ -204,6 +211,7 @@ impl TryFrom<Zone> for ProbeState {
             status: value.state(),
             external_ips: Vec::new(),
             interface: None,
+            router_list: Vec::new(),
         })
     }
 }
@@ -383,6 +391,7 @@ impl ProbeManagerInner {
             // possible. We should consider if we want to support them here.
             attached_subnets: vec![],
             mtu: None,
+            router_list: &probe.router_list,
         })?;
 
         let installed_zone = ZoneBuilderFactory::new()
@@ -532,6 +541,7 @@ mod test {
             status: zone::State::Configured,
             external_ips: Vec::new(),
             interface: None,
+            router_list: Vec::new(),
         };
 
         let mut b = a.clone();

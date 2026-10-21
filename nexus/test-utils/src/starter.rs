@@ -100,7 +100,6 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
-use sled_agent_scrimlet_reconcilers::BgpSocketConfig;
 use sled_agent_scrimlet_reconcilers::ScrimletReconcilersMode;
 use sled_agent_types::disk::CompressionAlgorithm;
 use sled_agent_types::disk::DiskIdentity;
@@ -117,6 +116,9 @@ use sled_agent_types::inventory::OmicronZoneDataset;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::SourceNatConfigGeneric;
+use sled_agent_types::router_config::{
+    SwitchRouterConfigs, default_router_list,
+};
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::system_networking::WriteNetworkConfigRequest;
 use slog::{Logger, debug, error, info, o};
@@ -1024,6 +1026,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 },
                 // TODO-correctness Can we fill this in for tests?
                 blueprint_external_networking_config: None,
+                switch_router_configs: SwitchRouterConfigs::new(),
+                control_plane_router_list: default_router_list(),
             },
             generation: 1,
         };
@@ -1874,7 +1878,6 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                         dpd_addr,
                         mgd_addr,
                         ddmd_addr,
-                        bgp_socket_config: BgpSocketConfig::for_test(mgd_addr),
                     };
                     builder
                         .start_sled(
@@ -1927,8 +1930,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                             dpd_addr,
                             mgd_addr,
                             ddmd_addr,
-                            bgp_socket_config: BgpSocketConfig::for_test(mgd_addr),
-                        };
+                            };
                         builder
                             .start_sled(
                                 SLED_AGENT2_UUID.parse().unwrap(),

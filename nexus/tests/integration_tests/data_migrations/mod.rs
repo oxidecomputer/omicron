@@ -41,6 +41,9 @@ mod inventory_zone_multiple_external_ips;
 mod normalize_service_external_ips;
 mod prune_service_nat_entries;
 mod rename_default_igw_ip_pool;
+mod router_configuration_bgp_src_addr;
+mod router_configuration_switches;
+mod router_configurations;
 mod sled_resource_vmm_state;
 mod support_bundle_time_range;
 mod tufaceous_v2;
@@ -90,6 +93,10 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(support_bundle_time_range);
     register!(inv_service_processor_rack_id);
     register!(add_rack_id_to_inv_sled_agent);
+
+    register!(router_configurations);
+    register!(router_configuration_switches);
+    register!(router_configuration_bgp_src_addr);
 
     map
 }

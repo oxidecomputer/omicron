@@ -119,6 +119,7 @@ use sled_agent_types::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
 use sled_agent_types::rack_init::rack_init_bootstore_generation;
+use sled_agent_types::router_config::default_router_list;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_agent_types::system_networking::BlueprintExternalNetworkingConfig;
 use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
@@ -908,6 +909,7 @@ impl ServiceInner {
             external_dns_zone_name: config.external_dns_zone_name.clone(),
             recovery_silo: config.recovery_silo.clone(),
             rack_network_config,
+            routing: sled_plan.routing.clone(),
             allowed_source_ips,
             initial_trust_quorum_configuration,
             external_jumbo_frames_opt_in_enabled: config
@@ -1025,6 +1027,11 @@ impl ServiceInner {
         let mut rss_step = RssProgress::new(step_tx);
         let config = &request.rack_initialize_request;
         let skip_timesync = request.skip_timesync;
+        if let Some(routing) = &config.routing {
+            routing
+                .validate(&config.rack_network_config)
+                .map_err(|e| SetupServiceError::BadConfig(e.to_string()))?;
+        }
 
         let resolver = DnsResolver::new_from_subnet(
             self.log.new(o!("component" => "DnsResolver")),
@@ -1109,6 +1116,16 @@ impl ServiceInner {
             // until after the service plan is created, once we've finished
             // moving all system networking into scrimlet reconcilers?
             blueprint_external_networking_config: None,
+            switch_router_configs: sled_plan
+                .routing
+                .as_ref()
+                .map(|r| r.switch_router_configs())
+                .unwrap_or_default(),
+            control_plane_router_list: sled_plan
+                .routing
+                .as_ref()
+                .map(|r| r.control_plane_router_list())
+                .unwrap_or_else(default_router_list),
         };
         info!(self.log, "Writing initial network configuration to bootstore");
         rss_step.update(RssStep::InitialNetworkConfigUpdate);
@@ -1953,6 +1970,7 @@ mod test {
     #[test]
     fn test_subnets() {
         let cfg = RackInitializeRequest {
+            routing: None,
             trust_quorum_peers: None,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
             ntp_servers: vec![String::from("test.pool.example.com")],

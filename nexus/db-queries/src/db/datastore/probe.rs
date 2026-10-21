@@ -294,7 +294,7 @@ impl super::DataStore {
         &self,
         opctx: &OpContext,
         sled_id: SledUuid,
-    ) -> ListResultVec<ProbeCreate> {
+    ) -> ListResultVec<(ProbeCreate, Uuid)> {
         opctx.check_complex_operations_allowed()?;
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         let mut paginator = Paginator::new(
@@ -310,8 +310,9 @@ impl super::DataStore {
                     &p.current_pagparams(),
                 )
                 .await?;
-            paginator =
-                p.found_batch(&batch, &|probe| probe.id.into_untyped_uuid());
+            paginator = p.found_batch(&batch, &|(probe, _)| {
+                probe.id.into_untyped_uuid()
+            });
             all_probes_for_sled.append(&mut batch);
         }
         Ok(all_probes_for_sled)
@@ -323,9 +324,9 @@ impl super::DataStore {
         opctx: &OpContext,
         sled_id: SledUuid,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<ProbeCreate> {
+    ) -> ListResultVec<(ProbeCreate, Uuid)> {
         use nexus_db_schema::schema::{
-            external_ip, network_interface, probe, vpc, vpc_subnet,
+            external_ip, network_interface, probe, project, vpc, vpc_subnet,
         };
 
         // TODO-correctness: This inner join below assumes exactly one external
@@ -356,6 +357,10 @@ impl super::DataStore {
             .inner_join(
                 vpc::dsl::vpc.on(vpc::dsl::id.eq(vpc_subnet::dsl::vpc_id)),
             )
+            .inner_join(
+                project::dsl::project
+                    .on(project::dsl::id.eq(probe::dsl::project_id)),
+            )
             .filter(probe::dsl::sled.eq(sled_id.into_untyped_uuid()))
             .filter(probe::dsl::time_deleted.is_null())
             .filter(external_ip::dsl::time_deleted.is_null())
@@ -372,6 +377,7 @@ impl super::DataStore {
                 vpc_subnet::dsl::ipv4_block,
                 vpc_subnet::dsl::ipv6_block,
                 vpc::dsl::vni,
+                project::dsl::silo_id,
             ))
             .get_results_async::<(
                 Uuid,
@@ -383,6 +389,7 @@ impl super::DataStore {
                 nexus_db_model::Ipv4Net,
                 nexus_db_model::Ipv6Net,
                 nexus_db_model::Vni,
+                Uuid,
             )>(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -399,6 +406,7 @@ impl super::DataStore {
                             ipv4_block,
                             ipv6_block,
                             vni,
+                            silo_id,
                         )| {
                             let kind = db_ip_kind_to_sled(kind);
                             let external_ips =
@@ -412,11 +420,17 @@ impl super::DataStore {
                                 vni: vni.0,
                                 ..nic.into_internal(*ipv4_block, *ipv6_block)?
                             };
-                            Ok(ProbeCreate {
-                                id: ProbeUuid::from_untyped_uuid(probe_id),
-                                external_ips,
-                                interface,
-                            })
+                            Ok((
+                                ProbeCreate {
+                                    id: ProbeUuid::from_untyped_uuid(probe_id),
+                                    external_ips,
+                                    interface,
+                                    // Filled by the caller from the probe's
+                                    // silo router list.
+                                    router_list: Vec::new(),
+                                },
+                                silo_id,
+                            ))
                         },
                     )
                     .collect::<Result<_, _>>()

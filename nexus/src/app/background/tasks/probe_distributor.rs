@@ -5,6 +5,7 @@
 //! Background task for distributing networking probe zones to sleds.
 
 use crate::app::background::BackgroundTask;
+use crate::app::router_configuration::router_list_from_links;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
@@ -14,6 +15,7 @@ use nexus_types::deployment::SledFilter;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::ProbeDistributorStatus;
 use nexus_types::internal_api::background::ProbeError;
+use omicron_uuid_kinds::GenericUuid;
 use serde_json::json;
 use sled_agent_client::types::ProbeSet;
 use slog_error_chain::InlineErrorChain;
@@ -42,6 +44,42 @@ impl BackgroundTask for ProbeDistributor {
         async {
             let log = &opctx.log;
             info!(log, "distributing networking probes to sleds");
+
+            // silo -> tunnel-router list, so a probe's OPTE port is born
+            // with its silo's list. A silo with no assignment gets an empty
+            // list (no tunnel routers, no external egress).
+            let silo_lists = match self
+                .datastore
+                .silo_router_configurations_list_all(opctx)
+                .await
+            {
+                Ok(links) => {
+                    let mut by_silo: HashMap<
+                        uuid::Uuid,
+                        Vec<(u16, uuid::Uuid)>,
+                    > = HashMap::new();
+                    for link in links {
+                        by_silo.entry(link.silo_id).or_default().push((
+                            *link.priority,
+                            link.router_configuration_id.into_untyped_uuid(),
+                        ));
+                    }
+                    by_silo
+                        .into_iter()
+                        .map(|(silo, links)| {
+                            (silo, router_list_from_links(links))
+                        })
+                        .collect::<HashMap<_, _>>()
+                }
+                Err(e) => {
+                    let msg = format!(
+                        "failed to list silo router configurations: {}",
+                        InlineErrorChain::new(&e)
+                    );
+                    error!(&log, "{msg}");
+                    return json!({"error": msg});
+                }
+            };
 
             let sleds = match self
                 .datastore
@@ -91,6 +129,17 @@ impl BackgroundTask for ProbeDistributor {
                         continue;
                     }
                 };
+
+                let probes: Vec<_> = probes
+                    .into_iter()
+                    .map(|(mut probe, silo_id)| {
+                        probe.router_list = silo_lists
+                            .get(&silo_id)
+                            .cloned()
+                            .unwrap_or_default();
+                        probe
+                    })
+                    .collect();
 
                 let client =
                     sled_client_from_address(sled.id(), sled.address(), &log);
