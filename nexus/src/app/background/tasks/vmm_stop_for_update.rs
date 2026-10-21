@@ -354,7 +354,7 @@ impl VmmStopForUpdate {
                     // state of the VMM has changed, and therefore its own state
                     // should change to reflect the VMM's new state:
                     //
-                    //   - The instance watcher backgraound task continuously
+                    //   - The instance watcher background task continuously
                     //     makes sure the instances' states are correct in
                     //     relation to their VMMs.
                     //   - Sled agent will attempt to publish the new state to
@@ -444,7 +444,7 @@ impl VmmStopForUpdate {
                         // previously created VMM.
                         //
                         // Additionally, When `vmm_put_state` returns a
-                        // `NO_SUCH_INSTANCE`` error, we transition the runtime
+                        // `NO_SUCH_INSTANCE` error, we transition the runtime
                         // state to `VmmState::Failed` above.
                         //
                         // While a `VmmState::Failed` could also be due to a
@@ -935,7 +935,7 @@ mod tests {
                 )
                 .await;
                 match state {
-                    // A new VMM in a simulated environemnt stays in `Starting`
+                    // A new VMM in a simulated environment stays in `Starting`
                     // until the "poke" API is called, so we can confidently
                     // test a VMM in this state.
                     DbVmmState::Starting => {}
