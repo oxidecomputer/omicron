@@ -57,7 +57,7 @@ macro_rules! problem_descriptions {
                                     class: ProblemClass::$class,
                                     docs_path: concat!(
                                         env!("CARGO_MANIFEST_DIR"),
-                                        "docs/active-problems/problems/",
+                                        "/docs/active-problems/problems/",
                                         stringify!($Variant),
                                         ".adoc",
                                     ),
