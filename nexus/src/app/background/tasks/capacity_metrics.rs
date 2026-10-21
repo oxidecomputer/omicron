@@ -4,9 +4,10 @@
 
 //! Background task that collects and emits silo quota metrics:
 //!
-//! * silo_quota:{memory,cpu,storage}_capacity: resource limits set on the silo.
-//! * silo_quota:{memory,cpu,storage}_provisioned: resources charged against the
-//!   silo.
+//! * silo_quota:{memory,cpu,virtual_storage}_capacity: resource limits set on
+//!   the silo.
+//! * silo_quota:{memory,cpu,virtual_storage}_provisioned: resources charged
+//!   against the silo.
 //!
 //! Note: because background tasks run on each Nexus instance, these metrics are
 //! emitted once for each Nexus--as of this writing, in triplicate. Callers
@@ -118,14 +119,14 @@ impl CapacityMetrics {
                     Sample::new_with_timestamp(
                         now,
                         &target,
-                        &silo_quota::StorageCapacity {
+                        &silo_quota::VirtualStorageCapacity {
                             datum: util.storage_allocated.to_bytes(),
                         },
                     )?,
                     Sample::new_with_timestamp(
                         now,
                         &target,
-                        &silo_quota::StorageProvisioned {
+                        &silo_quota::VirtualStorageProvisioned {
                             datum: util.storage_provisioned.to_bytes(),
                         },
                     )?,
@@ -355,7 +356,10 @@ mod tests {
             for (metric, value) in [
                 ("cpu", cpu),
                 ("memory", ByteCount::from_gibibytes_u32(memory).to_bytes()),
-                ("storage", ByteCount::from_gibibytes_u32(storage).to_bytes()),
+                (
+                    "virtual_storage",
+                    ByteCount::from_gibibytes_u32(storage).to_bytes(),
+                ),
             ] {
                 expected.insert(
                     (silo_id, format!("silo_quota:{metric}_{kind}")),

@@ -53,8 +53,8 @@ versions = [
 ]
 
 [[metrics]]
-name = "storage_capacity"
-description = "Quota capacity for provisioned disk and snapshot storage"
+name = "virtual_storage_capacity"
+description = "Quota capacity for provisioned virtual disk and snapshot storage"
 units = "bytes"
 datum_type = "u64"
 versions = [
@@ -62,8 +62,8 @@ versions = [
 ]
 
 [[metrics]]
-name = "storage_provisioned"
-description = "Provisioned disk and snapshot storage charged against the quota"
+name = "virtual_storage_provisioned"
+description = "Provisioned virtual disk and snapshot storage charged against the quota"
 units = "bytes"
 datum_type = "u64"
 versions = [
