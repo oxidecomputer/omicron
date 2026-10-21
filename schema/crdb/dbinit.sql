@@ -9730,6 +9730,51 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
     )
 );
 
+-- Tracks other racks that have joined the underlay network but haven't been
+-- adopted into the multirack cluster.
+--
+-- If/when a rack is adopted, its row in this table should be marked deleted,
+-- and a corresponding row should be inserted into the `rack` table.
+CREATE TABLE IF NOT EXISTS omicron.public.unadopted_rack (
+    -- This should be the same id that gets used for the `rack` table, as well
+    -- as the `rack_id` column in `unadopted_sled`:
+    id UUID PRIMARY KEY,
+
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    -- The IPv6 underlay /56 prefix for the rack:
+    rack_subnet INET NOT NULL,
+
+    -- Socket address of the multirack join service running on a sled-agent in
+    -- the unadopted rack:
+    join_service_ip INET NOT NULL,
+    join_service_port INT4
+        CHECK (join_service_port BETWEEN 0 AND 65535)
+        NOT NULL
+);
+
+-- Tracks sleds from other racks that have joined the underlay network but
+-- haven't been adopted into the multirack cluster.
+--
+-- If/when these sleds are adopted, these rows should be marked deleted, and
+-- there will subsequently be corresponding rows created in the `sled` and
+-- `inv_sled_agent` tables via the normal mechanisms.
+CREATE TABLE IF NOT EXISTS omicron.public.unadopted_sled (
+    id UUID PRIMARY KEY,
+    rack_id UUID NOT NULL,
+
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    -- Baseboard information about the sled
+    serial_number STRING(63) NOT NULL,
+    part_number STRING(63) NOT NULL,
+
+    ip INET NOT NULL
+);
 
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
@@ -9740,7 +9785,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '309.0.0', NULL)
+    (TRUE, NOW(), NOW(), '310.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
