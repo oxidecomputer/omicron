@@ -35,7 +35,7 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio_util::sync::CancellationToken;
 
-/// A write refused because it would exceed the bundle's size limit.
+/// A write was refused because it would exceed the bundle's size limit.
 #[derive(Clone, Copy, Debug, thiserror::Error)]
 #[error("write would exceed the bundle's size limit of {limit} bytes")]
 pub struct SizeLimitExceeded {
