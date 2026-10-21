@@ -1600,6 +1600,9 @@ impl InstanceRunner {
 
         // Now that we're done, we can actually take the running state out of
         // the option.
+        //
+        // NOTE: No more await points after this line. This method needs to
+        // remain cancel-safe.
         let _ = self.running_state.take();
     }
 
