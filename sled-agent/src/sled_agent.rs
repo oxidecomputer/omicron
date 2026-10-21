@@ -5,7 +5,7 @@
 //! Sled agent implementation
 
 use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
-use crate::bootstrap::MultirackJoinAccessor;
+use crate::bootstrap::{MultirackJoinAccessor, RssAccessError};
 use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitorHandle;
 use crate::instance_manager::InstanceManager;
@@ -404,7 +404,6 @@ impl From<Error> for dropshot::HttpError {
                 let err = omicron_common::api::external::Error::from(err);
                 err.into()
             }
-            Error::MultirackJoin(err) => err.into(),
             err @ (Error::BootDiskNotFound
             | Error::Config(_)
             | Error::BackingFs(_)
@@ -426,6 +425,7 @@ impl From<Error> for dropshot::HttpError {
             | Error::UnexpectedRevision(_)
             | Error::RepoDepotStart(_)
             | Error::TimeNotSynchronized
+            | Error::MultirackJoin(_)
             | Error::Rot(_)) => HttpError::for_internal_error(
                 InlineErrorChain::new(&err).to_string(),
             ),
@@ -1729,7 +1729,7 @@ impl SledAgent {
 
     pub(crate) fn multirack_join_service_status(
         &self,
-    ) -> Result<Option<MultirackJoinServiceStatus>, Error> {
+    ) -> Result<MultirackJoinServiceStatus, RssAccessError> {
         Ok(self
             .inner
             .multirack_join_completer

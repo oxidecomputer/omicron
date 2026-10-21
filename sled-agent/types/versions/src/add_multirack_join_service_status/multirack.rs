@@ -45,6 +45,7 @@ impl BiHashItem for SledAgentInfo {
     bi_upcast!();
 }
 
+// Information about the state of a sled agent start request
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum SledAgentStartState {

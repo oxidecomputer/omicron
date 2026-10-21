@@ -4,12 +4,12 @@
 
 //! Internal API for rack-level bootstrap agent operations.
 
+use crate::bootstrap::RssAccessError::MultirackJoinNotYetStarted;
 use crate::bootstrap::rss_handle::run_rss;
 use bootstrap_agent_lockstep_types::MultirackJoinRequest;
 use bootstrap_agent_lockstep_types::MultirackJoinServiceState;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::RssStep;
-use dropshot::HttpError;
 use omicron_uuid_kinds::MultirackJoinUuid;
 use omicron_uuid_kinds::RackInitUuid;
 use sled_agent_bootstrap_common::RssContext;
@@ -94,49 +94,6 @@ impl RssAccessError {
     }
 }
 
-impl From<RssAccessError> for HttpError {
-    fn from(err: RssAccessError) -> Self {
-        // Most variants of RssAccessError report states that conflict with the
-        // requested rack operation in some fashion:
-        //
-        // * `StillInitializing`/`MultirackJoinInProgress` mean that an
-        //   operation is in progress.
-        // * `AlreadyInitialized`/`MultirackJoinCompleted` mean that we're
-        //   already at the requested end state. (Note that we don't try and
-        //   be idempotent here -- to do so we'd have to ensure the actual RSS
-        //   config is the same, which is tricky. Instead, clients should look
-        //   at the error code to determine what to do.)
-        // * `MultirackJoinNotYetStarted` means it can't complete when signalled.
-        // * The other states are terminal states that need operator intervention.
-        //
-        // We map all of these states to 409 Conflict errors, and (since this is
-        // an internal API) expose the error text to the client.
-        match err {
-            RssAccessError::MultirackJoinTaskExitedUnexpectedly => {
-                HttpError::for_internal_error(err.to_string())
-            }
-            RssAccessError::StillInitializing
-            | RssAccessError::InitializationFailed { .. }
-            | RssAccessError::InitializationPanicked
-            | RssAccessError::AlreadyInitialized
-            | RssAccessError::MultirackJoinInProgress
-            | RssAccessError::MultirackJoinFailed { .. }
-            | RssAccessError::MultirackJoinPanicked
-            | RssAccessError::MultirackJoinCompleted
-            | RssAccessError::MembershipChangeNoLongerAllowed
-            | RssAccessError::RackSubnetChangeNotAllowed
-            | RssAccessError::MultirackJoinNotYetStarted
-            | RssAccessError::MultirackJoinStatusNotYetAvailable => {
-                HttpError::for_client_error(
-                    Some(err.error_code().to_string()),
-                    dropshot::ClientErrorStatusCode::CONFLICT,
-                    err.to_string(),
-                )
-            }
-        }
-    }
-}
-
 /// A mechanism for sled-agent to access its local multirack join service task.
 #[derive(Clone)]
 pub(crate) struct MultirackJoinAccessor(RssAccess);
@@ -157,7 +114,7 @@ impl MultirackJoinAccessor {
     /// running.
     pub fn multirack_join_service_status(
         &self,
-    ) -> Result<Option<MultirackJoinServiceStatus>, RssAccessError> {
+    ) -> Result<MultirackJoinServiceStatus, RssAccessError> {
         self.0.multirack_join_service_status()
     }
 }
@@ -407,7 +364,6 @@ impl RssAccess {
                     join_handle,
                     input_tx,
                     output_rx,
-                    status_rx,
                     membership_change_still_possible,
                     rack_join_successful_tx,
                 } = MultirackJoinServiceHandle::spawn(ctx, request);
@@ -415,7 +371,6 @@ impl RssAccess {
                     id,
                     input_tx,
                     output_rx,
-                    status_rx,
                     membership_change_still_possible,
                     rack_join_successful_tx: Some(rack_join_successful_tx),
                 };
@@ -530,24 +485,70 @@ impl RssAccess {
 
     pub(crate) fn multirack_join_service_status(
         &self,
-    ) -> Result<Option<MultirackJoinServiceStatus>, RssAccessError> {
+    ) -> Result<MultirackJoinServiceStatus, RssAccessError> {
         match &*self.status.lock().unwrap() {
-            RssStatus::MultirackJoinInProgress { status_rx, .. } => {
-                match status_rx.borrow().clone() {
-                    Some(status) => Ok(Some(status)),
-                    None => {
+            RssStatus::MultirackJoinInProgress { output_rx, .. } => {
+                match output_rx.borrow().clone() {
+                    MultirackJoinServiceState::StartSledAgents(status) => {
+                        Ok(status.into())
+                    }
+                    MultirackJoinServiceState::ConfigureNetworking(Some(
+                        status,
+                    )) => Ok(status.into()),
+                    MultirackJoinServiceState::WaitForCompletion(status) => {
+                        Ok(status.into())
+                    }
+                    MultirackJoinServiceState::ConfigureNetworking(None)
+                    | MultirackJoinServiceState::Requested
+                    | MultirackJoinServiceState::Starting
+                    | MultirackJoinServiceState::TrustQuorumReconfigure(_)
+                    | MultirackJoinServiceState::TrustQuorumPreparing(_)
+                    | MultirackJoinServiceState::TrustQuorumCommitting(_) => {
                         Err(RssAccessError::MultirackJoinStatusNotYetAvailable)
+                    }
+                    MultirackJoinServiceState::Uninitialized => {
+                        Err(RssAccessError::MultirackJoinNotYetStarted)
+                    }
+                    MultirackJoinServiceState::Completed => {
+                        Err(RssAccessError::MultirackJoinCompleted)
+                    }
+                    MultirackJoinServiceState::Failed { message } => {
+                        Err(RssAccessError::MultirackJoinFailed { message })
+                    }
+                    MultirackJoinServiceState::InvalidMembershipSize {
+                        message,
+                    } => Err(RssAccessError::MultirackJoinFailed { message }),
+                    MultirackJoinServiceState::TaskPanicked => {
+                        Err(RssAccessError::MultirackJoinPanicked)
                     }
                 }
             }
-            RssStatus::Uninitialized
-            | RssStatus::Initialized { .. }
-            | RssStatus::Initializing { .. }
-            | RssStatus::InitializationFailed { .. }
-            | RssStatus::InitializationPanicked { .. }
-            | RssStatus::MultirackJoinCompleted { .. }
-            | RssStatus::MultirackJoinFailed { .. }
-            | RssStatus::MultirackJoinPanicked { .. } => Ok(None),
+            RssStatus::Uninitialized => Err(MultirackJoinNotYetStarted),
+            RssStatus::Initialized { .. } => {
+                Err(RssAccessError::InitializationPanicked)
+            }
+            RssStatus::Initializing { .. } => {
+                Err(RssAccessError::StillInitializing)
+            }
+            RssStatus::InitializationFailed { err, .. } => {
+                Err(RssAccessError::InitializationFailed {
+                    message: InlineErrorChain::new(err).to_string(),
+                })
+            }
+            RssStatus::InitializationPanicked { .. } => {
+                Err(RssAccessError::InitializationPanicked)
+            }
+            RssStatus::MultirackJoinCompleted { .. } => {
+                Err(RssAccessError::MultirackJoinCompleted)
+            }
+            RssStatus::MultirackJoinFailed { err, .. } => {
+                Err(RssAccessError::MultirackJoinFailed {
+                    message: InlineErrorChain::new(err).to_string(),
+                })
+            }
+            RssStatus::MultirackJoinPanicked { .. } => {
+                Err(RssAccessError::InitializationPanicked)
+            }
         }
     }
 
@@ -623,7 +624,6 @@ enum RssStatus {
         id: MultirackJoinUuid,
         input_tx: watch::Sender<MultirackJoinRequest>,
         output_rx: watch::Receiver<MultirackJoinServiceState>,
-        status_rx: watch::Receiver<Option<MultirackJoinServiceStatus>>,
         membership_change_still_possible: Arc<AtomicBool>,
         rack_join_successful_tx: Option<oneshot::Sender<()>>,
     },
@@ -642,46 +642,4 @@ enum RssStatus {
     MultirackJoinPanicked {
         id: MultirackJoinUuid,
     },
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rss_access_error_to_http_error() {
-        let cases = [
-            RssAccessError::StillInitializing,
-            RssAccessError::InitializationFailed {
-                message: "boom".to_string(),
-            },
-            RssAccessError::InitializationPanicked,
-            RssAccessError::AlreadyInitialized,
-        ];
-        for err in cases {
-            let error_code = err.error_code();
-            let display = err.to_string();
-            let http_error = HttpError::from(err);
-            assert_eq!(
-                http_error.status_code.as_u16(),
-                409,
-                "{error_code}: expected 409 Conflict"
-            );
-            assert_eq!(
-                http_error.error_code.as_deref(),
-                Some(error_code),
-                "{error_code}: error_code should be the variant name"
-            );
-            assert_eq!(
-                http_error.external_message, display,
-                "{error_code}: full error text should be exposed to the \
-                 client"
-            );
-            assert_eq!(
-                http_error.internal_message, display,
-                "{error_code}: internal message should match the error \
-                 text"
-            );
-        }
-    }
 }
