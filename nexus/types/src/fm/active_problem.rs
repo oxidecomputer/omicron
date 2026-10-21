@@ -7,6 +7,7 @@
 //! These are *not* part of the external API; for that, see the
 //! [`crate::external_api::active_problem`] module.
 
+use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
 use omicron_common::api::external::Error;
 use omicron_generation_kinds::ActiveProblemRevNum;
@@ -209,10 +210,22 @@ impl SitrepActiveProblem {
 pub struct SitrepRevision {
     pub number: ActiveProblemRevNum,
     pub requested_sitrep_id: SitrepUuid,
+    /// The time at which the Active Problem was resolved, if it should be
+    /// resolved as of this revision.
+    ///
+    /// If this is `None`, the Active Problem will remain active when this
+    /// revision is created.
+    pub time_resolved: Option<DateTime<Utc>>,
     pub code: ProblemCode,
     pub summary: String,
     pub description: String,
     pub action_required: String,
+    /// A human-readable comment explaining why the diagnosis engine requested
+    /// this revision.
+    ///
+    /// This is used for debugging the sitrep, and is not part of the
+    /// externally visible Active Problem revision.
+    pub comment: String,
 }
 
 impl iddqd::IdOrdItem for SitrepRevision {

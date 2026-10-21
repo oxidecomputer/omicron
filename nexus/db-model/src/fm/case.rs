@@ -68,6 +68,7 @@ impl CaseMetadata {
             support_bundles_requested: _,
             ereports: _,
             facts: _,
+            active_problems: _,
         } = case;
         Self {
             sitrep_id: sitrep_id.into(),
@@ -140,7 +141,7 @@ impl CaseEreport {
     }
 }
 
-/// An association betwene a case and an Active Problem.
+/// An association between a case and an Active Problem.
 ///
 /// This corresponds to a record in the `fm_case_active_problem` table.
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
@@ -151,6 +152,44 @@ pub struct CaseActiveProblem {
     pub sitrep_id: DbTypedUuid<SitrepKind>,
     pub created_sitrep_id: DbTypedUuid<SitrepKind>,
     pub comment: String,
+}
+
+impl CaseActiveProblem {
+    pub fn from_sitrep(
+        sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
+        case_id: impl Into<DbTypedUuid<CaseKind>>,
+        association: fm::case::CaseActiveProblem,
+    ) -> Self {
+        let fm::case::CaseActiveProblem {
+            problem_id,
+            created_sitrep_id,
+            comment,
+        } = association;
+        Self {
+            case_id: case_id.into(),
+            problem_id: problem_id.into(),
+            sitrep_id: sitrep_id.into(),
+            created_sitrep_id: created_sitrep_id.into(),
+            comment,
+        }
+    }
+}
+
+impl From<CaseActiveProblem> for fm::case::CaseActiveProblem {
+    fn from(association: CaseActiveProblem) -> Self {
+        let CaseActiveProblem {
+            case_id: _,
+            problem_id,
+            sitrep_id: _,
+            created_sitrep_id,
+            comment,
+        } = association;
+        Self {
+            problem_id: problem_id.into(),
+            created_sitrep_id: created_sitrep_id.into(),
+            comment,
+        }
+    }
 }
 
 /// The complete state of a case in a particular sitrep, consisting of the

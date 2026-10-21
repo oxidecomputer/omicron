@@ -561,6 +561,7 @@ mod tests {
             .collect(),
             support_bundles_requested: IdOrdMap::new(),
             facts: IdOrdMap::new(),
+            active_problems: IdOrdMap::new(),
         };
 
         let parent = fm::Sitrep {
@@ -638,6 +639,7 @@ mod tests {
             .into_iter()
             .collect(),
             facts: IdOrdMap::new(),
+            active_problems: IdOrdMap::new(),
         };
 
         let parent = fm::Sitrep {

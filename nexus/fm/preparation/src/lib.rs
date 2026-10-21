@@ -793,6 +793,7 @@ mod tests {
                     alerts_requested,
                     support_bundles_requested: iddqd::IdOrdMap::new(),
                     facts: iddqd::IdOrdMap::new(),
+                    active_problems: iddqd::IdOrdMap::new(),
                 }
             };
 
