@@ -6,7 +6,7 @@
 
 use crate::collection::BundleCollection;
 use crate::output::BundleOutput;
-use crate::output::SizeLimitExceeded;
+use crate::output::WriteRefused;
 
 use chrono::DateTime;
 use chrono::Utc;
@@ -30,7 +30,7 @@ use std::sync::Arc;
 #[derive(Debug)]
 pub enum StepError {
     /// A write was refused because the bundle reached its size limit.
-    SizeLimitExceeded(SizeLimitExceeded),
+    WriteRefused(WriteRefused),
     /// Any other failure.
     Other(anyhow::Error),
 }
@@ -39,15 +39,15 @@ impl StepError {
     /// Returns this error as a `std::error::Error`, for logging.
     pub fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
         match self {
-            StepError::SizeLimitExceeded(err) => err,
+            StepError::WriteRefused(err) => err,
             StepError::Other(err) => err.as_ref(),
         }
     }
 }
 
-impl From<SizeLimitExceeded> for StepError {
-    fn from(err: SizeLimitExceeded) -> Self {
-        StepError::SizeLimitExceeded(err)
+impl From<WriteRefused> for StepError {
+    fn from(err: WriteRefused) -> Self {
+        StepError::WriteRefused(err)
     }
 }
 
@@ -85,7 +85,7 @@ impl<T> StepResultExt<T> for Result<T, StepError> {
     {
         self.map_err(|err| match err {
             StepError::Other(err) => StepError::Other(err.context(f())),
-            err @ StepError::SizeLimitExceeded(_) => err,
+            err @ StepError::WriteRefused(_) => err,
         })
     }
 }
@@ -129,7 +129,7 @@ impl CollectionStep {
         let output = match (self.step_fn)(collection, output).await {
             Ok(output) => output,
             // Not a step failure; the scheduler reports the size limit.
-            Err(StepError::SizeLimitExceeded(_)) => CollectionStepOutput::None,
+            Err(StepError::WriteRefused(_)) => CollectionStepOutput::None,
             Err(StepError::Other(err)) => {
                 warn!(
                     log,

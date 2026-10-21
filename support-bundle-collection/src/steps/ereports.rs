@@ -48,7 +48,7 @@ pub async fn collect(
     .await
     {
         Ok(()) => {}
-        Err(StepError::SizeLimitExceeded(_)) => {}
+        Err(StepError::WriteRefused(_)) => {}
         Err(StepError::Other(err)) => {
             warn!(
                 log,

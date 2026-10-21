@@ -28,7 +28,7 @@ host OS itself.
 
 Steps write through the `BundleOutput` they are given, not directly to the
 filesystem, so that writes count against the bundle's size limit. A write
-past the limit fails with `StepError::SizeLimitExceeded`, and the framework
+past the limit fails with `StepError::WriteRefused`, and the framework
 stops collection and records what was left out. Steps can return that error
 with `?`; beyond honoring the stop token, they need nothing special. See
 `StepError` for details.

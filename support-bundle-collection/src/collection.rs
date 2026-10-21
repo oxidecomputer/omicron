@@ -309,7 +309,7 @@ impl BundleCollection {
         }
 
         // At the size limit, steps still queued never ran.
-        if let Some(exceeded) = self.size_budget.exceeded() {
+        if let Some(refusals) = self.size_budget.refusals() {
             incomplete_steps.sort();
             let mut skipped_steps: Vec<String> =
                 steps.into_iter().map(|step| step.name).collect();
@@ -317,8 +317,8 @@ impl BundleCollection {
             report.size_limit_exceeded = Some(SupportBundleSizeLimitExceeded {
                 limit_bytes: self.size_budget.limit().byte_count(),
                 used_bytes: self.size_budget.used(),
-                exceeded_at: exceeded.at,
-                refused_paths: exceeded
+                exceeded_at: refusals.at,
+                refused_paths: refusals
                     .paths
                     .iter()
                     .map(|path| path.to_string())
