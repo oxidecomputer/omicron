@@ -319,7 +319,7 @@ impl BundleOutput {
 
             let charged = Cell::new(0);
             let refused = Cell::new(None);
-            let result = (|| {
+            let result = {
                 let mut w = std::io::BufWriter::new(BudgetedWriter {
                     file,
                     budget: &budget,
@@ -337,7 +337,7 @@ impl BundleOutput {
                 // the limit and hide the real error.
                 let _ = w.into_parts();
                 result
-            })();
+            };
             // A refused write fails the file, even if `f` returned Ok.
             let err = match (refused.take(), result) {
                 (None, Ok(())) => return Ok(()),
