@@ -141,6 +141,8 @@ pub struct BundleOutput {
     // The path of this directory, relative to `root`.
     dir: Utf8PathBuf,
     budget: Arc<SizeBudget>,
+    // The bundle's logger, from which each directory's `log` is built.
+    bundle_log: Logger,
     log: Logger,
 }
 
@@ -151,6 +153,7 @@ impl BundleOutput {
             root: Arc::new(root.to_owned()),
             dir: Utf8PathBuf::new(),
             budget,
+            bundle_log: log.clone(),
             log,
         }
     }
@@ -160,11 +163,14 @@ impl BundleOutput {
     /// The subdirectory is not created until something is written to it, or
     /// [`BundleOutput::create_dir_all`] is called.
     pub fn join(&self, path: impl AsRef<Utf8Path>) -> Self {
+        let dir = self.dir.join(path);
+        let log = self.bundle_log.new(slog::o!("dir" => dir.to_string()));
         Self {
             root: self.root.clone(),
-            dir: self.dir.join(path),
+            dir,
             budget: self.budget.clone(),
-            log: self.log.clone(),
+            bundle_log: self.bundle_log.clone(),
+            log,
         }
     }
 
