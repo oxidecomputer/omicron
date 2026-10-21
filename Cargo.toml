@@ -530,7 +530,7 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "e577a94678bf0a8d64d719acd3e19edd965f66a3" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "c424a79e13db858de98a0539d7f056f26ef36ef1" }
 dropshot = { version = "0.18.0", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.9.0"
 dropshot-api-manager-types = "0.9.0"
@@ -643,10 +643,10 @@ ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "6fee306970763d27025c408cbbf690d6e30a9593" }
-mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "6fee306970763d27025c408cbbf690d6e30a9593" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "6fee306970763d27025c408cbbf690d6e30a9593" }
-ddm-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "6fee306970763d27025c408cbbf690d6e30a9593" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "56b9fdb508ca435d2692b856b25f083ea03b5e49" }
+mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "56b9fdb508ca435d2692b856b25f083ea03b5e49" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "56b9fdb508ca435d2692b856b25f083ea03b5e49" }
+ddm-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "56b9fdb508ca435d2692b856b25f083ea03b5e49" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -719,7 +719,7 @@ oxide-update-engine = "0.1.2"
 oxide-update-engine-types = { version = "0.1.2", features = ["schemars08"] }
 oxide-update-engine-display = "0.1.2"
 oxide-versioned-envelope = { version = "0.1.1", features = ["schemars08"] }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "44052786cb63ad9ff32ec47bd8d65edb6a184e21", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "4343f01b73ce8e7f54c25aab39ef47a80fb1ee50", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.7"
 once_cell = "1.21.3"
@@ -728,7 +728,7 @@ openapiv3 = "2.2.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "44052786cb63ad9ff32ec47bd8d65edb6a184e21" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "4343f01b73ce8e7f54c25aab39ef47a80fb1ee50" }
 oso = "0.27"
 owo-colors = "4.2.2"
 oximeter = { path = "oximeter/oximeter" }

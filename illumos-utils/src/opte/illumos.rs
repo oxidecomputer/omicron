@@ -71,6 +71,12 @@ pub enum Error {
 
     #[error("Duplicate OPTE port: id={id}, kind={kind:?}")]
     DuplicateOptePort { id: Uuid, kind: NetworkInterfaceKind },
+
+    #[error("Tried to set a router list on non-existent port for NIC {0}")]
+    RouterListMissingPort(uuid::Uuid),
+
+    #[error("Invalid router list: {0}")]
+    InvalidRouterList(String),
 }
 
 /// Delete all xde devices on the system.

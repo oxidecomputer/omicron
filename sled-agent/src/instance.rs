@@ -28,7 +28,7 @@ use illumos_utils::opte::{
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use omicron_common::api::internal::shared::{
-    DelegatedZvol, DhcpConfig, SledIdentifiers,
+    DelegatedZvol, DhcpConfig, RouterListEntry, SledIdentifiers,
 };
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
@@ -686,6 +686,10 @@ struct InstanceRunner {
     // flag AND instance bit).
     primary_nic_mtu: Option<u32>,
 
+    // The tunnel-router list the instance's OPTE ports are created with.
+    // Empty means no tunnel routers (no external egress).
+    router_list: Vec<RouterListEntry>,
+
     // Internal State management
     state: InstanceStates,
     running_state: Option<RunningState>,
@@ -768,6 +772,7 @@ impl InstanceRunner {
             dhcp_config,
             delegated_zvols,
             primary_nic_mtu,
+            router_list,
         } = local_config;
         let DhcpConfig { dns_servers, host_domain, search_domains } =
             dhcp_config;
@@ -830,6 +835,7 @@ impl InstanceRunner {
             firewall_rules,
             dhcp_config,
             primary_nic_mtu,
+            router_list,
             state: InstanceStates::new(vmm_runtime, migration_id),
             running_state: None,
             nexus_client,
@@ -2526,6 +2532,7 @@ impl InstanceRunner {
         dhcp_config: &DhcpCfg,
         attached_subnets: &IdOrdMap<AttachedSubnet>,
         primary_mtu: Option<u32>,
+        router_list: &'a [RouterListEntry],
     ) -> PortCreateParams<'a> {
         let (external_ips, attached_subnets, mtu) = if nic.primary {
             (
@@ -2543,6 +2550,7 @@ impl InstanceRunner {
             dhcp_config: dhcp_config.clone(),
             attached_subnets,
             mtu,
+            router_list,
         }
     }
 
@@ -2586,6 +2594,7 @@ impl InstanceRunner {
                     &self.dhcp_config,
                     &self.attached_subnets,
                     self.primary_nic_mtu,
+                    &self.router_list,
                 ))?;
             opte_port_names.push(port.name().to_string());
             opte_ports.push(port);
@@ -3276,6 +3285,7 @@ mod tests {
             delegated_zvols: vec![],
             attached_subnets: IdOrdMap::new(),
             primary_nic_mtu: None,
+            router_list: vec![],
         };
 
         InstanceInitialState {
@@ -5163,6 +5173,7 @@ mod tests {
                 &dhcp_config,
                 &attached_subnets,
                 mtu,
+                &[],
             );
             if nic.primary {
                 assert_eq!(params.external_ips, &external_ips);

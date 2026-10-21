@@ -835,6 +835,14 @@
           "serial_number"
         ]
       },
+      "BfdMode": {
+        "description": "BFD connection mode.",
+        "type": "string",
+        "enum": [
+          "single_hop",
+          "multi_hop"
+        ]
+      },
       "BgpAuthKeyId": {
         "description": "The key identifier for authentication to use with a BGP peer.",
         "allOf": [
@@ -1324,6 +1332,14 @@
               }
             ]
           },
+          "routing": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserSpecifiedRoutingConfig"
+              }
+            ]
+          },
           "service_ip_pools": {
             "title": "IdOrdMap",
             "x-rust-type": {
@@ -1729,6 +1745,47 @@
             },
             "required": [
               "type"
+            ]
+          }
+        ]
+      },
+      "ImportExportPolicy": {
+        "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
+        "oneOf": [
+          {
+            "description": "Do not perform any filtering.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_filtering"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "allow"
+                ]
+              },
+              "value": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/IpNet"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "value"
             ]
           }
         ]
@@ -7500,6 +7557,50 @@
           "$ref": "#/components/schemas/IpNet"
         }
       },
+      "UserSpecifiedInitialRouterAssignment": {
+        "type": "object",
+        "properties": {
+          "priority": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "router_configuration": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "priority",
+          "router_configuration"
+        ],
+        "additionalProperties": false
+      },
+      "UserSpecifiedInitialRouterConfiguration": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "default": "",
+            "type": "string"
+          },
+          "switch0": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserSpecifiedRouterConfigurationSwitch"
+              }
+            ]
+          },
+          "switch1": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserSpecifiedRouterConfigurationSwitch"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "UserSpecifiedPortConfig": {
         "description": "A user-specified port configuration.",
         "oneOf": [
@@ -7696,8 +7797,399 @@
         ],
         "additionalProperties": false
       },
+      "UserSpecifiedRouterBfdPeer": {
+        "description": "A BFD peer within a router configuration",
+        "type": "object",
+        "properties": {
+          "detection_threshold": {
+            "description": "The negotiated Control packet transmission interval, multiplied by this variable, will be the Detection Time for this session (as seen by the remote system). Must be at least 1.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 1
+          },
+          "local": {
+            "nullable": true,
+            "description": "Local address to listen on for BFD traffic. If `None` then the unspecified address (0.0.0.0 or ::) is used.",
+            "type": "string",
+            "format": "ip"
+          },
+          "mode": {
+            "description": "Select either single-hop (RFC 5881) or multi-hop (RFC 5883)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BfdMode"
+              }
+            ]
+          },
+          "name": {
+            "description": "Name of this BFD peer entry",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "remote": {
+            "description": "Address of the remote peer to establish a BFD session with",
+            "type": "string",
+            "format": "ip"
+          },
+          "required_rx": {
+            "description": "The minimum interval, in microseconds, between received BFD Control packets that this system requires.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "detection_threshold",
+          "mode",
+          "name",
+          "remote",
+          "required_rx"
+        ],
+        "additionalProperties": false
+      },
+      "UserSpecifiedRouterBgp": {
+        "description": "The BGP configuration of a router configuration on one switch",
+        "type": "object",
+        "properties": {
+          "announce_set": {
+            "description": "Name of the announce set that holds the prefixes to announce",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "asn": {
+            "description": "The autonomous system number",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "max_paths": {
+            "description": "Maximum number of equal-cost paths for BGP ECMP",
+            "default": 1,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MaxPathConfig"
+              }
+            ]
+          }
+        },
+        "required": [
+          "announce_set",
+          "asn"
+        ],
+        "additionalProperties": false
+      },
+      "UserSpecifiedRouterBgpPeer": {
+        "description": "A BGP peer within a router configuration\n\nA numbered peer is given by `addr`, an unnumbered peer by `port`.",
+        "type": "object",
+        "properties": {
+          "addr": {
+            "nullable": true,
+            "description": "Address of the peer, for a numbered session",
+            "type": "string",
+            "format": "ip"
+          },
+          "allowed_export": {
+            "description": "Export prefix filtering policy",
+            "default": {
+              "type": "no_filtering"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportExportPolicy"
+              }
+            ]
+          },
+          "allowed_import": {
+            "description": "Import prefix filtering policy",
+            "default": {
+              "type": "no_filtering"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportExportPolicy"
+              }
+            ]
+          },
+          "auth_key_id": {
+            "nullable": true,
+            "description": "Authentication key uploaded separately through the existing key endpoint.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BgpAuthKeyId"
+              }
+            ]
+          },
+          "communities": {
+            "description": "BGP communities to include in updates",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "connect_retry": {
+            "description": "TCP connection retry interval in seconds",
+            "default": 3,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "delay_open": {
+            "description": "Delay in seconds before sending open request after TCP session establishment",
+            "default": 0,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "enforce_first_as": {
+            "description": "Enforce that the first AS in paths matches the peer's AS",
+            "default": false,
+            "type": "boolean"
+          },
+          "hold_time": {
+            "description": "Hold time between keepalives in seconds",
+            "default": 6,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "idle_hold_time": {
+            "description": "Time to hold peer in idle state in seconds",
+            "default": 3,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "keepalive": {
+            "description": "Keepalive request interval in seconds",
+            "default": 2,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "Local preference for received routes",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "min_ttl": {
+            "nullable": true,
+            "description": "Minimum IP TTL for peer messages (GTSM)",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "multi_exit_discriminator": {
+            "nullable": true,
+            "description": "Multi-exit discriminator for updates sent to this peer",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "name": {
+            "description": "Name of this BGP peer entry",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "port": {
+            "nullable": true,
+            "description": "Name of the external port the peer is reachable on, such as `qsfp0`, for an unnumbered session",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "remote_asn": {
+            "nullable": true,
+            "description": "Require that the peer has this autonomous system number. If not set, any peer ASN is accepted.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "router_lifetime": {
+            "nullable": true,
+            "description": "Router lifetime in seconds advertised on an unnumbered link. Defaults to 0 (disabled).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterLifetimeConfig"
+              }
+            ]
+          },
+          "src_addr": {
+            "nullable": true,
+            "description": "Local address to use for a numbered session. Must have the same address family as the peer. If omitted, the system selects the source address.",
+            "type": "string",
+            "format": "ip"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "VLAN ID associated with this peer",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "UserSpecifiedRouterConfigurationSwitch": {
+        "description": "The settings of a router configuration on one switch",
+        "type": "object",
+        "properties": {
+          "bfd_peers": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserSpecifiedRouterBfdPeer"
+            }
+          },
+          "bgp": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserSpecifiedRouterBgp"
+              }
+            ]
+          },
+          "bgp_peers": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserSpecifiedRouterBgpPeer"
+            }
+          },
+          "routes": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserSpecifiedRouterStaticRoute"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
       "UserSpecifiedRouterPeerAddr": {
         "type": "string"
+      },
+      "UserSpecifiedRouterStaticRoute": {
+        "description": "A static route within a router configuration",
+        "type": "object",
+        "properties": {
+          "destination": {
+            "description": "The destination of the route",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "name": {
+            "description": "Name of this static route entry",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "nexthop": {
+            "description": "The nexthop/gateway address",
+            "type": "string",
+            "format": "ip"
+          },
+          "rib_priority": {
+            "nullable": true,
+            "description": "Route RIB priority. Higher priority indicates precedence within and across protocols.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "VLAN ID for 802.1Q tagged L2 segment the gateway is reachable over",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "destination",
+          "name",
+          "nexthop"
+        ],
+        "additionalProperties": false
+      },
+      "UserSpecifiedRoutingAnnounceSet": {
+        "description": "A set of prefixes for BGP configurations to announce",
+        "type": "object",
+        "properties": {
+          "description": {
+            "default": "",
+            "type": "string"
+          },
+          "prefixes": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "UserSpecifiedRoutingConfig": {
+        "description": "Named routers and the two explicit initial assignment lists.",
+        "type": "object",
+        "properties": {
+          "announce_sets": {
+            "description": "Announce sets, keyed by name.",
+            "default": {},
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/UserSpecifiedRoutingAnnounceSet"
+            }
+          },
+          "control_plane_router_configurations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserSpecifiedInitialRouterAssignment"
+            }
+          },
+          "recovery_silo_router_configurations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserSpecifiedInitialRouterAssignment"
+            }
+          },
+          "router_configurations": {
+            "description": "Router configurations, keyed by name.",
+            "default": {},
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/UserSpecifiedInitialRouterConfiguration"
+            }
+          }
+        },
+        "required": [
+          "control_plane_router_configurations",
+          "recovery_silo_router_configurations"
+        ],
+        "additionalProperties": false
       },
       "UserSpecifiedUplinkAddressConfig": {
         "description": "A user-specified uplink address configuration.\n\nThis provides a friendlier TOML representation of an uplink address.",

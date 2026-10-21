@@ -77,6 +77,12 @@ pub enum Error {
 
     #[error("Duplicate OPTE port: id={id}, kind={kind:?}")]
     DuplicateOptePort { id: Uuid, kind: NetworkInterfaceKind },
+
+    #[error("Tried to set a router list on non-existent port for NIC {0}")]
+    RouterListMissingPort(uuid::Uuid),
+
+    #[error("Invalid router list: {0}")]
+    InvalidRouterList(String),
 }
 
 pub fn initialize_xde_driver(
@@ -321,6 +327,22 @@ impl Handle {
         &self,
         _: &ClearVirt2PhysReq,
     ) -> Result<NoResp, OpteError> {
+        unimplemented!("Not yet used in tests")
+    }
+
+    /// Set the tunnel-router list of a port.
+    pub fn set_router_list(
+        &self,
+        _: &oxide_vpc::api::SetRouterListReq,
+    ) -> Result<NoResp, OpteError> {
+        Ok(NO_RESPONSE)
+    }
+
+    /// Dump the tunnel-router list of a port.
+    pub fn dump_router_list(
+        &self,
+        _: &oxide_vpc::api::DumpRouterListReq,
+    ) -> Result<oxide_vpc::api::DumpRouterListResp, OpteError> {
         unimplemented!("Not yet used in tests")
     }
 

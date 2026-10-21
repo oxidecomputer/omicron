@@ -48,12 +48,15 @@ use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::StartSledAgentRequest;
 use sled_agent_client::types::StartSledAgentRequestBody;
 use sled_agent_types::early_networking::LldpAdminStatus;
+use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::early_networking::UplinkAddress;
 use sled_hardware_types::BaseboardId;
 
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
+use std::net::{IpAddr, Ipv6Addr};
 use std::num::NonZeroU32;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -92,6 +95,11 @@ impl super::Nexus {
         let log = &opctx.log;
 
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        if let Some(routing) = &request.routing {
+            routing
+                .validate(&request.rack_network_config)
+                .map_err(|e| Error::invalid_request(&e.to_string()))?;
+        }
 
         let physical_disks: Vec<_> = request
             .physical_disks
@@ -316,12 +324,7 @@ impl super::Nexus {
 
         let kind = networking::AddressLotKind::Infra;
 
-        let first_address = rack_network_config.infra_ip_first;
-        let last_address = rack_network_config.infra_ip_last;
-        let ipv4_block =
-            networking::AddressLotBlockCreate { first_address, last_address };
-
-        let blocks = vec![ipv4_block];
+        let blocks = initial_infra_lot_blocks(rack_network_config);
 
         let address_lot_params =
             networking::AddressLotCreate { identity, kind, blocks };
@@ -661,6 +664,7 @@ impl super::Nexus {
                     external_dns,
                     recovery_silo,
                     recovery_silo_fq_dns_name,
+                    routing: request.routing,
                     recovery_user_id: request.recovery_silo.user_name,
                     recovery_user_password_hash: request
                         .recovery_silo
@@ -690,8 +694,8 @@ impl super::Nexus {
 
         // We've potentially updated the list of DNS servers and the DNS
         // configuration for both internal and external DNS, plus the Silo
-        // certificates and target blueprint.  Activate the relevant background
-        // tasks.
+        // certificates, target blueprint, and router configuration
+        // assignments.  Activate the relevant background tasks.
         for task in &[
             &self.background_tasks.task_internal_dns_config,
             &self.background_tasks.task_internal_dns_servers,
@@ -700,6 +704,7 @@ impl super::Nexus {
             &self.background_tasks.task_external_endpoints,
             &self.background_tasks.task_inventory_collection,
             &self.background_tasks.task_blueprint_loader,
+            &self.background_tasks.task_router_list_manager,
         ] {
             self.background_tasks.activate(task);
         }
@@ -951,5 +956,111 @@ pub fn rack_subnet(
                 internal_message: "rack subnet not set".into(),
             });
         }
+    }
+}
+
+/// The blocks of the `initial-infra` address lot: RSS's infrastructure range,
+/// plus `::` when that range does not start there and some uplink uses
+/// link-local addressing. `rack_initialize` records such an uplink's address
+/// as `::` in this lot, so a rack mixing link-local and numbered uplinks
+/// would otherwise fail every handoff with "address not in lot".
+fn initial_infra_lot_blocks(
+    config: &RackNetworkConfig,
+) -> Vec<networking::AddressLotBlockCreate> {
+    let mut blocks = vec![networking::AddressLotBlockCreate {
+        first_address: config.infra_ip_first,
+        last_address: config.infra_ip_last,
+    }];
+    let unspecified = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
+    let addrconf = config.ports.iter().any(|p| {
+        p.addresses.iter().any(|a| a.address == UplinkAddress::AddrConf)
+    });
+    if addrconf && config.infra_ip_first != unspecified {
+        blocks.push(networking::AddressLotBlockCreate {
+            first_address: unspecified,
+            last_address: unspecified,
+        });
+    }
+    blocks
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use sled_agent_types::early_networking::PortConfig;
+    use sled_agent_types::early_networking::UplinkAddressConfig;
+    use sled_agent_types::early_networking::UplinkPorts;
+
+    /// A rack network config with one uplink port per address.
+    fn config(
+        first: &str,
+        last: &str,
+        addresses: &[UplinkAddress],
+    ) -> RackNetworkConfig {
+        let ports = addresses
+            .iter()
+            .enumerate()
+            .map(|(i, address)| PortConfig {
+                addresses: vec![UplinkAddressConfig {
+                    address: *address,
+                    vlan_id: None,
+                }],
+                ..PortConfig::empty_for_tests(&format!("qsfp{i}"))
+            })
+            .collect();
+        RackNetworkConfig {
+            rack_subnet: "fd00:1122:3344:0100::/56".parse().unwrap(),
+            infra_ip_first: first.parse().unwrap(),
+            infra_ip_last: last.parse().unwrap(),
+            ports: UplinkPorts::new(ports).unwrap(),
+            bgp: Vec::new(),
+            bfd: Vec::new(),
+        }
+    }
+
+    fn ranges(config: &RackNetworkConfig) -> Vec<(IpAddr, IpAddr)> {
+        initial_infra_lot_blocks(config)
+            .into_iter()
+            .map(|b| (b.first_address, b.last_address))
+            .collect()
+    }
+
+    fn numbered() -> UplinkAddress {
+        UplinkAddress::Static { ip_net: "198.51.101.2/30".parse().unwrap() }
+    }
+
+    #[test]
+    fn mixed_uplinks_add_a_block_for_link_local_addresses() {
+        let c = config(
+            "198.51.101.1",
+            "198.51.101.15",
+            &[numbered(), UplinkAddress::AddrConf],
+        );
+        let unspecified = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
+        assert_eq!(
+            ranges(&c),
+            vec![
+                (
+                    "198.51.101.1".parse().unwrap(),
+                    "198.51.101.15".parse().unwrap()
+                ),
+                (unspecified, unspecified),
+            ]
+        );
+    }
+
+    #[test]
+    fn numbered_uplinks_keep_the_infra_range_only() {
+        let c = config("198.51.101.1", "198.51.101.15", &[numbered()]);
+        assert_eq!(ranges(&c).len(), 1);
+    }
+
+    #[test]
+    fn link_local_uplinks_with_an_unspecified_range_keep_one_block() {
+        let c = config("::", "::", &[UplinkAddress::AddrConf]);
+        assert_eq!(
+            ranges(&c),
+            vec![("::".parse().unwrap(), "::".parse().unwrap())]
+        );
     }
 }
