@@ -330,9 +330,11 @@ impl BundleOutput {
                 let result = f(&mut w).and_then(|()| {
                     w.flush().with_context(|| format!("failed to flush {path}"))
                 });
-                // Discard buffered bytes instead of flushing them on drop.
-                // After a failure the file is removed, and flushing could
-                // trip the limit and hide the real error.
+                // On success, the buffer was just flushed, and any error
+                // reported. Otherwise, `into_parts` takes the file without
+                // flushing, unlike dropping the `BufWriter`, which flushes:
+                // the file is about to be removed, and flushing could trip
+                // the limit and hide the real error.
                 let _ = w.into_parts();
                 result
             })();
