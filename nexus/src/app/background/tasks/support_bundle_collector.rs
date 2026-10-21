@@ -1386,7 +1386,7 @@ mod test {
             .size_limit_exceeded
             .as_ref()
             .expect("Bundle should have exceeded its size limit");
-        assert_eq!(exceeded.limit_bytes, SIZE_LIMIT_BYTES);
+        assert_eq!(exceeded.limit_bytes.to_bytes(), SIZE_LIMIT_BYTES);
         assert_eq!(exceeded.used_bytes, 0);
         assert!(!exceeded.refused_paths.is_empty());
 

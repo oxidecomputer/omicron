@@ -11,6 +11,7 @@ use crate::fm::ereport::EreportFilters;
 use chrono::DateTime;
 use chrono::Utc;
 use itertools::Itertools;
+use omicron_common::api::external::ByteCount;
 use omicron_uuid_kinds::SledUuid;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -471,6 +472,10 @@ impl SupportBundleSizeLimit {
     pub fn bytes(self) -> u64 {
         self.0
     }
+
+    pub fn byte_count(self) -> ByteCount {
+        ByteCount::try_from(self.0).expect("MAX fits in a ByteCount")
+    }
 }
 
 /// Formats the limit as a number of bytes, which [`FromStr`] parses.
@@ -491,9 +496,8 @@ impl FromStr for SupportBundleSizeLimit {
 
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "support bundle size limit of {bytes} bytes exceeds the maximum of {} \
-     bytes",
-    SupportBundleSizeLimit::MAX.0
+    "support bundle size limit of {bytes} bytes exceeds the maximum of {}",
+    SupportBundleSizeLimit::MAX.byte_count()
 )]
 pub struct SupportBundleSizeLimitTooLarge {
     bytes: u64,

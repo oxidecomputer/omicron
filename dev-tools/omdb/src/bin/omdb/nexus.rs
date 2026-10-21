@@ -3143,7 +3143,7 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                          stopped early:"
                     );
                     println!(
-                        "        limit:            {} bytes",
+                        "        limit:            {}",
                         exceeded.limit_bytes
                     );
                     println!(

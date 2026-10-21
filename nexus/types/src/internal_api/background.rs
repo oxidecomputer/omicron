@@ -10,6 +10,7 @@ use gateway_types::component::SpType;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use omicron_common::api::external::ByteCount;
 use omicron_generation_kinds::ArtifactConfigGeneration;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
@@ -294,8 +295,8 @@ pub struct SupportBundleCollectionReport {
 /// bundle reached its size limit.
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SupportBundleSizeLimitExceeded {
-    /// The bundle's size limit, in bytes.
-    pub limit_bytes: u64,
+    /// The bundle's size limit.
+    pub limit_bytes: ByteCount,
     /// The number of bytes collected into the bundle.
     pub used_bytes: u64,
     /// When the limit was first reached.

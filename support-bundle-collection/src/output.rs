@@ -38,9 +38,12 @@ use tokio_util::sync::CancellationToken;
 
 /// A write was refused because it would exceed the bundle's size limit.
 #[derive(Clone, Copy, Debug, thiserror::Error)]
-#[error("write would exceed the bundle's size limit of {limit} bytes")]
+#[error(
+    "write would exceed the bundle's size limit of {}",
+    .limit.byte_count()
+)]
 pub struct SizeLimitExceeded {
-    limit: u64,
+    limit: SupportBundleSizeLimit,
 }
 
 /// When a bundle first exceeded its size limit, and which files were refused.
@@ -114,7 +117,7 @@ impl SizeBudget {
                 .paths
                 .push(path.to_owned());
             self.stop.cancel();
-            return Err(SizeLimitExceeded { limit });
+            return Err(SizeLimitExceeded { limit: self.limit });
         }
         Ok(())
     }
@@ -446,8 +449,10 @@ mod test {
     fn test_context_keeps_size_limit_exceeded() {
         use crate::step::StepResultExt;
 
-        let exceeded: Result<(), StepError> =
-            Err(SizeLimitExceeded { limit: 1 }.into());
+        let exceeded: Result<(), StepError> = Err(SizeLimitExceeded {
+            limit: SupportBundleSizeLimit::new(1).unwrap(),
+        }
+        .into());
         assert_size_limit_exceeded(
             &exceeded.context("writing a file").unwrap_err(),
         );

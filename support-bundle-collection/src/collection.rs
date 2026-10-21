@@ -315,7 +315,7 @@ impl BundleCollection {
                 steps.into_iter().map(|step| step.name).collect();
             skipped_steps.sort();
             report.size_limit_exceeded = Some(SupportBundleSizeLimitExceeded {
-                limit_bytes: self.size_budget.limit().bytes(),
+                limit_bytes: self.size_budget.limit().byte_count(),
                 used_bytes: self.size_budget.used(),
                 exceeded_at: exceeded.at,
                 refused_paths: exceeded
@@ -376,7 +376,7 @@ impl BundleCollection {
         let mut contents = format!(
             "This support bundle is incomplete. Collection stopped when the \
              bundle reached\n\
-             its size limit of {} bytes.\n\
+             its size limit of {}.\n\
              \n\
              Limit reached at: {}\n",
             exceeded.limit_bytes, exceeded.exceeded_at,
@@ -409,7 +409,7 @@ impl BundleCollection {
         info!(
             self.log,
             "Bundle reached its size limit";
-            "limit_bytes" => exceeded.limit_bytes,
+            "limit_bytes" => exceeded.limit_bytes.to_bytes(),
             "used_bytes" => exceeded.used_bytes,
             "refused_paths" => exceeded.refused_paths.len(),
             "incomplete_steps" => exceeded.incomplete_steps.len(),

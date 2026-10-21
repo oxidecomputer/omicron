@@ -266,7 +266,7 @@ impl CollectArgs {
         }
         if let Some(exceeded) = &report.size_limit_exceeded {
             eprintln!(
-                "Bundle reached its size limit of {} bytes, so collection \
+                "Bundle reached its size limit of {}, so collection \
                  stopped early. See {SIZE_LIMIT_EXCEEDED_FILE} in the bundle \
                  for what was left out.",
                 exceeded.limit_bytes,
