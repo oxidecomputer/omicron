@@ -134,6 +134,9 @@ impl SizeBudget {
 /// Writes are charged against the bundle's [`SizeBudget`]. A failed write
 /// removes its partial file and is refunded. If removal fails, it's logged
 /// and stays charged.
+///
+/// Each file may be written once. Writing a file that already exists fails,
+/// and leaves that file as it was.
 #[derive(Clone)]
 pub struct BundleOutput {
     // The root of the collected bundle directory.
@@ -197,8 +200,8 @@ impl BundleOutput {
         let _ = tokio::fs::remove_dir(self.root.join(&self.dir)).await;
     }
 
-    /// Writes `contents` to the file `name` within this directory, creating
-    /// any missing parent directories.
+    /// Writes `contents` to the new file `name` within this directory,
+    /// creating any missing parent directories.
     ///
     /// # Cancel safety
     ///
@@ -212,12 +215,21 @@ impl BundleOutput {
         let contents = contents.as_ref();
         let len = contents.len() as u64;
         self.budget.charge(&rel, len)?;
+        let mut file = match create_new_file(&path).await {
+            Ok(file) => file,
+            Err(err) => {
+                self.budget.refund(len);
+                return Err(err.into());
+            }
+        };
 
         let result = async {
-            create_parent_dir(&path).await?;
-            tokio::fs::write(&path, contents)
+            file.write_all(contents)
                 .await
-                .with_context(|| format!("failed to write {path}"))
+                .with_context(|| format!("failed to write {path}"))?;
+            file.flush()
+                .await
+                .with_context(|| format!("failed to flush {path}"))
         }
         .await
         .map_err(StepError::Other);
@@ -227,7 +239,7 @@ impl BundleOutput {
         result
     }
 
-    /// Copies everything from `reader` to the file `name` within this
+    /// Copies everything from `reader` to the new file `name` within this
     /// directory, creating any missing parent directories.
     ///
     /// # Cancel safety
@@ -243,12 +255,9 @@ impl BundleOutput {
         const BUF_SIZE: usize = 64 * 1024;
 
         let (path, rel) = self.resolve(name.as_ref());
+        let mut file = create_new_file(&path).await?;
         let mut charged = 0;
         let result = async {
-            create_parent_dir(&path).await?;
-            let mut file = tokio::fs::File::create(&path)
-                .await
-                .with_context(|| format!("failed to create {path}"))?;
             let mut buf = vec![0; BUF_SIZE];
             loop {
                 let n = reader.read(&mut buf).await.with_context(|| {
@@ -275,7 +284,7 @@ impl BundleOutput {
         result
     }
 
-    /// Runs `f` on a blocking thread, to write the file `name` within this
+    /// Runs `f` on a blocking thread, to write the new file `name` within this
     /// directory, creating any missing parent directories.
     ///
     /// `f` gets a buffered writer. If a write exceeds the size limit, this
@@ -297,16 +306,20 @@ impl BundleOutput {
         let budget = self.budget.clone();
         let log = self.log.clone();
         tokio::task::spawn_blocking(move || {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).with_context(|| {
+                    format!("failed to create directory {parent}")
+                })?;
+            }
+            let file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .with_context(|| format!("failed to create {path}"))?;
+
             let charged = Cell::new(0);
             let refused = Cell::new(None);
             let result = (|| {
-                if let Some(parent) = path.parent() {
-                    std::fs::create_dir_all(parent).with_context(|| {
-                        format!("failed to create directory {parent}")
-                    })?;
-                }
-                let file = std::fs::File::create(&path)
-                    .with_context(|| format!("failed to create {path}"))?;
                 let mut w = std::io::BufWriter::new(BudgetedWriter {
                     file,
                     budget: &budget,
@@ -381,13 +394,20 @@ impl Write for BudgetedWriter<'_> {
     }
 }
 
-async fn create_parent_dir(path: &Utf8Path) -> anyhow::Result<()> {
+// Creates the file at `path`, and any missing parent directories. Fails if the
+// file already exists.
+async fn create_new_file(path: &Utf8Path) -> anyhow::Result<tokio::fs::File> {
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent)
             .await
             .with_context(|| format!("failed to create directory {parent}"))?;
     }
-    Ok(())
+    tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .await
+        .with_context(|| format!("failed to create {path}"))
 }
 
 // Removes a failed write's partial file. Returns whether it's gone.
@@ -527,6 +547,35 @@ mod test {
         output.join("a/b").write("file", "12345").await.unwrap();
         assert_eq!(
             std::fs::read_to_string(dir.path().join("a/b/file")).unwrap(),
+            "12345"
+        );
+        assert_eq!(output.budget.used(), 5);
+        assert!(!output.budget.is_exceeded());
+        assert!(!stop.is_cancelled());
+    }
+
+    // Each kind of write fails on an existing file, without removing it or
+    // refunding its charge.
+    #[tokio::test]
+    async fn test_write_existing_file_fails() {
+        let (dir, output, stop) = output_with_limit(100);
+        output.write("file", "12345").await.unwrap();
+
+        let results = [
+            output.write("file", "abc").await,
+            output.write_stream("file", &b"abc"[..]).await,
+            output.write_with("file", |w| Ok(w.write_all(b"abc")?)).await,
+        ];
+        for result in results {
+            let err = other_error(result.unwrap_err());
+            assert!(
+                format!("{err:#}").contains("failed to create"),
+                "unexpected error: {err:#}"
+            );
+        }
+
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("file")).unwrap(),
             "12345"
         );
         assert_eq!(output.budget.used(), 5);
