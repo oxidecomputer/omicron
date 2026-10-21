@@ -288,7 +288,7 @@ impl VmmStopForUpdate {
                     // want to report it as such so we don't have to wait on the
                     // instance watcher to find and restart this instance.
                     if err.vmm_gone() {
-                        slog::error!(
+                        slog::info!(
                             opctx.log,
                             "Failed to mark VMM as Stopped; VMM was already \
                              gone. Marking as Failed";
@@ -309,7 +309,7 @@ impl VmmStopForUpdate {
                             migration_out: None,
                         })
                     } else {
-                        slog::error!(
+                        slog::info!(
                             opctx.log,
                             "Failed to mark VMM as Stopped";
                             "sled_id" => %sled_id,
@@ -477,7 +477,7 @@ impl VmmStopForUpdate {
                         | VmmState::Running
                         | VmmState::Creating
                         | VmmState::SagaUnwound => {
-                            slog::error!(
+                            slog::warn!(
                                 opctx.log,
                                 "Failed to mark VMM as Stopped, \
                                 unexpected state reported";
@@ -522,14 +522,14 @@ impl VmmStopForUpdate {
         if vmms_stopped_by_sled.is_empty() {
             slog::info!(
                 &opctx.log,
-                "no VMMs were stopped for a sled update";
+                "No VMMs were stopped for a sled update";
             );
         } else {
             for sled in &vmms_stopped_by_sled {
                 let VmmsBySled { sled_id, vmm_ids } = sled;
                 slog::info!(
                     &opctx.log,
-                    "stopped {} VMMs marked to stop for a sled update",
+                    "Stopped {} VMMs marked to stop for a sled update",
                     vmm_ids.len();
                     "sled_id" => %sled_id,
                     "vmms" => ?vmm_ids,
@@ -542,7 +542,7 @@ impl VmmStopForUpdate {
                 let VmmsBySled { sled_id, vmm_ids } = sled;
                 slog::info!(
                     &opctx.log,
-                    "failed to stop {} VMMs marked to stop for a sled update",
+                    "Failed to stop {} VMMs marked to stop for a sled update",
                     vmm_ids.len();
                     "sled_id" => %sled_id,
                     "vmms" => ?vmm_ids,
@@ -551,9 +551,10 @@ impl VmmStopForUpdate {
         }
 
         if !error_messages.is_empty() {
-            slog::error!(
+            slog::info!(
                 &opctx.log,
-                "failed to stop VMMs marked to stop for a sled update";
+                "Attempting to stop VMMs marked to stop for a sled update \
+                 returned errors";
                 "errors" => ?error_messages,
             );
         }
