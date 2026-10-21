@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::fmt;
+use std::num::ParseIntError;
+use std::str::FromStr;
 
 /// Describes the category of support bundle data.
 #[derive(
@@ -471,6 +473,22 @@ impl SupportBundleSizeLimit {
     }
 }
 
+/// Formats the limit as a number of bytes, which [`FromStr`] parses.
+impl fmt::Display for SupportBundleSizeLimit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Parses a number of bytes.
+impl FromStr for SupportBundleSizeLimit {
+    type Err = SupportBundleSizeLimitParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::new(s.parse()?)?)
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 #[error(
     "support bundle size limit of {bytes} bytes exceeds the maximum of {} \
@@ -479,6 +497,14 @@ impl SupportBundleSizeLimit {
 )]
 pub struct SupportBundleSizeLimitTooLarge {
     bytes: u64,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SupportBundleSizeLimitParseError {
+    #[error("invalid support bundle size limit")]
+    Invalid(#[from] ParseIntError),
+    #[error(transparent)]
+    TooLarge(#[from] SupportBundleSizeLimitTooLarge),
 }
 
 #[cfg(test)]
@@ -549,6 +575,11 @@ mod tests {
         let max = SupportBundleSizeLimit::MAX.bytes();
         assert_eq!(SupportBundleSizeLimit::new(max).unwrap().bytes(), max);
         SupportBundleSizeLimit::new(max + 1).unwrap_err();
+
+        let limit: SupportBundleSizeLimit = max.to_string().parse().unwrap();
+        assert_eq!(limit, SupportBundleSizeLimit::MAX);
+        (max + 1).to_string().parse::<SupportBundleSizeLimit>().unwrap_err();
+        "16G".parse::<SupportBundleSizeLimit>().unwrap_err();
     }
 
     #[proptest]

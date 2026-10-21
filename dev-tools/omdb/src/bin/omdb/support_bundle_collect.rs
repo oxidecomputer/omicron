@@ -94,11 +94,8 @@ struct CollectArgs {
     until: Option<std::time::Duration>,
 
     /// Stop collecting once the bundle reaches this many bytes.
-    #[clap(
-        long,
-        default_value_t = SupportBundleSizeLimit::DEFAULT.bytes()
-    )]
-    size_limit_bytes: u64,
+    #[clap(long, default_value_t = SupportBundleSizeLimit::DEFAULT)]
+    size_limit_bytes: SupportBundleSizeLimit,
 }
 
 impl CollectArgs {
@@ -209,7 +206,7 @@ impl CollectArgs {
                 data_selection,
                 bundle,
             )
-            .with_size_limit(Some(self.size_limit_bytes)),
+            .with_size_limit(Some(self.size_limit_bytes.bytes())),
         );
 
         // Wire Ctrl-C to cancel the in-flight collection.
