@@ -76,6 +76,9 @@ pub(crate) struct CurrentRssConfig {
     external_certificates: Vec<Certificate>,
     recovery_silo_password_hash: Option<omicron_passwords::NewPasswordHash>,
     rack_network_config: Option<UserSpecifiedRackNetworkConfig>,
+    routing: Option<
+        wicketd_commission_types::rack_setup::UserSpecifiedRoutingConfig,
+    >,
     allowed_source_ips: Option<AllowedSourceIps>,
     external_jumbo_frames_opt_in_enabled: bool,
     // External certificates are uploaded in two separate actions (cert then
@@ -167,6 +170,24 @@ impl CurrentRssConfig {
             &self.common.bgp_auth_keys,
         )?;
 
+        let routing = self
+            .routing
+            .as_ref()
+            .map(|config| {
+                let routing =
+                    resolve_routing(config, &self.common.bgp_auth_keys)?;
+                // Convert the generated client type to the shared RSS type so both
+                // entry points use the same reference/conflict/value validation.
+                let legacy = serde_json::from_value(serde_json::to_value(
+                    &rack_network_config,
+                )?)?;
+                routing
+                    .validate(&legacy)
+                    .context("invalid named routing configuration")?;
+                Ok::<_, anyhow::Error>(routing)
+            })
+            .transpose()?;
+
         let known_bootstrap_sleds = bootstrap_peers.sleds();
         let mut bootstrap_ips = Vec::new();
         for sled in &self.common.bootstrap_sleds {
@@ -215,6 +236,7 @@ impl CurrentRssConfig {
         let service_ip_pools = self.service_ip_pools.clone();
 
         let request = RackInitializeRequest {
+            routing,
             trust_quorum_peers,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyThese(
                 bootstrap_ips,
@@ -334,9 +356,13 @@ impl CurrentRssConfig {
         ddm_discovered_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
         log: &slog::Logger,
     ) -> Result<(), String> {
+        let mut key_ids = config.rack_network_config.get_bgp_auth_key_ids();
+        if let Some(routing) = &config.routing {
+            key_ids.extend(routing.get_bgp_auth_key_ids());
+        }
         self.common.update(
             &config.bootstrap_sleds,
-            config.rack_network_config.get_bgp_auth_key_ids(),
+            key_ids,
             our_baseboard,
             inventory,
             ddm_discovered_sleds,
@@ -350,6 +376,7 @@ impl CurrentRssConfig {
         self.external_dns_zone_name = config.external_dns_zone_name;
         self.allowed_source_ips = Some(config.allowed_source_ips);
         self.rack_network_config = Some(config.rack_network_config);
+        self.routing = config.routing;
         self.external_jumbo_frames_opt_in_enabled =
             config.external_jumbo_frames_opt_in_enabled;
 
@@ -391,12 +418,68 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
                 external_dns_ips: rss.external_dns_ips.clone(),
                 external_dns_zone_name: rss.external_dns_zone_name.clone(),
                 rack_network_config: rss.rack_network_config.clone(),
+                routing: rss.routing.clone(),
                 allowed_source_ips: rss.allowed_source_ips.clone(),
                 external_jumbo_frames_opt_in_enabled: rss
                     .external_jumbo_frames_opt_in_enabled,
             },
         }
     }
+}
+
+fn resolve_routing(
+    config: &wicketd_commission_types::rack_setup::UserSpecifiedRoutingConfig,
+    keys: &BgpAuthKeys,
+) -> Result<bootstrap_agent_lockstep_types::routing::RoutingConfig> {
+    use bootstrap_agent_lockstep_types::routing::{
+        InitialRouterConfiguration, RoutingConfig,
+    };
+    use nexus_types_versions::v2026_10_31_00::networking::RouterConfigurationSwitch;
+    let mut router_configurations = Vec::new();
+    for rc in &config.router_configurations {
+        let mut switches = Vec::new();
+        for block in &rc.switches {
+            let mut bgp_peers = Vec::new();
+            for peer in &block.bgp_peers {
+                let key = match &peer.auth_key_id {
+                    Some(id) => {
+                        let Some(Some(BgpAuthKey::TcpMd5 { key })) =
+                            keys.get(id)
+                        else {
+                            bail!(
+                                "No BGP MD5 auth key provided for key ID {id}"
+                            );
+                        };
+                        Some(key.clone())
+                    }
+                    None => None,
+                };
+                bgp_peers.push(peer.clone().with_auth_key(key));
+            }
+            switches.push(RouterConfigurationSwitch {
+                switch: block.switch,
+                bgp_config: block.bgp_config.clone(),
+                bgp_peers,
+                routes: block.routes.clone(),
+                bfd_peers: block.bfd_peers.clone(),
+            });
+        }
+        router_configurations.push(InitialRouterConfiguration {
+            name: rc.name.clone(),
+            description: rc.description.clone(),
+            switches,
+        });
+    }
+    Ok(RoutingConfig {
+        announce_sets: config.announce_sets.clone(),
+        router_configurations,
+        control_plane_router_configurations: config
+            .control_plane_router_configurations
+            .clone(),
+        recovery_silo_router_configurations: config
+            .recovery_silo_router_configurations
+            .clone(),
+    })
 }
 
 fn validate_rack_network_config(
@@ -765,6 +848,271 @@ mod tests {
     use zeroize::Zeroizing;
 
     use super::*;
+
+    #[test]
+    fn named_routing_defaults_survive_resolution_and_handoff() {
+        use bootstrap_agent_lockstep_types::routing::{
+            RoutingConfig, RoutingInitialization,
+        };
+        use wicketd_commission_types::rack_setup::UserSpecifiedRoutingConfig;
+
+        let input = serde_json::json!({
+            "announce_sets": [
+                { "name": "prefixes", "prefixes": ["198.51.100.0/24"] },
+                { "name": "empty-prefixes" }
+            ],
+            "router_configurations": [
+                {
+                    "name": "initial-routing",
+                    "switches": [
+                        {
+                            "switch": "switch0",
+                            "bgp_config": {
+                                "asn": 65000,
+                                "bgp_announce_set": "prefixes"
+                            },
+                            "bgp_peers": [{
+                                "name": "cr1",
+                                "peer": { "type": "numbered", "addr": "192.0.2.1" },
+                                "enforce_first_as": false
+                            }]
+                        },
+                        { "switch": "switch1" }
+                    ]
+                },
+                { "name": "empty-router" }
+            ],
+            "control_plane_router_configurations": [
+                { "router_configuration": "initial-routing", "priority": 100 }
+            ],
+            "recovery_silo_router_configurations": []
+        });
+        let wicket: UserSpecifiedRoutingConfig =
+            serde_json::from_value(input.clone()).unwrap();
+        let rss: RoutingConfig = serde_json::from_value(input.clone()).unwrap();
+        let keys = CurrentRssConfig::default().common.bgp_auth_keys;
+        assert_eq!(resolve_routing(&wicket, &keys).unwrap(), rss);
+        assert!(rss.announce_sets[1].prefixes.is_empty());
+        assert!(rss.announce_sets[0].description.is_empty());
+        assert!(rss.router_configurations[0].description.is_empty());
+        assert!(rss.router_configurations[1].switches.is_empty());
+        let block = &rss.router_configurations[0].switches[0];
+        assert!(block.routes.is_empty() && block.bfd_peers.is_empty());
+        assert!(rss.router_configurations[0].switches[1].bgp_peers.is_empty());
+        assert_eq!(
+            block.bgp_config.as_ref().unwrap().max_paths.as_nonzero_u8().get(),
+            1
+        );
+        let peer = &block.bgp_peers[0];
+        assert_eq!(
+            (
+                peer.hold_time,
+                peer.keepalive,
+                peer.connect_retry,
+                peer.delay_open,
+                peer.idle_hold_time
+            ),
+            (6, 2, 3, 0, 3),
+        );
+
+        // Export/handoff materialize defaults: they are no longer implicit input.
+        let exported = serde_json::to_value(&wicket).unwrap();
+        assert_eq!(
+            exported["router_configurations"][0]["switches"][0]["bgp_config"]["max_paths"],
+            1
+        );
+        let initialized = rss.allocate();
+        let handoff = serde_json::to_value(&initialized).unwrap();
+        assert_eq!(
+            handoff["config"]["router_configurations"][0]["switches"][0]["bgp_peers"]
+                [0]["hold_time"],
+            6
+        );
+        let restored: RoutingInitialization =
+            serde_json::from_value(handoff).unwrap();
+        assert_eq!(restored, initialized);
+        assert_eq!(
+            restored.switch_router_configs(),
+            initialized.switch_router_configs()
+        );
+
+        // Explicit settings, including zero, must not be replaced by defaults.
+        let mut explicit = input;
+        let block = &mut explicit["router_configurations"][0]["switches"][0];
+        block["bgp_config"]["max_paths"] = 2.into();
+        for (name, value) in [
+            ("hold_time", 90),
+            ("keepalive", 30),
+            ("connect_retry", 10),
+            ("delay_open", 5),
+            ("idle_hold_time", 0),
+        ] {
+            block["bgp_peers"][0][name] = value.into();
+        }
+        let wicket: UserSpecifiedRoutingConfig =
+            serde_json::from_value(explicit.clone()).unwrap();
+        let rss: RoutingConfig =
+            serde_json::from_value(explicit.clone()).unwrap();
+        assert_eq!(resolve_routing(&wicket, &keys).unwrap(), rss);
+        let output = serde_json::to_value(rss).unwrap();
+        for name in [
+            "hold_time",
+            "keepalive",
+            "connect_retry",
+            "delay_open",
+            "idle_hold_time",
+        ] {
+            assert_eq!(
+                output["router_configurations"][0]["switches"][0]["bgp_peers"]
+                    [0][name],
+                explicit["router_configurations"][0]["switches"][0]["bgp_peers"]
+                    [0][name]
+            );
+        }
+        assert_eq!(
+            output["router_configurations"][0]["switches"][0]["bgp_config"]["max_paths"],
+            2
+        );
+    }
+
+    #[test]
+    fn named_routing_still_requires_explicit_assignments() {
+        use bootstrap_agent_lockstep_types::routing::RoutingConfig;
+        use wicketd_commission_types::rack_setup::UserSpecifiedRoutingConfig;
+
+        let input = serde_json::json!({
+            "control_plane_router_configurations": [],
+            "recovery_silo_router_configurations": []
+        });
+        let rss: RoutingConfig = serde_json::from_value(input.clone()).unwrap();
+        let wicket: UserSpecifiedRoutingConfig =
+            serde_json::from_value(input.clone()).unwrap();
+        assert!(
+            rss.announce_sets.is_empty()
+                && rss.router_configurations.is_empty()
+        );
+        assert!(
+            wicket.announce_sets.is_empty()
+                && wicket.router_configurations.is_empty()
+        );
+        assert!(rss.control_plane_router_configurations.is_empty());
+        assert!(rss.recovery_silo_router_configurations.is_empty());
+        for field in [
+            "control_plane_router_configurations",
+            "recovery_silo_router_configurations",
+        ] {
+            let mut missing = input.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(
+                serde_json::from_value::<RoutingConfig>(missing.clone())
+                    .is_err()
+            );
+            assert!(
+                serde_json::from_value::<UserSpecifiedRoutingConfig>(missing)
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn named_routing_keys_and_validation() {
+        let logctx = dev::test_setup_log("named_routing_keys_and_validation");
+        let example = ExampleRackSetupData::with_named_routing();
+        let mut current = CurrentRssConfig::default();
+        current
+            .update(
+                example.put_insensitive.clone(),
+                &example.our_baseboard_id,
+                &example.inventory,
+                &example.ddm_discovered_sleds,
+                &logctx.log,
+            )
+            .unwrap();
+        let named_id: BgpAuthKeyId = "named-bgp".parse().unwrap();
+        assert!(current.common.bgp_auth_keys.get(&named_id).unwrap().is_none());
+        assert!(
+            resolve_routing(
+                current.routing.as_ref().unwrap(),
+                &current.common.bgp_auth_keys
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("named-bgp")
+        );
+        for id in &example.bgp_auth_keys {
+            current
+                .common
+                .set_bgp_auth_key(
+                    id.clone(),
+                    BgpAuthKey::TcpMd5 { key: "test-only-secret".into() },
+                )
+                .unwrap();
+        }
+        let routing = resolve_routing(
+            current.routing.as_ref().unwrap(),
+            &current.common.bgp_auth_keys,
+        )
+        .unwrap();
+        assert_eq!(
+            routing.router_configurations[0].switches[0].bgp_peers[0]
+                .md5_auth_key
+                .as_deref(),
+            Some("test-only-secret")
+        );
+        assert!(routing.recovery_silo_router_configurations.is_empty());
+        let legacy = validate_rack_network_config(
+            current.rack_network_config.as_ref().unwrap(),
+            &current.common.bgp_auth_keys,
+        )
+        .unwrap();
+        let legacy =
+            serde_json::from_value(serde_json::to_value(legacy).unwrap())
+                .unwrap();
+        routing.validate(&legacy).unwrap();
+        let view = CurrentRssUserConfig::from(&current);
+        assert!(
+            !serde_json::to_string(&view).unwrap().contains("test-only-secret")
+        );
+        assert!(!format!("{view:?}").contains("test-only-secret"));
+        let mut bad = routing.clone();
+        bad.control_plane_router_configurations[0].router_configuration =
+            "missing".parse().unwrap();
+        assert!(
+            bad.validate(&legacy)
+                .unwrap_err()
+                .to_string()
+                .contains("unknown router configuration")
+        );
+        let mut raw = serde_json::to_value(&example.put_insensitive).unwrap();
+        raw["routing"]["router_configurations"][0]["switches"][0]["bgp_peers"]
+            [0]["md5_auth_key"] = "secret".into();
+        assert!(
+            serde_json::from_value::<PutRssUserConfigInsensitive>(raw).is_err()
+        );
+        // Removing named routing drops only its unreferenced key; legacy keys survive.
+        let mut legacy_input = example.put_insensitive.clone();
+        legacy_input.routing = None;
+        current
+            .update(
+                legacy_input,
+                &example.our_baseboard_id,
+                &example.inventory,
+                &example.ddm_discovered_sleds,
+                &logctx.log,
+            )
+            .unwrap();
+        assert!(current.routing.is_none());
+        assert!(current.common.bgp_auth_keys.get(&named_id).is_none());
+        assert!(
+            current
+                .common
+                .bgp_auth_keys
+                .get(&example.bgp_auth_keys[0])
+                .unwrap()
+                .is_some()
+        );
+        logctx.cleanup_successful();
+    }
 
     #[test]
     fn test_router_lifetime_unnumbered_only() {

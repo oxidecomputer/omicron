@@ -12,7 +12,7 @@ use dropshot::{
 };
 use dropshot_api_manager_types::api_versions;
 use slog_error_chain::InlineErrorChain;
-use wicketd_commission_types_versions::{latest, v1, v2, v3, v4};
+use wicketd_commission_types_versions::{latest, v1, v2, v3, v4, v5};
 
 // NOTE: The commission API is server-side versioned, but changing it requires
 // coordinating with rkdeploy (it must stay on the oldest version supported
@@ -30,6 +30,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (7, ROUTER_CONFIGURATIONS),
     (6, UPDATE_PROGRESS_REPOSITORY),
     (5, MULTIRACK_JOIN),
     (4, UPDATE_ELAPSED),
@@ -235,12 +236,25 @@ pub trait WicketdCommissionApi {
     #[endpoint {
         method = PUT,
         path = "/rack-setup/config",
-        versions = VERSION_MULTIRACK_JOIN..,
+        versions = VERSION_ROUTER_CONFIGURATIONS..,
     }]
     async fn put_rss_config(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<latest::rack_setup::PutRssUserConfigInsensitive>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        operation_id = "put_rss_config",
+        method = PUT,
+        path = "/rack-setup/config",
+        versions = VERSION_MULTIRACK_JOIN..VERSION_ROUTER_CONFIGURATIONS,
+    }]
+    async fn put_rss_config_v5(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v5::rack_setup::PutRssUserConfigInsensitive>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::put_rss_config(rqctx, body.map(Into::into)).await
+    }
 
     #[endpoint {
         operation_id = "put_rss_config",
@@ -262,7 +276,7 @@ pub trait WicketdCommissionApi {
                     ),
                 )
             })?;
-        Self::put_rss_config(rqctx, body).await
+        Self::put_rss_config_v5(rqctx, body).await
     }
 
     #[endpoint {

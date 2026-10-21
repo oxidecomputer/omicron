@@ -22,6 +22,7 @@ use crate::db::model::Zpool;
 use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::AsyncSimpleConnection;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
@@ -94,6 +95,8 @@ pub struct RackInit {
     pub external_dns: InitialDnsGroup,
     pub recovery_silo: silo_types::SiloCreate,
     pub recovery_silo_fq_dns_name: String,
+    pub routing:
+        Option<bootstrap_agent_lockstep_types::routing::RoutingInitialization>,
     pub recovery_user_id: UserId,
     pub recovery_user_password_hash: omicron_passwords::PasswordHashString,
     pub dns_update: DnsVersionUpdateBuilder,
@@ -122,6 +125,7 @@ enum RackInitError {
     // Error adding initial allowed source IP list
     AllowedSourceIpError(Error),
     TrustQuorum(Error),
+    Routing(Error),
 }
 
 impl From<DieselError> for RackInitError {
@@ -135,6 +139,7 @@ impl From<RackInitError> for Error {
         match e {
             RackInitError::AddingServiceIpPool(err) => err,
             RackInitError::AddingIp(err) => err,
+            RackInitError::Routing(err) => err,
             RackInitError::AddingNic(err) => err,
             RackInitError::DatasetInsert { err, zpool_id } => match err {
                 AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
@@ -447,7 +452,7 @@ impl DataStore {
         recovery_user_id: UserId,
         recovery_user_password_hash: omicron_passwords::PasswordHashString,
         dns_update: DnsVersionUpdateBuilder,
-    ) -> Result<(), RackInitError> {
+    ) -> Result<Uuid, RackInitError> {
         if !matches!(
             &recovery_silo.identity_mode,
             silo_types::SiloIdentityMode::LocalOnly
@@ -535,6 +540,187 @@ impl DataStore {
         q2.execute_async(conn).await?;
         info!(log, "Granted Silo privileges");
 
+        Ok(db_silo.id().into_untyped_uuid())
+    }
+
+    async fn rack_initialize_routing(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        routing: Option<
+            &bootstrap_agent_lockstep_types::routing::RoutingInitialization,
+        >,
+        recovery_silo_id: Uuid,
+    ) -> Result<(), RackInitError> {
+        use nexus_db_model::{
+            BgpAnnounceSet, BgpAnnounceSetIdentity, BgpAnnouncement,
+            ControlPlaneRouterConfiguration, RouterConfiguration,
+            RouterConfigurationBfdPeer, RouterConfigurationBgpConfig,
+            RouterConfigurationBgpPeer, RouterConfigurationIdentity,
+            RouterConfigurationStaticRoute, RouterConfigurationSwitch,
+            SiloRouterConfiguration,
+        };
+        use nexus_db_schema::schema::{
+            bgp_announce_set, bgp_announcement,
+            control_plane_router_configuration, router_configuration,
+            router_configuration_bfd_peer, router_configuration_bgp_peer,
+            router_configuration_static_route, router_configuration_switch,
+            silo_router_configuration,
+        };
+        use omicron_common::api::external::IdentityMetadataCreateParams;
+        use omicron_uuid_kinds::{BgpAnnounceSetUuid, RouterConfigurationUuid};
+        use std::collections::BTreeMap;
+        let Some(routing) = routing else {
+            // The recovery silo is created after schema migration, so the
+            // migration's compatibility assignment cannot cover this silo.
+            diesel::insert_into(silo_router_configuration::table)
+                .values(SiloRouterConfiguration::new(recovery_silo_id,
+                    RouterConfigurationUuid::from_untyped_uuid(nexus_types::router_configuration::DEFAULT_ROUTER_CONFIGURATION_ID),
+                    sled_agent_types::router_config::DEFAULT_ROUTER_LIST_PRIORITY))
+                .execute_async(conn).await?;
+            return Ok(());
+        };
+        let mut announce_ids = BTreeMap::new();
+        for set in &routing.config.announce_sets {
+            let id = BgpAnnounceSetUuid::new_v4();
+            diesel::insert_into(bgp_announce_set::table)
+                .values(BgpAnnounceSet {
+                    identity: BgpAnnounceSetIdentity::new(
+                        id,
+                        IdentityMetadataCreateParams {
+                            name: set.name.clone(),
+                            description: set.description.clone(),
+                        },
+                    ),
+                })
+                .execute_async(conn)
+                .await?;
+            let announcements: Vec<_> = set
+                .prefixes
+                .iter()
+                .map(|prefix| BgpAnnouncement {
+                    announce_set_id: id.into(),
+                    // Same placeholder as the existing announce-set creation path
+                    // (omicron#10719); this field is not used to resolve prefixes.
+                    address_lot_block_id: id.into_untyped_uuid(),
+                    network: (*prefix).into(),
+                })
+                .collect();
+            diesel::insert_into(bgp_announcement::table)
+                .values(announcements)
+                .execute_async(conn)
+                .await?;
+            announce_ids.insert(set.name.clone(), id);
+        }
+        for rc in &routing.config.router_configurations {
+            let id = RouterConfigurationUuid::from_untyped_uuid(
+                routing.resolve(&rc.name),
+            );
+            diesel::insert_into(router_configuration::table)
+                .values(RouterConfiguration {
+                    identity: RouterConfigurationIdentity::new(
+                        id,
+                        IdentityMetadataCreateParams {
+                            name: rc.name.clone(),
+                            description: rc.description.clone(),
+                        },
+                    ),
+                })
+                .execute_async(conn)
+                .await?;
+            for block in &rc.switches {
+                let switch = block.switch.into();
+                let mut db_block = RouterConfigurationSwitch::new(id, switch);
+                if let Some(bgp) = &block.bgp_config {
+                    let omicron_common::api::external::NameOrId::Name(set) =
+                        &bgp.bgp_announce_set
+                    else {
+                        unreachable!("validated named announce set")
+                    };
+                    db_block.bgp_config = Some(RouterConfigurationBgpConfig {
+                        bgp_asn: bgp.asn.into(),
+                        bgp_max_paths: bgp.max_paths.as_u8().into(),
+                        bgp_announce_set_id: announce_ids[set].into(),
+                    });
+                }
+                diesel::insert_into(router_configuration_switch::table)
+                    .values(db_block)
+                    .execute_async(conn)
+                    .await?;
+                let peers = block
+                    .bgp_peers
+                    .iter()
+                    .cloned()
+                    .map(|p| RouterConfigurationBgpPeer::new(id, switch, p))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(RackInitError::Routing)?;
+                diesel::insert_into(router_configuration_bgp_peer::table)
+                    .values(peers)
+                    .execute_async(conn)
+                    .await?;
+                let routes = block
+                    .routes
+                    .iter()
+                    .cloned()
+                    .map(|r| RouterConfigurationStaticRoute::new(id, switch, r))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(RackInitError::Routing)?;
+                diesel::insert_into(router_configuration_static_route::table)
+                    .values(routes)
+                    .execute_async(conn)
+                    .await?;
+                let peers = block
+                    .bfd_peers
+                    .iter()
+                    .cloned()
+                    .map(|p| RouterConfigurationBfdPeer::new(id, switch, p))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(RackInitError::Routing)?;
+                diesel::insert_into(router_configuration_bfd_peer::table)
+                    .values(peers)
+                    .execute_async(conn)
+                    .await?;
+            }
+        }
+        // The explicit list replaces the compatibility default, even if empty.
+        conn.batch_execute_async(crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL)
+            .await?;
+        diesel::delete(control_plane_router_configuration::table)
+            .execute_async(conn)
+            .await?;
+        let cp: Vec<_> = routing
+            .config
+            .control_plane_router_configurations
+            .iter()
+            .map(|e| {
+                ControlPlaneRouterConfiguration::new(
+                    RouterConfigurationUuid::from_untyped_uuid(
+                        routing.resolve(&e.router_configuration),
+                    ),
+                    e.priority,
+                )
+            })
+            .collect();
+        diesel::insert_into(control_plane_router_configuration::table)
+            .values(cp)
+            .execute_async(conn)
+            .await?;
+        let recovery: Vec<_> = routing
+            .config
+            .recovery_silo_router_configurations
+            .iter()
+            .map(|e| {
+                SiloRouterConfiguration::new(
+                    recovery_silo_id,
+                    RouterConfigurationUuid::from_untyped_uuid(
+                        routing.resolve(&e.router_configuration),
+                    ),
+                    e.priority,
+                )
+            })
+            .collect();
+        diesel::insert_into(silo_router_configuration::table)
+            .values(recovery)
+            .execute_async(conn)
+            .await?;
         Ok(())
     }
 
@@ -1063,7 +1249,7 @@ impl DataStore {
                     info!(log, "Populated DNS tables for external DNS");
 
                     // Create the initial Recovery Silo
-                    self.rack_create_recovery_silo(
+                    let recovery_silo_id = self.rack_create_recovery_silo(
                         &opctx,
                         &conn,
                         &log,
@@ -1078,6 +1264,12 @@ impl DataStore {
                         err.set(e).unwrap();
                         DieselError::RollbackTransaction
                     })?;
+
+                    Self::rack_initialize_routing(&conn, rack_init.routing.as_ref(), recovery_silo_id)
+                        .await.map_err(|e| {
+                            err.set(e).unwrap();
+                            DieselError::RollbackTransaction
+                        })?;
 
                     // Insert the initial source IP allowlist for requests to
                     // user-facing services.
@@ -1214,6 +1406,7 @@ mod test {
         fn default() -> Self {
             let blueprint_id = BlueprintUuid::new_v4();
             RackInit {
+                routing: None,
                 rack_id: nexus_test_utils::RACK_UUID,
                 rack_subnet: nexus_test_utils::RACK_SUBNET.parse().unwrap(),
                 blueprint: Blueprint {
@@ -1405,6 +1598,15 @@ mod test {
             .await
             .expect("Failed to lookup Silo");
         assert!(!db_silo.discoverable);
+        let links = datastore
+            .silo_router_configurations_list(opctx, &authz_silo)
+            .await
+            .unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(
+            links[0].router_configuration_id.into_untyped_uuid(),
+            nexus_types::router_configuration::DEFAULT_ROUTER_CONFIGURATION_ID
+        );
 
         // Verify that the user exists and has the password (hash) that we
         // expect.
@@ -1455,6 +1657,117 @@ mod test {
             .unwrap();
         assert_eq!(dns_internal, dns_internal2);
 
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn rack_initial_routing_is_atomic_and_handoff_retry_preserves_edits()
+    {
+        use bootstrap_agent_lockstep_types::routing::RoutingConfig;
+        use nexus_db_model::DbSwitchSlot;
+        let logctx = dev::test_setup_log("rack_initial_routing");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let routing = serde_json::from_value::<RoutingConfig>(serde_json::json!({
+            "announce_sets": [{"name": "initial-prefixes", "description": "test", "prefixes": ["198.51.100.0/24"]}],
+            "router_configurations": [{"name": "initial-routing", "description": "test", "switches": [
+                {"switch": "switch0", "bgp_config": {"asn": 65000, "max_paths": 2, "bgp_announce_set": "initial-prefixes"},
+                 "bgp_peers": [], "routes": [{"name": "default", "dst": "0.0.0.0/0", "gw": "192.0.2.1"}],
+                 "bfd_peers": [{"name": "bfd", "remote": "192.0.2.1", "mode": "single_hop", "detection_threshold": 3, "required_rx": 4294967295u32}]},
+                {"switch": "switch1", "bgp_peers": [], "routes": [], "bfd_peers": []}
+            ]}],
+            "control_plane_router_configurations": [{"router_configuration": "initial-routing", "priority": 100}],
+            "recovery_silo_router_configurations": []
+        })).unwrap().allocate();
+        let id = omicron_uuid_kinds::RouterConfigurationUuid::from_untyped_uuid(
+            routing.router_ids[&"initial-routing".parse().unwrap()],
+        );
+        let mut init =
+            RackInit { routing: Some(routing.clone()), ..Default::default() };
+        // Force a late database conflict, after the first RC has been inserted.
+        let config = &mut init.routing.as_mut().unwrap().config;
+        let duplicate = config.router_configurations[0].clone();
+        config.router_configurations.push(duplicate);
+        assert!(datastore.rack_set_initialized(opctx, init).await.is_err());
+        assert!(
+            datastore
+                .router_configuration_switch_list_batch(opctx, &[id])
+                .await
+                .unwrap()
+                .is_empty()
+        );
+
+        let init = RackInit { routing: Some(routing), ..Default::default() };
+        datastore.rack_set_initialized(opctx, init.clone()).await.unwrap();
+        let blocks = datastore
+            .router_configuration_switch_list_batch(opctx, &[id])
+            .await
+            .unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(*blocks[0].bgp_config.as_ref().unwrap().bgp_max_paths, 2);
+        assert_eq!(
+            *datastore
+                .router_configuration_bfd_peer_list_batch(opctx, &[id])
+                .await
+                .unwrap()[0]
+                .required_rx,
+            u32::MAX
+        );
+        let links = datastore
+            .control_plane_router_configurations_list(opctx)
+            .await
+            .unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].router_configuration_id, id.into());
+        let (authz_silo, _) = LookupPath::new(opctx, datastore)
+            .silo_name(&nexus_db_model::Name(
+                init.recovery_silo.identity.name.clone(),
+            ))
+            .fetch()
+            .await
+            .unwrap();
+        assert!(
+            datastore
+                .silo_router_configurations_list(opctx, &authz_silo)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        // Operator edits after handoff must survive a replay of the RSS request.
+        datastore
+            .control_plane_router_configurations_replace(opctx, vec![])
+            .await
+            .unwrap();
+        let authz_rc = authz::RouterConfiguration::new(
+            authz::FLEET,
+            id,
+            LookupType::by_id(id),
+        );
+        datastore
+            .router_configuration_switch_delete(
+                opctx,
+                &authz_rc,
+                DbSwitchSlot::Switch1,
+            )
+            .await
+            .unwrap();
+        datastore.rack_set_initialized(opctx, init).await.unwrap();
+        assert!(
+            datastore
+                .control_plane_router_configurations_list(opctx)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            datastore
+                .router_configuration_switch_list_batch(opctx, &[id])
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
         db.terminate().await;
         logctx.cleanup_successful();
     }

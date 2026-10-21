@@ -26,52 +26,12 @@ use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use slog::info;
-use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::sync::watch;
-
-pub(crate) const BGP_PORT: u16 = 179;
-
-/// Configures how mgd's BGP socket is set up.
-///
-/// In production mgd listens on `[::]:179` and connects to peers on
-/// port 179. In test environments a different address/port is
-/// used to avoid requiring elevated privileges.
-#[derive(Debug, Clone, Copy)]
-pub struct BgpSocketConfig {
-    /// Address mgd's BGP dispatcher listens on.
-    listen_addr: SocketAddr,
-}
-
-impl Default for BgpSocketConfig {
-    /// Production default: listen on `[::]:179`, peers on port 179.
-    fn default() -> Self {
-        let listen_addr =
-            SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, BGP_PORT, 0, 0).into();
-        Self { listen_addr }
-    }
-}
-
-impl BgpSocketConfig {
-    /// Test override: derive both listen address and peer port from `addr`.
-    pub fn for_test(listen_addr: SocketAddr) -> Self {
-        Self { listen_addr }
-    }
-
-    /// Returns the router listen address string for mgd configuration.
-    pub(crate) fn router_listen_addr(&self) -> SocketAddr {
-        self.listen_addr
-    }
-
-    /// Returns the port to use for BGP peers.
-    pub(crate) fn peer_port(&self) -> u16 {
-        self.listen_addr.port()
-    }
-}
 
 /// Mode in which the scrimlet reconcilers should run.
 ///
@@ -90,7 +50,6 @@ pub enum ScrimletReconcilersMode {
         dpd_addr: SocketAddr,
         mgd_addr: SocketAddr,
         ddmd_addr: SocketAddr,
-        bgp_socket_config: BgpSocketConfig,
     },
 }
 

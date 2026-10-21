@@ -3,13 +3,15 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::*;
-use crate::handle::BgpSocketConfig;
 use assert_matches::assert_matches;
 use sled_agent_types::early_networking::LinkSpeed;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkPorts;
+use sled_agent_types::router_config::{
+    SwitchRouterConfigs, default_router_list,
+};
 use std::mem;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -96,6 +98,8 @@ fn test_system_networking_config_1() -> SystemNetworkingConfig {
             bfd: Vec::new(),
         },
         blueprint_external_networking_config: None,
+        switch_router_configs: SwitchRouterConfigs::new(),
+        control_plane_router_list: default_router_list(),
     }
 }
 
@@ -110,6 +114,8 @@ fn test_system_networking_config_2() -> SystemNetworkingConfig {
             bfd: Vec::new(),
         },
         blueprint_external_networking_config: None,
+        switch_router_configs: SwitchRouterConfigs::new(),
+        control_plane_router_list: default_router_list(),
     }
 }
 
@@ -145,7 +151,6 @@ impl Harness {
                     dpd_addr: dummy_addr,
                     mgd_addr: dummy_addr,
                     ddmd_addr: dummy_addr,
-                    bgp_socket_config: BgpSocketConfig::for_test(dummy_addr),
                 },
                 ThisSledSwitchSlot::TEST_FAKE,
                 log,

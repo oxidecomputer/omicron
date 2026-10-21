@@ -50,44 +50,7 @@ mgd reconciler:
         completed at: 1970-01-01T00:00:00.000Z
         ran for: 1.5s
         detailed status:
-            static routes:
-                reconciliation completed
-                    routes left unchanged: 4
-                    failed to delete v4 routes: delete failed
-                    v4 routes added: 2
-                    v6 routes:
-                        deleted: 3
-                        added: 5
-            BGP:
-                reconciliation completed
-                    did change max paths: true
-                    routers:
-                        created: 1
-                        updated: 0
-                        deleted: 0
-                    origin4: unchanged
-                    origin6: unchanged
-                    shapers: unchanged
-                    checkers: unchanged
-                    numbered peers:
-                        created: 0
-                        updated: 2
-                        deleted: 1
-                    unnumbered peers: unchanged
-                    errors:
-                        * bgp failed
-                        * bgp failed again
-            BFD:
-                reconciliation completed
-                    peers unchanged: 198.51.100.1, 198.51.100.2
-                    peers added: 198.51.100.6
-                    peers removed: 198.51.100.3
-                    remove failures:
-                        * 198.51.100.4: remove failed
-                        * 198.51.100.5: remove failed again
-                    add failures:
-                        * 198.51.100.7: add failed
-                        * 198.51.100.8: add failed again
+            failed to apply desired router set (2 routers): apply failed
 
 lldpd reconciler:
     current status:
@@ -164,26 +127,7 @@ mgd reconciler:
         completed at: 1970-01-01T00:00:00.000Z
         ran for: 1.5s
         detailed status:
-            static routes:
-                reconciliation completed
-                    routes left unchanged: 0
-                    v4 routes modified: none
-                    v6 routes modified: none
-            BGP:
-                reconciliation completed
-                    did change max paths: false
-                    routers: unchanged
-                    origin4: unchanged
-                    origin6: unchanged
-                    shapers: unchanged
-                    checkers: unchanged
-                    numbered peers: unchanged
-                    unnumbered peers: unchanged
-                    errors: none
-            BFD:
-                reconciliation completed
-                    remove failures: none
-                    add failures: none
+            applied desired router set (0 routers)
 
 lldpd reconciler:
     current status:

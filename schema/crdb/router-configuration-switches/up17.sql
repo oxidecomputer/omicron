@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS omicron.public.router_configuration_bgp_peer_unnumbered_unique;

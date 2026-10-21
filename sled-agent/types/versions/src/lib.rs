@@ -125,6 +125,10 @@ pub mod v6;
 pub mod v60;
 #[path = "trust_quorum_nullable_responses/mod.rs"]
 pub mod v61;
+#[path = "add_router_lists/mod.rs"]
+pub mod v62;
+#[path = "router_configs_in_bootstore/mod.rs"]
+pub mod v63;
 #[path = "multicast_support/mod.rs"]
 pub mod v7;
 #[path = "delegate_zvol_to_propolis/mod.rs"]

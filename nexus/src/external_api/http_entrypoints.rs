@@ -595,6 +595,46 @@ impl NexusExternalApi for NexusExternalApiImpl {
         .await
     }
 
+    async fn silo_router_configurations_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<path_params::SiloPath>,
+    ) -> Result<HttpResponseOk<networking::SiloRouterConfigurations>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let result = nexus
+                .silo_router_configurations_view(&opctx, path.silo)
+                .await?;
+            Ok(HttpResponseOk(result))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn silo_router_configurations_update(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<path_params::SiloPath>,
+        update: TypedBody<networking::SiloRouterConfigurationsUpdate>,
+    ) -> Result<HttpResponseOk<networking::SiloRouterConfigurations>, HttpError>
+    {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let update = update.into_inner();
+            let result = nexus
+                .silo_router_configurations_update(&opctx, path.silo, update)
+                .await?;
+            Ok(HttpResponseOk::<networking::SiloRouterConfigurations>(result))
+        })
+        .await
+    }
+
     // Silo-specific user endpoints
 
     async fn silo_user_list(
@@ -4812,6 +4852,645 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .external_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
+    }
+
+    async fn networking_router_configuration_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<networking::RouterConfiguration>>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let configurations =
+                nexus.router_configuration_list(&opctx, &paginated_by).await?;
+
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                configurations,
+                &marker_for_name_or_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_router_configuration_create(
+        rqctx: RequestContext<ApiContext>,
+        config: TypedBody<networking::RouterConfigurationCreate>,
+    ) -> Result<HttpResponseCreated<networking::RouterConfiguration>, HttpError>
+    {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let config = config.into_inner();
+            let result =
+                nexus.router_configuration_create(&opctx, &config).await?;
+            Ok(HttpResponseCreated::<networking::RouterConfiguration>(result))
+        })
+        .await
+    }
+
+    async fn networking_router_configuration_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationSelector>,
+    ) -> Result<HttpResponseOk<networking::RouterConfiguration>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let sel = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let result = nexus
+                .router_configuration_view(&opctx, sel.configuration)
+                .await?;
+            Ok(HttpResponseOk(result))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_router_configuration_update(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationSelector>,
+        update: TypedBody<networking::RouterConfigurationUpdate>,
+    ) -> Result<HttpResponseOk<networking::RouterConfiguration>, HttpError>
+    {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sel = path_params.into_inner();
+            let update = update.into_inner();
+            let result = nexus
+                .router_configuration_update(&opctx, sel.configuration, update)
+                .await?;
+            Ok(HttpResponseOk::<networking::RouterConfiguration>(result))
+        })
+        .await
+    }
+
+    async fn networking_router_configuration_delete(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationSelector>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sel = path_params.into_inner();
+            nexus
+                .router_configuration_delete(&opctx, sel.configuration)
+                .await?;
+            Ok(HttpResponseUpdatedNoContent {})
+        })
+        .await
+    }
+
+    async fn networking_router_configuration_switch_create(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
+    ) -> Result<
+        HttpResponseCreated<networking::RouterConfigurationSwitch>,
+        HttpError,
+    > {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sel = path_params.into_inner();
+            Ok(HttpResponseCreated(
+                nexus
+                    .router_configuration_switch_create(
+                        &opctx,
+                        sel.configuration,
+                        sel.switch,
+                    )
+                    .await?,
+            ))
+        })
+        .await
+    }
+
+    async fn networking_router_configuration_switch_delete(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sel = path_params.into_inner();
+            nexus
+                .router_configuration_switch_delete(
+                    &opctx,
+                    sel.configuration,
+                    sel.switch,
+                )
+                .await?;
+            Ok(HttpResponseUpdatedNoContent {})
+        })
+        .await
+    }
+
+    async fn networking_router_configuration_bgp_config_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
+    ) -> Result<
+        HttpResponseOk<networking::RouterConfigurationBgpConfig>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let sel = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let result = nexus
+                .router_configuration_bgp_config_view(
+                    &opctx,
+                    sel.configuration,
+                    sel.switch,
+                )
+                .await?;
+            Ok(HttpResponseOk(result))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_router_configuration_bgp_config_set(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
+        config: TypedBody<networking::RouterConfigurationBgpConfigSet>,
+    ) -> Result<
+        HttpResponseOk<networking::RouterConfigurationBgpConfig>,
+        HttpError,
+    > {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sel = path_params.into_inner();
+            let config = config.into_inner();
+            let result = nexus
+                .router_configuration_bgp_config_set(
+                    &opctx,
+                    sel.configuration,
+                    sel.switch,
+                    config,
+                )
+                .await?;
+            Ok(HttpResponseOk(result))
+        })
+        .await
+    }
+
+    async fn networking_router_configuration_bgp_config_delete(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sel = path_params.into_inner();
+            nexus
+                .router_configuration_bgp_config_delete(
+                    &opctx,
+                    sel.configuration,
+                    sel.switch,
+                )
+                .await?;
+            Ok(HttpResponseUpdatedNoContent {})
+        })
+        .await
+    }
+
+    async fn networking_router_configuration_bgp_peer_list(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
+        query_params: Query<PaginatedByName>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<networking::RouterConfigurationBgpPeer>>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let sel = path_params.into_inner();
+            let query = query_params.into_inner();
+            let pagparams = data_page_params_for(&rqctx, &query)?;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let items = nexus
+                .router_configuration_bgp_peer_list(
+                    &opctx,
+                    sel.configuration,
+                    sel.switch,
+                    &pagparams,
+                )
+                .await?;
+            // The entries are named but carry no identity metadata, so the
+            // page marker is the bare name.
+            Ok(HttpResponseOk(ScanByName::results_page(
+                &query,
+                items,
+                &|_, item: &networking::RouterConfigurationBgpPeer| {
+                    item.name.clone()
+                },
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_router_configuration_bgp_peer_create(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
+        peer: TypedBody<networking::RouterConfigurationBgpPeer>,
+    ) -> Result<
+        HttpResponseCreated<networking::RouterConfigurationBgpPeer>,
+        HttpError,
+    > {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sel = path_params.into_inner();
+            let peer = peer.into_inner();
+            let result = nexus
+                .router_configuration_bgp_peer_create(
+                    &opctx,
+                    sel.configuration,
+                    sel.switch,
+                    peer,
+                )
+                .await?;
+            Ok(HttpResponseCreated(result))
+        })
+        .await
+    }
+
+    async fn networking_router_configuration_bgp_peer_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationBgpPeerSelector>,
+    ) -> Result<HttpResponseOk<networking::RouterConfigurationBgpPeer>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let sel = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let result = nexus
+                .router_configuration_bgp_peer_view(
+                    &opctx,
+                    sel.configuration,
+                    sel.switch,
+                    &sel.peer,
+                )
+                .await?;
+            Ok(HttpResponseOk(result))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_router_configuration_bgp_peer_update(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationBgpPeerSelector>,
+        peer: TypedBody<networking::RouterConfigurationBgpPeer>,
+    ) -> Result<HttpResponseOk<networking::RouterConfigurationBgpPeer>, HttpError>
+    {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sel = path_params.into_inner();
+            let peer = peer.into_inner();
+            let result = nexus
+                .router_configuration_bgp_peer_update(
+                    &opctx,
+                    sel.configuration,
+                    sel.switch,
+                    &sel.peer,
+                    peer,
+                )
+                .await?;
+            Ok(HttpResponseOk(result))
+        })
+        .await
+    }
+
+    async fn networking_router_configuration_bgp_peer_delete(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationBgpPeerSelector>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sel = path_params.into_inner();
+            nexus
+                .router_configuration_bgp_peer_delete(
+                    &opctx,
+                    sel.configuration,
+                    sel.switch,
+                    &sel.peer,
+                )
+                .await?;
+            Ok(HttpResponseUpdatedNoContent {})
+        })
+        .await
+    }
+
+    async fn networking_router_configuration_static_route_list(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
+        query_params: Query<PaginatedByName>,
+    ) -> Result<HttpResponseOk<ResultsPage<networking::StaticRoute>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let sel = path_params.into_inner();
+            let query = query_params.into_inner();
+            let pagparams = data_page_params_for(&rqctx, &query)?;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let items = nexus
+                .router_configuration_static_route_list(
+                    &opctx,
+                    sel.configuration,
+                    sel.switch,
+                    &pagparams,
+                )
+                .await?;
+            // The entries are named but carry no identity metadata, so the
+            // page marker is the bare name.
+            Ok(HttpResponseOk(ScanByName::results_page(
+                &query,
+                items,
+                &|_, item: &networking::StaticRoute| item.name.clone(),
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_router_configuration_static_route_create(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
+        route: TypedBody<networking::StaticRoute>,
+    ) -> Result<HttpResponseCreated<networking::StaticRoute>, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sel = path_params.into_inner();
+            let route = route.into_inner();
+            let result = nexus
+                .router_configuration_static_route_create(
+                    &opctx,
+                    sel.configuration,
+                    sel.switch,
+                    route,
+                )
+                .await?;
+            Ok(HttpResponseCreated(result))
+        })
+        .await
+    }
+
+    async fn networking_router_configuration_static_route_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationStaticRouteSelector>,
+    ) -> Result<HttpResponseOk<networking::StaticRoute>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let sel = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let result = nexus
+                .router_configuration_static_route_view(
+                    &opctx,
+                    sel.configuration,
+                    sel.switch,
+                    &sel.route,
+                )
+                .await?;
+            Ok(HttpResponseOk(result))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_router_configuration_static_route_update(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationStaticRouteSelector>,
+        route: TypedBody<networking::StaticRoute>,
+    ) -> Result<HttpResponseOk<networking::StaticRoute>, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sel = path_params.into_inner();
+            let route = route.into_inner();
+            let result = nexus
+                .router_configuration_static_route_update(
+                    &opctx,
+                    sel.configuration,
+                    sel.switch,
+                    &sel.route,
+                    route,
+                )
+                .await?;
+            Ok(HttpResponseOk(result))
+        })
+        .await
+    }
+
+    async fn networking_router_configuration_static_route_delete(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationStaticRouteSelector>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sel = path_params.into_inner();
+            nexus
+                .router_configuration_static_route_delete(
+                    &opctx,
+                    sel.configuration,
+                    sel.switch,
+                    &sel.route,
+                )
+                .await?;
+            Ok(HttpResponseUpdatedNoContent {})
+        })
+        .await
+    }
+
+    async fn networking_router_configuration_bfd_peer_list(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
+        query_params: Query<PaginatedByName>,
+    ) -> Result<HttpResponseOk<ResultsPage<networking::BfdPeer>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let sel = path_params.into_inner();
+            let query = query_params.into_inner();
+            let pagparams = data_page_params_for(&rqctx, &query)?;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let items = nexus
+                .router_configuration_bfd_peer_list(
+                    &opctx,
+                    sel.configuration,
+                    sel.switch,
+                    &pagparams,
+                )
+                .await?;
+            // The entries are named but carry no identity metadata, so the
+            // page marker is the bare name.
+            Ok(HttpResponseOk(ScanByName::results_page(
+                &query,
+                items,
+                &|_, item: &networking::BfdPeer| item.name.clone(),
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_router_configuration_bfd_peer_create(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationSwitchSelector>,
+        peer: TypedBody<networking::BfdPeer>,
+    ) -> Result<HttpResponseCreated<networking::BfdPeer>, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sel = path_params.into_inner();
+            let peer = peer.into_inner();
+            let result = nexus
+                .router_configuration_bfd_peer_create(
+                    &opctx,
+                    sel.configuration,
+                    sel.switch,
+                    peer,
+                )
+                .await?;
+            Ok(HttpResponseCreated(result))
+        })
+        .await
+    }
+
+    async fn networking_router_configuration_bfd_peer_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationBfdPeerSelector>,
+    ) -> Result<HttpResponseOk<networking::BfdPeer>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let sel = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let result = nexus
+                .router_configuration_bfd_peer_view(
+                    &opctx,
+                    sel.configuration,
+                    sel.switch,
+                    &sel.peer,
+                )
+                .await?;
+            Ok(HttpResponseOk(result))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_router_configuration_bfd_peer_update(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationBfdPeerSelector>,
+        peer: TypedBody<networking::BfdPeer>,
+    ) -> Result<HttpResponseOk<networking::BfdPeer>, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sel = path_params.into_inner();
+            let peer = peer.into_inner();
+            let result = nexus
+                .router_configuration_bfd_peer_update(
+                    &opctx,
+                    sel.configuration,
+                    sel.switch,
+                    &sel.peer,
+                    peer,
+                )
+                .await?;
+            Ok(HttpResponseOk(result))
+        })
+        .await
+    }
+
+    async fn networking_router_configuration_bfd_peer_delete(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<networking::RouterConfigurationBfdPeerSelector>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sel = path_params.into_inner();
+            nexus
+                .router_configuration_bfd_peer_delete(
+                    &opctx,
+                    sel.configuration,
+                    sel.switch,
+                    &sel.peer,
+                )
+                .await?;
+            Ok(HttpResponseUpdatedNoContent {})
+        })
+        .await
+    }
+
+    async fn networking_control_plane_router_configurations_view(
+        rqctx: RequestContext<ApiContext>,
+    ) -> Result<
+        HttpResponseOk<networking::ControlPlaneRouterConfigurations>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let result =
+                nexus.control_plane_router_configurations_view(&opctx).await?;
+            Ok(HttpResponseOk(result))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_control_plane_router_configurations_update(
+        rqctx: RequestContext<ApiContext>,
+        update: TypedBody<networking::ControlPlaneRouterConfigurationsUpdate>,
+    ) -> Result<
+        HttpResponseOk<networking::ControlPlaneRouterConfigurations>,
+        HttpError,
+    > {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let update = update.into_inner();
+            let result = nexus
+                .control_plane_router_configurations_update(&opctx, update)
+                .await?;
+            Ok(HttpResponseOk::<networking::ControlPlaneRouterConfigurations>(
+                result,
+            ))
+        })
+        .await
     }
 
     async fn networking_bfd_enable(

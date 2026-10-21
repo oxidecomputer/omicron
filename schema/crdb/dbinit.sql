@@ -4111,6 +4111,182 @@ CREATE TABLE IF NOT EXISTS omicron.public.bgp_announcement (
     PRIMARY KEY (announce_set_id, network)
 );
 
+/* Router identity is shared by all participating switches. */
+CREATE TABLE IF NOT EXISTS omicron.public.router_configuration (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_switch (
+    router_configuration_id UUID NOT NULL,
+    switch omicron.public.switch_slot NOT NULL,
+
+    bgp_asn INT8,
+    bgp_max_paths INT2 CHECK (
+        bgp_max_paths IS NULL
+        OR (bgp_max_paths > 0 AND bgp_max_paths <= 32)
+    ),
+    bgp_announce_set_id UUID,
+
+    PRIMARY KEY (router_configuration_id, switch),
+
+    CONSTRAINT bgp_config_set_together CHECK (
+        (
+            bgp_asn IS NULL
+            AND bgp_max_paths IS NULL
+            AND bgp_announce_set_id IS NULL
+        )
+        OR
+        (
+            bgp_asn IS NOT NULL
+            AND bgp_max_paths IS NOT NULL
+            AND bgp_announce_set_id IS NOT NULL
+        )
+    )
+);
+
+CREATE INDEX IF NOT EXISTS lookup_router_configuration_switch_by_bgp_announce_set_id
+    ON omicron.public.router_configuration_switch (bgp_announce_set_id)
+    WHERE bgp_announce_set_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_router_configuration_by_name ON omicron.public.router_configuration (
+    name
+) WHERE
+    time_deleted IS NULL;
+
+/*
+ * A BGP peer within a router configuration. Peers are identified by name
+ * within their router configuration and switch block. A numbered peer has `addr` and
+ * an optional same-family `src_addr` set; an unnumbered peer has only `port_name` and `router_lifetime`
+ * (0 = disabled) set. A null `allowed_import`/`allowed_export` means no
+ * filtering.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_bgp_peer (
+    router_configuration_id UUID NOT NULL,
+    name STRING(63) NOT NULL,
+    addr INET CHECK (host(addr) != '0.0.0.0' AND host(addr) != '::'),
+    port_name TEXT,
+    remote_asn INT8,
+    allowed_import INET[],
+    allowed_export INET[],
+    hold_time INT8 NOT NULL,
+    keepalive INT8 NOT NULL,
+    connect_retry INT8 NOT NULL,
+    delay_open INT8 NOT NULL,
+    idle_hold_time INT8 NOT NULL,
+    local_pref INT8,
+    communities INT8[] NOT NULL,
+    multi_exit_discriminator INT8,
+    enforce_first_as BOOL NOT NULL,
+    md5_auth_key TEXT,
+    min_ttl INT2,
+    vlan_id INT4,
+    router_lifetime INT4 CHECK (
+        router_lifetime >= 0 AND router_lifetime <= 9000
+    ),
+
+    src_addr INET CHECK (host(src_addr) != '0.0.0.0' AND host(src_addr) != '::'),
+    switch omicron.public.switch_slot NOT NULL,
+    CONSTRAINT src_addr_only_for_numbered_peers
+        CHECK (src_addr IS NULL OR addr IS NOT NULL),
+    CONSTRAINT src_addr_family_must_match_peer
+        CHECK (family(src_addr) = family(addr)),
+
+    CONSTRAINT numbered_xor_unnumbered_peer CHECK (
+        (
+            addr IS NOT NULL
+            AND port_name IS NULL
+            AND router_lifetime IS NULL
+        )
+        OR
+        (
+            addr IS NULL
+            AND port_name IS NOT NULL
+            AND router_lifetime IS NOT NULL
+        )
+    ),
+
+    CONSTRAINT router_configuration_bgp_peer_pkey_switch
+        PRIMARY KEY (router_configuration_id, switch, name)
+);
+
+/* Unique constraint for numbered BGP peers (one per peer address) */
+CREATE UNIQUE INDEX IF NOT EXISTS router_configuration_bgp_peer_numbered_unique
+    ON omicron.public.router_configuration_bgp_peer (router_configuration_id, switch, addr)
+    WHERE addr IS NOT NULL;
+
+/* Unique constraint for unnumbered BGP peers (one per port) */
+CREATE UNIQUE INDEX IF NOT EXISTS router_configuration_bgp_peer_unnumbered_unique
+    ON omicron.public.router_configuration_bgp_peer (router_configuration_id, switch, port_name)
+    WHERE addr IS NULL;
+
+/*
+ * A static route within a router configuration, identified by name within
+ * its parent router configuration.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_static_route (
+    router_configuration_id UUID NOT NULL,
+    name STRING(63) NOT NULL,
+    dst INET NOT NULL,
+    gw INET NOT NULL,
+    rib_priority INT2,
+    vlan_id INT4,
+    switch omicron.public.switch_slot NOT NULL,
+
+    CONSTRAINT router_configuration_static_route_pkey_switch
+        PRIMARY KEY (router_configuration_id, switch, name)
+);
+
+/*
+ * Links a silo to the router configurations it uses, in priority order.
+ * Multiple silos may reference the same router configuration. Each priority
+ * is unique within a silo (enforced by the primary key); rows are
+ * hard-deleted and replaced in bulk when a silo's set of configurations is
+ * updated.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.silo_router_configuration (
+    silo_id UUID NOT NULL,
+    router_configuration_id UUID NOT NULL,
+    priority INT4 NOT NULL CHECK (priority >= 0 AND priority <= 65535),
+
+    PRIMARY KEY (silo_id, priority)
+);
+
+/*
+ * Enforces that a router configuration appears at most once per silo and
+ * supports reverse lookups (which silos use a given router configuration).
+ */
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_silo_router_configuration_by_router_configuration
+    ON omicron.public.silo_router_configuration (router_configuration_id, silo_id);
+
+/*
+ * The prioritized router-configuration list used by control-plane (service)
+ * OPTE ports, fleet-wide. Rows are hard-deleted and replaced in bulk.
+ *
+ * Initialization seeds the built-in "default" at priority 1000. An empty table
+ * means no external routing for services; normal startup never reseeds it.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.control_plane_router_configuration (
+    priority INT4 NOT NULL CHECK (priority >= 0 AND priority <= 65535),
+    router_configuration_id UUID NOT NULL,
+
+    PRIMARY KEY (priority)
+);
+
+INSERT INTO omicron.public.control_plane_router_configuration
+    (priority, router_configuration_id)
+VALUES (1000, '001de000-defa-4000-8000-000000000000')
+ON CONFLICT DO NOTHING;
+
+/* A router configuration appears at most once in the control-plane list. */
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_control_plane_router_configuration_by_router_configuration
+    ON omicron.public.control_plane_router_configuration (router_configuration_id);
+
+
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_address_config (
     port_settings_id UUID,
     address_lot_block_id UUID NOT NULL,
@@ -6946,6 +7122,27 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_bfd_session ON omicron.public.bfd_sessi
     remote,
     switch_slot
 ) WHERE time_deleted IS NULL;
+
+
+/*
+ * A BFD peer within a router configuration, identified by name within its
+ * parent router configuration. This table lives here rather than with the
+ * other router configuration tables because it must be created after the
+ * `bfd_mode` enum.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_bfd_peer (
+    router_configuration_id UUID NOT NULL,
+    name STRING(63) NOT NULL,
+    remote INET NOT NULL,
+    local INET,
+    mode omicron.public.bfd_mode NOT NULL,
+    detection_threshold INT2 NOT NULL,
+    required_rx INT8 NOT NULL,
+    switch omicron.public.switch_slot NOT NULL,
+
+    CONSTRAINT router_configuration_bfd_peer_pkey_switch
+        PRIMARY KEY (router_configuration_id, switch, name)
+);
 
 
 CREATE TABLE IF NOT EXISTS omicron.public.probe (
@@ -9810,7 +10007,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '311.0.0', NULL)
+    (TRUE, NOW(), NOW(), '315.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

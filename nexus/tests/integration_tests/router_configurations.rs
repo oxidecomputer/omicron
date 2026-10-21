@@ -1,0 +1,1815 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Integration tests for router configurations
+
+use dropshot::ResultsPage;
+use http::StatusCode;
+use http::method::Method;
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
+use nexus_db_queries::context::OpContext;
+use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
+use nexus_test_utils::resource_helpers::create_silo;
+use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::networking::{
+    AddressLotBlockCreate, AddressLotCreate, AddressLotKind, BfdPeer,
+    BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpPeerKind,
+    RouterConfiguration, RouterConfigurationBgpConfig,
+    RouterConfigurationBgpConfigSet, RouterConfigurationBgpPeer,
+    RouterConfigurationCreate, RouterConfigurationUpdate,
+    SiloRouterConfigurationEntry, SiloRouterConfigurations,
+    SiloRouterConfigurationsUpdate, StaticRoute,
+};
+use omicron_common::api::external::{
+    IdentityMetadataCreateParams, IdentityMetadataUpdateParams, NameOrId,
+};
+use sled_agent_types::early_networking::BfdMode;
+use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::MaxPathConfig;
+use sled_agent_types::early_networking::SwitchSlot;
+use std::num::NonZeroU8;
+use std::sync::Arc;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
+
+const CONFIGURATIONS_URL: &str = "/v1/system/networking/router-configurations";
+
+/// Create the address lot and BGP announce set that BGP configurations
+/// reference.
+async fn create_announce_set(ctx: &ControlPlaneTestContext) {
+    let client = &ctx.external_client;
+
+    let lot_params = AddressLotCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "parkinglot".parse().unwrap(),
+            description: "an address parking lot".into(),
+        },
+        kind: AddressLotKind::Infra,
+        blocks: vec![AddressLotBlockCreate {
+            first_address: "1.2.3.0".parse().unwrap(),
+            last_address: "1.2.3.255".parse().unwrap(),
+        }],
+    };
+    NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/address-lot",
+        &lot_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    let announce_set = BgpAnnounceSetCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "instances".parse().unwrap(),
+            description: "autonomous system 47 announcements".into(),
+        },
+        announcement: vec![BgpAnnouncementCreate {
+            address_lot_block: NameOrId::Name("parkinglot".parse().unwrap()),
+            network: "1.2.3.0/24".parse().unwrap(),
+        }],
+    };
+    NexusRequest::object_put(
+        client,
+        "/v1/system/networking/bgp-announce-set",
+        Some(&announce_set),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
+#[nexus_test]
+async fn test_router_configuration_basic_crud(ctx: &ControlPlaneTestContext) {
+    let client = &ctx.external_client;
+    let configuration_url = format!("{CONFIGURATIONS_URL}/routy");
+
+    // Initially there is only the built-in default configuration, with a
+    // block for each switch.
+    let configurations = NexusRequest::iter_collection_authn::<
+        RouterConfiguration,
+    >(client, CONFIGURATIONS_URL, "", None)
+    .await
+    .unwrap()
+    .all_items;
+    assert_eq!(configurations.len(), 1);
+    assert_eq!(configurations[0].identity.name, "default");
+    assert_eq!(
+        configurations[0].switches.iter().map(|s| s.switch).collect::<Vec<_>>(),
+        vec![SwitchSlot::Switch0, SwitchSlot::Switch1]
+    );
+
+    // Fetching a nonexistent router configuration fails.
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &configuration_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Create a router configuration.
+    let params = RouterConfigurationCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "routy".parse().unwrap(),
+            description: "just a router configuration".into(),
+        },
+        switches: vec![SwitchSlot::Switch0],
+    };
+    let created: RouterConfiguration =
+        NexusRequest::objects_post(client, CONFIGURATIONS_URL, &params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(created.identity.name, "routy");
+    assert_eq!(created.identity.description, "just a router configuration");
+    assert_eq!(created.switches[0].switch, SwitchSlot::Switch0);
+    assert_eq!(created.switches[0].bgp_config, None);
+    assert!(created.switches[0].bgp_peers.is_empty());
+    assert!(created.switches[0].routes.is_empty());
+    assert!(created.switches[0].bfd_peers.is_empty());
+
+    // Creating a router configuration with the same name fails.
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, CONFIGURATIONS_URL)
+            .body(Some(&params))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // The new router configuration appears in the list and can be fetched.
+    let configurations = NexusRequest::iter_collection_authn::<
+        RouterConfiguration,
+    >(client, CONFIGURATIONS_URL, "", None)
+    .await
+    .unwrap()
+    .all_items;
+    assert_eq!(configurations.len(), 2);
+    assert!(
+        configurations.iter().any(|c| c.identity.id == created.identity.id)
+    );
+
+    let fetched: RouterConfiguration =
+        NexusRequest::object_get(client, &configuration_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(fetched.identity.id, created.identity.id);
+
+    // Update the router configuration.
+    let update = RouterConfigurationUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: Some("routy2".parse().unwrap()),
+            description: Some("a renamed router configuration".into()),
+        },
+    };
+    let updated: RouterConfiguration =
+        NexusRequest::object_put(client, &configuration_url, Some(&update))
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(updated.identity.id, created.identity.id);
+    assert_eq!(updated.identity.name, "routy2");
+    assert_eq!(updated.identity.description, "a renamed router configuration");
+    assert_eq!(updated.switches[0].switch, SwitchSlot::Switch0);
+
+    // The router configuration can be fetched by its new name and deleted.
+    let configuration_url = format!("{CONFIGURATIONS_URL}/routy2");
+    NexusRequest::object_get(client, &configuration_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    NexusRequest::object_delete(client, &configuration_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &configuration_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
+#[nexus_test]
+async fn test_builtin_router_configurations(ctx: &ControlPlaneTestContext) {
+    use nexus_types::router_configuration::DEFAULT_ROUTER_CONFIGURATION_ID;
+
+    let client = &ctx.external_client;
+    let builtin_url = format!("{CONFIGURATIONS_URL}/default");
+
+    // The built-in exists with its fixed id and a block for each switch.
+    let fetched: RouterConfiguration =
+        NexusRequest::object_get(client, &builtin_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(fetched.identity.id, DEFAULT_ROUTER_CONFIGURATION_ID);
+    assert_eq!(
+        fetched.switches.iter().map(|s| s.switch).collect::<Vec<_>>(),
+        vec![SwitchSlot::Switch0, SwitchSlot::Switch1]
+    );
+
+    // The reserved name cannot be minted.
+    let params = RouterConfigurationCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "default".parse().unwrap(),
+            description: "must be rejected".into(),
+        },
+        switches: vec![SwitchSlot::Switch0],
+    };
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, CONFIGURATIONS_URL)
+            .body(Some(&params))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // The built-in cannot be renamed, ...
+    let rename = RouterConfigurationUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: Some("liberated".parse().unwrap()),
+            description: None,
+        },
+    };
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &builtin_url)
+            .body(Some(&rename))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // ... cannot add or remove switch blocks, ...
+    for (method, switch) in
+        [(Method::POST, "switch1"), (Method::DELETE, "switch0")]
+    {
+        NexusRequest::expect_failure(
+            client,
+            StatusCode::BAD_REQUEST,
+            method,
+            &format!("{builtin_url}/switches/{switch}"),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    }
+
+    // ... cannot be deleted, ...
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::BAD_REQUEST,
+        Method::DELETE,
+        &builtin_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // ... but a same-name (description-only) update is fine.
+    let describe = RouterConfigurationUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: Some("default".parse().unwrap()),
+            description: Some("still the built-in".into()),
+        },
+    };
+    let updated: RouterConfiguration =
+        NexusRequest::object_put(client, &builtin_url, Some(&describe))
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(updated.identity.description, "still the built-in");
+
+    // A normal configuration cannot take a reserved name.
+    let params = RouterConfigurationCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "routy".parse().unwrap(),
+            description: "just a router configuration".into(),
+        },
+        switches: vec![SwitchSlot::Switch0],
+    };
+    NexusRequest::objects_post(client, CONFIGURATIONS_URL, &params)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    let routy_url = format!("{CONFIGURATIONS_URL}/routy");
+    let steal = RouterConfigurationUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: Some("default".parse().unwrap()),
+            description: None,
+        },
+    };
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &routy_url)
+            .body(Some(&steal))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // A-13: the built-in populator is idempotent. Running it again (as the
+    // database-init identity Nexus uses at startup) leaves exactly the one
+    // built-in, unchanged.
+    let before: Vec<RouterConfiguration> =
+        list_all(ctx, CONFIGURATIONS_URL).await;
+    let builtins = |cfgs: &[RouterConfiguration]| {
+        let mut b: Vec<_> = cfgs
+            .iter()
+            .filter(|c| {
+                nexus_types::router_configuration::is_builtin_router_configuration_id(
+                    &c.identity.id,
+                )
+            })
+            .map(|c| {
+                (
+                    c.identity.id,
+                    c.identity.name.to_string(),
+                    c.identity.description.clone(),
+                    c.switches.iter().map(|s| s.switch).collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        b.sort_by_key(|a| a.0);
+        b
+    };
+    assert_eq!(builtins(&before).len(), 1);
+    let nexus = &ctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx = OpContext::for_background(
+        ctx.logctx.log.new(slog::o!()),
+        Arc::new(authz::Authz::new(&ctx.logctx.log)),
+        authn::Context::internal_db_init(),
+        Arc::clone(datastore) as Arc<dyn nexus_auth::storage::Storage>,
+    );
+    for _ in 0..2 {
+        datastore.load_builtin_router_configuration(&opctx).await.unwrap();
+    }
+    let after: Vec<RouterConfiguration> =
+        list_all(ctx, CONFIGURATIONS_URL).await;
+    assert_eq!(builtins(&after), builtins(&before));
+    assert_eq!(after.len(), before.len());
+}
+
+#[nexus_test]
+async fn test_router_configuration_bgp_config(ctx: &ControlPlaneTestContext) {
+    let client = &ctx.external_client;
+    create_announce_set(ctx).await;
+
+    // Create a router configuration.
+    let params = RouterConfigurationCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "routy".parse().unwrap(),
+            description: "just a router configuration".into(),
+        },
+        switches: vec![SwitchSlot::Switch0],
+    };
+    NexusRequest::objects_post(client, CONFIGURATIONS_URL, &params)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+
+    // There's no BGP configuration yet.
+    let bgp_config_url =
+        format!("{CONFIGURATIONS_URL}/routy/switches/switch0/bgp-config");
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &bgp_config_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Create the BGP configuration.
+    let set = RouterConfigurationBgpConfigSet {
+        asn: 47,
+        max_paths: Default::default(),
+        bgp_announce_set: NameOrId::Name("instances".parse().unwrap()),
+    };
+    let bgp_config: RouterConfigurationBgpConfig =
+        NexusRequest::object_put(client, &bgp_config_url, Some(&set))
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(bgp_config.asn, 47);
+    assert_eq!(bgp_config.max_paths, MaxPathConfig::new(1).unwrap());
+
+    // The BGP configuration can be fetched, and appears in the router
+    // configuration view.
+    let fetched: RouterConfigurationBgpConfig =
+        NexusRequest::object_get(client, &bgp_config_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(fetched, bgp_config);
+
+    let configuration: RouterConfiguration = NexusRequest::object_get(
+        client,
+        &format!("{CONFIGURATIONS_URL}/routy"),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(configuration.switches[0].bgp_config, Some(bgp_config));
+
+    // Setting the BGP configuration again replaces it.
+    let replace = RouterConfigurationBgpConfigSet {
+        asn: 65001,
+        max_paths: MaxPathConfig::new(4).unwrap(),
+        bgp_announce_set: NameOrId::Name("instances".parse().unwrap()),
+    };
+    let replaced: RouterConfigurationBgpConfig =
+        NexusRequest::object_put(client, &bgp_config_url, Some(&replace))
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(replaced.asn, 65001);
+    assert_eq!(replaced.max_paths, MaxPathConfig::new(4).unwrap());
+
+    // Referencing a nonexistent announce set fails.
+    let bad_set = RouterConfigurationBgpConfigSet {
+        asn: 47,
+        max_paths: Default::default(),
+        bgp_announce_set: NameOrId::Name("no-such-set".parse().unwrap()),
+    };
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &bgp_config_url)
+            .body(Some(&bad_set))
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Remove the BGP configuration.
+    NexusRequest::object_delete(client, &bgp_config_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &bgp_config_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Removing it again is fine (idempotent).
+    NexusRequest::object_delete(client, &bgp_config_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+}
+
+fn demo_bgp_peer() -> RouterConfigurationBgpPeer {
+    RouterConfigurationBgpPeer {
+        name: "spine1".parse().unwrap(),
+        peer: BgpPeerKind::Numbered {
+            addr: "203.0.113.10".parse().unwrap(),
+            src_addr: None,
+        },
+        remote_asn: Some(65001),
+        allowed_import: ImportExportPolicy::NoFiltering,
+        allowed_export: ImportExportPolicy::NoFiltering,
+        hold_time: 6,
+        keepalive: 2,
+        connect_retry: 3,
+        delay_open: 0,
+        idle_hold_time: 3,
+        local_pref: None,
+        communities: vec![100, 200],
+        multi_exit_discriminator: None,
+        enforce_first_as: true,
+        md5_auth_key: None,
+        min_ttl: Some(255),
+        vlan_id: None,
+    }
+}
+
+fn demo_static_route() -> StaticRoute {
+    StaticRoute {
+        name: "default".parse().unwrap(),
+        dst: "0.0.0.0/0".parse().unwrap(),
+        gw: "203.0.113.1".parse().unwrap(),
+        rib_priority: Some(1),
+        vlan_id: None,
+    }
+}
+
+fn demo_bfd_peer() -> BfdPeer {
+    BfdPeer {
+        name: "spine1-bfd".parse().unwrap(),
+        remote: "203.0.113.10".parse().unwrap(),
+        local: None,
+        mode: BfdMode::MultiHop,
+        detection_threshold: NonZeroU8::new(3).unwrap(),
+        required_rx: 1_000_000,
+    }
+}
+
+#[nexus_test]
+async fn test_router_configuration_sub_resources(
+    ctx: &ControlPlaneTestContext,
+) {
+    let client = &ctx.external_client;
+
+    // Create a router configuration.
+    let params = RouterConfigurationCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "routy".parse().unwrap(),
+            description: "just a router configuration".into(),
+        },
+        switches: vec![SwitchSlot::Switch0],
+    };
+    NexusRequest::objects_post(client, CONFIGURATIONS_URL, &params)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+
+    let bgp_peers_url =
+        format!("{CONFIGURATIONS_URL}/routy/switches/switch0/bgp-peers");
+    let routes_url =
+        format!("{CONFIGURATIONS_URL}/routy/switches/switch0/routes");
+    let bfd_peers_url =
+        format!("{CONFIGURATIONS_URL}/routy/switches/switch0/bfd-peers");
+
+    // All entry collections start out empty.
+    let bgp_peers: Vec<RouterConfigurationBgpPeer> =
+        list_all(ctx, &bgp_peers_url).await;
+    assert!(bgp_peers.is_empty());
+
+    // Create one entry of each kind.
+    let bgp_peer = demo_bgp_peer();
+    let created_peer: RouterConfigurationBgpPeer =
+        NexusRequest::objects_post(client, &bgp_peers_url, &bgp_peer)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(created_peer, bgp_peer);
+
+    let route = demo_static_route();
+    let created_route: StaticRoute =
+        NexusRequest::objects_post(client, &routes_url, &route)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(created_route, route);
+
+    let bfd_peer = demo_bfd_peer();
+    let created_bfd: BfdPeer =
+        NexusRequest::objects_post(client, &bfd_peers_url, &bfd_peer)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(created_bfd, bfd_peer);
+
+    // Creating an entry with a duplicate name fails.
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &bgp_peers_url)
+            .body(Some(&bgp_peer))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // The entries appear in the parent router configuration view.
+    let configuration: RouterConfiguration = NexusRequest::object_get(
+        client,
+        &format!("{CONFIGURATIONS_URL}/routy"),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(configuration.switches[0].bgp_peers, vec![bgp_peer.clone()]);
+    assert_eq!(configuration.switches[0].routes, vec![route.clone()]);
+    assert_eq!(configuration.switches[0].bfd_peers, vec![bfd_peer.clone()]);
+
+    // Entries can be fetched individually.
+    let bgp_peer_url = format!("{bgp_peers_url}/spine1");
+    let fetched: RouterConfigurationBgpPeer =
+        NexusRequest::object_get(client, &bgp_peer_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(fetched, bgp_peer);
+
+    // Fetching a nonexistent entry fails.
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &format!("{bgp_peers_url}/no-such-peer"),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Update an entry, including a rename.
+    let mut updated_peer = bgp_peer.clone();
+    updated_peer.name = "spine2".parse().unwrap();
+    updated_peer.remote_asn = Some(65002);
+    let updated: RouterConfigurationBgpPeer =
+        NexusRequest::object_put(client, &bgp_peer_url, Some(&updated_peer))
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(updated, updated_peer);
+
+    // The entry is now reachable under its new name, not the old one.
+    let bgp_peer_url = format!("{bgp_peers_url}/spine2");
+    NexusRequest::object_get(client, &bgp_peer_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &format!("{bgp_peers_url}/spine1"),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Updating a nonexistent entry fails.
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::PUT,
+            &format!("{routes_url}/no-such-route"),
+        )
+        .body(Some(&route))
+        .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Remove the entries.
+    NexusRequest::object_delete(client, &bgp_peer_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+
+    // Removing an entry twice fails.
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::DELETE,
+        &bgp_peer_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Deleting the parent router configuration removes its entries: a new
+    // router configuration created with the same name starts out empty.
+    NexusRequest::object_delete(client, &format!("{CONFIGURATIONS_URL}/routy"))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    NexusRequest::objects_post(client, CONFIGURATIONS_URL, &params)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    let configuration: RouterConfiguration = NexusRequest::object_get(
+        client,
+        &format!("{CONFIGURATIONS_URL}/routy"),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert!(configuration.switches[0].bgp_peers.is_empty());
+    assert!(configuration.switches[0].routes.is_empty());
+    assert!(configuration.switches[0].bfd_peers.is_empty());
+}
+
+#[nexus_test]
+async fn test_silo_router_configurations(ctx: &ControlPlaneTestContext) {
+    let client = &ctx.external_client;
+    let silo = create_silo(
+        client,
+        "rc-silo",
+        nexus_types::external_api::silo::SiloIdentityMode::LocalOnly,
+    )
+    .await;
+    let silo_configurations_url =
+        format!("/v1/system/silos/{}/router-configurations", silo.identity.id);
+
+    // Initially the silo uses no router configurations.
+    let linked: SiloRouterConfigurations =
+        NexusRequest::object_get(client, &silo_configurations_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert!(linked.configurations.is_empty());
+
+    // Create two router configurations to link.
+    let mut created = Vec::new();
+    for name in ["alpha", "beta"] {
+        let params = RouterConfigurationCreate {
+            identity: IdentityMetadataCreateParams {
+                name: name.parse().unwrap(),
+                description: String::new(),
+            },
+            switches: vec![SwitchSlot::Switch0],
+        };
+        let configuration: RouterConfiguration =
+            NexusRequest::objects_post(client, CONFIGURATIONS_URL, &params)
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await
+                .unwrap()
+                .parsed_body()
+                .unwrap();
+        created.push(configuration);
+    }
+
+    // Assign both router configurations to the silo, one by name and one by
+    // id, listed out of priority order.
+    let update = SiloRouterConfigurationsUpdate {
+        configurations: vec![
+            SiloRouterConfigurationEntry {
+                router_configuration: NameOrId::Name("beta".parse().unwrap()),
+                priority: 20,
+            },
+            SiloRouterConfigurationEntry {
+                router_configuration: NameOrId::Id(created[0].identity.id),
+                priority: 10,
+            },
+        ],
+    };
+    let linked: SiloRouterConfigurations = NexusRequest::object_put(
+        client,
+        &silo_configurations_url,
+        Some(&update),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    // The response is sorted by ascending priority.
+    assert_eq!(linked.configurations.len(), 2);
+    assert_eq!(linked.configurations[0].priority, 10);
+    assert_eq!(
+        linked.configurations[0].router_configuration_id,
+        created[0].identity.id
+    );
+    assert_eq!(linked.configurations[1].priority, 20);
+    assert_eq!(
+        linked.configurations[1].router_configuration_id,
+        created[1].identity.id
+    );
+
+    // Fetching returns the same result.
+    let fetched: SiloRouterConfigurations =
+        NexusRequest::object_get(client, &silo_configurations_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(fetched, linked);
+
+    // Duplicate priorities are rejected.
+    let update = SiloRouterConfigurationsUpdate {
+        configurations: vec![
+            SiloRouterConfigurationEntry {
+                router_configuration: NameOrId::Name("alpha".parse().unwrap()),
+                priority: 10,
+            },
+            SiloRouterConfigurationEntry {
+                router_configuration: NameOrId::Name("beta".parse().unwrap()),
+                priority: 10,
+            },
+        ],
+    };
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &silo_configurations_url)
+            .body(Some(&update))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Listing the same router configuration twice is rejected.
+    let update = SiloRouterConfigurationsUpdate {
+        configurations: vec![
+            SiloRouterConfigurationEntry {
+                router_configuration: NameOrId::Name("alpha".parse().unwrap()),
+                priority: 10,
+            },
+            SiloRouterConfigurationEntry {
+                router_configuration: NameOrId::Id(created[0].identity.id),
+                priority: 20,
+            },
+        ],
+    };
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &silo_configurations_url)
+            .body(Some(&update))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Failed updates left the previous assignments untouched.
+    let fetched: SiloRouterConfigurations =
+        NexusRequest::object_get(client, &silo_configurations_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(fetched, linked);
+
+    // A router configuration used by a silo cannot be deleted.
+    let alpha_url = format!("{CONFIGURATIONS_URL}/alpha");
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::CONFLICT,
+        Method::DELETE,
+        &alpha_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Remove "alpha" from the silo's router configurations.
+    let update = SiloRouterConfigurationsUpdate {
+        configurations: vec![SiloRouterConfigurationEntry {
+            router_configuration: NameOrId::Name("beta".parse().unwrap()),
+            priority: 5,
+        }],
+    };
+    NexusRequest::object_put(client, &silo_configurations_url, Some(&update))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body::<SiloRouterConfigurations>()
+        .unwrap();
+
+    NexusRequest::object_delete(client, &alpha_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+
+    // Deleting the silo unlinks its router configurations, so "beta" can be
+    // deleted afterwards.
+    NexusRequest::object_delete(
+        client,
+        &format!("/v1/system/silos/{}", silo.identity.id),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+    NexusRequest::object_delete(client, &format!("{CONFIGURATIONS_URL}/beta"))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+}
+
+async fn create_configuration(ctx: &ControlPlaneTestContext, name: &str) {
+    let params = RouterConfigurationCreate {
+        identity: IdentityMetadataCreateParams {
+            name: name.parse().unwrap(),
+            description: "validation tests".into(),
+        },
+        switches: vec![SwitchSlot::Switch0],
+    };
+    NexusRequest::objects_post(
+        &ctx.external_client,
+        CONFIGURATIONS_URL,
+        &params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
+/// POST/PUT a raw JSON body and expect 400; return the error message.
+async fn expect_bad_request(
+    ctx: &ControlPlaneTestContext,
+    method: Method,
+    url: &str,
+    body: &str,
+) -> String {
+    let error = NexusRequest::new(
+        RequestBuilder::new(&ctx.external_client, method, url)
+            .raw_body(Some(body.to_string()))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+    error.message
+}
+
+async fn get_json<T: serde::de::DeserializeOwned>(
+    ctx: &ControlPlaneTestContext,
+    url: &str,
+) -> T {
+    NexusRequest::object_get(&ctx.external_client, url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap()
+}
+
+/// Walk a paginated collection to completion (A-19: the router configuration
+/// entry collections are pages, not bare arrays).
+async fn list_all<T: Clone + serde::de::DeserializeOwned>(
+    ctx: &ControlPlaneTestContext,
+    url: &str,
+) -> Vec<T> {
+    NexusRequest::iter_collection_authn::<T>(
+        &ctx.external_client,
+        url,
+        "",
+        None,
+    )
+    .await
+    .unwrap()
+    .all_items
+}
+
+fn names_of(items: &[serde_json::Value]) -> Vec<String> {
+    items.iter().map(|v| v["name"].as_str().unwrap().to_string()).collect()
+}
+
+/// A-16: an IPv6 destination needs an IPv6 gateway; such a route is rejected
+/// before anything is stored or changed. An IPv4 destination accepts either.
+#[nexus_test]
+async fn test_router_configuration_static_route_family_mismatch(
+    ctx: &ControlPlaneTestContext,
+) {
+    let client = &ctx.external_client;
+    create_configuration(ctx, "famcheck").await;
+    let routes_url =
+        format!("{CONFIGURATIONS_URL}/famcheck/switches/switch0/routes");
+
+    let v4_dst_v6_gw = StaticRoute {
+        name: "mixed-a".parse().unwrap(),
+        dst: "10.0.0.0/8".parse().unwrap(),
+        gw: "fd00::1".parse().unwrap(),
+        rib_priority: None,
+        vlan_id: None,
+    };
+    let v6_dst_v4_gw = StaticRoute {
+        name: "mixed-b".parse().unwrap(),
+        dst: "fd00::/8".parse().unwrap(),
+        gw: "10.1.1.1".parse().unwrap(),
+        rib_priority: None,
+        vlan_id: None,
+    };
+    let msg = expect_bad_request(
+        ctx,
+        Method::POST,
+        &routes_url,
+        &serde_json::to_string(&v6_dst_v4_gw).unwrap(),
+    )
+    .await;
+    assert!(msg.contains("needs an IPv6 gateway"), "{msg}");
+    let routes: Vec<StaticRoute> = list_all(ctx, &routes_url).await;
+    assert!(routes.is_empty(), "rejected routes were stored: {routes:?}");
+
+    // A valid route is accepted; a mismatched update leaves it untouched.
+    let valid = StaticRoute {
+        name: "good".parse().unwrap(),
+        dst: "10.0.0.0/8".parse().unwrap(),
+        gw: "10.1.1.1".parse().unwrap(),
+        rib_priority: Some(5),
+        vlan_id: None,
+    };
+    let created: StaticRoute =
+        NexusRequest::objects_post(client, &routes_url, &valid)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(created, valid);
+    let route_url = format!("{routes_url}/good");
+    let mut bad_update = valid.clone();
+    bad_update.dst = "fd00::/8".parse().unwrap();
+    let msg = expect_bad_request(
+        ctx,
+        Method::PUT,
+        &route_url,
+        &serde_json::to_string(&bad_update).unwrap(),
+    )
+    .await;
+    assert!(msg.contains("needs an IPv6 gateway"), "{msg}");
+    let after: StaticRoute = get_json(ctx, &route_url).await;
+    assert_eq!(after, valid, "rejected update changed the stored route");
+    // An IPv6 route with an IPv6 gateway is still fine.
+    let v6 = StaticRoute {
+        name: "v6".parse().unwrap(),
+        dst: "fd00::/8".parse().unwrap(),
+        gw: "fd00::1".parse().unwrap(),
+        rib_priority: None,
+        vlan_id: None,
+    };
+    NexusRequest::objects_post(client, &routes_url, &v6)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    // So is an IPv4 route through an IPv6 gateway.
+    NexusRequest::objects_post(client, &routes_url, &v4_dst_v6_gw)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+}
+
+/// A-21: BFD `required_rx` is a bounded u32 that round-trips exactly, the
+/// detection threshold must be nonzero, and local/remote addresses must
+/// share a family; every rejection happens before persistence.
+#[nexus_test]
+async fn test_router_configuration_bfd_peer_validation(
+    ctx: &ControlPlaneTestContext,
+) {
+    let client = &ctx.external_client;
+    create_configuration(ctx, "bfdcheck").await;
+    let peers_url =
+        format!("{CONFIGURATIONS_URL}/bfdcheck/switches/switch0/bfd-peers");
+
+    // Boundary values round-trip unchanged.
+    for required_rx in [1u32, 1_000_000, u32::MAX] {
+        let peer = BfdPeer {
+            name: format!("rx-{required_rx}").parse().unwrap(),
+            remote: "203.0.113.10".parse().unwrap(),
+            local: Some("203.0.113.1".parse().unwrap()),
+            mode: BfdMode::SingleHop,
+            detection_threshold: NonZeroU8::new(1).unwrap(),
+            required_rx,
+        };
+        let created: BfdPeer =
+            NexusRequest::objects_post(client, &peers_url, &peer)
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await
+                .unwrap()
+                .parsed_body()
+                .unwrap();
+        assert_eq!(created, peer);
+        let fetched: BfdPeer =
+            get_json(ctx, &format!("{peers_url}/rx-{required_rx}")).await;
+        assert_eq!(fetched, peer);
+    }
+    let max_url = format!("{peers_url}/rx-{}", u32::MAX);
+    let max_peer: BfdPeer = get_json(ctx, &max_url).await;
+
+    // Beyond 32 bits, a zero threshold, and mixed families are rejected.
+    let base = r#""remote":"203.0.113.10","local":null,"mode":"multi_hop""#;
+    let too_wide = format!(
+        r#"{{"name":"bad",{base},"detection_threshold":3,"required_rx":4294967296}}"#
+    );
+    let zero_threshold = format!(
+        r#"{{"name":"bad",{base},"detection_threshold":0,"required_rx":1000}}"#
+    );
+    let mixed_a = r#"{"name":"bad","remote":"203.0.113.10","local":"fd00::1","mode":"multi_hop","detection_threshold":3,"required_rx":1000}"#.to_string();
+    let mixed_b = r#"{"name":"bad","remote":"fd00::10","local":"203.0.113.1","mode":"multi_hop","detection_threshold":3,"required_rx":1000}"#.to_string();
+    for (body, needle) in [
+        (&too_wide, "required_rx"),
+        (&zero_threshold, "detection_threshold"),
+        (&mixed_a, "same address family"),
+        (&mixed_b, "same address family"),
+    ] {
+        let msg = expect_bad_request(ctx, Method::POST, &peers_url, body).await;
+        assert!(msg.contains(needle), "expected {needle:?} in {msg:?}");
+    }
+    let peers: Vec<BfdPeer> = list_all(ctx, &peers_url).await;
+    assert_eq!(peers.len(), 3, "a rejected peer was stored: {peers:?}");
+    assert!(peers.iter().all(|p| p.name.as_str() != "bad"));
+
+    // Rejected updates leave the previous configuration in place.
+    let too_wide_update = too_wide
+        .replace(r#""name":"bad""#, &format!(r#""name":"rx-{}""#, u32::MAX));
+    let mixed_update = mixed_a
+        .replace(r#""name":"bad""#, &format!(r#""name":"rx-{}""#, u32::MAX));
+    for body in [&too_wide_update, &mixed_update] {
+        expect_bad_request(ctx, Method::PUT, &max_url, body).await;
+        let after: BfdPeer = get_json(ctx, &max_url).await;
+        assert_eq!(after, max_peer, "rejected update changed the stored peer");
+    }
+    // A valid update still works and round-trips.
+    let mut updated = max_peer.clone();
+    updated.required_rx = u32::MAX - 1;
+    updated.detection_threshold = NonZeroU8::new(255).unwrap();
+    let result: BfdPeer =
+        NexusRequest::object_put(client, &max_url, Some(&updated))
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(result, updated);
+}
+
+#[nexus_test]
+async fn test_router_configuration_bgp_source_address(
+    ctx: &ControlPlaneTestContext,
+) {
+    create_configuration(ctx, "sourcecheck").await;
+    let peers_url =
+        format!("{CONFIGURATIONS_URL}/sourcecheck/switches/switch0/bgp-peers");
+    let mut body = serde_json::to_value(demo_bgp_peer()).unwrap();
+
+    // Neither a mixed family nor a source on an unnumbered peer may be
+    // silently stored/ignored. Test both POST and, below, PUT admission.
+    for kind in [
+        serde_json::json!({"type": "numbered", "addr": "10.99.0.3", "src_addr": "2001:db8::4"}),
+        serde_json::json!({"type": "numbered", "addr": "2001:db8::3", "src_addr": "10.99.0.4"}),
+        serde_json::json!({"type": "numbered", "addr": "10.99.0.3", "src_addr": "0.0.0.0"}),
+        serde_json::json!({"type": "unnumbered", "port": "qsfp0", "src_addr": "10.99.0.4"}),
+        serde_json::json!({"type": "unnumbered", "port": "qsfp0", "src_addr": null}),
+    ] {
+        body["peer"] = kind;
+        expect_bad_request(ctx, Method::POST, &peers_url, &body.to_string())
+            .await;
+    }
+    let peers: Vec<RouterConfigurationBgpPeer> =
+        list_all(ctx, &peers_url).await;
+    assert!(peers.is_empty(), "rejected peers were persisted: {peers:?}");
+
+    for (name, target, first, second) in [
+        ("v4", "10.99.0.3", "10.99.0.4", "10.99.0.2"),
+        ("v6", "2001:db8::3", "2001:db8::4", "2001:db8::2"),
+    ] {
+        body["name"] = name.into();
+        // Old clients omit the field entirely.
+        body["peer"] = serde_json::json!({"type": "numbered", "addr": target});
+        let created: RouterConfigurationBgpPeer =
+            NexusRequest::objects_post(&ctx.external_client, &peers_url, &body)
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await
+                .unwrap()
+                .parsed_body()
+                .unwrap();
+        assert!(matches!(
+            created.peer,
+            BgpPeerKind::Numbered { src_addr: None, .. }
+        ));
+        let peer_url = format!("{peers_url}/{name}");
+        // Explicit A, replacement B, explicit null, and omission all have
+        // replacement semantics. Clearing must not retain the old source.
+        for source in [Some(first), Some(second), None] {
+            body["peer"] = serde_json::json!({"type": "numbered", "addr": target, "src_addr": source});
+            let updated: RouterConfigurationBgpPeer = NexusRequest::object_put(
+                &ctx.external_client,
+                &peer_url,
+                Some(&body),
+            )
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+            let expected: RouterConfigurationBgpPeer =
+                serde_json::from_value(body.clone()).unwrap();
+            assert_eq!(updated, expected);
+            let fetched: RouterConfigurationBgpPeer =
+                get_json(ctx, &peer_url).await;
+            assert_eq!(fetched, expected);
+        }
+        body["peer"]["src_addr"] = first.into();
+        NexusRequest::object_put(&ctx.external_client, &peer_url, Some(&body))
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap();
+        body["peer"].as_object_mut().unwrap().remove("src_addr");
+        let cleared: RouterConfigurationBgpPeer = NexusRequest::object_put(
+            &ctx.external_client,
+            &peer_url,
+            Some(&body),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
+        assert!(matches!(
+            cleared.peer,
+            BgpPeerKind::Numbered { src_addr: None, .. }
+        ));
+
+        let before: RouterConfigurationBgpPeer = get_json(ctx, &peer_url).await;
+        body["peer"]["src_addr"] =
+            if name == "v4" { "2001:db8::4" } else { "10.99.0.4" }.into();
+        let msg =
+            expect_bad_request(ctx, Method::PUT, &peer_url, &body.to_string())
+                .await;
+        assert!(msg.contains("same address family"), "{msg}");
+        let after: RouterConfigurationBgpPeer = get_json(ctx, &peer_url).await;
+        assert_eq!(after, before, "rejected update changed the peer");
+    }
+    // The unnumbered form remains usable when no source field is supplied.
+    body["name"] = "unnumbered".into();
+    body["peer"] = serde_json::json!({"type": "unnumbered", "port": "qsfp0"});
+    NexusRequest::objects_post(&ctx.external_client, &peers_url, &body)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    let peers: Vec<RouterConfigurationBgpPeer> =
+        list_all(ctx, &peers_url).await;
+    assert_eq!(peers.len(), 3);
+}
+
+/// A-19: the per-entry collections of a router configuration are paginated
+/// by name over the (configuration, name) primary key: stable order,
+/// working cursors, cursors that survive a deletion in the middle, bounded
+/// pages, and a complete parent view.
+#[nexus_test]
+async fn test_router_configuration_child_pagination(
+    ctx: &ControlPlaneTestContext,
+) {
+    let client = &ctx.external_client;
+    create_configuration(ctx, "pager").await;
+    let base = format!("{CONFIGURATIONS_URL}/pager");
+
+    // Five entries of each kind, created out of name order.
+    let names = ["p3", "p1", "p5", "p2", "p4"];
+    for (i, name) in names.iter().enumerate() {
+        let mut peer = demo_bgp_peer();
+        peer.name = name.parse().unwrap();
+        peer.peer = BgpPeerKind::Numbered {
+            addr: format!("203.0.113.{}", 20 + i).parse().unwrap(),
+            src_addr: None,
+        };
+        NexusRequest::objects_post(
+            client,
+            &format!("{base}/switches/switch0/bgp-peers"),
+            &peer,
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+        let mut route = demo_static_route();
+        route.name = name.parse().unwrap();
+        route.dst = format!("10.{i}.0.0/16").parse().unwrap();
+        NexusRequest::objects_post(
+            client,
+            &format!("{base}/switches/switch0/routes"),
+            &route,
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+        let mut bfd = demo_bfd_peer();
+        bfd.name = name.parse().unwrap();
+        bfd.remote = format!("203.0.113.{}", 30 + i).parse().unwrap();
+        NexusRequest::objects_post(
+            client,
+            &format!("{base}/switches/switch0/bfd-peers"),
+            &bfd,
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    }
+
+    for sub in ["bgp-peers", "routes", "bfd-peers"] {
+        let url = format!("{base}/switches/switch0/{sub}");
+
+        let page1: ResultsPage<serde_json::Value> =
+            get_json(ctx, &format!("{url}?limit=2")).await;
+        assert_eq!(names_of(&page1.items), ["p1", "p2"], "{sub} page 1");
+        let token1 = page1.next_page.expect("more pages");
+
+        let page2: ResultsPage<serde_json::Value> =
+            get_json(ctx, &format!("{url}?limit=2&page_token={token1}")).await;
+        assert_eq!(names_of(&page2.items), ["p3", "p4"], "{sub} page 2");
+        let token2 = page2.next_page.expect("more pages");
+
+        // Deleting an entry in the middle does not disturb an outstanding
+        // cursor: the keyset continues after the last name seen.
+        NexusRequest::object_delete(client, &format!("{url}/p3"))
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap();
+        let page3: ResultsPage<serde_json::Value> =
+            get_json(ctx, &format!("{url}?limit=2&page_token={token2}")).await;
+        assert_eq!(names_of(&page3.items), ["p5"], "{sub} page 3");
+
+        // Dropshot hands back a cursor for every non-empty page, so the end of
+        // a collection is an empty page, not a missing cursor.
+        let token3 = page3.next_page.expect("a cursor for the last page");
+        let page4: ResultsPage<serde_json::Value> =
+            get_json(ctx, &format!("{url}?limit=2&page_token={token3}")).await;
+        assert!(page4.items.is_empty(), "{sub} page 4: {:?}", page4.items);
+
+        // The default page size returns what is left, in name order, and a
+        // cursor walk agrees with it.
+        let one_page: ResultsPage<serde_json::Value> =
+            get_json(ctx, &url).await;
+        assert_eq!(names_of(&one_page.items), ["p1", "p2", "p4", "p5"]);
+        let walked: Vec<serde_json::Value> = list_all(ctx, &url).await;
+        assert_eq!(names_of(&walked), ["p1", "p2", "p4", "p5"]);
+
+        // A limit of zero and a bogus cursor are client errors.
+        for bad in ["limit=0", "page_token=not-a-token"] {
+            NexusRequest::expect_failure(
+                client,
+                StatusCode::BAD_REQUEST,
+                Method::GET,
+                &format!("{url}?{bad}"),
+            )
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap();
+        }
+    }
+
+    // The parent view still carries the complete entry sets.
+    let cfg: RouterConfiguration = get_json(ctx, &base).await;
+    assert_eq!(cfg.switches[0].bgp_peers.len(), 4);
+    assert_eq!(cfg.switches[0].routes.len(), 4);
+    assert_eq!(cfg.switches[0].bfd_peers.len(), 4);
+}
+
+/// A-18 at the API boundary: a second delete of a router configuration and
+/// any entry mutation against a deleted configuration report not-found and
+/// change nothing.
+#[nexus_test]
+async fn test_router_configuration_deleted_parent_is_not_found(
+    ctx: &ControlPlaneTestContext,
+) {
+    let client = &ctx.external_client;
+    create_configuration(ctx, "gone").await;
+    let base = format!("{CONFIGURATIONS_URL}/gone");
+    let cfg: RouterConfiguration = get_json(ctx, &base).await;
+    let by_id = format!("{CONFIGURATIONS_URL}/{}", cfg.identity.id);
+
+    NexusRequest::object_delete(client, &base)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    for url in [&base, &by_id] {
+        NexusRequest::expect_failure(
+            client,
+            StatusCode::NOT_FOUND,
+            Method::DELETE,
+            url,
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    }
+
+    // Entry creation against the deleted parent (by its id, which still
+    // resolves nothing live) is not-found, not a silent orphan.
+    for (sub, body) in [
+        ("bgp-peers", serde_json::to_value(demo_bgp_peer()).unwrap()),
+        ("routes", serde_json::to_value(demo_static_route()).unwrap()),
+        ("bfd-peers", serde_json::to_value(demo_bfd_peer()).unwrap()),
+    ] {
+        NexusRequest::new(
+            RequestBuilder::new(
+                client,
+                Method::POST,
+                &format!("{by_id}/{sub}"),
+            )
+            .body(Some(&body))
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    }
+
+    // A new configuration under the same name starts empty.
+    create_configuration(ctx, "gone").await;
+    let cfg: RouterConfiguration = get_json(ctx, &base).await;
+    assert!(cfg.switches[0].bgp_peers.is_empty());
+    assert!(cfg.switches[0].routes.is_empty());
+    assert!(cfg.switches[0].bfd_peers.is_empty());
+}
+
+/// A-15: an announce set referenced by a router configuration's BGP
+/// configuration cannot be deleted while the reference exists; once the
+/// reference is removed it can. Referencing a deleted set is not-found and
+/// stores nothing.
+#[nexus_test]
+async fn test_router_configuration_protects_announce_set(
+    ctx: &ControlPlaneTestContext,
+) {
+    let client = &ctx.external_client;
+    create_announce_set(ctx).await;
+    create_configuration(ctx, "refs").await;
+    let bgp_config_url =
+        format!("{CONFIGURATIONS_URL}/refs/switches/switch0/bgp-config");
+    let announce_set_url = "/v1/system/networking/bgp-announce-set/instances";
+    let announcements_url = format!("{announce_set_url}/announcement");
+
+    let set = RouterConfigurationBgpConfigSet {
+        asn: 47,
+        max_paths: Default::default(),
+        bgp_announce_set: NameOrId::Name("instances".parse().unwrap()),
+    };
+    NexusRequest::object_put(client, &bgp_config_url, Some(&set))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+
+    // Deleting the referenced set is refused, and both sides stay intact.
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::CONFLICT,
+        Method::DELETE,
+        announce_set_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+    NexusRequest::object_get(client, &announcements_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("announce set still exists");
+    let _still: RouterConfigurationBgpConfig =
+        get_json(ctx, &bgp_config_url).await;
+
+    // Dropping the reference frees the set.
+    NexusRequest::object_delete(client, &bgp_config_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    NexusRequest::object_delete(client, announce_set_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+
+    // Referencing the deleted set is not-found and nothing is stored.
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &bgp_config_url)
+            .body(Some(&set))
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &bgp_config_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
+#[nexus_test]
+async fn test_control_plane_router_list_explicit_default_and_empty(
+    ctx: &ControlPlaneTestContext,
+) {
+    use serde_json::json;
+    let client = &ctx.external_client;
+    let url = "/v1/system/networking/control-plane-router-configurations";
+    let initial: serde_json::Value = NexusRequest::object_get(client, url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
+    assert_eq!(
+        initial,
+        json!({"configurations": [{
+            "router_configuration_id": "001de000-defa-4000-8000-000000000000",
+            "priority": 1000
+        }]})
+    );
+
+    let empty = json!({"configurations": []});
+    let nexus = &ctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx = OpContext::for_background(
+        ctx.logctx.log.new(slog::o!()),
+        Arc::new(authz::Authz::new(&ctx.logctx.log)),
+        authn::Context::internal_db_init(),
+        Arc::clone(datastore) as Arc<dyn nexus_auth::storage::Storage>,
+    );
+    for _ in 0..2 {
+        let updated: serde_json::Value =
+            NexusRequest::object_put(client, url, Some(&empty))
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await
+                .unwrap()
+                .parsed_body()
+                .unwrap();
+        assert_eq!(updated, empty);
+        // Startup population must not re-add the default or create a marker.
+        datastore.load_builtin_router_configuration(&opctx).await.unwrap();
+        assert!(
+            datastore
+                .control_plane_router_configurations_list(&opctx)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let fetched: serde_json::Value = NexusRequest::object_get(client, url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+        assert_eq!(fetched, empty);
+    }
+
+    create_configuration(ctx, "cp-route-test").await;
+    let update = json!({"configurations": [
+        {"router_configuration": "cp-route-test", "priority": 10},
+        {"router_configuration": "default", "priority": 1000}
+    ]});
+    let updated: serde_json::Value =
+        NexusRequest::object_put(client, url, Some(&update))
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(updated.as_object().unwrap().len(), 1);
+    assert_eq!(updated["configurations"].as_array().unwrap().len(), 2);
+    let fetched: serde_json::Value = NexusRequest::object_get(client, url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
+    assert_eq!(fetched, updated);
+
+    // Replacing with the explicit default restores the exact initial API state.
+    let restore = json!({"configurations": [
+        {"router_configuration": "default", "priority": 1000}
+    ]});
+    let restored: serde_json::Value =
+        NexusRequest::object_put(client, url, Some(&restore))
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(restored, initial);
+}
+
+/// A-27: the same RC and entry names can configure both switches independently.
+#[nexus_test]
+async fn test_router_configuration_switch_blocks(
+    ctx: &ControlPlaneTestContext,
+) {
+    let client = &ctx.external_client;
+    create_configuration(ctx, "multi").await;
+    create_announce_set(ctx).await;
+    let parent = format!("{CONFIGURATIONS_URL}/multi");
+    let s0 = format!("{parent}/switches/switch0");
+    let s1 = format!("{parent}/switches/switch1");
+    NexusRequest::objects_post(client, &s1, &())
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::BAD_REQUEST,
+        Method::POST,
+        &s1,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+    for (block, asn) in [(&s0, 65001), (&s1, 65002)] {
+        NexusRequest::object_put(
+            client,
+            &format!("{block}/bgp-config"),
+            Some(&serde_json::json!({
+                "asn": asn, "bgp_announce_set": "instances", "max_paths": 2
+            })),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+        NexusRequest::objects_post(
+            client,
+            &format!("{block}/bgp-peers"),
+            &demo_bgp_peer(),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+        NexusRequest::objects_post(
+            client,
+            &format!("{block}/routes"),
+            &demo_static_route(),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+        NexusRequest::objects_post(
+            client,
+            &format!("{block}/bfd-peers"),
+            &demo_bfd_peer(),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    }
+    let both: RouterConfiguration = get_json(ctx, &parent).await;
+    assert_eq!(both.switches.len(), 2);
+    assert_eq!(both.switches[0].bgp_config.as_ref().unwrap().asn, 65001);
+    assert_eq!(both.switches[1].bgp_config.as_ref().unwrap().asn, 65002);
+    for block in &both.switches {
+        assert_eq!(block.bgp_peers.len(), 1);
+        assert_eq!(block.routes.len(), 1);
+        assert_eq!(block.bfd_peers.len(), 1);
+    }
+    NexusRequest::object_put(client, "/v1/system/networking/control-plane-router-configurations",
+        Some(&serde_json::json!({"configurations": [{"router_configuration": "multi", "priority": 10}]})))
+        .authn_as(AuthnMode::PrivilegedUser).execute().await.unwrap();
+    NexusRequest::object_delete(client, &s0)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    let one: RouterConfiguration = get_json(ctx, &parent).await;
+    assert_eq!(one.identity.id, both.identity.id);
+    assert_eq!(one.switches, vec![both.switches[1].clone()]);
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &format!("{s0}/routes"),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+    NexusRequest::object_delete(client, &s1)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    let empty: RouterConfiguration = get_json(ctx, &parent).await;
+    assert_eq!(empty.identity.id, both.identity.id);
+    assert!(empty.switches.is_empty());
+    let list: serde_json::Value = get_json(
+        ctx,
+        "/v1/system/networking/control-plane-router-configurations",
+    )
+    .await;
+    assert_eq!(
+        list["configurations"][0]["router_configuration_id"],
+        both.identity.id.to_string()
+    );
+}

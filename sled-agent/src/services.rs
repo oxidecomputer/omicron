@@ -71,7 +71,9 @@ use omicron_common::address::{
     get_internal_dns_server_addresses,
 };
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
-use omicron_common::api::internal::shared::{PrivateIpConfig, SledIdentifiers};
+use omicron_common::api::internal::shared::{
+    PrivateIpConfig, RouterListEntry, SledIdentifiers,
+};
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_ddm_admin_client::DdmError;
 use omicron_generation_kinds::Generation;
@@ -88,6 +90,7 @@ use sled_agent_types::resolvable_files::{
     MupdateOverrideReadError, PreparedOmicronZone,
 };
 use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
+use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
 use sled_hardware::underlay;
@@ -101,6 +104,7 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use tokio::sync::oneshot;
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
@@ -593,6 +597,7 @@ pub(crate) struct SledAgentInfo {
     pub(crate) underlay_address: Ipv6Addr,
     pub(crate) local_switch_zone_ip: ThisSledSwitchZoneUnderlayIpAddr,
     pub(crate) rack_id: RackUuid,
+    pub(crate) network_config_rx: watch::Receiver<SystemNetworkingConfig>,
     pub(crate) metrics_queue: MetricsRequestQueue,
 }
 
@@ -925,12 +930,10 @@ impl ServiceManager {
             return Ok(vec![]);
         }
 
-        let port_manager = &self
-            .inner
-            .sled_info
-            .get()
-            .ok_or(Error::SledAgentNotReady)?
-            .port_manager;
+        let sled_info =
+            self.inner.sled_info.get().ok_or(Error::SledAgentNotReady)?;
+        let port_manager = &sled_info.port_manager;
+        let network_config_rx = &sled_info.network_config_rx;
 
         let (zone_kind, nic, external_ips) = match &zone_args.omicron_type() {
             Some(
@@ -948,6 +951,20 @@ impl ServiceManager {
             ) => (zone_type.kind(), nic, snat.into()),
             _ => unreachable!("unexpected zone type"),
         };
+
+        // Service ports get the control-plane tunnel-router list from the
+        // bootstore, since they may be created before nexus exists (boundary
+        // NTP needs egress first). Nexus keeps the list converged afterwards
+        // via the router-lists background task.
+        let control_plane_router_list: Vec<RouterListEntry> = network_config_rx
+            .borrow()
+            .control_plane_router_list
+            .iter()
+            .map(|entry| RouterListEntry {
+                priority: entry.priority,
+                router_id: entry.router_id,
+            })
+            .collect();
 
         // Create the OPTE port for the service.
         // Note we don't plumb any firewall rules at this point,
@@ -973,6 +990,7 @@ impl ServiceManager {
                 // per-instance jumbo opt-in (the primary user-facing feature
                 // from RFD 689) is fully wired through `instance_ensure_registered`.
                 mtu: None,
+                router_list: &control_plane_router_list,
             })
             .map_err(|err| Error::ServicePortCreation {
                 service: zone_kind,

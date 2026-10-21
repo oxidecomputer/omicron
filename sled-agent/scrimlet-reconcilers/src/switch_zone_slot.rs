@@ -40,6 +40,10 @@ impl PartialEq<ThisSledSwitchSlot> for SwitchSlot {
 impl ThisSledSwitchSlot {
     const MGS_RETRY_TIMEOUT: Duration = Duration::from_secs(5);
 
+    pub(crate) fn slot(&self) -> SwitchSlot {
+        self.0
+    }
+
     #[cfg(test)]
     pub(crate) const TEST_FAKE: Self = Self(SwitchSlot::Switch0);
 

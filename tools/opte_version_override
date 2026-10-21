@@ -22,3 +22,10 @@
 #
 # To deactivate (once the new version is published): set OPTE_COMMIT to "".
 OPTE_COMMIT=""
+
+# 662 local mode: install the explicitly staged local p5p, built from the
+# sibling OPTE checkout that the userland crates also come from in local mode.
+# install_opte.sh checks OPTE_P5P before OPTE_COMMIT, requires both the archive
+# and its recorded digest ($OPTE_P5P.sha256), and fails when either is missing
+# or mismatched — a selected local input never falls back to a download.
+OPTE_P5P="${OPTE_P5P:-${OMICRON_TOP:-.}/out/opte.p5p}"
