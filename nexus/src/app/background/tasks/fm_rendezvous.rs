@@ -731,6 +731,7 @@ mod tests {
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
             facts: iddqd::IdOrdMap::new(),
+            problems: iddqd::IdOrdMap::new(),
         };
         case1
             .alerts_requested
@@ -838,6 +839,7 @@ mod tests {
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
             facts: iddqd::IdOrdMap::new(),
+            problems: iddqd::IdOrdMap::new(),
         };
         case2
             .alerts_requested
@@ -1013,6 +1015,7 @@ mod tests {
                 ereports: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
                 facts: iddqd::IdOrdMap::new(),
+                problems: iddqd::IdOrdMap::new(),
             };
             for id in [stale_alert_id, stale_alert2_id] {
                 c.alerts_requested
@@ -1195,6 +1198,7 @@ mod tests {
                 ereports: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
                 facts: iddqd::IdOrdMap::new(),
+                problems: iddqd::IdOrdMap::new(),
             };
             for id in [stale_bundle_id, stale_bundle2_id] {
                 c.support_bundles_requested
@@ -1522,6 +1526,7 @@ mod tests {
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
                 facts: iddqd::IdOrdMap::new(),
+                problems: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -1738,6 +1743,7 @@ mod tests {
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
                 facts: iddqd::IdOrdMap::new(),
+                problems: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -1853,6 +1859,7 @@ mod tests {
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
                 facts: iddqd::IdOrdMap::new(),
+                problems: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -2052,6 +2059,7 @@ mod tests {
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
             facts: iddqd::IdOrdMap::new(),
+            problems: iddqd::IdOrdMap::new(),
         };
         case1
             .support_bundles_requested
@@ -2288,6 +2296,7 @@ mod tests {
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
             facts: iddqd::IdOrdMap::new(),
+            problems: iddqd::IdOrdMap::new(),
         };
         case.support_bundles_requested
             .insert_unique(fm::case::SupportBundleRequest {

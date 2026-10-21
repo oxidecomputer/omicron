@@ -67,6 +67,7 @@ impl CaseMetadata {
             support_bundles_requested: _,
             ereports: _,
             facts: _,
+            problems: _,
         } = case;
         Self {
             sitrep_id: sitrep_id.into(),
@@ -150,6 +151,41 @@ pub struct CaseProblem {
     pub sitrep_id: DbTypedUuid<SitrepKind>,
     pub created_sitrep_id: DbTypedUuid<SitrepKind>,
     pub comment: String,
+}
+
+impl CaseProblem {
+    pub fn from_sitrep(
+        sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
+        case_id: impl Into<DbTypedUuid<CaseKind>>,
+        association: fm::case::CaseProblem,
+    ) -> Self {
+        let fm::case::CaseProblem { problem_id, created_sitrep_id, comment } =
+            association;
+        Self {
+            case_id: case_id.into(),
+            problem_id: problem_id.into(),
+            sitrep_id: sitrep_id.into(),
+            created_sitrep_id: created_sitrep_id.into(),
+            comment,
+        }
+    }
+}
+
+impl From<CaseProblem> for fm::case::CaseProblem {
+    fn from(association: CaseProblem) -> Self {
+        let CaseProblem {
+            case_id: _,
+            problem_id,
+            sitrep_id: _,
+            created_sitrep_id,
+            comment,
+        } = association;
+        Self {
+            problem_id: problem_id.into(),
+            created_sitrep_id: created_sitrep_id.into(),
+            comment,
+        }
+    }
 }
 
 /// The complete state of a case in a particular sitrep, consisting of the
