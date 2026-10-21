@@ -1730,10 +1730,7 @@ impl SledAgent {
     pub(crate) fn multirack_join_service_status(
         &self,
     ) -> Result<MultirackJoinServiceStatus, RssAccessError> {
-        Ok(self
-            .inner
-            .multirack_join_accessor
-            .multirack_join_service_status()?)
+        self.inner.multirack_join_accessor.multirack_join_service_status()
     }
 }
 
