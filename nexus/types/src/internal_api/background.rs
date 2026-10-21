@@ -304,7 +304,7 @@ pub struct SupportBundleSizeLimitExceeded {
     /// Files refused because they would exceed the limit, relative to the
     /// bundle's root, in the order refused.
     pub refused_paths: Vec<String>,
-    /// Steps running when the limit was reached. These may be incomplete.
+    /// Steps which stopped before finishing.
     pub incomplete_steps: Vec<String>,
     /// Steps which never started because the limit was reached.
     pub skipped_steps: Vec<String>,
@@ -357,6 +357,9 @@ impl SupportBundleCollectionStep {
 pub enum SupportBundleCollectionStepStatus {
     Ok,
     Skipped,
+    /// The step stopped before finishing, because the bundle reached its
+    /// size limit.
+    Stopped,
     Failed(String),
 }
 
@@ -366,6 +369,7 @@ impl std::fmt::Display for SupportBundleCollectionStepStatus {
         match self {
             Ok => write!(f, "ok"),
             Skipped => write!(f, "skipped"),
+            Stopped => write!(f, "stopped"),
             Failed(why) => write!(f, "failed: {why}"),
         }
     }

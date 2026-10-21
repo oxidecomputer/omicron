@@ -21,25 +21,32 @@ use std::sync::Arc;
 
 /// The error returned by a collection step, and by writes to the bundle.
 ///
-/// The size limit is kept apart from other failures, so a step that hits it
-/// is reported as cut short, not failed.
+/// Stopping early is kept apart from other failures, so a step that stops
+/// early is reported as stopped, not failed.
 ///
 /// Deliberately not `std::error::Error`: otherwise `?` or anyhow's `Context`
-/// could turn it into an `anyhow::Error`, losing the size limit variant. Use
+/// could turn it into an `anyhow::Error`, losing the other variants. Use
 /// [`StepResultExt`] to add context.
 #[derive(Debug)]
 pub enum StepError {
     /// A write was refused because the bundle reached its size limit.
     WriteRefused(WriteRefused),
+    /// The step stopped early, because collection was stopped.
+    Stopped,
     /// Any other failure.
     Other(anyhow::Error),
 }
+
+#[derive(Debug, thiserror::Error)]
+#[error("collection was stopped")]
+struct CollectionStopped;
 
 impl StepError {
     /// Returns this error as a `std::error::Error`, for logging.
     pub fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
         match self {
             StepError::WriteRefused(err) => err,
+            StepError::Stopped => &CollectionStopped,
             StepError::Other(err) => err.as_ref(),
         }
     }
@@ -58,7 +65,7 @@ impl From<anyhow::Error> for StepError {
 }
 
 /// Like anyhow's `Context`, but only adds context to [`StepError::Other`],
-/// keeping the size limit variant as-is.
+/// keeping the other variants as-is.
 pub trait StepResultExt<T> {
     fn context<C>(self, context: C) -> Result<T, StepError>
     where
@@ -85,7 +92,7 @@ impl<T> StepResultExt<T> for Result<T, StepError> {
     {
         self.map_err(|err| match err {
             StepError::Other(err) => StepError::Other(err.context(f())),
-            err @ StepError::WriteRefused(_) => err,
+            err @ (StepError::WriteRefused(_) | StepError::Stopped) => err,
         })
     }
 }
@@ -128,8 +135,9 @@ impl CollectionStep {
 
         let output = match (self.step_fn)(collection, output).await {
             Ok(output) => output,
-            // Not a step failure; the scheduler reports the size limit.
-            Err(StepError::WriteRefused(_)) => CollectionStepOutput::None,
+            Err(StepError::WriteRefused(_) | StepError::Stopped) => {
+                CollectionStepOutput::Stopped
+            }
             Err(StepError::Other(err)) => {
                 warn!(
                     log,
@@ -142,19 +150,7 @@ impl CollectionStep {
         };
 
         let end = Utc::now();
-
-        // A step still running once the size limit was exceeded may have been
-        // stopped before collecting everything it would have otherwise.
-        let stopped_by_size_limit = collection.size_budget().is_exceeded()
-            && !matches!(output, CollectionStepOutput::Skipped);
-
-        CompletedCollectionStep {
-            name: self.name,
-            start,
-            end,
-            output,
-            stopped_by_size_limit,
-        }
+        CompletedCollectionStep { name: self.name, start, end, output }
     }
 }
 
@@ -163,14 +159,13 @@ pub struct CompletedCollectionStep {
     pub start: DateTime<Utc>,
     pub end: DateTime<Utc>,
     pub output: CollectionStepOutput,
-    pub stopped_by_size_limit: bool,
 }
 
 impl CompletedCollectionStep {
     // Updates the collection report based on the output of a collection step,
     // and possibly extends the set of all steps to be executed.
     //
-    // If the step was stopped by the bundle's size limit, its name is added to
+    // If the step stopped before finishing, its name is added to
     // `incomplete_steps`.
     pub fn process(
         self,
@@ -180,13 +175,13 @@ impl CompletedCollectionStep {
     ) {
         use SupportBundleCollectionStepStatus as Status;
 
-        if self.stopped_by_size_limit {
-            incomplete_steps.push(self.name.clone());
-        }
-
         let mut details = None;
         let status = match self.output {
             CollectionStepOutput::Skipped => Status::Skipped,
+            CollectionStepOutput::Stopped => {
+                incomplete_steps.push(self.name.clone());
+                Status::Stopped
+            }
             CollectionStepOutput::Failed(err) => {
                 Status::Failed(err.to_string())
             }
@@ -216,6 +211,10 @@ impl CompletedCollectionStep {
 pub enum CollectionStepOutput {
     // The step was not executed intentionally
     Skipped,
+    // The step stopped before finishing, because collection was stopped.
+    //
+    // It may have still saved a partial set of data to the bundle.
+    Stopped,
     // The step encountered a fatal error and could not complete.
     //
     // It may have still saved a partial set of data to the bundle.
@@ -228,4 +227,67 @@ pub enum CollectionStepOutput {
     Spawn { extra_steps: Vec<CollectionStep> },
     // The step completed with nothing to report, and no follow-up steps
     None,
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use omicron_uuid_kinds::SupportBundleUuid;
+
+    fn completed(
+        name: &str,
+        output: CollectionStepOutput,
+    ) -> CompletedCollectionStep {
+        let now = Utc::now();
+        CompletedCollectionStep {
+            name: name.to_string(),
+            start: now,
+            end: now,
+            output,
+        }
+    }
+
+    // Only steps which stopped are listed as incomplete, whatever else
+    // happened to the bundle.
+    #[test]
+    fn test_process_lists_only_stopped_steps() {
+        use SupportBundleCollectionStepStatus as Status;
+
+        let mut report =
+            SupportBundleCollectionReport::new(SupportBundleUuid::new_v4());
+        let mut steps = vec![];
+        let mut incomplete_steps = vec![];
+        for step in [
+            completed("stopped", CollectionStepOutput::Stopped),
+            completed(
+                "failed",
+                CollectionStepOutput::Failed(anyhow::anyhow!("MGS is down")),
+            ),
+            completed("finished", CollectionStepOutput::None),
+            completed(
+                "details",
+                CollectionStepOutput::Details(serde_json::json!({})),
+            ),
+            completed("skipped", CollectionStepOutput::Skipped),
+        ] {
+            step.process(&mut report, &mut steps, &mut incomplete_steps);
+        }
+
+        assert_eq!(incomplete_steps, ["stopped"]);
+        let statuses: Vec<_> = report
+            .steps
+            .iter()
+            .map(|step| (step.name.as_str(), step.status.clone()))
+            .collect();
+        assert_eq!(
+            statuses,
+            [
+                ("stopped", Status::Stopped),
+                ("failed", Status::Failed("MGS is down".to_string())),
+                ("finished", Status::Ok),
+                ("details", Status::Ok),
+                ("skipped", Status::Skipped),
+            ]
+        );
+    }
 }

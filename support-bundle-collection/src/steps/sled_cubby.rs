@@ -36,7 +36,7 @@ pub async fn collect(
     }
 
     let (mgs_client_option, nexus_sleds) = tokio::select! {
-        _ = collection.stopped() => return Ok(CollectionStepOutput::None),
+        _ = collection.stopped() => return Err(StepError::Stopped),
         result = async {
             let mgs = cache.get_or_initialize_mgs_client(&collection).await;
             let sleds = cache.get_or_initialize_all_sleds(&collection).await;
@@ -134,7 +134,7 @@ async fn write_sled_cubby_info(
         Ok::<_, anyhow::Error>(sled_info)
     };
     let sled_info = tokio::select! {
-        _ = collection.stopped() => return Ok(()),
+        _ = collection.stopped() => return Err(StepError::Stopped),
         result = sled_info_collection => result?,
     };
 

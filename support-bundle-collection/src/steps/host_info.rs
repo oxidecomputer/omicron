@@ -44,7 +44,7 @@ pub async fn spawn_query_all_sleds(
     let time_range = collection.data_selection().time_range().clone();
 
     let all_sleds = tokio::select! {
-        _ = collection.stopped() => return Ok(CollectionStepOutput::None),
+        _ = collection.stopped() => return Err(StepError::Stopped),
         result = cache.get_or_initialize_all_sleds(collection) => result,
     };
 
@@ -111,7 +111,7 @@ async fn collect_data_from_sled(
     info!(log, "Collecting bundle info from sled"; "sled" => %sled.id());
 
     let sled_client_result = tokio::select! {
-        _ = collection.stopped() => return Ok(CollectionStepOutput::None),
+        _ = collection.stopped() => return Err(StepError::Stopped),
         result = nexus_networking::sled_client(
             &datastore, &opctx, sled.id(), log,
         ) => result,
@@ -220,21 +220,30 @@ async fn collect_data_from_sled(
     // output of every Oxide process that is found on a sled.
     .buffer_unordered(MAX_CONCURRENT_SLED_AGENT_REQUESTS);
 
+    // If collection stops, finish what's in flight, then report it.
+    let mut stopped = None;
     while let Some(result) = diag_cmds.next().await {
-        // Log that we failed to write the diag command output to a
-        // file but don't return early as we wish to get as much
-        // information as we can.
-        if let Err(StepError::Other(e)) = result {
-            error!(
-                log,
-                "failed to write diagnostic command output to \
-                file: {e}"
-            );
+        match result {
+            Ok(()) => {}
+            // Log that we failed to write the diag command output to a
+            // file but don't return early as we wish to get as much
+            // information as we can.
+            Err(StepError::Other(e)) => {
+                error!(
+                    log,
+                    "failed to write diagnostic command output to \
+                    file: {e}"
+                );
+            }
+            Err(err) => stopped = Some(err),
         }
+    }
+    if let Some(err) = stopped {
+        return Err(err);
     }
 
     let zones = tokio::select! {
-        _ = collection.stopped() => return Ok(CollectionStepOutput::None),
+        _ = collection.stopped() => return Err(StepError::Stopped),
         result = sled_client.support_logs() => {
             result.context("failed to list zone logs")?.into_inner()
         }
@@ -265,18 +274,26 @@ async fn collect_data_from_sled(
         })
         .buffer_unordered(MAX_CONCURRENT_SLED_AGENT_REQUESTS);
 
+    let mut stopped = None;
     while let Some(log_collection_result) = log_futs.next().await {
-        // We log any errors saving the zip file to disk and
-        // continue on.
-        if let Err(StepError::Other(e)) = log_collection_result {
-            error!(
-                log,
-                "failed to write logs output";
-                "error" => InlineErrorChain::new(e.as_ref()),
-            );
+        match log_collection_result {
+            Ok(()) => {}
+            // We log any errors saving the zip file to disk and
+            // continue on.
+            Err(StepError::Other(e)) => {
+                error!(
+                    log,
+                    "failed to write logs output";
+                    "error" => InlineErrorChain::new(e.as_ref()),
+                );
+            }
+            Err(err) => stopped = Some(err),
         }
     }
-    Ok(CollectionStepOutput::None)
+    match stopped {
+        Some(err) => Err(err),
+        None => Ok(CollectionStepOutput::None),
+    }
 }
 
 // Run a `sled-diagnostics` future and save its output to a corresponding file.
@@ -302,7 +319,7 @@ where
         > + Send,
 {
     let result = tokio::select! {
-        _ = cancellation_token.cancelled() => return Ok(()),
+        _ = cancellation_token.cancelled() => return Err(StepError::Stopped),
         result = future => result,
     };
 
@@ -346,7 +363,7 @@ async fn save_zone_log_zip_or_error(
     let (start, end) = (time_range.start(), time_range.end());
 
     let download_result = tokio::select! {
-        _ = cancellation_token.cancelled() => return Ok(()),
+        _ = cancellation_token.cancelled() => return Err(StepError::Stopped),
         result = client.support_logs_download(
             zone,
             end.as_ref(),

@@ -467,9 +467,7 @@ mod test {
     fn other_error(err: StepError) -> anyhow::Error {
         match err {
             StepError::Other(err) => err,
-            StepError::WriteRefused(_) => {
-                panic!("expected an error other than WriteRefused")
-            }
+            err => panic!("expected StepError::Other, got: {err:?}"),
         }
     }
 

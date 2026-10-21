@@ -1403,6 +1403,20 @@ mod test {
             );
         }
 
+        // Exactly the steps which stopped are listed as incomplete.
+        let mut stopped: Vec<_> = report
+            .collection
+            .steps
+            .iter()
+            .filter(|step| {
+                step.status == SupportBundleCollectionStepStatus::Stopped
+            })
+            .map(|step| step.name.clone())
+            .collect();
+        stopped.sort();
+        assert!(!stopped.is_empty());
+        assert_eq!(stopped, exceeded.incomplete_steps);
+
         // The bundle describes what was left out, both for people and in the
         // report.
         let marker = download_bundle_file(

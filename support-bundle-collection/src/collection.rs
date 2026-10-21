@@ -387,7 +387,7 @@ impl BundleCollection {
                 &exceeded.refused_paths,
             ),
             (
-                "Steps which were running, and may be incomplete:",
+                "Steps which stopped before finishing:",
                 &exceeded.incomplete_steps,
             ),
             ("Steps which never started:", &exceeded.skipped_steps),

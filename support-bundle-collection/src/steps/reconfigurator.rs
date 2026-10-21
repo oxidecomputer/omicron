@@ -27,7 +27,7 @@ pub async fn collect(
 
     const NMAX_BLUEPRINTS: usize = 300;
     let state = tokio::select! {
-        _ = collection.stopped() => return Ok(CollectionStepOutput::None),
+        _ = collection.stopped() => return Err(StepError::Stopped),
         result = reconfigurator_state_load(&opctx, &datastore, NMAX_BLUEPRINTS) => {
             match result {
                 Ok(state) => state,

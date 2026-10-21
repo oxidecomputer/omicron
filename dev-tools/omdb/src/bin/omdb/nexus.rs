@@ -3160,8 +3160,7 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                             &exceeded.refused_paths,
                         ),
                         (
-                            "steps running when the limit was reached \
-                             (may be incomplete)",
+                            "steps stopped before finishing",
                             &exceeded.incomplete_steps,
                         ),
                         ("steps never started", &exceeded.skipped_steps),

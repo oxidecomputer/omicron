@@ -48,7 +48,9 @@ pub async fn collect(
     .await
     {
         Ok(()) => {}
-        Err(StepError::WriteRefused(_)) => {}
+        Err(err @ (StepError::WriteRefused(_) | StepError::Stopped)) => {
+            return Err(err);
+        }
         Err(StepError::Other(err)) => {
             warn!(
                 log,
@@ -86,7 +88,7 @@ async fn save_ereports(
     while let Some(p) = paginator.next() {
         let pagparams = p.current_pagparams();
         let ereports = tokio::select! {
-            _ = collection.stopped() => return Ok(()),
+            _ = collection.stopped() => return Err(StepError::Stopped),
             result = datastore.ereport_fetch_matching(
                 &opctx, &filters, &time_range, &pagparams
             ) => {

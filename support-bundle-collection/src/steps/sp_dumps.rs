@@ -39,7 +39,7 @@ pub async fn spawn_collection_steps(
         Ok::<_, anyhow::Error>((mgs_client, sps))
     };
     let (mgs_client, available_sps) = tokio::select! {
-        _ = collection.stopped() => return Ok(CollectionStepOutput::None),
+        _ = collection.stopped() => return Err(StepError::Stopped),
         result = init_future => result?,
     };
 
@@ -119,7 +119,7 @@ async fn save_sp_dumps(
         Ok::<_, anyhow::Error>(dumps)
     };
     let dumps = tokio::select! {
-        _ = collection.stopped() => return Ok(()),
+        _ = collection.stopped() => return Err(StepError::Stopped),
         result = fetch_dumps => result?,
     };
 
