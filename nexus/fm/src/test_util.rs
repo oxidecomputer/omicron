@@ -549,6 +549,7 @@ pub fn make_saga_case(
         alerts_requested: Default::default(),
         support_bundles_requested: Default::default(),
         facts: fact_map,
+        active_problems: IdOrdMap::new(),
     }
 }
 
@@ -574,6 +575,7 @@ pub fn make_disk_case(
         alerts_requested: Default::default(),
         support_bundles_requested: Default::default(),
         facts: fact_map,
+        active_problems: IdOrdMap::new(),
     }
 }
 

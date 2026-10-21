@@ -14,8 +14,12 @@ use crate::SqlU32;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::fm_active_problem;
 use nexus_db_schema::schema::fm_active_problem_revision;
+use nexus_types::fm::active_problem::{
+    ProblemCode, SitrepActiveProblem, SitrepRevision,
+};
+use omicron_common::api::external::Error;
 use omicron_generation_kinds::ActiveProblemRevKind;
-use omicron_uuid_kinds::{ActiveProblemKind, SitrepKind};
+use omicron_uuid_kinds::{ActiveProblemKind, ActiveProblemUuid, SitrepKind};
 
 /// An Active Problem in a fault management sitrep.
 ///
@@ -69,4 +73,90 @@ pub struct FmActiveProblemRevision {
     /// This is used for debugging the sitrep, and is not part of the
     /// externally visible Active Problem revision.
     pub comment: String,
+}
+
+impl FmActiveProblem {
+    /// Returns the `fm_active_problem` record for `problem` in the sitrep
+    /// `sitrep_id`.
+    ///
+    /// The problem's revisions are stored separately; see
+    /// [`FmActiveProblemRevision::from_sitrep`].
+    pub fn from_sitrep(
+        sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
+        problem: &SitrepActiveProblem,
+    ) -> Self {
+        let SitrepActiveProblem { id, requested_sitrep_id, revisions: _ } =
+            problem;
+        Self {
+            id: (*id).into(),
+            sitrep_id: sitrep_id.into(),
+            requested_sitrep_id: (*requested_sitrep_id).into(),
+        }
+    }
+}
+
+impl FmActiveProblemRevision {
+    /// Returns the `fm_active_problem_revision` record for `revision` of the
+    /// Active Problem `problem_id` in the sitrep `sitrep_id`.
+    pub fn from_sitrep(
+        sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
+        problem_id: ActiveProblemUuid,
+        revision: SitrepRevision,
+    ) -> Self {
+        let SitrepRevision {
+            number,
+            requested_sitrep_id,
+            time_resolved,
+            code,
+            summary,
+            description,
+            action_required,
+            comment,
+        } = revision;
+        Self {
+            problem_id: problem_id.into(),
+            revision: number.into(),
+            sitrep_id: sitrep_id.into(),
+            created_sitrep_id: requested_sitrep_id.into(),
+            time_resolved,
+            code: SqlU32::new(code.into()),
+            summary,
+            description,
+            action_required,
+            comment,
+        }
+    }
+}
+
+impl TryFrom<FmActiveProblemRevision> for SitrepRevision {
+    type Error = Error;
+
+    /// # Errors
+    ///
+    /// Returns an internal error if the revision's problem code is not known
+    /// to this version of the system software.
+    fn try_from(revision: FmActiveProblemRevision) -> Result<Self, Error> {
+        let FmActiveProblemRevision {
+            problem_id: _,
+            revision: number,
+            sitrep_id: _,
+            created_sitrep_id,
+            time_resolved,
+            code,
+            summary,
+            description,
+            action_required,
+            comment,
+        } = revision;
+        Ok(Self {
+            number: number.into(),
+            requested_sitrep_id: created_sitrep_id.into(),
+            time_resolved,
+            code: ProblemCode::try_from(u32::from(code))?,
+            summary,
+            description,
+            action_required,
+            comment,
+        })
+    }
 }

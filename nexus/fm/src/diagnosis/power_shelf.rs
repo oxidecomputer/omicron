@@ -1077,6 +1077,7 @@ mod tests {
             alerts_requested: alerts.into_iter().collect(),
             support_bundles_requested: Default::default(),
             facts: Default::default(),
+            active_problems: Default::default(),
         };
         let mut cases = IdOrdMap::new();
         cases.insert_unique(case).unwrap();

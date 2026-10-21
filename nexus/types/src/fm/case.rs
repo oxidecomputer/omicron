@@ -13,8 +13,8 @@ use crate::fm::{CertificateFact, DiskFact, SagaFact};
 use crate::support_bundle::BundleDataSelection;
 use iddqd::{IdOrdItem, IdOrdMap};
 use omicron_uuid_kinds::{
-    AlertUuid, CaseEreportUuid, CaseUuid, FactUuid, SitrepUuid,
-    SupportBundleUuid,
+    ActiveProblemUuid, AlertUuid, CaseEreportUuid, CaseUuid, FactUuid,
+    SitrepUuid, SupportBundleUuid,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -32,6 +32,8 @@ pub struct Case {
     /// Diagnosis-engine-derived facts attached to this case. See
     /// [`Fact`] for semantics.
     pub facts: IdOrdMap<Fact>,
+    /// Active Problems associated with this case, indexed by their ID.
+    pub active_problems: IdOrdMap<CaseActiveProblem>,
 }
 
 impl Case {
@@ -363,6 +365,35 @@ impl iddqd::IdOrdItem for SupportBundleRequest {
     iddqd::id_upcast!();
 }
 
+/// An association between a [`Case`] and an Active Problem.
+///
+/// These associations are used by diagnosis engine to track whether an Active
+/// Problem exists for a given case across multiple sitreps. The relationship
+/// between cases and Active Problems is many-to-many: an Active Problem may be
+/// created due to the observations contained in one case, but diagnosis engines
+/// may determine that other cases contain observations also related to the same
+/// Active Problem. In the other direction, a case may result in the diagnosis
+/// of any number of Active Problems.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CaseActiveProblem {
+    /// The ID of the associated Active Problem.
+    pub problem_id: ActiveProblemUuid,
+    /// The sitrep in which this association was first created.
+    pub created_sitrep_id: SitrepUuid,
+    /// A human-readable comment why the Active Problem is associated with the
+    /// case, for debugging purposes.
+    pub comment: String,
+}
+
+impl iddqd::IdOrdItem for CaseActiveProblem {
+    type Key<'a> = &'a ActiveProblemUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.problem_id
+    }
+
+    iddqd::id_upcast!();
+}
+
 /// Displays a [`Case`], as returned by [`Case::display_indented`].
 #[must_use = "this struct does nothing unless displayed"]
 pub struct DisplayCase<'a> {
@@ -393,6 +424,7 @@ impl fmt::Display for DisplayCase<'_> {
                     alerts_requested,
                     support_bundles_requested,
                     facts,
+                    active_problems,
                 },
             indent,
             sitrep_id,
@@ -601,6 +633,42 @@ impl fmt::Display for DisplayCase<'_> {
             }
         }
 
+        if !active_problems.is_empty() {
+            writeln!(
+                f,
+                "\n{:>indent$}{}:",
+                "",
+                heading.style("active problems")
+            )?;
+            writeln!(f, "{:>indent$}{}", "", heading.style("---------------"))?;
+
+            let indent = indent + 2;
+            for CaseActiveProblem { problem_id, created_sitrep_id, comment } in
+                active_problems.iter()
+            {
+                const ADDED_IN: &str = "added in:";
+                const WIDTH: usize = const_max_len(&[ADDED_IN]);
+
+                writeln!(
+                    f,
+                    "{BULLET:>indent$}{}",
+                    heading.style(format_args!("active problem {problem_id}"))
+                )?;
+                display::Comment::from(comment)
+                    .indent(indent)
+                    .colored(colored)
+                    .fmt(f)?;
+                writeln!(
+                    f,
+                    "{:>indent$}{} {created_sitrep_id}{}",
+                    "",
+                    styles.label(ADDED_IN, WIDTH),
+                    this_sitrep(*created_sitrep_id)
+                )?;
+                writeln!(f)?;
+            }
+        }
+
         writeln!(f)?;
 
         Ok(())
@@ -617,9 +685,9 @@ mod tests {
     use crate::support_bundle::BundleDataSelection;
     use ereport_types::{Ena, EreportId};
     use omicron_uuid_kinds::{
-        AlertUuid, CaseUuid, CollectionUuid, EreporterRestartUuid, FactUuid,
-        OmicronZoneUuid, PhysicalDiskUuid, SitrepUuid, SupportBundleUuid,
-        ZpoolUuid,
+        ActiveProblemUuid, AlertUuid, CaseUuid, CollectionUuid,
+        EreporterRestartUuid, FactUuid, OmicronZoneUuid, PhysicalDiskUuid,
+        SitrepUuid, SupportBundleUuid, ZpoolUuid,
     };
     use std::str::FromStr;
     use std::sync::Arc;
@@ -788,6 +856,18 @@ mod tests {
             })
             .unwrap();
 
+        let mut active_problems = IdOrdMap::new();
+        active_problems
+            .insert_unique(CaseActiveProblem {
+                problem_id: ActiveProblemUuid::from_str(
+                    "a0b1e3a0-4c0d-4e5f-8a9b-0c1d2e3f4a5b",
+                )
+                .unwrap(),
+                created_sitrep_id: closed_sitrep_id,
+                comment: "the rectifier is missing".to_string(),
+            })
+            .unwrap();
+
         // Create the case
         let case = Case {
             id: case_id,
@@ -802,6 +882,7 @@ mod tests {
             alerts_requested,
             support_bundles_requested,
             facts,
+            active_problems,
         };
 
         (case, closed_sitrep_id)
