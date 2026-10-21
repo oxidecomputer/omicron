@@ -14,6 +14,7 @@ pub mod blueprint_load;
 pub mod blueprint_planner;
 pub mod blueprint_pruner;
 pub mod blueprint_rendezvous;
+pub mod capacity_metrics;
 pub mod crdb_node_id_collector;
 pub mod decommissioned_disk_cleaner;
 pub mod dns_config;
