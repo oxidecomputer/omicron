@@ -611,6 +611,9 @@ mod test {
         }
     }
 
+    // TODO-K: Add a test here that calls the vmm_stop_for_update background
+    // task first
+
     #[nexus_test(server = crate::Server)]
     async fn test_reincarnates_failed_instances(
         cptestctx: &ControlPlaneTestContext,
