@@ -43,12 +43,10 @@ pub async fn spawn_query_all_sleds(
     };
     let time_range = collection.data_selection().time_range().clone();
 
-    let all_sleds = tokio::select! {
-        _ = collection.stopped() => return Err(StepError::Stopped),
-        result = cache.get_or_initialize_all_sleds(collection) => result,
-    };
-
-    let Some(all_sleds) = all_sleds else {
+    // Not cut short when collection stops: the sled steps it spawns are then
+    // reported as never started, naming each sled that was left out.
+    let Some(all_sleds) = cache.get_or_initialize_all_sleds(collection).await
+    else {
         return Err(anyhow!("Could not read list of sleds").into());
     };
 
