@@ -1479,6 +1479,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      *
      * This may differ from its current state, and is used to determine what
      * action should be taken when the instance's VMM state changes.
+     *
+     * Note: This field's `guest_shutdown` enum variant is used when the
+     * guest OS *independently* shuts itself down while the control plane's
+     * intent was 'running'. If an ACPI shutdown is performed by way of the
+     * instance's `shutdown_policy_action`, the intended state is `stopped`.
      */
     intended_state omicron.public.instance_intended_state NOT NULL,
 
@@ -1503,9 +1508,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      */
     enable_jumbo_frames BOOL NOT NULL,
 
-    /* TODO(?) note the above 'intended_state' has a 'guest_shutdown' already
-    so we may want this field's value to decide that gets set accordingly whenever
-    a stop request comes in? */
     /*
      * When shutdown_policy_action is 'power_button', this represents the time
      * in seconds (the unit of `INTERVAL(0)`) propolis will wait for the guest

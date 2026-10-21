@@ -4,6 +4,8 @@
 
 //! Virtual Machine Instances
 
+use super::DEFAULT_ACPI_SHUTDOWN_TIMEOUT_SECS;
+use super::MAX_ACPI_SHUTDOWN_TIMEOUT_SECS;
 use super::MAX_DISKS_PER_INSTANCE;
 use super::MAX_EPHEMERAL_IPS_PER_INSTANCE;
 use super::MAX_EXTERNAL_IPS_PER_INSTANCE;
@@ -577,6 +579,7 @@ impl super::Nexus {
         } = params;
 
         check_instance_cpu_memory_sizes(*ncpus, *memory)?;
+        check_instance_shutdown_policy_valid(shutdown_policy)?;
 
         // Opting in to jumbo frames requires the fleet-wide opt-in. Opting out
         // (`Some(false)`) is always allowed.
@@ -628,16 +631,7 @@ impl super::Nexus {
                     timeout_secs,
                 }) => (
                     Some(nexus_db_model::InstanceShutdownAction::PowerButton),
-                    Some(chrono::TimeDelta::seconds(
-                        (*timeout_secs).try_into().map_err(|e| {
-                            Error::invalid_value(
-                                "shutdown_policy_timeout",
-                                format!(
-                                    "timeout value {timeout_secs} invalid: {e}"
-                                ),
-                            )
-                        })?,
-                    )),
+                    Some(chrono::TimeDelta::seconds((*timeout_secs) as i64)),
                 ),
                 // if policy action omitted from the update request, leave as-is
                 None => (None, None),
@@ -691,6 +685,7 @@ impl super::Nexus {
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
         check_instance_cpu_memory_sizes(params.ncpus, params.memory)?;
+        check_instance_shutdown_policy_valid(&params.shutdown_policy)?;
 
         let all_disks: Vec<&instance::InstanceDiskAttachment> =
             params.boot_disk.iter().chain(params.disks.iter()).collect();
@@ -821,6 +816,16 @@ impl super::Nexus {
         )
         .await?;
 
+        // RFD 622: default newly created instances to ACPI shutdown with
+        // 600-second timeout (rather than the previous behavior of
+        // hard-poweroff when instance stop state is requested).
+        let shutdown_policy =
+            Some(params.shutdown_policy.to_owned().unwrap_or(
+                instance::InstanceShutdownPolicy::PowerButton {
+                    timeout_secs: DEFAULT_ACPI_SHUTDOWN_TIMEOUT_SECS,
+                },
+            ));
+
         // It is deceptively inconvenient to do an early check that the boot
         // disk is valid here! We accept boot disk by name or ID, but disk
         // creation and attachment requests as part of instance creation all
@@ -835,6 +840,7 @@ impl super::Nexus {
             create_params: instance::InstanceCreate {
                 ssh_public_keys: ssh_keys,
                 anti_affinity_groups,
+                shutdown_policy,
                 ..params.clone()
             },
             boundary_switches: self
@@ -1466,10 +1472,8 @@ impl super::Nexus {
                         nexus_db_model::InstanceShutdownAction::PowerButton => {
                             prev_instance_state
                                 .shutdown_policy_timeout
-                                .and_then(
-                                    // non-negative enforced by crdb constraint
-                                    |delta| delta.num_seconds().try_into().ok(),
-                                )
+                                // non-neg enforced by api impl & crdb constraint
+                                .and_then(|d| d.num_seconds().try_into().ok())
                         }
                     },
                     _ => None
@@ -2971,6 +2975,25 @@ fn check_instance_cpu_memory_sizes(
     Ok(())
 }
 
+fn check_instance_shutdown_policy_valid(
+    policy: &Option<instance::InstanceShutdownPolicy>,
+) -> Result<(), Error> {
+    const MAX_PLUS_1: u64 = MAX_ACPI_SHUTDOWN_TIMEOUT_SECS + 1;
+    if let Some(instance::InstanceShutdownPolicy::PowerButton {
+        timeout_secs: 0 | MAX_PLUS_1..,
+    }) = policy
+    {
+        return Err(Error::invalid_value(
+            "seconds",
+            format!(
+                "shutdown timeout must be between \
+                1 and {MAX_ACPI_SHUTDOWN_TIMEOUT_SECS}"
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// Effective MTU for an instance's primary OPTE port. Jumbo frames are only
 /// applied when both the fleet-wide opt-in is enabled and the per-instance bit
 /// is set; otherwise this returns `None` and OPTE applies the default MTU.
@@ -3449,12 +3472,11 @@ mod tests {
         );
         assert_eq!(db_instance.shutdown_policy_timeout, None);
 
+        // explicitly set power button with timeout
         params.shutdown_policy =
             Some(instance::InstanceShutdownPolicy::PowerButton {
                 timeout_secs: 42,
             });
-
-        // explicitly set power button with timeout
         let db_instance = DbInstance::new(instance_id, project_id, &params);
         assert_eq!(
             db_instance.shutdown_policy_action,
@@ -3463,6 +3485,22 @@ mod tests {
         assert_eq!(
             db_instance.shutdown_policy_timeout.unwrap().num_seconds(),
             42
+        );
+
+        // DbInstance::new clamps invalid timeout to max allowed by db constraint
+        // (XXX: is that good?)
+        params.shutdown_policy =
+            Some(instance::InstanceShutdownPolicy::PowerButton {
+                timeout_secs: 999000,
+            });
+        let db_instance = DbInstance::new(instance_id, project_id, &params);
+        assert_eq!(
+            db_instance.shutdown_policy_action,
+            InstanceShutdownAction::PowerButton
+        );
+        assert_eq!(
+            db_instance.shutdown_policy_timeout.unwrap().num_seconds(),
+            3600
         );
     }
 }

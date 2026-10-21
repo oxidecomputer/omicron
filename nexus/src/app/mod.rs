@@ -176,6 +176,14 @@ pub const LOCAL_STORAGE_WORKERS: NonZeroU32 = NonZeroU32::new(30).unwrap();
 /// This value is aribtrary
 pub const MAX_SSH_KEYS_PER_INSTANCE: u32 = 100;
 
+/// Upper bound of the timeout of the 'power button' instance shutdown policy,
+/// which the time before the VMM force-kills an instance that was requested
+/// to shut down gracefully.
+pub const MAX_ACPI_SHUTDOWN_TIMEOUT_SECS: u64 = 3600;
+/// Default timeout of the 'power button' instance shutdown policy used for
+/// newly-created instances when a policy is not specified.
+pub const DEFAULT_ACPI_SHUTDOWN_TIMEOUT_SECS: u64 = 600;
+
 /// The amount of disk space to reserve for non-Crucible / control plane
 /// storage. This amount represents a buffer that the region allocation query
 /// will not use for each U2.
