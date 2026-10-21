@@ -380,12 +380,21 @@ impl ManagementSwitch {
         let location_map = self.location_map()?;
 
         let allowed = match id.typ {
-            // We allow any non-sled reset.
-            SpType::Switch | SpType::Power => true,
+            // All PSC resets are allowed.
+            SpType::Power => true,
+            // For sleds and switches, we disallow resetting our own local
+            // device unless explicitly configured to allow it. (Resetting our
+            // own local device is generally fraught: reset requires us to issue
+            // a reset, wait for the device to reset, then disarm a watchdog; if
+            // the reset we issue takes us down, we won't be around to disarm
+            // the watchdog.)
+            SpType::Switch => {
+                id != location_map
+                    .port_to_id(self.local_ignition_controller_port)
+                    || location_map.allow_local_sled_sp_reset()
+            }
             SpType::Sled => {
-                // We allow resets to any sled that isn't our local sled...
                 id.slot != location_map.local_sled()
-                    // ... and resets to our local sled if configured to do so.
                     || location_map.allow_local_sled_sp_reset()
             }
         };
