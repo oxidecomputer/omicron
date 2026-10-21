@@ -492,13 +492,15 @@ impl RssAccess {
                     MultirackJoinServiceState::StartSledAgents(status) => {
                         Ok(status.into())
                     }
-                    MultirackJoinServiceState::ConfigureNetworking(Some(
-                        status,
-                    )) => Ok(status.into()),
+                    MultirackJoinServiceState::ConfigureNetworking {
+                        start_sled_agent_status: Some(status),
+                    } => Ok(status.into()),
                     MultirackJoinServiceState::WaitForCompletion(status) => {
                         Ok(status.into())
                     }
-                    MultirackJoinServiceState::ConfigureNetworking(None)
+                    MultirackJoinServiceState::ConfigureNetworking {
+                        start_sled_agent_status: None,
+                    }
                     | MultirackJoinServiceState::Requested
                     | MultirackJoinServiceState::Starting
                     | MultirackJoinServiceState::TrustQuorumReconfigure(_)

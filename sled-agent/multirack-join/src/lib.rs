@@ -290,9 +290,9 @@ impl MultirackJoinServiceTask {
     ) -> Result<(), MultirackJoinServiceError> {
         loop {
             self.output_tx.send_modify(|state| match state {
-                MultirackJoinServiceState::ConfigureNetworking(Some(
-                    status,
-                )) => {
+                MultirackJoinServiceState::ConfigureNetworking {
+                    start_sled_agent_status: Some(status),
+                } => {
                     *state = MultirackJoinServiceState::WaitForCompletion(
                         status.clone(),
                     )
@@ -302,7 +302,9 @@ impl MultirackJoinServiceTask {
                         status.clone(),
                     )
                 }
-                MultirackJoinServiceState::ConfigureNetworking(None)
+                MultirackJoinServiceState::ConfigureNetworking {
+                    start_sled_agent_status: None,
+                }
                 | MultirackJoinServiceState::Uninitialized
                 | MultirackJoinServiceState::Requested
                 | MultirackJoinServiceState::Starting
@@ -350,19 +352,21 @@ impl MultirackJoinServiceTask {
 
         self.output_tx.send_modify(|state| match state {
             MultirackJoinServiceState::TrustQuorumCommitting(_) => {
-                *state = MultirackJoinServiceState::ConfigureNetworking(None)
+                *state = MultirackJoinServiceState::ConfigureNetworking {
+                    start_sled_agent_status: None,
+                }
             }
             MultirackJoinServiceState::WaitForCompletion(status) => {
-                *state = MultirackJoinServiceState::ConfigureNetworking(Some(
-                    status.clone(),
-                ))
+                *state = MultirackJoinServiceState::ConfigureNetworking {
+                    start_sled_agent_status: Some(status.clone()),
+                }
             }
             MultirackJoinServiceState::Uninitialized
             | MultirackJoinServiceState::Requested
             | MultirackJoinServiceState::Starting
             | MultirackJoinServiceState::TrustQuorumReconfigure(_)
             | MultirackJoinServiceState::TrustQuorumPreparing(_)
-            | MultirackJoinServiceState::ConfigureNetworking(_)
+            | MultirackJoinServiceState::ConfigureNetworking { .. }
             | MultirackJoinServiceState::StartSledAgents(_)
             | MultirackJoinServiceState::Completed
             | MultirackJoinServiceState::Failed { .. }

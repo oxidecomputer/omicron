@@ -576,11 +576,17 @@ pub enum MultirackJoinServiceState {
     TrustQuorumReconfigure(TqReconfigureMsg),
     TrustQuorumPreparing(CoordinatorStatus),
     TrustQuorumCommitting(CommitState),
-    ConfigureNetworking(Option<StartSledAgentsStatus>),
+    ConfigureNetworking {
+        start_sled_agent_status: Option<StartSledAgentsStatus>,
+    },
     StartSledAgents(StartSledAgentsStatus),
     WaitForCompletion(StartSledAgentsStatus),
     Completed,
-    Failed { message: String },
-    InvalidMembershipSize { message: String },
+    Failed {
+        message: String,
+    },
+    InvalidMembershipSize {
+        message: String,
+    },
     TaskPanicked,
 }
