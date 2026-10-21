@@ -136,6 +136,8 @@ sitrep_child_tables! {
     SupportBundleRequestDataSelectionTimeRange => { table: "fm_support_bundle_request_data_selection_time_range" },
     SupportBundleRequest => { table: "fm_support_bundle_request" },
     ActiveProblem => { table: "fm_active_problem" },
+    ActiveProblemRevision => { table: "fm_active_problem_revision" },
+    CaseActiveProblem => { table: "fm_case_active_problem" },
     Case => { table: "fm_case" },
     FmFactPhysicalDisk => { table: "fm_fact_physical_disk" },
     FmFactSaga => { table: "fm_fact_saga" },
@@ -4355,16 +4357,54 @@ mod tests {
         // the sitrep struct n stuff.
         {
             use nexus_db_schema::schema::fm_active_problem::dsl as active_problem_dsl;
+            use nexus_db_schema::schema::fm_active_problem_revision::dsl as revision_dsl;
+            use nexus_db_schema::schema::fm_case_active_problem::dsl as case_problem_dsl;
             let conn = datastore.pool_connection_for_tests().await.unwrap();
+            let problem_id = omicron_uuid_kinds::ActiveProblemUuid::new_v4();
             diesel::insert_into(active_problem_dsl::fm_active_problem)
                 .values(model::fm::FmActiveProblem {
-                    id: omicron_uuid_kinds::ActiveProblemUuid::new_v4().into(),
+                    id: problem_id.into(),
                     sitrep_id: sitrep_id.into(),
                     requested_sitrep_id: sitrep_id.into(),
                 })
                 .execute_async(&*conn)
                 .await
                 .expect("failed to insert fm_active_problem row");
+            diesel::insert_into(revision_dsl::fm_active_problem_revision)
+                .values(model::fm::FmActiveProblemRevision {
+                    problem_id: problem_id.into(),
+                    revision:
+                        omicron_generation_kinds::ActiveProblemRevNum::new()
+                            .into(),
+                    sitrep_id: sitrep_id.into(),
+                    created_sitrep_id: sitrep_id.into(),
+                    time_resolved: None,
+                    code: model::SqlU32::new(0),
+                    summary: "a representative active problem".to_string(),
+                    description: String::new(),
+                    action_required: String::new(),
+                    comment: String::new(),
+                })
+                .execute_async(&*conn)
+                .await
+                .expect("failed to insert fm_active_problem_revision row");
+            let case_id = sitrep
+                .cases
+                .iter()
+                .next()
+                .expect("the representative sitrep should have a case")
+                .id;
+            diesel::insert_into(case_problem_dsl::fm_case_active_problem)
+                .values(model::fm::CaseActiveProblem {
+                    case_id: case_id.into(),
+                    problem_id: problem_id.into(),
+                    sitrep_id: sitrep_id.into(),
+                    created_sitrep_id: sitrep_id.into(),
+                    comment: String::new(),
+                })
+                .execute_async(&*conn)
+                .await
+                .expect("failed to insert fm_case_active_problem row");
         }
 
         // Verify every child table has ≥1 row, AND that every fm_*
