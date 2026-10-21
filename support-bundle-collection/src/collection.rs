@@ -20,10 +20,9 @@
 //! - The caller cancels it, through [`BundleCollection::cancellation_token`].
 //!   The bundle is abandoned, and [`BundleCollection::collect_bundle_locally`]
 //!   returns an error.
-//! - The bundle reaches its size limit (see
-//!   [`BundleCollection::with_size_limit`]). The bundle keeps what was
-//!   collected, and records what was left out in the collection report and
-//!   in [`SIZE_LIMIT_EXCEEDED_FILE`].
+//! - The bundle reaches its size limit. The bundle keeps what was collected,
+//!   and records what was left out in the collection report and in
+//!   [`SIZE_LIMIT_EXCEEDED_FILE`].
 //!
 //! Either way, steps see [`BundleCollection::stop_token`] cancelled.
 
@@ -42,6 +41,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::SupportBundleSizeLimitExceeded;
+use nexus_types::support_bundle::SupportBundleSizeLimit;
 use omicron_uuid_kinds::SupportBundleUuid;
 use parallel_task_set::ParallelTaskSet;
 use serde_json::json;
@@ -92,10 +92,12 @@ impl BundleCollection {
         opctx: OpContext,
         data_selection: BundleDataSelection,
         bundle: BundleInfo,
+        size_limit: SupportBundleSizeLimit,
     ) -> Self {
         let cancellation_token = CancellationToken::new();
         let stop_token = cancellation_token.child_token();
-        let size_budget = Arc::new(SizeBudget::new(None, stop_token.clone()));
+        let size_budget =
+            Arc::new(SizeBudget::new(size_limit, stop_token.clone()));
         Self {
             datastore,
             resolver,
@@ -107,14 +109,6 @@ impl BundleCollection {
             stop_token,
             size_budget,
         }
-    }
-
-    /// Limits the bundle to `limit` bytes, or no limit if `None` (the
-    /// default). See [Stopping early](self#stopping-early).
-    pub fn with_size_limit(mut self, limit: Option<u64>) -> Self {
-        self.size_budget =
-            Arc::new(SizeBudget::new(limit, self.stop_token.clone()));
-        self
     }
 
     pub fn datastore(&self) -> &Arc<DataStore> {
@@ -321,7 +315,7 @@ impl BundleCollection {
                 steps.into_iter().map(|step| step.name).collect();
             skipped_steps.sort();
             report.size_limit_exceeded = Some(SupportBundleSizeLimitExceeded {
-                limit_bytes: self.size_budget.limit().unwrap_or(u64::MAX),
+                limit_bytes: self.size_budget.limit().bytes(),
                 used_bytes: self.size_budget.used(),
                 exceeded_at: exceeded.at,
                 refused_paths: exceeded

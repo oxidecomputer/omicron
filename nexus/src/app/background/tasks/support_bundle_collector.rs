@@ -395,20 +395,18 @@ impl SupportBundleCollector {
 
         let bundle_log =
             opctx.log.new(slog::o!("bundle" => bundle.id.to_string()));
-        let collection = Arc::new(
-            BundleCollection::new(
-                self.datastore.clone(),
-                self.resolver.clone(),
-                bundle_log.clone(),
-                opctx.child(std::collections::BTreeMap::new()),
-                data_selection,
-                BundleInfo {
-                    id: bundle.id.into(),
-                    reason_for_creation: bundle.reason_for_creation.clone(),
-                },
-            )
-            .with_size_limit(Some(self.size_limit.bytes())),
-        );
+        let collection = Arc::new(BundleCollection::new(
+            self.datastore.clone(),
+            self.resolver.clone(),
+            bundle_log.clone(),
+            opctx.child(std::collections::BTreeMap::new()),
+            data_selection,
+            BundleInfo {
+                id: bundle.id.into(),
+                reason_for_creation: bundle.reason_for_creation.clone(),
+            },
+            self.size_limit,
+        ));
 
         // Spawn a task that periodically polls the `support_bundle` row's
         // state. If the bundle has been cancelled (or removed), it cancels

@@ -197,17 +197,15 @@ impl CollectArgs {
             BundleDataSelection::DEFAULT_LOOKBACK,
         );
 
-        let collection = Arc::new(
-            BundleCollection::new(
-                datastore,
-                resolver,
-                bundle_log,
-                opctx,
-                data_selection,
-                bundle,
-            )
-            .with_size_limit(Some(self.size_limit_bytes.bytes())),
-        );
+        let collection = Arc::new(BundleCollection::new(
+            datastore,
+            resolver,
+            bundle_log,
+            opctx,
+            data_selection,
+            bundle,
+            self.size_limit_bytes,
+        ));
 
         // Wire Ctrl-C to cancel the in-flight collection.
         let cancel_handle = tokio::spawn({

@@ -21,6 +21,7 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use chrono::DateTime;
 use chrono::Utc;
+use nexus_types::support_bundle::SupportBundleSizeLimit;
 use slog::Logger;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
@@ -53,16 +54,16 @@ pub struct Exceeded {
 
 /// Tracks the bytes written to a bundle against its size limit.
 pub struct SizeBudget {
-    limit: Option<u64>,
+    limit: SupportBundleSizeLimit,
     used: AtomicU64,
     exceeded: Mutex<Option<Exceeded>>,
     stop: CancellationToken,
 }
 
 impl SizeBudget {
-    /// Creates a budget of `limit` bytes, or an unlimited one if `limit` is
-    /// `None`. `stop` is cancelled when a write is first refused.
-    pub fn new(limit: Option<u64>, stop: CancellationToken) -> Self {
+    /// Creates a budget of `limit` bytes. `stop` is cancelled when a write is
+    /// first refused.
+    pub fn new(limit: SupportBundleSizeLimit, stop: CancellationToken) -> Self {
         Self {
             limit,
             used: AtomicU64::new(0),
@@ -71,7 +72,7 @@ impl SizeBudget {
         }
     }
 
-    pub fn limit(&self) -> Option<u64> {
+    pub fn limit(&self) -> SupportBundleSizeLimit {
         self.limit
     }
 
@@ -93,10 +94,7 @@ impl SizeBudget {
     /// Fails, without charging anything, if these bytes would exceed the
     /// limit. Each refusal records `path`, and cancels the stop token.
     fn charge(&self, path: &Utf8Path, n: u64) -> Result<(), SizeLimitExceeded> {
-        let Some(limit) = self.limit else {
-            self.used.fetch_add(n, Ordering::Relaxed);
-            return Ok(());
-        };
+        let limit = self.limit.bytes();
         // Check and add in one step, so `used` never includes a refused
         // write. Otherwise a concurrent write could be refused, and blamed,
         // instead.
@@ -417,10 +415,11 @@ mod test {
     use camino_tempfile::tempdir;
 
     fn output_with_limit(
-        limit: Option<u64>,
+        limit: u64,
     ) -> (Utf8TempDir, BundleOutput, CancellationToken) {
         let dir = tempdir().unwrap();
         let stop = CancellationToken::new();
+        let limit = SupportBundleSizeLimit::new(limit).unwrap();
         let budget = Arc::new(SizeBudget::new(limit, stop.clone()));
         let log = Logger::root(slog::Discard, slog::o!());
         let output = BundleOutput::new(dir.path(), budget, log);
@@ -468,7 +467,10 @@ mod test {
         const THREADS: u64 = 8;
         const CHARGES_PER_THREAD: u64 = 1_000;
 
-        let budget = SizeBudget::new(Some(LIMIT), CancellationToken::new());
+        let budget = SizeBudget::new(
+            SupportBundleSizeLimit::new(LIMIT).unwrap(),
+            CancellationToken::new(),
+        );
         let results: Vec<(Utf8PathBuf, u64, bool)> = std::thread::scope(|s| {
             let threads: Vec<_> = (0..THREADS)
                 .map(|t| {
@@ -510,7 +512,7 @@ mod test {
 
     #[tokio::test]
     async fn test_write_within_limit() {
-        let (dir, output, stop) = output_with_limit(Some(10));
+        let (dir, output, stop) = output_with_limit(10);
         output.join("a/b").write("file", "12345").await.unwrap();
         assert_eq!(
             std::fs::read_to_string(dir.path().join("a/b/file")).unwrap(),
@@ -521,20 +523,11 @@ mod test {
         assert!(!stop.is_cancelled());
     }
 
-    #[tokio::test]
-    async fn test_unlimited_budget_counts_bytes() {
-        let (_dir, output, stop) = output_with_limit(None);
-        output.write("file", vec![0; 1 << 20]).await.unwrap();
-        assert_eq!(output.budget.used(), 1 << 20);
-        assert!(!output.budget.is_exceeded());
-        assert!(!stop.is_cancelled());
-    }
-
     // After a refusal, writes that fit still succeed. Every refusal is
     // recorded, in order.
     #[tokio::test]
     async fn test_write_exceeding_limit_trips_budget() {
-        let (dir, output, stop) = output_with_limit(Some(10));
+        let (dir, output, stop) = output_with_limit(10);
         output.write("first", "12345").await.unwrap();
 
         let err =
@@ -558,7 +551,7 @@ mod test {
 
     #[tokio::test]
     async fn test_write_stream() {
-        let (dir, output, _stop) = output_with_limit(Some(1 << 20));
+        let (dir, output, _stop) = output_with_limit(1 << 20);
         let data = vec![7u8; 600 * 1024];
         output.write_stream("stream", &data[..]).await.unwrap();
         assert_eq!(std::fs::read(dir.path().join("stream")).unwrap(), data);
@@ -568,7 +561,7 @@ mod test {
     // Bytes already charged are refunded.
     #[tokio::test]
     async fn test_write_stream_exceeding_limit_removes_partial_file() {
-        let (dir, output, stop) = output_with_limit(Some(1 << 20));
+        let (dir, output, stop) = output_with_limit(1 << 20);
         output.write("small", "12345").await.unwrap();
 
         let data = vec![7u8; 2 << 20];
@@ -583,7 +576,7 @@ mod test {
     // Refunded, without tripping the budget.
     #[tokio::test]
     async fn test_write_stream_read_error_removes_partial_file() {
-        let (dir, output, stop) = output_with_limit(Some(1 << 20));
+        let (dir, output, stop) = output_with_limit(1 << 20);
         let reader = failing_reader(b"some data", "the network broke");
         let err = other_error(
             output.write_stream("stream", reader).await.unwrap_err(),
@@ -612,7 +605,7 @@ mod test {
     // fits.
     #[tokio::test]
     async fn test_write_stream_continues_after_refusal() {
-        let (dir, output, stop) = output_with_limit(Some(100));
+        let (dir, output, stop) = output_with_limit(100);
         let (tx, rx) = futures::channel::mpsc::unbounded::<
             std::io::Result<&'static [u8]>,
         >();
@@ -650,7 +643,7 @@ mod test {
 
     #[tokio::test]
     async fn test_write_with() {
-        let (dir, output, _stop) = output_with_limit(Some(100));
+        let (dir, output, _stop) = output_with_limit(100);
         output
             .write_with("dir/file.json", |w| {
                 serde_json::to_writer(w, &[1, 2, 3])?;
@@ -668,7 +661,7 @@ mod test {
     // Reports the size limit, not the closure's error.
     #[tokio::test]
     async fn test_write_with_exceeding_limit_removes_partial_file() {
-        let (dir, output, stop) = output_with_limit(Some(1 << 20));
+        let (dir, output, stop) = output_with_limit(1 << 20);
         let err = output
             .write_with("big.json", |w| {
                 serde_json::to_writer(w, &vec![0u8; 1 << 20])
@@ -686,7 +679,7 @@ mod test {
     // Flushing what's buffered would trip the limit and hide `f`'s error.
     #[tokio::test]
     async fn test_write_with_error_discards_buffered_bytes() {
-        let (dir, output, stop) = output_with_limit(Some(50));
+        let (dir, output, stop) = output_with_limit(50);
         let err = output
             .write_with("file", |w| {
                 // Fewer bytes than the writer buffers, but more than the limit.
@@ -705,7 +698,7 @@ mod test {
     // Later writes to a refused file are refused too, even if they'd fit.
     #[tokio::test]
     async fn test_write_with_ignored_refusal() {
-        let (dir, output, stop) = output_with_limit(Some(1000));
+        let (dir, output, stop) = output_with_limit(1000);
         let err = output
             .write_with("file", |w| {
                 // Larger than the writer's buffer, so it goes straight to the
@@ -727,7 +720,7 @@ mod test {
 
     #[tokio::test]
     async fn test_write_with_error_removes_partial_file() {
-        let (dir, output, stop) = output_with_limit(Some(100));
+        let (dir, output, stop) = output_with_limit(100);
         let err = output
             .write_with("file", |w| {
                 w.write_all(b"partial")?;
