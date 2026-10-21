@@ -88,6 +88,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_10_21_00, BYTE_WRAPPER_0_2_BUMP),
     (2026_10_15_00, SYSTEM_CERTIFICATES),
     (2026_10_13_00, ARTIFACT_HASH_SCHEMA),
     (2026_09_15_00, REMOVE_SILO_DISCOVERABLE),

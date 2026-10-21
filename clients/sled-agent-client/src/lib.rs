@@ -24,7 +24,7 @@ progenitor::generate_api!(
         VirtualNetworkInterfaceHost = { derives = [Eq, Hash] },
     },
     crates = {
-        "byte-wrapper" = "0.1.0",
+        "byte-wrapper" = "0.2.0",
         "omicron-uuid-kinds" = "*",
         "oxnet" = "0.1.0",
     },
