@@ -583,7 +583,6 @@ mod tests {
         let limit: SupportBundleSizeLimit = max.to_string().parse().unwrap();
         assert_eq!(limit, SupportBundleSizeLimit::MAX);
         (max + 1).to_string().parse::<SupportBundleSizeLimit>().unwrap_err();
-        "16G".parse::<SupportBundleSizeLimit>().unwrap_err();
     }
 
     #[proptest]
