@@ -601,6 +601,7 @@ impl DataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::authz;
     use crate::db;
     use crate::db::model::Generation;
     use crate::db::model::Migration;
@@ -608,6 +609,7 @@ mod tests {
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use crate::db::pub_test_utils::helpers::create_vmm_for_instance;
     use iddqd::IdOrdMap;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::ActiveSledBpAvailability;
     use nexus_db_model::SledBlueprintAvailabilityInput;
     use nexus_db_model::SledBpAvailabilityState;
@@ -1357,8 +1359,9 @@ mod tests {
     #[tokio::test]
     async fn test_vmm_list_stoppable_for_update_by_sled_id() {
         // Setup
-        let logctx =
-            dev::test_setup_log("test_vmm_list_stoppable_for_update_by_sled_id");
+        let logctx = dev::test_setup_log(
+            "test_vmm_list_stoppable_for_update_by_sled_id",
+        );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -1376,18 +1379,33 @@ mod tests {
         };
 
         // Insert 2 VMMs (one marked to stop, one not) in each state per sled
-        // (2 sleds only).
+        // (2 in-service and 1 expunged).
         let generation = UpdateDispositionGeneration::from(1);
         let sled_a = SledUuid::new_v4();
         let sled_b = SledUuid::new_v4();
+        let sled_expunged = SledUuid::new_v4();
         let mut vmms = Vec::new();
-        for sled_id in [sled_a, sled_b] {
-            // The query only returns VMMs on in-service sleds. We store the two
-            // sleds in the db. New sleds are in-service by default.
+        for sled_id in [sled_a, sled_b, sled_expunged] {
+            // The query only returns VMMs on in-service sleds. We store the
+            // three sleds in the db.
             datastore
                 .sled_upsert(SledUpdateBuilder::new().sled_id(sled_id).build())
                 .await
                 .expect("sled should be upserted successfully");
+
+            // New sleds are in-service by default. We expunge one of them to
+            // test that no VMMs from that sled are returned.
+            if sled_id == sled_expunged {
+                let (.., authz_sled) = LookupPath::new(&opctx, datastore)
+                    .sled_id(sled_id)
+                    .lookup_for(authz::Action::Modify)
+                    .await
+                    .expect("sled should exist");
+                datastore
+                    .sled_set_policy_to_expunged(&opctx, &authz_sled)
+                    .await
+                    .expect("sled should be expunged");
+            }
 
             for &state in DbVmmState::ALL_STATES {
                 for marker in [Some(generation), None] {
@@ -1420,7 +1438,7 @@ mod tests {
             }
         }
 
-        // There should be 40 VMM rows. 2 VMMs (one marked, one not) per state
+        // There should be 60 VMM rows. 2 VMMs (one marked, one not) per state
         // per sled
         let row_count: i64 = dsl::vmm
             // Add a filter to ensure there is no full table scan
@@ -1429,13 +1447,14 @@ mod tests {
             .get_result_async(&*conn)
             .await
             .expect("VMMs should be counted");
-        assert_eq!(row_count, 40);
+        assert_eq!(row_count, 60);
 
-        // Check there are 6 stoppable VMMs (3 per sled)
+        // Check there are 6 stoppable VMMs (3 per in-service sled).
         let expected_ids: BTreeSet<Uuid> = vmms
             .iter()
             .filter(|vmm| {
-                vmm.stop_for_update_disposition_generation.is_some()
+                vmm.sled_id() != sled_expunged
+                    && vmm.stop_for_update_disposition_generation.is_some()
                     && is_stoppable(vmm.state)
             })
             .map(|vmm| vmm.id)
