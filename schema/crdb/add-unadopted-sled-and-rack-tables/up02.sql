@@ -16,5 +16,5 @@ CREATE TABLE IF NOT EXISTS omicron.public.unadopted_sled (
     serial_number STRING(63) NOT NULL,
     part_number STRING(63) NOT NULL,
 
-    ip INET NOT NULL
+    sled_agent_ip INET NOT NULL,
 )

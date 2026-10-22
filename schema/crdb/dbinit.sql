@@ -9770,7 +9770,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.unadopted_sled (
     serial_number STRING(63) NOT NULL,
     part_number STRING(63) NOT NULL,
 
-    ip INET NOT NULL
+    sled_agent_ip INET NOT NULL
 );
 
 -- Keep this at the end of file so that the database does not contain a version
