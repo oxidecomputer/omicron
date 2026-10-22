@@ -55,12 +55,6 @@ macro_rules! problem_descriptions {
                                 &ProblemCodeDescription {
                                     title: $title,
                                     class: ProblemClass::$class,
-                                    docs_path: concat!(
-                                        env!("CARGO_MANIFEST_DIR"),
-                                        "docs/active-problems/problems/",
-                                        stringify!($Variant),
-                                        ".adoc",
-                                    ),
                                     added_in: $added_in,
                                     retired_in: $retired_in,
                                 };
@@ -155,8 +149,6 @@ pub struct ProblemCodeDescription {
     /// A one-line, human-readable title for this problem code's documentation.
     pub title: &'static str,
 
-    pub docs_path: &'static str,
-
     /// The Oxide system software version in which this problem code was added.
     pub added_in: semver::Version,
     /// The Oxide system software version in which this problem code was
@@ -187,10 +179,11 @@ mod tests {
     fn problem_code_docs_exist() {
         let mut errors = Vec::new();
         let mut paths = BTreeMap::new();
+        let docs_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("docs/active-problems/problems");
         for problem in ProblemCode::ALL {
             let code = u32::from(*problem);
-            let description = problem.description();
-            let path = Utf8Path::new(description.docs_path);
+            let path = docs_dir.join(format!("{code:04}.adoc"));
             if !path.exists() {
                 errors.push(format!(
                     "error: no documentation file exists for problem code \
@@ -198,7 +191,7 @@ mod tests {
                 ));
             }
 
-            if let Some(prev) = paths.insert(path, problem) {
+            if let Some(prev) = paths.insert(path.clone(), problem) {
                 if prev != problem {
                     // this shouldn't happen, but may as well check for it!
                     errors.push(format!(
@@ -225,5 +218,28 @@ mod tests {
                 if errors.len() == 1 { "" } else { "s" }
             )
         }
+    }
+
+    #[test]
+    fn problem_code_description_manifest() {
+        #[derive(serde::Serialize)]
+        struct Entry {
+            code: u32,
+            description: &'static ProblemCodeDescription,
+        }
+
+        let entries: Vec<Entry> = ProblemCode::ALL
+            .iter()
+            .map(|problem| Entry {
+                code: u32::from(*problem),
+                description: problem.description(),
+            })
+            .collect();
+
+        let json = serde_json::to_string_pretty(&entries).unwrap();
+        expectorate::assert_contents(
+            "docs/active-problems/problems/manifest.json",
+            &json,
+        );
     }
 }
