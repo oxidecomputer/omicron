@@ -78,6 +78,14 @@ impl Case {
                 .facts
                 .iter()
                 .any(|f| f.metadata.created_sitrep_id == sitrep_id)
+            || self.problems.iter().any(|p| {
+                // TODO(eliza): we *might* also consider checking if the problem
+                // itself has a revision that was created in this sitrep, but
+                // that would require passing in the whole sitrep...and, I'm on
+                // the fence as to whether that should be considered a change to
+                // the *case* or not...
+                p.created_sitrep_id == sitrep_id
+            })
     }
 }
 
@@ -748,6 +756,7 @@ impl fmt::Display for DisplayCaseSummary<'_> {
             alerts_requested: _,
             support_bundles_requested: _,
             facts: _,
+            problems: _,
         } = case;
         let Metadata { created_sitrep_id, closed_sitrep_id, de, comment } =
             metadata;
