@@ -18,8 +18,8 @@ use omicron_common::api::internal::shared::{
 };
 use sled_agent_types_versions::{
     latest, v1, v11, v14, v18, v20, v22, v24, v25, v26, v28, v29, v30, v31,
-    v32, v33, v34, v37, v39, v40, v41, v42, v43, v46, v47, v48, v49, v50, v51,
-    v52, v53, v55,
+    v32, v33, v34, v37, v39, v40, v41, v42, v43, v44, v46, v47, v48, v49, v50,
+    v51, v52, v53, v55,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -36,6 +36,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (59, INSTANCE_ATTACHED_SUBNETS_MAP),
     (58, BYTE_WRAPPER_0_2_BUMP),
     (57, ADD_RACK_ID_TO_INVENTORY),
     (56, ADD_MULTIRACK_JOIN_COMPLETE),
@@ -444,13 +445,41 @@ pub trait SledAgentApi {
         operation_id = "vmm_register",
         method = PUT,
         path = "/vmms/{propolis_id}",
-        versions = VERSION_PROPOLIS_NVME_VWC..
+        versions = VERSION_INSTANCE_ATTACHED_SUBNETS_MAP..
     }]
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<latest::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError>;
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions = VERSION_PROPOLIS_NVME_VWC..VERSION_INSTANCE_ATTACHED_SUBNETS_MAP
+    }]
+    async fn vmm_register_v44(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<v44::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
+        Self::vmm_register(
+            rqctx,
+            path_params,
+            body.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    format!(
+                        "duplicate attached subnet in instance sled-local \
+                         configuration: {}",
+                        InlineErrorChain::new(&err),
+                    ),
+                )
+            })?,
+        )
+        .await
+    }
 
     #[endpoint {
         operation_id = "vmm_register",
@@ -463,7 +492,7 @@ pub trait SledAgentApi {
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<v41::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
-        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+        Self::vmm_register_v44(rqctx, path_params, body.map(Into::into)).await
     }
 
     #[endpoint {

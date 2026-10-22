@@ -1107,7 +1107,8 @@ impl DataStore {
         //
         // * Make the primary-NIC join 1:1 with a database constraint (e.g., a
         //   partial unique index on `network_interface (parent_id) WHERE
-        //   is_primary AND time_deleted IS NULL`).
+        //   is_primary AND time_deleted IS NULL`). See
+        //   https://github.com/oxidecomputer/omicron/issues/11568.
         // * As part of addressing #9580, figure out the correct uniqueness
         //   constraint for `shared::AttachedSubnet` (just the subnet?
         //   instance or VMM + subnet?), and express that in the IdOrdItem
