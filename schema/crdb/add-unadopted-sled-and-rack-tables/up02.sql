@@ -6,6 +6,9 @@
 -- `inv_sled_agent` tables via the normal mechanisms.
 CREATE TABLE IF NOT EXISTS omicron.public.unadopted_sled (
     id UUID PRIMARY KEY,
+    -- Foreign key into the `unadopted_rack` table (though, also, the rack ID
+    -- that gets used in the `rack` table should be the same if/when the rack
+    -- is adopted)
     rack_id UUID NOT NULL,
 
     time_created TIMESTAMPTZ NOT NULL,
