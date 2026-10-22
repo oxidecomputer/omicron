@@ -715,7 +715,8 @@ task: "attached_subnet_manager"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-   no dendrite instances found
+  error looking up dendrite instances:
+    proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
    no sleds found
 
 task: "audit_log_cleanup"
@@ -1463,7 +1464,8 @@ task: "attached_subnet_manager"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-   no dendrite instances found
+  error looking up dendrite instances:
+    proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
    no sleds found
 
 task: "audit_log_cleanup"

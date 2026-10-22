@@ -413,22 +413,6 @@ impl BackgroundTask for Manager {
         async {
             let log = &opctx.log;
             info!(log, "starting attached subnet manager work");
-            let mut out = AttachedSubnetManagerStatus::default();
-
-            // Fetch Dendrite clients. We will need to move this into the loop
-            // when we resolve #5201, since we'll look up Dendrite instances per
-            // rack in that case.
-            let maybe_dpd_clients = dpd_clients(&self.resolver, &log)
-                .await
-                .inspect_err(|e| {
-                    error!(
-                        log,
-                        "failed to lookup Dendrite clients, will \
-                        not be able to forward attachments to Dendrite";
-                        "error" => %e
-                    )
-                })
-                .ok();
             let attachments = match self
                 .datastore
                 .list_all_attached_subnets_batched(opctx)
@@ -449,26 +433,40 @@ impl BackgroundTask for Manager {
                         "failed to list attached subnets";
                         "error" => &err,
                     );
-                    out.db_error = Some(err.to_string());
-                    return json!(out);
+                    return json!(AttachedSubnetManagerStatus::DatabaseError {
+                        error: err.to_string(),
+                    });
                 }
             };
 
-            out.dendrite = match &maybe_dpd_clients {
-                None => HashMap::new(),
-                Some(clients) => {
-                    self.send_attachments_to_dendrite(
-                        &log,
-                        &clients,
-                        &attachments,
-                    )
-                    .await
+            // Fetch Dendrite clients. We will need to move this into the loop
+            // when we resolve #5201, since we'll look up Dendrite instances per
+            // rack in that case.
+            let dendrite = match dpd_clients(&self.resolver, &log).await {
+                Ok(clients) => {
+                    let dendrite_details = self
+                        .send_attachments_to_dendrite(
+                            &log,
+                            &clients,
+                            &attachments,
+                        )
+                        .await;
+                    Ok(dendrite_details)
+                }
+                Err(e) => {
+                    error!(
+                        log,
+                        "failed to lookup Dendrite clients, will \
+                        not be able to forward attachments to Dendrite";
+                        "error" => %e
+                    );
+                    Err(e)
                 }
             };
-            out.sled = self
+            let sled = self
                 .send_attachments_to_sled_agents(&log, opctx, &attachments)
                 .await;
-            json!(out)
+            json!(AttachedSubnetManagerStatus::Listed { dendrite, sled })
         }
         .boxed()
     }
@@ -921,12 +919,11 @@ mod test {
         removed: &[shared::AttachedSubnet],
     ) {
         // No errors
-        assert!(result.contains_key("db_error"));
-        assert!(result["db_error"].is_null());
+        assert_eq!(result["status"], "listed");
 
         // Dendrite should have added all the mappings.
         assert!(result.contains_key("dendrite"));
-        let dendrite = result["dendrite"].as_object().unwrap();
+        let dendrite = result["dendrite"]["ok"].as_object().unwrap();
         let switch0 = dendrite["switch0"].as_object().unwrap();
         assert!(switch0["errors"].as_array().unwrap().is_empty());
         assert_eq!(
@@ -959,12 +956,11 @@ mod test {
         result: &serde_json::Map<String, serde_json::Value>,
     ) {
         // No errors.
-        assert!(result.contains_key("db_error"));
-        assert!(result["db_error"].is_null());
+        assert_eq!(result["status"], "listed");
 
         // We have a dendrite key with a switch, but there are no mappings.
         assert!(result.contains_key("dendrite"));
-        let dendrite = result["dendrite"].as_object().unwrap();
+        let dendrite = result["dendrite"]["ok"].as_object().unwrap();
         let switch0 = dendrite["switch0"].as_object().unwrap();
         assert!(switch0["errors"].as_array().unwrap().is_empty());
         assert_eq!(

@@ -2493,34 +2493,49 @@ struct AttachedSubnetManagerStatusDisplay<'a>(&'a AttachedSubnetManagerStatus);
 
 impl std::fmt::Display for AttachedSubnetManagerStatusDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let AttachedSubnetManagerStatus { db_error, dendrite, sled } = self.0;
-        if let Some(err) = db_error {
-            writeln!(
-                f,
-                "  error accessing database to list attached subnets:"
-            )?;
-            writeln!(f, "    {err}")?;
-        }
-        if dendrite.is_empty() {
-            writeln!(f, "   no dendrite instances found")?;
-        } else {
-            // Sort the data by switch slot to ensure stable output.
-            let mut dendrite: Vec<_> = dendrite.iter().collect();
-            dendrite.sort_unstable_by_key(|(switch_slot, _)| **switch_slot);
-            for (switch_slot, details) in dendrite {
-                let DendriteSubnetDetails {
-                    n_subnets_added,
-                    n_subnets_removed,
-                    n_total_subnets,
-                    errors,
-                } = details;
-                writeln!(f, "   dendrite instance on switch {switch_slot:?}")?;
-                writeln!(f, "     n_subnets_removed={n_subnets_removed}")?;
-                writeln!(f, "     n_subnets_added={n_subnets_added}")?;
-                writeln!(f, "     n_subnets_total={n_total_subnets}")?;
-                writeln!(f, "     n_errors={}", errors.len())?;
-                for error in errors {
-                    writeln!(f, "       {error}")?;
+        let (dendrite, sled) = match self.0 {
+            AttachedSubnetManagerStatus::DatabaseError { error } => {
+                writeln!(
+                    f,
+                    "  error accessing database to list attached subnets:"
+                )?;
+                writeln!(f, "    {error}")?;
+                return Ok(());
+            }
+            AttachedSubnetManagerStatus::Listed { dendrite, sled } => {
+                (dendrite, sled)
+            }
+        };
+        match dendrite {
+            Err(err) => {
+                writeln!(f, "  error looking up dendrite instances:")?;
+                writeln!(f, "    {err}")?;
+            }
+            Ok(dendrite) if dendrite.is_empty() => {
+                writeln!(f, "   no dendrite instances found")?;
+            }
+            Ok(dendrite) => {
+                // Sort the data by switch slot to ensure stable output.
+                let mut dendrite: Vec<_> = dendrite.iter().collect();
+                dendrite.sort_unstable_by_key(|(switch_slot, _)| **switch_slot);
+                for (switch_slot, details) in dendrite {
+                    let DendriteSubnetDetails {
+                        n_subnets_added,
+                        n_subnets_removed,
+                        n_total_subnets,
+                        errors,
+                    } = details;
+                    writeln!(
+                        f,
+                        "   dendrite instance on switch {switch_slot:?}"
+                    )?;
+                    writeln!(f, "     n_subnets_removed={n_subnets_removed}")?;
+                    writeln!(f, "     n_subnets_added={n_subnets_added}")?;
+                    writeln!(f, "     n_subnets_total={n_total_subnets}")?;
+                    writeln!(f, "     n_errors={}", errors.len())?;
+                    for error in errors {
+                        writeln!(f, "       {error}")?;
+                    }
                 }
             }
         }
@@ -6226,9 +6241,8 @@ mod tests {
         //   in the snapshot.
         let sled1 = SledUuid::from_u128(0x1b2b4c4f_42a5_4e3c_8b28_a1c1f2f3a0b1);
         let sled2 = SledUuid::from_u128(0x9d8e2f61_7c0d_4b6a_9e5f_3a4b5c6d7e8f);
-        let status = AttachedSubnetManagerStatus {
-            db_error: None,
-            dendrite: HashMap::from([
+        let status = AttachedSubnetManagerStatus::Listed {
+            dendrite: Ok(HashMap::from([
                 (
                     SwitchSlot::Switch1,
                     DendriteSubnetDetails {
@@ -6247,7 +6261,7 @@ mod tests {
                         errors: Vec::new(),
                     },
                 ),
-            ]),
+            ])),
             sled: HashMap::from([
                 (
                     sled2,
@@ -6267,14 +6281,25 @@ mod tests {
             &AttachedSubnetManagerStatusDisplay(&status).to_string(),
         );
 
-        let db_error = AttachedSubnetManagerStatus {
-            db_error: Some("database unavailable".to_string()),
-            dendrite: HashMap::new(),
-            sled: HashMap::new(),
+        let db_error = AttachedSubnetManagerStatus::DatabaseError {
+            error: "database unavailable".to_string(),
         };
         expectorate::assert_contents(
             "tests/output/attached-subnet-manager-status-db-error.txt",
             &AttachedSubnetManagerStatusDisplay(&db_error).to_string(),
+        );
+
+        let dendrite_lookup_error = AttachedSubnetManagerStatus::Listed {
+            dendrite: Err("no dendrite instances in DNS".to_string()),
+            sled: HashMap::from([(
+                sled1,
+                SledSubnetDetails { n_subnets: 2, errors: Vec::new() },
+            )]),
+        };
+        expectorate::assert_contents(
+            "tests/output/attached-subnet-manager-status-dendrite-lookup-error.txt",
+            &AttachedSubnetManagerStatusDisplay(&dendrite_lookup_error)
+                .to_string(),
         );
     }
 
