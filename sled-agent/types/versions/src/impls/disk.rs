@@ -150,3 +150,16 @@ impl FromStr for CompressionAlgorithm {
         Ok(c)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn m2_slot_from_chassis_location() {
+        assert_eq!(M2Slot::from_chassis_location("M.2 East"), Some(M2Slot::A));
+        assert_eq!(M2Slot::from_chassis_location("M.2 West"), Some(M2Slot::B));
+        assert_eq!(M2Slot::from_chassis_location("N0"), None);
+        assert_eq!(M2Slot::from_chassis_location("M.2 2"), None);
+    }
+}

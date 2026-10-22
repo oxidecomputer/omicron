@@ -1026,7 +1026,7 @@ mod tests {
             },
             false,
             DiskFirmware::new(0, None, false, 1, vec![]),
-            "N0".to_string(),
+            sled_storage::disk::synthetic_disk_location(variant, 0),
         ))
     }
 

@@ -985,8 +985,8 @@ pub struct PhysicalDisk {
     /// hardware topology: "N5" for a U.2 bay, "M.2 East" for a boot device.
     ///
     /// This is the operator-facing position, matching what is printed on the
-    /// sled. Sled agents at API version 55 and later always report one;
-    /// `None` only appears in collections taken from older sled agents.
+    /// sled. Sled agents that report disk bays always report one; `None`
+    /// only appears in collections taken from older sled agents.
     //
     // Older serialized state had no such field; treating its absence as
     // `None` accurately represents that nothing recorded a location.
@@ -1149,8 +1149,9 @@ pub struct SledAgent {
     /// Every U.2 bay and M.2 socket of the sled's chassis, occupied or not,
     /// sorted by location.
     //
-    // Older serialized state had no such field, and sled agents before API
-    // version 55 do not report bays; an empty list represents both.
+    // Older serialized state had no such field, and sled agents before the
+    // `ADD_DISK_BAYS_TO_INVENTORY` API version do not report bays; an empty
+    // list represents both.
     #[serde(default)]
     pub disk_bays: Vec<DiskBay>,
     pub zpools: Vec<Zpool>,

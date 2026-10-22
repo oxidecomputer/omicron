@@ -636,6 +636,24 @@ impl CollectionBuilder {
     ) -> Result<(), anyhow::Error> {
         let sled_id = inventory.sled_id;
 
+        // The sled lists bays in the order its topology walks them; the
+        // datastore reads them back by location. Sort them here so a
+        // collection equals its own database round trip. The location is
+        // also part of the database key, so keep only the first bay with
+        // any given location.
+        let mut disk_bays: Vec<DiskBay> =
+            inventory.disk_bays.into_iter().map(|b| b.into()).collect();
+        disk_bays.sort_by(|a, b| a.location.cmp(&b.location));
+        let reported_bays = disk_bays.len();
+        disk_bays.dedup_by(|a, b| a.location == b.location);
+        if disk_bays.len() != reported_bays {
+            self.found_error(InventoryError::from(anyhow!(
+                "sled {sled_id} ({source}): reported {} disk bay(s) with a \
+                 duplicate location",
+                reported_bays - disk_bays.len(),
+            )));
+        }
+
         let baseboard_id = Some(Self::normalize_item(
             &mut self.baseboards,
             inventory.baseboard_id,
@@ -659,15 +677,7 @@ impl CollectionBuilder {
             time_collected,
             sled_id,
             disks: inventory.disks.into_iter().map(|d| d.into()).collect(),
-            disk_bays: {
-                // The sled lists bays in the order its topology walks them;
-                // the datastore reads them back by location. Sort them here
-                // so a collection equals its own database round trip.
-                let mut bays: Vec<DiskBay> =
-                    inventory.disk_bays.into_iter().map(|b| b.into()).collect();
-                bays.sort_by(|a, b| a.location.cmp(&b.location));
-                bays
-            },
+            disk_bays,
             zpools: inventory
                 .zpools
                 .into_iter()
@@ -1958,6 +1968,68 @@ mod test {
                 second_psus[4].clone(),
                 first_psus[5].clone(),
             ],
+        );
+    }
+
+    // A sled reporting two bays with the same location keeps the first and
+    // records an error, rather than failing the collection's insert.
+    #[test]
+    fn test_duplicate_disk_bay_location() {
+        use sled_agent_types::disk::DiskVariant;
+        use sled_agent_types::inventory::InventoryDiskBay;
+        use sled_agent_types::inventory::InventoryDiskBayOccupant;
+        use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+
+        let mut builder =
+            CollectionBuilder::new("test_duplicate_disk_bay_location");
+        let bay = |location: &str, occupant| InventoryDiskBay {
+            location: location.to_string(),
+            kind: DiskVariant::U2,
+            occupant,
+        };
+        let device = InventoryDiskBayOccupant::Device {
+            driver: Some("nvme".to_string()),
+            devfs_path: None,
+        };
+        let sled_id = "1f1b4c3e-1f39-4fd4-a1f8-0e8f3f9b5b21".parse().unwrap();
+        builder
+            .found_sled_inventory(
+                "fake sled agent",
+                examples::sled_agent(
+                    sled_id,
+                    BaseboardId {
+                        part_number: "test".to_string(),
+                        serial_number: "test".to_string(),
+                    },
+                    SledRole::Gimlet,
+                    vec![],
+                    vec![
+                        bay("N1", InventoryDiskBayOccupant::Empty),
+                        bay("N0", InventoryDiskBayOccupant::Empty),
+                        bay("N1", device),
+                    ],
+                    vec![],
+                    vec![],
+                    None,
+                    examples::file_source_resolver(
+                        examples::OmicronFileSourceResolverExampleKind::Error,
+                    ),
+                    SvcsEnabledNotOnlineResult::DataUnavailable,
+                ),
+            )
+            .unwrap();
+        let collection = builder.build();
+
+        let sled = collection.sled_agents.get(&sled_id).unwrap();
+        let locations: Vec<_> =
+            sled.disk_bays.iter().map(|b| b.location.as_str()).collect();
+        assert_eq!(locations, ["N0", "N1"]);
+        assert_eq!(sled.disk_bays[1].occupant, DiskBayOccupant::Empty);
+        assert_eq!(collection.errors.len(), 1);
+        assert!(
+            collection.errors[0].contains("duplicate location"),
+            "{}",
+            collection.errors[0]
         );
     }
 }
