@@ -1521,14 +1521,28 @@ pub enum TrustQuorumManagerStatus {
     Error(String),
 }
 
-#[derive(Default, Deserialize, Serialize)]
-pub struct AttachedSubnetManagerStatus {
-    /// Error reaching the database to fetch attached subnets.
-    pub db_error: Option<String>,
-    /// Details about attached subnets sent to Dendrite instances.
-    pub dendrite: HashMap<SwitchSlot, DendriteSubnetDetails>,
-    /// Details about attached subnets sent to sleds.
-    pub sled: HashMap<SledUuid, SledSubnetDetails>,
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum AttachedSubnetManagerStatus {
+    /// An error occurred while querying the database to fetch attached subnets,
+    /// so nothing was sent to Dendrite or Sled Agents.
+    DatabaseError {
+        /// The error that occurred.
+        error: String,
+    },
+    /// Querying the database the fetch attached subnets succeeded, and the task
+    /// then attempted to make requests to Dendrite and Sled Agents.
+    Listed {
+        /// Details about attached subnets sent to Dendrite instances, or an
+        /// error if dpd clients could not be looked up.
+        ///
+        /// Even in the `Ok` case, there could be errors; see
+        /// [`DendriteSubnetDetails::errors`].
+        #[serde(with = "omicron_common::snake_case_result")]
+        dendrite: Result<HashMap<SwitchSlot, DendriteSubnetDetails>, String>,
+        /// Details about attached subnets sent to sleds.
+        sled: HashMap<SledUuid, SledSubnetDetails>,
+    },
 }
 
 /// Details about attached subnets sent to a single Dendrite instance.

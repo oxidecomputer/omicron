@@ -1,4 +1,2 @@
   error accessing database to list attached subnets:
     database unavailable
-   no dendrite instances found
-   no sleds found
