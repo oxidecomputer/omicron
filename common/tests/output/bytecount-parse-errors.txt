@@ -1,8 +1,11 @@
 input: "10 PiB"
-error: invalid byte count suffix "PiB" (expected "TiB", "T", "GiB", "G", "MiB", "M", "KiB", "K", or "B")
+error: invalid byte count suffix "PiB" (expected "TiB", "GiB", "MiB", "KiB", or "B")
+
+input: "10 G"
+error: invalid byte count suffix "G" (expected "TiB", "GiB", "MiB", "KiB", or "B")
 
 input: "1 K B"
-error: invalid byte count suffix "K B" (expected "TiB", "T", "GiB", "G", "MiB", "M", "KiB", "K", or "B")
+error: invalid byte count suffix "K B" (expected "TiB", "GiB", "MiB", "KiB", or "B")
 
 input: ""
 error: invalid number "" in byte count: cannot parse integer from empty string

@@ -615,13 +615,9 @@ pub enum ByteCountParseError {
 
 const BYTE_COUNT_SUFFIXEN: &[(&str, u64)] = &[
     (TiB_SUFFIX, TiB),
-    ("T", TiB),
     (GiB_SUFFIX, GiB),
-    ("G", GiB),
     (MiB_SUFFIX, MiB),
-    ("M", MiB),
     (KiB_SUFFIX, KiB),
-    ("K", KiB),
     (B_SUFFIX, 1),
 ];
 
@@ -648,9 +644,10 @@ impl FromStr for ByteCount {
         fn suffix2factor(suffix: &str) -> Option<u64> {
             BYTE_COUNT_SUFFIXEN
                 .iter()
-                // Be conservative in what you send, but be liberal in what you
-                // accept!
-                .find(|(s, _)| suffix.eq_ignore_ascii_case(s))
+                // We intentionally do not match case-insensitively here to
+                // avoid potentially ambiguous spellings (i.e. where a lowercase
+                // 'b' means "bits" rather than "bytes")
+                .find(|(s, _)| suffix == *s)
                 .map(|&(_, factor)| factor)
         }
 
@@ -2777,23 +2774,19 @@ mod test {
             ("1", 1),
             ("12", 12),
             ("1025", 1025),
-            // Every suffix, both long and short forms.
+            // Every suffix.
             ("0B", 0),
             ("1B", 1),
             ("1025B", 1025),
             ("1KiB", KIB),
-            ("1K", KIB),
             ("100KiB", 100 * KIB),
             ("2MiB", 2 * MIB),
-            ("2M", 2 * MIB),
             ("3GiB", 3 * GIB),
-            ("3G", 3 * GIB),
             ("4TiB", 4 * TIB),
-            ("4T", 4 * TIB),
             // Whitespace between the number and the suffix, and around the
             // whole input, is ignored.
             ("1 KiB", KIB),
-            ("1   K", KIB),
+            ("1   KiB", KIB),
             ("  10 GiB  ", 10 * GIB),
             ("\t5 B\n", 5),
             ("  42  ", 42),
@@ -2849,6 +2842,19 @@ mod test {
             ("1 KKiB", "KKiB"),
             ("1 BB", "BB"),
             ("1 TiBB", "TiBB"),
+            // Single-letter abbreviations are ambiguous between binary and
+            // decimal units, so they're rejected.
+            ("1 K", "K"),
+            ("1 M", "M"),
+            ("1 G", "G"),
+            ("1 T", "T"),
+            // Suffixes are case-sensitive, since a lowercase "b" commonly
+            // means bits rather than bytes.
+            ("1 b", "b"),
+            ("1 kib", "kib"),
+            ("1 KIB", "KIB"),
+            ("1 gib", "gib"),
+            ("1 Mib", "Mib"),
         ] {
             match input.parse::<ByteCount>() {
                 Err(ByteCountParseError::InvalidSuffix(s)) => {
@@ -2870,15 +2876,18 @@ mod test {
             ("-1 KiB", "-1"),
             ("1.5 GiB", "1.5"),
             ("x1 KiB", "x1"),
-            ("1 2 K", "1 2"),
+            ("1 2 KiB", "1 2"),
             ("", ""),
             ("   ", ""),
             ("B", ""),
             (" KiB ", ""),
-            ("kib", ""),
             ("abc", "abc"),
             (" -KiB ", "-KiB"),
             ("PiB", "PiB"),
+            // Rejected suffixes alone are not valid suffixes, so the whole
+            // input is treated as the numeric part.
+            ("K", "K"),
+            ("kib", "kib"),
         ] {
             match input.parse::<ByteCount>() {
                 Err(ByteCountParseError::InvalidInteger { digits, .. }) => {
@@ -2897,7 +2906,7 @@ mod test {
             "9223372036854775808",
             "9223372036854775808 B",
             "8388608 TiB",
-            "18446744073709551615 K",
+            "18446744073709551615 KiB",
         ] {
             match input.parse::<ByteCount>() {
                 Err(ByteCountParseError::OutOfRange(
@@ -2918,6 +2927,7 @@ mod test {
         let inputs = [
             // InvalidSuffix
             "10 PiB",
+            "10 G",
             "1 K B",
             // InvalidInteger
             "",
