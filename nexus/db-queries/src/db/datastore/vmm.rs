@@ -25,10 +25,12 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
+use nexus_db_model::ApplySledFilterExt;
 use nexus_db_schema::enums::SledBpAvailabilityEnum;
 use nexus_db_schema::enums::VmmStateEnum;
 use nexus_db_schema::schema::vmm;
 use nexus_db_schema::schema::vmm::dsl;
+use nexus_types::deployment::SledFilter;
 use nexus_types::instance::Migrations;
 use nexus_types::instance::VmmRuntimeState;
 use omicron_common::api::external::CreateResult;
@@ -572,21 +574,23 @@ impl DataStore {
     }
 
     /// Lists VMMs that have been marked as needing to be stopped for a sled
-    /// update.
+    /// update, and that *can* be stopped.
     ///
     /// The query performed by this function is paginated by the sled and
     /// VMM UUIDs, in that order.
-    // TODO-K: Probably change the name here? It's retrieving stoppable states,
-    //         not all of the VMMs marked to stop
-    pub async fn vmm_list_marked_stop_for_update_by_sled_id(
+    pub async fn vmm_list_stoppable_for_update_by_sled_id(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, (Uuid, Uuid)>,
     ) -> ListResultVec<Vmm> {
+        use nexus_db_schema::schema::sled::dsl as sled_dsl;
+
         paginated_multicolumn(dsl::vmm, (dsl::sled_id, dsl::id), pagparams)
+            .inner_join(sled_dsl::sled.on(sled_dsl::id.eq(dsl::sled_id)))
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::stop_for_update_disposition_generation.is_not_null())
             .filter(dsl::state.eq_any(DbVmmState::SHOULD_STOP_FOR_EVACUATION))
+            .sled_filter(SledFilter::InService)
             .select(Vmm::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -601,6 +605,7 @@ mod tests {
     use crate::db::model::Generation;
     use crate::db::model::Migration;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use crate::db::pub_test_utils::helpers::create_vmm_for_instance;
     use iddqd::IdOrdMap;
     use nexus_db_model::ActiveSledBpAvailability;
@@ -1350,17 +1355,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_vmm_list_marked_stop_for_update_by_sled_id() {
+    async fn test_vmm_list_stoppable_for_update_by_sled_id() {
         // Setup
         let logctx =
-            dev::test_setup_log("test_vmm_list_marked_stop_for_update");
+            dev::test_setup_log("test_vmm_list_stoppable_for_update_by_sled_id");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         // The states from which a VMM can still be stopped for an update. Only
         // marked VMMs in these states should be listed by
-        // `vmm_list_marked_stop_for_update`.
+        // `vmm_list_stoppable_for_update_by_sled_id`.
         let is_stoppable = |state: DbVmmState| {
             matches!(
                 state,
@@ -1377,6 +1382,13 @@ mod tests {
         let sled_b = SledUuid::new_v4();
         let mut vmms = Vec::new();
         for sled_id in [sled_a, sled_b] {
+            // The query only returns VMMs on in-service sleds. We store the two
+            // sleds in the db. New sleds are in-service by default.
+            datastore
+                .sled_upsert(SledUpdateBuilder::new().sled_id(sled_id).build())
+                .await
+                .expect("sled should be upserted successfully");
+
             for &state in DbVmmState::ALL_STATES {
                 for marker in [Some(generation), None] {
                     let failure_reason = (state == DbVmmState::Failed)
@@ -1433,7 +1445,7 @@ mod tests {
         // Check the retrieved ids for stoppable VMMs are the same as the
         // expected ones
         let listed = datastore
-            .vmm_list_marked_stop_for_update_by_sled_id(
+            .vmm_list_stoppable_for_update_by_sled_id(
                 &opctx,
                 &DataPageParams::max_page(),
             )

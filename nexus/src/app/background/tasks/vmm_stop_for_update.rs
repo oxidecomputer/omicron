@@ -154,7 +154,7 @@ impl VmmStopForUpdate {
         while let Some(p) = paginator.next() {
             let vmms = match self
                 .datastore
-                .vmm_list_marked_stop_for_update_by_sled_id(
+                .vmm_list_stoppable_for_update_by_sled_id(
                     opctx,
                     &p.current_pagparams(),
                 )
