@@ -13,11 +13,13 @@
 //! The `oxhc` enumerator fills each of those in from the PCIe bridge behind
 //! it. An empty bay has no children. A bay holding an NVMe device gets
 //! `binding/driver = "nvme"` and, if the disk enumerator succeeds, an `nvme`
-//! child carrying the driver instance, with one `disk` child per active
-//! namespace. A bay holding anything else gets a `board` child with an `ic`
+//! child carrying the driver instance, with one `disk` child per namespace
+//! the nvme driver does not ignore. A bay holding anything else gets a `board` child with an `ic`
 //! under it as a placeholder.
 
-use crate::disk_bay::{ObservedBay, ObservedNamespace, ObservedOccupant};
+use crate::disk_bay::{
+    BayProblem, ObservedBay, ObservedNamespace, ObservedOccupant,
+};
 use crate::nvme_instance::NvmeInstance;
 use libtopo::{Error, Node, Scheme, TopoHdl, WalkAction, hc};
 use sled_agent_types::disk::DiskVariant;
@@ -44,19 +46,12 @@ pub(super) enum TopoError {
 
     #[error("topology node {node} ({location}) has no binding/slot")]
     BayWithoutSlot { node: String, location: String },
-
-    #[error("{location} has more than one occupant in the topology")]
-    MultipleOccupants { location: String },
-
-    #[error("topology disk node {node} in {location} has no {property}")]
-    IncompleteDisk { node: String, location: String, property: String },
-
-    #[error("{location} holds an NVMe device the topology failed to enumerate")]
-    NvmeNotEnumerated { location: String },
 }
 
 /// Takes a fresh topology snapshot and returns every U.2 bay and M.2 socket
-/// with what the topology found behind it, in walk order.
+/// with what the topology found behind it, in walk order. A bay the
+/// topology only partly describes comes back as
+/// [`ObservedOccupant::Unreadable`] rather than failing the whole read.
 ///
 /// A new handle is opened on every call: the wrapper allows one snapshot per
 /// handle (see <https://github.com/oxidecomputer/libtopo/issues/14>), and a
@@ -82,7 +77,7 @@ pub(super) fn read_disk_bays(
     if let Some(err) = failure {
         return Err(err);
     }
-    let bays = walker.finish()?;
+    let bays = walker.finish();
 
     debug!(
         log,
@@ -217,20 +212,14 @@ impl<'a> BayWalker<'a> {
         NodeKey::of_parent(node).and_then(|key| self.bay_of.get(&key).copied())
     }
 
-    /// Claims the bay for a new occupant, which must be its first.
-    fn occupy(
-        &mut self,
-        index: usize,
-        occupant: ObservedOccupant,
-    ) -> Result<(), TopoError> {
+    /// Claims the bay for a new occupant, which should be its first.
+    fn occupy(&mut self, index: usize, occupant: ObservedOccupant) {
         let bay = &mut self.bays[index];
-        if bay.occupant != ObservedOccupant::Empty {
-            return Err(TopoError::MultipleOccupants {
-                location: bay.location.clone(),
-            });
-        }
-        bay.occupant = occupant;
-        Ok(())
+        bay.occupant = if bay.occupant == ObservedOccupant::Empty {
+            occupant
+        } else {
+            ObservedOccupant::Unreadable(BayProblem::MultipleOccupants)
+        };
     }
 
     fn visit_nvme(&mut self, node: &Node<'_>) -> Result<(), TopoError> {
@@ -253,14 +242,12 @@ impl<'a> BayWalker<'a> {
                     namespaces: Vec::new(),
                 }
             }
-            // Without an instance this controller can never be opened, so
-            // report the device and let the poll carry on.
-            None => ObservedOccupant::Other {
-                driver: driver.or_else(|| Some("nvme".to_string())),
-                devfs_path,
-            },
+            None => {
+                ObservedOccupant::Unreadable(BayProblem::NvmeWithoutInstance)
+            }
         };
-        self.occupy(index, occupant)
+        self.occupy(index, occupant);
+        Ok(())
     }
 
     fn visit_disk(&mut self, node: &Node<'_>) -> Result<(), TopoError> {
@@ -269,26 +256,18 @@ impl<'a> BayWalker<'a> {
         else {
             return Ok(());
         };
-        let bay = &mut self.bays[index];
-        let ObservedOccupant::Nvme { namespaces, .. } = &mut bay.occupant
-        else {
-            // `nvme_of` only holds bays whose occupant is `Nvme`.
-            unreachable!(
-                "nvme node {} indexed without an Nvme occupant",
-                index
-            );
-        };
 
-        let key = NodeKey::of(node);
-        let required = |group: &str, name: &str| -> Result<String, TopoError> {
-            optional_string(node, group, name)?.ok_or_else(|| {
-                TopoError::IncompleteDisk {
-                    node: key.to_string(),
-                    location: bay.location.clone(),
-                    property: format!("{group}/{name}"),
+        // topo sets the `storage` and `io/devfs-path` properties only when
+        // the namespace has a blkdev attached.
+        let mut missing = None;
+        let mut required =
+            |group: &str, name: &str| -> Result<String, TopoError> {
+                let value = optional_string(node, group, name)?;
+                if value.is_none() && missing.is_none() {
+                    missing = Some(format!("{group}/{name}"));
                 }
-            })
-        };
+                Ok(value.unwrap_or_default())
+            };
         let namespace = ObservedNamespace {
             manufacturer: required(
                 hc::TOPO_PGROUP_STORAGE,
@@ -303,7 +282,22 @@ impl<'a> BayWalker<'a> {
                 TOPO_STORAGE_LOGICAL_DISK_NAME,
             )?,
         };
-        namespaces.push(namespace);
+
+        let bay = &mut self.bays[index];
+        match (&mut bay.occupant, missing) {
+            (ObservedOccupant::Nvme { namespaces, .. }, None) => {
+                namespaces.push(namespace);
+            }
+            (ObservedOccupant::Nvme { .. }, Some(property)) => {
+                bay.occupant =
+                    ObservedOccupant::Unreadable(BayProblem::IncompleteDisk {
+                        node: NodeKey::of(node).to_string(),
+                        property,
+                    });
+            }
+            // An earlier problem already made the bay unreadable.
+            _ => (),
+        }
         Ok(())
     }
 
@@ -315,7 +309,8 @@ impl<'a> BayWalker<'a> {
         self.occupy(
             index,
             ObservedOccupant::Other { driver: None, devfs_path: None },
-        )
+        );
+        Ok(())
     }
 
     fn visit_ic(&mut self, node: &Node<'_>) -> Result<(), TopoError> {
@@ -337,21 +332,19 @@ impl<'a> BayWalker<'a> {
         Ok(())
     }
 
-    /// Checks the finished list for a bay the topology only half described:
-    /// it found an NVMe device behind the bridge (and said so on the bay)
-    /// but its disk enumerator produced nothing. That snapshot cannot be
-    /// trusted to say which disks exist.
-    fn finish(self) -> Result<Vec<ObservedBay>, TopoError> {
-        for bay in &self.bays {
+    /// Marks bays the topology only half described: it found an NVMe device
+    /// behind the bridge (and said so on the bay) but its disk enumerator
+    /// produced nothing.
+    fn finish(mut self) -> Vec<ObservedBay> {
+        for bay in &mut self.bays {
             if bay.binding_driver.as_deref() == Some("nvme")
                 && bay.occupant == ObservedOccupant::Empty
             {
-                return Err(TopoError::NvmeNotEnumerated {
-                    location: bay.location.clone(),
-                });
+                bay.occupant =
+                    ObservedOccupant::Unreadable(BayProblem::NvmeNotEnumerated);
             }
         }
-        Ok(self.bays)
+        self.bays
     }
 }
 

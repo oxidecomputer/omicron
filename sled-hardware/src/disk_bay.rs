@@ -22,6 +22,8 @@ use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::DiskVariant;
+use slog::{Logger, warn};
+use std::collections::HashMap;
 
 /// One U.2 bay or M.2 socket of the chassis, as the hardware topology
 /// describes it.
@@ -76,16 +78,34 @@ pub(crate) enum ObservedOccupant {
     /// The bay node has no children.
     Empty,
     /// An `nvme` node with a driver instance. `namespaces` has one entry per
-    /// `disk` child, which the topology creates per active namespace.
+    /// `disk` child, which the topology creates per namespace the nvme driver
+    /// does not ignore.
     Nvme {
         instance: NvmeInstance,
         driver: Option<String>,
         devfs_path: Option<String>,
         namespaces: Vec<ObservedNamespace>,
     },
-    /// The topology's placeholder for a device it does not enumerate, or an
-    /// `nvme` node it left without a driver instance.
+    /// The topology's placeholder for a device it does not enumerate.
     Other { driver: Option<String>, devfs_path: Option<String> },
+    /// The topology only partly described what is behind the bay.
+    Unreadable(BayProblem),
+}
+
+/// Why the topology could not describe one bay.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum BayProblem {
+    #[error("the topology reports more than one occupant")]
+    MultipleOccupants,
+
+    #[error("topology disk node {node} has no {property}")]
+    IncompleteDisk { node: String, property: String },
+
+    #[error("the topology found an NVMe device but did not enumerate it")]
+    NvmeNotEnumerated,
+
+    #[error("the topology's nvme node has no usable driver instance")]
+    NvmeWithoutInstance,
 }
 
 /// A `disk` node under an `nvme` node: one NVMe namespace.
@@ -113,20 +133,26 @@ pub(crate) struct ObservedNamespace {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct NvmeFacts {
     pub pci_vid: u16,
-    pub active_namespaces: usize,
+    /// Namespaces the nvme driver does not ignore. It ignores those it
+    /// cannot attach `blkdev` to, such as ones formatted with protection
+    /// information, and the topology describes none of those.
+    pub usable_namespaces: usize,
     pub firmware: DiskFirmware,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ClassifyError {
+    #[error("{location}: {problem}")]
+    Unreadable { location: String, problem: BayProblem },
+
     #[error(
-        "{location} ({nvme_instance}) has {active_namespaces} active \
+        "{location} ({nvme_instance}) has {usable_namespaces} usable \
          namespace(s) but the hardware topology describes none"
     )]
     MissingNamespace {
         location: String,
         nvme_instance: NvmeInstance,
-        active_namespaces: usize,
+        usable_namespaces: usize,
     },
 
     #[error(
@@ -170,6 +196,12 @@ pub(crate) fn classify_bay(
         ObservedOccupant::Nvme { instance, driver, devfs_path, namespaces } => {
             (*instance, driver, devfs_path, namespaces)
         }
+        ObservedOccupant::Unreadable(problem) => {
+            return Err(ClassifyError::Unreadable {
+                location: bay.location.clone(),
+                problem: problem.clone(),
+            });
+        }
     };
 
     let Some(nvme) = nvme else {
@@ -179,11 +211,11 @@ pub(crate) fn classify_bay(
         });
     };
 
-    // The topology creates one `disk` node per active namespace. If it has
+    // The topology creates one `disk` node per usable namespace. If it has
     // none but the controller says it has some, the topology's namespace
-    // enumeration failed silently and this snapshot cannot be trusted.
+    // enumeration failed silently.
     let Some(namespace) = namespaces.first() else {
-        if nvme.active_namespaces == 0 {
+        if nvme.usable_namespaces == 0 {
             let device = DiskBayOccupant::Device {
                 driver: driver.clone(),
                 devfs_path: devfs_path.clone(),
@@ -193,7 +225,7 @@ pub(crate) fn classify_bay(
         return Err(ClassifyError::MissingNamespace {
             location: bay.location.clone(),
             nvme_instance: instance,
-            active_namespaces: nvme.active_namespaces,
+            usable_namespaces: nvme.usable_namespaces,
         });
     };
 
@@ -231,6 +263,86 @@ pub(crate) fn classify_bay(
     Ok((describe(DiskBayOccupant::Disk { identity }), Some(disk)))
 }
 
+/// One bay from a single hardware poll.
+#[derive(Clone, Debug)]
+pub(crate) enum PolledBay {
+    Described {
+        bay: DiskBay,
+        disk: Option<Box<UnparsedDisk>>,
+    },
+    /// The topology or libnvme could not describe the bay on this poll.
+    Unreadable {
+        location: String,
+        kind: DiskVariant,
+        driver: Option<String>,
+    },
+}
+
+/// Combines one poll's bays with the previous view into the disks and bays to
+/// report.
+///
+/// A bay this poll could not describe keeps what the previous view said about
+/// it, so a fault in one bay neither drops its disk nor holds up the others.
+/// With no previous entry, it is reported as a device with no disk. If two
+/// bays claim the same disk identity, the first keeps the disk.
+pub(crate) fn resolve_bays(
+    log: &Logger,
+    polled: Vec<PolledBay>,
+    previous_bays: &[DiskBay],
+    previous_disks: &HashMap<DiskIdentity, UnparsedDisk>,
+) -> (HashMap<DiskIdentity, UnparsedDisk>, Vec<DiskBay>) {
+    let mut disks = HashMap::new();
+    let mut bays = Vec::with_capacity(polled.len());
+    let mut bay_of_disk: HashMap<DiskIdentity, String> = HashMap::new();
+
+    for polled_bay in polled {
+        let (mut bay, disk) = match polled_bay {
+            PolledBay::Described { bay, disk } => (bay, disk.map(|d| *d)),
+            PolledBay::Unreadable { location, kind, driver } => {
+                match previous_bays.iter().find(|b| b.location == location) {
+                    Some(previous) => {
+                        let disk = match &previous.occupant {
+                            DiskBayOccupant::Disk { identity } => {
+                                previous_disks.get(identity).cloned()
+                            }
+                            _ => None,
+                        };
+                        (previous.clone(), disk)
+                    }
+                    None => {
+                        let occupant = DiskBayOccupant::Device {
+                            driver,
+                            devfs_path: None,
+                        };
+                        (DiskBay { location, kind, occupant }, None)
+                    }
+                }
+            }
+        };
+
+        if let Some(disk) = disk {
+            let identity = disk.identity().clone();
+            if let Some(first) = bay_of_disk.get(&identity) {
+                warn!(
+                    log,
+                    "disk appears in more than one bay; ignoring all but the \
+                     first";
+                    "identity" => ?identity,
+                    "first" => first,
+                    "second" => &bay.location,
+                );
+                bay.occupant =
+                    DiskBayOccupant::Device { driver: None, devfs_path: None };
+            } else {
+                bay_of_disk.insert(identity.clone(), bay.location.clone());
+                disks.insert(identity, disk);
+            }
+        }
+        bays.push(bay);
+    }
+    (disks, bays)
+}
+
 /// The model string of a disk, from the `inquiry-vendor-id` and
 /// `inquiry-product-id` strings the `blkdev` driver publishes.
 ///
@@ -255,8 +367,8 @@ mod tests {
         DiskFirmware::new(1, None, true, 1, vec![Some("FW1".to_string())])
     }
 
-    fn facts(active_namespaces: usize) -> NvmeFacts {
-        NvmeFacts { pci_vid: 0x1344, active_namespaces, firmware: firmware() }
+    fn facts(usable_namespaces: usize) -> NvmeFacts {
+        NvmeFacts { pci_vid: 0x1344, usable_namespaces, firmware: firmware() }
     }
 
     fn instance() -> NvmeInstance {
@@ -400,7 +512,7 @@ mod tests {
         assert!(
             matches!(
                 err,
-                ClassifyError::MissingNamespace { active_namespaces: 1, .. }
+                ClassifyError::MissingNamespace { usable_namespaces: 1, .. }
             ),
             "{err}"
         );
@@ -445,5 +557,109 @@ mod tests {
         let (_, disk) =
             classify_bay(&nvme_bay(vec![ns]), Some(&facts(1)), false).unwrap();
         assert_eq!(disk.unwrap().paths().dev_path, None);
+    }
+
+    #[test]
+    fn unreadable_bay_is_an_error() {
+        let observed =
+            bay(ObservedOccupant::Unreadable(BayProblem::NvmeNotEnumerated));
+        let err = classify_bay(&observed, None, false).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                ClassifyError::Unreadable {
+                    problem: BayProblem::NvmeNotEnumerated,
+                    ..
+                }
+            ),
+            "{err}"
+        );
+    }
+
+    fn log() -> Logger {
+        Logger::root(slog::Discard, slog::o!())
+    }
+
+    fn described(
+        observed: &ObservedBay,
+        facts: Option<&NvmeFacts>,
+    ) -> PolledBay {
+        let (bay, disk) = classify_bay(observed, facts, false).unwrap();
+        PolledBay::Described { bay, disk: disk.map(Box::new) }
+    }
+
+    fn unreadable(location: &str) -> PolledBay {
+        PolledBay::Unreadable {
+            location: location.to_string(),
+            kind: DiskVariant::U2,
+            driver: Some("nvme".to_string()),
+        }
+    }
+
+    #[test]
+    fn unreadable_bay_keeps_previous_disk() {
+        let (previous_disks, previous_bays) = resolve_bays(
+            &log(),
+            vec![described(&nvme_bay(vec![namespace()]), Some(&facts(1)))],
+            &[],
+            &HashMap::new(),
+        );
+        assert_eq!(previous_disks.len(), 1);
+
+        let (disks, bays) = resolve_bays(
+            &log(),
+            vec![unreadable("N3")],
+            &previous_bays,
+            &previous_disks,
+        );
+        assert_eq!(disks, previous_disks);
+        assert_eq!(bays, previous_bays);
+    }
+
+    #[test]
+    fn unreadable_bay_without_history_is_a_device() {
+        let (disks, bays) = resolve_bays(
+            &log(),
+            vec![
+                described(&bay(ObservedOccupant::Empty), None),
+                unreadable("N4"),
+            ],
+            &[],
+            &HashMap::new(),
+        );
+        assert!(disks.is_empty());
+        assert_eq!(bays.len(), 2);
+        assert_eq!(bays[0].occupant, DiskBayOccupant::Empty);
+        assert_eq!(bays[1].location, "N4");
+        assert_eq!(
+            bays[1].occupant,
+            DiskBayOccupant::Device {
+                driver: Some("nvme".to_string()),
+                devfs_path: None,
+            }
+        );
+    }
+
+    #[test]
+    fn duplicate_disk_identity_keeps_first_bay() {
+        let first = nvme_bay(vec![namespace()]);
+        let mut second = nvme_bay(vec![namespace()]);
+        second.location = "N4".to_string();
+        let (disks, bays) = resolve_bays(
+            &log(),
+            vec![
+                described(&first, Some(&facts(1))),
+                described(&second, Some(&facts(1))),
+            ],
+            &[],
+            &HashMap::new(),
+        );
+        assert_eq!(disks.len(), 1);
+        assert_eq!(disks.values().next().unwrap().location(), "N3");
+        assert!(matches!(bays[0].occupant, DiskBayOccupant::Disk { .. }));
+        assert_eq!(
+            bays[1].occupant,
+            DiskBayOccupant::Device { driver: None, devfs_path: None }
+        );
     }
 }

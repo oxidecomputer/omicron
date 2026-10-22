@@ -8,7 +8,8 @@ use crate::HardwareView;
 use crate::TofinoSnapshot;
 use crate::TofinoView;
 use crate::disk_bay::{
-    ClassifyError, NvmeFacts, ObservedBay, ObservedOccupant, classify_bay,
+    NvmeFacts, ObservedBay, ObservedOccupant, PolledBay, classify_bay,
+    resolve_bays,
 };
 use crate::nvme_instance::NvmeInstance;
 use crate::{DendriteAsic, DiskBay, DiskBayOccupant, SledMode, UnparsedDisk};
@@ -24,6 +25,7 @@ use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::watch;
 use uuid::Uuid;
@@ -65,16 +67,6 @@ enum Error {
 
     #[error("Failed to read disk bays from the hardware topology")]
     Topology(#[from] topo::TopoError),
-
-    #[error("Could not describe a disk bay from the topology and libnvme")]
-    Bay(#[from] ClassifyError),
-
-    #[error("Disk {identity:?} appears in both {first} and {second}")]
-    DuplicateDiskIdentity {
-        identity: DiskIdentity,
-        first: String,
-        second: String,
-    },
 
     #[error("Failed to init nvme handle: {0}")]
     NvmeHandleInit(#[from] libnvme::NvmeInitError),
@@ -134,8 +126,8 @@ impl TryFrom<i64> for BootStorageUnit {
 #[derive(Debug, Clone)]
 struct HardwareSnapshot {
     tofino: TofinoSnapshot,
-    disks: HashMap<DiskIdentity, UnparsedDisk>,
-    disk_bays: Vec<DiskBay>,
+    /// `None` if the disk bays could not be read at all this time.
+    bays: Option<Vec<PolledBay>>,
 }
 
 impl HardwareSnapshot {
@@ -173,57 +165,42 @@ impl HardwareSnapshot {
 
         // Find the disks. The hardware topology says which bays exist and
         // what is behind each one; libnvme fills in what only the controller
-        // knows. If either cannot answer, this snapshot cannot say which
-        // disks exist, and the previous view stands until the next poll.
-        let mut disks = HashMap::new();
-        let mut disk_bays = Vec::new();
-        match external_disks {
+        // knows.
+        let bays = match external_disks {
             ExternalDisks::DetectPhysical => {
-                let observed = topo::read_disk_bays(log)?;
-                let nvme = Nvme::new()?;
-                let mut bay_of_disk: HashMap<DiskIdentity, String> =
-                    HashMap::new();
-                for bay in &observed {
-                    let (described, disk) = poll_bay(
-                        log,
-                        &nvme,
-                        sled_type,
-                        boot_storage_unit,
-                        bay,
-                    )?;
-                    if let Some(disk) = disk {
-                        let identity = disk.identity().clone();
-                        if let Some(first) = bay_of_disk
-                            .insert(identity.clone(), bay.location.clone())
-                        {
-                            return Err(Error::DuplicateDiskIdentity {
-                                identity,
-                                first,
-                                second: bay.location.clone(),
-                            });
-                        }
-                        disks.insert(identity, disk);
+                match read_bays(log, sled_type, boot_storage_unit) {
+                    Ok(bays) => Some(bays),
+                    Err(err) => {
+                        warn!(
+                            log,
+                            "Failed to read disk bays; keeping the previous \
+                             view of disks";
+                            InlineErrorChain::new(&err),
+                        );
+                        None
                     }
-                    disk_bays.push(described);
                 }
             }
 
-            ExternalDisks::Hardcoded { vdevs: _, disks: hardcoded_disks } => {
-                // These stand in for real hardware, so give each one a bay.
-                for disk in hardcoded_disks {
-                    disk_bays.push(DiskBay {
-                        location: disk.location().to_string(),
-                        kind: disk.variant(),
-                        occupant: DiskBayOccupant::Disk {
-                            identity: disk.identity().clone(),
+            // These stand in for real hardware, so give each one a bay.
+            ExternalDisks::Hardcoded { vdevs: _, disks } => Some(
+                disks
+                    .iter()
+                    .map(|disk| PolledBay::Described {
+                        bay: DiskBay {
+                            location: disk.location().to_string(),
+                            kind: disk.variant(),
+                            occupant: DiskBayOccupant::Disk {
+                                identity: disk.identity().clone(),
+                            },
                         },
-                    });
-                    disks.insert(disk.identity().clone(), disk.clone());
-                }
-            }
-        }
+                        disk: Some(Box::new(disk.clone())),
+                    })
+                    .collect(),
+            ),
+        };
 
-        Ok(Self { tofino, disks, disk_bays })
+        Ok(Self { tofino, bays })
     }
 }
 
@@ -348,6 +325,20 @@ fn find_properties<'a, const N: usize>(
     Ok(output.try_into().map_err(|_| "Unexpected output size").unwrap())
 }
 
+/// Reads every bay from the hardware topology and describes each one.
+fn read_bays(
+    log: &Logger,
+    sled: OxideSled,
+    boot_storage_unit: BootStorageUnit,
+) -> Result<Vec<PolledBay>, Error> {
+    let observed = topo::read_disk_bays(log)?;
+    let nvme = Nvme::new()?;
+    Ok(observed
+        .iter()
+        .map(|bay| poll_bay(log, &nvme, sled, boot_storage_unit, bay))
+        .collect())
+}
+
 /// Describes one bay the topology reported and, when it holds an NVMe disk
 /// with a namespace, the disk to manage.
 fn poll_bay(
@@ -356,7 +347,12 @@ fn poll_bay(
     sled: OxideSled,
     boot_storage_unit: BootStorageUnit,
     bay: &ObservedBay,
-) -> Result<(DiskBay, Option<UnparsedDisk>), Error> {
+) -> PolledBay {
+    let unreadable = || PolledBay::Unreadable {
+        location: bay.location.clone(),
+        kind: bay.kind,
+        driver: bay.binding_driver.clone(),
+    };
     let facts = match &bay.occupant {
         ObservedOccupant::Nvme { instance, namespaces, .. } => {
             if namespaces.len() > 1 {
@@ -371,18 +367,44 @@ fn poll_bay(
                     "namespaces" => namespaces.len(),
                 );
             }
-            Some(nvme_facts(log, nvme, *instance)?)
+            match nvme_facts(log, nvme, *instance) {
+                Ok(facts) => Some(facts),
+                Err(err) => {
+                    warn!(
+                        log,
+                        "Failed to query NVMe controller";
+                        "location" => &bay.location,
+                        "nvme_instance" => %instance,
+                        InlineErrorChain::new(&err),
+                    );
+                    return unreadable();
+                }
+            }
         }
-        ObservedOccupant::Empty | ObservedOccupant::Other { .. } => None,
+        ObservedOccupant::Empty
+        | ObservedOccupant::Other { .. }
+        | ObservedOccupant::Unreadable(_) => None,
     };
     let is_boot_disk =
         pcie_slot_is_boot_disk(sled, bay.pcie_slot, boot_storage_unit);
-    Ok(classify_bay(bay, facts.as_ref(), is_boot_disk)?)
+    match classify_bay(bay, facts.as_ref(), is_boot_disk) {
+        Ok((bay, disk)) => {
+            PolledBay::Described { bay, disk: disk.map(Box::new) }
+        }
+        Err(err) => {
+            warn!(
+                log,
+                "Could not describe disk bay";
+                InlineErrorChain::new(&err),
+            );
+            unreadable()
+        }
+    }
 }
 
 /// Asks libnvme for what the topology does not record about a controller:
-/// its PCI vendor id, how many namespaces are active, and its firmware
-/// slots.
+/// its PCI vendor id, how many namespaces it has that the nvme driver does not
+/// ignore, and its firmware slots.
 fn nvme_facts(
     log: &Logger,
     nvme: &Nvme,
@@ -391,12 +413,12 @@ fn nvme_facts(
     let controller = Controller::init_by_instance(nvme, instance.as_i32())?;
     let pci_vid = controller.get_info()?.pci_vid()?;
 
-    let mut active_namespaces = 0;
+    let mut usable_namespaces = 0;
     for namespace in
-        controller.namespace_discovery(NamespaceDiscoveryLevel::Active)?
+        controller.namespace_discovery(NamespaceDiscoveryLevel::NotIgnored)?
     {
         namespace?;
-        active_namespaces += 1;
+        usable_namespaces += 1;
     }
 
     let controller_lock = match controller.try_read_lock() {
@@ -424,7 +446,7 @@ fn nvme_facts(
         firmware_log_page.slot_iter().map(|s| s.map(str::to_string)).collect(),
     );
 
-    Ok(NvmeFacts { pci_vid, active_namespaces, firmware })
+    Ok(NvmeFacts { pci_vid, usable_namespaces, firmware })
 }
 
 // Poll just enough of the device info tree to get the Baseboard. We really
@@ -505,11 +527,14 @@ fn poll_device_tree(
         }
     };
 
-    let HardwareSnapshot {
-        tofino: polled_tofino,
-        disks: polled_disks,
-        disk_bays: polled_bays,
-    } = polled_hw;
+    let HardwareSnapshot { tofino: polled_tofino, bays: polled_bays } =
+        polled_hw;
+
+    // Bays this poll could not describe keep what the previous view said.
+    let polled_disks = polled_bays.map(|bays| {
+        let previous = hardware_view_tx.borrow();
+        resolve_bays(log, bays, &previous.disk_bays, &previous.disks)
+    });
 
     // Check for any changes since the last view.
     let mut did_modify_tofino = false;
@@ -527,14 +552,18 @@ fn poll_device_tree(
             TofinoView::Stub { .. } => false,
         };
 
-        did_modify_disks =
-            if inner.disks == polled_disks && inner.disk_bays == polled_bays {
-                false
-            } else {
-                inner.disks = polled_disks.clone();
-                inner.disk_bays = polled_bays.clone();
-                true
-            };
+        did_modify_disks = match &polled_disks {
+            None => false,
+            Some((disks, bays)) => {
+                if inner.disks == *disks && inner.disk_bays == *bays {
+                    false
+                } else {
+                    inner.disks = disks.clone();
+                    inner.disk_bays = bays.clone();
+                    true
+                }
+            }
+        };
 
         did_modify_tofino || did_modify_disks
     });
@@ -548,11 +577,13 @@ fn poll_device_tree(
         info!(log, "Updated tofino"; "tofino" => ?polled_tofino);
     }
     if did_modify_disks {
-        info!(
-            log, "Updated disks";
-            "disks" => ?polled_disks,
-            "disk_bays" => ?polled_bays,
-        );
+        if let Some((disks, bays)) = &polled_disks {
+            info!(
+                log, "Updated disks";
+                "disks" => ?disks,
+                "disk_bays" => ?bays,
+            );
+        }
     }
 
     Ok(())
