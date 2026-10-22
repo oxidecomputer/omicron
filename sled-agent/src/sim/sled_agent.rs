@@ -319,7 +319,7 @@ impl SledAgent {
         // sled-agent will also return a 503 if it has no config. We don't do
         // that here because sim-sled-agent never gets a config if it isn't
         // explicitly given one.
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             if let Some(config) = self.omicron_sled_config() {
                 match config.update_disposition {
                     OmicronSledUpdateDisposition::Available => (),
@@ -371,7 +371,7 @@ impl SledAgent {
         //      point to the correct address.
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
-            if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+            if !self.vmms.contains_key(&propolis_id).await {
                 let metadata =
                     propolis_client::instance_spec::InstanceMetadata {
                         project_id: metadata.project_id,
@@ -432,7 +432,7 @@ impl SledAgent {
         let instance_run_time_state = self
             .vmms
             .sim_ensure(
-                &propolis_id.into_untyped_uuid(),
+                &propolis_id,
                 SledVmmState {
                     vmm_state: vmm_runtime,
                     migration_in,
@@ -486,10 +486,7 @@ impl SledAgent {
         self: &Arc<Self>,
         propolis_id: PropolisUuid,
     ) -> Result<VmmUnregisterResponse, Error> {
-        let instance = match self
-            .vmms
-            .sim_get_cloned_object(&propolis_id.into_untyped_uuid())
-            .await
+        let instance = match self.vmms.sim_get_cloned_object(&propolis_id).await
         {
             Ok(instance) => instance,
             Err(Error::ObjectNotFound { .. }) => {
@@ -502,7 +499,7 @@ impl SledAgent {
             updated_runtime: Some(instance.terminate()),
         };
 
-        self.vmms.sim_force_remove(propolis_id.into_untyped_uuid()).await;
+        self.vmms.sim_force_remove(propolis_id).await;
         Ok(response)
     }
 
@@ -538,11 +535,7 @@ impl SledAgent {
                     tokio::spawn(async move {
                         tokio::time::sleep(Duration::from_secs(10)).await;
                         match vmms
-                            .sim_ensure(
-                                &propolis_id.into_untyped_uuid(),
-                                current,
-                                Some(state),
-                            )
+                            .sim_ensure(&propolis_id, current, Some(state))
                             .await
                         {
                             Ok(state) => {
@@ -574,10 +567,8 @@ impl SledAgent {
             )?;
         }
 
-        let new_state = self
-            .vmms
-            .sim_ensure(&propolis_id.into_untyped_uuid(), current, Some(state))
-            .await?;
+        let new_state =
+            self.vmms.sim_ensure(&propolis_id, current, Some(state)).await?;
 
         Ok(VmmPutStateResponse { updated_runtime: Some(new_state) })
     }
@@ -588,14 +579,11 @@ impl SledAgent {
         &self,
         propolis_id: PropolisUuid,
     ) -> Result<SimInstance, crate::sled_agent::Error> {
-        self.vmms
-            .sim_get_cloned_object(&propolis_id.into_untyped_uuid())
-            .await
-            .map_err(|_| {
-                crate::sled_agent::Error::Instance(
-                    crate::instance_manager::Error::NoSuchVmm(propolis_id),
-                )
-            })
+        self.vmms.sim_get_cloned_object(&propolis_id).await.map_err(|_| {
+            crate::sled_agent::Error::Instance(
+                crate::instance_manager::Error::NoSuchVmm(propolis_id),
+            )
+        })
     }
 
     pub async fn instance_get_state(
@@ -664,7 +652,7 @@ impl SledAgent {
     }
 
     pub async fn vmm_poke(&self, id: PropolisUuid, mode: PokeMode) {
-        self.vmms.sim_poke(id.into_untyped_uuid(), mode).await;
+        self.vmms.sim_poke(id, mode).await;
     }
 
     /// Adds a Physical Disk to the simulated sled agent.
@@ -777,7 +765,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         body_args: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't alter IP state for VMM that's not registered",
             ));
@@ -812,7 +800,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         body_args: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't alter IP state for VMM that's not registered",
             ));
@@ -831,7 +819,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         subnets: AttachedSubnets,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't alter subnet state for VMM that's not registered",
             ));
@@ -847,7 +835,7 @@ impl SledAgent {
         &self,
         propolis_id: PropolisUuid,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't alter subnet state for VMM that's not registered",
             ));
@@ -866,7 +854,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         subnet: AttachedSubnet,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't alter subnet state for VMM that's not registered",
             ));
@@ -883,7 +871,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         subnet: IpNet,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't alter subnet state for VMM that's not registered",
             ));
@@ -900,7 +888,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't join multicast group for VMM that's not registered",
             ));
@@ -919,7 +907,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't leave multicast group for VMM that's not registered",
             ));
