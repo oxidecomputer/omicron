@@ -13,13 +13,19 @@ use crate::DbTypedUuid;
 use crate::SqlU32;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::fm_active_problem;
+use nexus_db_schema::schema::fm_active_problem_alert;
 use nexus_db_schema::schema::fm_active_problem_revision;
+use nexus_db_schema::schema::fm_active_problem_support_bundle;
 use nexus_types::fm::active_problem::{
-    ProblemCode, SitrepActiveProblem, SitrepRevision,
+    AlertLink, ProblemCode, SitrepActiveProblem, SitrepRevision,
+    SupportBundleLink,
 };
 use omicron_common::api::external::Error;
 use omicron_generation_kinds::ActiveProblemRevKind;
-use omicron_uuid_kinds::{ActiveProblemKind, ActiveProblemUuid, SitrepKind};
+use omicron_uuid_kinds::{
+    ActiveProblemKind, ActiveProblemUuid, AlertKind, SitrepKind,
+    SupportBundleKind,
+};
 
 /// An Active Problem in a fault management sitrep.
 ///
@@ -75,18 +81,74 @@ pub struct FmActiveProblemRevision {
     pub comment: String,
 }
 
+/// A link between an Active Problem in a fault management sitrep, and an alert.
+/// The referenced alert need not be one requested in the same sitrep, and a
+/// link will be created when the sitrep is executed as long as the referenced
+/// alert still exists.
+///
+/// This corresponds to a record in the `fm_active_problem_alert` table.
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[diesel(table_name = fm_active_problem_alert)]
+pub struct FmActiveProblemAlert {
+    pub problem_id: DbTypedUuid<ActiveProblemKind>,
+    pub alert_id: DbTypedUuid<AlertKind>,
+    /// The sitrep that this record is part of.
+    ///
+    /// Note that this is *not* the sitrep in which the link was first created;
+    /// see [`Self::created_sitrep_id`].
+    pub sitrep_id: DbTypedUuid<SitrepKind>,
+    /// The sitrep in which this link was first created.
+    pub created_sitrep_id: DbTypedUuid<SitrepKind>,
+    /// The Active Problem revision with which the alert is associated.
+    pub revision: DbTypedGeneration<ActiveProblemRevKind>,
+    pub comment: String,
+}
+
+/// A link between an Active Problem fault management sitrep and a support
+/// bundle. The support bundle need not have been requested in the same sitrep,
+/// and a link will be created when the sitrep is executed as long as the
+/// referenced support bundle still exists.
+///
+/// This corresponds to a record in the `fm_active_problem_support_bundle`
+/// table.
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[diesel(table_name = fm_active_problem_support_bundle)]
+pub struct FmActiveProblemSupportBundle {
+    pub problem_id: DbTypedUuid<ActiveProblemKind>,
+    pub support_bundle_id: DbTypedUuid<SupportBundleKind>,
+    /// The sitrep that this record is part of.
+    ///
+    /// Note that this is *not* the sitrep in which the link was first created;
+    /// see [`Self::created_sitrep_id`].
+    pub sitrep_id: DbTypedUuid<SitrepKind>,
+    /// The sitrep in which this link was first created.
+    pub created_sitrep_id: DbTypedUuid<SitrepKind>,
+    /// The Active Problem revision with which the support bundle is
+    /// associated.
+    pub revision: DbTypedGeneration<ActiveProblemRevKind>,
+    pub comment: String,
+}
+
 impl FmActiveProblem {
     /// Returns the `fm_active_problem` record for `problem` in the sitrep
     /// `sitrep_id`.
     ///
-    /// The problem's revisions are stored separately; see
-    /// [`FmActiveProblemRevision::from_sitrep`].
+    /// The problem's revisions, and records representing links to alerts and
+    /// support bundles, are stored in separate tables. See
+    /// [`FmActiveProblemRevision::from_sitrep`],
+    /// [`FmActiveProblemAlert::from_sitrep`], and
+    /// [`FmActiveProblemSupportBundle::from_sitrep`].
     pub fn from_sitrep(
         sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
         problem: &SitrepActiveProblem,
     ) -> Self {
-        let SitrepActiveProblem { id, requested_sitrep_id, revisions: _ } =
-            problem;
+        let SitrepActiveProblem {
+            id,
+            requested_sitrep_id,
+            revisions: _,
+            alerts: _,
+            support_bundles: _,
+        } = problem;
         Self {
             id: (*id).into(),
             sitrep_id: sitrep_id.into(),
@@ -96,7 +158,7 @@ impl FmActiveProblem {
 }
 
 impl FmActiveProblemRevision {
-    /// Returns the `fm_active_problem_revision` record for `revision` of the
+    /// Constructs an `fm_active_problem_revision` record for `revision` of the
     /// Active Problem `problem_id` in the sitrep `sitrep_id`.
     pub fn from_sitrep(
         sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
@@ -158,5 +220,88 @@ impl TryFrom<FmActiveProblemRevision> for SitrepRevision {
             action_required,
             comment,
         })
+    }
+}
+
+impl FmActiveProblemAlert {
+    /// Constructs an `fm_active_problem_alert` record for `link` from the
+    /// Active Problem `problem_id` in the sitrep `sitrep_id`.
+    pub fn from_sitrep(
+        sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
+        problem_id: ActiveProblemUuid,
+        link: AlertLink,
+    ) -> Self {
+        let AlertLink { alert_id, revision, created_sitrep_id, comment } = link;
+        Self {
+            problem_id: problem_id.into(),
+            alert_id: alert_id.into(),
+            sitrep_id: sitrep_id.into(),
+            created_sitrep_id: created_sitrep_id.into(),
+            revision: revision.into(),
+            comment,
+        }
+    }
+}
+
+impl From<FmActiveProblemAlert> for AlertLink {
+    fn from(link: FmActiveProblemAlert) -> Self {
+        let FmActiveProblemAlert {
+            problem_id: _,
+            alert_id,
+            sitrep_id: _,
+            created_sitrep_id,
+            revision,
+            comment,
+        } = link;
+        Self {
+            alert_id: alert_id.into(),
+            revision: revision.into(),
+            created_sitrep_id: created_sitrep_id.into(),
+            comment,
+        }
+    }
+}
+
+impl FmActiveProblemSupportBundle {
+    /// Constructs an `fm_active_problem_support_bundle` record for `link` from
+    /// the Active Problem `problem_id` in the sitrep `sitrep_id`.
+    pub fn from_sitrep(
+        sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
+        problem_id: ActiveProblemUuid,
+        link: SupportBundleLink,
+    ) -> Self {
+        let SupportBundleLink {
+            support_bundle_id,
+            revision,
+            created_sitrep_id,
+            comment,
+        } = link;
+        Self {
+            problem_id: problem_id.into(),
+            support_bundle_id: support_bundle_id.into(),
+            sitrep_id: sitrep_id.into(),
+            created_sitrep_id: created_sitrep_id.into(),
+            revision: revision.into(),
+            comment,
+        }
+    }
+}
+
+impl From<FmActiveProblemSupportBundle> for SupportBundleLink {
+    fn from(link: FmActiveProblemSupportBundle) -> Self {
+        let FmActiveProblemSupportBundle {
+            problem_id: _,
+            support_bundle_id,
+            sitrep_id: _,
+            created_sitrep_id,
+            revision,
+            comment,
+        } = link;
+        Self {
+            support_bundle_id: support_bundle_id.into(),
+            revision: revision.into(),
+            created_sitrep_id: created_sitrep_id.into(),
+            comment,
+        }
     }
 }
