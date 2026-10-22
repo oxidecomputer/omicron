@@ -31,7 +31,8 @@ use std::sync::Arc;
 pub enum StepError {
     /// A write was refused because the bundle reached its size limit.
     WriteRefused(WriteRefused),
-    /// The step stopped early, because collection was stopped.
+    /// The step stopped early, because the bundle reached its size limit
+    /// or was cancelled.
     Stopped,
     /// Any other failure.
     Other(anyhow::Error),

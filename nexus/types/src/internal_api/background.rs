@@ -358,7 +358,7 @@ pub enum SupportBundleCollectionStepStatus {
     Ok,
     Skipped,
     /// The step stopped before finishing, because the bundle reached its
-    /// size limit.
+    /// size limit or was cancelled.
     Stopped,
     Failed(String),
 }
