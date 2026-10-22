@@ -731,6 +731,119 @@ impl InstanceRunner {
     /// terminating the zone.
     const STOP_GRACE_PERIOD: Duration = Duration::from_secs(60 * 10);
 
+    #[expect(clippy::too_many_arguments)]
+    fn new(
+        log: Logger,
+        id: InstanceUuid,
+        propolis_id: PropolisUuid,
+        state: InstanceInitialState,
+        services: InstanceManagerServices,
+        sled_identifiers: SledIdentifiers,
+        metadata: InstanceMetadata,
+        rx: mpsc::Receiver<InstanceRequest>,
+        tx_monitor: mpsc::Sender<InstanceMonitorMessage>,
+        rx_monitor: mpsc::Receiver<InstanceMonitorMessage>,
+    ) -> Result<Self, Error> {
+        let InstanceInitialState {
+            vmm_spec,
+            local_config,
+            vmm_runtime,
+            propolis_addr,
+            migration_id,
+        } = state;
+
+        let InstanceManagerServices {
+            nexus_client,
+            vnic_allocator,
+            port_manager,
+            zone_bundler,
+            zone_builder_factory,
+            metrics_queue,
+            available_datasets_rx,
+            currently_managed_zpools_rx,
+        } = services;
+
+        let mut dhcp_config = DhcpCfg {
+            hostname: Some(
+                local_config
+                    .hostname
+                    .as_str()
+                    .parse()
+                    .map_err(Error::InvalidHostname)?,
+            ),
+            host_domain: local_config
+                .dhcp_config
+                .host_domain
+                .map(|domain| domain.parse())
+                .transpose()
+                .map_err(Error::InvalidHostname)?,
+            domain_search_list: local_config
+                .dhcp_config
+                .search_domains
+                .into_iter()
+                .map(|domain| domain.parse())
+                .collect::<Result<_, _>>()
+                .map_err(Error::InvalidHostname)?,
+            dns4_servers: Vec::new(),
+            dns6_servers: Vec::new(),
+        };
+        for ip in local_config.dhcp_config.dns_servers {
+            match ip {
+                IpAddr::V4(ip) => dhcp_config.dns4_servers.push(ip.into()),
+                IpAddr::V6(ip) => dhcp_config.dns6_servers.push(ip.into()),
+            }
+        }
+
+        // Construct the termination signal and response channel.
+        let terminator = Terminator::new(id, propolis_id);
+
+        let metadata = propolis_client::instance_spec::InstanceMetadata {
+            project_id: metadata.project_id,
+            silo_id: metadata.silo_id,
+            sled_id: sled_identifiers.sled_id,
+            sled_model: sled_identifiers.model,
+            sled_revision: sled_identifiers.revision,
+            sled_serial: sled_identifiers.serial,
+        };
+
+        Ok(Self {
+            log,
+            rx,
+            tx_monitor,
+            rx_monitor,
+            monitor_handle: None,
+            properties: propolis_client::instance_spec::InstanceProperties {
+                id: id.into_untyped_uuid(),
+                name: local_config.hostname.to_string(),
+                description: "Omicron-managed VM".to_string(),
+                metadata,
+            },
+            propolis_spec: vmm_spec,
+            propolis_id,
+            propolis_addr,
+            vnic_allocator,
+            port_manager,
+            requested_nics: local_config.nics,
+            external_ips: local_config.external_ips,
+            multicast_groups: local_config.multicast_groups,
+            firewall_rules: local_config.firewall_rules,
+            dhcp_config,
+            primary_nic_mtu: local_config.primary_nic_mtu,
+            state: InstanceStates::new(vmm_runtime, migration_id),
+            running_state: None,
+            nexus_client,
+            available_datasets_rx,
+            zone_builder_factory,
+            zone_bundler,
+            metrics_queue,
+            delegated_zvols: local_config.delegated_zvols,
+            // XXX This should use the attached subnets from the local config.
+            attached_subnets: IdOrdMap::new(),
+            terminator,
+            currently_managed_zpools_rx,
+        })
+    }
+
     async fn run(mut self, mut ticket: InstanceTicket) {
         use InstanceRequest::*;
 
@@ -2051,106 +2164,22 @@ impl Instance {
               "migration_id" => ?state.migration_id,
               "state" => ?state);
 
-        let InstanceInitialState {
-            vmm_spec,
-            local_config,
-            vmm_runtime,
-            propolis_addr,
-            migration_id,
-        } = state;
-
-        let InstanceManagerServices {
-            nexus_client,
-            vnic_allocator,
-            port_manager,
-            zone_bundler,
-            zone_builder_factory,
-            metrics_queue,
-            available_datasets_rx,
-            currently_managed_zpools_rx,
-        } = services;
-
-        let mut dhcp_config = DhcpCfg {
-            hostname: Some(
-                local_config
-                    .hostname
-                    .as_str()
-                    .parse()
-                    .map_err(Error::InvalidHostname)?,
-            ),
-            host_domain: local_config
-                .dhcp_config
-                .host_domain
-                .map(|domain| domain.parse())
-                .transpose()
-                .map_err(Error::InvalidHostname)?,
-            domain_search_list: local_config
-                .dhcp_config
-                .search_domains
-                .into_iter()
-                .map(|domain| domain.parse())
-                .collect::<Result<_, _>>()
-                .map_err(Error::InvalidHostname)?,
-            dns4_servers: Vec::new(),
-            dns6_servers: Vec::new(),
-        };
-        for ip in local_config.dhcp_config.dns_servers {
-            match ip {
-                IpAddr::V4(ip) => dhcp_config.dns4_servers.push(ip.into()),
-                IpAddr::V6(ip) => dhcp_config.dns6_servers.push(ip.into()),
-            }
-        }
-
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
         let (tx_monitor, rx_monitor) = mpsc::channel(1);
 
-        // Construct the termination signal and response channel.
-        let terminator = Terminator::new(id, propolis_id);
-
-        let metadata = propolis_client::instance_spec::InstanceMetadata {
-            project_id: metadata.project_id,
-            silo_id: metadata.silo_id,
-            sled_id: sled_identifiers.sled_id,
-            sled_model: sled_identifiers.model,
-            sled_revision: sled_identifiers.revision,
-            sled_serial: sled_identifiers.serial,
-        };
-
-        let runner = InstanceRunner {
-            log: log.new(o!("instance_id" => id.to_string())),
+        let runner = InstanceRunner::new(
+            log.new(o!("instance_id" => id.to_string())),
+            id,
+            propolis_id,
+            state,
+            services,
+            sled_identifiers,
+            metadata,
             rx,
             tx_monitor,
             rx_monitor,
-            monitor_handle: None,
-            properties: propolis_client::instance_spec::InstanceProperties {
-                id: id.into_untyped_uuid(),
-                name: local_config.hostname.to_string(),
-                description: "Omicron-managed VM".to_string(),
-                metadata,
-            },
-            propolis_spec: vmm_spec,
-            propolis_id,
-            propolis_addr,
-            vnic_allocator,
-            port_manager,
-            requested_nics: local_config.nics,
-            external_ips: local_config.external_ips,
-            multicast_groups: local_config.multicast_groups,
-            firewall_rules: local_config.firewall_rules,
-            dhcp_config,
-            primary_nic_mtu: local_config.primary_nic_mtu,
-            state: InstanceStates::new(vmm_runtime, migration_id),
-            running_state: None,
-            nexus_client,
-            available_datasets_rx,
-            zone_builder_factory,
-            zone_bundler,
-            metrics_queue,
-            delegated_zvols: local_config.delegated_zvols,
-            attached_subnets: IdOrdMap::new(),
-            terminator: terminator.clone(),
-            currently_managed_zpools_rx,
-        };
+        )?;
+        let terminator = runner.terminator.clone();
 
         let runner_handle = tokio::task::spawn(runner.run(ticket));
 
@@ -4088,104 +4117,6 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    impl InstanceRunner {
-        #[allow(clippy::too_many_arguments)]
-        fn new_for_test(
-            log: &slog::Logger,
-            instance_id: InstanceUuid,
-            propolis_id: PropolisUuid,
-            initial_state: InstanceInitialState,
-            services: InstanceManagerServices,
-            cmd_rx: mpsc::Receiver<InstanceRequest>,
-            monitor_tx: mpsc::Sender<InstanceMonitorMessage>,
-            monitor_rx: mpsc::Receiver<InstanceMonitorMessage>,
-        ) -> Self {
-            let metadata = InstanceMetadata {
-                silo_id: Uuid::new_v4(),
-                project_id: Uuid::new_v4(),
-            };
-            let sled_identifiers = SledIdentifiers {
-                rack_id: Uuid::new_v4(),
-                sled_id: Uuid::new_v4(),
-                model: "fake-model".into(),
-                revision: 1,
-                serial: "fake-serial".into(),
-            };
-
-            let metadata = propolis_client::instance_spec::InstanceMetadata {
-                project_id: metadata.project_id,
-                silo_id: metadata.silo_id,
-                sled_id: sled_identifiers.sled_id,
-                sled_model: sled_identifiers.model,
-                sled_revision: sled_identifiers.revision,
-                sled_serial: sled_identifiers.serial,
-            };
-
-            let InstanceInitialState {
-                vmm_spec,
-                local_config,
-                vmm_runtime,
-                propolis_addr,
-                migration_id,
-            } = initial_state;
-
-            let InstanceManagerServices {
-                nexus_client,
-                vnic_allocator,
-                port_manager,
-                available_datasets_rx,
-                zone_bundler,
-                zone_builder_factory,
-                metrics_queue,
-                currently_managed_zpools_rx,
-            } = services;
-
-            let dhcp_config = DhcpCfg::default();
-            let log = log.new(o!(
-                "component" => "TestInstanceRunner",
-                "instance_id" => instance_id.to_string(),
-                "propolis_id" => propolis_id.to_string(),
-            ));
-
-            Self {
-                log,
-                rx: cmd_rx,
-                tx_monitor: monitor_tx,
-                rx_monitor: monitor_rx,
-                monitor_handle: None,
-                properties:
-                    propolis_client::instance_spec::InstanceProperties {
-                        id: propolis_id.into_untyped_uuid(),
-                        name: "test instance".to_string(),
-                        description: "test instance".to_string(),
-                        metadata,
-                    },
-                propolis_spec: vmm_spec,
-                propolis_id,
-                propolis_addr,
-                vnic_allocator,
-                port_manager,
-                requested_nics: local_config.nics,
-                external_ips: local_config.external_ips,
-                multicast_groups: local_config.multicast_groups,
-                firewall_rules: local_config.firewall_rules,
-                dhcp_config,
-                primary_nic_mtu: local_config.primary_nic_mtu,
-                state: InstanceStates::new(vmm_runtime, migration_id),
-                running_state: None,
-                nexus_client,
-                available_datasets_rx,
-                zone_builder_factory,
-                zone_bundler,
-                metrics_queue,
-                delegated_zvols: local_config.delegated_zvols,
-                currently_managed_zpools_rx,
-                attached_subnets: IdOrdMap::new(),
-                terminator: Terminator::new(instance_id, propolis_id),
-            }
-        }
-    }
-
     struct TestInstanceRunner {
         runner_task: tokio::task::JoinHandle<()>,
         state_rx: tokio::sync::watch::Receiver<ReceivedInstanceState>,
@@ -4233,16 +4164,35 @@ mod tests {
             let (remove_tx, remove_rx) = mpsc::unbounded_channel();
             let ticket = InstanceTicket::new(propolis_id, remove_tx);
 
-            let runner = InstanceRunner::new_for_test(
-                &log,
+            let metadata = InstanceMetadata {
+                silo_id: Uuid::new_v4(),
+                project_id: Uuid::new_v4(),
+            };
+            let sled_identifiers = SledIdentifiers {
+                rack_id: Uuid::new_v4(),
+                sled_id: Uuid::new_v4(),
+                model: "fake-model".into(),
+                revision: 1,
+                serial: "fake-serial".into(),
+            };
+            let runner_log = log.new(o!(
+                "component" => "TestInstanceRunner",
+                "instance_id" => instance_id.to_string(),
+                "propolis_id" => propolis_id.to_string(),
+            ));
+            let runner = InstanceRunner::new(
+                runner_log,
                 instance_id,
                 propolis_id,
                 initial_state,
                 services,
+                sled_identifiers,
+                metadata,
                 cmd_rx,
                 monitor_tx.clone(),
                 monitor_rx,
-            );
+            )
+            .expect("constructed instance runner");
             let terminator = runner.terminator.clone();
 
             let runner_task = tokio::spawn(runner.run(ticket));
