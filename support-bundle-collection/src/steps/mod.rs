@@ -14,6 +14,7 @@ mod host_info;
 mod metadata;
 mod reconfigurator;
 mod sled_cubby;
+mod sp_components;
 mod sp_dumps;
 
 /// Returns all steps necessary to collect a bundle.
@@ -70,6 +71,21 @@ pub fn all(cache: &Cache) -> Vec<CollectionStep> {
                 move |collection, dir| {
                     async move {
                         sp_dumps::spawn_collection_steps(
+                            collection, &cache, dir,
+                        )
+                        .await
+                    }
+                    .boxed()
+                }
+            }),
+        ),
+        CollectionStep::new(
+            SupportBundleCollectionStep::STEP_SPAWN_SP_COMPONENTS,
+            Box::new({
+                let cache = cache.clone();
+                move |collection, dir| {
+                    async move {
+                        sp_components::spawn_collection_steps(
                             collection, &cache, dir,
                         )
                         .await

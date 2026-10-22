@@ -3356,6 +3356,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_flags (
     include_reconfigurator BOOL NOT NULL,
     include_sled_cubby_info BOOL NOT NULL,
     include_sp_dumps BOOL NOT NULL,
+    include_sp_components BOOL NOT NULL,
 
     PRIMARY KEY (bundle_id)
 );
@@ -8751,6 +8752,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selecti
     include_reconfigurator BOOL NOT NULL,
     include_sled_cubby_info BOOL NOT NULL,
     include_sp_dumps BOOL NOT NULL,
+    include_sp_components BOOL NOT NULL,
 
     PRIMARY KEY (sitrep_id, request_id)
 );
@@ -9740,7 +9742,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '309.0.0', NULL)
+    (TRUE, NOW(), NOW(), '310.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

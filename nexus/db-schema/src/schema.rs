@@ -1651,6 +1651,7 @@ table! {
         include_reconfigurator -> Bool,
         include_sled_cubby_info -> Bool,
         include_sp_dumps -> Bool,
+        include_sp_components -> Bool,
     }
 }
 
@@ -3523,6 +3524,7 @@ table! {
         include_reconfigurator -> Bool,
         include_sled_cubby_info -> Bool,
         include_sp_dumps -> Bool,
+        include_sp_components -> Bool,
     }
 }
 
