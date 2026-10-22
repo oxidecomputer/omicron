@@ -1484,7 +1484,7 @@ name = "clickhouse-admin-keeper-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "clickhouse-admin-types",
+ "clickhouse-admin-types-versions",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
