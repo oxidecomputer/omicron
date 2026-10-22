@@ -18,7 +18,4 @@ CREATE TABLE IF NOT EXISTS omicron.public.unadopted_rack (
     -- Underlay address of the particular sled-agent instance on the unadopted
     -- rack that's running the multirack join service:
     join_service_ip INET NOT NULL,
-    join_service_port INT4
-        CHECK (join_service_port BETWEEN 0 AND 65535)
-        NOT NULL
 )
