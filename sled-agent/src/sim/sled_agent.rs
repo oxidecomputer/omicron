@@ -298,11 +298,11 @@ impl SledAgent {
         let InstanceEnsureBody {
             vmm_spec,
             local_config,
-            instance_id,
             migration_id,
             vmm_runtime,
+            instance_id: _,
+            propolis_addr: _,
             metadata,
-            ..
         } = instance;
         let spec = vmm_spec.0.clone();
         // respond with a fake 500 level failure if asked to ensure an instance
@@ -371,7 +371,7 @@ impl SledAgent {
         //      point to the correct address.
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
-            if !self.vmms.contains_key(&instance_id.into_untyped_uuid()).await {
+            if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
                 let metadata =
                     propolis_client::instance_spec::InstanceMetadata {
                         project_id: metadata.project_id,
