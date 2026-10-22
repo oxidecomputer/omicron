@@ -9771,6 +9771,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.unadopted_sled (
     part_number STRING(63) NOT NULL,
 
     sled_agent_ip INET NOT NULL
+
+    -- This tracks whether this particular sled's sled-agent has been
+    -- successfully started by the multirack join service:
+    sled_agent_started BOOL NOT NULL,
+    -- This nullable column should be set to the last error we've seen for this
+    -- particular sled's sled-agent startup process, if any:
+    last_start_error_seen STRING(512),
 );
 
 -- Keep this at the end of file so that the database does not contain a version
