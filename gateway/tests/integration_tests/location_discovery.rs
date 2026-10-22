@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use gateway_client::SpComponent;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup;
 use gateway_types::component::SpType;
@@ -39,6 +40,55 @@ async fn discovery_both_locations() {
                 .into_inner();
             assert_eq!(state.serial_number, expected_serial);
         }
+    }
+
+    testctx0.teardown().await;
+    testctx1.teardown().await;
+}
+
+#[tokio::test]
+async fn cannot_reset_local_switch() {
+    let testctx0 = setup::test_setup_local_reset_disabled(
+        "cannot_reset_local_switch_0",
+        SpPort::One,
+    )
+    .await;
+    let testctx1 = setup::test_setup_local_reset_disabled(
+        "cannot_reset_local_switch_1",
+        SpPort::Two,
+    )
+    .await;
+
+    let client0 = &testctx0.client;
+    let client1 = &testctx1.client;
+
+    for (switch, client) in [(0, client0), (1, client1)] {
+        // Resetting the client's local switch SP should fail...
+        let err = client
+            .sp_component_reset(
+                &SpType::Switch,
+                switch,
+                SpComponent::SP_ITSELF.const_as_str(),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+        let expected = "reset_sp_of_local_switch";
+        assert!(
+            err.contains(expected),
+            "expected error to contain `{expected}`, but got `{err}`"
+        );
+
+        // ... but resetting the _other_ switch should succeed.
+        let other_switch = switch ^ 1;
+        client
+            .sp_component_reset(
+                &SpType::Switch,
+                other_switch,
+                SpComponent::SP_ITSELF.const_as_str(),
+            )
+            .await
+            .unwrap();
     }
 
     testctx0.teardown().await;
