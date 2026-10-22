@@ -117,6 +117,8 @@ pub mod v54;
 pub mod v55;
 #[path = "add_rack_id_to_inventory/mod.rs"]
 pub mod v57;
+#[path = "instance_attached_subnets_map/mod.rs"]
+pub mod v59;
 #[path = "add_probe_put_endpoint/mod.rs"]
 pub mod v6;
 #[path = "multicast_support/mod.rs"]
