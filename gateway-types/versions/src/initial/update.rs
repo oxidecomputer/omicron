@@ -21,6 +21,10 @@ pub enum SpComponentResetError {
     #[error("cannot reset SP of the sled hosting MGS")]
     ResetSpOfLocalSled,
 
+    /// MGS refuses to reset its own sled's connected switch's SP.
+    #[error("cannot reset SP of the switch connected to the sled hosting MGS")]
+    ResetSpOfLocalSwitch,
+
     /// Other dropshot errors.
     #[error("{internal_message}")]
     Other {
@@ -40,7 +44,8 @@ pub enum SpComponentResetError {
 impl HttpResponseError for SpComponentResetError {
     fn status_code(&self) -> ErrorStatusCode {
         match self {
-            SpComponentResetError::ResetSpOfLocalSled => {
+            SpComponentResetError::ResetSpOfLocalSled
+            | SpComponentResetError::ResetSpOfLocalSwitch => {
                 ErrorStatusCode::BAD_REQUEST
             }
             SpComponentResetError::Other { status, .. } => *status,

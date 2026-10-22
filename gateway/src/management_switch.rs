@@ -145,6 +145,20 @@ impl From<SpType> for gateway_types::component::SpType {
 )]
 pub(crate) struct SwitchPort(usize);
 
+/// Enum representing whether a given [`SpIdentifier`] corresponds to the SP of
+/// a locally-connected device (sled or switch).
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum SpLocality {
+    /// The SP is not local to this MGS.
+    NotLocal,
+
+    /// The SP is that of this MGS's hosting sled.
+    LocalSled,
+
+    /// The SP is that of this MGS's locally-connected switch.
+    LocalSwitch,
+}
+
 #[derive(Debug)]
 pub struct ManagementSwitch {
     local_ignition_controller_port: SwitchPort,
@@ -367,39 +381,48 @@ impl ManagementSwitch {
         Ok(location_map.port_to_id(self.local_ignition_controller_port))
     }
 
-    /// Determine whether our configuration allows us to reset the specified SP.
+    /// Determine whether a given SP is local to this MGS.
     ///
     /// # Errors
     ///
     /// This method will fail if discovery is not yet complete (i.e., we don't
     /// know the logical identifiers of any SP yet!).
-    pub fn allowed_to_reset_sp(
+    pub(crate) fn sp_locality(
         &self,
         id: SpIdentifier,
-    ) -> Result<bool, SpLookupError> {
+    ) -> Result<SpLocality, SpLookupError> {
         let location_map = self.location_map()?;
 
-        let allowed = match id.typ {
-            // All PSC resets are allowed.
-            SpType::Power => true,
-            // For sleds and switches, we disallow resetting our own local
-            // device unless explicitly configured to allow it. (Resetting our
-            // own local device is generally fraught: reset requires us to issue
-            // a reset, wait for the device to reset, then disarm a watchdog; if
-            // the reset we issue takes us down, we won't be around to disarm
-            // the watchdog.)
+        let locality = match id.typ {
+            // PSCs are never local to an MGS.
+            SpType::Power => SpLocality::NotLocal,
             SpType::Switch => {
-                id != location_map
-                    .port_to_id(self.local_ignition_controller_port)
-                    || location_map.allow_local_sled_sp_reset()
+                let local_switch_id = location_map
+                    .port_to_id(self.local_ignition_controller_port);
+                if id == local_switch_id {
+                    SpLocality::LocalSwitch
+                } else {
+                    SpLocality::NotLocal
+                }
             }
             SpType::Sled => {
-                id.slot != location_map.local_sled()
-                    || location_map.allow_local_sled_sp_reset()
+                if id.slot == location_map.local_sled() {
+                    SpLocality::LocalSled
+                } else {
+                    SpLocality::NotLocal
+                }
             }
         };
 
-        Ok(allowed)
+        Ok(locality)
+    }
+
+    /// Get whether our config told us it's okay to reset our local sled or
+    /// switch.
+    pub(crate) fn is_local_sp_reset_allowed(
+        &self,
+    ) -> Result<bool, SpLookupError> {
+        Ok(self.location_map()?.allow_local_sled_sp_reset())
     }
 
     /// Get the handle for communicating with an SP by its switch port.
