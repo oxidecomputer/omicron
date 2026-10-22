@@ -3546,6 +3546,28 @@ table! {
     }
 }
 
+table! {
+    fm_active_problem_alert (sitrep_id, problem_id, alert_id) {
+        problem_id -> Uuid,
+        alert_id -> Uuid,
+        sitrep_id -> Uuid,
+        created_sitrep_id -> Uuid,
+        revision -> Int8,
+        comment -> Text,
+    }
+}
+
+table! {
+    fm_active_problem_support_bundle (sitrep_id, problem_id, support_bundle_id) {
+        problem_id -> Uuid,
+        support_bundle_id -> Uuid,
+        sitrep_id -> Uuid,
+        created_sitrep_id -> Uuid,
+        revision -> Int8,
+        comment -> Text,
+    }
+}
+
 // Child data selection tables owned by `fm_support_bundle_request`. Each table
 // corresponds to a `BundleData` variant. Row existence means "include this
 // category in the referenced bundle."

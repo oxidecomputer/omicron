@@ -12,7 +12,9 @@ use iddqd::IdOrdMap;
 use omicron_common::api::external::Error;
 use omicron_generation_kinds::ActiveProblemRevNum;
 use omicron_uuid_kinds::ActiveProblemUuid;
+use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::SitrepUuid;
+use omicron_uuid_kinds::SupportBundleUuid;
 use serde::{Deserialize, Serialize};
 
 /// A structured internal representation of problem codes.
@@ -186,6 +188,15 @@ pub struct SitrepActiveProblem {
     pub id: ActiveProblemUuid,
     pub requested_sitrep_id: SitrepUuid,
     pub revisions: IdOrdMap<SitrepRevision>,
+    /// Alerts linked to this Active Problem, indexed by alert ID.
+    ///
+    /// See [`AlertLink`] for details.
+    pub alerts: IdOrdMap<AlertLink>,
+    /// Support bundles linked to this Active Problem, indexed by support
+    /// bundle ID.
+    ///
+    /// See [`SupportBundleLink`] for details.
+    pub support_bundles: IdOrdMap<SupportBundleLink>,
 }
 
 impl iddqd::IdOrdItem for SitrepActiveProblem {
@@ -232,6 +243,78 @@ impl iddqd::IdOrdItem for SitrepRevision {
     type Key<'a> = &'a ActiveProblemRevNum;
     fn key(&self) -> Self::Key<'_> {
         &self.number
+    }
+
+    iddqd::id_upcast!();
+}
+
+/// A link between an Active Problem and an alert.
+///
+/// Linked alerts form a timeline of events over the course of an Active Problem
+/// (see [RFD 699][rfd]). An alert may be linked to an Active Problem in the
+/// same sitrep that requests the alert, or in any later sitrep, including after
+/// the request has been removed from the sitrep. This may occur even if the
+/// alert was created prior to the Active Problem. Therefore, a link refers to
+/// the alert only by its ID, and does not require that a corresponding
+/// [`AlertRequest`](super::case::AlertRequest) exist in the sitrep. The same
+/// alert may be linked to multiple Active Problems.
+///
+/// A link exists for as long as the Active Problem it belongs to remains in the
+/// sitrep, and is never removed from or modified Active Problem once created.
+/// Therefore, rendezvous can create link records without needing a separate
+/// generation counter: as long as the Active Problem itself exists, its links
+/// may be created during execution.
+///
+/// [rfd]: https://rfd.shared.oxide.computer/rfd/0699#alerts-as-timeline
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct AlertLink {
+    /// The ID of the linked alert.
+    pub alert_id: AlertUuid,
+    /// The Active Problem revision with which the alert is associated.
+    ///
+    /// This is used to order an Active Problem's alerts by revision.
+    pub revision: ActiveProblemRevNum,
+    /// The sitrep in which this link was first created.
+    pub created_sitrep_id: SitrepUuid,
+    /// A human-readable comment explaining why the alert is linked to the
+    /// Active Problem, for debugging purposes.
+    pub comment: String,
+}
+
+impl iddqd::IdOrdItem for AlertLink {
+    type Key<'a> = &'a AlertUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.alert_id
+    }
+
+    iddqd::id_upcast!();
+}
+
+/// A link between an Active Problem and a support bundle.
+///
+/// Like [`AlertLink`]s, support bundle links may be created in the same sitrep
+/// that requests the support bundle or in any later sitrep, refer to the
+/// support bundle only by its ID, and are never removed or modified while
+/// the Active Problem remains in the sitrep. The same support bundle may be
+/// linked to multiple Active Problems.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct SupportBundleLink {
+    /// The ID of the linked support bundle.
+    pub support_bundle_id: SupportBundleUuid,
+    /// The Active Problem revision with which the support bundle is
+    /// associated.
+    pub revision: ActiveProblemRevNum,
+    /// The sitrep in which this link was first created.
+    pub created_sitrep_id: SitrepUuid,
+    /// A human-readable comment explaining why the support bundle is linked
+    /// to the Active Problem, for debugging purposes.
+    pub comment: String,
+}
+
+impl iddqd::IdOrdItem for SupportBundleLink {
+    type Key<'a> = &'a SupportBundleUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.support_bundle_id
     }
 
     iddqd::id_upcast!();

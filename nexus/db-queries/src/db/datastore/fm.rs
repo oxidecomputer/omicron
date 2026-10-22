@@ -40,7 +40,9 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::ereport::dsl as ereport_dsl;
 use nexus_db_schema::schema::fm_active_problem::dsl as problem_dsl;
+use nexus_db_schema::schema::fm_active_problem_alert::dsl as problem_alert_dsl;
 use nexus_db_schema::schema::fm_active_problem_revision::dsl as problem_rev_dsl;
+use nexus_db_schema::schema::fm_active_problem_support_bundle::dsl as problem_bundle_dsl;
 use nexus_db_schema::schema::fm_alert_request::dsl as alert_req_dsl;
 use nexus_db_schema::schema::fm_case::dsl as case_dsl;
 use nexus_db_schema::schema::fm_case_active_problem::dsl as case_problem_dsl;
@@ -146,6 +148,8 @@ sitrep_child_tables! {
     SupportBundleRequest => { table: "fm_support_bundle_request" },
     ActiveProblem => { table: "fm_active_problem" },
     ActiveProblemRevision => { table: "fm_active_problem_revision" },
+    ActiveProblemAlert => { table: "fm_active_problem_alert" },
+    ActiveProblemSupportBundle => { table: "fm_active_problem_support_bundle" },
     CaseActiveProblem => { table: "fm_case_active_problem" },
     Case => { table: "fm_case" },
     FmFactPhysicalDisk => { table: "fm_fact_physical_disk" },
@@ -593,8 +597,16 @@ impl DataStore {
             }
         }
 
+        // Load every alert and support bundle link in this sitrep, grouped by
+        // problem.
+        let mut alerts_by_problem =
+            Self::active_problem_alerts_read_on_conn(sitrep_id, conn).await?;
+        let mut support_bundles_by_problem =
+            Self::active_problem_support_bundles_read_on_conn(sitrep_id, conn)
+                .await?;
+
         // Then, load the Active Problems themselves, and attach each one's
-        // revisions.
+        // revisions and links.
         let mut problems = iddqd::IdOrdMap::new();
         let mut paginator =
             Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
@@ -632,11 +644,17 @@ impl DataStore {
                         );
                         Error::InternalError { internal_message }
                     })?;
+                // Unlike revisions, an Active Problem need not have any links.
+                let alerts = alerts_by_problem.remove(&id).unwrap_or_default();
+                let support_bundles =
+                    support_bundles_by_problem.remove(&id).unwrap_or_default();
                 problems
                     .insert_unique(SitrepActiveProblem {
                         id,
                         requested_sitrep_id: requested_sitrep_id.into(),
                         revisions,
+                        alerts,
+                        support_bundles,
                     })
                     .map_err(|_| {
                         let internal_message = format!(
@@ -656,8 +674,138 @@ impl DataStore {
             );
             return Err(Error::InternalError { internal_message });
         }
+        if let Some(orphaned) = alerts_by_problem.keys().next() {
+            let internal_message = format!(
+                "sitrep {sitrep_id} contains alert links for active problem \
+                 {orphaned}, but no record of that active problem",
+            );
+            return Err(Error::InternalError { internal_message });
+        }
+        if let Some(orphaned) = support_bundles_by_problem.keys().next() {
+            let internal_message = format!(
+                "sitrep {sitrep_id} contains support bundle links for active \
+                 problem {orphaned}, but no record of that active problem",
+            );
+            return Err(Error::InternalError { internal_message });
+        }
 
         Ok(problems)
+    }
+
+    /// Fetch all links between Active Problems and alerts in the given sitrep,
+    /// grouped by Active Problem.
+    async fn active_problem_alerts_read_on_conn(
+        sitrep_id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<
+        HashMap<ActiveProblemUuid, IdOrdMap<fm::active_problem::AlertLink>>,
+        Error,
+    > {
+        use nexus_db_schema::schema::fm_active_problem_alert::dsl;
+
+        let mut by_problem = HashMap::<_, IdOrdMap<_>>::new();
+        let mut paginator =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated_multicolumn(
+                dsl::fm_active_problem_alert,
+                (dsl::problem_id, dsl::alert_id),
+                &p.current_pagparams(),
+            )
+            .filter(dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+            .select(model::fm::FmActiveProblemAlert::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to load active problem alert links",
+                    )
+            })?;
+
+            paginator =
+                p.found_batch(&batch, &|link| (link.problem_id, link.alert_id));
+            for link in batch {
+                let problem_id: ActiveProblemUuid = link.problem_id.into();
+                let alert_id: AlertUuid = link.alert_id.into();
+                by_problem
+                    .entry(problem_id)
+                    .or_default()
+                    .insert_unique(link.into())
+                    .map_err(|_| {
+                        let internal_message = format!(
+                            "encountered multiple links between active \
+                             problem {problem_id} and alert {alert_id}. this \
+                             should really not be possible, as the problem ID \
+                             and alert ID are a primary key!",
+                        );
+                        Error::InternalError { internal_message }
+                    })?;
+            }
+        }
+
+        Ok(by_problem)
+    }
+
+    /// Fetch all links between Active Problems and support bundles in the
+    /// given sitrep, grouped by Active Problem.
+    async fn active_problem_support_bundles_read_on_conn(
+        sitrep_id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<
+        HashMap<
+            ActiveProblemUuid,
+            IdOrdMap<fm::active_problem::SupportBundleLink>,
+        >,
+        Error,
+    > {
+        use nexus_db_schema::schema::fm_active_problem_support_bundle::dsl;
+
+        let mut by_problem = HashMap::<_, IdOrdMap<_>>::new();
+        let mut paginator =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated_multicolumn(
+                dsl::fm_active_problem_support_bundle,
+                (dsl::problem_id, dsl::support_bundle_id),
+                &p.current_pagparams(),
+            )
+            .filter(dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+            .select(model::fm::FmActiveProblemSupportBundle::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to load active problem support bundle links",
+                    )
+            })?;
+
+            paginator = p.found_batch(&batch, &|link| {
+                (link.problem_id, link.support_bundle_id)
+            });
+            for link in batch {
+                let problem_id: ActiveProblemUuid = link.problem_id.into();
+                let bundle_id: SupportBundleUuid =
+                    link.support_bundle_id.into();
+                by_problem
+                    .entry(problem_id)
+                    .or_default()
+                    .insert_unique(link.into())
+                    .map_err(|_| {
+                        let internal_message = format!(
+                            "encountered multiple links between active \
+                             problem {problem_id} and support bundle \
+                             {bundle_id}. this should really not be \
+                             possible, as the problem ID and support bundle \
+                             ID are a primary key!",
+                        );
+                        Error::InternalError { internal_message }
+                    })?;
+            }
+        }
+
+        Ok(by_problem)
     }
 
     /// Fetch all associations between cases and Active Problems in the given
@@ -1328,6 +1476,8 @@ impl DataStore {
         let mut active_problems =
             Vec::with_capacity(sitrep.active_problems.len());
         let mut active_problem_revisions = Vec::new();
+        let mut active_problem_alerts = Vec::new();
+        let mut active_problem_support_bundles = Vec::new();
         for problem in sitrep.active_problems {
             active_problems.push(model::fm::FmActiveProblem::from_sitrep(
                 sitrep_id, &problem,
@@ -1339,6 +1489,20 @@ impl DataStore {
                     )
                 },
             ));
+            active_problem_alerts.extend(problem.alerts.into_iter().map(
+                |link| {
+                    model::fm::FmActiveProblemAlert::from_sitrep(
+                        sitrep_id, problem.id, link,
+                    )
+                },
+            ));
+            active_problem_support_bundles.extend(
+                problem.support_bundles.into_iter().map(|link| {
+                    model::fm::FmActiveProblemSupportBundle::from_sitrep(
+                        sitrep_id, problem.id, link,
+                    )
+                }),
+            );
         }
 
         if !active_problems.is_empty() {
@@ -1363,6 +1527,34 @@ impl DataStore {
                             "failed to insert active problem revisions",
                         )
                 })?;
+        }
+
+        if !active_problem_alerts.is_empty() {
+            diesel::insert_into(problem_alert_dsl::fm_active_problem_alert)
+                .values(active_problem_alerts)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to insert active problem alert links",
+                        )
+                })?;
+        }
+
+        if !active_problem_support_bundles.is_empty() {
+            diesel::insert_into(
+                problem_bundle_dsl::fm_active_problem_support_bundle,
+            )
+            .values(active_problem_support_bundles)
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to insert active problem support bundle links",
+                    )
+            })?;
         }
 
         // Now, try to make the sitrep current.
@@ -3132,10 +3324,26 @@ mod tests {
         let creator_id = OmicronZoneUuid::new_v4();
 
         // Two Active Problems, which should be sufficient to exercise the
-        // fm_active_problem, fm_active_problem_revision, and
+        // fm_active_problem, fm_active_problem_revision,
+        // fm_active_problem_alert, fm_active_problem_support_bundle, and
         // fm_case_active_problem read, write, and GC paths. One problem has
         // multiple revisions, the latest of which is resolved. The other is
         // associated with more than one case.
+        //
+        // Both problems link the same alert, which is requested by case 1 in
+        // this sitrep. The resolved problem also links to alert which is not
+        // requested in this sitrep, as though it had been requested by a
+        // previous one, and a support bundle requested by case 1.
+        let linked_alert_id = AlertUuid::new_v4();
+        let linked_bundle_id = SupportBundleUuid::new_v4();
+        let alert_link = |alert_id: AlertUuid, revision: u32, comment: &str| {
+            fm::active_problem::AlertLink {
+                alert_id,
+                revision: ActiveProblemRevNum::from_u32(revision),
+                created_sitrep_id: sitrep_id,
+                comment: comment.to_string(),
+            }
+        };
         let revision = |number: u32,
                         time_resolved: Option<DateTime<Utc>>,
                         summary: &str| {
@@ -3163,6 +3371,24 @@ mod tests {
             ]
             .into_iter()
             .collect(),
+            alerts: [
+                alert_link(linked_alert_id, 1, "requested along with it"),
+                alert_link(
+                    AlertUuid::new_v4(),
+                    2,
+                    "requested by an earlier sitrep",
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            support_bundles: [fm::active_problem::SupportBundleLink {
+                support_bundle_id: linked_bundle_id,
+                revision: ActiveProblemRevNum::from_u32(2),
+                created_sitrep_id: sitrep_id,
+                comment: "collected when the problem was resolved".to_string(),
+            }]
+            .into_iter()
+            .collect(),
         };
         let shared_problem = fm::active_problem::SitrepActiveProblem {
             id: ActiveProblemUuid::new_v4(),
@@ -3170,6 +3396,14 @@ mod tests {
             revisions: [revision(1, None, "two cases agree this is wrong")]
                 .into_iter()
                 .collect(),
+            alerts: [alert_link(
+                linked_alert_id,
+                1,
+                "also linked to the resolved problem",
+            )]
+            .into_iter()
+            .collect(),
+            support_bundles: iddqd::IdOrdMap::new(),
         };
         let case_problem =
             |problem: &fm::active_problem::SitrepActiveProblem,
@@ -3201,7 +3435,7 @@ mod tests {
             let mut alerts_requested = iddqd::IdOrdMap::new();
             alerts_requested
                 .insert_unique(fm::case::AlertRequest {
-                    id: AlertUuid::new_v4(),
+                    id: linked_alert_id,
                     class: AlertClass::TestFoo,
                     version: 0,
                     payload: serde_json::json!({}),
@@ -3223,7 +3457,7 @@ mod tests {
             let mut support_bundles_requested = iddqd::IdOrdMap::new();
             support_bundles_requested
                 .insert_unique(fm::case::SupportBundleRequest {
-                    id: SupportBundleUuid::new_v4(),
+                    id: linked_bundle_id,
                     requested_sitrep_id: sitrep_id,
                     data_selection: BundleDataSelection::all(),
                     comment: String::new(),
