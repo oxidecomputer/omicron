@@ -362,7 +362,7 @@ impl VmmStopForUpdate {
                     //
                     // Both of these methods are not immediate, and it will take
                     // some time for the instance to report itself as `Stopped`.
-                    // To reduce the latency from the time we change the Vmm's
+                    // To reduce the latency from the time we change the `Vmm`'s
                     // state to the time this is reflected in the instance, we
                     // do two things:
                     //
@@ -370,7 +370,7 @@ impl VmmStopForUpdate {
                     //    `instance::process_vmm_update`.
                     //  - Execute the instance update saga that
                     //    `instance::process_vmm_update` returns to reconcile
-                    //     the instance to the new VMM state.
+                    //    the instance to the new VMM state.
                     //
                     // We don't care if either of the previous two steps fails.
                     // We are running these steps as an _optimisation_ only. The
@@ -443,7 +443,7 @@ impl VmmStopForUpdate {
                         // This implies that it restarted and lost the
                         // previously created VMM.
                         //
-                        // Additionally, When `vmm_put_state` returns a
+                        // Additionally, when `vmm_put_state` returns a
                         // `NO_SUCH_INSTANCE` error, we transition the runtime
                         // state to `VmmState::Failed` above.
                         //
@@ -806,7 +806,7 @@ mod tests {
     }
 
     // Inserts a VMM row without sled agent knowing about it. This is used for
-    // VMM in states that we don't expect to stop.
+    // VMMs in states that we don't expect to stop.
     async fn insert_vmm_in_state(
         datastore: &DataStore,
         opctx: &OpContext,
