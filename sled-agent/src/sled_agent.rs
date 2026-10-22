@@ -293,6 +293,12 @@ impl From<Error> for dropshot::HttpError {
                             InlineErrorChain::new(&err).to_string(),
                         )
                     }
+                    err @ InstanceError::DuplicateAttachedSubnet(_) => {
+                        HttpError::for_bad_request(
+                            None,
+                            InlineErrorChain::new(&err).to_string(),
+                        )
+                    }
                     err @ (InstanceError::Timeout(_)
                     | InstanceError::VnicCreation(_)
                     | InstanceError::Notification(_)
