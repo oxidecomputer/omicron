@@ -216,7 +216,7 @@ impl DataStore {
                 model::DbSledBpAvailability::Unavailable,
             )
             .bind::<sql_types::Array<VmmStateEnum>, _>(
-                DbVmmState::SHOULD_STOP_FOR_EVACUATION.to_vec(),
+                DbVmmState::SHOULD_MARK_TO_STOP_FOR_EVACUATION.to_vec(),
             )
             .bind::<sql_types::BigInt, _>(i64::from(batch_size.get()))
             .execute_async(&*conn)
@@ -576,6 +576,8 @@ impl DataStore {
     ///
     /// The query performed by this function is paginated by the sled and
     /// VMM UUIDs, in that order.
+    // TODO-K: Probably change the name here? It's retrieving stoppable states,
+    //         not all of the VMMs marked to stop
     pub async fn vmm_list_marked_stop_for_update_by_sled_id(
         &self,
         opctx: &OpContext,
@@ -1362,8 +1364,7 @@ mod tests {
         let is_stoppable = |state: DbVmmState| {
             matches!(
                 state,
-                DbVmmState::Creating
-                    | DbVmmState::Starting
+                DbVmmState::Starting
                     | DbVmmState::Running
                     | DbVmmState::Rebooting
             )
@@ -1418,7 +1419,7 @@ mod tests {
             .expect("VMMs should be counted");
         assert_eq!(row_count, 40);
 
-        // Check there are 8 stoppable VMMs (4 per sled)
+        // Check there are 6 stoppable VMMs (3 per sled)
         let expected_ids: BTreeSet<Uuid> = vmms
             .iter()
             .filter(|vmm| {
@@ -1427,7 +1428,7 @@ mod tests {
             })
             .map(|vmm| vmm.id)
             .collect();
-        assert_eq!(expected_ids.len(), 8);
+        assert_eq!(expected_ids.len(), 6);
 
         // Check the retrieved ids for stoppable VMMs are the same as the
         // expected ones

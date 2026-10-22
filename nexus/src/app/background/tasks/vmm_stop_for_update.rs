@@ -675,7 +675,6 @@ mod tests {
     use diesel::QueryDsl;
     use diesel::SelectableHelper;
     use nexus_db_lookup::AsyncConnection;
-    use nexus_db_lookup::LookupPath;
     use nexus_db_model::Generation;
     use nexus_db_model::InstanceState;
     use nexus_db_model::Vmm;
@@ -683,8 +682,6 @@ mod tests {
     use nexus_db_model::VmmFailureReason;
     use nexus_db_model::VmmState as DbVmmState;
     use nexus_db_model::to_db_typed_generation;
-    use nexus_db_queries::authz;
-    use nexus_db_queries::db::pub_test_utils::helpers::create_instance_with_vmm;
     use nexus_test_utils::ControlPlaneBuilder;
     use nexus_test_utils::resource_helpers::create_anti_affinity_group;
     use nexus_test_utils::resource_helpers::create_default_ip_pools;
@@ -712,9 +709,7 @@ mod tests {
 
     // In order to stop a VMM, it needs to be registered with the simulated
     // sled agent. We keep a record of the states of the real VMMs we will be
-    // stopping. Even though `Creating` is a "stoppable" state, we do not
-    // include it in this list as a VMM is only in this state for a short
-    // period. This means we cannot reliably test a VMM in the `Creating` state.
+    // stopping.
     //
     // The label is used to name instances and groups.
     const REAL_VMM_STATES: [(&str, DbVmmState); 3] = [
@@ -907,12 +902,7 @@ mod tests {
         let generation = UpdateDispositionGeneration::from(1);
 
         create_default_ip_pools(client).await;
-        let project = create_project(client, PROJECT_NAME).await;
-        let (.., authz_project) = LookupPath::new(&opctx, &datastore)
-            .project_id(project.identity.id)
-            .lookup_for(authz::Action::CreateChild)
-            .await
-            .expect("project should exist");
+        create_project(client, PROJECT_NAME).await;
 
         // The simulated agent can only stop VMMs that are registered with it.
         // So, for each VMM that we intend to stop, we create a real instance
@@ -963,15 +953,9 @@ mod tests {
         // rows directly in the DB. The task should skip them entirely, so they
         // don't need to be registered with sled agent.
         //
-        // Even though this shouldn't happen in practice, we insert marked
-        // non-stoppable VMMs. This ensures that even if the task to mark VMMs
-        // marks a VMM that is in a state that it shouldn't be stopped in, this
-        // task skips it entirely.
-        //
-        // Also, we are including the VMMs in `Creating` state. As mentioned
-        // earlier, these cannot be reliably tested to stop, but we can
-        // conveniently use them to simulate VMMs that failed to stop. We insert
-        // them and mark them as needing to be stopped.
+        // We insert marked non-stoppable VMMs. This ensures that even if the
+        // task to mark VMMs marks a VMM that is in a state that it shouldn't be
+        // stopped in, this task skips it entirely.
         for sled_id in [sled_a, sled_b] {
             for &state in DbVmmState::ALL_STATES {
                 let unmarked = insert_vmm_in_state(
@@ -981,35 +965,15 @@ mod tests {
                 vmm_ids.push(unmarked.id);
 
                 if !REAL_VMM_STATES.iter().any(|(_, real)| *real == state) {
-                    let marked_id = if state == DbVmmState::Creating {
-                        // For each desired VMM in the Creating state , we
-                        // create a "real" instance as it would be while no
-                        // sled agent knows about it yet.
-                        let (_, vmm_id) = create_instance_with_vmm(
-                            &opctx,
-                            &datastore,
-                            &authz_project,
-                            &format!("creating-{sled_id}"),
-                            sled_id,
-                        )
-                        .await;
-                        let vmm_id = vmm_id.into_untyped_uuid();
-                        mark_vmm_stopped_for_update(&conn, vmm_id, generation)
-                            .await;
-                        vmm_id
-                    } else {
-                        insert_vmm_in_state(
-                            &datastore,
-                            &opctx,
-                            sled_id,
-                            state,
-                            Some(generation),
-                        )
-                        .await
-                        .id
-                    };
-
-                    vmm_ids.push(marked_id);
+                    let marked = insert_vmm_in_state(
+                        &datastore,
+                        &opctx,
+                        sled_id,
+                        state,
+                        Some(generation),
+                    )
+                    .await;
+                    vmm_ids.push(marked.id);
                 }
             }
         }
@@ -1028,29 +992,13 @@ mod tests {
         let should_be_stopped = |vmm: &Vmm| {
             vmm.stop_for_update_disposition_generation.is_some()
                 && DbVmmState::SHOULD_STOP_FOR_EVACUATION.contains(&vmm.state)
-                // As mentioned above, we don't expect VMMs in `Creating` state
-                // to stop for the purposes of this test
-                && vmm.state != DbVmmState::Creating
         };
         let (expected_rows_to_be_stopped, expected_rows_to_not_be_stopped): (
             Vec<Vmm>,
             Vec<Vmm>,
         ) = vmms.values().cloned().partition(should_be_stopped);
 
-        // Collect the ids of the VMMs in `Creating` state, which are the ones
-        // we expect to turn up as `Failed`.
-        let expected_failed_ids: BTreeSet<Uuid> =
-            expected_rows_to_not_be_stopped
-                .iter()
-                .filter(|vmm| {
-                    vmm.stop_for_update_disposition_generation.is_some()
-                        && vmm.state == DbVmmState::Creating
-                })
-                .map(|vmm| vmm.id)
-                .collect();
-
         assert_eq!(expected_rows_to_be_stopped.len(), 6);
-        assert_eq!(expected_failed_ids.len(), 2);
 
         // Confirm there is one of each stoppable state per sled in
         // `expected_rows_to_be_stopped`
@@ -1097,18 +1045,8 @@ mod tests {
             .sum();
         assert_eq!(failed_to_stop_count, 0);
 
-        // The VMMs that were in the `Creating` state will not have had a VMM
-        // registered with a sled agent yet. The task will then force a `Failed`
-        // state which means the VMMs will not be included in the
-        // `vmms_failed_to_stop_by_sled` field. But, we still collect the "not found"
-        // errors.
-        assert_eq!(
-            status.error_messages,
-            vec![
-                "Invalid Request: Not Found".to_string(),
-                "Invalid Request: Not Found".to_string()
-            ]
-        );
+        // No errors are expected
+        assert!(status.error_messages.is_empty());
 
         // Poke each simulated instance so each sled agent reports back to Nexus
         // and wait until each one reports `NoVmm`
@@ -1144,27 +1082,8 @@ mod tests {
             );
         }
 
-        // The initial marked `Creating` VMMs should now be `Failed`. Also, the
-        // instance-update saga should have marked them as deleted.
-        for id in &expected_failed_ids {
-            let actual = &vmms_after[id];
-            assert_eq!(
-                actual.state,
-                DbVmmState::Failed,
-                "VMM {id} was not marked as failed",
-            );
-            assert_eq!(
-                actual.failure_reason,
-                Some(VmmFailureReason::NoSuchInstance),
-            );
-            assert!(actual.time_deleted.is_some(), "VMM {id} was not deleted");
-        }
-
         // Make sure all other rows are unchanged
-        for expected in expected_rows_to_not_be_stopped
-            .iter()
-            .filter(|vmm| !expected_failed_ids.contains(&vmm.id))
-        {
+        for expected in &expected_rows_to_not_be_stopped {
             assert_eq!(
                 &vmms_after[&expected.id],
                 expected,
