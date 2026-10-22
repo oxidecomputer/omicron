@@ -1484,7 +1484,7 @@ name = "clickhouse-admin-keeper-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "clickhouse-admin-types",
+ "clickhouse-admin-types-versions",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
@@ -1500,7 +1500,8 @@ name = "clickhouse-admin-server-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "clickhouse-admin-types",
+ "clickhouse-admin-types-versions",
+ "iddqd",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
@@ -1516,7 +1517,8 @@ name = "clickhouse-admin-single-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "clickhouse-admin-types",
+ "clickhouse-admin-types-versions",
+ "iddqd",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
@@ -9522,6 +9524,7 @@ dependencies = [
  "chrono",
  "clap",
  "clickhouse-admin-single-client",
+ "clickhouse-admin-types",
  "crossterm 0.29.0",
  "crucible-agent-client",
  "crucible-pantry-client",
