@@ -518,6 +518,40 @@ fn name_schema(
 )]
 pub struct ByteCount(u64);
 
+/// Generates byte counts in `0..=i64::MAX`, the range a [`ByteCount`] may
+/// hold.
+///
+/// A uniform distribution over that range would almost never produce a multiple
+/// of a KiB, let alone a TiB, but real byte counts (disk and memory sizes)
+/// almost always are. So, rather than using the derive, we hand-implement a
+/// strategy that has a 1/5ths chance of generating multiples of each unit,
+/// rather than a uniform distribution.
+#[cfg(any(test, feature = "testing"))]
+impl proptest::arbitrary::Arbitrary for ByteCount {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+
+    fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
+        use proptest::strategy::Strategy;
+
+        const MAX: u64 = i64::MAX as u64;
+        proptest::prop_oneof![
+            0..=MAX,
+            (0..=MAX / KiB).prop_map(|n| n * KiB),
+            (0..=MAX / MiB).prop_map(|n| n * MiB),
+            (0..=MAX / GiB).prop_map(|n| n * GiB),
+            (0..=MAX / TiB).prop_map(|n| n * TiB),
+        ]
+        .prop_map(|bytes| {
+            ByteCount::try_from(bytes).expect(
+                "all branches of the `prop_oneof!` should generate at most
+                `i64::MAX` bytes, so this should always be in bounds",
+            )
+        })
+        .boxed()
+    }
+}
+
 impl<'de> Deserialize<'de> for ByteCount {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -2789,27 +2823,13 @@ mod test {
         }
     }
 
-    #[test]
-    fn test_bytecount_parse_roundtrips_display() {
-        let values = [
-            ByteCount::from(0u32),
-            ByteCount::from(1023u32),
-            ByteCount::from(1024u32),
-            ByteCount::from(1025u32),
-            ByteCount::from_kibibytes_u32(u32::MAX),
-            ByteCount::from_mebibytes_u32(1),
-            ByteCount::from_gibibytes_u32(1),
-            ByteCount::from_gibibytes_u32(1024),
-            ByteCount::try_from(i64::MAX).unwrap(),
-            ByteCount::try_from(8388607 * (1u64 << 40)).unwrap(),
-        ];
-        for value in values {
-            let displayed = value.to_string();
-            let parsed = displayed.parse::<ByteCount>().unwrap_or_else(|e| {
-                panic!("failed to parse {displayed:?}: {e}")
-            });
-            assert_eq!(parsed, value, "displayed: {displayed:?}");
-        }
+    #[test_strategy::proptest]
+    fn test_bytecount_parse_roundtrips_display(value: ByteCount) {
+        let displayed = value.to_string();
+        let parsed = displayed
+            .parse::<ByteCount>()
+            .unwrap_or_else(|e| panic!("failed to parse {displayed:?}: {e}"));
+        assert_eq!(parsed, value, "displayed: {displayed:?}");
     }
 
     #[test]
