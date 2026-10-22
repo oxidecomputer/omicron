@@ -219,7 +219,7 @@ async fn collect_data_from_sled(
     .buffer_unordered(MAX_CONCURRENT_SLED_AGENT_REQUESTS);
 
     // If collection stops, finish what's in flight, then report it.
-    let mut stopped = None;
+    let mut stopped = Ok(());
     while let Some(result) = diag_cmds.next().await {
         match result {
             Ok(()) => {}
@@ -233,12 +233,10 @@ async fn collect_data_from_sled(
                     file: {e}"
                 );
             }
-            Err(err) => stopped = Some(err),
+            Err(err) => stopped = Err(err),
         }
     }
-    if let Some(err) = stopped {
-        return Err(err);
-    }
+    stopped?;
 
     let zones = tokio::select! {
         _ = collection.stopped() => return Err(StepError::Stopped),
@@ -272,7 +270,7 @@ async fn collect_data_from_sled(
         })
         .buffer_unordered(MAX_CONCURRENT_SLED_AGENT_REQUESTS);
 
-    let mut stopped = None;
+    let mut stopped = Ok(());
     while let Some(log_collection_result) = log_futs.next().await {
         match log_collection_result {
             Ok(()) => {}
@@ -285,13 +283,11 @@ async fn collect_data_from_sled(
                     "error" => InlineErrorChain::new(e.as_ref()),
                 );
             }
-            Err(err) => stopped = Some(err),
+            Err(err) => stopped = Err(err),
         }
     }
-    match stopped {
-        Some(err) => Err(err),
-        None => Ok(CollectionStepOutput::None),
-    }
+    stopped?;
+    Ok(CollectionStepOutput::None)
 }
 
 // Run a `sled-diagnostics` future and save its output to a corresponding file.
