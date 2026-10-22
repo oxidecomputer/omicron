@@ -467,7 +467,7 @@ bootstrap-agent-lockstep-client = { path = "clients/bootstrap-agent-lockstep-cli
 bootstrap-agent-lockstep-types = { path = "sled-agent/bootstrap-agent-lockstep-types" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.5.0"
-byte-wrapper = { version = "0.1.0", features = ["serde", "schemars08"] }
+byte-wrapper = { version = "0.2.1", features = ["serde", "schemars08"] }
 bytes = "1.10.1"
 camino = { version = "1.2.0", features = ["serde1"] }
 camino-tempfile = "1.4.1"

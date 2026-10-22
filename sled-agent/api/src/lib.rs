@@ -36,6 +36,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (58, BYTE_WRAPPER_0_2_BUMP),
     (57, ADD_RACK_ID_TO_INVENTORY),
     (56, ADD_MULTIRACK_JOIN_COMPLETE),
     (55, ARTIFACT_HASH_SCHEMA),
