@@ -75,6 +75,7 @@ getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", defaul
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng", "wasm_js"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown-3575ec1268b04181 = { package = "hashbrown", version = "0.15.5" }
+hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13.2", default-features = false, features = ["ahash", "inline-more", "raw"] }
 hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17.0" }
 hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16.1" }
 hex = { version = "0.4.3", features = ["serde"] }
@@ -116,10 +117,11 @@ postgres-types = { version = "0.2.14", default-features = false, features = ["wi
 ppv-lite86 = { version = "0.2.21", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.1.4" }
 proc-macro2 = { version = "1.0.106" }
-qorb = { version = "0.4.1" }
 quote = { version = "1.0.45" }
-rand = { version = "0.9.2" }
-rand_chacha = { version = "0.9.0", default-features = false, features = ["std"] }
+rand-274715c4dabd11b0 = { package = "rand", version = "0.9.2" }
+rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.6" }
+rand_chacha-274715c4dabd11b0 = { package = "rand_chacha", version = "0.9.0", default-features = false, features = ["std"] }
+rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", default-features = false, features = ["std"] }
 regex = { version = "1.12.3" }
 regex-automata = { version = "0.4.14", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "std", "unicode"] }
 regex-syntax = { version = "0.8.10" }
@@ -236,6 +238,7 @@ getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", defaul
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng", "wasm_js"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown-3575ec1268b04181 = { package = "hashbrown", version = "0.15.5" }
+hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13.2", default-features = false, features = ["ahash", "inline-more", "raw"] }
 hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17.0" }
 hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16.1" }
 heck = { version = "0.4.1", features = ["unicode"] }
@@ -278,10 +281,11 @@ postgres-types = { version = "0.2.14", default-features = false, features = ["wi
 ppv-lite86 = { version = "0.2.21", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.1.4" }
 proc-macro2 = { version = "1.0.106" }
-qorb = { version = "0.4.1" }
 quote = { version = "1.0.45" }
-rand = { version = "0.9.2" }
-rand_chacha = { version = "0.9.0", default-features = false, features = ["std"] }
+rand-274715c4dabd11b0 = { package = "rand", version = "0.9.2" }
+rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.6" }
+rand_chacha-274715c4dabd11b0 = { package = "rand_chacha", version = "0.9.0", default-features = false, features = ["std"] }
+rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", default-features = false, features = ["std"] }
 regex = { version = "1.12.3" }
 regex-automata = { version = "0.4.14", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "std", "unicode"] }
 regex-syntax = { version = "0.8.10" }
