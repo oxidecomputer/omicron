@@ -189,28 +189,30 @@ impl Instance {
         };
 
         use instance_types::InstanceShutdownPolicy;
-        let (shutdown_policy_action, shutdown_policy_timeout) = match params
-            .shutdown_policy
-        {
-            Some(InstanceShutdownPolicy::HardOff) => {
-                (InstanceShutdownAction::HardOff, None)
-            }
-            // RFD 622: "A user-configurable timeout for the instance to
-            // finish stopping itself should be present, bounded between
-            // 1 and 3600 seconds, inclusive"
-            Some(InstanceShutdownPolicy::PowerButton { timeout_secs }) => (
-                InstanceShutdownAction::PowerButton,
-                Some(TimeDelta::seconds(timeout_secs.clamp(1, 3600) as i64)),
-            ),
-            // RFD 622: "To generally match the behavior of other cloud
-            // providers, the default action for an instance that does not
-            // have an explicit policy should be graceful-stop with a
-            // timeout of 600 seconds."
-            None => (
-                InstanceShutdownAction::PowerButton,
-                Some(TimeDelta::minutes(10)),
-            ),
-        };
+        let (shutdown_policy_action, shutdown_policy_timeout) =
+            match params.shutdown_policy {
+                Some(InstanceShutdownPolicy::HardOff) => {
+                    (InstanceShutdownAction::HardOff, None)
+                }
+                // RFD 622: "A user-configurable timeout for the instance to
+                // finish stopping itself should be present, bounded between
+                // 1 and 3600 seconds, inclusive." This is enforced at the API
+                // level and as a crdb constraint (expect `timeout_secs as i64`
+                // to be handled as an error elsewhere if somehow in the range
+                // where the cast would be problematic)
+                Some(InstanceShutdownPolicy::PowerButton { timeout_secs }) => (
+                    InstanceShutdownAction::PowerButton,
+                    Some(TimeDelta::seconds(timeout_secs as i64)),
+                ),
+                // RFD 622: "To generally match the behavior of other cloud
+                // providers, the default action for an instance that does not
+                // have an explicit policy should be graceful-stop with a
+                // timeout of 600 seconds."
+                None => (
+                    InstanceShutdownAction::PowerButton,
+                    Some(TimeDelta::minutes(10)),
+                ),
+            };
 
         Self {
             identity,

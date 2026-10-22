@@ -10507,28 +10507,6 @@ async fn test_instances_shutdown_policy_updates(
             .expect("invalid JSON response")
     }
 
-    // XXX probably don't actually wanna use these but in case i'm wrong..
-    // async fn mock_mode(
-    //     propolis_addr: std::net::SocketAddr,
-    //     mode: propolis_mock_server::MockMode,
-    // ) -> propolis_client::types::InstanceStateChange {
-    //     let url = format!("http://{}/mock/mode", propolis_addr);
-    //     reqwest::Client::new()
-    //         .put(url)
-    //         .json(&mode)
-    //         .send()
-    //         .await
-    //         .expect("setting mock mode failed unexpectedly")
-    // }
-    // async fn mock_step(propolis_addr: std::net::SocketAddr) {
-    //     let url = format!("http://{}/mock/step", propolis_addr);
-    //     reqwest::Client::new()
-    //         .put(url)
-    //         .send()
-    //         .await
-    //         .expect("single-stepping mock server failed unexpectedly");
-    // }
-
     create_project_and_pool(&client).await;
 
     // Create an instance with no specified shutdown policy.
@@ -10666,7 +10644,6 @@ async fn test_instances_shutdown_policy_updates(
     );
     // test that hard-off is still sent for a force stop request even when
     // an explicit powerbutton shutdown policy is present
-    expect_instance_start_ok(client, instance_name).await;
     expect_instance_stop_ok(client, instance_name, true).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
