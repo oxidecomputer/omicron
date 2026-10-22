@@ -83,6 +83,8 @@ use sagas::instance_update;
 use sled_agent_client::types::DelegatedZvol;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::VmmPutStateBody;
+use sled_agent_types::attached_subnet::AttachedSubnet;
+use sled_agent_types::attached_subnet::AttachedSubnetKind;
 use sled_agent_types::instance as sled_agent;
 use sled_agent_types::instance::ExternalIpConfig;
 use sled_agent_types::instance::ExternalIps;
@@ -1670,9 +1672,9 @@ impl super::Nexus {
             .instance_lookup_external_subnets(opctx, authz_instance)
             .await?
             .into_iter()
-            .map(|ext| sled_agent_client::types::AttachedSubnet {
+            .map(|ext| AttachedSubnet {
                 subnet: ext.subnet.into(),
-                kind: sled_agent_client::types::AttachedSubnetKind::External,
+                kind: AttachedSubnetKind::External,
             })
             .collect();
 
