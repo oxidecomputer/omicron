@@ -242,6 +242,7 @@ mod switch;
 mod tuf_repo;
 mod typed_generation;
 mod typed_uuid;
+mod unadopted;
 mod unsigned;
 mod upstairs_repair;
 mod user_builtin;
