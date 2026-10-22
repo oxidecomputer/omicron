@@ -2634,7 +2634,12 @@ impl InstanceRunner {
             .with_devices(&devices)
             .with_opte_ports(opte_ports)
             .with_links(vec![])
-            .with_limit_priv(vec![])
+            .with_limit_priv(vec![
+                // TODO-john remove once we figure out how we're actually
+                // scoping ioctls / privileges
+                "default".to_owned(),
+                "sys_dl_config".to_owned(),
+            ])
             .install()
             .await?;
 
