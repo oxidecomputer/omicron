@@ -37,6 +37,19 @@ impl M2Slot {
             _ => None,
         }
     }
+
+    /// Look up the slot of an M.2 socket from its chassis label, returning
+    /// `None` for any other label.
+    ///
+    /// Gimlet and Cosmo both pair M.2 East with boot storage unit A and
+    /// M.2 West with B.
+    pub fn from_chassis_location(location: &str) -> Option<Self> {
+        match location {
+            "M.2 East" => Some(Self::A),
+            "M.2 West" => Some(Self::B),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for M2Slot {
@@ -59,21 +72,6 @@ impl FromStr for M2Slot {
                 "unrecognized value {s} for M2 slot. \
                  Must be one of `a`, `A`, `b`, or `B`",
             )),
-        }
-    }
-}
-
-impl TryFrom<i64> for M2Slot {
-    type Error = anyhow::Error;
-
-    fn try_from(value: i64) -> Result<Self, Self::Error> {
-        match value {
-            // Gimlet and Cosmo have two M.2 drives. The value here is the
-            // PCIe physical slot number of the bridge above the drive:
-            // drive A is behind slot 0x11 and drive B behind slot 0x12.
-            17 => Ok(Self::A),
-            18 => Ok(Self::B),
-            _ => bail!("unexpected M.2 slot {value}"),
         }
     }
 }
