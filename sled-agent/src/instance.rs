@@ -149,23 +149,10 @@ pub enum Error {
 
     #[error("The IP subnet {0} is already attached")]
     SubnetAlreadyAttached(IpNet),
-
-    #[error(
-        "attached subnet {0} appears more than once in the instance's \
-         sled-local configuration"
-    )]
-    DuplicateAttachedSubnet(IpNet),
 }
 
 type PropolisClientError =
     propolis_client::Error<propolis_client::types::Error>;
-
-fn attached_subnets_from_local_config(
-    subnets: Vec<AttachedSubnet>,
-) -> Result<IdOrdMap<AttachedSubnet>, Error> {
-    IdOrdMap::from_iter_unique(subnets)
-        .map_err(|err| Error::DuplicateAttachedSubnet(err.new_item().subnet))
-}
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
 // an acknowledgement. This provides a hacky mechanism to "wait until the HTTP
@@ -808,9 +795,6 @@ impl InstanceRunner {
             dns4_servers: Vec::new(),
             dns6_servers: Vec::new(),
         };
-        let attached_subnets =
-            attached_subnets_from_local_config(attached_subnets)?;
-
         for ip in dns_servers {
             match ip {
                 IpAddr::V4(ip) => dhcp_config.dns4_servers.push(ip.into()),
@@ -3224,7 +3208,7 @@ mod tests {
                 search_domains: vec![],
             },
             delegated_zvols: vec![],
-            attached_subnets: vec![],
+            attached_subnets: IdOrdMap::new(),
             primary_nic_mtu: None,
         };
 
