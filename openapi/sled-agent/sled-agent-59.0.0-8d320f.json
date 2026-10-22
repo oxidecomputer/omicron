@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "58.0.0"
+    "version": "59.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -6137,10 +6137,22 @@
         "type": "object",
         "properties": {
           "attached_subnets": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/AttachedSubnet"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/AttachedSubnet"
-            }
+            },
+            "uniqueItems": true
           },
           "delegated_zvols": {
             "type": "array",
