@@ -2,11 +2,18 @@
      n_subnets_removed=0
      n_subnets_added=3
      n_subnets_total=3
+     n_errors=0
    dendrite instance on switch switch1
      n_subnets_removed=1
      n_subnets_added=0
      n_subnets_total=2
+     n_errors=1
+       failed to create subnet
    sled 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
      n_subnets=2
+     n_errors=0
    sled 9d8e2f61-7c0d-4b6a-9e5f-3a4b5c6d7e8f
      n_subnets=1
+     n_errors=2
+       duplicate subnet
+       failed to send attached subnets

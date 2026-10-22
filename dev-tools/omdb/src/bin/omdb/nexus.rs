@@ -2512,12 +2512,16 @@ impl std::fmt::Display for AttachedSubnetManagerStatusDisplay<'_> {
                     n_subnets_added,
                     n_subnets_removed,
                     n_total_subnets,
-                    errors: _,
+                    errors,
                 } = details;
                 writeln!(f, "   dendrite instance on switch {switch_slot:?}")?;
                 writeln!(f, "     n_subnets_removed={n_subnets_removed}")?;
                 writeln!(f, "     n_subnets_added={n_subnets_added}")?;
                 writeln!(f, "     n_subnets_total={n_total_subnets}")?;
+                writeln!(f, "     n_errors={}", errors.len())?;
+                for error in errors {
+                    writeln!(f, "       {error}")?;
+                }
             }
         }
         if sled.is_empty() {
@@ -2526,9 +2530,13 @@ impl std::fmt::Display for AttachedSubnetManagerStatusDisplay<'_> {
             let mut sled: Vec<_> = sled.iter().collect();
             sled.sort_unstable_by_key(|(sled_id, _)| **sled_id);
             for (sled_id, details) in sled {
-                let SledSubnetDetails { n_subnets, errors: _ } = details;
+                let SledSubnetDetails { n_subnets, errors } = details;
                 writeln!(f, "   sled {sled_id}")?;
                 writeln!(f, "     n_subnets={n_subnets}")?;
+                writeln!(f, "     n_errors={}", errors.len())?;
+                for error in errors {
+                    writeln!(f, "       {error}")?;
+                }
             }
         }
         Ok(())
@@ -6214,9 +6222,8 @@ mod tests {
         //
         // * There are two entries in `dendrite` to exercise
         //   the sorting in AttachedSubnetManagerStatusDisplay.
-        // * Some entries have errors. These errors are not
-        //   currently displayed, but will be in an upcoming
-        //   commit.
+        // * Some entries have errors. These errors are displayed
+        //   in the snapshot.
         let sled1 = SledUuid::from_u128(0x1b2b4c4f_42a5_4e3c_8b28_a1c1f2f3a0b1);
         let sled2 = SledUuid::from_u128(0x9d8e2f61_7c0d_4b6a_9e5f_3a4b5c6d7e8f);
         let status = AttachedSubnetManagerStatus {
