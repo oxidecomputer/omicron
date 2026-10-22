@@ -8,8 +8,8 @@ use camino::Utf8Path;
 use slog::Logger;
 use std::sync::Arc;
 use std::sync::Mutex;
+use tokio::sync::SetOnce;
 use tokio::sync::mpsc;
-use tokio::sync::watch;
 
 /// A fake implementation of [crate::zone::Zones].
 ///
@@ -28,9 +28,9 @@ struct HaltControl {
     //
     // NOTE: We ask to control a specific zone for testing, but all zones are
     // released. If we want to control individual zones, this could be a hashmap
-    // of bools instead, keyed on the zone name. We don't need that at this
+    // of objects instead, keyed on the zone name. We don't need that at this
     // time.
-    released: watch::Receiver<bool>,
+    released: Arc<SetOnce<()>>,
 }
 
 /// Handle to control when a zone starts and finishes halting.
@@ -50,7 +50,7 @@ pub struct HaltController {
     /// Which zones have started halting.
     started: mpsc::UnboundedReceiver<String>,
     /// Ask to release the halting zone.
-    release: watch::Sender<bool>,
+    release: Arc<SetOnce<()>>,
 }
 
 impl HaltController {
@@ -62,7 +62,8 @@ impl HaltController {
     /// Let the currently-blocked halt of a zone continue, as well as any
     /// future calls to it.
     pub fn release(&self) {
-        let _ = self.release.send(true);
+        // Ignore previously-set values, this is just a latch.
+        let _ = self.release.set(());
     }
 }
 
@@ -75,15 +76,15 @@ impl Zones {
     /// of a single zone.
     pub fn new_with_halt_control() -> (Arc<Self>, HaltController) {
         let (started_tx, started_rx) = mpsc::unbounded_channel();
-        let (released_tx, released_rx) = watch::channel(false);
+        let released = Arc::new(SetOnce::new());
         let zones = Arc::new(Self {
             zones: Mutex::new(vec![]),
             halt_ctl: Some(HaltControl {
                 started: started_tx,
-                released: released_rx,
+                released: released.clone(),
             }),
         });
-        (zones, HaltController { started: started_rx, release: released_tx })
+        (zones, HaltController { started: started_rx, release: released })
     }
 }
 
@@ -140,8 +141,7 @@ impl Api for Zones {
             // Indicate that we've started halting this zone.
             let _ = ctl.started.send(name.to_string());
             // Now wait for us to be released by the caller.
-            let mut released = ctl.released.clone();
-            let _ = released.wait_for(|r| *r).await;
+            ctl.released.wait().await;
         }
 
         // Either we're not instrumenting zone shutdown, or we have been
