@@ -537,15 +537,11 @@ const GiB: u64 = MiB * 1024;
 #[allow(non_upper_case_globals)]
 const TiB: u64 = GiB * 1024;
 
-#[allow(non_upper_case_globals)]
-const KiB_SUFFIX: &str = "KiB";
-#[allow(non_upper_case_globals)]
-const MiB_SUFFIX: &str = "MiB";
-#[allow(non_upper_case_globals)]
-const GiB_SUFFIX: &str = "GiB";
-#[allow(non_upper_case_globals)]
-const TiB_SUFFIX: &str = "TiB";
-const B_SUFFIX: &str = "B";
+// A mapping of string suffixen to the factor that converts between a suffixed
+// value and a number of bytes. This is used in the `fmt::Display` and `FromStr`
+// implementations for `ByteCount`.
+const BYTE_COUNT_SUFFIXEN: &[(&str, u64)] =
+    &[("TiB", TiB), ("GiB", GiB), ("MiB", MiB), ("KiB", KiB), ("B", 1)];
 
 impl ByteCount {
     // None of these three constructors can create a value larger than
@@ -579,20 +575,18 @@ impl ByteCount {
 
 impl Display for ByteCount {
     fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        if self.to_bytes() >= TiB && self.to_bytes().is_multiple_of(TiB) {
-            write!(f, "{} {TiB_SUFFIX}", self.to_whole_tebibytes())
-        } else if self.to_bytes() >= GiB && self.to_bytes().is_multiple_of(GiB)
-        {
-            write!(f, "{} {GiB_SUFFIX}", self.to_whole_gibibytes())
-        } else if self.to_bytes() >= MiB && self.to_bytes().is_multiple_of(MiB)
-        {
-            write!(f, "{} {MiB_SUFFIX}", self.to_whole_mebibytes())
-        } else if self.to_bytes() >= KiB && self.to_bytes().is_multiple_of(KiB)
-        {
-            write!(f, "{} {KiB_SUFFIX}", self.to_whole_kibibytes())
-        } else {
-            write!(f, "{} {B_SUFFIX}", self.to_bytes())
+        for &(suffix, factor) in BYTE_COUNT_SUFFIXEN {
+            if self.to_bytes() >= factor
+                && self.to_bytes().is_multiple_of(factor)
+            {
+                return write!(f, "{} {suffix}", self.to_bytes() / factor);
+            }
         }
+        // This is trivially unreachable, since the last iteration of the loop
+        // would have hit the ("B", 1) tuple, and we would never fall through to
+        // here. But, it's nicer not to panic even in the unreachable case if we
+        // can just do the correct thing instead.
+        write!(f, "{} B", self.to_bytes())
     }
 }
 
@@ -612,14 +606,6 @@ pub enum ByteCountParseError {
         source: std::num::ParseIntError,
     },
 }
-
-const BYTE_COUNT_SUFFIXEN: &[(&str, u64)] = &[
-    (TiB_SUFFIX, TiB),
-    (GiB_SUFFIX, GiB),
-    (MiB_SUFFIX, MiB),
-    (KiB_SUFFIX, KiB),
-    (B_SUFFIX, 1),
-];
 
 struct ByteCountSuffixenDisplayer;
 impl fmt::Display for ByteCountSuffixenDisplayer {
