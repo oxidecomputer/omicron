@@ -457,7 +457,7 @@ mod test {
         (dir, output, stop)
     }
 
-    fn assert_size_limit_exceeded(err: &StepError) {
+    fn assert_write_refused(err: &StepError) {
         assert!(
             matches!(err, StepError::WriteRefused(_)),
             "expected WriteRefused, got: {err:?}"
@@ -472,16 +472,14 @@ mod test {
     }
 
     #[test]
-    fn test_context_keeps_size_limit_exceeded() {
+    fn test_context_keeps_write_refused() {
         use crate::step::StepResultExt;
 
         let refused: Result<(), StepError> = Err(WriteRefused {
             limit: SupportBundleSizeLimit::new(1).unwrap(),
         }
         .into());
-        assert_size_limit_exceeded(
-            &refused.context("writing a file").unwrap_err(),
-        );
+        assert_write_refused(&refused.context("writing a file").unwrap_err());
 
         let other: Result<(), StepError> =
             Err(anyhow::anyhow!("the disk broke").into());
@@ -529,7 +527,7 @@ mod test {
         assert_eq!(budget.used(), accepted);
         assert!(accepted <= LIMIT);
 
-        let refusals = budget.refusals().expect("limit should be refusals");
+        let refusals = budget.refusals().expect("limit should be exceeded");
         let mut recorded = refusals.paths;
         recorded.sort();
         let mut refused: Vec<Utf8PathBuf> = results
@@ -592,7 +590,7 @@ mod test {
 
         let err =
             output.join("sub").write("second", "123456").await.unwrap_err();
-        assert_size_limit_exceeded(&err);
+        assert_write_refused(&err);
         assert!(!dir.path().join("sub/second").exists());
         assert_eq!(output.budget.used(), 5);
         assert!(stop.is_cancelled());
@@ -602,7 +600,7 @@ mod test {
         assert_eq!(output.budget.used(), 6);
 
         let err = output.write("fourth", "12345").await.unwrap_err();
-        assert_size_limit_exceeded(&err);
+        assert_write_refused(&err);
         assert!(!dir.path().join("fourth").exists());
         let refusals = output.budget.refusals().unwrap();
         assert_eq!(refusals.at, at);
@@ -626,7 +624,7 @@ mod test {
 
         let data = vec![7u8; 2 << 20];
         let err = output.write_stream("stream", &data[..]).await.unwrap_err();
-        assert_size_limit_exceeded(&err);
+        assert_write_refused(&err);
         assert!(!dir.path().join("stream").exists());
         assert_eq!(output.budget.used(), 5);
         assert!(stop.is_cancelled());
@@ -685,9 +683,7 @@ mod test {
         while output.budget.used() < 10 {
             tokio::task::yield_now().await;
         }
-        assert_size_limit_exceeded(
-            &output.write("big", [0; 100]).await.unwrap_err(),
-        );
+        assert_write_refused(&output.write("big", [0; 100]).await.unwrap_err());
         assert!(stop.is_cancelled());
 
         tx.unbounded_send(Ok(&b"abcdefghij"[..])).unwrap();
@@ -729,7 +725,7 @@ mod test {
             })
             .await
             .unwrap_err();
-        assert_size_limit_exceeded(&err);
+        assert_write_refused(&err);
         assert!(!dir.path().join("big.json").exists());
         assert_eq!(output.budget.used(), 0);
         assert!(stop.is_cancelled());
@@ -771,7 +767,7 @@ mod test {
             })
             .await
             .unwrap_err();
-        assert_size_limit_exceeded(&err);
+        assert_write_refused(&err);
         assert!(!dir.path().join("file").exists());
         assert_eq!(output.budget.used(), 0);
         assert!(stop.is_cancelled());
