@@ -13,9 +13,9 @@
 //! The `oxhc` enumerator fills each of those in from the PCIe bridge behind
 //! it. An empty bay has no children. A bay holding an NVMe device gets
 //! `binding/driver = "nvme"` and, if the disk enumerator succeeds, an `nvme`
-//! child carrying the driver instance, with one `disk` child per namespace
-//! the nvme driver does not ignore. A bay holding anything else gets a `board` child with an `ic`
-//! under it as a placeholder.
+//! child carrying the driver instance, with one `disk` child per
+//! namespace the nvme driver does not ignore. A bay holding anything else
+//! gets a `board` child with an `ic` under it as a placeholder.
 
 use crate::disk_bay::{
     BayProblem, ObservedBay, ObservedNamespace, ObservedOccupant,

@@ -6635,7 +6635,7 @@
             ]
           },
           {
-            "description": "A device is attached but there is no disk sled-agent can manage: an NVMe controller with no active namespace, or something that is not NVMe at all.",
+            "description": "A device is attached but there is no disk sled-agent can manage: an NVMe controller with no usable namespace, something that is not NVMe at all, or a device sled-agent could not read.",
             "type": "object",
             "properties": {
               "devfs_path": {

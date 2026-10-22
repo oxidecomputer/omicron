@@ -1021,8 +1021,8 @@ pub enum DiskBayOccupant {
     /// under this identity.
     Disk { identity: DiskIdentity },
     /// A device is attached but there is no disk the sled can manage: an
-    /// NVMe controller with no active namespace, or something that is not
-    /// NVMe at all.
+    /// NVMe controller with no usable namespace, something that is not NVMe
+    /// at all, or a device the sled could not read.
     Device { driver: Option<String>, devfs_path: Option<String> },
 }
 

@@ -4864,7 +4864,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.inv_disk_bay_occupant AS ENUM (
     -- An NVMe disk the sled manages; it also appears in `inv_physical_disk`.
     'disk',
     -- A device is attached but is not a usable disk: an NVMe controller with
-    -- no active namespace, or something that is not NVMe at all.
+    -- no usable namespace, something that is not NVMe at all, or a device
+    -- the sled could not read.
     'device'
 );
 

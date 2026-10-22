@@ -106,8 +106,8 @@ pub enum InventoryDiskBayOccupant {
     /// `Inventory::disks` under this identity.
     Disk { identity: DiskIdentity },
     /// A device is attached but there is no disk sled-agent can manage: an
-    /// NVMe controller with no active namespace, or something that is not
-    /// NVMe at all.
+    /// NVMe controller with no usable namespace, something that is not NVMe
+    /// at all, or a device sled-agent could not read.
     Device {
         /// The driver bound to the device, if one is.
         driver: Option<String>,

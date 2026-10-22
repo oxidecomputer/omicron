@@ -24,6 +24,7 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::DiskBay;
+use nexus_types::inventory::DiskBayOccupant;
 use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::HostPhase1FlashHash;
 use nexus_types::inventory::InternalDnsGenerationStatus;
@@ -639,11 +640,18 @@ impl CollectionBuilder {
         // The sled lists bays in the order its topology walks them; the
         // datastore reads them back by location. Sort them here so a
         // collection equals its own database round trip. The location is
-        // also part of the database key, so keep only the first bay with
-        // any given location.
+        // also part of the database key, so keep only one bay per location:
+        // one that holds a disk if there is one, else the first reported.
         let mut disk_bays: Vec<DiskBay> =
             inventory.disk_bays.into_iter().map(|b| b.into()).collect();
-        disk_bays.sort_by(|a, b| a.location.cmp(&b.location));
+        let holds_disk = |bay: &DiskBay| {
+            matches!(bay.occupant, DiskBayOccupant::Disk { .. })
+        };
+        disk_bays.sort_by(|a, b| {
+            a.location
+                .cmp(&b.location)
+                .then_with(|| holds_disk(b).cmp(&holds_disk(a)))
+        });
         let reported_bays = disk_bays.len();
         disk_bays.dedup_by(|a, b| a.location == b.location);
         if disk_bays.len() != reported_bays {
@@ -1971,8 +1979,8 @@ mod test {
         );
     }
 
-    // A sled reporting two bays with the same location keeps the first and
-    // records an error, rather than failing the collection's insert.
+    // A sled reporting several bays with the same location keeps one, and
+    // records an error rather than failing the collection's insert.
     #[test]
     fn test_duplicate_disk_bay_location() {
         use sled_agent_types::disk::DiskVariant;
@@ -1987,9 +1995,14 @@ mod test {
             kind: DiskVariant::U2,
             occupant,
         };
-        let device = InventoryDiskBayOccupant::Device {
+        let device = || InventoryDiskBayOccupant::Device {
             driver: Some("nvme".to_string()),
             devfs_path: None,
+        };
+        let identity = sled_agent_types::disk::DiskIdentity {
+            vendor: "v".to_string(),
+            model: "m".to_string(),
+            serial: "s".to_string(),
         };
         let sled_id = "1f1b4c3e-1f39-4fd4-a1f8-0e8f3f9b5b21".parse().unwrap();
         builder
@@ -2006,7 +2019,14 @@ mod test {
                     vec![
                         bay("N1", InventoryDiskBayOccupant::Empty),
                         bay("N0", InventoryDiskBayOccupant::Empty),
-                        bay("N1", device),
+                        bay("N2", device()),
+                        bay(
+                            "N1",
+                            InventoryDiskBayOccupant::Disk {
+                                identity: identity.clone(),
+                            },
+                        ),
+                        bay("N2", InventoryDiskBayOccupant::Empty),
                     ],
                     vec![],
                     vec![],
@@ -2023,8 +2043,16 @@ mod test {
         let sled = collection.sled_agents.get(&sled_id).unwrap();
         let locations: Vec<_> =
             sled.disk_bays.iter().map(|b| b.location.as_str()).collect();
-        assert_eq!(locations, ["N0", "N1"]);
-        assert_eq!(sled.disk_bays[1].occupant, DiskBayOccupant::Empty);
+        assert_eq!(locations, ["N0", "N1", "N2"]);
+        // A bay holding a disk wins; otherwise the first one reported does.
+        assert_eq!(
+            sled.disk_bays[1].occupant,
+            DiskBayOccupant::Disk { identity }
+        );
+        assert!(matches!(
+            sled.disk_bays[2].occupant,
+            DiskBayOccupant::Device { .. }
+        ));
         assert_eq!(collection.errors.len(), 1);
         assert!(
             collection.errors[0].contains("duplicate location"),
