@@ -3487,8 +3487,9 @@ mod tests {
             42
         );
 
-        // DbInstance::new clamps invalid timeout to max allowed by db constraint
-        // (XXX: is that good?)
+        // DbInstance::new doesn't clamp an invalid timeout
+        // (enforced instead by check_instance_shutdown_policy_valid
+        // and crdb constraint)
         params.shutdown_policy =
             Some(instance::InstanceShutdownPolicy::PowerButton {
                 timeout_secs: 999000,
@@ -3500,7 +3501,7 @@ mod tests {
         );
         assert_eq!(
             db_instance.shutdown_policy_timeout.unwrap().num_seconds(),
-            3600
+            999000
         );
     }
 }
