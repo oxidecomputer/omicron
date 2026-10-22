@@ -171,5 +171,7 @@ pub enum ImpactedResource {
     },
     /// A disk snapshot.
     Snapshot { id: Uuid },
+    /// A silo.
+    Silo { id: Uuid },
     // TODO: This list is incomplete! You can help by expanding it.
 }
