@@ -9749,7 +9749,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.unadopted_rack (
 
     -- Underlay address of the particular sled-agent instance on the unadopted
     -- rack that's running the multirack join service:
-    join_service_ip INET NOT NULL,
+    join_service_ip INET NOT NULL
 );
 
 -- Tracks sleds from other racks that have joined the underlay network but
@@ -9773,14 +9773,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.unadopted_sled (
     serial_number STRING(63) NOT NULL,
     part_number STRING(63) NOT NULL,
 
-    sled_agent_ip INET NOT NULL
+    sled_agent_ip INET NOT NULL,
 
     -- This tracks whether this particular sled's sled-agent has been
     -- successfully started by the multirack join service:
     sled_agent_started BOOL NOT NULL,
     -- This nullable column should be set to the last error we've seen for this
     -- particular sled's sled-agent startup process, if any:
-    last_start_error_seen STRING(512),
+    last_start_error_seen STRING(512)
 );
 
 -- Keep this at the end of file so that the database does not contain a version
