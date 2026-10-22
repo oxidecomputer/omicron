@@ -14377,6 +14377,7 @@ dependencies = [
  "async-trait",
  "byte-wrapper",
  "chrono",
+ "iddqd",
  "omicron-common",
  "omicron-generation-kinds",
  "omicron-uuid-kinds",
