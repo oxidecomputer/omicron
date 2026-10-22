@@ -16,6 +16,7 @@ use nexus_types::internal_api::background::SupportBundleCollectionStep;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeSet;
 use std::fmt::Display;
 use std::sync::Arc;
 
@@ -172,7 +173,7 @@ impl CompletedCollectionStep {
         self,
         report: &mut SupportBundleCollectionReport,
         steps: &mut Vec<CollectionStep>,
-        incomplete_steps: &mut Vec<String>,
+        incomplete_steps: &mut BTreeSet<String>,
     ) {
         use SupportBundleCollectionStepStatus as Status;
 
@@ -180,7 +181,7 @@ impl CompletedCollectionStep {
         let status = match self.output {
             CollectionStepOutput::Skipped => Status::Skipped,
             CollectionStepOutput::Stopped => {
-                incomplete_steps.push(self.name.clone());
+                incomplete_steps.insert(self.name.clone());
                 Status::Stopped
             }
             CollectionStepOutput::Failed(err) => {
@@ -257,7 +258,7 @@ mod test {
         let mut report =
             SupportBundleCollectionReport::new(SupportBundleUuid::new_v4());
         let mut steps = vec![];
-        let mut incomplete_steps = vec![];
+        let mut incomplete_steps = BTreeSet::new();
         for step in [
             completed("stopped", CollectionStepOutput::Stopped),
             completed(
@@ -274,7 +275,7 @@ mod test {
             step.process(&mut report, &mut steps, &mut incomplete_steps);
         }
 
-        assert_eq!(incomplete_steps, ["stopped"]);
+        assert_eq!(incomplete_steps, BTreeSet::from(["stopped".to_string()]));
         let statuses: Vec<_> = report
             .steps
             .iter()

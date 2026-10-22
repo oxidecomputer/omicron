@@ -28,6 +28,7 @@ use serde::Serialize;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog::Key;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::net::Ipv6Addr;
@@ -305,9 +306,9 @@ pub struct SupportBundleSizeLimitExceeded {
     /// bundle's root, in the order refused.
     pub refused_paths: Vec<String>,
     /// Steps which stopped before finishing.
-    pub incomplete_steps: Vec<String>,
+    pub incomplete_steps: BTreeSet<String>,
     /// Steps which never started because the limit was reached.
-    pub skipped_steps: Vec<String>,
+    pub skipped_steps: BTreeSet<String>,
 }
 
 /// Pairs a [`SupportBundleCollectionReport`] with facts known only after

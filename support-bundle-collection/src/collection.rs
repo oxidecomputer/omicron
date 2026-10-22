@@ -49,6 +49,7 @@ use slog::debug;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -231,7 +232,7 @@ impl BundleCollection {
             self.size_budget.clone(),
             self.log.clone(),
         );
-        let mut incomplete_steps = vec![];
+        let mut incomplete_steps = BTreeSet::new();
 
         const MAX_CONCURRENT_STEPS: usize = 16;
         let mut tasks =
@@ -310,10 +311,8 @@ impl BundleCollection {
 
         // At the size limit, steps still queued never ran.
         if let Some(refusals) = self.size_budget.refusals() {
-            incomplete_steps.sort();
-            let mut skipped_steps: Vec<String> =
+            let skipped_steps =
                 steps.into_iter().map(|step| step.name).collect();
-            skipped_steps.sort();
             report.size_limit_exceeded = Some(SupportBundleSizeLimitExceeded {
                 limit_bytes: self.size_budget.limit().byte_count(),
                 used_bytes: self.size_budget.used(),
@@ -384,13 +383,16 @@ impl BundleCollection {
         for (title, items) in [
             (
                 "Files left out because they would exceed the limit:",
-                &exceeded.refused_paths,
+                exceeded.refused_paths.iter().collect::<Vec<_>>(),
             ),
             (
                 "Steps which stopped before finishing:",
-                &exceeded.incomplete_steps,
+                exceeded.incomplete_steps.iter().collect(),
             ),
-            ("Steps which never started:", &exceeded.skipped_steps),
+            (
+                "Steps which never started:",
+                exceeded.skipped_steps.iter().collect(),
+            ),
         ] {
             if items.is_empty() {
                 continue;

@@ -3157,13 +3157,16 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                     for (title, items) in [
                         (
                             "files left out (would exceed the limit)",
-                            &exceeded.refused_paths,
+                            exceeded.refused_paths.iter().collect::<Vec<_>>(),
                         ),
                         (
                             "steps stopped before finishing",
-                            &exceeded.incomplete_steps,
+                            exceeded.incomplete_steps.iter().collect(),
                         ),
-                        ("steps never started", &exceeded.skipped_steps),
+                        (
+                            "steps never started",
+                            exceeded.skipped_steps.iter().collect(),
+                        ),
                     ] {
                         println!("        {title}: {}", items.len());
                         for item in items {

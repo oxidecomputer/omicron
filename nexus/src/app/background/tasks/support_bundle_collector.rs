@@ -752,6 +752,7 @@ mod test {
     use sled_agent_types::disk::DatasetConfig;
     use sled_agent_types::disk::SharedDatasetConfig;
     use sled_agent_types::inventory::ZpoolHealth;
+    use std::collections::BTreeSet;
     use std::num::NonZeroU64;
     use support_bundle_collection::SIZE_LIMIT_EXCEEDED_FILE;
     use support_bundle_collection::perfetto;
@@ -1404,7 +1405,7 @@ mod test {
         }
 
         // Exactly the steps which stopped are listed as incomplete.
-        let mut stopped: Vec<_> = report
+        let stopped: BTreeSet<_> = report
             .collection
             .steps
             .iter()
@@ -1413,7 +1414,6 @@ mod test {
             })
             .map(|step| step.name.clone())
             .collect();
-        stopped.sort();
         assert!(!stopped.is_empty());
         assert_eq!(stopped, exceeded.incomplete_steps);
 
