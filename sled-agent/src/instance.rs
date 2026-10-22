@@ -27,7 +27,9 @@ use illumos_utils::opte::{
 };
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
-use omicron_common::api::internal::shared::{DelegatedZvol, SledIdentifiers};
+use omicron_common::api::internal::shared::{
+    DelegatedZvol, DhcpConfig, SledIdentifiers,
+};
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
 use omicron_common::zpool_name::ZpoolName;
@@ -763,23 +765,29 @@ impl InstanceRunner {
             currently_managed_zpools_rx,
         } = services;
 
+        let InstanceSledLocalConfig {
+            hostname,
+            nics,
+            external_ips,
+            attached_subnets: _,
+            multicast_groups,
+            firewall_rules,
+            dhcp_config,
+            delegated_zvols,
+            primary_nic_mtu,
+        } = local_config;
+        let DhcpConfig { dns_servers, host_domain, search_domains } =
+            dhcp_config;
+
         let mut dhcp_config = DhcpCfg {
             hostname: Some(
-                local_config
-                    .hostname
-                    .as_str()
-                    .parse()
-                    .map_err(Error::InvalidHostname)?,
+                hostname.as_str().parse().map_err(Error::InvalidHostname)?,
             ),
-            host_domain: local_config
-                .dhcp_config
-                .host_domain
+            host_domain: host_domain
                 .map(|domain| domain.parse())
                 .transpose()
                 .map_err(Error::InvalidHostname)?,
-            domain_search_list: local_config
-                .dhcp_config
-                .search_domains
+            domain_search_list: search_domains
                 .into_iter()
                 .map(|domain| domain.parse())
                 .collect::<Result<_, _>>()
@@ -787,7 +795,7 @@ impl InstanceRunner {
             dns4_servers: Vec::new(),
             dns6_servers: Vec::new(),
         };
-        for ip in local_config.dhcp_config.dns_servers {
+        for ip in dns_servers {
             match ip {
                 IpAddr::V4(ip) => dhcp_config.dns4_servers.push(ip.into()),
                 IpAddr::V6(ip) => dhcp_config.dns6_servers.push(ip.into()),
@@ -814,7 +822,7 @@ impl InstanceRunner {
             monitor_handle: None,
             properties: propolis_client::instance_spec::InstanceProperties {
                 id: id.into_untyped_uuid(),
-                name: local_config.hostname.to_string(),
+                name: hostname.to_string(),
                 description: "Omicron-managed VM".to_string(),
                 metadata,
             },
@@ -823,12 +831,12 @@ impl InstanceRunner {
             propolis_addr,
             vnic_allocator,
             port_manager,
-            requested_nics: local_config.nics,
-            external_ips: local_config.external_ips,
-            multicast_groups: local_config.multicast_groups,
-            firewall_rules: local_config.firewall_rules,
+            requested_nics: nics,
+            external_ips,
+            multicast_groups,
+            firewall_rules,
             dhcp_config,
-            primary_nic_mtu: local_config.primary_nic_mtu,
+            primary_nic_mtu,
             state: InstanceStates::new(vmm_runtime, migration_id),
             running_state: None,
             nexus_client,
@@ -836,7 +844,7 @@ impl InstanceRunner {
             zone_builder_factory,
             zone_bundler,
             metrics_queue,
-            delegated_zvols: local_config.delegated_zvols,
+            delegated_zvols,
             // XXX This should use the attached subnets from the local config.
             attached_subnets: IdOrdMap::new(),
             terminator,
@@ -2957,7 +2965,7 @@ mod tests {
     use internal_dns_resolver::Resolver;
     use omicron_common::FileKv;
     use omicron_common::api::external::Hostname;
-    use omicron_common::api::internal::shared::{DhcpConfig, SledIdentifiers};
+    use omicron_common::api::internal::shared::SledIdentifiers;
     use omicron_generation_kinds::Generation;
 
     use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
