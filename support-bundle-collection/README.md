@@ -24,6 +24,15 @@ called `all()`. Some of these steps may themselves spawn additional steps,
 such as `STEP_SPAWN_SLEDS`, which spawns a per-sled step to query the sled
 host OS itself.
 
+### Writing data
+
+Steps write through the `BundleOutput` they are given, not directly to the
+filesystem, so that writes count against the bundle's size limit. A write
+past the limit fails with `StepError::WriteRefused`, and the framework
+stops collection and records what was left out. Steps can return that error
+with `?`; beyond honoring the stop token, they need nothing special. See
+`StepError` for details.
+
 ### Tracing
 
 **Steps** are automatically instrumented, and their durations are emitted to an

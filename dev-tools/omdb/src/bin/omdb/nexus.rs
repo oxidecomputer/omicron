@@ -3191,6 +3191,43 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                         println!("{}", textwrap::indent(&pretty, "        "));
                     }
                 }
+                if let Some(exceeded) = &collection.size_limit_exceeded {
+                    println!(
+                        "      Bundle reached its size limit, and collection \
+                         stopped early:"
+                    );
+                    println!(
+                        "        limit:            {}",
+                        exceeded.limit_bytes
+                    );
+                    println!(
+                        "        collected:        {} bytes",
+                        exceeded.used_bytes
+                    );
+                    println!(
+                        "        reached at:       {}",
+                        exceeded.exceeded_at
+                    );
+                    for (title, items) in [
+                        (
+                            "files left out (would exceed the limit)",
+                            exceeded.refused_paths.iter().collect::<Vec<_>>(),
+                        ),
+                        (
+                            "steps stopped before finishing",
+                            exceeded.incomplete_steps.iter().collect(),
+                        ),
+                        (
+                            "steps never started",
+                            exceeded.skipped_steps.iter().collect(),
+                        ),
+                    ] {
+                        println!("        {title}: {}", items.len());
+                        for item in items {
+                            println!("          {item}");
+                        }
+                    }
+                }
                 println!(
                     "      Bundle was activated in the database: {activated_in_db_ok}"
                 );

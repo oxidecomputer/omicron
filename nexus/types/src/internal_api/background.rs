@@ -10,6 +10,7 @@ use gateway_types::component::SpType;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use omicron_common::api::external::ByteCount;
 use omicron_generation_kinds::ArtifactConfigGeneration;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
@@ -27,6 +28,7 @@ use serde::Serialize;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog::Key;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::net::Ipv6Addr;
@@ -291,6 +293,29 @@ pub struct SupportBundleCollectionReport {
     /// All steps taken, alongside their timing information, when collecting the
     /// bundle.
     pub steps: Vec<SupportBundleCollectionStep>,
+
+    /// Set if collection stopped at the bundle's size limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_limit_exceeded: Option<SupportBundleSizeLimitExceeded>,
+}
+
+/// Describes a support bundle collection that stopped early because the
+/// bundle reached its size limit.
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SupportBundleSizeLimitExceeded {
+    /// The bundle's size limit.
+    pub limit_bytes: ByteCount,
+    /// The number of bytes collected into the bundle.
+    pub used_bytes: u64,
+    /// When the limit was first reached.
+    pub exceeded_at: DateTime<Utc>,
+    /// Files refused because they would exceed the limit, relative to the
+    /// bundle's root, in the order refused.
+    pub refused_paths: Vec<String>,
+    /// Steps which stopped before finishing.
+    pub incomplete_steps: BTreeSet<String>,
+    /// Steps which never started because the limit was reached.
+    pub skipped_steps: BTreeSet<String>,
 }
 
 /// Pairs a [`SupportBundleCollectionReport`] with facts known only after
@@ -340,6 +365,9 @@ impl SupportBundleCollectionStep {
 pub enum SupportBundleCollectionStepStatus {
     Ok,
     Skipped,
+    /// The step stopped before finishing, because the bundle reached its
+    /// size limit or was cancelled.
+    Stopped,
     Failed(String),
 }
 
@@ -349,6 +377,7 @@ impl std::fmt::Display for SupportBundleCollectionStepStatus {
         match self {
             Ok => write!(f, "ok"),
             Skipped => write!(f, "skipped"),
+            Stopped => write!(f, "stopped"),
             Failed(why) => write!(f, "failed: {why}"),
         }
     }
@@ -372,7 +401,7 @@ pub struct SupportBundleEreportStatus {
 
 impl SupportBundleCollectionReport {
     pub fn new(bundle: SupportBundleUuid) -> Self {
-        Self { bundle, steps: vec![] }
+        Self { bundle, steps: vec![], size_limit_exceeded: None }
     }
 }
 

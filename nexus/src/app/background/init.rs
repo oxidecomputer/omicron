@@ -163,6 +163,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::PendingMgsUpdates;
 
 use nexus_types::inventory::Collection;
+use nexus_types::support_bundle::SupportBundleSizeLimit;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::RackUuid;
 use oximeter::types::ProducerRegistry;
@@ -645,6 +646,7 @@ impl BackgroundTasksInitializer {
                     resolver.clone(),
                     config.support_bundle_collector.disable,
                     nexus_id,
+                    SupportBundleSizeLimit::DEFAULT,
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),

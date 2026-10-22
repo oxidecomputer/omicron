@@ -11,11 +11,14 @@ use crate::fm::ereport::EreportFilters;
 use chrono::DateTime;
 use chrono::Utc;
 use itertools::Itertools;
+use omicron_common::api::external::ByteCount;
 use omicron_uuid_kinds::SledUuid;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::fmt;
+use std::num::ParseIntError;
+use std::str::FromStr;
 
 /// Describes the category of support bundle data.
 #[derive(
@@ -447,6 +450,67 @@ impl fmt::Display for DisplaySledSelection<'_> {
     }
 }
 
+/// A support bundle size limit, in bytes, no larger than
+/// [`SupportBundleSizeLimit::MAX`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SupportBundleSizeLimit(u64);
+
+impl SupportBundleSizeLimit {
+    /// The default limit.
+    pub const DEFAULT: Self = Self(16 << 30);
+
+    /// The largest limit allowed. Larger bundles risk destabilizing Nexus.
+    pub const MAX: Self = Self(32 << 30);
+
+    pub fn new(bytes: u64) -> Result<Self, SupportBundleSizeLimitTooLarge> {
+        if bytes > Self::MAX.0 {
+            return Err(SupportBundleSizeLimitTooLarge { bytes });
+        }
+        Ok(Self(bytes))
+    }
+
+    pub fn bytes(self) -> u64 {
+        self.0
+    }
+
+    pub fn byte_count(self) -> ByteCount {
+        ByteCount::try_from(self.0).expect("MAX fits in a ByteCount")
+    }
+}
+
+/// Formats the limit as a number of bytes, which [`FromStr`] parses.
+impl fmt::Display for SupportBundleSizeLimit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Parses a number of bytes.
+impl FromStr for SupportBundleSizeLimit {
+    type Err = SupportBundleSizeLimitParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::new(s.parse()?)?)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "support bundle size limit of {bytes} bytes exceeds the maximum of {}",
+    SupportBundleSizeLimit::MAX.byte_count()
+)]
+pub struct SupportBundleSizeLimitTooLarge {
+    bytes: u64,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SupportBundleSizeLimitParseError {
+    #[error("invalid support bundle size limit")]
+    Invalid(#[from] ParseIntError),
+    #[error(transparent)]
+    TooLarge(#[from] SupportBundleSizeLimitTooLarge),
+}
+
 #[cfg(test)]
 pub(crate) mod test_utils {
     use super::*;
@@ -509,6 +573,17 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
     use test_strategy::proptest;
+
+    #[test]
+    fn size_limit_rejects_above_max() {
+        let max = SupportBundleSizeLimit::MAX.bytes();
+        assert_eq!(SupportBundleSizeLimit::new(max).unwrap().bytes(), max);
+        SupportBundleSizeLimit::new(max + 1).unwrap_err();
+
+        let limit: SupportBundleSizeLimit = max.to_string().parse().unwrap();
+        assert_eq!(limit, SupportBundleSizeLimit::MAX);
+        (max + 1).to_string().parse::<SupportBundleSizeLimit>().unwrap_err();
+    }
 
     #[proptest]
     fn bundle_data_selection_serde_round_trip(selection: BundleDataSelection) {
