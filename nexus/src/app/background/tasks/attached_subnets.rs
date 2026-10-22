@@ -13,6 +13,7 @@ use futures::FutureExt as _;
 use futures::StreamExt;
 use futures::TryStreamExt;
 use futures::future::BoxFuture;
+use iddqd::IdOrdMap;
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -26,9 +27,9 @@ use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
 use serde_json::Value;
 use serde_json::json;
-use sled_agent_client::types::AttachedSubnet;
-use sled_agent_client::types::AttachedSubnetKind;
-use sled_agent_client::types::AttachedSubnets;
+use sled_agent_types::attached_subnet::AttachedSubnet;
+use sled_agent_types::attached_subnet::AttachedSubnetKind;
+use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog::Logger;
 use slog::debug;
@@ -83,6 +84,13 @@ impl Manager {
                 };
                 (*subnet, tgt)
             })
+            // TODO: For a duplicate subnet, this silently keeps the last entry.
+            // Dendrite keys attachments by subnet alone, so this map relies on
+            // its input being globally unique per subnet. This is true for
+            // external subnets once the primary-NIC join is 1:1 (explained in
+            // more detail in the TODO referenced below), but not for VPC
+            // subnets (#9580), which should be filtered out here. See the TODO
+            // in `DataStore::list_all_attached_subnets_batched`.
             .collect::<HashMap<_, _>>();
 
         // Loop over each Dendrite instance, find the subnets it has and the
@@ -201,9 +209,9 @@ impl Manager {
         // would spread the work out across the different sleds, rather than
         // sending each sled all its subnets in a short time. But it's not clear
         // there's any meaningful difference at this point.
-        let attachments_by_sled =
-            group_attached_subnets_by_sled_and_vmm(attachments);
         let mut res = HashMap::<_, SledSubnetDetails>::new();
+        let attachments_by_sled =
+            group_attached_subnets_by_sled_and_vmm(log, attachments, &mut res);
         'sleds: for ((sled_id, sled_ip), attachments_by_sled) in
             attachments_by_sled.iter()
         {
@@ -299,25 +307,58 @@ type SledAttachedSubnetMap =
 // We really care about the instance ID, but the sled-agent API exposes a
 // per-VMM endpoint for replacing attached subnets.
 fn group_attached_subnets_by_sled_and_vmm(
+    log: &Logger,
     attachments: &[shared::AttachedSubnet],
+    details_by_sled: &mut HashMap<SledUuid, SledSubnetDetails>,
 ) -> SledAttachedSubnetMap {
     let mut attachments_by_sled = SledAttachedSubnetMap::new();
     for attachment in attachments.iter() {
-        attachments_by_sled
-            .entry((attachment.sled_id, attachment.sled_ip))
+        let &shared::AttachedSubnet {
+            sled_id,
+            sled_ip,
+            vmm_id,
+            subnet,
+            subnet_id,
+            ..
+        } = attachment;
+        let result = attachments_by_sled
+            .entry((sled_id, sled_ip))
             .or_default()
-            .entry(attachment.vmm_id)
-            .or_insert_with(|| AttachedSubnets { subnets: Vec::new() })
+            .entry(vmm_id)
+            .or_insert_with(|| AttachedSubnets { subnets: IdOrdMap::new() })
             .subnets
-            .push(AttachedSubnet {
-                subnet: attachment.subnet,
-                kind: match attachment.subnet_id {
+            .insert_unique(AttachedSubnet {
+                subnet,
+                kind: match subnet_id {
                     AttachedSubnetId::External(_) => {
                         AttachedSubnetKind::External
                     }
                     AttachedSubnetId::Vpc(_) => AttachedSubnetKind::Vpc,
                 },
             });
+        if let Err(err) = result {
+            // TODO: Duplicates here indicate an invariant violation. See the
+            // TODO in `DataStore::list_all_attached_subnets_batched`. Once that
+            // function returns an appropriately-keyed map, this branch should
+            // go away.
+            let err = InlineErrorChain::new(&err);
+            let message = format!(
+                "subnet attached to the same VMM more than once, keeping \
+                the first attachment: sled_id={sled_id}, sled_ip={sled_ip}, \
+                vmm_id={vmm_id}, subnet={subnet}: {err}",
+            );
+            error!(
+                log,
+                "subnet attached to the same VMM more than once, keeping \
+                the first attachment";
+                "sled_id" => %sled_id,
+                "sled_ip" => %sled_ip,
+                "vmm_id" => %vmm_id,
+                "subnet" => %subnet,
+                &err,
+            );
+            details_by_sled.entry(sled_id).or_default().errors.push(message);
+        }
     }
     attachments_by_sled
 }
@@ -442,6 +483,7 @@ mod test {
     use diesel::QueryDsl as _;
     use dpd_client::types::MacAddr;
     use dpd_client::types::Vni;
+    use iddqd::id_ord_map;
     use nexus_db_model::IpAttachState;
     use nexus_db_schema::schema::external_subnet::dsl;
     use nexus_test_utils::resource_helpers::create_default_ip_pools;
@@ -453,9 +495,12 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::address::IpVersion;
     use omicron_common::api::internal::shared;
+    use omicron_uuid_kinds::ExternalSubnetUuid;
     use omicron_uuid_kinds::GenericUuid;
-    use sled_agent_types::attached_subnet::AttachedSubnetKind;
+    use omicron_uuid_kinds::InstanceUuid;
+    use omicron_uuid_kinds::RackUuid;
     use std::collections::BTreeSet;
+    use uuid::Uuid;
 
     #[test]
     fn attached_subnet_diff_works_with_empty_sets() {
@@ -544,6 +589,80 @@ mod test {
 
         // And add the entire new mapping.
         assert_eq!(to_add, desired.iter().collect());
+    }
+
+    #[test]
+    fn group_attached_subnets_rejects_duplicate_subnets_per_vmm() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "group_attached_subnets_rejects_duplicate_subnets_per_vmm",
+        );
+        let rack_id = RackUuid::new_v4();
+        let sled_id = SledUuid::new_v4();
+        let sled_ip: Ipv6Addr = "fd00::1".parse().unwrap();
+        let vmm_id = PropolisUuid::new_v4();
+        let other_vmm_id = PropolisUuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
+        let subnet: IpNet = "10.0.0.0/24".parse().unwrap();
+        let other_subnet: IpNet = "10.0.1.0/24".parse().unwrap();
+        let make = |vmm_id, subnet, subnet_id| shared::AttachedSubnet {
+            rack_id,
+            sled_id,
+            sled_ip,
+            vmm_id,
+            instance_id,
+            subnet_id,
+            subnet,
+            mac: "a8:40:25:00:00:01".parse().unwrap(),
+            vni: omicron_common::api::external::Vni::try_from(100u32).unwrap(),
+        };
+        let external_id =
+            AttachedSubnetId::External(ExternalSubnetUuid::new_v4());
+        let vpc_id = AttachedSubnetId::Vpc(Uuid::new_v4());
+        let attachments = [
+            make(vmm_id, subnet, external_id),
+            make(vmm_id, other_subnet, external_id),
+            make(vmm_id, subnet, vpc_id),
+            make(other_vmm_id, subnet, vpc_id),
+        ];
+
+        let mut details_by_sled = HashMap::new();
+        let grouped = group_attached_subnets_by_sled_and_vmm(
+            &logctx.log,
+            &attachments,
+            &mut details_by_sled,
+        );
+
+        let expected_vmm_subnets = id_ord_map! {
+            AttachedSubnet { subnet, kind: AttachedSubnetKind::External },
+            AttachedSubnet {
+                subnet: other_subnet,
+                kind: AttachedSubnetKind::External,
+            },
+        };
+        let expected_other_vmm_subnets = id_ord_map! {
+            AttachedSubnet { subnet, kind: AttachedSubnetKind::Vpc },
+        };
+        assert_eq!(grouped.len(), 1);
+        let by_vmm = &grouped[&(sled_id, sled_ip)];
+        assert_eq!(by_vmm.len(), 2);
+        assert_eq!(by_vmm[&vmm_id].subnets, expected_vmm_subnets);
+        assert_eq!(by_vmm[&other_vmm_id].subnets, expected_other_vmm_subnets);
+
+        assert_eq!(details_by_sled.len(), 1);
+        let details = &details_by_sled[&sled_id];
+        assert_eq!(details.n_subnets, 0);
+        let existing =
+            AttachedSubnet { subnet, kind: AttachedSubnetKind::External };
+        let new = AttachedSubnet { subnet, kind: AttachedSubnetKind::Vpc };
+        let expected_error = format!(
+            "subnet attached to the same VMM more than once, keeping the \
+             first attachment: sled_id={sled_id}, sled_ip={sled_ip}, \
+             vmm_id={vmm_id}, subnet={subnet}: new item: {new:?} conflicts \
+             with existing: [{existing:?}]",
+        );
+        assert_eq!(details.errors, [expected_error]);
+
+        logctx.cleanup_successful();
     }
 
     type ControlPlaneTestContext =
