@@ -10088,6 +10088,66 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_case_problem (
     PRIMARY KEY (sitrep_id, case_id, problem_id)
 );
 
+-- Links between problems and alerts in a sitrep.
+--
+-- An alert may be linked to a problem either in the sitrep that
+-- requests the alert, or in any later sitrep, so a link refers to the alert
+-- only by its ID and does not require a corresponding `fm_alert_request` row
+-- in the same sitrep.
+--
+-- A link exists for as long as the problem it belongs to remains in the
+-- sitrep, and is never removed from or modified problem once created.
+-- Therefore, rendezvous can create link records without needing a separate
+-- generation counter: as long as the problem itself exists, its links
+-- may be created during execution.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_alert (
+    -- The ID of the problem.
+    problem_id UUID NOT NULL,
+    -- The ID of the linked alert.
+    alert_id UUID NOT NULL,
+    -- The ID of the current sitrep in which this link exists.
+    sitrep_id UUID NOT NULL,
+    -- The ID of the *first* sitrep in which this link was created.
+    created_sitrep_id UUID NOT NULL,
+    -- The problem revision with which the alert is associated, used to
+    -- order a problem's alerts by revision.
+    revision INT8 NOT NULL,
+
+    -- A human-readable comment explaining why the alert is linked to the
+    -- problem.
+    comment TEXT NOT NULL,
+
+    CONSTRAINT revision_is_non_zero CHECK (revision > 0),
+
+    PRIMARY KEY (sitrep_id, problem_id, alert_id)
+);
+
+-- Links between problems and support bundles in a sitrep.
+--
+-- Like `fm_problem_alert`, a link may be created in the sitrep that
+-- requests the support bundle or in any later sitrep, and does not require a
+-- corresponding `fm_support_bundle_request` row in the same sitrep.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_support_bundle (
+    -- The ID of the problem.
+    problem_id UUID NOT NULL,
+    -- The ID of the linked support bundle.
+    support_bundle_id UUID NOT NULL,
+    -- The ID of the current sitrep in which this link exists.
+    sitrep_id UUID NOT NULL,
+    -- The ID of the *first* sitrep in which this link was created.
+    created_sitrep_id UUID NOT NULL,
+    -- The problem revision with which the support bundle is associated.
+    revision INT8 NOT NULL,
+
+    -- A human-readable comment explaining why the support bundle is linked to
+    -- the problem.
+    comment TEXT NOT NULL,
+
+    CONSTRAINT revision_is_non_zero CHECK (revision > 0),
+
+    PRIMARY KEY (sitrep_id, problem_id, support_bundle_id)
+);
+
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
