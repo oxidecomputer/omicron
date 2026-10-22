@@ -10,7 +10,8 @@ impl ImpactedResource {
     /// Returns the ID of the impacted resource.
     ///
     /// API resource IDs are unique across resource types, so this alone
-    /// identifies the resource. This can be used to determine the page marker for the subsequent page.q
+    /// identifies the resource. This can be used to determine the page marker
+    /// for the subsequent page.
     pub fn id(&self) -> Uuid {
         match self {
             Self::Sled { id } => id.into_untyped_uuid(),
@@ -20,7 +21,8 @@ impl ImpactedResource {
             Self::Switch { id }
             | Self::SwitchPort { id }
             | Self::Image { id }
-            | Self::Snapshot { id } => *id,
+            | Self::Snapshot { id }
+            | Self::Silo { id } => *id,
         }
     }
 }

@@ -23831,6 +23831,26 @@
               "id",
               "resource_type"
             ]
+          },
+          {
+            "description": "A silo.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "resource_type": {
+                "type": "string",
+                "enum": [
+                  "silo"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "resource_type"
+            ]
           }
         ]
       },
