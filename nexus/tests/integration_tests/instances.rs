@@ -10119,19 +10119,54 @@ async fn can_create_instance_with_multiple_nics_and_ephemeral_ip(
 async fn test_instances_shutdown_policy_updates(
     cptestctx: &ControlPlaneTestContext,
 ) {
+    use propolis_client::types::InstanceState as PropolisState;
+    use propolis_client::types::InstanceStateRequested as PropolisStateRequested;
+
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
-    let datastore = nexus.datastore();
     let instance_name = "resonance-cascade";
-    let instance_url = get_instance_url(instance_name);
 
     let sled_agent = cptestctx.first_sled_agent();
     let propolis_addr = sled_agent
         .start_local_mock_propolis_server(&cptestctx.logctx.log)
         .await
         .unwrap();
+    let propolis_client =
+        propolis_client::Client::new(&format!("http://{propolis_addr}"));
 
+    // sled-agent-sim is a little *too* sim. it doesn't send mock propolis
+    // the instance_state_monitor calls it needs to advance through
+    // requested states (nor does it send it the 'run' requested state.)
+    // TODO(?) enhance sled-agent-sim accordingly, if that makes sense.
+    // for now we have to probe the mock server's instance state monitor
+    // endpoint ourself.
+    async fn propolis_state_monitor(
+        propolis_client: &propolis_client::Client,
+        gen_: u64,
+    ) -> propolis_client::types::InstanceStateMonitorResponse {
+        propolis_client
+            .instance_state_monitor()
+            .body(propolis_client::types::InstanceStateMonitorRequest { gen_ })
+            .send()
+            .await
+            .expect("instance state monitor response to mock server failed")
+            .into_inner()
+    }
+    async fn propolis_state_put_run(propolis_client: &propolis_client::Client) {
+        propolis_client
+            .instance_state_put()
+            .body(propolis_client::types::InstanceStateChange {
+                acpi_timeout_secs: None,
+                state: PropolisStateRequested::Run,
+            })
+            .send()
+            .await
+            .expect("instance state put to mock server failed");
+    }
+
+    // instance state monitor requesting is one thing, but that doesn't let us
+    // see the timeout that was/wasn't sent in the propolis state put request.
     async fn mock_get_last_state_requested(
         propolis_addr: std::net::SocketAddr,
     ) -> propolis_client::types::InstanceStateChange {
@@ -10145,6 +10180,7 @@ async fn test_instances_shutdown_policy_updates(
             .await
             .expect("invalid JSON response")
     }
+
     // XXX probably don't actually wanna use these but in case i'm wrong..
     // async fn mock_mode(
     //     propolis_addr: std::net::SocketAddr,
@@ -10196,61 +10232,26 @@ async fn test_instances_shutdown_policy_updates(
         })
     );
 
-    // Starting a simulated instance with a mock Propolis server starts the
-    // mock, but it serves on localhost instead of the address that was chosen
-    // by the instance start process. Forcibly update the VMM record to point to
-    // the correct IP.
-    let opctx =
-        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
-    let (.., db_instance) = LookupPath::new(&opctx, datastore)
-        .instance_id(instance_default.identity.id)
-        .fetch()
-        .await
-        .unwrap();
-    let propolis_id = PropolisUuid::from_untyped_uuid(
-        db_instance
-            .runtime()
-            .propolis_id
-            .expect("running instance should have vmm"),
-    );
-    let updated_vmm = datastore
-        .vmm_overwrite_addr_for_test(&opctx, &propolis_id, propolis_addr)
-        .await
-        .unwrap();
-    assert_eq!(updated_vmm.propolis_ip.ip(), propolis_addr.ip());
-    assert_eq!(updated_vmm.propolis_port.0, propolis_addr.port());
-
     let instance_id =
         InstanceUuid::from_untyped_uuid(instance_default.identity.id);
 
-    instance_post(&client, instance_name, InstanceOp::Start).await;
-    // instance_simulate(nexus, &instance_id).await;
-    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+    expect_instance_start_ok(client, instance_name).await;
+    instance_simulate(nexus, &instance_id).await;
 
-    // expect_instance_start_ok(client, instance_name).await;
-    // // Poke it to ensure it's running
-    // let instance_next = poll::wait_for_condition(
-    //     || async {
-    //         //         instance_simulate(nexus, &instance_id).await;
-    //         let instance_next = instance_get(&client, &instance_url).await;
-    //         if instance_next.runtime.run_state == InstanceState::Running {
-    //             Ok(instance_next)
-    //         } else {
-    //             Err(CondCheckError::<()>::NotYet { status: None })
-    //         }
-    //     },
-    //     &Duration::from_secs(5),
-    //     &Duration::from_secs(60),
-    // )
-    // .await
-    // .unwrap();
-    // identity_eq(&instance_default.identity, &instance_next.identity);
-    // assert!(
-    //     instance_next.runtime.time_run_state_updated
-    //         > instance_default.runtime.time_run_state_updated
-    // );
+    propolis_state_put_run(&propolis_client).await;
+    let mut generation = 0;
+    let state = propolis_state_monitor(&propolis_client, generation).await;
+    assert_eq!(state.gen_, generation);
+    assert_eq!(state.state, PropolisState::Creating);
 
-    // FIXME: okay how do we make sure sled-agent's instance state monitor is actually poking the dang mock to get it out of Creating
+    generation += 1;
+    let state = propolis_state_monitor(&propolis_client, generation).await;
+    assert_eq!(state.gen_, generation);
+    assert_eq!(state.state, PropolisState::Running);
+
+    // now that mock-propolis is in Running state, it will happily stay
+    // there accepting any stop/reset requests we send it without us
+    // sending further instance state monitor requests
 
     // check the default instance's shutdown behavior
     // (should default to AcpiShutdown w/ 600 second timeout)
@@ -10259,19 +10260,17 @@ async fn test_instances_shutdown_policy_updates(
         mock_get_last_state_requested(propolis_addr).await,
         propolis_client::types::InstanceStateChange {
             acpi_timeout_secs: Some(DEFAULT_ACPI_SHUTDOWN_TIMEOUT_SECS),
-            state: propolis_client::types::InstanceStateRequested::AcpiStop
+            state: PropolisStateRequested::AcpiStop
         }
     );
 
-    // start instance again, then stop with skip_os_shutdown=true param.
-    expect_instance_start_ok(client, instance_name).await;
-    // instance_simulate(nexus, &instance_id).await; // XXX
+    // stop with skip_os_shutdown=true param.
     expect_instance_stop_ok(client, instance_name, true).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
         propolis_client::types::InstanceStateChange {
             acpi_timeout_secs: None,
-            state: propolis_client::types::InstanceStateRequested::Stop
+            state: PropolisStateRequested::Stop
         }
     );
 
@@ -10295,21 +10294,18 @@ async fn test_instances_shutdown_policy_updates(
         },
     )
     .await;
-
     assert_eq!(
         instance_hard.shutdown_policy,
         Some(instance::InstanceShutdownPolicy::HardOff)
     );
 
     // start instance again with new hard-off config, then stop without forcing
-    expect_instance_start_ok(client, instance_name).await;
-    // instance_simulate(nexus, &instance_id).await; // XXX
     expect_instance_stop_ok(client, instance_name, false).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
         propolis_client::types::InstanceStateChange {
             acpi_timeout_secs: None,
-            state: propolis_client::types::InstanceStateRequested::Stop
+            state: PropolisStateRequested::Stop
         }
     );
 
@@ -10327,20 +10323,19 @@ async fn test_instances_shutdown_policy_updates(
         },
     )
     .await;
-
     assert_eq!(
         instance_soft.shutdown_policy,
         Some(instance::InstanceShutdownPolicy::PowerButton {
             timeout_secs: 30
         })
     );
-    expect_instance_start_ok(client, instance_name).await;
+
     expect_instance_stop_ok(client, instance_name, false).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
         propolis_client::types::InstanceStateChange {
             acpi_timeout_secs: Some(30),
-            state: propolis_client::types::InstanceStateRequested::AcpiStop
+            state: PropolisStateRequested::AcpiStop
         }
     );
     // test that hard-off is still sent for a force stop request even when
@@ -10351,7 +10346,7 @@ async fn test_instances_shutdown_policy_updates(
         mock_get_last_state_requested(propolis_addr).await,
         propolis_client::types::InstanceStateChange {
             acpi_timeout_secs: None,
-            state: propolis_client::types::InstanceStateRequested::Stop
+            state: PropolisStateRequested::Stop
         }
     );
 
