@@ -149,10 +149,23 @@ pub enum Error {
 
     #[error("The IP subnet {0} is already attached")]
     SubnetAlreadyAttached(IpNet),
+
+    #[error(
+        "attached subnet {0} appears more than once in the instance's \
+         sled-local configuration"
+    )]
+    DuplicateAttachedSubnet(IpNet),
 }
 
 type PropolisClientError =
     propolis_client::Error<propolis_client::types::Error>;
+
+fn attached_subnets_from_local_config(
+    subnets: Vec<AttachedSubnet>,
+) -> Result<IdOrdMap<AttachedSubnet>, Error> {
+    IdOrdMap::from_iter_unique(subnets)
+        .map_err(|err| Error::DuplicateAttachedSubnet(err.new_item().subnet))
+}
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
 // an acknowledgement. This provides a hacky mechanism to "wait until the HTTP
@@ -769,7 +782,7 @@ impl InstanceRunner {
             hostname,
             nics,
             external_ips,
-            attached_subnets: _,
+            attached_subnets,
             multicast_groups,
             firewall_rules,
             dhcp_config,
@@ -795,6 +808,9 @@ impl InstanceRunner {
             dns4_servers: Vec::new(),
             dns6_servers: Vec::new(),
         };
+        let attached_subnets =
+            attached_subnets_from_local_config(attached_subnets)?;
+
         for ip in dns_servers {
             match ip {
                 IpAddr::V4(ip) => dhcp_config.dns4_servers.push(ip.into()),
@@ -845,8 +861,7 @@ impl InstanceRunner {
             zone_bundler,
             metrics_queue,
             delegated_zvols,
-            // XXX This should use the attached subnets from the local config.
-            attached_subnets: IdOrdMap::new(),
+            attached_subnets,
             terminator,
             currently_managed_zpools_rx,
         })
