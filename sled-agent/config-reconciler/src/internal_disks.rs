@@ -544,7 +544,7 @@ impl From<&'_ Disk> for InternalDiskDetails {
                 is_boot_disk: disk.is_boot_disk(),
             },
             zpool_id,
-            slot: M2Slot::try_from(disk.pcie_slot()).ok(),
+            slot: M2Slot::from_chassis_location(disk.location()),
             boot_image_raw_devfs_path: disk
                 .boot_image_devfs_path(true)
                 .map_err(Arc::new),
