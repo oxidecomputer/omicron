@@ -9,10 +9,12 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::datastore;
 use crate::db::datastore::DbConnection;
 use crate::db::datastore::LocalStorageAllocation;
 use crate::db::datastore::LocalStorageDisk;
 use crate::db::datastore::SQL_BATCH_SIZE;
+use crate::db::model;
 use crate::db::model::LocalStorageDatasetAllocation;
 use crate::db::model::LocalStorageUnencryptedDatasetAllocation;
 use crate::db::model::RendezvousLocalStorageDataset;
@@ -42,6 +44,7 @@ use uuid::Uuid;
 
 // XXX is it bad that Numeric -> BigInt here?
 define_sql_function! { fn coalesce(x: Nullable<Numeric>, y: BigInt) -> BigInt; }
+define_sql_function! { fn random() -> BigInt; }
 
 impl DataStore {
     /// List all LocalStorage datasets, making as many queries as needed to get
@@ -280,9 +283,9 @@ impl DataStore {
         Ok(())
     }
 
-    /// Mark the local storage dataset allocations as deleted, and re-compute
-    /// the appropriate dataset size_used columns.
-    pub async fn delete_local_storage_dataset_allocations(
+    /// Mark the local storage dataset allocation backing this disk as deleted,
+    /// and re-compute the appropriate dataset size_used columns.
+    pub async fn delete_local_storage_dataset_allocation(
         &self,
         opctx: &OpContext,
         local_storage_disk: &LocalStorageDisk,
@@ -296,7 +299,7 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         self.transaction_retry_wrapper(
-            "delete_local_storage_dataset_allocations",
+            "delete_local_storage_dataset_allocation",
         )
         .transaction(&conn, |conn| async move {
             match local_storage_dataset_allocation {
@@ -450,5 +453,95 @@ impl DataStore {
                 ),
             })
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Return a page deleted disks, ordered randomly, that have undeleted local
+    /// storage allocations.
+    pub async fn deleted_disks_with_undeleted_local_storage(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> Result<Vec<datastore::LocalStorageDisk>, Error> {
+        opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
+        opctx.check_complex_operations_allowed()?;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use nexus_db_schema::schema::disk::dsl;
+        use nexus_db_schema::schema::disk_type_local_storage::dsl as dtls_dsl;
+        use nexus_db_schema::schema::local_storage_unencrypted_dataset_allocation::dsl as lsuda_dsl;
+
+        // Query for deleted disks where the unencrypted local storage
+        // allocation is not yet deleted.
+        let found_disks: Vec<model::Disk> = paginated(
+            dsl::disk,
+            dsl::id,
+            pagparams,
+        )
+        .inner_join(
+            dtls_dsl::disk_type_local_storage.on(dsl::id.eq(dtls_dsl::disk_id)),
+        )
+        .inner_join(
+            lsuda_dsl::local_storage_unencrypted_dataset_allocation
+                .on(dtls_dsl::local_storage_unencrypted_dataset_allocation_id
+                    .eq(lsuda_dsl::id.nullable())),
+        )
+        .order(random())
+        .filter(lsuda_dsl::time_deleted.is_null())
+        .filter(dsl::time_deleted.is_not_null())
+        .select(model::Disk::as_select())
+        .load_async(&*conn)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let mut disks = Vec::with_capacity(found_disks.len());
+
+        for found_disk in found_disks {
+            let found_disk_id = found_disk.id();
+
+            match self
+                .disk_get_with_model_on_connection(&conn, found_disk)
+                .await
+            {
+                Ok(datastore::Disk::Crucible(crucible_disk)) => {
+                    // The query above joins the disk table with the
+                    // disk_type_local_storage table, meaning the higher level
+                    // Disk can never be the Crucible type, unless there's a
+                    // serious problem. Log an error but return whatever disks
+                    // we can for deletion.
+                    //
+                    // TODO surface this to operators, support intervention is
+                    // likely required.
+                    error!(
+                        self.log,
+                        "disk {} should be local storage, not crucible",
+                        crucible_disk.id(),
+                    );
+                }
+
+                Ok(datastore::Disk::LocalStorage(local_storage_disk)) => {
+                    disks.push(local_storage_disk);
+                }
+
+                Err(Error::NotFound { .. }) => {
+                    // The disk was likely deleted between when the found_disks
+                    // query ran, and when `disk_get_with_model_on_connection`
+                    // ran. Skip this one.
+                    info!(
+                        self.log,
+                        "disk {found_disk_id} was deleted after the \
+                        found_disks query, skipping",
+                    );
+
+                    continue;
+                }
+
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
+
+        Ok(disks)
     }
 }

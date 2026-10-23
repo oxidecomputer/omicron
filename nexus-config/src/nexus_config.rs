@@ -506,6 +506,8 @@ pub struct BackgroundTaskConfig {
     pub populate_switch_ports: PopulateSwitchPortsConfig,
     /// configuration for the task that marks VMMs to stop for an update
     pub vmm_mark_stop_for_update: VmmMarkStopForUpdateConfig,
+    /// configuration for local storage delete task
+    pub local_storage_delete: LocalStorageDeleteConfig,
 }
 
 #[serde_as]
@@ -1136,6 +1138,14 @@ pub struct TrustQuorumConfig {
     pub period_secs: Duration,
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LocalStorageDeleteConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -1436,6 +1446,7 @@ mod test {
             audit_log_cleanup.max_deleted_per_activation = 10000
             populate_switch_ports.period_secs = 31
             vmm_mark_stop_for_update.period_secs = 300
+            local_storage_delete.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1734,6 +1745,10 @@ mod test {
                         vmm_mark_stop_for_update: VmmMarkStopForUpdateConfig {
                             period_secs: Duration::from_secs(300),
                         },
+                        local_storage_delete:
+                            LocalStorageDeleteConfig {
+                                period_secs: Duration::from_secs(30),
+                            },
                     },
                     multicast: MulticastConfig { enabled: false },
                     default_region_allocation_strategy:
@@ -1853,6 +1868,7 @@ mod test {
             audit_log_cleanup.max_deleted_per_activation = 10000
             populate_switch_ports.period_secs = 31
             vmm_mark_stop_for_update.period_secs = 300
+            local_storage_delete.period_secs = 30
 
             [default_region_allocation_strategy]
             type = "random"

@@ -34,6 +34,8 @@ use crate::db::model::Volume;
 use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use crate::db::queries::disk::DiskSetClauseForAttach;
+use crate::db::queries::virtual_provisioning_collection_update;
+use crate::db::queries::virtual_provisioning_collection_update::*;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -52,6 +54,7 @@ use nexus_types::identity::Asset;
 use omicron_common::api;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
@@ -363,6 +366,19 @@ impl LocalStorageDisk {
             }
         }
     }
+
+    /// If this disk has an allocation, return the ID.
+    pub fn allocation_id(&self) -> Option<DatasetUuid> {
+        let Some(allocation) = &self.local_storage_dataset_allocation else {
+            return None;
+        };
+
+        Some(match allocation {
+            LocalStorageAllocation::Unencrypted(allocation) => allocation.id(),
+
+            LocalStorageAllocation::Encrypted(allocation) => allocation.id(),
+        })
+    }
 }
 
 /// Conversion to the external API type.
@@ -510,7 +526,9 @@ impl DataStore {
         let (.., disk) =
             LookupPath::new(opctx, self).disk_id(disk_id).fetch().await?;
 
-        self.disk_get_with_model(opctx, disk).await
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        self.disk_get_with_model_on_connection(&conn, disk).await
     }
 
     /// Return a `datastore::Disk` given a `model::Disk`
@@ -518,14 +536,14 @@ impl DataStore {
     /// Note: basically all of Nexus should _not_ be using this, and should be
     /// using `disk_get` instead: this version of the function bypasses the
     /// LookupPath induced permissions check and should only called from omdb.
-    pub async fn disk_get_with_model(
+    /// Code that is looking up deleted disks should also use this method, as
+    /// `LookupPath` will not return deleted resources.
+    pub async fn disk_get_with_model_on_connection(
         &self,
-        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         disk: model::Disk,
     ) -> LookupResult<Disk> {
         let disk_id = disk.id();
-
-        let conn = self.pool_connection_authorized(opctx).await?;
 
         let disk = match disk.disk_type {
             db::model::DiskType::Crucible => {
@@ -534,7 +552,7 @@ impl DataStore {
                 let disk_type_crucible = dsl::disk_type_crucible
                     .filter(dsl::disk_id.eq(disk_id))
                     .select(DiskTypeCrucible::as_select())
-                    .first_async(&*conn)
+                    .first_async(conn)
                     .await
                     .map_err(|e| {
                         public_error_from_diesel(e, ErrorHandler::Server)
@@ -552,7 +570,7 @@ impl DataStore {
                 let disk_type_local_storage = dsl::disk_type_local_storage
                     .filter(dsl::disk_id.eq(disk_id))
                     .select(DiskTypeLocalStorage::as_select())
-                    .first_async(&*conn)
+                    .first_async(conn)
                     .await
                     .map_err(|e| {
                         public_error_from_diesel(e, ErrorHandler::Server)
@@ -1549,8 +1567,22 @@ impl DataStore {
         disk_id: &Uuid,
         ok_to_delete_states: &[api::external::DiskState],
     ) -> Result<model::Disk, Error> {
-        use nexus_db_schema::schema::disk::dsl;
         let conn = self.pool_connection_unauthorized().await?;
+
+        Self::project_delete_disk_no_auth_on_connection(
+            &conn,
+            disk_id,
+            ok_to_delete_states,
+        )
+        .await
+    }
+
+    async fn project_delete_disk_no_auth_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        disk_id: &Uuid,
+        ok_to_delete_states: &[api::external::DiskState],
+    ) -> Result<model::Disk, Error> {
+        use nexus_db_schema::schema::disk::dsl;
         let now = Utc::now();
 
         let ok_to_delete_state_labels: Vec<_> =
@@ -2082,6 +2114,74 @@ impl DataStore {
         .await?;
 
         Ok(disk)
+    }
+
+    /// In a single transaction, set time_deleted for a disk and delete the
+    /// storage from the appropriate virtual provisioning collection.
+    pub async fn delete_disk_and_update_provisioning_collection(
+        &self,
+        opctx: &OpContext,
+        project: &authz::Project,
+        disk: &Disk,
+        ok_to_delete_states: &[api::external::DiskState],
+    ) -> DeleteResult {
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let provisions = self
+            // Use the non-retry wrapper, as both parts of this transaction bail
+            // on errors.
+            .transaction_non_retry_wrapper(
+                "delete_disk_and_update_provisioning_collection",
+            )
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    Self::project_delete_disk_no_auth_on_connection(
+                        &conn,
+                        &disk.id(),
+                        ok_to_delete_states,
+                    )
+                    .await
+                    .map_err(|e| err.bail(e))?;
+
+                    let provisions =
+                        VirtualProvisioningCollectionUpdate::new_delete_storage(
+                            disk.id(),
+                            disk.size(),
+                            project.id(),
+                        )
+                        .get_results_async(&conn)
+                        .await
+                        .map_err(|e| err.bail(
+                            virtual_provisioning_collection_update::from_diesel(e)
+                        ))?;
+
+                    Ok(provisions)
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    err
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })?;
+
+        // Failing to append the updated number of provisioned disk bytes should
+        // not cause the disk delete to fail.
+        if let Err(metrics_error) = self
+            .virtual_provisioning_collection_producer
+            .append_disk_metrics(&provisions)
+        {
+            error!(
+                &self.log,
+                "error appending disk metrics after delete: {metrics_error}"
+            );
+        }
+
+        Ok(())
     }
 }
 
