@@ -471,11 +471,11 @@ impl ProbeManagerInner {
                         "errors" => ?errors,
                     ),
                 }
-                running_zone.release_opte_ports();
-
+                // We need to stop the zone, then delete the OPTE ports.
                 if let Err(e) = running_zone.stop().await {
-                    error!(self.log, "stop probe: {e}")
+                    error!(self.log, "stop probe: {e}");
                 }
+                running_zone.delete_opte_ports();
                 // TODO are there storage resources that need to be cleared
                 // out here too?
             }

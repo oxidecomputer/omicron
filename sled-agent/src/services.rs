@@ -39,9 +39,7 @@ use illumos_utils::dladm::{
     Dladm, Etherstub, EtherstubVnic, GetSimnetError, PhysicalLink,
 };
 use illumos_utils::link::{Link, VnicAllocator};
-use illumos_utils::opte::{
-    DhcpCfg, Port, PortCreateParams, PortManager, PortTicket,
-};
+use illumos_utils::opte::{DhcpCfg, Port, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{
     EnsureAddressError, InstalledZone, RunCommandError, RunningZone,
     ZoneBuilderFactory,
@@ -917,7 +915,7 @@ impl ServiceManager {
     async fn opte_ports_needed(
         &self,
         zone_args: &ZoneArgs<'_>,
-    ) -> Result<Vec<(Port, PortTicket)>, Error> {
+    ) -> Result<Vec<Port>, Error> {
         if !matches!(
             zone_args.omicron_type(),
             Some(OmicronZoneType::ExternalDns { .. })
