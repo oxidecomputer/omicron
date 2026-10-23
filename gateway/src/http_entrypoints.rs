@@ -7,6 +7,7 @@
 use crate::ServerContext;
 use crate::error::SpCommsError;
 use crate::http_err_with_message;
+use crate::management_switch::SpLocality;
 use base64::Engine;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -527,10 +528,24 @@ impl GatewayApi for GatewayImpl {
             if component == SpComponent::SP_ITSELF
                 && !apictx
                     .mgmt_switch
-                    .allowed_to_reset_sp(sp_id)
+                    .is_local_sp_reset_allowed()
                     .map_err(HttpError::from)?
             {
-                return Err(SpComponentResetError::ResetSpOfLocalSled);
+                match apictx
+                    .mgmt_switch
+                    .sp_locality(sp_id)
+                    .map_err(HttpError::from)?
+                {
+                    SpLocality::NotLocal => (), // ok, fall through
+                    SpLocality::LocalSled => {
+                        return Err(SpComponentResetError::ResetSpOfLocalSled);
+                    }
+                    SpLocality::LocalSwitch => {
+                        return Err(
+                            SpComponentResetError::ResetSpOfLocalSwitch,
+                        );
+                    }
+                }
             }
 
             sp.reset_component_prepare(component)
