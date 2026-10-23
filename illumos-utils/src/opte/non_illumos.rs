@@ -302,7 +302,7 @@ impl Handle {
         &self,
         _: &SetExternalIpsReq,
     ) -> Result<NoResp, OpteError> {
-        unimplemented!("Not yet used in tests")
+        Ok(NO_RESPONSE)
     }
 
     /// Set a mapping from a virtual NIC to a physical host.

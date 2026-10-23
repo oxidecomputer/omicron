@@ -106,6 +106,28 @@ pub struct SledAgent {
     pub external_ips:
         Mutex<HashMap<PropolisUuid, HashSet<InstanceExternalIpBody>>>,
     /// subnets attached to instances.
+    // TODO: entries in this map can currently be stale because:
+    //
+    // * We don't always clean up attached subnets at VMM unregister
+    //   time. instance_unregister cleans attached subnets up, but
+    //   sim_poke -> ready_to_destroy does not.
+    // * instance_register can fail after the VMM is registered,
+    //   which leaves it registered (with its entry) despite returning
+    //   an error.
+    //
+    // There are multiple data modeling and code defects here:
+    //
+    // * Invalid states are representable at all (attached_subnets
+    //   should not be a separate map).
+    // * Even if they're representable, these kinds of torn states
+    //   should not be externally visible (there should be a single
+    //   shared lock, or we should use the actor model).
+    // * instance_register (and other functions?) should be written
+    //   in a prepare-and-commit style, where all prerequisites are
+    //   checked first and then a second infallible section updates
+    //   all state.
+    //
+    // We should fix all of this at some point.
     pub attached_subnets:
         Mutex<HashMap<PropolisUuid, IdOrdMap<AttachedSubnet>>>,
     /// multicast group memberships for instances
@@ -298,11 +320,11 @@ impl SledAgent {
         let InstanceEnsureBody {
             vmm_spec,
             local_config,
-            instance_id,
             migration_id,
             vmm_runtime,
+            instance_id: _,
+            propolis_addr: _,
             metadata,
-            ..
         } = instance;
         let spec = vmm_spec.0.clone();
         // respond with a fake 500 level failure if asked to ensure an instance
@@ -319,7 +341,7 @@ impl SledAgent {
         // sled-agent will also return a 503 if it has no config. We don't do
         // that here because sim-sled-agent never gets a config if it isn't
         // explicitly given one.
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             if let Some(config) = self.omicron_sled_config() {
                 match config.update_disposition {
                     OmicronSledUpdateDisposition::Available => (),
@@ -371,7 +393,7 @@ impl SledAgent {
         //      point to the correct address.
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
-            if !self.vmms.contains_key(&instance_id.into_untyped_uuid()).await {
+            if !self.vmms.contains_key(&propolis_id).await {
                 let metadata =
                     propolis_client::instance_spec::InstanceMetadata {
                         project_id: metadata.project_id,
@@ -429,10 +451,28 @@ impl SledAgent {
                 time_updated: chrono::Utc::now(),
             });
 
+        let newly_registered = !self.vmms.contains_key(&propolis_id).await;
+        // If this is a newly-registered VMM, track the attached subnets.
+        //
+        // Add to attached_subnets before calling sim_ensure so that a
+        // concurrent attached-subnet PUT/POST/DELETE (which only checks
+        // vmms.contains_key) can't be overwritten by this, and so a later `?`
+        // in this function can't cause a registered VMM with no
+        // attached-subnets entry.
+        //
+        // TODO: This should all become atomic. See the comment on
+        // `Self::attached_subnets`.
+        if newly_registered {
+            self.attached_subnets
+                .lock()
+                .unwrap()
+                .insert(propolis_id, local_config.attached_subnets);
+        }
+
         let instance_run_time_state = self
             .vmms
             .sim_ensure(
-                &propolis_id.into_untyped_uuid(),
+                &propolis_id,
                 SledVmmState {
                     vmm_state: vmm_runtime,
                     migration_in,
@@ -486,10 +526,7 @@ impl SledAgent {
         self: &Arc<Self>,
         propolis_id: PropolisUuid,
     ) -> Result<VmmUnregisterResponse, Error> {
-        let instance = match self
-            .vmms
-            .sim_get_cloned_object(&propolis_id.into_untyped_uuid())
-            .await
+        let instance = match self.vmms.sim_get_cloned_object(&propolis_id).await
         {
             Ok(instance) => instance,
             Err(Error::ObjectNotFound { .. }) => {
@@ -502,7 +539,8 @@ impl SledAgent {
             updated_runtime: Some(instance.terminate()),
         };
 
-        self.vmms.sim_force_remove(propolis_id.into_untyped_uuid()).await;
+        self.vmms.sim_force_remove(propolis_id).await;
+        self.attached_subnets.lock().unwrap().remove(&propolis_id);
         Ok(response)
     }
 
@@ -538,11 +576,7 @@ impl SledAgent {
                     tokio::spawn(async move {
                         tokio::time::sleep(Duration::from_secs(10)).await;
                         match vmms
-                            .sim_ensure(
-                                &propolis_id.into_untyped_uuid(),
-                                current,
-                                Some(state),
-                            )
+                            .sim_ensure(&propolis_id, current, Some(state))
                             .await
                         {
                             Ok(state) => {
@@ -574,10 +608,8 @@ impl SledAgent {
             )?;
         }
 
-        let new_state = self
-            .vmms
-            .sim_ensure(&propolis_id.into_untyped_uuid(), current, Some(state))
-            .await?;
+        let new_state =
+            self.vmms.sim_ensure(&propolis_id, current, Some(state)).await?;
 
         Ok(VmmPutStateResponse { updated_runtime: Some(new_state) })
     }
@@ -588,14 +620,11 @@ impl SledAgent {
         &self,
         propolis_id: PropolisUuid,
     ) -> Result<SimInstance, crate::sled_agent::Error> {
-        self.vmms
-            .sim_get_cloned_object(&propolis_id.into_untyped_uuid())
-            .await
-            .map_err(|_| {
-                crate::sled_agent::Error::Instance(
-                    crate::instance_manager::Error::NoSuchVmm(propolis_id),
-                )
-            })
+        self.vmms.sim_get_cloned_object(&propolis_id).await.map_err(|_| {
+            crate::sled_agent::Error::Instance(
+                crate::instance_manager::Error::NoSuchVmm(propolis_id),
+            )
+        })
     }
 
     pub async fn instance_get_state(
@@ -664,7 +693,7 @@ impl SledAgent {
     }
 
     pub async fn vmm_poke(&self, id: PropolisUuid, mode: PokeMode) {
-        self.vmms.sim_poke(id.into_untyped_uuid(), mode).await;
+        self.vmms.sim_poke(id, mode).await;
     }
 
     /// Adds a Physical Disk to the simulated sled agent.
@@ -777,7 +806,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         body_args: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't alter IP state for VMM that's not registered",
             ));
@@ -812,7 +841,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         body_args: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't alter IP state for VMM that's not registered",
             ));
@@ -831,7 +860,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         subnets: AttachedSubnets,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't alter subnet state for VMM that's not registered",
             ));
@@ -847,7 +876,7 @@ impl SledAgent {
         &self,
         propolis_id: PropolisUuid,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't alter subnet state for VMM that's not registered",
             ));
@@ -866,7 +895,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         subnet: AttachedSubnet,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't alter subnet state for VMM that's not registered",
             ));
@@ -883,7 +912,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         subnet: IpNet,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't alter subnet state for VMM that's not registered",
             ));
@@ -900,7 +929,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't join multicast group for VMM that's not registered",
             ));
@@ -919,7 +948,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't leave multicast group for VMM that's not registered",
             ));
