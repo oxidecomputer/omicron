@@ -24,7 +24,7 @@
 [libraries."libsocket.so.1"]
 [libraries."libssl.so.3"]
 [libraries."libumem.so.1"]
-[libraries."libxml2.so.2"]
+[libraries."libxml2.so.16"]
 [libraries."libxmlsec1.so.1"]
 
 # libipcc should only be depended on by binaries that communicate with ipcc.

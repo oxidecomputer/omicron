@@ -659,12 +659,14 @@ dependencies = [
 [[package]]
 name = "before"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/rumors?rev=90e4509dc66330affb38afa74813a8dd500edd93#90e4509dc66330affb38afa74813a8dd500edd93"
+source = "git+https://github.com/oxidecomputer/rumors?rev=bf2ba264e2360eab1ba5f06148ea3ef3050825c8#bf2ba264e2360eab1ba5f06148ea3ef3050825c8"
 dependencies = [
  "bytes",
- "dashu-int",
  "dsi-bitstream",
+ "hex",
+ "num-bigint",
  "serde",
+ "serde_bytes",
  "serde_json",
  "static_assertions",
  "suanpan",
@@ -2590,25 +2592,6 @@ dependencies = [
  "darling_core 0.23.0",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "dashu-base"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a64b04cdfc4c8533100fe00304eb9687173bda47b1f1dac8af12ba13712ed49d"
-
-[[package]]
-name = "dashu-int"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6ee98721d5d223e5b64b642dd9588b79d9ef415554b13720308b77d628c3be6"
-dependencies = [
- "cfg-if",
- "dashu-base",
- "num-modular",
- "rustversion",
- "static_assertions",
 ]
 
 [[package]]
@@ -8714,12 +8697,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "num-modular"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd8e500409e6cd603b03e477c26a6caecdc27ac58979a53e881c75eafc079f44"
-
-[[package]]
 name = "num-primitive"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10107,6 +10084,7 @@ dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.4.3",
  "group 0.13.0",
+ "hashbrown 0.13.2",
  "hashbrown 0.15.5",
  "hashbrown 0.16.1",
  "hashbrown 0.17.0",
@@ -10157,9 +10135,10 @@ dependencies = [
  "ppv-lite86",
  "predicates",
  "proc-macro2",
- "qorb",
  "quote",
+ "rand 0.8.6",
  "rand 0.9.2",
+ "rand_chacha 0.3.1",
  "rand_chacha 0.9.0",
  "regex",
  "regex-automata",
@@ -13213,17 +13192,17 @@ dependencies = [
 [[package]]
 name = "rumors"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/rumors?rev=90e4509dc66330affb38afa74813a8dd500edd93#90e4509dc66330affb38afa74813a8dd500edd93"
+source = "git+https://github.com/oxidecomputer/rumors?rev=bf2ba264e2360eab1ba5f06148ea3ef3050825c8#bf2ba264e2360eab1ba5f06148ea3ef3050825c8"
 dependencies = [
  "async-stream",
  "before",
  "bytes",
  "ciborium",
  "futures",
- "futures-util",
  "hex",
  "itertools 0.14.0",
- "rand 0.8.6",
+ "rand 0.9.2",
+ "schnellru",
  "seq-macro",
  "serde",
  "sha3 0.12.0",
@@ -13231,7 +13210,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tinyvec",
  "tokio",
- "tokio-stream",
 ]
 
 [[package]]
@@ -13694,6 +13672,17 @@ dependencies = [
  "quote",
  "serde_derive_internals",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "schnellru"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "356285bbf17bea63d9e52e96bd18f039672ac92b55b8cb997d6162a2a37d1649"
+dependencies = [
+ "ahash",
+ "cfg-if",
+ "hashbrown 0.13.2",
 ]
 
 [[package]]
@@ -15631,10 +15620,7 @@ dependencies = [
 [[package]]
 name = "suanpan"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/rumors?rev=90e4509dc66330affb38afa74813a8dd500edd93#90e4509dc66330affb38afa74813a8dd500edd93"
-dependencies = [
- "dashu-int",
-]
+source = "git+https://github.com/oxidecomputer/rumors?rev=bf2ba264e2360eab1ba5f06148ea3ef3050825c8#bf2ba264e2360eab1ba5f06148ea3ef3050825c8"
 
 [[package]]
 name = "subprocess"
@@ -15758,7 +15744,7 @@ checksum = "b7401a30af6cb5818bb64852270bb722533397edcfc7344954a38f420819ece2"
 [[package]]
 name = "sush-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=e96e7190f8bc5a1b54e89153769d4112e64d4280#e96e7190f8bc5a1b54e89153769d4112e64d4280"
+source = "git+https://github.com/oxidecomputer/sush?rev=969e5d518e962ec6a45785e3d9194eadd380507a#969e5d518e962ec6a45785e3d9194eadd380507a"
 dependencies = [
  "chrono",
  "dropshot",
@@ -15774,7 +15760,7 @@ dependencies = [
 [[package]]
 name = "sush-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=e96e7190f8bc5a1b54e89153769d4112e64d4280#e96e7190f8bc5a1b54e89153769d4112e64d4280"
+source = "git+https://github.com/oxidecomputer/sush?rev=969e5d518e962ec6a45785e3d9194eadd380507a#969e5d518e962ec6a45785e3d9194eadd380507a"
 dependencies = [
  "bytes",
  "bytesize",
@@ -15835,7 +15821,7 @@ dependencies = [
 [[package]]
 name = "sush-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=e96e7190f8bc5a1b54e89153769d4112e64d4280#e96e7190f8bc5a1b54e89153769d4112e64d4280"
+source = "git+https://github.com/oxidecomputer/sush?rev=969e5d518e962ec6a45785e3d9194eadd380507a#969e5d518e962ec6a45785e3d9194eadd380507a"
 dependencies = [
  "async-trait",
  "atomicwrites",
@@ -15859,7 +15845,6 @@ dependencies = [
  "p256 0.13.2",
  "percent-encoding",
  "pwd",
- "qorb",
  "rand_core 0.6.4",
  "rumors",
  "rustix 1.1.4",

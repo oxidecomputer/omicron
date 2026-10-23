@@ -221,7 +221,7 @@ pub async fn spawn_sush_tasks(
             );
         }
     }
-    let locker = match Locker::new(&log, slots) {
+    let locker = match Locker::new(&log, own_baseboard.clone(), slots) {
         Ok(locker) => locker,
         Err(err) => {
             error!(
