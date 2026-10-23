@@ -10441,6 +10441,8 @@ async fn can_create_instance_with_multiple_nics_and_ephemeral_ip(
     .await;
 }
 
+// Test that we send propolis the correct state and timeout for any given
+// instance shutdown policy specified in instance create/update.
 #[nexus_test]
 async fn test_instances_shutdown_policy_updates(
     cptestctx: &ControlPlaneTestContext,
@@ -10598,8 +10600,19 @@ async fn test_instances_shutdown_policy_updates(
         },
     )
     .await;
+
+    // FIXME: this is failing - but when i check crdb of the failed test run,
+    // the value in the instance table *is* `hard_off`
     assert_eq!(
         instance_hard.shutdown_policy,
+        Some(instance::InstanceShutdownPolicy::HardOff)
+    );
+    // FIXME(cont'd) this *also* fails, so it's not just instance put giving us
+    // a bogus response, instance get is also affected by whatever i'v missed..
+    assert_eq!(
+        instance_get(client, &get_instance_url(instance_name))
+            .await
+            .shutdown_policy,
         Some(instance::InstanceShutdownPolicy::HardOff)
     );
 
