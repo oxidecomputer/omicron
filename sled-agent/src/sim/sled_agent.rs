@@ -106,6 +106,28 @@ pub struct SledAgent {
     pub external_ips:
         Mutex<HashMap<PropolisUuid, HashSet<InstanceExternalIpBody>>>,
     /// subnets attached to instances.
+    // TODO: entries in this map can currently be stale because:
+    //
+    // * We don't always clean up attached subnets at VMM unregister
+    //   time. instance_unregister cleans attached subnets up, but
+    //   sim_poke -> ready_to_destroy does not.
+    // * instance_register can fail after the VMM is registered,
+    //   which leaves it registered (with its entry) despite returning
+    //   an error.
+    //
+    // There are multiple data modeling and code defects here:
+    //
+    // * Invalid states are representable at all (attached_subnets
+    //   should not be a separate map).
+    // * Even if they're representable, these kinds of torn states
+    //   should not be externally visible (there should be a single
+    //   shared lock, or we should use the actor model).
+    // * instance_register (and other functions?) should be written
+    //   in a prepare-and-commit style, where all prerequisites are
+    //   checked first and then a second infallible section updates
+    //   all state.
+    //
+    // We should fix all of this at some point.
     pub attached_subnets:
         Mutex<HashMap<PropolisUuid, IdOrdMap<AttachedSubnet>>>,
     /// multicast group memberships for instances
@@ -429,6 +451,24 @@ impl SledAgent {
                 time_updated: chrono::Utc::now(),
             });
 
+        let newly_registered = !self.vmms.contains_key(&propolis_id).await;
+        // If this is a newly-registered VMM, track the attached subnets.
+        //
+        // Add to attached_subnets before calling sim_ensure so that a
+        // concurrent attached-subnet PUT/POST/DELETE (which only checks
+        // vmms.contains_key) can't be overwritten by this, and so a later `?`
+        // in this function can't cause a registered VMM with no
+        // attached-subnets entry.
+        //
+        // TODO: This should all become atomic. See the comment on
+        // `Self::attached_subnets`.
+        if newly_registered {
+            self.attached_subnets
+                .lock()
+                .unwrap()
+                .insert(propolis_id, local_config.attached_subnets);
+        }
+
         let instance_run_time_state = self
             .vmms
             .sim_ensure(
@@ -500,6 +540,7 @@ impl SledAgent {
         };
 
         self.vmms.sim_force_remove(propolis_id).await;
+        self.attached_subnets.lock().unwrap().remove(&propolis_id);
         Ok(response)
     }
 
