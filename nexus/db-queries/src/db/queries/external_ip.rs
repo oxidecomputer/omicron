@@ -326,7 +326,9 @@ impl NextExternalIp {
         out.push_sql(", ");
 
         // Project ID, possibly null
-        out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, Option<Uuid>>(self.ip.project_id())?;
+        out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, _>(
+            self.ip.project_id(),
+        )?;
         out.push_sql(" AS ");
         out.push_identifier(dsl::project_id::NAME)?;
         out.push_sql(", ");
@@ -1008,6 +1010,7 @@ mod tests {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::ProjectUuid;
     use sled_agent_types::inventory::SourceNatConfigGeneric;
     use sled_agent_types::inventory::ZoneKind;
     use std::net::IpAddr;
@@ -1114,7 +1117,7 @@ mod tests {
 
         async fn create_instance(&self, name: &str) -> InstanceUuid {
             let instance_id = InstanceUuid::new_v4();
-            let project_id = Uuid::new_v4();
+            let project_id = ProjectUuid::new_v4();
             let instance = Instance::new(instance_id, project_id, &InstanceCreate {
                 identity: IdentityMetadataCreateParams {
                     name: String::from(name).parse().unwrap(),
@@ -2136,7 +2139,7 @@ mod tests {
             uuid::uuid!("45633e04-3087-47eb-9d1e-8436fb090108"),
             &Name("fip".parse().unwrap()),
             "",
-            uuid::uuid!("789fdb15-9790-4df1-9d06-c1ecd72c94ae"),
+            ProjectUuid::from_u128(0x789fdb15_9790_4df1_9d06_c1ecd72c94ae),
             uuid::uuid!("37bdd6f6-0adb-46ad-8e5b-083b928ace56"),
             uuid::uuid!("6d97b968-93bd-42d4-84b3-2c8fbc47e2f8"),
         );
@@ -2154,7 +2157,7 @@ mod tests {
             uuid::uuid!("45633e04-3087-47eb-9d1e-8436fb090108"),
             &Name("fip".parse().unwrap()),
             "",
-            uuid::uuid!("789fdb15-9790-4df1-9d06-c1ecd72c94ae"),
+            ProjectUuid::from_u128(0x789fdb15_9790_4df1_9d06_c1ecd72c94ae),
             "10.0.0.1".parse().unwrap(),
             uuid::uuid!("37bdd6f6-0adb-46ad-8e5b-083b928ace56"),
             uuid::uuid!("6d97b968-93bd-42d4-84b3-2c8fbc47e2f8"),
@@ -2668,7 +2671,7 @@ mod tests {
 
         // Create an instance with only an IPv4 stack.
         let instance_id = InstanceUuid::new_v4();
-        let project_id = Uuid::new_v4();
+        let project_id = ProjectUuid::new_v4();
         let instance = Instance::new(instance_id, project_id, &InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: String::from("inst").parse().unwrap(),

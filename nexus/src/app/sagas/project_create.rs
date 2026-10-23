@@ -196,6 +196,7 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::{project, vpc};
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_uuid_kinds::GenericUuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -285,12 +286,13 @@ mod test {
     async fn no_projects_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::fixed_data::project::SERVICES_PROJECT_ID;
         use nexus_db_queries::db::model::Project;
+        use nexus_db_queries::db::model::to_db_typed_uuid;
         use nexus_db_schema::schema::project::dsl;
 
         dsl::project
             .filter(dsl::time_deleted.is_null())
             // ignore built-in services project
-            .filter(dsl::id.ne(*SERVICES_PROJECT_ID))
+            .filter(dsl::id.ne(to_db_typed_uuid(*SERVICES_PROJECT_ID)))
             .select(Project::as_select())
             .first_async::<Project>(
                 &*datastore.pool_connection_for_tests().await.unwrap(),
@@ -324,7 +326,7 @@ mod test {
                     dsl::virtual_provisioning_collection
                         .filter(dsl::collection_type.eq(nexus_db_queries::db::model::CollectionTypeProvisioned::Project.to_string()))
                         // ignore built-in services project
-                        .filter(dsl::id.ne(*SERVICES_PROJECT_ID))
+                        .filter(dsl::id.ne(SERVICES_PROJECT_ID.into_untyped_uuid()))
                         .select(VirtualProvisioningCollection::as_select())
                         .get_results_async::<VirtualProvisioningCollection>(&conn)
                         .await

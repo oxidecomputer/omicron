@@ -70,6 +70,7 @@ use omicron_generation_kinds::InstanceStateGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::MulticastGroupUuid;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use propolis_client::support::InstanceSerialConsoleHelper;
@@ -601,7 +602,9 @@ impl super::Nexus {
             Some(disk) => {
                 let selector = disk::DiskSelector {
                     project: match &disk {
-                        NameOrId::Name(_) => Some(authz_project.id().into()),
+                        NameOrId::Name(_) => Some(NameOrId::Id(
+                            authz_project.id().into_untyped_uuid(),
+                        )),
                         NameOrId::Id(_) => None,
                     },
                     disk: disk.clone(),
@@ -1619,7 +1622,7 @@ impl super::Nexus {
 
         let metadata = sled_agent_client::types::InstanceMetadata {
             silo_id: authz_silo.id(),
-            project_id: authz_project.id(),
+            project_id: authz_project.id().into_untyped_uuid(),
         };
 
         let mut multicast_groups = Vec::new();
@@ -1903,7 +1906,9 @@ impl super::Nexus {
                 opctx,
                 disk::DiskSelector {
                     project: match disk {
-                        NameOrId::Name(_) => Some(authz_project.id().into()),
+                        NameOrId::Name(_) => Some(NameOrId::Id(
+                            authz_project.id().into_untyped_uuid(),
+                        )),
                         NameOrId::Id(_) => None,
                     },
                     disk,
@@ -1964,7 +1969,9 @@ impl super::Nexus {
                 opctx,
                 disk::DiskSelector {
                     project: match disk {
-                        NameOrId::Name(_) => Some(authz_project.id().into()),
+                        NameOrId::Name(_) => Some(NameOrId::Id(
+                            authz_project.id().into_untyped_uuid(),
+                        )),
                         NameOrId::Id(_) => None,
                     },
                     disk,
@@ -2563,7 +2570,7 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         authz_instance: authz::Instance,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         ext_ip: ExternalIpAttach,
     ) -> UpdateResult<external_ip::ExternalIp> {
         let saga_params = sagas::instance_ip_attach::Params {
@@ -3178,7 +3185,7 @@ mod tests {
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
-        let project_id = Uuid::new_v4();
+        let project_id = ProjectUuid::new_v4();
         let instance = DbInstance::new(instance_id, project_id, &params);
 
         let propolis_id = PropolisUuid::from_untyped_uuid(Uuid::new_v4());
@@ -3334,7 +3341,7 @@ mod tests {
             enable_jumbo_frames,
         };
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
-        let project_id = Uuid::new_v4();
+        let project_id = ProjectUuid::new_v4();
         DbInstance::new(instance_id, project_id, &params)
     }
 

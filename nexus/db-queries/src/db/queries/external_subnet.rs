@@ -28,6 +28,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::SubnetPoolUuid;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
@@ -432,7 +434,7 @@ pub fn decode_unlink_subnet_pool_from_silo_result(
 /// will be very helpful to actually inspect and understand the query.
 pub fn insert_external_subnet_query(
     silo_id: &Uuid,
-    project_id: &Uuid,
+    project_id: &ProjectUuid,
     identity: ExternalSubnetIdentity,
     subnet_selector: &ExternalSubnetAllocator,
 ) -> TypedSqlQuery<SelectableSql<ExternalSubnet>> {
@@ -627,7 +629,7 @@ fn push_cte_to_select_pool_from_explicit_subnet(
 // concurrent creations of a new subnet and deletions of the project itself.
 fn push_cte_to_check_for_deleted_project_and_update_rcgen(
     builder: &mut QueryBuilder,
-    project_id: &Uuid,
+    project_id: &ProjectUuid,
 ) {
     builder
         .sql(
@@ -637,7 +639,7 @@ fn push_cte_to_check_for_deleted_project_and_update_rcgen(
         WHERE id = ",
         )
         .param()
-        .bind::<sql_types::Uuid, _>(*project_id)
+        .bind::<sql_types::Uuid, _>(project_id.into_untyped_uuid())
         .sql(
             " AND time_deleted IS NULL \
         RETURNING 1\
@@ -710,7 +712,7 @@ fn push_cte_to_update_subnet_pool_member_rcgen(builder: &mut QueryBuilder) {
 // records we've selected in earlier CTEs.
 fn push_cte_to_insert_actual_ip_subnet(
     builder: &mut QueryBuilder,
-    project_id: &Uuid,
+    project_id: &ProjectUuid,
     identity: ExternalSubnetIdentity,
 ) {
     builder
@@ -753,7 +755,7 @@ fn push_cte_to_insert_actual_ip_subnet(
             subnet_pool_member_id, ",
         )
         .param()
-        .bind::<sql_types::Uuid, _>(*project_id)
+        .bind::<sql_types::Uuid, _>(project_id.into_untyped_uuid())
         .sql(
             " AS project_id, \
             subnet AS subnet, \
@@ -1367,13 +1369,14 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ExternalSubnetUuid;
     use omicron_uuid_kinds::GenericUuid as _;
+    use omicron_uuid_kinds::ProjectUuid;
     use omicron_uuid_kinds::SubnetPoolMemberUuid;
     use omicron_uuid_kinds::SubnetPoolUuid;
     use uuid::Uuid;
 
     const SILO_ID: Uuid = uuid::uuid!("1a597381-b5a1-43da-bd72-bb1ac0786c21");
-    const PROJECT_ID: Uuid =
-        uuid::uuid!("e9c2d699-c60d-4486-81c6-63de6897a4ed");
+    const PROJECT_ID: ProjectUuid =
+        ProjectUuid::from_u128(0xe9c2d699_c60d_4486_81c6_63de6897a4ed);
     const SUBNET_ID: Uuid = uuid::uuid!("56ba77dc-6116-4537-a858-d3d56e34a222");
     const SUBNET_MEMBER_ID: Uuid =
         uuid::uuid!("b694e771-a21d-4022-9acf-1e1f5169945e");
