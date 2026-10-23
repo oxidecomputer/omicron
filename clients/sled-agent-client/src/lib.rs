@@ -117,6 +117,7 @@ progenitor::generate_api!(
         ServiceZoneNatEntry = sled_agent_types_versions::latest::system_networking::ServiceZoneNatEntry,
         Sha3_256Digest = sled_agent_types_versions::latest::rot::Sha3_256Digest,
         SingleMeasurementInventory = sled_agent_types_versions::latest::inventory::SingleMeasurementInventory,
+        SledAgentInfo = sled_agent_types_versions::latest::multirack::SledAgentInfo,
         SledRole = sled_agent_types_versions::latest::inventory::SledRole,
         SledVmmState = sled_agent_types_versions::latest::instance::SledVmmState,
         SourceNatConfigGeneric = sled_agent_types_versions::latest::inventory::SourceNatConfigGeneric,

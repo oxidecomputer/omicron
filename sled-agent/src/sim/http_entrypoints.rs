@@ -60,6 +60,7 @@ use sled_agent_types::instance::{
     VmmPutStateResponse, VmmUnregisterResponse, VpcPathParam,
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
+use sled_agent_types::multirack::MultirackJoinServiceStatus;
 use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::rot::{
     Attestation, CertificateChain, MeasurementLog, Nonce, RotPathParams,
@@ -1164,6 +1165,12 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn multirack_join_complete(
         _request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn multirack_join_service_status(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<MultirackJoinServiceStatus>, HttpError> {
         method_unimplemented()
     }
 }

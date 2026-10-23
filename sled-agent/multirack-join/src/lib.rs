@@ -17,7 +17,7 @@
 extern crate slog;
 use bootstrap_agent_lockstep_types::{
     CommitState, MultirackJoinRequest, MultirackJoinServiceState,
-    SledAgentInfo, SledAgentStartState, StartSledAgentsStatus,
+    SledAgentInfo, StartSledAgentsStatus,
 };
 use nexus_types::trust_quorum::TrustQuorumConfig;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
@@ -26,6 +26,7 @@ use omicron_uuid_kinds::RackUuid;
 use sled_agent_bootstrap_common::sprockets::SprocketsClient;
 use sled_agent_bootstrap_common::{RssContext, RunRssError};
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
+use sled_agent_types::multirack::SledAgentStartState;
 use sled_agent_types::rack_init::rack_init_bootstore_generation;
 use sled_agent_types::sled::{
     StartSledAgentRequest, StartSledAgentRequestBody,
@@ -288,8 +289,35 @@ impl MultirackJoinServiceTask {
         &mut self,
     ) -> Result<(), MultirackJoinServiceError> {
         loop {
-            self.output_tx.send_modify(|state| {
-                *state = MultirackJoinServiceState::WaitForCompletion
+            self.output_tx.send_modify(|state| match state {
+                MultirackJoinServiceState::ConfigureNetworking {
+                    start_sled_agent_status: Some(status),
+                } => {
+                    *state = MultirackJoinServiceState::WaitForCompletion(
+                        status.clone(),
+                    )
+                }
+                MultirackJoinServiceState::StartSledAgents(status) => {
+                    *state = MultirackJoinServiceState::WaitForCompletion(
+                        status.clone(),
+                    )
+                }
+                MultirackJoinServiceState::ConfigureNetworking {
+                    start_sled_agent_status: None,
+                }
+                | MultirackJoinServiceState::Uninitialized
+                | MultirackJoinServiceState::Requested
+                | MultirackJoinServiceState::Starting
+                | MultirackJoinServiceState::TrustQuorumReconfigure(_)
+                | MultirackJoinServiceState::TrustQuorumPreparing(_)
+                | MultirackJoinServiceState::TrustQuorumCommitting(_)
+                | MultirackJoinServiceState::WaitForCompletion(_)
+                | MultirackJoinServiceState::Completed
+                | MultirackJoinServiceState::Failed { .. }
+                | MultirackJoinServiceState::InvalidMembershipSize { .. }
+                | MultirackJoinServiceState::TaskPanicked => {
+                    panic!("MultirackJoinService in wrong state: {:#?}", state);
+                }
             });
 
             tokio::select! {
@@ -322,8 +350,30 @@ impl MultirackJoinServiceTask {
         let rack_network_config =
             self.input_rx.borrow_and_update().rack_network_config.clone();
 
-        self.output_tx.send_modify(|state| {
-            *state = MultirackJoinServiceState::ConfigureNetworking
+        self.output_tx.send_modify(|state| match state {
+            MultirackJoinServiceState::TrustQuorumCommitting(_) => {
+                *state = MultirackJoinServiceState::ConfigureNetworking {
+                    start_sled_agent_status: None,
+                }
+            }
+            MultirackJoinServiceState::WaitForCompletion(status) => {
+                *state = MultirackJoinServiceState::ConfigureNetworking {
+                    start_sled_agent_status: Some(status.clone()),
+                }
+            }
+            MultirackJoinServiceState::Uninitialized
+            | MultirackJoinServiceState::Requested
+            | MultirackJoinServiceState::Starting
+            | MultirackJoinServiceState::TrustQuorumReconfigure(_)
+            | MultirackJoinServiceState::TrustQuorumPreparing(_)
+            | MultirackJoinServiceState::ConfigureNetworking { .. }
+            | MultirackJoinServiceState::StartSledAgents(_)
+            | MultirackJoinServiceState::Completed
+            | MultirackJoinServiceState::Failed { .. }
+            | MultirackJoinServiceState::InvalidMembershipSize { .. }
+            | MultirackJoinServiceState::TaskPanicked => {
+                panic!("MultirackJoinService in wrong state: {:#?}", state);
+            }
         });
 
         let config = SystemNetworkingConfig {
@@ -367,7 +417,11 @@ impl MultirackJoinServiceTask {
         // `changed()` wouldn't fire.
         let req = self.input_rx.borrow().clone();
         let tq_members = req.trust_quorum_peers.clone();
-        let status = StartSledAgentsStatus::assign_ids_and_subnets(req);
+        let status = StartSledAgentsStatus::assign_ids_and_subnets(
+            self.ctx.trust_quorum_handle.baseboard_id(),
+            rack_id,
+            req,
+        );
         self.output_tx.send_modify(|state| {
             *state = MultirackJoinServiceState::StartSledAgents(status.clone())
         });
@@ -1075,7 +1129,12 @@ mod tests {
             rack_network_config: rack_network_config(),
         };
 
-        let status = StartSledAgentsStatus::assign_ids_and_subnets(req.clone());
+        let coordinator = req.trust_quorum_peers.first().unwrap();
+        let status = StartSledAgentsStatus::assign_ids_and_subnets(
+            coordinator,
+            RackUuid::new_v4(),
+            req.clone(),
+        );
         assert_eq!(status.sleds.len(), req.trust_quorum_peers.len());
 
         let actual_sled_subnets: BTreeSet<_> =
