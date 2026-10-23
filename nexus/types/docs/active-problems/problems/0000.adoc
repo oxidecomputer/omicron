@@ -1,29 +1,3 @@
-:showtitle:
-:toc: left
-:icons: font
-// attributes passed in when the document is rendered:
-// - the problem code
-:problem-code:
-// - the problem title
-:problem-title:
-// - the problem class
-:problem-class:
-// - the version in which this problem code was added
-:problem-version-added:
-// - the version in which this problem was retired (set only if it's retired)
-:problem-version-retired:
-ifdef::problem-version-retired[]
-= {problem-title} (retired)
-endif::[]
-ifndef::problem-version-retired[]
-= {problem-title}
-endif::[]
-
-**Problem Code**: `{problem-code}`
-**Class**: `{problem-class}`
-**Added in**: `{problem-version-added}`
-ifdef::problem-version-retired[**Retired in**: `{problem-version-retired}`]
-
 == Description
 
 This is not a real problem. It exists only for testing purposes.
