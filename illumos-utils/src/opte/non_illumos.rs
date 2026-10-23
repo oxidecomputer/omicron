@@ -52,9 +52,6 @@ pub enum Error {
     #[error("Invalid IP configuration for port: {0}")]
     InvalidPortIpConfig(String),
 
-    #[error("Tried to release non-existent port ({0}, {1:?})")]
-    ReleaseMissingPort(uuid::Uuid, NetworkInterfaceKind),
-
     #[error("Tried to update external IPs on non-existent port ({0}, {1:?})")]
     ExternalIpUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
 
