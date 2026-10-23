@@ -378,7 +378,14 @@ impl ManagementSwitch {
     /// Get the identifier of our local switch.
     pub fn local_switch(&self) -> Result<SpIdentifier, SpLookupError> {
         let location_map = self.location_map()?;
-        Ok(location_map.port_to_id(self.local_ignition_controller_port))
+        Ok(self.local_switch_via_location_map(location_map))
+    }
+
+    fn local_switch_via_location_map(
+        &self,
+        location_map: &LocationMap,
+    ) -> SpIdentifier {
+        location_map.port_to_id(self.local_ignition_controller_port)
     }
 
     /// Determine whether a given SP is local to this MGS.
@@ -397,9 +404,7 @@ impl ManagementSwitch {
             // PSCs are never local to an MGS.
             SpType::Power => SpLocality::NotLocal,
             SpType::Switch => {
-                let local_switch_id = location_map
-                    .port_to_id(self.local_ignition_controller_port);
-                if id == local_switch_id {
+                if id == self.local_switch_via_location_map(location_map) {
                     SpLocality::LocalSwitch
                 } else {
                     SpLocality::NotLocal
