@@ -5,6 +5,7 @@
 use crate::ByteCount;
 use crate::DbTypedUuid;
 use crate::Name;
+use nexus_db_schema::schema::project_utilization;
 use nexus_db_schema::schema::silo_utilization;
 use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::silo;
@@ -69,6 +70,23 @@ impl From<SiloUtilization> for silo::Utilization {
             },
         }
     }
+}
+
+#[derive(Queryable, Debug, Clone, Selectable, Serialize, Deserialize)]
+#[diesel(table_name = project_utilization)]
+pub struct ProjectUtilization {
+    pub project_id: Uuid,
+    pub project_name: Name,
+    pub silo_id: Uuid,
+    pub silo_name: Name,
+    pub silo_discoverable: bool,
+
+    pub silo_cpus_allocated: i64,
+    pub silo_memory_allocated: ByteCount,
+    pub silo_storage_allocated: ByteCount,
+    pub cpus_provisioned: i64,
+    pub memory_provisioned: ByteCount,
+    pub storage_provisioned: ByteCount,
 }
 
 // Not really a DB model, just the result of a datastore function
