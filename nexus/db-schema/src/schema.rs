@@ -3543,7 +3543,8 @@ table! {
     fm_problem (sitrep_id, id) {
         id -> Uuid,
         sitrep_id -> Uuid,
-        requested_sitrep_id -> Uuid,
+        created_sitrep_id -> Uuid,
+        comment -> Text,
     }
 }
 
@@ -3567,7 +3568,7 @@ table! {
         case_id -> Uuid,
         problem_id -> Uuid,
         sitrep_id -> Uuid,
-        created_sitrep_id -> Uuid,
+        linked_sitrep_id -> Uuid,
         comment -> Text,
     }
 }
@@ -3577,7 +3578,7 @@ table! {
         problem_id -> Uuid,
         alert_id -> Uuid,
         sitrep_id -> Uuid,
-        created_sitrep_id -> Uuid,
+        linked_sitrep_id -> Uuid,
         revision -> Int8,
         comment -> Text,
     }
@@ -3588,7 +3589,7 @@ table! {
         problem_id -> Uuid,
         support_bundle_id -> Uuid,
         sitrep_id -> Uuid,
-        created_sitrep_id -> Uuid,
+        linked_sitrep_id -> Uuid,
         revision -> Int8,
         comment -> Text,
     }
