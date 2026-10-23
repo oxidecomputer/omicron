@@ -801,7 +801,7 @@ mod tests {
                 },
                 cases,
                 ereports_by_id,
-                active_problems: IdOrdMap::new(),
+                active_problems: Default::default(),
             };
             Arc::new((
                 SitrepVersion {
@@ -1066,7 +1066,7 @@ mod tests {
             },
             cases: [case].into_iter().collect(),
             ereports_by_id: IdOrdMap::new(),
-            active_problems: IdOrdMap::new(),
+            active_problems: Default::default(),
         };
         let parent_version = SitrepVersion {
             id: parent_sitrep_id,

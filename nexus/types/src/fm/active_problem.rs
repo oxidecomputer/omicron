@@ -16,6 +16,8 @@ use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 /// A structured internal representation of problem codes.
 ///
@@ -40,6 +42,8 @@ use serde::{Deserialize, Serialize};
     Debug,
     PartialEq,
     Eq,
+    PartialOrd,
+    Ord,
     strum::VariantArray,
     strum::FromRepr,
     Serialize,
@@ -182,6 +186,179 @@ impl ProblemCodeDescription {
     }
 }
 
+/// A map of all the Active Problems in a sitrep.
+///
+/// Active Problems may be looked up by ID, or by their [`ProblemCode`], using
+/// the [`AllActiveProblems::by_id`] and [`AllActiveProblems::by_code`] methods,
+/// respectively.
+#[derive(Clone, Debug, Default)]
+pub struct AllActiveProblems {
+    by_id: IdOrdMap<Arc<SitrepActiveProblem>>,
+    by_code: BTreeMap<ProblemCode, IdOrdMap<Arc<SitrepActiveProblem>>>,
+}
+
+impl AllActiveProblems {
+    /// Constructs a new `AllActiveProblems` from an iterator of Active
+    /// Problems.
+    ///
+    /// This is equivalent to calling [`AllActiveProblems::try_extend`] on an
+    /// empty map.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error under the same conditions as
+    /// [`AllActiveProblems::try_extend`].
+    pub fn try_from_iter<I>(
+        problems: impl IntoIterator<Item = I>,
+    ) -> anyhow::Result<Self>
+    where
+        SitrepActiveProblem: From<I>,
+    {
+        let mut this = Self::default();
+        this.try_extend(problems)?;
+        Ok(this)
+    }
+
+    pub fn try_extend<I>(
+        &mut self,
+        problems: impl IntoIterator<Item = I>,
+    ) -> anyhow::Result<&mut Self>
+    where
+        SitrepActiveProblem: From<I>,
+    {
+        for problem in problems {
+            let problem = SitrepActiveProblem::from(problem);
+            // Note: because `try_extend` may have been called with potentially
+            // invalid sets of Active Problems in the `Deserialize` impl or when
+            // loading a sitrep from the database, we must check here that the
+            // Active Problem has at least one revision and reject the Active
+            // Problems if it does not. The `SitrepActiveProblem::code()` method
+            // will instead assert that there is a problem code, so it should
+            // really only be used when the Active Problem has already been
+            // constructed and is known to be valid.
+            let code = problem
+                .revisions
+                .last()
+                .map(|rev| rev.code)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "invalid sitrep: Active Problem {} has no revisions!",
+                        problem.id
+                    )
+                })?;
+            let problem = Arc::new(problem);
+            self.by_code
+                .entry(problem.code())
+                .or_default()
+                .insert_unique(problem.clone())
+                .map_err(|e| anyhow::anyhow!(
+                    "invalid sitrep: duplicate Active Problem ID in by-code \
+                     map for {code:?}: {e}",
+                ))?;
+            self.by_id.insert_unique(problem).map_err(|e| {
+                anyhow::anyhow!(
+                    "invalid sitrep: duplicate Active Problem ID in by-id \
+                     map: {e}",
+                )
+            })?;
+        }
+        Ok(self)
+    }
+
+    pub fn by_id(&self) -> &IdOrdMap<Arc<SitrepActiveProblem>> {
+        &self.by_id
+    }
+
+    pub fn by_code(
+        &self,
+    ) -> &BTreeMap<ProblemCode, IdOrdMap<Arc<SitrepActiveProblem>>> {
+        &self.by_code
+    }
+
+    pub fn len(&self) -> usize {
+        self.by_id.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_id.is_empty()
+    }
+}
+
+impl<'a> IntoIterator for &'a AllActiveProblems {
+    type Item = &'a Arc<SitrepActiveProblem>;
+    type IntoIter =
+        <&'a IdOrdMap<Arc<SitrepActiveProblem>> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.by_id.iter()
+    }
+}
+
+/// Consumes the map, returning owned Active Problems in ID order.
+///
+/// This avoids cloning the individual [`Arc`]`<`[`SitrepActiveProblem`]`>`s if
+/// they are uniquely owned by this map. If a given problem's [`Arc`] has been
+/// cloned out of [`AllActiveProblems::by_id`] or [`AllActiveProblems::by_code`]
+/// and the caller is still holding a reference to it, that
+/// [`SitrepActiveProblem`] is cloned, instead.
+impl IntoIterator for AllActiveProblems {
+    type Item = SitrepActiveProblem;
+    type IntoIter = std::iter::Map<
+        iddqd::id_ord_map::IntoIter<Arc<SitrepActiveProblem>>,
+        fn(Arc<SitrepActiveProblem>) -> SitrepActiveProblem,
+    >;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let Self { by_id, by_code } = self;
+        // The by-code index holds a second reference to every problem, so it
+        // must be dropped before we drain `by_id`, or else
+        // `Arc::unwrap_or_clone` would always clone because `by_id` is not the
+        // unique owner of the `Arc`s. Therefore, drop it now
+        drop(by_code);
+        by_id.into_iter().map(Arc::unwrap_or_clone)
+    }
+}
+
+impl PartialEq for AllActiveProblems {
+    fn eq(&self, other: &Self) -> bool {
+        // Note: it is not necessary to compare the by-code maps, because the
+        // `SitrepActiveProblems` map is constructed in
+        // `SitrepActiveProblems::try_extend`, and this function will construct
+        // the by-code map identically provided that it was constructed from the
+        // same set of inputs.
+        self.by_id == other.by_id
+    }
+}
+
+impl Eq for AllActiveProblems {}
+
+/// Serializes as a sequence of [`SitrepActiveProblem`]s, in ID order.
+///
+/// Only the by-ID map is serialized, as a sequence. The by-code index is
+/// derived entirely from the contents of the by-ID map in [`Self::try_extend`],
+/// so these types should always round-trip identically without actually
+/// serializing both maps.
+impl Serialize for AllActiveProblems {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.by_id.iter().map(|problem| &**problem))
+    }
+}
+
+impl<'de> Deserialize<'de> for AllActiveProblems {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Self, D::Error> {
+        use serde::de::Error as _;
+
+        let problems = Vec::<SitrepActiveProblem>::deserialize(deserializer)?;
+        Self::try_from_iter(problems)
+            .map_err(|e| D::Error::custom(format!("{e:#}")))
+    }
+}
+
 /// The sitrep internal representation of an Active Problem.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct SitrepActiveProblem {
@@ -225,6 +402,10 @@ impl SitrepActiveProblem {
             "an active problem in the sitrep must always have at least one \
             revision!",
         )
+    }
+
+    pub fn code(&self) -> ProblemCode {
+        self.current_revision().code
     }
 }
 
@@ -438,5 +619,101 @@ mod tests {
         let path = base_docs_path().join("manifest.json");
 
         expectorate::assert_contents(&path, &manifest)
+    }
+
+    fn test_problem(revisions: u32) -> SitrepActiveProblem {
+        let sitrep_id = SitrepUuid::new_v4();
+        let mut revs = IdOrdMap::new();
+        for number in 1..=revisions {
+            revs.insert_unique(SitrepRevision {
+                number: ActiveProblemRevNum::from_u32(number),
+                created_sitrep_id: sitrep_id,
+                time_resolved: None,
+                code: ProblemCode::NotARealProblem,
+                summary: format!("revision {number}"),
+                description: format!("description of revision {number}"),
+                action_required: "none, it's not a real problem".to_string(),
+                comment: format!("revision {number} comment"),
+            })
+            .expect("revision numbers are distinct");
+        }
+        let mut alerts = IdOrdMap::new();
+        alerts
+            .insert_unique(AlertLink {
+                alert_id: AlertUuid::new_v4(),
+                revision: ActiveProblemRevNum::from_u32(1),
+                linked_sitrep_id: sitrep_id,
+                comment: "linked alert".to_string(),
+            })
+            .expect("map is empty");
+        let mut support_bundles = IdOrdMap::new();
+        support_bundles
+            .insert_unique(SupportBundleLink {
+                support_bundle_id: SupportBundleUuid::new_v4(),
+                revision: ActiveProblemRevNum::from_u32(1),
+                linked_sitrep_id: sitrep_id,
+                comment: "linked support bundle".to_string(),
+            })
+            .expect("map is empty");
+        SitrepActiveProblem {
+            id: ActiveProblemUuid::new_v4(),
+            created_sitrep_id: sitrep_id,
+            comment: "test problem".to_string(),
+            revisions: revs,
+            alerts,
+            support_bundles,
+        }
+    }
+
+    /// Serializing and deserializing an `AllActiveProblems` must reproduce both
+    /// the by-ID map and the by-code index, even though it only serializes the
+    /// by-ID map.
+    #[test]
+    fn all_active_problems_serde_roundtrip() {
+        let mut problems = AllActiveProblems::default();
+        problems
+            .try_extend([test_problem(1), test_problem(2), test_problem(3)])
+            .expect("problems are valid");
+
+        let json = serde_json::to_value(&problems)
+            .expect("active problems should serialize");
+        let serialized = json.as_array().unwrap_or_else(|| {
+            panic!("active problems should serialize as a sequence: {json:#}")
+        });
+        assert_eq!(serialized.len(), problems.len());
+
+        let deserialized: AllActiveProblems = serde_json::from_value(json)
+            .expect("serialized active problems should deserialize");
+        assert_eq!(deserialized, problems);
+        // `PartialEq` for `AllActiveProblems` only compares the by-ID maps, so
+        // check that the by-code index was rebuilt separately.
+        assert_eq!(deserialized.by_code(), problems.by_code());
+    }
+
+    #[test]
+    fn all_active_problems_deserialize_rejects_duplicate_ids() {
+        let problem = test_problem(1);
+        let json = serde_json::to_string(&[&problem, &problem])
+            .expect("problems should serialize");
+        let err = serde_json::from_str::<AllActiveProblems>(&json)
+            .expect_err("duplicate Active Problem IDs should be rejected");
+        assert!(
+            err.to_string().contains("duplicate Active Problem ID"),
+            "unexpected error: {err}",
+        );
+    }
+
+    #[test]
+    fn all_active_problems_deserialize_rejects_empty_revisions() {
+        let problem = test_problem(0);
+        let json = serde_json::to_string(&[&problem])
+            .expect("problems should serialize");
+        let err = serde_json::from_str::<AllActiveProblems>(&json).expect_err(
+            "an Active Problem with no revisions should be rejected",
+        );
+        assert!(
+            err.to_string().contains("has no revisions"),
+            "unexpected error: {err}",
+        );
     }
 }
