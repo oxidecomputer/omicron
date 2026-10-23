@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use gateway_client::SpComponent;
+use gateway_client::types::SpComponentResetError;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup;
 use gateway_types::component::SpType;
@@ -71,13 +72,16 @@ async fn cannot_reset_local_switch() {
                 SpComponent::SP_ITSELF.const_as_str(),
             )
             .await
-            .unwrap_err()
-            .to_string();
-        let expected = "reset_sp_of_local_switch";
-        assert!(
-            err.contains(expected),
-            "expected error to contain `{expected}`, but got `{err}`"
-        );
+            .unwrap_err();
+        match err {
+            gateway_client::Error::ErrorResponse(err) => {
+                match err.into_inner() {
+                    SpComponentResetError::ResetSpOfLocalSwitch => (),
+                    other => panic!("unexpected inner error: {other:?}"),
+                }
+            }
+            _ => panic!("unexpected error variant: {err:?}"),
+        }
 
         // ... but resetting the _other_ switch should succeed.
         let other_switch = switch ^ 1;
