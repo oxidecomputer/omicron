@@ -630,7 +630,8 @@ impl DataStore {
                 let model::fm::FmActiveProblem {
                     id,
                     sitrep_id: _,
-                    requested_sitrep_id,
+                    created_sitrep_id,
+                    comment,
                 } = problem;
                 let id = ActiveProblemUuid::from(id);
                 let revisions = revisions_by_problem
@@ -651,7 +652,8 @@ impl DataStore {
                 problems
                     .insert_unique(SitrepActiveProblem {
                         id,
-                        requested_sitrep_id: requested_sitrep_id.into(),
+                        created_sitrep_id: created_sitrep_id.into(),
+                        comment,
                         revisions,
                         alerts,
                         support_bundles,
@@ -3340,7 +3342,7 @@ mod tests {
             fm::active_problem::AlertLink {
                 alert_id,
                 revision: ActiveProblemRevNum::from_u32(revision),
-                created_sitrep_id: sitrep_id,
+                linked_sitrep_id: sitrep_id,
                 comment: comment.to_string(),
             }
         };
@@ -3349,7 +3351,7 @@ mod tests {
                         summary: &str| {
             fm::active_problem::SitrepRevision {
                 number: ActiveProblemRevNum::from_u32(number),
-                requested_sitrep_id: sitrep_id,
+                created_sitrep_id: sitrep_id,
                 time_resolved,
                 code: fm::active_problem::ProblemCode::NotARealProblem,
                 summary: summary.to_string(),
@@ -3360,7 +3362,8 @@ mod tests {
         };
         let resolved_problem = fm::active_problem::SitrepActiveProblem {
             id: ActiveProblemUuid::new_v4(),
-            requested_sitrep_id: sitrep_id,
+            created_sitrep_id: sitrep_id,
+            comment: "a problem that has since been resolved".to_string(),
             revisions: [
                 revision(1, None, "something is wrong"),
                 revision(
@@ -3384,7 +3387,7 @@ mod tests {
             support_bundles: [fm::active_problem::SupportBundleLink {
                 support_bundle_id: linked_bundle_id,
                 revision: ActiveProblemRevNum::from_u32(2),
-                created_sitrep_id: sitrep_id,
+                linked_sitrep_id: sitrep_id,
                 comment: "collected when the problem was resolved".to_string(),
             }]
             .into_iter()
@@ -3392,7 +3395,8 @@ mod tests {
         };
         let shared_problem = fm::active_problem::SitrepActiveProblem {
             id: ActiveProblemUuid::new_v4(),
-            requested_sitrep_id: sitrep_id,
+            created_sitrep_id: sitrep_id,
+            comment: "a problem shared by two cases".to_string(),
             revisions: [revision(1, None, "two cases agree this is wrong")]
                 .into_iter()
                 .collect(),
@@ -3410,7 +3414,7 @@ mod tests {
              comment: &str| {
                 fm::case::CaseActiveProblem {
                     problem_id: problem.id,
-                    created_sitrep_id: sitrep_id,
+                    linked_sitrep_id: sitrep_id,
                     comment: comment.to_string(),
                 }
             };
