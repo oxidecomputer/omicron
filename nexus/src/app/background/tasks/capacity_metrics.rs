@@ -41,7 +41,9 @@ use oximeter::types::ProducerRegistry;
 use std::sync::{Arc, Mutex};
 
 oximeter::use_timeseries!("silo-quota.toml");
+oximeter::use_timeseries!("project-quota.toml");
 
+use project_quota::ProjectQuota;
 use silo_quota::SiloQuota;
 
 const QUEUE_SIZE: usize = 8192;
@@ -71,11 +73,11 @@ impl CapacityMetrics {
         let now = chrono::Utc::now();
         let nexus_id = nexus_id.into_untyped_uuid();
 
-        let mut paginator =
-            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Ascending);
         let mut samples = Vec::<Sample>::new();
 
-        while let Some(p) = paginator.next() {
+        let mut silo_paginator =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Ascending);
+        while let Some(p) = silo_paginator.next() {
             let silo_utils = self
                 .datastore
                 .silo_utilization_list(
@@ -83,7 +85,7 @@ impl CapacityMetrics {
                     &PaginatedBy::Id(p.current_pagparams()),
                 )
                 .await?;
-            paginator = p.found_batch(&silo_utils, &|util| {
+            silo_paginator = p.found_batch(&silo_utils, &|util| {
                 util.silo_id().into_untyped_uuid()
             });
 
@@ -132,6 +134,48 @@ impl CapacityMetrics {
                         now,
                         &target,
                         &silo_quota::VirtualStorageProvisioned {
+                            datum: util.storage_provisioned.to_bytes(),
+                        },
+                    )?,
+                ]);
+            }
+        }
+
+        let mut project_paginator =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Ascending);
+        while let Some(p) = project_paginator.next() {
+            let project_utils = self
+                .datastore
+                .project_utilization_list(opctx, &p.current_pagparams())
+                .await?;
+            project_paginator =
+                p.found_batch(&project_utils, &|util| util.project_id);
+
+            for util in project_utils {
+                let target = ProjectQuota {
+                    project_id: util.project_id,
+                    silo_id: util.silo_id,
+                    nexus_id,
+                };
+                samples.extend([
+                    Sample::new_with_timestamp(
+                        now,
+                        &target,
+                        &project_quota::MemoryProvisioned {
+                            datum: util.memory_provisioned.to_bytes(),
+                        },
+                    )?,
+                    Sample::new_with_timestamp(
+                        now,
+                        &target,
+                        &project_quota::CpuProvisioned {
+                            datum: u64::try_from(util.cpus_provisioned)?,
+                        },
+                    )?,
+                    Sample::new_with_timestamp(
+                        now,
+                        &target,
+                        &project_quota::VirtualStorageProvisioned {
                             datum: util.storage_provisioned.to_bytes(),
                         },
                     )?,
@@ -346,17 +390,18 @@ mod tests {
 
         assert_eq!(
             task.activate(&opctx).await,
-            serde_json::json!({"samples_queued": 12}),
+            serde_json::json!({"samples_queued": 15}),
         );
         let samples = collect_samples(&registry);
-        assert_eq!(samples.len(), 12);
+        assert_eq!(samples.len(), 15);
 
         let mut expected = BTreeMap::new();
-        for (silo_id, kind, cpu, memory, storage) in [
-            (populated_silo, "capacity", 32, 128, 1024),
-            (populated_silo, "provisioned", 4, 16, 100),
-            (empty_silo, "capacity", 8, 32, 256),
-            (empty_silo, "provisioned", 0, 0, 0),
+        for (silo_id, project_id, kind, cpu, memory, storage) in [
+            (populated_silo, None, "capacity", 32, 128, 1024),
+            (populated_silo, None, "provisioned", 4, 16, 100),
+            (empty_silo, None, "capacity", 8, 32, 256),
+            (empty_silo, None, "provisioned", 0, 0, 0),
+            (populated_silo, Some(project_id), "provisioned", 4, 16, 100),
         ] {
             for (metric, value) in [
                 ("cpu", cpu),
@@ -366,10 +411,16 @@ mod tests {
                     ByteCount::from_gibibytes_u32(storage).to_bytes(),
                 ),
             ] {
+                let target = if project_id.is_some() {
+                    "project_quota"
+                } else {
+                    "silo_quota"
+                };
                 expected.insert(
                     (
                         silo_id.into_untyped_uuid(),
-                        format!("silo_quota:{metric}_{kind}"),
+                        project_id,
+                        format!("{target}:{metric}_{kind}"),
                     ),
                     value,
                 );
@@ -381,7 +432,16 @@ mod tests {
             let FieldValue::Uuid(silo_id) = fields["silo_id"].value else {
                 panic!("expected silo_id be a uuid");
             };
-            let key = (silo_id, sample.timeseries_name.to_string());
+            let project_id = if sample.target_name() == "project_quota" {
+                let FieldValue::Uuid(project_id) = fields["project_id"].value
+                else {
+                    panic!("expected project_id to be a uuid");
+                };
+                Some(project_id)
+            } else {
+                None
+            };
+            let key = (silo_id, project_id, sample.timeseries_name.to_string());
             let value = expected.remove(&key).unwrap_or_else(|| {
                 panic!("unexpected or duplicate sample: {key:?}")
             });

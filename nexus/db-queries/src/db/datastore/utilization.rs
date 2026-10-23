@@ -14,11 +14,14 @@ use diesel::BoolExpressionMethods;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_model::ProjectUtilization;
 use nexus_types::silo::DEFAULT_SILO_ID;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use ref_cast::RefCast;
+use uuid::Uuid;
 
 impl DataStore {
     pub async fn silo_utilization_view(
@@ -72,5 +75,29 @@ impl DataStore {
         .load_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn project_utilization_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<ProjectUtilization> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        use nexus_db_schema::schema::project_utilization::dsl;
+        paginated(dsl::project_utilization, dsl::project_id, pagparams)
+            .select(ProjectUtilization::as_select())
+            // Match filtering logic from `silo_utilization_list` so that we
+            // include projects whose parent silos appear in that list.
+            .filter(
+                dsl::silo_discoverable
+                    .eq(true)
+                    .or(dsl::silo_cpus_allocated.gt(0))
+                    .or(dsl::silo_memory_allocated.gt(0))
+                    .or(dsl::silo_storage_allocated.gt(0)),
+            )
+            .filter(dsl::silo_id.ne(DEFAULT_SILO_ID))
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
