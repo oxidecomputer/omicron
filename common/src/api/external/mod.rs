@@ -31,6 +31,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::convert::TryFrom;
+use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -517,6 +518,40 @@ fn name_schema(
 )]
 pub struct ByteCount(u64);
 
+/// Generates byte counts in `0..=i64::MAX`, the range a [`ByteCount`] may
+/// hold.
+///
+/// A uniform distribution over that range would almost never produce a multiple
+/// of a KiB, let alone a TiB, but real byte counts (disk and memory sizes)
+/// almost always are. So, rather than using the derive, we hand-implement a
+/// strategy that has a 1/5ths chance of generating multiples of each unit,
+/// rather than a uniform distribution.
+#[cfg(any(test, feature = "testing"))]
+impl proptest::arbitrary::Arbitrary for ByteCount {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+
+    fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
+        use proptest::strategy::Strategy;
+
+        const MAX: u64 = i64::MAX as u64;
+        proptest::prop_oneof![
+            0..=MAX,
+            (0..=MAX / KiB).prop_map(|n| n * KiB),
+            (0..=MAX / MiB).prop_map(|n| n * MiB),
+            (0..=MAX / GiB).prop_map(|n| n * GiB),
+            (0..=MAX / TiB).prop_map(|n| n * TiB),
+        ]
+        .prop_map(|bytes| {
+            ByteCount::try_from(bytes).expect(
+                "all branches of the `prop_oneof!` should generate at most
+                `i64::MAX` bytes, so this should always be in bounds",
+            )
+        })
+        .boxed()
+    }
+}
+
 impl<'de> Deserialize<'de> for ByteCount {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -535,6 +570,12 @@ const MiB: u64 = KiB * 1024;
 const GiB: u64 = MiB * 1024;
 #[allow(non_upper_case_globals)]
 const TiB: u64 = GiB * 1024;
+
+// A mapping of string suffixen to the factor that converts between a suffixed
+// value and a number of bytes. This is used in the `fmt::Display` and `FromStr`
+// implementations for `ByteCount`.
+const BYTE_COUNT_SUFFIXEN: &[(&str, u64)] =
+    &[("TiB", TiB), ("GiB", GiB), ("MiB", MiB), ("KiB", KiB), ("B", 1)];
 
 impl ByteCount {
     // None of these three constructors can create a value larger than
@@ -568,20 +609,109 @@ impl ByteCount {
 
 impl Display for ByteCount {
     fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        if self.to_bytes() >= TiB && self.to_bytes().is_multiple_of(TiB) {
-            write!(f, "{} TiB", self.to_whole_tebibytes())
-        } else if self.to_bytes() >= GiB && self.to_bytes().is_multiple_of(GiB)
-        {
-            write!(f, "{} GiB", self.to_whole_gibibytes())
-        } else if self.to_bytes() >= MiB && self.to_bytes().is_multiple_of(MiB)
-        {
-            write!(f, "{} MiB", self.to_whole_mebibytes())
-        } else if self.to_bytes() >= KiB && self.to_bytes().is_multiple_of(KiB)
-        {
-            write!(f, "{} KiB", self.to_whole_kibibytes())
-        } else {
-            write!(f, "{} B", self.to_bytes())
+        for &(suffix, factor) in BYTE_COUNT_SUFFIXEN {
+            if self.to_bytes() >= factor
+                && self.to_bytes().is_multiple_of(factor)
+            {
+                return write!(f, "{} {suffix}", self.to_bytes() / factor);
+            }
         }
+        // This is trivially unreachable, since the last iteration of the loop
+        // would have hit the ("B", 1) tuple, and we would never fall through to
+        // here. But, it's nicer not to panic even in the unreachable case if we
+        // can just do the correct thing instead.
+        write!(f, "{} B", self.to_bytes())
+    }
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ByteCountParseError {
+    #[error(transparent)]
+    OutOfRange(#[from] ByteCountRangeError),
+    #[error(
+        "invalid byte count suffix {0:?} (expected {ex})",
+        ex = ByteCountSuffixenDisplayer
+    )]
+    InvalidSuffix(String),
+    #[error("invalid number {digits:?} in byte count")]
+    InvalidInteger {
+        digits: String,
+        #[source]
+        source: std::num::ParseIntError,
+    },
+}
+
+struct ByteCountSuffixenDisplayer;
+impl fmt::Display for ByteCountSuffixenDisplayer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut suffixen = BYTE_COUNT_SUFFIXEN.iter().peekable();
+        while let Some((suffix, _)) = suffixen.next() {
+            if suffixen.peek().is_some() {
+                write!(f, "{suffix:?}, ")?;
+            } else {
+                write!(f, "or {suffix:?}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl FromStr for ByteCount {
+    type Err = ByteCountParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Returns the multiplier for `suffix`.
+        fn suffix2factor(suffix: &str) -> Option<u64> {
+            BYTE_COUNT_SUFFIXEN
+                .iter()
+                // We intentionally do not match case-insensitively here to
+                // avoid potentially ambiguous spellings (i.e. where a lowercase
+                // 'b' means "bits" rather than "bytes")
+                .find(|(s, _)| suffix == *s)
+                .map(|&(_, factor)| factor)
+        }
+
+        // First, split the string into any non-digit suffix and the rest of the
+        // string.
+        let s = s.trim();
+        let (digits, factor) = match s.rfind(|c: char| c.is_ascii_digit()) {
+            Some(splitpoint) => {
+                // An ASCII digit is one byte long, so `splitpoint + 1` is a char
+                // boundary.
+                let (digits, suffix) = s.split_at(splitpoint + 1);
+                let suffix = suffix.trim();
+                let factor = if !suffix.is_empty() {
+                    suffix2factor(suffix).ok_or_else(|| {
+                        ByteCountParseError::InvalidSuffix(suffix.to_string())
+                    })?
+                } else {
+                    1
+                };
+                (digits, factor)
+            }
+            // No digits at all. If the input is a valid suffix, the number is
+            // missing; otherwise, the whole input is a malformed number. This
+            // bit only matters so that we can report slightly nicer errors.
+            None => match suffix2factor(s) {
+                Some(factor) => ("", factor),
+                None => (s, 1),
+            },
+        };
+
+        // Parse the digits as an integer and multiply it by the factor
+        // determined based on either the suffix or the lack thereof.
+        let base = digits.parse::<u64>().map_err(|source| {
+            ByteCountParseError::InvalidInteger {
+                digits: digits.to_string(),
+                source,
+            }
+        })?;
+        let bytes = base
+            // If base * factor would overflow, the value is out of range.
+            .checked_mul(factor)
+            .ok_or(ByteCountRangeError::TooLarge)?
+            .try_into()?;
+        return Ok(bytes);
     }
 }
 
@@ -2424,10 +2554,10 @@ mod test {
     use super::VpcFirewallRuleHostFilter;
     use super::VpcFirewallRuleTarget;
     use super::{
-        ByteCount, Digest, L4Port, L4PortRange, Name, VpcFirewallRuleAction,
-        VpcFirewallRuleDirection, VpcFirewallRuleFilter,
-        VpcFirewallRulePriority, VpcFirewallRuleProtocol,
-        VpcFirewallRuleStatus, VpcFirewallRuleUpdate,
+        ByteCount, ByteCountParseError, ByteCountRangeError, Digest, L4Port,
+        L4PortRange, Name, VpcFirewallRuleAction, VpcFirewallRuleDirection,
+        VpcFirewallRuleFilter, VpcFirewallRulePriority,
+        VpcFirewallRuleProtocol, VpcFirewallRuleStatus, VpcFirewallRuleUpdate,
         VpcFirewallRuleUpdateParams,
     };
     use crate::api::external::Error;
@@ -2649,6 +2779,184 @@ mod test {
         assert_eq!(
             format!("{}", ByteCount::from_gibibytes_u32(1024)),
             "1 TiB".to_string()
+        );
+    }
+
+    #[test]
+    fn test_bytecount_parse() {
+        const KIB: u64 = 1024;
+        const MIB: u64 = KIB * 1024;
+        const GIB: u64 = MIB * 1024;
+        const TIB: u64 = GIB * 1024;
+        let cases: &[(&str, u64)] = &[
+            // Bare integers are interpreted as bytes.
+            ("0", 0),
+            ("1", 1),
+            ("12", 12),
+            ("1025", 1025),
+            // Every suffix.
+            ("0B", 0),
+            ("1B", 1),
+            ("1025B", 1025),
+            ("1KiB", KIB),
+            ("100KiB", 100 * KIB),
+            ("2MiB", 2 * MIB),
+            ("3GiB", 3 * GIB),
+            ("4TiB", 4 * TIB),
+            // Whitespace between the number and the suffix, and around the
+            // whole input, is ignored.
+            ("1 KiB", KIB),
+            ("1   KiB", KIB),
+            ("  10 GiB  ", 10 * GIB),
+            ("\t5 B\n", 5),
+            ("  42  ", 42),
+            // Largest representable value, as bytes and as a multiple.
+            ("9223372036854775807", i64::MAX as u64),
+            ("9223372036854775807 B", i64::MAX as u64),
+            ("8388607 TiB", 8388607 * TIB),
+        ];
+        for &(input, expected) in cases {
+            let parsed = input
+                .parse::<ByteCount>()
+                .unwrap_or_else(|e| panic!("failed to parse {input:?}: {e}"));
+            assert_eq!(parsed.to_bytes(), expected, "input: {input:?}");
+        }
+    }
+
+    #[test_strategy::proptest]
+    fn test_bytecount_parse_roundtrips_display(value: ByteCount) {
+        let displayed = value.to_string();
+        let parsed = displayed
+            .parse::<ByteCount>()
+            .unwrap_or_else(|e| panic!("failed to parse {displayed:?}: {e}"));
+        assert_eq!(parsed, value, "displayed: {displayed:?}");
+    }
+
+    #[test]
+    fn test_bytecount_parse_errors() {
+        // Unrecognized suffixes.
+        for (input, suffix) in [
+            ("1 kb", "kb"),
+            ("10x", "x"),
+            ("12 bytes", "bytes"),
+            ("100 PiB", "PiB"),
+            ("5 x", "x"),
+            // Near-misses that include a valid suffix as a substring of an
+            // invalid one.
+            ("1 EiB", "EiB"),
+            ("1 iB", "iB"),
+            ("1 KKiB", "KKiB"),
+            ("1 BB", "BB"),
+            ("1 TiBB", "TiBB"),
+            // Single-letter abbreviations are ambiguous between binary and
+            // decimal units, so they're rejected.
+            ("1 K", "K"),
+            ("1 M", "M"),
+            ("1 G", "G"),
+            ("1 T", "T"),
+            // Suffixes are case-sensitive, since a lowercase "b" commonly
+            // means bits rather than bytes.
+            ("1 b", "b"),
+            ("1 kib", "kib"),
+            ("1 KIB", "KIB"),
+            ("1 gib", "gib"),
+            ("1 Mib", "Mib"),
+        ] {
+            match input.parse::<ByteCount>() {
+                Err(ByteCountParseError::InvalidSuffix(s)) => {
+                    assert_eq!(s, suffix, "input: {input:?}")
+                }
+                other => panic!(
+                    "expected InvalidSuffix({suffix:?}) for {input:?}, got \
+                     {other:?}"
+                ),
+            }
+        }
+
+        // Inputs whose numeric part is not a non-negative integer. The numeric
+        // part runs up to and including the last ASCII digit. If there are no
+        // digits, then a valid suffix alone has an empty numeric part, and
+        // anything else is entirely numeric part.
+        for (input, expected_digits) in [
+            ("-1", "-1"),
+            ("-1 KiB", "-1"),
+            ("1.5 GiB", "1.5"),
+            ("x1 KiB", "x1"),
+            ("1 2 KiB", "1 2"),
+            ("", ""),
+            ("   ", ""),
+            ("B", ""),
+            (" KiB ", ""),
+            ("abc", "abc"),
+            (" -KiB ", "-KiB"),
+            ("PiB", "PiB"),
+            // Rejected suffixes alone are not valid suffixes, so the whole
+            // input is treated as the numeric part.
+            ("K", "K"),
+            ("kib", "kib"),
+        ] {
+            match input.parse::<ByteCount>() {
+                Err(ByteCountParseError::InvalidInteger { digits, .. }) => {
+                    assert_eq!(digits, expected_digits, "input: {input:?}")
+                }
+                other => panic!(
+                    "expected InvalidInteger {{ digits: \
+                     {expected_digits:?} }} for {input:?}, got {other:?}"
+                ),
+            }
+        }
+
+        // Values that don't fit in a `ByteCount`, either because the
+        // multiplication overflows `u64`, or the result exceeds `i64::MAX`.
+        for input in [
+            "9223372036854775808",
+            "9223372036854775808 B",
+            "8388608 TiB",
+            "18446744073709551615 KiB",
+        ] {
+            match input.parse::<ByteCount>() {
+                Err(ByteCountParseError::OutOfRange(
+                    ByteCountRangeError::TooLarge,
+                )) => {}
+                other => panic!(
+                    "expected OutOfRange(TooLarge) for {input:?}, got \
+                     {other:?}"
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn test_bytecount_parse_error_display() {
+        use std::fmt::Write;
+
+        let inputs = [
+            // InvalidSuffix
+            "10 PiB",
+            "10 G",
+            "1 K B",
+            // InvalidInteger
+            "",
+            "KiB",
+            "abc",
+            "-1 KiB",
+            "1.5 GiB",
+            "99999999999999999999 B",
+            // OutOfRange
+            "9223372036854775808",
+            "8388608 TiB",
+        ];
+
+        let mut found_output = String::new();
+        for input in inputs {
+            let err = input.parse::<ByteCount>().expect_err(input);
+            let err = slog_error_chain::InlineErrorChain::new(&err);
+            writeln!(found_output, "input: {input:?}\nerror: {err}\n").unwrap();
+        }
+
+        expectorate::assert_contents(
+            "tests/output/bytecount-parse-errors.txt",
+            &found_output,
         );
     }
 
