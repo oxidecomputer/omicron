@@ -223,7 +223,6 @@ pub struct NextExternalIp {
     // Number of ports reserved per IP address. Only applicable if the IP kind
     // is snat.
     n_ports_per_chunk: i32,
-    now: DateTime<Utc>,
     // Cached projection of `ip`'s allocation target, stored here so that we can
     // bind it as a query parameter with a lifetime tied to the query fragment.
     is_service: bool,
@@ -231,10 +230,9 @@ pub struct NextExternalIp {
 
 impl NextExternalIp {
     pub fn new(ip: IncompleteExternalIp) -> Self {
-        let now = Utc::now();
         let n_ports_per_chunk = i32::from(NUM_SOURCE_NAT_PORTS);
         let is_service = ip.is_service();
-        Self { ip, n_ports_per_chunk, now, is_service }
+        Self { ip, n_ports_per_chunk, is_service }
     }
 
     // Push the top-level SELECT clauses used in the `next_external_ip` CTE.
@@ -679,12 +677,6 @@ impl NextExternalIp {
         out.push_sql("UPDATE ");
         IP_POOL_RANGE_FROM_CLAUSE.walk_ast(out.reborrow())?;
         out.push_sql(" SET ");
-        out.push_identifier(dsl::time_modified::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
-            &self.now,
-        )?;
-        out.push_sql(", ");
         out.push_identifier(dsl::rcgen::NAME)?;
         out.push_sql(" = ");
         out.push_identifier(dsl::rcgen::NAME)?;
