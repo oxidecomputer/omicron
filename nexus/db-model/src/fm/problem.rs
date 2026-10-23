@@ -35,10 +35,17 @@ pub struct FmProblem {
     /// The sitrep that this record is part of.
     ///
     /// Note that this is *not* the sitrep in which the problem was first
-    /// requested; see [`Self::requested_sitrep_id`].
+    /// created; see [`Self::created_sitrep_id`].
     pub sitrep_id: DbTypedUuid<SitrepKind>,
-    /// The sitrep in which the problem was first requested.
-    pub requested_sitrep_id: DbTypedUuid<SitrepKind>,
+    /// The sitrep in which the problem was first created.
+    pub created_sitrep_id: DbTypedUuid<SitrepKind>,
+
+    /// An internal human-readable comment explaining why the diagnosis engine
+    /// created this problem.
+    ///
+    /// This is used for debugging the sitrep, and is not part of the
+    /// externally visible problem.
+    pub comment: String,
 }
 
 /// A revision of a problem in a fault management sitrep.
@@ -92,10 +99,12 @@ pub struct FmProblemAlert {
     /// The sitrep that this record is part of.
     ///
     /// Note that this is *not* the sitrep in which the link was first created;
-    /// see [`Self::created_sitrep_id`].
+    /// see [`Self::linked_sitrep_id`].
     pub sitrep_id: DbTypedUuid<SitrepKind>,
     /// The sitrep in which this link was first created.
-    pub created_sitrep_id: DbTypedUuid<SitrepKind>,
+    ///
+    /// This is *not* the sitrep that requested the alert.
+    pub linked_sitrep_id: DbTypedUuid<SitrepKind>,
     /// The problem revision with which the alert is associated.
     pub revision: DbTypedGeneration<ProblemRevKind>,
     pub comment: String,
@@ -115,10 +124,12 @@ pub struct FmProblemSupportBundle {
     /// The sitrep that this record is part of.
     ///
     /// Note that this is *not* the sitrep in which the link was first created;
-    /// see [`Self::created_sitrep_id`].
+    /// see [`Self::linked_sitrep_id`].
     pub sitrep_id: DbTypedUuid<SitrepKind>,
     /// The sitrep in which this link was first created.
-    pub created_sitrep_id: DbTypedUuid<SitrepKind>,
+    ///
+    /// This is *not* the sitrep that requested the support bundle.
+    pub linked_sitrep_id: DbTypedUuid<SitrepKind>,
     /// The problem revision with which the support bundle is associated.
     pub revision: DbTypedGeneration<ProblemRevKind>,
     pub comment: String,
@@ -138,7 +149,8 @@ impl FmProblem {
     ) -> Self {
         let SitrepProblem {
             id,
-            requested_sitrep_id,
+            created_sitrep_id,
+            comment,
             revisions: _,
             alerts: _,
             support_bundles: _,
@@ -146,7 +158,8 @@ impl FmProblem {
         Self {
             id: (*id).into(),
             sitrep_id: sitrep_id.into(),
-            requested_sitrep_id: (*requested_sitrep_id).into(),
+            created_sitrep_id: (*created_sitrep_id).into(),
+            comment: comment.clone(),
         }
     }
 }
@@ -161,7 +174,7 @@ impl FmProblemRevision {
     ) -> Self {
         let SitrepRevision {
             number,
-            requested_sitrep_id,
+            created_sitrep_id,
             time_resolved,
             code,
             summary,
@@ -173,7 +186,7 @@ impl FmProblemRevision {
             problem_id: problem_id.into(),
             revision: number.into(),
             sitrep_id: sitrep_id.into(),
-            created_sitrep_id: requested_sitrep_id.into(),
+            created_sitrep_id: created_sitrep_id.into(),
             time_resolved,
             code: SqlU32::new(code.into()),
             summary,
@@ -206,7 +219,7 @@ impl TryFrom<FmProblemRevision> for SitrepRevision {
         } = revision;
         Ok(Self {
             number: number.into(),
-            requested_sitrep_id: created_sitrep_id.into(),
+            created_sitrep_id: created_sitrep_id.into(),
             time_resolved,
             code: ProblemCode::try_from(u32::from(code))?,
             summary,
@@ -225,12 +238,12 @@ impl FmProblemAlert {
         problem_id: ProblemUuid,
         link: AlertLink,
     ) -> Self {
-        let AlertLink { alert_id, revision, created_sitrep_id, comment } = link;
+        let AlertLink { alert_id, revision, linked_sitrep_id, comment } = link;
         Self {
             problem_id: problem_id.into(),
             alert_id: alert_id.into(),
             sitrep_id: sitrep_id.into(),
-            created_sitrep_id: created_sitrep_id.into(),
+            linked_sitrep_id: linked_sitrep_id.into(),
             revision: revision.into(),
             comment,
         }
@@ -243,14 +256,14 @@ impl From<FmProblemAlert> for AlertLink {
             problem_id: _,
             alert_id,
             sitrep_id: _,
-            created_sitrep_id,
+            linked_sitrep_id,
             revision,
             comment,
         } = link;
         Self {
             alert_id: alert_id.into(),
             revision: revision.into(),
-            created_sitrep_id: created_sitrep_id.into(),
+            linked_sitrep_id: linked_sitrep_id.into(),
             comment,
         }
     }
@@ -267,14 +280,14 @@ impl FmProblemSupportBundle {
         let SupportBundleLink {
             support_bundle_id,
             revision,
-            created_sitrep_id,
+            linked_sitrep_id,
             comment,
         } = link;
         Self {
             problem_id: problem_id.into(),
             support_bundle_id: support_bundle_id.into(),
             sitrep_id: sitrep_id.into(),
-            created_sitrep_id: created_sitrep_id.into(),
+            linked_sitrep_id: linked_sitrep_id.into(),
             revision: revision.into(),
             comment,
         }
@@ -287,14 +300,14 @@ impl From<FmProblemSupportBundle> for SupportBundleLink {
             problem_id: _,
             support_bundle_id,
             sitrep_id: _,
-            created_sitrep_id,
+            linked_sitrep_id,
             revision,
             comment,
         } = link;
         Self {
             support_bundle_id: support_bundle_id.into(),
             revision: revision.into(),
-            created_sitrep_id: created_sitrep_id.into(),
+            linked_sitrep_id: linked_sitrep_id.into(),
             comment,
         }
     }
