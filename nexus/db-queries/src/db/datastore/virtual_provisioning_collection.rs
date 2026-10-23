@@ -18,6 +18,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use omicron_common::api::external::{DeleteResult, Error};
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::ProjectUuid;
 use uuid::Uuid;
 
 /// The types of resources which can consume storage space.
@@ -148,7 +149,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         id: Uuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         disk_byte_diff: ByteCount,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         self.virtual_provisioning_collection_insert_storage(
@@ -165,7 +166,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         id: Uuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         disk_byte_diff: ByteCount,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         self.virtual_provisioning_collection_insert_storage(
@@ -183,7 +184,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         id: Uuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         disk_byte_diff: ByteCount,
         storage_type: StorageType,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
@@ -208,7 +209,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         id: Uuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         disk_byte_diff: ByteCount,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         self.virtual_provisioning_collection_delete_storage(
@@ -224,7 +225,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         id: Uuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         disk_byte_diff: ByteCount,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         self.virtual_provisioning_collection_delete_storage(
@@ -241,7 +242,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         id: Uuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         disk_byte_diff: ByteCount,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         let provisions =
@@ -263,7 +264,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         id: InstanceUuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         cpus_diff: i64,
         ram_diff: ByteCount,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
@@ -285,7 +286,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         id: InstanceUuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         cpus_diff: i64,
         ram_diff: ByteCount,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
@@ -336,6 +337,8 @@ mod test {
     use nexus_types::silo::DEFAULT_SILO_ID;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::ProjectUuid;
     use uuid::Uuid;
 
     async fn verify_collection_usage(
@@ -363,7 +366,7 @@ mod test {
     }
 
     struct TestData {
-        project_id: Uuid,
+        project_id: ProjectUuid,
         silo_id: Uuid,
         fleet_id: Uuid,
         authz_project: crate::authz::Project,
@@ -371,7 +374,7 @@ mod test {
 
     impl TestData {
         fn ids(&self) -> [Uuid; 3] {
-            [self.project_id, self.silo_id, self.fleet_id]
+            [self.project_id.into_untyped_uuid(), self.silo_id, self.fleet_id]
         }
     }
 
@@ -382,7 +385,7 @@ mod test {
     ) -> TestData {
         let fleet_id = *nexus_db_fixed_data::FLEET_ID;
         let silo_id = DEFAULT_SILO_ID;
-        let project_id = Uuid::new_v4();
+        let project_id = ProjectUuid::new_v4();
 
         let (authz_project, _project) = datastore
             .project_create(
@@ -432,7 +435,7 @@ mod test {
         opctx: &OpContext,
         authz_project: &crate::authz::Project,
         instance_id: InstanceUuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         cpus: i64,
         memory: ByteCount,
     ) {

@@ -1442,7 +1442,7 @@ impl AuthorizedResource for SubnetPoolList {
 authz_resource! {
     name = "Project",
     parent = "Silo",
-    primary_key = Uuid,
+    primary_key = { uuid_kind = ProjectKind },
     roles_allowed = true,
     polar_snippet = Custom,
 }

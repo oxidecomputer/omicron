@@ -127,7 +127,7 @@ impl QueryFragment<Pg> for InsertVpcQuery {
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(", ");
 
-        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.vpc.project_id)?;
+        out.push_bind_param::<sql_types::Uuid, _>(&self.vpc.project_id)?;
         out.push_sql(" AS ");
         out.push_identifier(dsl::project_id::NAME)?;
         out.push_sql(", ");

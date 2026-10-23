@@ -307,13 +307,24 @@ fn do_authz_resource(
     let primary_key_type = input.primary_key.0.external();
     let input_key_type = input.input_key.as_deref().unwrap_or(primary_key_type);
 
+    // Role assignments are keyed by untyped UUIDs, so a typed UUID primary
+    // key must be converted before it's used to look up roles.
+    let key_as_untyped_uuid = |key: TokenStream| match &input.primary_key.0 {
+        PrimaryKeyType::Standard(_) => key,
+        PrimaryKeyType::TypedUuid { .. } => quote! {
+            ::omicron_uuid_kinds::GenericUuid::into_untyped_uuid(#key)
+        },
+    };
+    let role_key = key_as_untyped_uuid(quote! { r.key });
+    let resource_id = key_as_untyped_uuid(quote! { self.key });
+
     let (has_role_body, as_roles_body, api_resource_roles_trait) =
         if input.roles_allowed {
             (
                 quote! {
                     actor.has_role_resource(
                         ResourceType::#resource_name,
-                        r.key,
+                        #role_key,
                         &role
                     )
                 },
@@ -321,7 +332,7 @@ fn do_authz_resource(
                 quote! {
                     impl ApiResourceWithRoles for #resource_name {
                         fn resource_id(&self) -> Uuid {
-                            self.key
+                            #resource_id
                         }
 
                         fn conferred_roles_by(
@@ -681,6 +692,16 @@ mod tests {
         })
         .unwrap();
         assert_contents("outputs/rack.txt", &pretty_format(output));
+
+        let output = do_authz_resource(quote! {
+            name = "Project",
+            parent = "Silo",
+            primary_key = { uuid_kind = ProjectKind },
+            roles_allowed = true,
+            polar_snippet = Custom,
+        })
+        .unwrap();
+        assert_contents("outputs/project.txt", &pretty_format(output));
     }
 
     fn pretty_format(input: TokenStream) -> String {
