@@ -24,6 +24,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (7, BYTE_WRAPPER_0_2_BUMP),
     (6, ARTIFACT_HASH_SCHEMA),
     (5, RACK_ID),
     (4, COMPONENT_VPD),

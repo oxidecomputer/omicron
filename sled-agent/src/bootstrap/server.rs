@@ -10,7 +10,7 @@ use super::http_entrypoints_lockstep::BootstrapServerContext;
 use crate::bootstrap::maghemite;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
 use crate::bootstrap::pumpkind;
-use crate::bootstrap::rack_ops::{MultirackJoinCompleter, RssAccess};
+use crate::bootstrap::rack_ops::{MultirackJoinAccessor, RssAccess};
 use crate::bootstrap::secret_retriever::{
     HardcodedSecretRetriever, TqOrLrtqSecretRetriever,
 };
@@ -204,8 +204,8 @@ impl Server {
         let rss_access = RssAccess::new(maybe_ledger.is_some());
 
         // Provide a mechanism for multirack join requests to be completed by sled-agent.
-        let multirack_join_completer =
-            MultirackJoinCompleter::new(rss_access.clone());
+        let multirack_join_accessor =
+            MultirackJoinAccessor::new(rss_access.clone());
 
         // Start the bootstrap dropshot server.
         let bootstrap_context = BootstrapServerContext {
@@ -259,7 +259,7 @@ impl Server {
                 long_running_task_handles.clone(),
                 config_reconciler_spawn_token,
                 service_manager.clone(),
-                multirack_join_completer.clone(),
+                multirack_join_accessor.clone(),
                 &base_log,
                 &startup_log,
             )
@@ -291,7 +291,7 @@ impl Server {
             service_manager,
             _sprockets_server_handle: sprockets_server_handle,
             base_log,
-            multirack_join_completer,
+            multirack_join_accessor,
         };
         let inner_task = tokio::spawn(inner.run());
 
@@ -370,7 +370,7 @@ async fn start_sled_agent(
     long_running_task_handles: LongRunningTaskHandles,
     config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
     service_manager: ServiceManager,
-    multirack_join_completer: MultirackJoinCompleter,
+    multirack_join_accessor: MultirackJoinAccessor,
     base_log: &Logger,
     log: &Logger,
 ) -> Result<SledAgentServer, SledAgentServerStartError> {
@@ -428,7 +428,7 @@ async fn start_sled_agent(
         long_running_task_handles.clone(),
         config_reconciler_spawn_token,
         service_manager,
-        multirack_join_completer,
+        multirack_join_accessor,
     )
     .await
     .map_err(SledAgentServerStartError::FailedStartingServer)?;
@@ -520,7 +520,7 @@ struct Inner {
     service_manager: ServiceManager,
     _sprockets_server_handle: JoinHandle<()>,
     base_log: Logger,
-    multirack_join_completer: MultirackJoinCompleter,
+    multirack_join_accessor: MultirackJoinAccessor,
 }
 
 impl Inner {
@@ -560,7 +560,7 @@ impl Inner {
                     self.long_running_task_handles.clone(),
                     config_reconciler_spawn_token,
                     self.service_manager.clone(),
-                    self.multirack_join_completer.clone(),
+                    self.multirack_join_accessor.clone(),
                     &self.base_log,
                     &log,
                 )

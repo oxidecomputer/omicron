@@ -1,0 +1,33 @@
+input: "10 PiB"
+error: invalid byte count suffix "PiB" (expected "TiB", "GiB", "MiB", "KiB", or "B")
+
+input: "10 G"
+error: invalid byte count suffix "G" (expected "TiB", "GiB", "MiB", "KiB", or "B")
+
+input: "1 K B"
+error: invalid byte count suffix "K B" (expected "TiB", "GiB", "MiB", "KiB", or "B")
+
+input: ""
+error: invalid number "" in byte count: cannot parse integer from empty string
+
+input: "KiB"
+error: invalid number "" in byte count: cannot parse integer from empty string
+
+input: "abc"
+error: invalid number "abc" in byte count: invalid digit found in string
+
+input: "-1 KiB"
+error: invalid number "-1" in byte count: invalid digit found in string
+
+input: "1.5 GiB"
+error: invalid number "1.5" in byte count: invalid digit found in string
+
+input: "99999999999999999999 B"
+error: invalid number "99999999999999999999" in byte count: number too large to fit in target type
+
+input: "9223372036854775808"
+error: value is too large for a byte count
+
+input: "8388608 TiB"
+error: value is too large for a byte count
+

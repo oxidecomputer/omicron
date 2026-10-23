@@ -32,6 +32,7 @@ pub struct BackgroundTasks {
     pub task_region_replacement: Activator,
     pub task_region_replacement_driver: Activator,
     pub task_instance_watcher: Activator,
+    pub task_capacity_metrics: Activator,
     pub task_instance_updater: Activator,
     pub task_instance_reincarnation: Activator,
     pub task_service_firewall_propagation: Activator,

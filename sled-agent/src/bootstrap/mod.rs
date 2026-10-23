@@ -17,7 +17,7 @@ mod sprockets_server;
 pub(crate) mod trust_quorum_setup;
 
 pub(crate) use pre_server::BootstrapNetworking;
-pub(crate) use rack_ops::MultirackJoinCompleter;
+pub(crate) use rack_ops::MultirackJoinAccessor;
 pub use rack_ops::RssAccessError;
 use slog_error_chain::InlineErrorChain;
 
