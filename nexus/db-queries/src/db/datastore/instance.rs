@@ -1099,7 +1099,10 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?;
 
-                    // Set the instance shutdown policy.
+                    // Set the instance shutdown policy, if specified.
+                    // (Leave as-is if not, so as not to clobber explicitly-set
+                    // policy with default values if the nexus instance update
+                    // API is ever touched by an older client without the field)
                     if let Some(shut_update_action) = shutdown_policy_action {
                         diesel::update(instance_dsl::instance)
                             .filter(instance_dsl::id.eq(authz_instance.id()))
