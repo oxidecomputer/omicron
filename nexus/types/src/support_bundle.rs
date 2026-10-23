@@ -12,12 +12,13 @@ use chrono::DateTime;
 use chrono::Utc;
 use itertools::Itertools;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::ByteCountParseError;
+use omicron_common::api::external::ByteCountRangeError;
 use omicron_uuid_kinds::SledUuid;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::fmt;
-use std::num::ParseIntError;
 use std::str::FromStr;
 
 /// Describes the category of support bundle data.
@@ -453,51 +454,77 @@ impl fmt::Display for DisplaySledSelection<'_> {
 /// A support bundle size limit, in bytes, no larger than
 /// [`SupportBundleSizeLimit::MAX`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct SupportBundleSizeLimit(u64);
+pub struct SupportBundleSizeLimit(ByteCount);
 
 impl SupportBundleSizeLimit {
     /// The default limit.
-    pub const DEFAULT: Self = Self(16 << 30);
+    pub const DEFAULT: Self = Self(ByteCount::from_gibibytes_u32(16));
 
     /// The largest limit allowed. Larger bundles risk destabilizing Nexus.
-    pub const MAX: Self = Self(32 << 30);
+    pub const MAX: Self = Self(ByteCount::from_gibibytes_u32(32));
 
     pub fn new(bytes: u64) -> Result<Self, SupportBundleSizeLimitTooLarge> {
-        if bytes > Self::MAX.0 {
-            return Err(SupportBundleSizeLimitTooLarge { bytes });
-        }
-        Ok(Self(bytes))
+        ByteCount::try_from(bytes)
+            .map_err(|_e| {
+                // `ByteCountRangeError` has `TooLarge` and `TooSmall` variants,
+                // but `TooSmall` is only ever returned by the `TryFrom<i64>`
+                // implementation.
+                //
+                // TODO(eliza): it would be nice if the `TryFrom<u64>` had an
+                // error type that only represented the "too large" case, and
+                // only the i64 impl could return the "too small" case.
+                debug_assert_eq!(
+                    _e,
+                    ByteCountRangeError::TooLarge,
+                    "since bytes is a u64, `ByteCount::try_from::<u64>` should \
+                    never return a `TooSmall` error",
+                );
+                SupportBundleSizeLimitTooLarge { bytes }
+            })?
+            .try_into()
     }
 
     pub fn bytes(self) -> u64 {
-        self.0
+        self.byte_count().to_bytes()
     }
 
     pub fn byte_count(self) -> ByteCount {
-        ByteCount::try_from(self.0).expect("MAX fits in a ByteCount")
+        self.0
     }
 }
 
-/// Formats the limit as a number of bytes, which [`FromStr`] parses.
+/// Formats the limit as a [`ByteCount`] (e.g. "16 GiB"), which [`FromStr`]
+/// parses.
 impl fmt::Display for SupportBundleSizeLimit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
+        self.byte_count().fmt(f)
     }
 }
 
-/// Parses a number of bytes.
 impl FromStr for SupportBundleSizeLimit {
     type Err = SupportBundleSizeLimitParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self::new(s.parse()?)?)
+        Ok(s.parse::<ByteCount>()?.try_into()?)
+    }
+}
+
+impl TryFrom<ByteCount> for SupportBundleSizeLimit {
+    type Error = SupportBundleSizeLimitTooLarge;
+    fn try_from(bytes: ByteCount) -> Result<Self, Self::Error> {
+        if bytes > Self::MAX.0 {
+            return Err(SupportBundleSizeLimitTooLarge {
+                bytes: bytes.to_bytes(),
+            });
+        }
+        Ok(Self(bytes))
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 #[error(
     "support bundle size limit of {bytes} bytes exceeds the maximum of {}",
-    SupportBundleSizeLimit::MAX.byte_count()
+    SupportBundleSizeLimit::MAX
 )]
 pub struct SupportBundleSizeLimitTooLarge {
     bytes: u64,
@@ -505,8 +532,11 @@ pub struct SupportBundleSizeLimitTooLarge {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SupportBundleSizeLimitParseError {
-    #[error("invalid support bundle size limit")]
-    Invalid(#[from] ParseIntError),
+    // Transparent because clap only displays the top-level error from a value
+    // parser, and the `ByteCountParseError` indicates what part of the string
+    // was invalid..
+    #[error(transparent)]
+    Invalid(#[from] ByteCountParseError),
     #[error(transparent)]
     TooLarge(#[from] SupportBundleSizeLimitTooLarge),
 }
