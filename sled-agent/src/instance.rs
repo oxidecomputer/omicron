@@ -2545,6 +2545,39 @@ impl InstanceRunner {
         Ok(self.state.sled_instance_state())
     }
 
+    /// Construct OPTE port-creation parameters for a NIC.
+    ///
+    /// External IPs, attached subnets, and other "external" data only apply to
+    /// the primary NIC. Nexus only sends NAT entries to Dendrite for the
+    /// primary, and all updates to things like external IPs are only applied
+    /// there as well.
+    fn port_create_params<'a>(
+        nic: &'a NetworkInterface,
+        external_ips: &'a ExternalIpConfig,
+        firewall_rules: &'a [ResolvedVpcFirewallRule],
+        dhcp_config: &DhcpCfg,
+        attached_subnets: &IdOrdMap<AttachedSubnet>,
+        primary_mtu: Option<u32>,
+    ) -> PortCreateParams<'a> {
+        let (external_ips, attached_subnets, mtu) = if nic.primary {
+            (
+                external_ips,
+                attached_subnets.iter().copied().map(Into::into).collect(),
+                primary_mtu,
+            )
+        } else {
+            (&ExternalIpConfig { v4: None, v6: None }, vec![], None)
+        };
+        PortCreateParams {
+            nic,
+            external_ips,
+            firewall_rules,
+            dhcp_config: dhcp_config.clone(),
+            attached_subnets,
+            mtu,
+        }
+    }
+
     /// Sets up the Propolis zone that will host this instance's virtual
     /// machine.
     async fn setup_propolis_zone(&mut self) -> Result<PropolisSetup, Error> {
@@ -2554,19 +2587,15 @@ impl InstanceRunner {
         let mut opte_ports = Vec::with_capacity(self.requested_nics.len());
         let mut opte_port_names = Vec::with_capacity(self.requested_nics.len());
         for nic in self.requested_nics.iter() {
-            let port = self.port_manager.create_port(PortCreateParams {
-                nic,
-                external_ips: &self.external_ips,
-                firewall_rules: &self.firewall_rules,
-                dhcp_config: self.dhcp_config.clone(),
-                attached_subnets: self
-                    .attached_subnets
-                    .iter()
-                    .copied()
-                    .map(Into::into)
-                    .collect(),
-                mtu: if nic.primary { self.primary_nic_mtu } else { None },
-            })?;
+            let port =
+                self.port_manager.create_port(Self::port_create_params(
+                    nic,
+                    &self.external_ips,
+                    &self.firewall_rules,
+                    &self.dhcp_config,
+                    &self.attached_subnets,
+                    self.primary_nic_mtu,
+                ))?;
             opte_port_names.push(port.0.name().to_string());
             opte_ports.push(port);
         }
@@ -2964,7 +2993,9 @@ mod tests {
     use internal_dns_resolver::Resolver;
     use omicron_common::FileKv;
     use omicron_common::api::external::Hostname;
-    use omicron_common::api::internal::shared::SledIdentifiers;
+    use omicron_common::api::internal::shared::{
+        DhcpConfig, PrivateIpConfig, SledIdentifiers,
+    };
     use omicron_generation_kinds::Generation;
 
     use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
@@ -2978,14 +3009,17 @@ mod tests {
         CurrentlyManagedZpoolsReceiver, InternalDiskDetails,
         InternalDisksReceiver,
     };
+    use sled_agent_types::attached_subnet::AttachedSubnetKind;
     use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::instance::ExternalIpv4Config;
     use sled_agent_types::instance::ExternalIpv6Config;
     use sled_agent_types::instance::InstanceEnsureBody;
-    use sled_agent_types::inventory::CurrentUpdateDisposition;
     use sled_agent_types::inventory::InstanceManagerStatus;
     use sled_agent_types::inventory::OmicronSledUpdateDisposition;
     use sled_agent_types::inventory::SourceNatConfigV6;
+    use sled_agent_types::inventory::{
+        CurrentUpdateDisposition, NetworkInterfaceKind,
+    };
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_agent_types_versions::v1;
     use sled_storage::config::MountConfig;
@@ -4727,5 +4761,76 @@ mod tests {
             ),
         );
         assert_eq!(new_stack, expected_stack);
+    }
+
+    #[test]
+    fn only_primary_nic_gets_external_ips_and_attached_subnets() {
+        let create_nic =
+            |name: &str, ip: &str, mac: &str, primary, slot| NetworkInterface {
+                id: Uuid::new_v4(),
+                kind: NetworkInterfaceKind::Instance { id: Uuid::new_v4() },
+                name: name.parse().unwrap(),
+                ip_config: PrivateIpConfig::new_ipv6(
+                    ip.parse().unwrap(),
+                    "fd00::/64".parse().unwrap(),
+                )
+                .unwrap(),
+                mac: mac.parse().unwrap(),
+                vni: 77.try_into().unwrap(),
+                primary,
+                slot,
+            };
+        let nics = [
+            create_nic("net0", "fd00::10", "a8:40:25:01:01:01", true, 0),
+            create_nic("net1", "fd00::11", "a8:40:25:01:01:02", false, 1),
+        ];
+        let external_ips = ExternalIpConfig {
+            v6: Some(ExternalIpv6Config {
+                source_nat: Some(
+                    SourceNatConfigV6::new(Ipv6Addr::UNSPECIFIED, 0, 16383)
+                        .unwrap(),
+                ),
+                ..Default::default()
+            }),
+            v4: None,
+        };
+        let mut attached_subnets = IdOrdMap::new();
+        attached_subnets
+            .insert_unique(AttachedSubnet {
+                subnet: IpNet::V6("fd00::1/64".parse().unwrap()),
+                kind: AttachedSubnetKind::External,
+            })
+            .unwrap();
+        let dhcp_config = DhcpCfg {
+            hostname: None,
+            host_domain: None,
+            domain_search_list: vec![],
+            dns4_servers: vec![],
+            dns6_servers: vec![],
+        };
+        let mtu = Some(9000);
+
+        for nic in nics.iter() {
+            let params = InstanceRunner::port_create_params(
+                nic,
+                &external_ips,
+                &[],
+                &dhcp_config,
+                &attached_subnets,
+                mtu,
+            );
+            if nic.primary {
+                assert_eq!(params.external_ips, &external_ips);
+                assert_eq!(
+                    params.attached_subnets.len(),
+                    attached_subnets.len()
+                );
+                assert_eq!(params.mtu, mtu);
+            } else {
+                assert_eq!(params.external_ips, &ExternalIpConfig::default());
+                assert!(params.attached_subnets.is_empty());
+                assert!(params.mtu.is_none());
+            }
+        }
     }
 }
