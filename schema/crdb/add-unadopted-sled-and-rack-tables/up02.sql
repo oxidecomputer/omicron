@@ -26,5 +26,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.unadopted_sled (
     sled_agent_started BOOL NOT NULL,
     -- This nullable column should be set to the last error we've seen for this
     -- particular sled's sled-agent startup process, if any:
-    last_start_error_seen TEXT
+    last_start_error_seen TEXT,
+
+    CONSTRAINT start_error_is_null_if_started CHECK (
+        (NOT sled_agent_started) OR (last_start_error_seen IS NULL)
 );
