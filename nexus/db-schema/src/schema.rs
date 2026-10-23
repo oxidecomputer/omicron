@@ -3608,6 +3608,39 @@ table! {
     }
 }
 
+table! {
+    unadopted_rack {
+        id -> Uuid,
+
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+
+        rack_subnet -> Inet,
+        join_service_ip -> Inet,
+    }
+}
+
+table! {
+    unadopted_sled {
+        id -> Uuid,
+
+        rack_id -> Uuid,
+
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+
+        serial_number -> Text,
+        part_number -> Text,
+
+        sled_agent_ip -> Inet,
+
+        sled_agent_started -> Bool,
+        last_start_error_seen -> Nullable<Text>,
+    }
+}
+
 allow_tables_to_appear_in_same_query!(trust_quorum_member, hw_baseboard_id);
 joinable!(trust_quorum_member -> hw_baseboard_id(hw_baseboard_id));
 

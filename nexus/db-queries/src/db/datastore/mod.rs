@@ -147,6 +147,7 @@ mod target_release;
 #[cfg(test)]
 pub(crate) mod test_utils;
 mod trust_quorum;
+mod unadopted;
 pub mod update;
 mod user_data_export;
 mod utilization;
