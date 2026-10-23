@@ -22,7 +22,7 @@ endif::[]
 **Problem Code**: {problem-code}
 **Class**: `{problem-class}`
 **Added in**: `{problem-version-added}`
-ifdef::problem-version-retired[**Retired in**: {problem-version-retired}]
+ifdef::problem-version-retired[**Retired in**: `{problem-version-retired}`]
 
 == Description
 
