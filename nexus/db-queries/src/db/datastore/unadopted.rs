@@ -379,4 +379,66 @@ mod tests {
         db.terminate().await;
         logctx.cleanup_successful();
     }
+
+    #[tokio::test]
+    async fn test_unadopted_sled_start_error_constraint() {
+        let logctx =
+            dev::test_setup_log("test_unadopted_sled_start_error_constraint");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // Build an insert with the given values for the two columns covered
+        // by the constraint. The datastore API can't produce an inconsistent
+        // row, so we need raw SQL to exercise the constraint.
+        let insert_sql = |sled_agent_started: &str, last_start_error: &str| {
+            format!(
+                "INSERT INTO omicron.public.unadopted_sled \
+                 (id, rack_id, time_created, time_modified, serial_number, \
+                  part_number, sled_agent_ip, sled_agent_started, \
+                  last_start_error_seen) \
+                 VALUES (gen_random_uuid(), gen_random_uuid(), now(), now(), \
+                  'serial', 'part', '::1', {sled_agent_started}, \
+                  {last_start_error})"
+            )
+        };
+
+        // Every combination except "started with an error" is allowed.
+        for (started, error) in
+            [("false", "NULL"), ("false", "'some error'"), ("true", "NULL")]
+        {
+            diesel::sql_query(insert_sql(started, error))
+                .execute_async(&*conn)
+                .await
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "insert with sled_agent_started = {started}, \
+                         last_start_error_seen = {error} should succeed: {e}"
+                    )
+                });
+        }
+
+        let err = diesel::sql_query(insert_sql("true", "'some error'"))
+            .execute_async(&*conn)
+            .await
+            .expect_err("insert of a started sled with an error was rejected");
+        match err {
+            diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::CheckViolation,
+                info,
+            ) => {
+                assert_eq!(
+                    info.constraint_name(),
+                    Some("start_error_is_null_if_started"),
+                );
+            }
+            other => {
+                panic!("expected a check-constraint violation, got {other:?}")
+            }
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 }
