@@ -9752,6 +9752,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.unadopted_rack (
     join_service_ip INET NOT NULL
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_unadopted_rack_by_id ON omicron.public.unadopted_rack (
+    id
+) WHERE time_deleted IS NULL;
+
 -- Tracks sleds from other racks that have joined the underlay network but
 -- haven't been adopted into the multirack cluster.
 --
@@ -9782,6 +9786,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.unadopted_sled (
     -- particular sled's sled-agent startup process, if any:
     last_start_error_seen STRING(512)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_unadopted_sled_by_id ON omicron.public.unadopted_sled (
+    id
+) WHERE time_deleted IS NULL;
 
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
