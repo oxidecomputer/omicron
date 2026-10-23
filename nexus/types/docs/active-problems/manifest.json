@@ -1,0 +1,11 @@
+[
+  {
+    "code": 0,
+    "description": {
+      "class": "system",
+      "title": "Not a Real Problem",
+      "added_in": "24.0.0",
+      "retired_in": "24.0.0"
+    }
+  }
+]
