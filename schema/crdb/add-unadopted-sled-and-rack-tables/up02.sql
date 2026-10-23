@@ -30,4 +30,5 @@ CREATE TABLE IF NOT EXISTS omicron.public.unadopted_sled (
 
     CONSTRAINT start_error_is_null_if_started CHECK (
         (NOT sled_agent_started) OR (last_start_error_seen IS NULL)
+    )
 );
