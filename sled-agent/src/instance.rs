@@ -2489,6 +2489,16 @@ impl InstanceRunner {
     /// be eventually destroyed by the drop impl on `RunningZone` as a
     /// last-resort.
     ///
+    /// This applies even if the future is cancelled, e.g., by a concurrent
+    /// request to terminate the instance. In that case, we still need to try to
+    /// destroy the zone through the normal termination path, e.g.,
+    /// `fail_vmm_and_terminate()`, to ensure that we destroy the zone if
+    /// possible.
+    ///
+    /// It's still possible that this future is cancelled _during_ zone boot. In
+    /// that case, we won't store the zone in `self.running_state`, and won't
+    /// really have a way to stop the zone either.
+    ///
     /// # Panics
     ///
     /// This method panics if called more than once on the same instance.
