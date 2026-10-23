@@ -231,7 +231,7 @@ impl<'a> SitrepBuilder<'a> {
             ereports_by_id,
             // TODO(eliza): add builder APIs for creating and updating
             // Active Problems and copying forward parent ones
-            active_problems: IdOrdMap::new(),
+            active_problems: Default::default(),
         };
         (sitrep, report)
     }
@@ -309,7 +309,7 @@ mod tests {
             },
             cases: IdOrdMap::new(),
             ereports_by_id: IdOrdMap::new(),
-            active_problems: IdOrdMap::new(),
+            active_problems: Default::default(),
         };
         let parent_version = SitrepVersion {
             id: parent_id,
@@ -579,7 +579,7 @@ mod tests {
             },
             cases: [closed_case].into_iter().collect(),
             ereports_by_id: IdOrdMap::new(),
-            active_problems: IdOrdMap::new(),
+            active_problems: Default::default(),
         };
         let parent_version = SitrepVersion {
             id: parent_id,
@@ -657,7 +657,7 @@ mod tests {
             },
             cases: [closed_case].into_iter().collect(),
             ereports_by_id: IdOrdMap::new(),
-            active_problems: IdOrdMap::new(),
+            active_problems: Default::default(),
         };
         let parent_version = SitrepVersion {
             id: parent_id,

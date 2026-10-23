@@ -8,6 +8,8 @@
 //! structure containing fault management state.
 
 pub mod active_problem;
+pub use active_problem::AllActiveProblems;
+pub use active_problem::SitrepActiveProblem;
 pub mod analysis_reports;
 pub mod ereport;
 pub use ereport::{Ereport, EreportId};
@@ -26,7 +28,6 @@ pub use fact::{
 };
 pub mod display;
 
-use active_problem::SitrepActiveProblem;
 use case::AlertRequest;
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
@@ -64,7 +65,7 @@ pub struct Sitrep {
     /// A map of all ereports associated with cases in this sitrep.
     pub ereports_by_id: IdOrdMap<Arc<Ereport>>,
     /// All current active problems.
-    pub active_problems: IdOrdMap<SitrepActiveProblem>,
+    pub active_problems: AllActiveProblems,
     //
     // NOTE FOR FUTURE GENERATIONS: If you add more database tables whose
     // records are top-level children of a sitrep (i.e., like cases), please
