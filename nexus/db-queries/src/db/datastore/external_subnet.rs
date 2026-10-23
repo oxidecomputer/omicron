@@ -1079,6 +1079,45 @@ impl DataStore {
 
         // TODO-completeness: We need to fetch the attached VPC Subnets here
         // too. See https://github.com/oxidecomputer/omicron/issues/9580.
+        //
+        // TODO: Parts of our code base assume that attached subnets are unique
+        // per subnet (IpNet), but the return value of this function doesn't
+        // indicate that. As of 2026-10-21, external subnets are unique in the
+        // `external_subnet` table, so it would seem that data returned from
+        // the database should uphold this invariant. But:
+        //
+        // * `list_attached_external_subnets` below has an inner join with
+        //   `network_interface` to determine the primary NIC. The database
+        //   does not prevent an instance from having two primary NICs, so
+        //   it is possible that we get multiple `AttachedSubnet` entries for
+        //   the same subnet and instance, each with a different MAC. (Since
+        //   pagination is keyed on the external subnet ID, such duplicates
+        //   that straddle a page boundary are silently dropped.) At the
+        //   application layer, Nexus _does_ prevent an instance from having
+        //   two primary NICs, so the risk is mostly theoretical, but ideally
+        //   the database would enforce it.
+        // * Issue #9580 (mentioned immediately above) would have us fetch
+        //   attached VPC subnets, and there's no current database constraint
+        //   against a VPC subnet being the same as an external subnet. Also,
+        //   VPC subnets are only unique within a VPC, so it is legitimately
+        //   possible for two instances in different VPCs to attach the same
+        //   subnet.
+        //
+        // We should:
+        //
+        // * Make the primary-NIC join 1:1 with a database constraint (e.g., a
+        //   partial unique index on `network_interface (parent_id) WHERE
+        //   is_primary AND time_deleted IS NULL`). See
+        //   https://github.com/oxidecomputer/omicron/issues/11568.
+        // * As part of addressing #9580, figure out the correct uniqueness
+        //   constraint for `shared::AttachedSubnet` (just the subnet?
+        //   instance or VMM + subnet?), and express that in the IdOrdItem
+        //   key.
+        // * Return an `IdOrdMap` or similar of `shared::AttachedSubnet`s,
+        //   thus expressing the uniqueness in the function signature.
+        // * Within the scope of an instance, reject equal or overlapping
+        //   subnets of any kind (external or VPC) at attach time with a clear
+        //   error.
         Ok(results)
     }
 
@@ -1589,6 +1628,7 @@ mod tests {
     use dropshot::PaginationOrder;
     use dropshot::test_util::LogContext;
     use nexus_auth::authz;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::IpAttachState;
     use nexus_db_model::IpPool;
     use nexus_db_model::IpPoolAssignment;
@@ -4896,5 +4936,108 @@ mod tests {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_delete_project_with_outstanding_external_subnet() {
+        let context = setup_external_subnet_test(
+            "cannot_delete_project_with_outstanding_external_subnet",
+        )
+        .await;
+        let (opctx, datastore) = (context.db.opctx(), context.db.datastore());
+        let authz_project = &context.authz_project;
+        let fetch_project = async || {
+            LookupPath::new(opctx, datastore)
+                .project_id(authz_project.id())
+                .fetch()
+                .await
+                .expect("should be able to fetch test project")
+                .2
+        };
+        let db_project = fetch_project().await;
+
+        let subnet_name = "subnet";
+        let subnet = datastore
+            .create_external_subnet(
+                opctx,
+                &DEFAULT_SILO_ID,
+                &authz_project,
+                ExternalSubnetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: subnet_name.parse().unwrap(),
+                        description: String::new(),
+                    },
+                    // Use the default IPv6 pool
+                    allocator: ExternalSubnetAllocator::Auto {
+                        prefix_length: 64,
+                        pool_selector: PoolSelector::Auto {
+                            ip_version: Some(IpVersion::V6),
+                        },
+                    },
+                },
+            )
+            .await
+            .expect("able to create subnet in project");
+        let authz_subnet = authz::ExternalSubnet::new(
+            authz_project.clone(),
+            subnet.id(),
+            LookupType::ById(subnet.id().into_untyped_uuid()),
+        );
+
+        // We shouldn't be able to delete the project, because of the above
+        // subnet.
+        let err = datastore
+            .project_delete(opctx, authz_project, &db_project)
+            .await
+            .expect_err("failure deleting project with outstanding subnet");
+        let Error::InvalidRequest { message } = &err else {
+            panic!(
+                "Expected an InvalidRequest when deleting \
+                a project while it still has an outstanding \
+                external subnet, but found: {err:#?}",
+            );
+        };
+        assert_eq!(
+            message.external_message(),
+            &format!(
+                "project to be deleted contains an external subnet: \
+                {subnet_name}"
+            ),
+        );
+
+        // Delete the subnet and try again, which should work.
+        datastore
+            .delete_external_subnet(opctx, &authz_subnet)
+            .await
+            .expect("able to delete external subnet from project");
+
+        // Creating the subnet bumped the project's rcgen, so deleting with the
+        // stale record we got at creation time should fail.
+        let err = datastore
+            .project_delete(opctx, &authz_project, &db_project)
+            .await
+            .expect_err(
+                "should not be able to delete project with stale rcgen",
+            );
+        let Error::InvalidRequest { message } = &err else {
+            panic!(
+                "Expected an InvalidRequest when deleting a project \
+                with a stale rcgen, but found: {err:#?}",
+            );
+        };
+        assert_eq!(
+            message.external_message(),
+            "deletion failed due to concurrent modification",
+        );
+
+        // Refetching the project and deleting it should work.
+        let db_project = fetch_project().await;
+        datastore
+            .project_delete(opctx, &authz_project, &db_project)
+            .await
+            .expect("should be able to delete project after deleting subnet");
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
     }
 }

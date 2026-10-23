@@ -9,8 +9,6 @@ use chrono::Utc;
 use either::Either;
 use futures::future;
 use iddqd::IdOrdMap;
-use illumos_utils::zpool::PathInPool;
-use illumos_utils::zpool::ZpoolOrRamdisk;
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
@@ -62,6 +60,7 @@ use self::datasets::OmicronDatasets;
 use self::external_disks::ExternalDisks;
 use self::zones::OmicronZones;
 
+pub use self::datasets::PathInPool;
 pub use self::external_disks::CurrentlyManagedZpools;
 pub use self::external_disks::CurrentlyManagedZpoolsReceiver;
 pub use self::zones::TimeSyncError;
@@ -287,13 +286,8 @@ impl LatestReconciliationResult {
             })
             // Filter down to matching dataset kinds
             .filter(move |config| *config.name.kind() == kind)
-            .map(|config| {
-                let pool = *config.name.pool();
-                PathInPool {
-                    pool: ZpoolOrRamdisk::Zpool(pool),
-                    path: pool
-                        .dataset_mountpoint(&mount_config.root, mountpoint),
-                }
+            .map(move |config| {
+                PathInPool::new(*config.name.pool(), &mount_config, mountpoint)
             })
     }
 }

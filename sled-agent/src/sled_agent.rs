@@ -40,8 +40,6 @@ use illumos_utils::zfs::RemoveReservationError;
 use illumos_utils::zfs::RemoveReservationErrorInner;
 use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
-use illumos_utils::zpool::PathInPool;
-use illumos_utils::zpool::ZpoolOrRamdisk;
 use itertools::Itertools as _;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_common::address::{
@@ -63,6 +61,7 @@ use oxnet::IpNet;
 use sled_agent_bootstrap_common::sprockets::{
     SprocketsClient, SprocketsClientError,
 };
+use sled_agent_config_reconciler::PathInPool;
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
@@ -1483,11 +1482,8 @@ impl SledAgent {
             .available_datasets_rx()
             .all_mounted_local_storage_unencrypted_datasets()
             .into_iter()
-            .any(|path_in_pool| match path_in_pool.pool {
-                ZpoolOrRamdisk::Zpool(zpool_name) => {
-                    zpool_name == ZpoolName::External(zpool_id)
-                }
-                ZpoolOrRamdisk::Ramdisk => false,
+            .any(|path_in_pool| {
+                path_in_pool.pool() == ZpoolName::External(zpool_id)
             });
 
         if !present {
@@ -1563,11 +1559,8 @@ impl SledAgent {
                 .available_datasets_rx()
                 .all_mounted_local_storage_datasets()
                 .into_iter()
-                .any(|path_in_pool| match path_in_pool.pool {
-                    ZpoolOrRamdisk::Zpool(zpool_name) => {
-                        zpool_name == ZpoolName::External(zpool_id)
-                    }
-                    ZpoolOrRamdisk::Ramdisk => false,
+                .any(|path_in_pool| {
+                    path_in_pool.pool() == ZpoolName::External(zpool_id)
                 });
 
             if !present {
@@ -1589,11 +1582,8 @@ impl SledAgent {
                 .available_datasets_rx()
                 .all_mounted_local_storage_unencrypted_datasets()
                 .into_iter()
-                .any(|path_in_pool| match path_in_pool.pool {
-                    ZpoolOrRamdisk::Zpool(zpool_name) => {
-                        zpool_name == ZpoolName::External(zpool_id)
-                    }
-                    ZpoolOrRamdisk::Ramdisk => false,
+                .any(|path_in_pool| {
+                    path_in_pool.pool() == ZpoolName::External(zpool_id)
                 });
 
             if !present {

@@ -117,10 +117,12 @@ pub mod v54;
 pub mod v55;
 #[path = "add_rack_id_to_inventory/mod.rs"]
 pub mod v57;
-#[path = "add_multirack_join_service_status/mod.rs"]
-pub mod v58;
+#[path = "instance_attached_subnets_map/mod.rs"]
+pub mod v59;
 #[path = "add_probe_put_endpoint/mod.rs"]
 pub mod v6;
+#[path = "add_multirack_join_service_status/mod.rs"]
+pub mod v60;
 #[path = "multicast_support/mod.rs"]
 pub mod v7;
 #[path = "delegate_zvol_to_propolis/mod.rs"]
