@@ -12,9 +12,12 @@
 :problem-version-added:
 // - the version in which this problem was retired (set only if it's retired)
 :problem-version-retired:
-
-
-= {problem-title} ifdef::problem-version-retired[(retired)]
+ifdef::problem-version-retired[]
+= {problem-title} (retired)
+endif::[]
+ifndef::problem-version-retired[]
+= {problem-title}
+endif::[]
 
 **Problem Code**: {problem-code}
 **Class**: `{problem-class}`
