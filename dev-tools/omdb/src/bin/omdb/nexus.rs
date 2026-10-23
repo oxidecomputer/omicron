@@ -61,9 +61,11 @@ use nexus_types::internal_api::background::AuditLogTimeoutIncompleteStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintPrunerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
+use nexus_types::internal_api::background::CapacityMetricsStatus;
 use nexus_types::internal_api::background::DatasetRendezvousOutcome;
 use nexus_types::internal_api::background::DatasetRendezvousStats;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
+use nexus_types::internal_api::background::DendriteSubnetDetails;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::FmConfigLoadStatus;
@@ -88,6 +90,7 @@ use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
 use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousOutcome;
 use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousStats;
+use nexus_types::internal_api::background::SledSubnetDetails;
 use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
@@ -1341,6 +1344,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "instance_watcher" => {
             print_task_instance_watcher(details);
         }
+        "capacity_metrics" => {
+            print_task_capacity_metrics(details);
+        }
         "inventory_collection" => {
             print_task_inventory_collection(details);
         }
@@ -2232,6 +2238,17 @@ fn print_task_instance_updater(details: &serde_json::Value) {
     println!("    {SAGA_ERRORS:<WIDTH$}{:>NUM_WIDTH$}", saga_errors.len());
 }
 
+fn print_task_capacity_metrics(details: &serde_json::Value) {
+    match serde_json::from_value::<CapacityMetricsStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {error:?}: {details:?}",
+        ),
+        Ok(status) => {
+            println!("    samples queued: {}", status.samples_queued);
+        }
+    }
+}
+
 fn print_task_instance_watcher(details: &serde_json::Value) {
     #[derive(Deserialize)]
     struct TaskSuccess {
@@ -2466,42 +2483,79 @@ fn print_task_attached_subnet_manager_status(details: &serde_json::Value) {
             "warning: failed to interpret task details: {:?}: {:?}",
             error, details
         ),
-        Ok(AttachedSubnetManagerStatus { db_error, dendrite, sled }) => {
-            if let Some(err) = db_error {
-                println!(
+        Ok(status) => {
+            print!("{}", AttachedSubnetManagerStatusDisplay(&status));
+        }
+    };
+}
+
+struct AttachedSubnetManagerStatusDisplay<'a>(&'a AttachedSubnetManagerStatus);
+
+impl std::fmt::Display for AttachedSubnetManagerStatusDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (dendrite, sled) = match self.0 {
+            AttachedSubnetManagerStatus::DatabaseError { error } => {
+                writeln!(
+                    f,
                     "  error accessing database to list attached subnets:"
-                );
-                println!("    {err}");
+                )?;
+                writeln!(f, "    {error}")?;
+                return Ok(());
             }
-            if dendrite.is_empty() {
-                println!("   no dendrite instances found");
-            } else {
-                for (switch_slot, details) in dendrite.iter() {
-                    println!("   dendrite instance on switch {switch_slot:?}");
-                    println!(
-                        "     n_subnets_removed={}",
-                        details.n_subnets_removed
-                    );
-                    println!(
-                        "     n_subnets_added={}",
-                        details.n_subnets_added
-                    );
-                    println!(
-                        "     n_subnets_total={}",
-                        details.n_total_subnets
-                    );
-                }
+            AttachedSubnetManagerStatus::Listed { dendrite, sled } => {
+                (dendrite, sled)
             }
-            if sled.is_empty() {
-                println!("   no sleds found");
-            } else {
-                for (sled_id, details) in sled.iter() {
-                    println!("   sled {sled_id}");
-                    println!("     n_subnets={}", details.n_subnets);
+        };
+        match dendrite {
+            Err(err) => {
+                writeln!(f, "  error looking up dendrite instances:")?;
+                writeln!(f, "    {err}")?;
+            }
+            Ok(dendrite) if dendrite.is_empty() => {
+                writeln!(f, "   no dendrite instances found")?;
+            }
+            Ok(dendrite) => {
+                // Sort the data by switch slot to ensure stable output.
+                let mut dendrite: Vec<_> = dendrite.iter().collect();
+                dendrite.sort_unstable_by_key(|(switch_slot, _)| **switch_slot);
+                for (switch_slot, details) in dendrite {
+                    let DendriteSubnetDetails {
+                        n_subnets_added,
+                        n_subnets_removed,
+                        n_total_subnets,
+                        errors,
+                    } = details;
+                    writeln!(
+                        f,
+                        "   dendrite instance on switch {switch_slot:?}"
+                    )?;
+                    writeln!(f, "     n_subnets_removed={n_subnets_removed}")?;
+                    writeln!(f, "     n_subnets_added={n_subnets_added}")?;
+                    writeln!(f, "     n_subnets_total={n_total_subnets}")?;
+                    writeln!(f, "     n_errors={}", errors.len())?;
+                    for error in errors {
+                        writeln!(f, "       {error}")?;
+                    }
                 }
             }
         }
-    };
+        if sled.is_empty() {
+            writeln!(f, "   no sleds found")?;
+        } else {
+            let mut sled: Vec<_> = sled.iter().collect();
+            sled.sort_unstable_by_key(|(sled_id, _)| **sled_id);
+            for (sled_id, details) in sled {
+                let SledSubnetDetails { n_subnets, errors } = details;
+                writeln!(f, "   sled {sled_id}")?;
+                writeln!(f, "     n_subnets={n_subnets}")?;
+                writeln!(f, "     n_errors={}", errors.len())?;
+                for error in errors {
+                    writeln!(f, "       {error}")?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 fn print_task_read_only_region_replacement_start(details: &serde_json::Value) {
@@ -3135,6 +3189,43 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                         let pretty = serde_json::to_string_pretty(details)
                             .unwrap_or_else(|_| details.to_string());
                         println!("{}", textwrap::indent(&pretty, "        "));
+                    }
+                }
+                if let Some(exceeded) = &collection.size_limit_exceeded {
+                    println!(
+                        "      Bundle reached its size limit, and collection \
+                         stopped early:"
+                    );
+                    println!(
+                        "        limit:            {}",
+                        exceeded.limit_bytes
+                    );
+                    println!(
+                        "        collected:        {} bytes",
+                        exceeded.used_bytes
+                    );
+                    println!(
+                        "        reached at:       {}",
+                        exceeded.exceeded_at
+                    );
+                    for (title, items) in [
+                        (
+                            "files left out (would exceed the limit)",
+                            exceeded.refused_paths.iter().collect::<Vec<_>>(),
+                        ),
+                        (
+                            "steps stopped before finishing",
+                            exceeded.incomplete_steps.iter().collect(),
+                        ),
+                        (
+                            "steps never started",
+                            exceeded.skipped_steps.iter().collect(),
+                        ),
+                    ] {
+                        println!("        {title}: {}", items.len());
+                        for item in items {
+                            println!("          {item}");
+                        }
                     }
                 }
                 println!(
@@ -6073,7 +6164,9 @@ mod tests {
     use omicron_uuid_kinds::AlertUuid;
     use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::WebhookDeliveryUuid;
+    use sled_agent_types::early_networking::SwitchSlot;
     use std::collections::BTreeMap;
+    use std::collections::HashMap;
 
     #[test]
     fn test_ereporter_status_totals_display() {
@@ -6172,6 +6265,78 @@ mod tests {
                 failed: 3,
                 errors: 2,
             },
+        );
+    }
+
+    #[test]
+    fn test_attached_subnet_manager_status_display() {
+        // In this test:
+        //
+        // * There are two entries in `dendrite` to exercise
+        //   the sorting in AttachedSubnetManagerStatusDisplay.
+        // * Some entries have errors. These errors are displayed
+        //   in the snapshot.
+        let sled1 = SledUuid::from_u128(0x1b2b4c4f_42a5_4e3c_8b28_a1c1f2f3a0b1);
+        let sled2 = SledUuid::from_u128(0x9d8e2f61_7c0d_4b6a_9e5f_3a4b5c6d7e8f);
+        let status = AttachedSubnetManagerStatus::Listed {
+            dendrite: Ok(HashMap::from([
+                (
+                    SwitchSlot::Switch1,
+                    DendriteSubnetDetails {
+                        n_subnets_added: 0,
+                        n_subnets_removed: 1,
+                        n_total_subnets: 2,
+                        errors: vec!["failed to create subnet".to_string()],
+                    },
+                ),
+                (
+                    SwitchSlot::Switch0,
+                    DendriteSubnetDetails {
+                        n_subnets_added: 3,
+                        n_subnets_removed: 0,
+                        n_total_subnets: 3,
+                        errors: Vec::new(),
+                    },
+                ),
+            ])),
+            sled: HashMap::from([
+                (
+                    sled2,
+                    SledSubnetDetails {
+                        n_subnets: 1,
+                        errors: vec![
+                            "duplicate subnet".to_string(),
+                            "failed to send attached subnets".to_string(),
+                        ],
+                    },
+                ),
+                (sled1, SledSubnetDetails { n_subnets: 2, errors: Vec::new() }),
+            ]),
+        };
+        expectorate::assert_contents(
+            "tests/output/attached-subnet-manager-status.txt",
+            &AttachedSubnetManagerStatusDisplay(&status).to_string(),
+        );
+
+        let db_error = AttachedSubnetManagerStatus::DatabaseError {
+            error: "database unavailable".to_string(),
+        };
+        expectorate::assert_contents(
+            "tests/output/attached-subnet-manager-status-db-error.txt",
+            &AttachedSubnetManagerStatusDisplay(&db_error).to_string(),
+        );
+
+        let dendrite_lookup_error = AttachedSubnetManagerStatus::Listed {
+            dendrite: Err("no dendrite instances in DNS".to_string()),
+            sled: HashMap::from([(
+                sled1,
+                SledSubnetDetails { n_subnets: 2, errors: Vec::new() },
+            )]),
+        };
+        expectorate::assert_contents(
+            "tests/output/attached-subnet-manager-status-dendrite-lookup-error.txt",
+            &AttachedSubnetManagerStatusDisplay(&dendrite_lookup_error)
+                .to_string(),
         );
     }
 

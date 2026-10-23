@@ -23,6 +23,7 @@ camino-tempfile.workspace = true
 chrono.workspace = true
 clap.workspace = true
 clickhouse-admin-single-client.workspace = true
+clickhouse-admin-types.workspace = true
 crossterm.workspace = true
 crucible-agent-client.workspace = true
 crucible-pantry-client.workspace = true

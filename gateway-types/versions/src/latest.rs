@@ -110,7 +110,7 @@ pub mod update {
     pub use crate::v6::update::HostPhase2RecoveryImageId;
     pub use crate::v6::update::InstallinatorImageId;
 
-    pub use crate::v7::update::SpComponentResetError;
+    pub use crate::v8::update::SpComponentResetError;
 }
 
 pub mod local {

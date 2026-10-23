@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "57.0.0"
+    "version": "59.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -45,7 +45,7 @@
               "x-rust-type": {
                 "crate": "byte-wrapper",
                 "path": "byte_wrapper::HexArray::<32>",
-                "version": "0.1.0"
+                "version": "0.2.0"
               },
               "type": "string",
               "pattern": "^[0-9a-fA-F]{64}$",
@@ -105,7 +105,7 @@
               "x-rust-type": {
                 "crate": "byte-wrapper",
                 "path": "byte_wrapper::HexArray::<32>",
-                "version": "0.1.0"
+                "version": "0.2.0"
               },
               "type": "string",
               "pattern": "^[0-9a-fA-F]{64}$",
@@ -1395,7 +1395,7 @@
               "x-rust-type": {
                 "crate": "byte-wrapper",
                 "path": "byte_wrapper::HexArray::<32>",
-                "version": "0.1.0"
+                "version": "0.2.0"
               },
               "type": "string",
               "pattern": "^[0-9a-fA-F]{64}$",
@@ -3028,7 +3028,7 @@
               "x-rust-type": {
                 "crate": "byte-wrapper",
                 "path": "byte_wrapper::HexArray::<32>",
-                "version": "0.1.0"
+                "version": "0.2.0"
               },
               "type": "string",
               "pattern": "^[0-9a-fA-F]{64}$",
@@ -3820,7 +3820,7 @@
             "x-rust-type": {
               "crate": "byte-wrapper",
               "path": "byte_wrapper::HexArray::<32>",
-              "version": "0.1.0"
+              "version": "0.2.0"
             },
             "type": "string",
             "pattern": "^[0-9a-fA-F]{64}$",
@@ -5811,7 +5811,7 @@
                 "x-rust-type": {
                   "crate": "byte-wrapper",
                   "path": "byte_wrapper::HexArray::<32>",
-                  "version": "0.1.0"
+                  "version": "0.2.0"
                 },
                 "type": "string",
                 "pattern": "^[0-9a-fA-F]{64}$",
@@ -6137,10 +6137,22 @@
         "type": "object",
         "properties": {
           "attached_subnets": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/AttachedSubnet"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/AttachedSubnet"
-            }
+            },
+            "uniqueItems": true
           },
           "delegated_zvols": {
             "type": "array",
@@ -7706,7 +7718,7 @@
             "x-rust-type": {
               "crate": "byte-wrapper",
               "path": "byte_wrapper::HexArray::<32>",
-              "version": "0.1.0"
+              "version": "0.2.0"
             },
             "type": "string",
             "pattern": "^[0-9a-fA-F]{64}$",
@@ -7903,7 +7915,7 @@
                 "x-rust-type": {
                   "crate": "byte-wrapper",
                   "path": "byte_wrapper::HexArray::<32>",
-                  "version": "0.1.0"
+                  "version": "0.2.0"
                 },
                 "type": "string",
                 "pattern": "^[0-9a-fA-F]{64}$",
@@ -10949,7 +10961,7 @@
             "x-rust-type": {
               "crate": "byte-wrapper",
               "path": "byte_wrapper::HexArray::<32>",
-              "version": "0.1.0"
+              "version": "0.2.0"
             },
             "type": "string",
             "pattern": "^[0-9a-fA-F]{64}$",
