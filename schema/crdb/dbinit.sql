@@ -9835,8 +9835,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_active_problem (
     -- UUID of the current sitrep that this record is part of.
     sitrep_id UUID NOT NULL,
     -- UUID of the original sitrep in which the Active Problem was first
-    -- requested.
-    requested_sitrep_id UUID NOT NULL,
+    -- created.
+    created_sitrep_id UUID NOT NULL,
+
+    -- A human-readable comment explaining why the diagnosis engine created
+    -- this Active Problem. This is *not* part of the externally visible Active
+    -- Problem, and is only used for debugging the sitrep itself.
+    comment TEXT NOT NULL,
 
     PRIMARY KEY (sitrep_id, id)
 );
@@ -9920,8 +9925,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_case_active_problem (
     problem_id UUID NOT NULL,
     -- The ID of the current sitrep in which this association exists.
     sitrep_id UUID NOT NULL,
-    -- The ID of the *first* sitrep in which this association was created.
-    created_sitrep_id UUID NOT NULL,
+    -- The ID of the *first* sitrep in which this association between the case
+    -- and the Active Problem was created. This is *not* the sitrep in which
+    -- either the case or the Active Problem was created.
+    linked_sitrep_id UUID NOT NULL,
 
     -- A human-readable comment explaining why the Active Problem is related to
     -- the case.
@@ -9949,8 +9956,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_active_problem_alert (
     alert_id UUID NOT NULL,
     -- The ID of the current sitrep in which this link exists.
     sitrep_id UUID NOT NULL,
-    -- The ID of the *first* sitrep in which this link was created.
-    created_sitrep_id UUID NOT NULL,
+    -- The ID of the *first* sitrep in which this link was created. This is
+    -- *not* the sitrep that requested the alert.
+    linked_sitrep_id UUID NOT NULL,
     -- The Active Problem revision with which the alert is associated, used to
     -- order an Active Problem's alerts by revision.
     revision INT8 NOT NULL,
@@ -9976,8 +9984,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_active_problem_support_bundle (
     support_bundle_id UUID NOT NULL,
     -- The ID of the current sitrep in which this link exists.
     sitrep_id UUID NOT NULL,
-    -- The ID of the *first* sitrep in which this link was created.
-    created_sitrep_id UUID NOT NULL,
+    -- The ID of the *first* sitrep in which this link was created. This is
+    -- *not* the sitrep that requested the support bundle.
+    linked_sitrep_id UUID NOT NULL,
     -- The Active Problem revision with which the support bundle is associated.
     revision INT8 NOT NULL,
 

@@ -2,7 +2,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_active_problem_support_bundle (
     problem_id UUID NOT NULL,
     support_bundle_id UUID NOT NULL,
     sitrep_id UUID NOT NULL,
-    created_sitrep_id UUID NOT NULL,
+    linked_sitrep_id UUID NOT NULL,
     revision INT8 NOT NULL,
 
     comment TEXT NOT NULL,

@@ -37,10 +37,17 @@ pub struct FmActiveProblem {
     /// The sitrep that this record is part of.
     ///
     /// Note that this is *not* the sitrep in which the Active Problem was
-    /// first requested; see [`Self::requested_sitrep_id`].
+    /// first created; see [`Self::created_sitrep_id`].
     pub sitrep_id: DbTypedUuid<SitrepKind>,
-    /// The sitrep in which the Active Problem was first requested.
-    pub requested_sitrep_id: DbTypedUuid<SitrepKind>,
+    /// The sitrep in which the Active Problem was first created.
+    pub created_sitrep_id: DbTypedUuid<SitrepKind>,
+
+    /// An internal human-readable comment explaining why the diagnosis engine
+    /// created this Active Problem.
+    ///
+    /// This is used for debugging the sitrep, and is not part of the
+    /// externally visible Active Problem.
+    pub comment: String,
 }
 
 /// A revision of an Active Problem in a fault management sitrep.
@@ -95,10 +102,12 @@ pub struct FmActiveProblemAlert {
     /// The sitrep that this record is part of.
     ///
     /// Note that this is *not* the sitrep in which the link was first created;
-    /// see [`Self::created_sitrep_id`].
+    /// see [`Self::linked_sitrep_id`].
     pub sitrep_id: DbTypedUuid<SitrepKind>,
     /// The sitrep in which this link was first created.
-    pub created_sitrep_id: DbTypedUuid<SitrepKind>,
+    ///
+    /// This is *not* the sitrep that requested the alert.
+    pub linked_sitrep_id: DbTypedUuid<SitrepKind>,
     /// The Active Problem revision with which the alert is associated.
     pub revision: DbTypedGeneration<ActiveProblemRevKind>,
     pub comment: String,
@@ -119,10 +128,12 @@ pub struct FmActiveProblemSupportBundle {
     /// The sitrep that this record is part of.
     ///
     /// Note that this is *not* the sitrep in which the link was first created;
-    /// see [`Self::created_sitrep_id`].
+    /// see [`Self::linked_sitrep_id`].
     pub sitrep_id: DbTypedUuid<SitrepKind>,
     /// The sitrep in which this link was first created.
-    pub created_sitrep_id: DbTypedUuid<SitrepKind>,
+    ///
+    /// This is *not* the sitrep that requested the support bundle.
+    pub linked_sitrep_id: DbTypedUuid<SitrepKind>,
     /// The Active Problem revision with which the support bundle is
     /// associated.
     pub revision: DbTypedGeneration<ActiveProblemRevKind>,
@@ -144,7 +155,8 @@ impl FmActiveProblem {
     ) -> Self {
         let SitrepActiveProblem {
             id,
-            requested_sitrep_id,
+            created_sitrep_id,
+            comment,
             revisions: _,
             alerts: _,
             support_bundles: _,
@@ -152,7 +164,8 @@ impl FmActiveProblem {
         Self {
             id: (*id).into(),
             sitrep_id: sitrep_id.into(),
-            requested_sitrep_id: (*requested_sitrep_id).into(),
+            created_sitrep_id: (*created_sitrep_id).into(),
+            comment: comment.clone(),
         }
     }
 }
@@ -167,7 +180,7 @@ impl FmActiveProblemRevision {
     ) -> Self {
         let SitrepRevision {
             number,
-            requested_sitrep_id,
+            created_sitrep_id,
             time_resolved,
             code,
             summary,
@@ -179,7 +192,7 @@ impl FmActiveProblemRevision {
             problem_id: problem_id.into(),
             revision: number.into(),
             sitrep_id: sitrep_id.into(),
-            created_sitrep_id: requested_sitrep_id.into(),
+            created_sitrep_id: created_sitrep_id.into(),
             time_resolved,
             code: SqlU32::new(code.into()),
             summary,
@@ -212,7 +225,7 @@ impl TryFrom<FmActiveProblemRevision> for SitrepRevision {
         } = revision;
         Ok(Self {
             number: number.into(),
-            requested_sitrep_id: created_sitrep_id.into(),
+            created_sitrep_id: created_sitrep_id.into(),
             time_resolved,
             code: ProblemCode::try_from(u32::from(code))?,
             summary,
@@ -231,12 +244,12 @@ impl FmActiveProblemAlert {
         problem_id: ActiveProblemUuid,
         link: AlertLink,
     ) -> Self {
-        let AlertLink { alert_id, revision, created_sitrep_id, comment } = link;
+        let AlertLink { alert_id, revision, linked_sitrep_id, comment } = link;
         Self {
             problem_id: problem_id.into(),
             alert_id: alert_id.into(),
             sitrep_id: sitrep_id.into(),
-            created_sitrep_id: created_sitrep_id.into(),
+            linked_sitrep_id: linked_sitrep_id.into(),
             revision: revision.into(),
             comment,
         }
@@ -249,14 +262,14 @@ impl From<FmActiveProblemAlert> for AlertLink {
             problem_id: _,
             alert_id,
             sitrep_id: _,
-            created_sitrep_id,
+            linked_sitrep_id,
             revision,
             comment,
         } = link;
         Self {
             alert_id: alert_id.into(),
             revision: revision.into(),
-            created_sitrep_id: created_sitrep_id.into(),
+            linked_sitrep_id: linked_sitrep_id.into(),
             comment,
         }
     }
@@ -273,14 +286,14 @@ impl FmActiveProblemSupportBundle {
         let SupportBundleLink {
             support_bundle_id,
             revision,
-            created_sitrep_id,
+            linked_sitrep_id,
             comment,
         } = link;
         Self {
             problem_id: problem_id.into(),
             support_bundle_id: support_bundle_id.into(),
             sitrep_id: sitrep_id.into(),
-            created_sitrep_id: created_sitrep_id.into(),
+            linked_sitrep_id: linked_sitrep_id.into(),
             revision: revision.into(),
             comment,
         }
@@ -293,14 +306,14 @@ impl From<FmActiveProblemSupportBundle> for SupportBundleLink {
             problem_id: _,
             support_bundle_id,
             sitrep_id: _,
-            created_sitrep_id,
+            linked_sitrep_id,
             revision,
             comment,
         } = link;
         Self {
             support_bundle_id: support_bundle_id.into(),
             revision: revision.into(),
-            created_sitrep_id: created_sitrep_id.into(),
+            linked_sitrep_id: linked_sitrep_id.into(),
             comment,
         }
     }

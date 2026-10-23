@@ -378,8 +378,12 @@ impl iddqd::IdOrdItem for SupportBundleRequest {
 pub struct CaseActiveProblem {
     /// The ID of the associated Active Problem.
     pub problem_id: ActiveProblemUuid,
-    /// The sitrep in which this association was first created.
-    pub created_sitrep_id: SitrepUuid,
+    /// The sitrep in which this association between the case and the Active
+    /// Problem was first created.
+    ///
+    /// This is *not* the sitrep in which either the case or the Active Problem
+    /// was created.
+    pub linked_sitrep_id: SitrepUuid,
     /// A human-readable comment why the Active Problem is associated with the
     /// case, for debugging purposes.
     pub comment: String,
@@ -643,7 +647,7 @@ impl fmt::Display for DisplayCase<'_> {
             writeln!(f, "{:>indent$}{}", "", heading.style("---------------"))?;
 
             let indent = indent + 2;
-            for CaseActiveProblem { problem_id, created_sitrep_id, comment } in
+            for CaseActiveProblem { problem_id, linked_sitrep_id, comment } in
                 active_problems.iter()
             {
                 const ADDED_IN: &str = "added in:";
@@ -660,10 +664,10 @@ impl fmt::Display for DisplayCase<'_> {
                     .fmt(f)?;
                 writeln!(
                     f,
-                    "{:>indent$}{} {created_sitrep_id}{}",
+                    "{:>indent$}{} {linked_sitrep_id}{}",
                     "",
                     styles.label(ADDED_IN, WIDTH),
-                    this_sitrep(*created_sitrep_id)
+                    this_sitrep(*linked_sitrep_id)
                 )?;
                 writeln!(f)?;
             }
@@ -863,7 +867,7 @@ mod tests {
                     "a0b1e3a0-4c0d-4e5f-8a9b-0c1d2e3f4a5b",
                 )
                 .unwrap(),
-                created_sitrep_id: closed_sitrep_id,
+                linked_sitrep_id: closed_sitrep_id,
                 comment: "the rectifier is missing".to_string(),
             })
             .unwrap();

@@ -186,7 +186,18 @@ impl ProblemCodeDescription {
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct SitrepActiveProblem {
     pub id: ActiveProblemUuid,
-    pub requested_sitrep_id: SitrepUuid,
+    /// The sitrep in which the diagnosis engine first created this Active
+    /// Problem.
+    ///
+    /// This remains the same as the Active Problem is carried forward into
+    /// subsequent sitreps.
+    pub created_sitrep_id: SitrepUuid,
+    /// A human-readable comment explaining why the diagnosis engine created
+    /// this Active Problem.
+    ///
+    /// This is used for debugging the sitrep, and is not part of the
+    /// externally visible Active Problem.
+    pub comment: String,
     pub revisions: IdOrdMap<SitrepRevision>,
     /// Alerts linked to this Active Problem, indexed by alert ID.
     ///
@@ -220,7 +231,8 @@ impl SitrepActiveProblem {
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct SitrepRevision {
     pub number: ActiveProblemRevNum,
-    pub requested_sitrep_id: SitrepUuid,
+    /// The sitrep in which this revision was first created.
+    pub created_sitrep_id: SitrepUuid,
     /// The time at which the Active Problem was resolved, if it should be
     /// resolved as of this revision.
     ///
@@ -275,7 +287,10 @@ pub struct AlertLink {
     /// This is used to order an Active Problem's alerts by revision.
     pub revision: ActiveProblemRevNum,
     /// The sitrep in which this link was first created.
-    pub created_sitrep_id: SitrepUuid,
+    ///
+    /// This is *not* the sitrep that requested the alert, which may be an
+    /// earlier one.
+    pub linked_sitrep_id: SitrepUuid,
     /// A human-readable comment explaining why the alert is linked to the
     /// Active Problem, for debugging purposes.
     pub comment: String,
@@ -305,7 +320,10 @@ pub struct SupportBundleLink {
     /// associated.
     pub revision: ActiveProblemRevNum,
     /// The sitrep in which this link was first created.
-    pub created_sitrep_id: SitrepUuid,
+    ///
+    /// This is *not* the sitrep that requested the support bundle, which may be
+    /// an earlier one.
+    pub linked_sitrep_id: SitrepUuid,
     /// A human-readable comment explaining why the support bundle is linked
     /// to the Active Problem, for debugging purposes.
     pub comment: String,
