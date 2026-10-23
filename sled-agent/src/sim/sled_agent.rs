@@ -111,9 +111,9 @@ pub struct SledAgent {
     // * We don't always clean up attached subnets at VMM unregister
     //   time. instance_unregister cleans attached subnets up, but
     //   sim_poke -> ready_to_destroy does not.
-    // * This function can fail after the VMM is registered, which
-    //   leaves it registered (with its entry) despite returning an
-    //   error.
+    // * instance_register can fail after the VMM is registered,
+    //   which leaves it registered (with its entry) despite returning
+    //   an error.
     //
     // There are multiple data modeling and code defects here:
     //
@@ -122,9 +122,10 @@ pub struct SledAgent {
     // * Even if they're representable, these kinds of torn states
     //   should not be externally visible (there should be a single
     //   shared lock, or we should use the actor model).
-    // * This function should be written in a prepare-and-commit style,
-    //   where all prerequisites are checked first and then a second
-    //   infallible section updates all state.
+    // * instance_register (and other functions?) should be written
+    //   in a prepare-and-commit style, where all prerequisites are
+    //   checked first and then a second infallible section updates
+    //   all state.
     //
     // We should fix all of this at some point.
     pub attached_subnets:
