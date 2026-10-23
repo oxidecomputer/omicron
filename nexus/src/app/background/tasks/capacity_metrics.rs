@@ -83,10 +83,15 @@ impl CapacityMetrics {
                     &PaginatedBy::Id(p.current_pagparams()),
                 )
                 .await?;
-            paginator = p.found_batch(&silo_utils, &|util| util.silo_id);
+            paginator = p.found_batch(&silo_utils, &|util| {
+                util.silo_id().into_untyped_uuid()
+            });
 
             for util in silo_utils {
-                let target = SiloQuota { silo_id: util.silo_id, nexus_id };
+                let target = SiloQuota {
+                    silo_id: util.silo_id().into_untyped_uuid(),
+                    nexus_id,
+                };
                 samples.extend([
                     Sample::new_with_timestamp(
                         now,
@@ -362,7 +367,10 @@ mod tests {
                 ),
             ] {
                 expected.insert(
-                    (silo_id, format!("silo_quota:{metric}_{kind}")),
+                    (
+                        silo_id.into_untyped_uuid(),
+                        format!("silo_quota:{metric}_{kind}"),
+                    ),
                     value,
                 );
             }

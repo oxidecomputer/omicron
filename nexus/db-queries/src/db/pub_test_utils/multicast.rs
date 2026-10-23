@@ -142,7 +142,12 @@ pub async fn create_test_setup_with_range(
 
     // Link pool to silo
     let link = IncompleteIpPoolResource {
-        resource_id: opctx.authn.silo_required().unwrap().id(),
+        resource_id: opctx
+            .authn
+            .silo_required()
+            .unwrap()
+            .id()
+            .into_untyped_uuid(),
         resource_type: IpPoolResourceType::Silo,
         ip_pool_id: ip_pool.id(),
         is_default: false,

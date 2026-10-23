@@ -37,6 +37,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_uuid_kinds::GenericUuid;
 use ref_cast::RefCast;
 use std::matches;
 use std::num::NonZeroU32;
@@ -336,7 +337,7 @@ impl super::Nexus {
                 db::model::IncompleteIpPoolResource {
                     ip_pool_id: authz_pool.id(),
                     resource_type: db::model::IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: silo_link.is_default,
                 },
             )

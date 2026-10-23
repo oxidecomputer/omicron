@@ -122,6 +122,7 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::policy::{ProjectRole, SiloRole};
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_uuid_kinds::SiloUuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -2656,7 +2657,7 @@ async fn assert_metrics(
     for id in [None, Some(project_id)] {
         assert_silo_metrics(cptestctx, id, disk, cpus, ram).await;
     }
-    for id in [None, Some(DEFAULT_SILO_ID)] {
+    for id in [None, Some(DEFAULT_SILO_ID.into_untyped_uuid())] {
         assert_system_metrics(cptestctx, id, disk, cpus, ram).await;
     }
 }
@@ -8015,13 +8016,25 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
 
     // make first pool the default for the priv user's silo
     create_ip_pool(&client, "pool1", Some(range1)).await;
-    link_ip_pool(&client, "pool1", &DEFAULT_SILO.id(), /*default*/ true).await;
+    link_ip_pool(
+        &client,
+        "pool1",
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        /*default*/ true,
+    )
+    .await;
 
     assert_ip_pool_utilization(client, "pool1", 0, capacity1).await;
 
     // second pool is associated with the silo but not default
     create_ip_pool(&client, "pool2", Some(range2)).await;
-    link_ip_pool(&client, "pool2", &DEFAULT_SILO.id(), /*default*/ false).await;
+    link_ip_pool(
+        &client,
+        "pool2",
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        /*default*/ false,
+    )
+    .await;
 
     assert_ip_pool_utilization(client, "pool2", 0, capacity2).await;
 
@@ -8168,7 +8181,13 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
 
     // make first pool the default for the priv user's silo
     create_ip_pool(&client, "default", None).await;
-    link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
+    link_ip_pool(
+        &client,
+        "default",
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        true,
+    )
+    .await;
 
     let orphan_pool_range = IpRange::V4(
         Ipv4Range::new(
@@ -8336,7 +8355,13 @@ async fn test_instance_attach_several_external_ips(
     let capacity = range.len().into();
     let default_pool_range = IpRange::V4(range);
     create_ip_pool(&client, "default", Some(default_pool_range)).await;
-    link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
+    link_ip_pool(
+        &client,
+        "default",
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        true,
+    )
+    .await;
 
     assert_ip_pool_utilization(client, "default", 0, capacity).await;
 
@@ -8814,7 +8839,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         Arc::new(nexus_db_queries::authz::Authz::new(&cptestctx.logctx.log)),
         nexus_db_queries::authn::Context::for_test_user(
             user_id,
-            silo.identity.id,
+            SiloUuid::from_untyped_uuid(silo.identity.id),
             nexus_db_queries::authn::SiloAuthnPolicy::try_from(&*DEFAULT_SILO)
                 .unwrap(),
         ),

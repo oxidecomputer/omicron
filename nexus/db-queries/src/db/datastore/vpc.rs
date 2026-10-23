@@ -2996,6 +2996,7 @@ mod tests {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::RackUuid;
+    use omicron_uuid_kinds::SiloUuid;
     use oxnet::IpNet;
     use oxnet::Ipv4Net;
     use slog::info;
@@ -3026,7 +3027,7 @@ mod tests {
             },
             defaults: None,
         };
-        let project = Project::new(Uuid::new_v4(), project_params);
+        let project = Project::new(SiloUuid::new_v4(), project_params);
         let (authz_project, _) = datastore
             .project_create(&opctx, project)
             .await
@@ -3134,7 +3135,7 @@ mod tests {
             },
             defaults: None,
         };
-        let project = Project::new(Uuid::new_v4(), project_params);
+        let project = Project::new(SiloUuid::new_v4(), project_params);
         let (authz_project, _) = datastore
             .project_create(&opctx, project)
             .await

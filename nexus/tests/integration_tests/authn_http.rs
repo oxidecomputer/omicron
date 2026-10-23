@@ -30,8 +30,8 @@ use nexus_db_queries::authn::external::spoof::SPOOF_SCHEME_NAME;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_uuid_kinds::ConsoleSessionUuid;
 use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::SiloUuid;
 use std::sync::Mutex;
-use uuid::Uuid;
 
 /// Tests authn::external::Authenticator with the "spoof" scheme allowed
 ///
@@ -109,7 +109,7 @@ async fn test_authn_session_cookie() {
         id: ConsoleSessionUuid::new_v4(),
         token: "valid".to_string(),
         silo_user_id: SiloUserUuid::new_v4(),
-        silo_id: Uuid::new_v4(),
+        silo_id: SiloUuid::new_v4(),
         time_last_used: Utc::now() - Duration::seconds(5),
         time_created: Utc::now() - Duration::seconds(5),
     };
@@ -117,7 +117,7 @@ async fn test_authn_session_cookie() {
         id: ConsoleSessionUuid::new_v4(),
         token: "idle_expired".to_string(),
         silo_user_id: SiloUserUuid::new_v4(),
-        silo_id: Uuid::new_v4(),
+        silo_id: SiloUuid::new_v4(),
         time_last_used: Utc::now() - Duration::hours(2),
         time_created: Utc::now() - Duration::hours(3),
     };
@@ -125,7 +125,7 @@ async fn test_authn_session_cookie() {
         id: ConsoleSessionUuid::new_v4(),
         token: "abs_expired".to_string(),
         silo_user_id: SiloUserUuid::new_v4(),
-        silo_id: Uuid::new_v4(),
+        silo_id: SiloUuid::new_v4(),
         time_last_used: Utc::now(),
         time_created: Utc::now() - Duration::hours(10),
     };
@@ -334,7 +334,7 @@ impl SiloUserSilo for WhoamiServerState {
     async fn silo_user_silo(
         &self,
         silo_user_id: SiloUserUuid,
-    ) -> Result<Uuid, nexus_db_queries::authn::Reason> {
+    ) -> Result<SiloUuid, nexus_db_queries::authn::Reason> {
         assert_eq!(
             silo_user_id.to_string(),
             "7f927c86-3371-4295-c34a-e3246a4b9c02"
@@ -348,7 +348,7 @@ struct FakeSession {
     id: ConsoleSessionUuid,
     token: String,
     silo_user_id: SiloUserUuid,
-    silo_id: Uuid,
+    silo_id: SiloUuid,
     time_created: DateTime<Utc>,
     time_last_used: DateTime<Utc>,
 }
@@ -360,7 +360,7 @@ impl session_cookie::Session for FakeSession {
     fn silo_user_id(&self) -> SiloUserUuid {
         self.silo_user_id
     }
-    fn silo_id(&self) -> Uuid {
+    fn silo_id(&self) -> SiloUuid {
         self.silo_id
     }
     fn time_created(&self) -> DateTime<Utc> {

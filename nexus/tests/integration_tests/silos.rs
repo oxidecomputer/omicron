@@ -52,6 +52,8 @@ use http::StatusCode;
 use http::method::Method;
 use httptest::{Expectation, Server, matchers::*, responders::*};
 use nexus_types::external_api::policy::{FleetRole, SiloRole};
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloUuid;
 use std::convert::Infallible;
 use std::net::Ipv4Addr;
 use std::time::Duration;
@@ -935,7 +937,9 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
 
     // In the built-in Silo, we expect the test-privileged and test-unprivileged
     // users.
-    let user_key = |u: &user::User| (u.id, u.display_name.clone(), u.silo_id);
+    let user_key = |u: &user::User| {
+        (u.id, u.display_name.clone(), SiloUuid::from_untyped_uuid(u.silo_id))
+    };
     assert_eq!(
         initial_silo_users.iter().map(user_key).collect::<Vec<_>>(),
         vec![
@@ -1030,7 +1034,11 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
             .unwrap();
     assert_eq!(
         silo2_users.items.iter().map(user_key).collect::<Vec<_>>(),
-        vec![(new_silo_user_id, new_silo_user_name, silo.identity.id),]
+        vec![(
+            new_silo_user_id,
+            new_silo_user_name,
+            SiloUuid::from_untyped_uuid(silo.identity.id),
+        )]
     );
 
     // The "test-privileged" user also shouldn't see the user in this other
@@ -1765,10 +1773,16 @@ async fn create_jit_user(
     assert_eq!(silo.identity_mode, silo::SiloIdentityMode::SamlJit);
     let silo_id = silo.identity.id;
     let silo_user_id = SiloUserUuid::new_v4();
-    let authz_silo =
-        authz::Silo::new(authz::FLEET, silo_id, LookupType::ById(silo_id));
-    let silo_user =
-        SiloUserJit::new(silo_id, silo_user_id, external_id.to_owned());
+    let authz_silo = authz::Silo::new(
+        authz::FLEET,
+        SiloUuid::from_untyped_uuid(silo_id),
+        LookupType::by_id(silo_id),
+    );
+    let silo_user = SiloUserJit::new(
+        SiloUuid::from_untyped_uuid(silo_id),
+        silo_user_id,
+        external_id.to_owned(),
+    );
     datastore
         .silo_user_create(&authz_silo, silo_user.into())
         .await
@@ -1786,10 +1800,13 @@ async fn create_scim_user(
     assert_eq!(silo.identity_mode, silo::SiloIdentityMode::SamlScim);
     let silo_id = silo.identity.id;
     let silo_user_id = SiloUserUuid::new_v4();
-    let authz_silo =
-        authz::Silo::new(authz::FLEET, silo_id, LookupType::ById(silo_id));
+    let authz_silo = authz::Silo::new(
+        authz::FLEET,
+        SiloUuid::from_untyped_uuid(silo_id),
+        LookupType::by_id(silo_id),
+    );
     let silo_user = SiloUserScim::new(
-        silo_id,
+        SiloUuid::from_untyped_uuid(silo_id),
         silo_user_id,
         user_name.to_owned(),
         None,

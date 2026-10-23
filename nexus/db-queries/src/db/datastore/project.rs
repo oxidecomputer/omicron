@@ -167,7 +167,7 @@ impl DataStore {
                 let project = project.clone();
                 async move {
                     let project: Project = Silo::insert_resource(
-                        silo_id,
+                        silo_id.into(),
                         diesel::insert_into(dsl::project).values(project),
                     )
                     .insert_and_get_result_async(&conn)
@@ -329,7 +329,7 @@ impl DataStore {
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
-        .filter(dsl::silo_id.eq(authz_silo.id()))
+        .filter(dsl::silo_id.eq(to_db_typed_uuid(authz_silo.id())))
         .filter(dsl::time_deleted.is_null())
         .select(Project::as_select())
         .load_async(&*self.pool_connection_authorized(opctx).await?)

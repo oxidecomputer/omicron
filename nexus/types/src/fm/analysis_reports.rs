@@ -12,6 +12,7 @@ use super::ereport::EreportId;
 use crate::observed_saga::{ObservedSagaState, SagaOwnerState};
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
+use omicron_uuid_kinds::SiloUuid;
 use omicron_uuid_kinds::{
     AlertUuid, CaseUuid, CollectionUuid, PhysicalDiskUuid, SitrepUuid,
     SupportBundleUuid,
@@ -535,7 +536,7 @@ pub struct InputReport {
     /// Every silo, with its installed external TLS certificates, visible to
     /// the diagnosis engines for this analysis pass. Keyed by silo ID.
     #[serde(default)]
-    pub observed_silo_certificates: BTreeMap<Uuid, SiloCertificatesReport>,
+    pub observed_silo_certificates: BTreeMap<SiloUuid, SiloCertificatesReport>,
     /// The fault management configuration diagnosis engines ran with. `None`
     /// only for reports written before this field existed.
     #[serde(default)]
@@ -1180,7 +1181,7 @@ mod tests {
     }
 
     fn example_observed_silo_certificates()
-    -> BTreeMap<Uuid, SiloCertificatesReport> {
+    -> BTreeMap<SiloUuid, SiloCertificatesReport> {
         let mut certificates = BTreeMap::new();
         certificates.insert(
             Uuid::from_str("cccccccc-0000-0000-0000-000000000001").unwrap(),
@@ -1192,7 +1193,7 @@ mod tests {
         );
         let mut silos = BTreeMap::new();
         silos.insert(
-            Uuid::from_str("5110aaaa-0000-0000-0000-000000000001").unwrap(),
+            SiloUuid::from_str("5110aaaa-0000-0000-0000-000000000001").unwrap(),
             SiloCertificatesReport {
                 silo_name: "fake-silo".to_string(),
                 certificates,

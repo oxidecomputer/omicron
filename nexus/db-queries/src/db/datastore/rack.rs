@@ -519,7 +519,7 @@ impl DataStore {
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             db_silo.id(),
-            LookupType::ById(db_silo.id()),
+            LookupType::by_id(db_silo.id()),
         );
         let (q1, q2) = Self::role_assignment_replace_visible_queries(
             opctx,

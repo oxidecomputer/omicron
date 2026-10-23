@@ -7,10 +7,11 @@
 use std::sync::LazyLock;
 
 use omicron_common::api::external::Name;
+use omicron_uuid_kinds::SiloUuid;
 
 /// The ID of the "default" silo.
-pub static DEFAULT_SILO_ID: uuid::Uuid =
-    uuid::Uuid::from_u128(0x001de000_5110_4000_8000_000000000000);
+pub static DEFAULT_SILO_ID: SiloUuid =
+    SiloUuid::from_u128(0x001de000_5110_4000_8000_000000000000);
 
 /// Return the name of the default silo.
 pub fn default_silo_name() -> &'static Name {
@@ -21,8 +22,8 @@ pub fn default_silo_name() -> &'static Name {
 }
 
 /// The ID of the built-in internal silo.
-pub static INTERNAL_SILO_ID: uuid::Uuid =
-    uuid::Uuid::from_u128(0x001de000_5110_4000_8000_000000000001);
+pub static INTERNAL_SILO_ID: SiloUuid =
+    SiloUuid::from_u128(0x001de000_5110_4000_8000_000000000001);
 
 /// Return the name of the internal silo.
 pub fn internal_silo_name() -> &'static Name {

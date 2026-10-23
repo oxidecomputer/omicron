@@ -2189,6 +2189,7 @@ mod tests {
     use omicron_uuid_kinds::FactUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::RackUuid;
+    use omicron_uuid_kinds::SiloUuid;
     use omicron_uuid_kinds::SupportBundleUuid;
     use std::sync::Arc;
 
@@ -3106,7 +3107,7 @@ mod tests {
                     },
                     payload: fm::FactPayload::Certificate(kind(
                         fm::CertificateExpiryFactPayload {
-                            silo_id: Uuid::new_v4(),
+                            silo_id: SiloUuid::new_v4(),
                             certificate_id: Uuid::new_v4(),
                             not_after: omicron_common::now_db_precision(),
                         },
