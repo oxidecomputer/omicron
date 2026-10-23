@@ -59,6 +59,10 @@ impl HardwareManager {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
+    pub fn incomplete_disks(&self) -> Option<String> {
+        unimplemented!("Accessing hardware unsupported on non-illumos");
+    }
+
     pub fn disks(&self) -> HashMap<DiskIdentity, UnparsedDisk> {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }

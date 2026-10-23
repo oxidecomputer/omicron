@@ -23,6 +23,8 @@ cfg_if::cfg_if! {
 pub mod cleanup;
 pub mod disk;
 pub use disk::*;
+pub mod disk_bay;
+pub use disk_bay::{DiskBay, DiskBayOccupant};
 pub mod nvme_instance;
 pub mod softnpu;
 pub mod underlay;
@@ -399,6 +401,10 @@ enum TofinoView {
 pub struct HardwareView {
     tofino: TofinoView,
     disks: HashMap<DiskIdentity, UnparsedDisk>,
+    disk_bays: Vec<DiskBay>,
+    /// Why the latest poll could not describe every disk bay, if it could
+    /// not.
+    incomplete_disks: Option<String>,
     baseboard: Baseboard,
     online_processor_count: u32,
     usable_physical_pages: u64,
@@ -421,6 +427,23 @@ impl HardwareView {
 
     pub fn disks(&self) -> HashMap<DiskIdentity, UnparsedDisk> {
         self.disks.clone()
+    }
+
+    /// Every U.2 bay and M.2 socket of the chassis and what occupies it.
+    ///
+    /// Empty on hosts that are not Oxide sleds, where there is no chassis
+    /// topology to read.
+    pub fn disk_bays(&self) -> &[DiskBay] {
+        &self.disk_bays
+    }
+
+    /// Why the latest hardware poll could not describe every disk bay, or
+    /// `None` if it described them all.
+    ///
+    /// When this is `Some`, [`Self::disks`] may be missing disks that are
+    /// present, or may describe a disk as of an earlier poll.
+    pub fn incomplete_disks(&self) -> Option<&str> {
+        self.incomplete_disks.as_deref()
     }
 
     pub fn into_disks(self) -> HashMap<DiskIdentity, UnparsedDisk> {

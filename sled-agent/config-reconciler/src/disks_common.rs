@@ -30,9 +30,9 @@ pub(crate) fn update_properties_from_raw_disk(
     }
 
     // The only properties we expect to change are the firmware metadata and
-    // the chassis location (which may be learned after the disk was adopted).
-    // Update those and check again; if they're still not equal, something
-    // weird is going on. At least log a warning.
+    // the chassis location, which is re-read from the hardware topology on
+    // every poll. Update those and check again; if they're still not equal,
+    // something weird is going on. At least log a warning.
     let mut disk = disk.clone();
     disk.update_mutable_properties(raw_disk);
     if *raw_disk == RawDisk::from(disk.clone()) {
@@ -68,14 +68,12 @@ mod tests {
     use sled_hardware::PooledDisk;
     use sled_hardware::UnparsedDisk;
 
-    // A disk adopted before its chassis location was known must pick up the
-    // location once the raw disk reports it, and be considered unchanged
-    // afterwards.
+    // A change to a disk's chassis location reported by the hardware
+    // topology must be copied onto the adopted disk, which is then
+    // considered unchanged.
     #[test]
-    fn location_learned_after_adoption_is_propagated() {
-        let logctx = dev::test_setup_log(
-            "location_learned_after_adoption_is_propagated",
-        );
+    fn location_change_is_propagated() {
+        let logctx = dev::test_setup_log("location_change_is_propagated");
 
         let identity = DiskIdentity {
             vendor: "test".into(),
@@ -91,32 +89,30 @@ mod tests {
             pcie_slot: 0,
             identity: identity.clone(),
             is_boot_disk: false,
-            location: None,
+            location: "N2".to_string(),
             partitions: vec![],
             zpool_name: ZpoolName::External(ExternalZpoolUuid::new_v4()),
             firmware: firmware.clone(),
         });
 
-        // The raw disk matches what was adopted, except that it now carries a
-        // chassis location.
-        let raw_disk = RawDisk::Real(
-            UnparsedDisk::new(
-                "/test-devfs".into(),
-                None,
-                0,
-                DiskVariant::U2,
-                identity,
-                false,
-                firmware,
-            )
-            .with_location(Some("N3".to_string())),
-        );
+        // The raw disk matches what was adopted, except for its chassis
+        // location.
+        let raw_disk = RawDisk::Real(UnparsedDisk::new(
+            "/test-devfs".into(),
+            None,
+            0,
+            DiskVariant::U2,
+            identity,
+            false,
+            firmware,
+            "N3".to_string(),
+        ));
 
         let updated = assert_matches!(
             update_properties_from_raw_disk(&adopted, &raw_disk, &logctx.log),
             MaybeUpdatedDisk::Updated(disk) => disk
         );
-        assert_eq!(updated.location(), Some("N3"));
+        assert_eq!(updated.location(), "N3");
         assert_eq!(RawDisk::from(updated.clone()), raw_disk);
 
         // A second pass sees nothing left to update.
