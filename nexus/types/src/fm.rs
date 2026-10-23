@@ -11,6 +11,8 @@ pub mod analysis_reports;
 pub mod ereport;
 pub mod problem;
 pub use ereport::{Ereport, EreportId};
+pub use problem::AllProblems;
+pub use problem::SitrepProblem;
 pub mod case;
 pub use case::Case;
 pub mod config;
@@ -37,7 +39,6 @@ use omicron_generation_kinds::{
 use omicron_uuid_kinds::{
     CaseUuid, CollectionUuid, OmicronZoneUuid, SitrepUuid,
 };
-use problem::SitrepProblem;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -67,7 +68,7 @@ pub struct Sitrep {
     /// A map of all ereports associated with cases in this sitrep.
     pub ereports_by_id: IdOrdMap<Arc<Ereport>>,
     /// All problems in this sitrep.
-    pub problems: IdOrdMap<SitrepProblem>,
+    pub problems: AllProblems,
     //
     // NOTE FOR FUTURE GENERATIONS: If you add more database tables whose
     // records are top-level children of a sitrep (i.e., like cases), please
