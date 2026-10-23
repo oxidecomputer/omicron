@@ -12,7 +12,7 @@ use crate::addrobj::{
 use crate::contract;
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
-use crate::opte::{Port, PortInfo, PortTicket};
+use crate::opte::{Port, PortInfo};
 use crate::zone::Zones;
 use crate::zone::{AddressRequest, ROUTE};
 use camino::{Utf8Path, Utf8PathBuf};
@@ -417,10 +417,10 @@ impl RunningZone {
         self.inner.opte_port_info()
     }
 
-    /// Remove the OPTE ports on this zone from the port manager.
-    pub fn release_opte_ports(&mut self) {
-        for (_, ticket) in self.inner.opte_ports.drain(..) {
-            ticket.release();
+    /// Remove the OPTE ports in this zone from the system.
+    pub fn delete_opte_ports(&mut self) {
+        for p in self.inner.opte_ports.drain(..) {
+            drop(p);
         }
     }
 
@@ -561,13 +561,7 @@ impl Drop for RunningZone {
             // them will return `EBUSY`. See
             // https://github.com/oxidecomputer/omicron/issues/7726#issuecomment-2702320286
             // and the surrounding thread for context.
-            //
-            // Drop the tickets right away, which removes the ports from the
-            // manager, so the only live reference is the one in the spawned
-            // task.
-            let (opte_ports, tickets): (Vec<_>, Vec<_>) =
-                self.inner.opte_ports.drain(..).unzip();
-            drop(tickets);
+            let opte_ports = std::mem::take(&mut self.inner.opte_ports);
             tokio::task::spawn(async move {
                 match zones_api.halt_and_remove_logged(&log, &name).await {
                     Ok(()) => {
@@ -644,7 +638,7 @@ pub struct InstalledZone {
     bootstrap_vnic: Option<Link>,
 
     // OPTE devices for the guest network interfaces
-    opte_ports: Vec<(Port, PortTicket)>,
+    opte_ports: Vec<Port>,
 
     // Physical NICs possibly provisioned to the zone.
     links: Vec<Link>,
@@ -685,16 +679,12 @@ impl InstalledZone {
 
     /// Returns references to the OPTE ports for this zone.
     pub fn opte_ports(&self) -> impl Iterator<Item = &Port> {
-        self.opte_ports.iter().map(|(port, _)| port)
+        self.opte_ports.iter()
     }
 
-    /// Returns references to the OPTE ports and metadata for this zone.
+    /// Returns references to the OPTE port info for this zone.
     pub fn opte_port_info(&self) -> impl Iterator<Item = PortInfo> {
-        self.opte_ports.iter().map(|(port, ticket)| PortInfo {
-            port: port.clone(),
-            nic_id: ticket.id(),
-            nic_kind: ticket.kind(),
-        })
+        self.opte_ports.iter().map(|p| p.info().clone())
     }
 
     /// Returns the filesystem path to the zone's root in the GZ.
@@ -795,7 +785,7 @@ pub struct ZoneBuilder<'a> {
     /// Device nodes to pass through to the zone.
     devices: Option<&'a [zone::Device]>,
     /// OPTE devices for the guest network interfaces.
-    opte_ports: Option<Vec<(Port, PortTicket)>>,
+    opte_ports: Option<Vec<Port>>,
     /// NIC to use for creating a bootstrap address on the switch zone.
     // actually optional (as above)
     bootstrap_vnic: Option<Link>,
@@ -880,7 +870,7 @@ impl<'a> ZoneBuilder<'a> {
     }
 
     /// OPTE devices for the guest network interfaces.
-    pub fn with_opte_ports(mut self, ports: Vec<(Port, PortTicket)>) -> Self {
+    pub fn with_opte_ports(mut self, ports: Vec<Port>) -> Self {
         self.opte_ports = Some(ports);
         self
     }
@@ -1002,7 +992,7 @@ impl<'a> ZoneBuilder<'a> {
 
         let mut net_device_names: Vec<String> = opte_ports
             .iter()
-            .map(|(port, _)| port.name().to_string())
+            .map(|port| port.name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
             .chain(bootstrap_vnic.as_ref().map(|vnic| vnic.name().to_string()))
             .chain(links.iter().map(|nic| nic.name().to_string()))
@@ -1119,7 +1109,7 @@ mod tests {
             Uuid::new_v4(),
             NetworkInterfaceKind::Instance { id: Uuid::new_v4() },
         );
-        let (port, ticket) = manager
+        let port = manager
             .create_port(PortCreateParams {
                 nic: &NetworkInterface {
                     id: key.0,
@@ -1167,7 +1157,7 @@ mod tests {
             .with_zone_root_path("/test-root".into())
             .with_underlay_vnic_allocator(&vnic_alloc)
             .with_log(logctx.log.clone())
-            .with_opte_ports(vec![(port, ticket)])
+            .with_opte_ports(vec![port])
             .with_links(vec![])
             .install()
             .await
@@ -1185,17 +1175,14 @@ mod tests {
             .expect("should have gotten a zone name");
         assert_eq!(zname, expected_zone_name);
 
-        // At this point, the tickets should be gone, which means the ports
-        // should have been removed from the manager's map.
-        assert!(
-            !manager.contains_key(&key),
-            "Dropping the zone should have synchronously dropped the port \
-            ticket, which removes the port from the manager's map."
-        );
-
-        // But it should still appear in the full list at the "driver", as we
+        // The port should still appear in the full list at the "driver", as we
         // haven't completed the zone halt and thus deleted the actual XDE
         // devices.
+        assert!(
+            manager.contains_key(&key),
+            "PortManager should still have the OPTE port data, as we \
+            haven't halted the zone yet",
+        );
         assert!(
             xde_handle.state().lock().unwrap().ports.contains_key(&port_name),
             "OPTE kernel driver should still have the actual OPTE ports, \
@@ -1225,6 +1212,21 @@ mod tests {
         )
         .await
         .expect("should have removed the port from the driver");
+
+        // At this point, the ports should be gone, which means they should have
+        // also been removed from the manager's map.
+        assert!(
+            !manager.contains_key(&key),
+            "Dropping the zone should have synchronously dropped the port, \
+            which removes the port from the manager's map."
+        );
+
+        // And from the driver state.
+        assert!(
+            !xde_handle.state().lock().unwrap().ports.contains_key(&port_name),
+            "OPTE kernel driver should not have the actual OPTE ports, \
+            as we've completely halted the zone",
+        );
 
         logctx.cleanup_successful();
     }
