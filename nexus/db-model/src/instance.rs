@@ -324,14 +324,17 @@ impl Instance {
         &self,
     ) -> Option<instance_types::InstanceShutdownPolicy> {
         use instance_types::InstanceShutdownPolicy;
-        // return None if timeout NULL or negative (enforced by sql-side check)
-        let timeout_secs: u64 =
-            self.shutdown_policy_timeout?.num_seconds().try_into().ok()?;
         match self.shutdown_policy_action {
             InstanceShutdownAction::HardOff => {
                 Some(InstanceShutdownPolicy::HardOff)
             }
             InstanceShutdownAction::PowerButton => {
+                // return None if timeout NULL or negative (enforced by sql-side check)
+                let timeout_secs: u64 = self
+                    .shutdown_policy_timeout?
+                    .num_seconds()
+                    .try_into()
+                    .ok()?;
                 Some(InstanceShutdownPolicy::PowerButton { timeout_secs })
             }
         }
