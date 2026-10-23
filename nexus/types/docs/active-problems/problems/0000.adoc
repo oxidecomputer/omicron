@@ -19,7 +19,7 @@ ifndef::problem-version-retired[]
 = {problem-title}
 endif::[]
 
-**Problem Code**: {problem-code}
+**Problem Code**: `{problem-code}`
 **Class**: `{problem-class}`
 **Added in**: `{problem-version-added}`
 ifdef::problem-version-retired[**Retired in**: `{problem-version-retired}`]
