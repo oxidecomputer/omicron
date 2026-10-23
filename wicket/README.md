@@ -133,7 +133,8 @@ The easiest way to do this is to run:
 cargo xtask mgs-dev run
 ```
 
-This will print out a line similar to `mgs-dev: MGS API: http://[::1]:12225`. Note the address for use below.
+This will print out a line similar to `mgs-dev: MGS API: http://[::1]:39385`. The
+port is chosen dynamically, so note the exact address for use below.
 
 ##### Running sp-sim and MGS by hand
 
@@ -170,8 +171,25 @@ location = { switch0 = ["sled", 1], switch1 = ["sled", 1] }
 Taking the port number mentioned above, run:
 
 ```
-cargo run -p wicketd -- run wicketd/examples/config.toml --address '[::1]:12226' --artifact-address '[::]:12227' --commission-address '[::1]:12234' --nexus-proxy-address '[::1]:12228' --mgs-address '[::1]:12225'
+cargo run -p wicketd -- run wicketd/examples/config.toml \
+  --address '[::1]:12226' \
+  --artifact-address '[::]:12227' \
+  --commission-address '[::1]:12234' \
+  --nexus-proxy-address '[::1]:12228' \
+  --mgs-address '[::1]:<MGS_PORT>' \
+  --baseboard-part i86pc \
+  --baseboard-serial SimGimlet01 \
+  --bootstrap-agent-lockstep-address '[::1]:12229'
 ```
+
+`<MGS_PORT>` is the port printed by `mgs-dev` above (or `12225` if you started
+MGS by hand). `--baseboard-part` and `--baseboard-serial` identify the simulated
+baseboard on which wicketd is pretending to run; the values above match one of
+the gimlets in sp-sim's test config. Rack-setup operations require that
+baseboard to be present in inventory. `--bootstrap-agent-lockstep-address` is
+only used for rack setup; no bootstrap agent is running in this development
+environment, so point it at an unused local port and expect periodic connection
+warnings. wicketd refuses to update the sled it is pretending to run on.
 
  In this case, the port numbers in `--address` and
 `--commission-address` provide the two interfaces between wicketd and wicket.
