@@ -149,7 +149,9 @@ pub struct CaseProblem {
     pub case_id: DbTypedUuid<CaseKind>,
     pub problem_id: DbTypedUuid<ProblemKind>,
     pub sitrep_id: DbTypedUuid<SitrepKind>,
-    pub created_sitrep_id: DbTypedUuid<SitrepKind>,
+    /// The sitrep in which this association between the case and the problem
+    /// was first created.
+    pub linked_sitrep_id: DbTypedUuid<SitrepKind>,
     pub comment: String,
 }
 
@@ -159,13 +161,13 @@ impl CaseProblem {
         case_id: impl Into<DbTypedUuid<CaseKind>>,
         association: fm::case::CaseProblem,
     ) -> Self {
-        let fm::case::CaseProblem { problem_id, created_sitrep_id, comment } =
+        let fm::case::CaseProblem { problem_id, linked_sitrep_id, comment } =
             association;
         Self {
             case_id: case_id.into(),
             problem_id: problem_id.into(),
             sitrep_id: sitrep_id.into(),
-            created_sitrep_id: created_sitrep_id.into(),
+            linked_sitrep_id: linked_sitrep_id.into(),
             comment,
         }
     }
@@ -177,12 +179,12 @@ impl From<CaseProblem> for fm::case::CaseProblem {
             case_id: _,
             problem_id,
             sitrep_id: _,
-            created_sitrep_id,
+            linked_sitrep_id,
             comment,
         } = association;
         Self {
             problem_id: problem_id.into(),
-            created_sitrep_id: created_sitrep_id.into(),
+            linked_sitrep_id: linked_sitrep_id.into(),
             comment,
         }
     }
