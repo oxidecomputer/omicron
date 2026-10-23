@@ -225,7 +225,9 @@ pub struct InstanceCreate {
     #[serde(default)]
     pub enable_jumbo_frames: bool,
     /// The method by which the instance should be stopped.
-    /// If not provided, new instances will be created with a 10-minute timeout.
+    /// If not provided, new instances will be created with a default of an
+    /// ACPI fixed power button press, with a 10-minute timeout for the guest OS
+    /// to shut itself down before the instance is forcibly terminated.
     #[serde(default)]
     pub shutdown_policy: Option<InstanceShutdownPolicy>,
 }
@@ -321,7 +323,10 @@ pub struct InstanceUpdate {
     /// take effect on the next instance restart.
     pub enable_jumbo_frames: bool,
 
-    /// The method by which the instance should be stopped.
+    /// The method by which the instance should be stopped. If omitted from the
+    /// update request, the instance's existing shutdown policy is left as-is.
+    /// Changes to soft-shutdown timeout do not affect instances that are
+    /// already in the process of shutting down until their next start.
     pub shutdown_policy: Option<InstanceShutdownPolicy>,
 }
 
