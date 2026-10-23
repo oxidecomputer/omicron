@@ -55,12 +55,6 @@ macro_rules! problem_descriptions {
                                 &ProblemCodeDescription {
                                     title: $title,
                                     class: ProblemClass::$class,
-                                    docs_path: concat!(
-                                        env!("CARGO_MANIFEST_DIR"),
-                                        "/docs/active-problems/problems/",
-                                        stringify!($Variant),
-                                        ".adoc",
-                                    ),
                                     added_in: $added_in,
                                     retired_in: $retired_in,
                                 };
@@ -155,8 +149,6 @@ pub struct ProblemCodeDescription {
     /// A one-line, human-readable title for this problem code's documentation.
     pub title: &'static str,
 
-    pub docs_path: &'static str,
-
     /// The Oxide system software version in which this problem code was added.
     pub added_in: semver::Version,
     /// The Oxide system software version in which this problem code was
@@ -172,25 +164,33 @@ impl ProblemCodeDescription {
     pub fn is_retired(&self) -> bool {
         self.retired_in.is_some()
     }
-
-    // TODO(eliza): there should be a way to squirt out the problem as ASCIIDoc
-    // or something for use on the docs site!
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use camino::Utf8Path;
+    use camino::Utf8PathBuf;
     use std::collections::BTreeMap;
+
+    fn base_docs_path() -> Utf8PathBuf {
+        let mut path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("docs");
+        path.push("active-problems");
+        path
+    }
 
     #[test]
     fn problem_code_docs_exist() {
+        let base_path = {
+            let mut path = base_docs_path();
+            path.push("problems");
+            path
+        };
         let mut errors = Vec::new();
         let mut paths = BTreeMap::new();
         for problem in ProblemCode::ALL {
             let code = u32::from(*problem);
-            let description = problem.description();
-            let path = Utf8Path::new(description.docs_path);
+            let path = base_path.join(format!("{code}.adoc"));
             if !path.exists() {
                 errors.push(format!(
                     "error: no documentation file exists for problem code \
@@ -198,7 +198,7 @@ mod tests {
                 ));
             }
 
-            if let Some(prev) = paths.insert(path, problem) {
+            if let Some(prev) = paths.insert(path.clone(), problem) {
                 if prev != problem {
                     // this shouldn't happen, but may as well check for it!
                     errors.push(format!(
@@ -209,8 +209,21 @@ mod tests {
                 }
             }
 
-            // TODO(eliza): we could eventually add an `asciidoctor -v` check
-            // here, but that means adding ASCIIDoctor as a build dependency...
+            // TODO(eliza): we could eventually add some ASCIIDoc linting here.
+            // We could either run `asciidoctor -v` (which would require
+            // ASCIIDoctor as a build-time dependency, which seems unfortunate),
+            // or we could parse the docs using a pure-Rust ASCIIDoc crate, such
+            // as https://crates.io/crates/asciidoc-parser (which might be the
+            // nicer option).
+            //
+            // Eventually, we should probably check for the following:
+            //
+            // - the file contains valid ASCIIDoc syntax
+            // - the file contains the expected level-two headings for a problem
+            //   code's documentation
+            // - the headings have the correct anchors
+            // - the file defines the expected attributes that the docs
+            //   generator will interpolate.
         }
 
         if !errors.is_empty() {
@@ -225,5 +238,33 @@ mod tests {
                 if errors.len() == 1 { "" } else { "s" }
             )
         }
+    }
+
+    /// This test generates the manifest file listing the ASCIIDoc files for
+    /// each problem code's documentation and the corresponding metadata.
+    ///
+    /// When adding new problem codes or modifying their metadata, re-run this
+    /// test to ensure that the manifest is updated to contain any new problem
+    /// codes you've added or modified.
+    #[test]
+    fn problem_code_docs_manifest() {
+        #[derive(serde::Serialize)]
+        struct Entry {
+            code: u32,
+            description: &'static ProblemCodeDescription,
+        }
+
+        let entries = ProblemCode::ALL
+            .iter()
+            .map(|problem| {
+                let code = u32::from(*problem);
+                Entry { code, description: problem.description() }
+            })
+            .collect::<Vec<_>>();
+        let manifest = serde_json::to_string_pretty(&entries)
+            .expect("manifest will serialize correctly");
+        let path = base_docs_path().join("manifest.json");
+
+        expectorate::assert_contents(&path, &manifest)
     }
 }
