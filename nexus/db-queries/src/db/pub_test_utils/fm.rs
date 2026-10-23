@@ -20,6 +20,7 @@ use nexus_types::fm::SitrepMetadata;
 use nexus_types::internal_api::background::fm_sitrep_history_pruner;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_generation_kinds::SitrepActiveProblemGeneration;
 use omicron_generation_kinds::SitrepAlertGeneration;
 use omicron_generation_kinds::SitrepSupportBundleGeneration;
 use omicron_uuid_kinds::CollectionUuid;
@@ -539,9 +540,11 @@ fn test_sitrep(
             time_created: Utc::now(),
             alert_generation: SitrepAlertGeneration::new(),
             support_bundle_generation: SitrepSupportBundleGeneration::new(),
+            active_problem_generation: SitrepActiveProblemGeneration::new(),
         },
         cases: Default::default(),
         ereports_by_id: Default::default(),
+        active_problems: Default::default(),
     }
 }
 

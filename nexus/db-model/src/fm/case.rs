@@ -9,8 +9,11 @@ use super::DiagnosisEngine;
 use super::SupportBundleRequest;
 use crate::DbTypedUuid;
 use crate::ereport;
-use nexus_db_schema::schema::{fm_case, fm_ereport_in_case};
+use nexus_db_schema::schema::fm_case;
+use nexus_db_schema::schema::fm_case_active_problem;
+use nexus_db_schema::schema::fm_ereport_in_case;
 use nexus_types::fm;
+use omicron_uuid_kinds::ActiveProblemKind;
 use omicron_uuid_kinds::{
     CaseEreportKind, CaseKind, EreporterRestartKind, SitrepKind,
 };
@@ -65,6 +68,7 @@ impl CaseMetadata {
             support_bundles_requested: _,
             ereports: _,
             facts: _,
+            active_problems: _,
         } = case;
         Self {
             sitrep_id: sitrep_id.into(),
@@ -137,6 +141,59 @@ impl CaseEreport {
     }
 }
 
+/// An association between a case and an Active Problem.
+///
+/// This corresponds to a record in the `fm_case_active_problem` table.
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[diesel(table_name = fm_case_active_problem)]
+pub struct CaseActiveProblem {
+    pub case_id: DbTypedUuid<CaseKind>,
+    pub problem_id: DbTypedUuid<ActiveProblemKind>,
+    pub sitrep_id: DbTypedUuid<SitrepKind>,
+    /// The sitrep in which this association between the case and the Active
+    /// Problem was first created.
+    pub linked_sitrep_id: DbTypedUuid<SitrepKind>,
+    pub comment: String,
+}
+
+impl CaseActiveProblem {
+    pub fn from_sitrep(
+        sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
+        case_id: impl Into<DbTypedUuid<CaseKind>>,
+        association: fm::case::CaseActiveProblem,
+    ) -> Self {
+        let fm::case::CaseActiveProblem {
+            problem_id,
+            linked_sitrep_id,
+            comment,
+        } = association;
+        Self {
+            case_id: case_id.into(),
+            problem_id: problem_id.into(),
+            sitrep_id: sitrep_id.into(),
+            linked_sitrep_id: linked_sitrep_id.into(),
+            comment,
+        }
+    }
+}
+
+impl From<CaseActiveProblem> for fm::case::CaseActiveProblem {
+    fn from(association: CaseActiveProblem) -> Self {
+        let CaseActiveProblem {
+            case_id: _,
+            problem_id,
+            sitrep_id: _,
+            linked_sitrep_id,
+            comment,
+        } = association;
+        Self {
+            problem_id: problem_id.into(),
+            linked_sitrep_id: linked_sitrep_id.into(),
+            comment,
+        }
+    }
+}
+
 /// The complete state of a case in a particular sitrep, consisting of the
 /// [`CaseMetadata`] record and any other records belonging to the case.
 #[derive(Clone, Debug)]
@@ -145,4 +202,5 @@ pub struct Case {
     pub ereports: Vec<CaseEreport>,
     pub alerts_requested: Vec<AlertRequest>,
     pub support_bundles_requested: Vec<SupportBundleRequest>,
+    pub active_problems: Vec<CaseActiveProblem>,
 }

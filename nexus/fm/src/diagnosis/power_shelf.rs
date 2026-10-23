@@ -744,6 +744,7 @@ mod tests {
     use nexus_types::fm::case::{AlertRequest, CaseEreport};
     use nexus_types::fm::{self, Sitrep, SitrepVersion};
     use nexus_types::inventory::SpType;
+    use omicron_generation_kinds::SitrepActiveProblemGeneration;
     use omicron_generation_kinds::SitrepAlertGeneration;
     use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_uuid_kinds::{
@@ -1076,6 +1077,7 @@ mod tests {
             alerts_requested: alerts.into_iter().collect(),
             support_bundles_requested: Default::default(),
             facts: Default::default(),
+            active_problems: Default::default(),
         };
         let mut cases = IdOrdMap::new();
         cases.insert_unique(case).unwrap();
@@ -1090,9 +1092,11 @@ mod tests {
                 comment: "parent sitrep for test".to_string(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases,
             ereports_by_id: ereports.into_iter().collect(),
+            active_problems: IdOrdMap::new(),
         }
     }
 

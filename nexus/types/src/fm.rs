@@ -26,11 +26,13 @@ pub use fact::{
 };
 pub mod display;
 
+use active_problem::SitrepActiveProblem;
 use case::AlertRequest;
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
 use omicron_generation_kinds::{
-    SitrepAlertGeneration, SitrepSupportBundleGeneration,
+    SitrepActiveProblemGeneration, SitrepAlertGeneration,
+    SitrepSupportBundleGeneration,
 };
 use omicron_uuid_kinds::{
     CaseUuid, CollectionUuid, OmicronZoneUuid, SitrepUuid,
@@ -61,6 +63,8 @@ pub struct Sitrep {
     pub cases: IdOrdMap<Case>,
     /// A map of all ereports associated with cases in this sitrep.
     pub ereports_by_id: IdOrdMap<Arc<Ereport>>,
+    /// All current active problems.
+    pub active_problems: IdOrdMap<SitrepActiveProblem>,
     //
     // NOTE FOR FUTURE GENERATIONS: If you add more database tables whose
     // records are top-level children of a sitrep (i.e., like cases), please
@@ -193,6 +197,17 @@ pub struct SitrepMetadata {
     /// a sitrep whose generation no longer matches the current sitrep's has
     /// its inserts rejected as stale.
     pub support_bundle_generation: SitrepSupportBundleGeneration,
+
+    /// `SitrepBuilder` increments this each time it builds a sitrep whose set
+    /// of Active Problems differs from its parent's. Active Problem creation
+    /// is guarded on this value: a rendezvous task working from a sitrep whose
+    /// generation no longer matches the current sitrep's has its inserts
+    /// rejected as stale.
+    ///
+    /// This tracks only which Active Problems *exist*. Changes to an existing
+    /// Active Problem are tracked by that problem's own revision number, and
+    /// do not bump this generation.
+    pub active_problem_generation: SitrepActiveProblemGeneration,
 }
 
 pub struct SitrepStateComparison<'sitrep> {
@@ -213,10 +228,11 @@ impl PartialEq<Sitrep> for SitrepStateComparison<'_> {
             // they always will if the two sitreps' cases contain the same
             // ereports.
             ereports_by_id: _,
+            active_problems,
             cases,
         } = self.sitrep;
 
-        cases == &other.cases
+        cases == &other.cases && active_problems == &other.active_problems
         // TO FUTURE GENERATIONS: if other top-level sitrep objects which
         // represent the state of the system are added, compare them here!
     }

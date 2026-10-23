@@ -8,6 +8,7 @@ use crate::analysis_input;
 use iddqd::IdOrdMap;
 use nexus_types::fm;
 use nexus_types::inventory;
+use omicron_generation_kinds::SitrepActiveProblemGeneration;
 use omicron_generation_kinds::SitrepAlertGeneration;
 use omicron_generation_kinds::SitrepSupportBundleGeneration;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -43,6 +44,7 @@ pub struct SitrepBuilder<'a> {
 struct ParentGenerations {
     alert_generation: SitrepAlertGeneration,
     support_bundle_generation: SitrepSupportBundleGeneration,
+    active_problem_generation: SitrepActiveProblemGeneration,
 }
 
 impl ParentGenerations {
@@ -51,6 +53,7 @@ impl ParentGenerations {
         Self {
             alert_generation: SitrepAlertGeneration::new(),
             support_bundle_generation: SitrepSupportBundleGeneration::new(),
+            active_problem_generation: SitrepActiveProblemGeneration::new(),
         }
     }
 }
@@ -139,6 +142,7 @@ impl<'a> SitrepBuilder<'a> {
             .map(|p| ParentGenerations {
                 alert_generation: p.metadata.alert_generation,
                 support_bundle_generation: p.metadata.support_bundle_generation,
+                active_problem_generation: p.metadata.active_problem_generation,
             })
             .unwrap_or_else(ParentGenerations::new)
     }
@@ -169,6 +173,9 @@ impl<'a> SitrepBuilder<'a> {
             } else {
                 parent.support_bundle_generation
             };
+        // TODO(eliza): once the sitrep builder lets you request Active Problem
+        // creation, bump the generation here!
+        let active_problem_generation = parent.active_problem_generation;
 
         let mut ereports_by_id = iddqd::IdOrdMap::new();
         let mut report_cases = IdOrdMap::new();
@@ -218,9 +225,13 @@ impl<'a> SitrepBuilder<'a> {
                 next_inv_min_time_started: self.inventory.time_done,
                 alert_generation,
                 support_bundle_generation,
+                active_problem_generation,
             },
             cases,
             ereports_by_id,
+            // TODO(eliza): add builder APIs for creating and updating
+            // Active Problems and copying forward parent ones
+            active_problems: IdOrdMap::new(),
         };
         (sitrep, report)
     }
@@ -294,9 +305,11 @@ mod tests {
                 time_created: chrono::Utc::now(),
                 alert_generation: gens.alert_generation,
                 support_bundle_generation: gens.support_bundle_generation,
+                active_problem_generation: gens.active_problem_generation,
             },
             cases: IdOrdMap::new(),
             ereports_by_id: IdOrdMap::new(),
+            active_problems: IdOrdMap::new(),
         };
         let parent_version = SitrepVersion {
             id: parent_id,
@@ -326,6 +339,10 @@ mod tests {
         assert_eq!(
             sitrep.metadata.support_bundle_generation,
             SitrepSupportBundleGeneration::new()
+        );
+        assert_eq!(
+            sitrep.metadata.active_problem_generation,
+            SitrepActiveProblemGeneration::new()
         );
         logctx.cleanup_successful();
     }
@@ -386,12 +403,14 @@ mod tests {
         let logctx = dev::test_setup_log(
             "generation_stable_when_no_new_requests_with_parent",
         );
-        let inputs = make_input_with_parent_generations(ParentGenerations {
-            alert_generation: SitrepAlertGeneration::from_u32(1),
-            support_bundle_generation: SitrepSupportBundleGeneration::from_u32(
-                2,
-            ),
-        });
+        let inputs =
+            make_input_with_parent_generations(ParentGenerations {
+                alert_generation: SitrepAlertGeneration::from_u32(1),
+                support_bundle_generation:
+                    SitrepSupportBundleGeneration::from_u32(2),
+                active_problem_generation:
+                    SitrepActiveProblemGeneration::from_u32(3),
+            });
         let sitrep = build_sitrep(SitrepBuilder::new(&logctx.log, &inputs));
         assert_eq!(
             sitrep.metadata.alert_generation,
@@ -400,6 +419,10 @@ mod tests {
         assert_eq!(
             sitrep.metadata.support_bundle_generation,
             SitrepSupportBundleGeneration::from_u32(2)
+        );
+        assert_eq!(
+            sitrep.metadata.active_problem_generation,
+            SitrepActiveProblemGeneration::from_u32(3)
         );
         logctx.cleanup_successful();
     }
@@ -417,6 +440,7 @@ mod tests {
             support_bundle_generation: SitrepSupportBundleGeneration::from_u32(
                 7,
             ),
+            active_problem_generation: SitrepActiveProblemGeneration::new(),
         });
         let mut builder = SitrepBuilder::new(&logctx.log, &inputs);
         {
@@ -448,6 +472,7 @@ mod tests {
             support_bundle_generation: SitrepSupportBundleGeneration::from_u32(
                 7,
             ),
+            active_problem_generation: SitrepActiveProblemGeneration::new(),
         });
         let mut builder = SitrepBuilder::new(&logctx.log, &inputs);
         {
@@ -480,6 +505,7 @@ mod tests {
             support_bundle_generation: SitrepSupportBundleGeneration::from_u32(
                 7,
             ),
+            active_problem_generation: SitrepActiveProblemGeneration::new(),
         });
         let mut builder = SitrepBuilder::new(&logctx.log, &inputs);
         {
@@ -535,6 +561,7 @@ mod tests {
             .collect(),
             support_bundles_requested: IdOrdMap::new(),
             facts: IdOrdMap::new(),
+            active_problems: IdOrdMap::new(),
         };
 
         let parent = fm::Sitrep {
@@ -548,9 +575,11 @@ mod tests {
                 time_created: chrono::Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases: [closed_case].into_iter().collect(),
             ereports_by_id: IdOrdMap::new(),
+            active_problems: IdOrdMap::new(),
         };
         let parent_version = SitrepVersion {
             id: parent_id,
@@ -610,6 +639,7 @@ mod tests {
             .into_iter()
             .collect(),
             facts: IdOrdMap::new(),
+            active_problems: IdOrdMap::new(),
         };
 
         let parent = fm::Sitrep {
@@ -623,9 +653,11 @@ mod tests {
                 time_created: chrono::Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases: [closed_case].into_iter().collect(),
             ereports_by_id: IdOrdMap::new(),
+            active_problems: IdOrdMap::new(),
         };
         let parent_version = SitrepVersion {
             id: parent_id,

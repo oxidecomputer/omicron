@@ -193,6 +193,7 @@ mod test {
     use crate::app::background::BackgroundTask;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_types::fm::SitrepMetadata;
+    use omicron_generation_kinds::SitrepActiveProblemGeneration;
     use omicron_generation_kinds::SitrepAlertGeneration;
     use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_test_utils::dev;
@@ -228,9 +229,11 @@ mod test {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            active_problems: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep1.clone(), None)
@@ -297,9 +300,11 @@ mod test {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            active_problems: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep2.clone(), None)

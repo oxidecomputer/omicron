@@ -585,6 +585,7 @@ mod tests {
     use nexus_types::fm::{DiagnosisEngineKind, SitrepVersion};
     use nexus_types::inventory::SpType;
     use nexus_types::support_bundle::BundleDataSelection;
+    use omicron_generation_kinds::SitrepActiveProblemGeneration;
     use omicron_generation_kinds::SitrepAlertGeneration;
     use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_uuid_kinds::{
@@ -684,6 +685,7 @@ mod tests {
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
                     facts: Default::default(),
+                    active_problems: Default::default(),
                 }
             };
             let open_case2 = {
@@ -705,6 +707,7 @@ mod tests {
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
                     facts: Default::default(),
+                    active_problems: Default::default(),
                 }
             };
             let closed_case_with_unmarked = {
@@ -733,6 +736,7 @@ mod tests {
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
                     facts: Default::default(),
+                    active_problems: Default::default(),
                 }
             };
             let closed_case_without_unmarked = {
@@ -755,6 +759,7 @@ mod tests {
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
                     facts: Default::default(),
+                    active_problems: Default::default(),
                 }
             };
 
@@ -791,9 +796,12 @@ mod tests {
                     alert_generation: SitrepAlertGeneration::new(),
                     support_bundle_generation:
                         SitrepSupportBundleGeneration::new(),
+                    active_problem_generation:
+                        SitrepActiveProblemGeneration::new(),
                 },
                 cases,
                 ereports_by_id,
+                active_problems: IdOrdMap::new(),
             };
             Arc::new((
                 SitrepVersion {
@@ -1054,9 +1062,11 @@ mod tests {
                 time_created: chrono::Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases: [case].into_iter().collect(),
             ereports_by_id: IdOrdMap::new(),
+            active_problems: IdOrdMap::new(),
         };
         let parent_version = SitrepVersion {
             id: parent_sitrep_id,
@@ -1099,6 +1109,7 @@ mod tests {
             .collect(),
             support_bundles_requested: IdOrdMap::new(),
             facts: IdOrdMap::new(),
+            active_problems: IdOrdMap::new(),
         };
 
         let mut builder = builder_with_closed_case(closed_case);
@@ -1151,6 +1162,7 @@ mod tests {
             .collect(),
             support_bundles_requested: IdOrdMap::new(),
             facts: IdOrdMap::new(),
+            active_problems: IdOrdMap::new(),
         };
 
         let mut builder = builder_with_closed_case(closed_case);
@@ -1203,6 +1215,7 @@ mod tests {
             .into_iter()
             .collect(),
             facts: IdOrdMap::new(),
+            active_problems: IdOrdMap::new(),
         };
 
         let mut builder = builder_with_closed_case(closed_case);
@@ -1251,6 +1264,7 @@ mod tests {
             .into_iter()
             .collect(),
             facts: IdOrdMap::new(),
+            active_problems: IdOrdMap::new(),
         };
 
         let mut builder = builder_with_closed_case(closed_case);

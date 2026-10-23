@@ -442,6 +442,7 @@ mod tests {
     use nexus_types::observed_saga::{
         OrphanedReason, SagaOwnerState, SagaProgressState,
     };
+    use omicron_generation_kinds::SitrepActiveProblemGeneration;
     use omicron_generation_kinds::SitrepAlertGeneration;
     use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_test_utils::dev;
@@ -599,6 +600,7 @@ mod tests {
             alerts_requested: Default::default(),
             support_bundles_requested: Default::default(),
             facts,
+            active_problems: IdOrdMap::new(),
         }
     }
 
@@ -623,9 +625,11 @@ mod tests {
                 comment: String::new(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases: case_map,
             ereports_by_id: Default::default(),
+            active_problems: Default::default(),
         }
     }
 

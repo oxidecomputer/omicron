@@ -39,13 +39,17 @@ impl_typed_generation_kinds! {
         },
     },
     kinds = {
-        ActiveProblem = {},
+        ActiveProblemRev = {
+            type_name = ActiveProblemRevKind,
+            alias = ActiveProblemRevNum,
+        },
         ArtifactConfig = {},
         InstanceState = {},
         InstanceUpdater = {},
         Nexus = {},
         SagaAdopt = {},
         SagaReassignment = {},
+        SitrepActiveProblem = {},
         SitrepAlert = {},
         SitrepSupportBundle = {},
         SledConfig = {},
