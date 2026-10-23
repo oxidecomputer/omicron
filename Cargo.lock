@@ -2170,7 +2170,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=f85cf0dc3631e2f0c13384787efb0efc1b642162#f85cf0dc3631e2f0c13384787efb0efc1b642162"
+source = "git+https://github.com/oxidecomputer/crucible?rev=9fe46349b83d9818e9531d71c0816a327b8e187b#9fe46349b83d9818e9531d71c0816a327b8e187b"
 dependencies = [
  "anyhow",
  "chrono",
