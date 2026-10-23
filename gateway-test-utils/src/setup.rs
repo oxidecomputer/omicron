@@ -134,7 +134,7 @@ pub async fn test_setup_local_reset_disabled(
     let (mut server_config, sp_sim_config) =
         load_test_config(DEFAULT_SP_SIM_CONFIG.into());
     for description in server_config.switch.location.description.iter_mut() {
-        description.allow_local_sled_sp_reset = false;
+        description.allow_local_sp_reset = false;
     }
     test_setup_with_config(
         test_name,

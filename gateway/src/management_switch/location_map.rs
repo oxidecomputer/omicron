@@ -93,15 +93,16 @@ pub struct LocationDescriptionConfig {
     pub local_sled: u16,
 
     /// Config option controlling whether MGS will accept a request to reset the
-    /// SP of its local sled.
+    /// SP of its local sled or locally-attached switch.
     ///
-    /// MGS resetting its local sled's SP is dangerous during SP updates,
-    /// because the "reset" operation involves a watchdog that requires MGS to
-    /// send a "disarm the watchdog" message _after_ the reset, which it can't
-    /// do if it just powered itself off. In production, we always expect this
-    /// value to be false. In dev/test environments, we allow it to be true to
-    /// not interfere with reset testing that isn't connected to an actual sled.
-    pub allow_local_sled_sp_reset: bool,
+    /// MGS resetting its local sled or switch SP is dangerous during SP
+    /// updates, because the "reset" operation involves a watchdog that requires
+    /// MGS to send a "disarm the watchdog" message _after_ the reset, which it
+    /// can't do if it just powered itself off. In production, we always expect
+    /// this value to be false. In dev/test environments, we allow it to be true
+    /// to not interfere with reset testing that isn't connected to an actual
+    /// sled.
+    pub allow_local_sp_reset: bool,
 }
 
 impl IdOrdItem for LocationDescriptionConfig {
@@ -134,7 +135,7 @@ pub struct LocationDeterminationConfig {
 #[derive(Debug)]
 pub(super) struct LocationMap {
     local_sled: u16,
-    allow_local_sled_sp_reset: bool,
+    allow_local_sp_reset: bool,
     port_to_id: HashMap<SwitchPort, SpIdentifier>,
     id_to_port: HashMap<SpIdentifier, SwitchPort>,
 }
@@ -197,7 +198,7 @@ impl LocationMap {
 
         Ok(Self {
             local_sled: description.local_sled,
-            allow_local_sled_sp_reset: description.allow_local_sled_sp_reset,
+            allow_local_sp_reset: description.allow_local_sp_reset,
             port_to_id,
             id_to_port,
         })
@@ -208,9 +209,9 @@ impl LocationMap {
         self.local_sled
     }
 
-    /// Get whether our config told us it's okay to reset our local sled.
-    pub(super) fn allow_local_sled_sp_reset(&self) -> bool {
-        self.allow_local_sled_sp_reset
+    /// Get whether our config told us it's okay to reset our local sled/switch.
+    pub(super) fn allow_local_sp_reset(&self) -> bool {
+        self.allow_local_sp_reset
     }
 
     /// Get the ID of a given port.
@@ -588,17 +589,17 @@ mod tests {
                 LocationDescriptionConfig {
                     name: String::from("a"),
                     local_sled: 14,
-                    allow_local_sled_sp_reset: false,
+                    allow_local_sp_reset: false,
                 },
                 LocationDescriptionConfig {
                     name: String::from("b"),
                     local_sled: 14, // dupe
-                    allow_local_sled_sp_reset: false,
+                    allow_local_sp_reset: false,
                 },
                 LocationDescriptionConfig {
                     name: String::from("a"), // dupe
                     local_sled: 16,
-                    allow_local_sled_sp_reset: false,
+                    allow_local_sp_reset: false,
                 },
             ],
             determination: vec![
@@ -677,12 +678,12 @@ mod tests {
                 LocationDescriptionConfig {
                     name: String::from("a"),
                     local_sled: 14,
-                    allow_local_sled_sp_reset: false,
+                    allow_local_sp_reset: false,
                 },
                 LocationDescriptionConfig {
                     name: String::from("b"),
                     local_sled: 16,
-                    allow_local_sled_sp_reset: false,
+                    allow_local_sp_reset: false,
                 },
             ],
             determination: vec![

@@ -427,7 +427,7 @@ impl ManagementSwitch {
     pub(crate) fn is_local_sp_reset_allowed(
         &self,
     ) -> Result<bool, SpLookupError> {
-        Ok(self.location_map()?.allow_local_sled_sp_reset())
+        Ok(self.location_map()?.allow_local_sp_reset())
     }
 
     /// Get the handle for communicating with an SP by its switch port.
