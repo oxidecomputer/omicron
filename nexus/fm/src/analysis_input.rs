@@ -1084,8 +1084,8 @@ mod tests {
                 creator_id: OmicronZoneUuid::new_v4(),
                 comment: String::new(),
                 time_created: chrono::Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: IdOrdMap::new(),
             ereports_by_id: [Arc::new(unknown_seen.clone())]
