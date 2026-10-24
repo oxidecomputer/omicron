@@ -1343,13 +1343,128 @@ pub struct FmAnalysisStatus {
 pub mod fm_analysis {
     use super::*;
     use crate::fm::FmConfigSource;
+    use iddqd::{IdOrdItem, IdOrdMap};
     use std::num::{NonZeroU32, NonZeroU64};
+    use std::time::Duration;
 
-    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+    #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
     pub struct PreparationStatus {
+        /// The total duration of this preparation phase.
+        pub total_duration: Duration,
+        /// The status of each preparation step that ran during this preparation
+        /// phase.
+        #[serde(default)]
+        pub steps: IdOrdMap<PreparationStepStatus>,
+    }
+
+    /// Identifies one of the steps which load analysis inputs from the
+    /// database during the preparation phase.
+    ///
+    /// Each step runs concurrently with the others.
+    #[derive(
+        Copy,
+        Clone,
+        Debug,
+        PartialEq,
+        Eq,
+        PartialOrd,
+        Ord,
+        Hash,
+        Deserialize,
+        Serialize,
+        strum::Display,
+        strum::EnumIter,
+        strum::IntoStaticStr,
+        strum::VariantNames,
+    )]
+    #[serde(rename_all = "snake_case")]
+    #[strum(serialize_all = "snake_case")]
+    pub enum PreparationStep {
+        InServiceDisks,
+        ObservedSagas,
+        SiloCertificates,
+        EreporterRestarts,
+        Ereports,
+        AlertMarkers,
+        SupportBundleMarkers,
+    }
+
+    #[derive(
+        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
+    )]
+    pub struct PreparationStepStatus {
+        pub step: PreparationStep,
+        /// How long each input-loading step took to complete, whether it
+        /// succeeded or failed.
+        ///
+        /// Steps run concurrently, so these durations overlap, and their sum
+        /// may exceed the wall-clock time spent preparing inputs.
+        pub duration: Duration,
         /// Errors encountered during the preparation step which did *not*
-        /// prevent the analysis step from completing.
+        /// prevent preparation from completing successfully.
         pub warnings: Vec<String>,
+    }
+
+    impl IdOrdItem for PreparationStepStatus {
+        type Key<'a> = &'a PreparationStep;
+
+        fn key(&self) -> Self::Key<'_> {
+            &self.step
+        }
+
+        iddqd::id_upcast!();
+    }
+
+    impl std::fmt::Display for PreparationStatus {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            use strum::VariantNames;
+
+            // Calculate the length of the step names statically, so that the
+            // column doesn't move around between activations based on which
+            // steps actually ran.
+            const NAME_WIDTH: usize =
+                crate::fm::display::const_max_len(PreparationStep::VARIANTS);
+
+            let Self { total_duration, steps } = self;
+            if steps.iter().any(|step| !step.warnings.is_empty()) {
+                writeln!(
+                    f,
+                    "/!\\ non-fatal errors preparing analysis inputs:"
+                )?;
+                for step in steps {
+                    for warning in &step.warnings {
+                        writeln!(f, "      > {}: {warning}", step.step)?;
+                    }
+                }
+            }
+            writeln!(
+                f,
+                "    input preparation took {}ms",
+                total_duration.as_millis()
+            )?;
+            for step in steps {
+                let name: &'static str = step.step.into();
+                writeln!(
+                    f,
+                    "      {name}:{:pad$}{}ms",
+                    "",
+                    step.duration.as_millis(),
+                    pad = NAME_WIDTH - name.len() + 1,
+                )?;
+            }
+            Ok(())
+        }
+    }
+
+    /// Describes why preparing analysis inputs failed.
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+    pub enum PreparationFailure {
+        /// One or more input-loading steps failed. Each failed step is
+        /// recorded with its error; steps which succeeded are absent.
+        StepsFailed(BTreeMap<PreparationStep, String>),
+        /// Every input-loading step succeeded, but the loaded inputs could
+        /// not be assembled into analysis inputs.
+        InvalidInputs(String),
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -1370,14 +1485,14 @@ pub mod fm_analysis {
         /// Fault management analysis was not performed, as the currently-loaded
         /// inventory collection was collected prior to the earliest newer start
         /// time indicated by the current sitrep.
-        WaitingForNewerInventory {
-            parent_inv_id: CollectionUuid,
-            next_inv_min_time_started: DateTime<Utc>,
-            input_inv_time_started: DateTime<Utc>,
-        },
+        WaitingForNewerInventory(crate::fm::InventoryStale),
 
         /// Preparing analysis input failed.
-        PreparationError(String),
+        PreparationError {
+            /// Warnings and timings from any input-loading steps which ran.
+            prep_status: PreparationStatus,
+            failure: PreparationFailure,
+        },
 
         /// Preparation succeeded and analysis was performed.
         RanAnalysis {
@@ -1750,8 +1865,13 @@ mod test {
     use crate::internal_api::background::BlueprintPrunerDetails;
     use crate::internal_api::background::BlueprintPrunerStatus;
     use crate::internal_api::background::DeletedBlueprint;
+    use crate::internal_api::background::fm_analysis::PreparationStatus;
+    use crate::internal_api::background::fm_analysis::PreparationStep;
+    use crate::internal_api::background::fm_analysis::PreparationStepStatus;
     use expectorate::assert_contents;
     use iddqd::IdOrdMap;
+    use std::time::Duration;
+    use strum::IntoEnumIterator;
 
     #[test]
     fn test_display_tuf_repo_pruner_status_enabled() {
@@ -1832,6 +1952,60 @@ mod test {
 
         assert_contents(
             "output/blueprint_pruner_status_disabled.out",
+            &status.to_string(),
+        );
+    }
+
+    fn fm_preparation_step(
+        step: PreparationStep,
+        millis: u64,
+        warnings: &[&str],
+    ) -> PreparationStepStatus {
+        PreparationStepStatus {
+            step,
+            duration: Duration::from_millis(millis),
+            warnings: warnings.iter().map(|w| w.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn test_display_fm_preparation_status_with_warnings() {
+        let status = PreparationStatus {
+            total_duration: Duration::from_millis(125),
+            steps: [
+                fm_preparation_step(
+                    PreparationStep::Ereports,
+                    120,
+                    &["ereport 1 is invalid", "ereport 2 is also invalid"],
+                ),
+                fm_preparation_step(PreparationStep::InServiceDisks, 8, &[]),
+                fm_preparation_step(
+                    PreparationStep::SiloCertificates,
+                    3,
+                    &["certificate 1 cannot be served"],
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        };
+
+        assert_contents(
+            "output/fm_preparation_status_with_warnings.out",
+            &status.to_string(),
+        );
+    }
+
+    #[test]
+    fn test_display_fm_preparation_status_no_warnings() {
+        let status = PreparationStatus {
+            total_duration: Duration::from_millis(42),
+            steps: PreparationStep::iter()
+                .map(|step| fm_preparation_step(step, 5, &[]))
+                .collect(),
+        };
+
+        assert_contents(
+            "output/fm_preparation_status_no_warnings.out",
             &status.to_string(),
         );
     }
