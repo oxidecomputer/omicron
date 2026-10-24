@@ -3869,8 +3869,9 @@ mod ereporter_status_fields {
 }
 
 fn print_task_fm_analysis(details: &serde_json::Value) {
+    use nexus_types::fm::InventoryStale;
     use nexus_types::internal_api::background::fm_analysis::{
-        AnalysisOutcome, AnalysisStatus, Outcome, PreparationStatus,
+        AnalysisOutcome, AnalysisStatus, Outcome, PreparationFailure,
     };
 
     let FmAnalysisStatus {
@@ -3930,11 +3931,11 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
             );
             return;
         }
-        Outcome::WaitingForNewerInventory {
+        Outcome::WaitingForNewerInventory(InventoryStale {
             parent_inv_id,
             next_inv_min_time_started,
             input_inv_time_started,
-        } => {
+        }) => {
             const PARENT_INV: &str = "parent sitrep's inventory ID:";
             const MIN_STARTED: &str = "earliest start time for next inventory:";
             const LOADED_STARTED: &str = "loaded inventory started at:";
@@ -3954,10 +3955,26 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
             println!("      {LOADED_STARTED:<WIDTH$}{loaded_started}");
             return;
         }
-        Outcome::PreparationError(error) => {
-            println!(
-                "{ERRICON} failed to prepare analysis inputs:\n    {error}"
-            );
+        Outcome::PreparationError { prep_status, failure } => {
+            match failure {
+                PreparationFailure::StepsFailed(errors) => {
+                    println!(
+                        "{ERRICON} failed to load analysis inputs \
+                         ({} steps failed):",
+                        errors.len()
+                    );
+                    for (step, error) in errors {
+                        println!("      > {step}: {error}");
+                    }
+                }
+                PreparationFailure::InvalidInputs(error) => {
+                    println!(
+                        "{ERRICON} failed to assemble analysis inputs:\n    \
+                         {error}"
+                    );
+                }
+            }
+            print!("{prep_status}");
             return;
         }
         Outcome::RanAnalysis { prep_status, analysis_status } => {
@@ -4036,13 +4053,7 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
         println!("      count: {:>6}", capacity.count);
     }
 
-    let PreparationStatus { warnings } = prep_status;
-    if !warnings.is_empty() {
-        println!("{ERRICON}   non-fatal errors preparing analysis inputs:");
-        for error in warnings {
-            println!("      > {error}")
-        }
-    }
+    print!("{prep_status}");
     print_start_end_time(start_time, end_time, 4);
 }
 

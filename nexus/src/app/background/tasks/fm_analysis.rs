@@ -9,11 +9,11 @@ use crate::app::external_endpoints::TlsCertificate;
 use anyhow::Context;
 use chrono::Utc;
 use fm::analysis_input::Input;
-use fm::analysis_input::InvalidInputs;
 use fm::analysis_reports::InputReport;
 use futures::future::BoxFuture;
 use iddqd::IdOrdMap;
 use nexus_db_model::DbMetadataNexusState;
+use nexus_db_model::EreporterRestart;
 use nexus_db_model::PhysicalDiskPolicy;
 use nexus_db_model::SagaExecState;
 use nexus_db_model::SagaReasonAbandoned;
@@ -48,8 +48,12 @@ use omicron_uuid_kinds::SupportBundleUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Instant;
+use strum::IntoEnumIterator;
 use tokio::sync::watch;
+use tokio_util::task::JoinMap;
 
 #[derive(Clone)]
 pub struct FmAnalysis {
@@ -233,79 +237,64 @@ impl FmAnalysis {
             .collect(),
         );
 
-        // Prepare analysis inputs.
-        let (inputs, prep_status, input_report) = match self
-            .prepare_inputs(&opctx, parent_sitrep, inv, &cfg)
-            .await
-        {
-            Ok(inputs) => inputs,
-            Err(PreparationError::Other(err)) => {
-                let error = InlineErrorChain::new(&*err);
-                slog::error!(
-                    opctx.log,
-                    "fault management analysis preparation failed";
-                    &error,
-                );
-                return FmAnalysisStatus {
-                    parent_sitrep_id,
-                    inv_collection_id: Some(inv_collection_id),
-                    known_classes,
-                    outcome: status::Outcome::PreparationError(
-                        error.to_string(),
-                    ),
-                    warnings,
-                };
-            }
-            Err(PreparationError::InvalidInputs(
-                err @ InvalidInputs::MissingInput { .. },
-            )) => {
-                // A missing input is a bug in this task: `prepare_inputs`
-                // must provide every required input to the builder.
-                let error = InlineErrorChain::new(&err);
-                slog::error!(
-                    opctx.log,
-                    "fault management analysis preparation failed";
-                    &error,
-                );
-                return FmAnalysisStatus {
-                    parent_sitrep_id,
-                    inv_collection_id: Some(inv_collection_id),
-                    known_classes,
-                    outcome: status::Outcome::PreparationError(
-                        error.to_string(),
-                    ),
-                    warnings,
-                };
-            }
-            Err(PreparationError::InvalidInputs(
-                InvalidInputs::InventoryStale {
-                    parent_inv_id,
-                    next_inv_min_time_started,
-                    input_inv_time_started,
-                },
-            )) => {
+        // Construct the input builder for the preparation phase. This will fail
+        // if the inventory collection is insufficiently new, so we can bail out
+        // here if we need to wait for a new collection without having to spawn
+        // the input-loading tasks.
+        let builder = match Input::builder(parent_sitrep.clone(), inv) {
+            Ok(builder) => builder.config(cfg),
+            Err(stale) => {
                 slog::info!(
                     opctx.log,
                     "fault management analysis: waiting for a newer inventory \
                      to be loaded";
-                    "parent_sitrep_inv_id" => %parent_inv_id,
-                    "next_inv_min_time_started" => %next_inv_min_time_started,
-                    "input_inv_time_started" => %input_inv_time_started,
+                    "parent_sitrep_inv_id" => %stale.parent_inv_id,
+                    "next_inv_min_time_started" =>
+                        %stale.next_inv_min_time_started,
+                    "input_inv_time_started" => %stale.input_inv_time_started,
                 );
                 self.activators.inventory_loader.activate();
                 return FmAnalysisStatus {
                     parent_sitrep_id,
                     inv_collection_id: Some(inv_collection_id),
                     known_classes,
-                    outcome: status::Outcome::WaitingForNewerInventory {
-                        parent_inv_id,
-                        next_inv_min_time_started,
-                        input_inv_time_started,
+                    outcome: status::Outcome::WaitingForNewerInventory(stale),
+                    warnings,
+                };
+            }
+        };
+
+        // Load analysis inputs from the database.
+        let mut prep_status = status::PreparationStatus::default();
+        let prep_started = Instant::now();
+        let prepared = self
+            .prepare_inputs(&opctx, builder, parent_sitrep, &mut prep_status)
+            .await;
+        prep_status.total_duration = prep_started.elapsed();
+        let (inputs, input_report) = match prepared {
+            Ok(prepared) => prepared,
+            Err(failure) => {
+                // Each failure has already been logged where it occurred.
+                return FmAnalysisStatus {
+                    parent_sitrep_id,
+                    inv_collection_id: Some(inv_collection_id),
+                    known_classes,
+                    outcome: status::Outcome::PreparationError {
+                        prep_status,
+                        failure,
                     },
                     warnings,
                 };
             }
         };
+
+        slog::debug!(
+            opctx.log,
+            "prepared fault management analysis inputs (took {:?})",
+            prep_status.total_duration;
+            "new_ereports" => input_report.new_ereport_ids.len(),
+            "ereporter_restarts" => input_report.num_ereporter_restarts,
+        );
 
         // Okay, actually run analysis and generate a new sitrep.
         let outcome = self
@@ -324,54 +313,203 @@ impl FmAnalysis {
         }
     }
 
+    /// Loads the inputs to analysis from the database into `builder`, and
+    /// builds it into an [`Input`].
+    ///
+    /// Each input is loaded by a separate step, running on its own task, so
+    /// that the steps' queries execute concurrently. Every step runs to
+    /// completion even if another fails, so that all failures are reported
+    /// together. As each step completes, successfully or otherwise, its status
+    /// recorded in `prep_status`.
+    ///
+    /// # Cancel safety
+    ///
+    /// Dropping the returned future aborts any steps still in flight. This is
+    /// harmless, as the steps only read from the database.
     async fn prepare_inputs(
-        &mut self,
+        &self,
         opctx: &OpContext,
+        mut builder: fm::analysis_input::Builder,
         parent_sitrep: Option<CurrentSitrep>,
-        inv: Arc<inventory::Collection>,
-        cfg: &FmConfig,
-    ) -> Result<(Input, status::PreparationStatus, InputReport), PreparationError>
-    {
+        prep_status: &mut status::PreparationStatus,
+    ) -> Result<(Input, InputReport), status::PreparationFailure> {
+        use status::PreparationStep as Step;
+
+        // Dropping this `JoinMap` aborts any tasks still running in it.
+        let mut steps = JoinMap::new();
+        for step in Step::iter() {
+            let loader = InputLoader { datastore: self.datastore.clone() };
+            let opctx = opctx.child(BTreeMap::from([(
+                "input".to_string(),
+                step.to_string(),
+            )]));
+            let parent_sitrep = parent_sitrep.clone();
+            steps.spawn(step, async move {
+                let parent = parent_sitrep.as_ref().map(|s| &s.1);
+                loader.run_step(step, &opctx, parent).await
+            });
+        }
+
+        let mut step_errors = BTreeMap::new();
+        while let Some((step, result)) = steps.join_next().await {
+            let result = match result {
+                Ok(StepOutput { status, result }) => {
+                    prep_status
+                        .steps
+                        .insert_unique(status)
+                        .expect("exactly one step is spawned for each input");
+                    result
+                }
+                // This shouldn't happen in a production build, since we build
+                // with `panic = "abort"`, but lets us get the panic message out
+                // nicely in tests.
+                Err(err) if err.is_panic() => {
+                    std::panic::resume_unwind(err.into_panic())
+                }
+                // This also shouldn't happen, since the only thing that aborts
+                // the tasks we spawn is if this function is cancelled, in which
+                // case, it wouldn't be around to wait for them to complete
+                // anyway. May as well handle it gracefully, though.
+                Err(err) => Err(err).with_context(|| {
+                    format!(
+                        "input-loading task for {step} was unexpectedly \
+                         canceled (this is probably a bug)",
+                    )
+                }),
+            };
+            match result {
+                Ok(LoadedInput::InServiceDisks(disks)) => {
+                    builder = builder.in_service_disks(Arc::new(disks));
+                }
+                Ok(LoadedInput::ObservedSagas(sagas)) => {
+                    builder = builder.observed_sagas(Arc::new(sagas));
+                }
+                Ok(LoadedInput::SiloCertificates(silos)) => {
+                    builder =
+                        builder.observed_silo_certificates(Arc::new(silos));
+                }
+                Ok(LoadedInput::EreporterRestarts(restarts)) => {
+                    builder.add_ereporter_restarts(restarts);
+                }
+                Ok(LoadedInput::Ereports(ereports)) => {
+                    builder.add_unmarked_ereports(ereports);
+                }
+                Ok(LoadedInput::AlertMarkers(marked)) => {
+                    builder.add_marked_alert_requests(marked);
+                }
+                Ok(LoadedInput::SupportBundleMarkers(marked)) => {
+                    builder.add_marked_support_bundle_requests(marked);
+                }
+                Err(err) => {
+                    let error = InlineErrorChain::new(&*err);
+                    slog::error!(
+                        opctx.log,
+                        "failed to load fault management analysis input";
+                        "input" => %step,
+                        &error,
+                    );
+                    step_errors.insert(step, error.to_string());
+                }
+            }
+        }
+        if !step_errors.is_empty() {
+            return Err(status::PreparationFailure::StepsFailed(step_errors));
+        }
+
+        let (input, report) = builder.build().map_err(|err| {
+            // A missing input is a bug in this task: every step which
+            // succeeded must have provided its input to the builder.
+            let error = InlineErrorChain::new(&err);
+            slog::error!(
+                opctx.log,
+                "fault management analysis preparation failed";
+                &error,
+            );
+            status::PreparationFailure::InvalidInputs(error.to_string())
+        })?;
+
+        // The builder checks ereports' restart IDs only once both ereports and
+        // restarts are loaded; report any unknown ones as warnings from the
+        // step which loaded the ereports.
+        if !report.unknown_restart_ereport_ids.is_empty() {
+            let mut ereports_step =
+                prep_status.steps.get_mut(&Step::Ereports).expect(
+                    "every step succeeded, so every step has a status entry",
+                );
+            for id in &report.unknown_restart_ereport_ids {
+                let msg = format!(
+                    "ereport {id} has a restart ID not contained in the \
+                     `ereporter_restart` table"
+                );
+                slog::warn!(&opctx.log, "{msg}");
+                ereports_step.warnings.push(msg);
+            }
+        }
+
+        Ok((input, report))
+    }
+}
+
+/// Loads analysis inputs from the database.
+///
+/// This is separate from [`FmAnalysis`] so that each input-loading step can
+/// own the state it needs, and run on its own task.
+struct InputLoader {
+    datastore: Arc<DataStore>,
+}
+
+impl InputLoader {
+    /// Runs the step which loads the `kind` input.
+    async fn run_step(
+        &self,
+        step: status::PreparationStep,
+        opctx: &OpContext,
+        parent_sitrep: Option<&nexus_types::fm::Sitrep>,
+    ) -> StepOutput {
+        use status::PreparationStep as Kind;
+
+        let started = Instant::now();
         let mut warnings = Vec::new();
-
-        let in_service_disks =
-            Arc::new(self.load_in_service_disks(opctx, &mut warnings).await?);
-
-        let observed_sagas =
-            Arc::new(self.prepare_observed_sagas(opctx).await?);
-
-        let observed_silo_certificates =
-            Arc::new(self.load_silo_certificates(opctx, &mut warnings).await?);
-
-        let mut builder =
-            fm::analysis_input::Input::builder(parent_sitrep.clone(), inv)?
-                .in_service_disks(in_service_disks)
-                .observed_sagas(observed_sagas)
-                .observed_silo_certificates(observed_silo_certificates)
-                .config(*cfg);
-        self.load_ereporter_restarts(opctx, &mut builder)
-            .await
-            .context("failed to load ereporter restarts")?;
-        self.load_new_ereports(opctx, &mut builder, &mut warnings)
-            .await
-            .context("failed to load new ereports")?;
-        self.load_existing_alert_markers(
-            opctx,
-            parent_sitrep.as_ref().map(|s| &s.1),
-            &mut builder,
-        )
-        .await
-        .context("failed to load existing alert markers")?;
-        self.load_existing_support_bundle_markers(
-            opctx,
-            parent_sitrep.as_ref().map(|s| &s.1),
-            &mut builder,
-        )
-        .await
-        .context("failed to load existing support bundle markers")?;
-
-        let (input, report) = builder.build()?;
-        Ok((input, status::PreparationStatus { warnings }, report))
+        let result = match step {
+            Kind::InServiceDisks => self
+                .load_in_service_disks(opctx, &mut warnings)
+                .await
+                .map(LoadedInput::InServiceDisks),
+            Kind::ObservedSagas => self
+                .prepare_observed_sagas(opctx)
+                .await
+                .map(LoadedInput::ObservedSagas),
+            Kind::SiloCertificates => self
+                .load_silo_certificates(opctx, &mut warnings)
+                .await
+                .map(LoadedInput::SiloCertificates),
+            Kind::EreporterRestarts => self
+                .load_ereporter_restarts(opctx)
+                .await
+                .context("failed to load ereporter restarts")
+                .map(LoadedInput::EreporterRestarts),
+            Kind::Ereports => self
+                .load_new_ereports(opctx, &mut warnings)
+                .await
+                .context("failed to load new ereports")
+                .map(LoadedInput::Ereports),
+            Kind::AlertMarkers => self
+                .load_existing_alert_markers(opctx, parent_sitrep)
+                .await
+                .context("failed to load existing alert markers")
+                .map(LoadedInput::AlertMarkers),
+            Kind::SupportBundleMarkers => self
+                .load_existing_support_bundle_markers(opctx, parent_sitrep)
+                .await
+                .context("failed to load existing support bundle markers")
+                .map(LoadedInput::SupportBundleMarkers),
+        };
+        let status = status::PreparationStepStatus {
+            step,
+            duration: started.elapsed(),
+            warnings,
+        };
+        StepOutput { status, result }
     }
 
     /// Load all in-service control plane disks, projected down to FM's
@@ -622,10 +760,10 @@ impl FmAnalysis {
     }
 
     async fn load_ereporter_restarts(
-        &mut self,
+        &self,
         opctx: &OpContext,
-        builder: &mut fm::analysis_input::Builder,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Vec<EreporterRestart>> {
+        let mut restarts = Vec::new();
         let mut nbatches = 0;
         let mut paginator = Paginator::new(
             nexus_db_queries::db::datastore::SQL_BATCH_SIZE,
@@ -638,24 +776,32 @@ impl FmAnalysis {
                 .ereporter_restart_list(opctx, &p.current_pagparams())
                 .await?;
             paginator = p.found_batch(&batch, &|e| e.id().into_untyped_uuid());
-            builder.add_ereporter_restarts(batch);
+            restarts.extend(batch);
         }
 
         slog::debug!(
             opctx.log,
             "loaded {} ereporter restarts (in {nbatches} batches)",
-            builder.ereporter_restarts().len(),
+            restarts.len(),
         );
 
-        Ok(())
+        Ok(restarts)
     }
 
+    /// Loads all ereports which have not been marked as seen, skipping (with a
+    /// warning) any which are invalid.
+    ///
+    /// This includes ereports which were input to the parent sitrep but have
+    /// not yet been marked; [`fm::analysis_input::Builder`] distinguishes
+    /// them from new ereports. The builder also checks the ereports' restart
+    /// IDs against the ereporter restarts, so that the two may be loaded
+    /// concurrently.
     async fn load_new_ereports(
-        &mut self,
+        &self,
         opctx: &OpContext,
-        builder: &mut fm::analysis_input::Builder,
         warnings: &mut Vec<String>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Vec<fm::Ereport>> {
+        let mut ereports = Vec::new();
         // Only surface ereports a diagnosis engine will consume.
         let classes = fm::diagnosis::known_ereport_classes();
         let mut paginator = Paginator::new(
@@ -663,7 +809,6 @@ impl FmAnalysis {
             dropshot::PaginationOrder::Ascending,
         );
         while let Some(p) = paginator.next() {
-            let prev_total = builder.num_ereports();
             let batch = self
                 .datastore
                 .ereports_list_unmarked(opctx, classes, &p.current_pagparams())
@@ -675,53 +820,36 @@ impl FmAnalysis {
 
             let mut invalid = 0;
             for ereport in batch {
-                let ereport = match fm::Ereport::try_from(ereport) {
-                    Ok(ereport) => ereport,
+                match fm::Ereport::try_from(ereport) {
+                    Ok(ereport) => ereports.push(ereport),
                     Err(e) => {
                         invalid += 1;
                         warnings.push(e.to_string());
-                        continue;
                     }
                 };
-
-                // Check if this is a reporter we know about, and issue a
-                // warning if it is not.
-                let id = ereport.id;
-                if !builder.ereporter_restarts().contains_key(&id.restart_id) {
-                    let msg = format!(
-                        "ereport {id} has a restart ID not contained in the \
-                         `ereporter_restart` table"
-                    );
-                    slog::warn!(&opctx.log, "{msg}");
-                    warnings.push(msg);
-                }
-                builder.add_unmarked_ereports(std::iter::once(ereport));
             }
 
-            let total = builder.num_ereports();
-            let new = total - prev_total;
             if invalid > 0 {
                 slog::warn!(
                     &opctx.log,
-                    "loaded {loaded} ereports, {new} new, {invalid} invalid"
+                    "loaded {loaded} unmarked ereports, {invalid} invalid"
                 );
             } else {
-                slog::debug!(&opctx.log, "loaded {loaded} ereports, {new} new");
+                slog::debug!(&opctx.log, "loaded {loaded} unmarked ereports");
             }
         }
 
-        Ok(())
+        Ok(ereports)
     }
 
     async fn load_existing_alert_markers(
-        &mut self,
+        &self,
         opctx: &OpContext,
         parent: Option<&nexus_types::fm::Sitrep>,
-        builder: &mut fm::analysis_input::Builder,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<HashSet<AlertUuid>> {
         let Some(parent) = parent else {
             // No parent sitrep, so no closed cases, so nothing to look up.
-            return Ok(());
+            return Ok(HashSet::new());
         };
         let candidate_ids: Vec<AlertUuid> = parent
             .cases
@@ -730,26 +858,24 @@ impl FmAnalysis {
             .flat_map(|c| c.alerts_requested.iter().map(|r| r.id))
             .collect();
         if candidate_ids.is_empty() {
-            return Ok(());
+            return Ok(HashSet::new());
         }
         let marked = self
             .datastore
             .fm_rendezvous_existing_alert_markers(opctx, &candidate_ids)
             .await
             .context("failed to look up alert marker existence")?;
-        builder.add_marked_alert_requests(marked);
-        Ok(())
+        Ok(marked)
     }
 
     async fn load_existing_support_bundle_markers(
-        &mut self,
+        &self,
         opctx: &OpContext,
         parent: Option<&nexus_types::fm::Sitrep>,
-        builder: &mut fm::analysis_input::Builder,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<HashSet<SupportBundleUuid>> {
         let Some(parent) = parent else {
             // No parent sitrep, so no closed cases, so nothing to look up.
-            return Ok(());
+            return Ok(HashSet::new());
         };
         let candidate_ids: Vec<SupportBundleUuid> = parent
             .cases
@@ -758,7 +884,7 @@ impl FmAnalysis {
             .flat_map(|c| c.support_bundles_requested.iter().map(|r| r.id))
             .collect();
         if candidate_ids.is_empty() {
-            return Ok(());
+            return Ok(HashSet::new());
         }
         let marked = self
             .datastore
@@ -768,10 +894,11 @@ impl FmAnalysis {
             )
             .await
             .context("failed to look up support bundle marker existence")?;
-        builder.add_marked_support_bundle_requests(marked);
-        Ok(())
+        Ok(marked)
     }
+}
 
+impl FmAnalysis {
     async fn analyze(
         &mut self,
         opctx: &OpContext,
@@ -1015,12 +1142,19 @@ impl FmAnalysis {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-enum PreparationError {
-    #[error(transparent)]
-    InvalidInputs(#[from] InvalidInputs),
-    #[error(transparent)]
-    Other(#[from] anyhow::Error),
+struct StepOutput {
+    status: status::PreparationStepStatus,
+    result: anyhow::Result<LoadedInput>,
+}
+
+enum LoadedInput {
+    InServiceDisks(IdOrdMap<InServiceDisk>),
+    ObservedSagas(IdOrdMap<ObservedSaga>),
+    SiloCertificates(IdOrdMap<ObservedSiloCertificates>),
+    EreporterRestarts(Vec<EreporterRestart>),
+    Ereports(Vec<fm::Ereport>),
+    AlertMarkers(HashSet<AlertUuid>),
+    SupportBundleMarkers(HashSet<SupportBundleUuid>),
 }
 
 #[cfg(test)]
@@ -1032,6 +1166,7 @@ mod tests {
     use nexus_types::alert::AlertClass;
     use nexus_types::fm::Case;
     use nexus_types::fm::DiagnosisEngineKind;
+    use nexus_types::fm::InventoryStale;
     use nexus_types::fm::Setting;
     use nexus_types::fm::Sitrep;
     use nexus_types::fm::SitrepMetadata;
@@ -1169,20 +1304,14 @@ mod tests {
 
             let result = task.actually_activate(opctx).await;
             assert_eq!(result.inv_collection_id, Some(older.id));
-            match &result.outcome {
-                status::Outcome::WaitingForNewerInventory {
-                    parent_inv_id,
-                    next_inv_min_time_started,
-                    input_inv_time_started,
-                } => {
-                    assert_eq!(*parent_inv_id, newer.id);
-                    assert_eq!(*next_inv_min_time_started, newer.time_done,);
-                    assert_eq!(*input_inv_time_started, older.time_started,);
-                }
-                other => {
-                    panic!("expected WaitingForNewerInventory, got {other:?}")
-                }
-            }
+            assert_eq!(
+                result.outcome,
+                status::Outcome::WaitingForNewerInventory(InventoryStale {
+                    parent_inv_id: newer.id,
+                    next_inv_min_time_started: newer.time_done,
+                    input_inv_time_started: older.time_started,
+                }),
+            );
         }
 
         // If the loaded inventory collection started at or after the parent
@@ -1288,24 +1417,15 @@ mod tests {
 
             let result = task.actually_activate(opctx).await;
             assert_eq!(result.inv_collection_id, Some(overlapping.id));
-            match &result.outcome {
-                status::Outcome::WaitingForNewerInventory {
-                    parent_inv_id,
-                    next_inv_min_time_started,
-                    input_inv_time_started,
-                } => {
-                    assert_eq!(*parent_inv_id, older.id);
-                    assert_eq!(*next_inv_min_time_started, older.time_done,);
-                    assert_eq!(
-                        *input_inv_time_started,
-                        overlapping.time_started,
-                    );
-                }
-                other => panic!(
-                    "expected WaitingForNewerInventory for overlapping \
-                     collections, got {other:?}"
-                ),
-            }
+            assert_eq!(
+                result.outcome,
+                status::Outcome::WaitingForNewerInventory(InventoryStale {
+                    parent_inv_id: older.id,
+                    next_inv_min_time_started: older.time_done,
+                    input_inv_time_started: overlapping.time_started,
+                }),
+                "overlapping collections must wait for a newer inventory",
+            );
         }
 
         db.terminate().await;
@@ -1435,7 +1555,7 @@ mod tests {
 
         let (_sitrep_tx, sitrep_rx) = watch::channel(None);
         let (_inv_tx, inv_rx) = watch::channel(None);
-        let mut task = FmAnalysis::new(
+        let task = FmAnalysis::new(
             datastore.clone(),
             sitrep_rx,
             inv_rx,
@@ -1444,15 +1564,28 @@ mod tests {
             OmicronZoneUuid::new_v4(),
         );
 
-        let (input, prep, report) = task
-            .prepare_inputs(opctx, Some(parent), inv, &FmConfig::default())
+        let builder = Input::builder(Some(parent.clone()), inv)
+            .expect("parent sitrep was produced from this inventory")
+            .config(FmConfig::default());
+        let mut prep = status::PreparationStatus::default();
+        let (input, report) = task
+            .prepare_inputs(opctx, builder, Some(parent), &mut prep)
             .await
             .expect("input preparation should succeed");
-        assert!(
-            prep.warnings.is_empty(),
-            "unexpected preparation warnings: {:?}",
-            prep.warnings,
+        // Every input-loading step ran and recorded its status, without
+        // warnings.
+        assert_eq!(
+            prep.steps.iter().map(|s| s.step).collect::<Vec<_>>(),
+            status::PreparationStep::iter().collect::<Vec<_>>(),
         );
+        for step in &prep.steps {
+            assert!(
+                step.warnings.is_empty(),
+                "unexpected warnings from step {}: {:?}",
+                step.step,
+                step.warnings,
+            );
+        }
 
         // The open case is copied forward as open.
         assert!(input.open_cases().contains_key(&open_case_id));
@@ -1630,19 +1763,9 @@ mod tests {
             .await
             .expect("inserted certificates");
 
-        let (_sitrep_tx, sitrep_rx) = watch::channel(None);
-        let (_inv_tx, inv_rx) = watch::channel(None);
-        let task = FmAnalysis::new(
-            datastore.clone(),
-            sitrep_rx,
-            inv_rx,
-            config_rx(Default::default()),
-            activators(),
-            OmicronZoneUuid::new_v4(),
-        );
-
+        let loader = InputLoader { datastore: datastore.clone() };
         let mut warnings = Vec::new();
-        let silos = task
+        let silos = loader
             .load_silo_certificates(opctx, &mut warnings)
             .await
             .expect("loaded silo certificates");
