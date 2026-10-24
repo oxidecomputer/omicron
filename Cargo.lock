@@ -2258,7 +2258,7 @@ source = "git+https://github.com/oxidecomputer/crucible?rev=ad8a31742adc45e925e6
 dependencies = [
  "crucible-workspace-hack",
  "libc",
- "num-derive",
+ "num-derive 0.4.2",
  "num-traits",
  "thiserror 2.0.18",
 ]
@@ -6456,6 +6456,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52ff2c0fe9bc6cb6b14a0592c2ff4fa9ceb83eea9db979b0487cd054946a2b8f"
 
 [[package]]
+name = "libcontract-sys"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29fff969872cff880a0a328a107528e3065b785df5fa8094fa1002cf0bf6c412"
+dependencies = [
+ "libc",
+ "num-derive 0.3.3",
+ "num-traits",
+]
+
+[[package]]
 name = "libdlpi-sys"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/dlpi-sys#b0887ece420ff6d641fb62e4a6cbd8788fc822d1"
@@ -6583,7 +6594,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0d7bd6cfd9b5d32738cebd83a1b68060d96b1ca10d88bf9a5cb10dfac0f1cdf"
 dependencies = [
  "libc",
- "num-derive",
+ "num-derive 0.4.2",
  "num-traits",
 ]
 
@@ -8664,6 +8675,17 @@ name = "num-conv"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf97ec579c3c42f953ef76dbf8d55ac91fb219dde70e49aa4a6b7d74e9919050"
+
+[[package]]
+name = "num-derive"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "876a53fff98e03a936a674b29568b0e605f06b29372c2489ff4de23f1949743d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
 
 [[package]]
 name = "num-derive"
@@ -11653,7 +11675,7 @@ dependencies = [
  "anyhow",
  "convert_case 0.4.0",
  "libm",
- "num-derive",
+ "num-derive 0.4.2",
  "num-traits",
  "ron",
  "serde",
@@ -15744,7 +15766,7 @@ checksum = "b7401a30af6cb5818bb64852270bb722533397edcfc7344954a38f420819ece2"
 [[package]]
 name = "sush-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=969e5d518e962ec6a45785e3d9194eadd380507a#969e5d518e962ec6a45785e3d9194eadd380507a"
+source = "git+https://github.com/oxidecomputer/sush?rev=e0aa5339031b890526e892936df60b7105896678#e0aa5339031b890526e892936df60b7105896678"
 dependencies = [
  "chrono",
  "dropshot",
@@ -15753,6 +15775,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "sled-hardware-types",
+ "strum 0.27.2",
  "sush-common",
  "thiserror 1.0.69",
 ]
@@ -15760,7 +15783,7 @@ dependencies = [
 [[package]]
 name = "sush-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=969e5d518e962ec6a45785e3d9194eadd380507a#969e5d518e962ec6a45785e3d9194eadd380507a"
+source = "git+https://github.com/oxidecomputer/sush?rev=e0aa5339031b890526e892936df60b7105896678#e0aa5339031b890526e892936df60b7105896678"
 dependencies = [
  "bytes",
  "bytesize",
@@ -15821,7 +15844,7 @@ dependencies = [
 [[package]]
 name = "sush-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=969e5d518e962ec6a45785e3d9194eadd380507a#969e5d518e962ec6a45785e3d9194eadd380507a"
+source = "git+https://github.com/oxidecomputer/sush?rev=e0aa5339031b890526e892936df60b7105896678#e0aa5339031b890526e892936df60b7105896678"
 dependencies = [
  "async-trait",
  "atomicwrites",
@@ -15840,6 +15863,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "libc",
+ "libcontract-sys",
  "lru 0.18.3",
  "memmap2",
  "p256 0.13.2",
