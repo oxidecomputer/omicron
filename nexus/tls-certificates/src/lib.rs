@@ -157,7 +157,7 @@ impl TlsCertificate {
         let validity = omicron_certificates::validity(&end_cert)
             .context("reading leaf certificate validity")?;
 
-        Ok(TlsCertificate { id: db_cert.id(), certified_key, digest, validity })
+        Ok(TlsCertificate { id, certified_key, digest, validity })
     }
 }
 
