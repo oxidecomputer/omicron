@@ -16,9 +16,9 @@
 //! make sense as a place to put this type. Constructing a `TlsCertificate`
 //! requires a dependency on `rustls`, which in turn will compile cryptography
 //! libraries, and is therefore a somewhat expensive dependency. Similarly, the
-//! code for converting a database [`Certificate`] record into a
-//! [`TlsCertificate`] requires a dependency on `nexus-db-model`, which neither
-//! `nexus-types` nor `omicron-certificates` may depend on.
+//! code for converting a database [`nexus_db_model::Certificate`] record into a
+//! [`TlsCertificate`] requires a dependency on `nexus-db-model` (naturally!)
+//! which neither `nexus-types` nor `omicron-certificates` may depend on.
 
 use anyhow::Context;
 use anyhow::anyhow;
