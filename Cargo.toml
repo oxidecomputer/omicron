@@ -125,6 +125,7 @@ members = [
     "nexus/test-interface",
     "nexus/test-utils-macros",
     "nexus/test-utils",
+    "nexus/tls-certificates",
     "nexus/types",
     "nexus/types/versions",
     "ntp-admin",
@@ -325,6 +326,7 @@ default-members = [
     "nexus/test-interface",
     "nexus/test-utils-macros",
     "nexus/test-utils",
+    "nexus/tls-certificates",
     "nexus/types",
     "nexus/types/versions",
     "ntp-admin",
@@ -680,6 +682,7 @@ nexus-saga-recovery = { path = "nexus/saga-recovery" }
 nexus-test-interface = { path = "nexus/test-interface" }
 nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
+nexus-tls-certificates = { path = "nexus/tls-certificates" }
 nexus-types = { path = "nexus/types" }
 nexus-types-versions = { path = "nexus/types/versions" }
 nix = { version = "0.31", features = ["fs", "net"] }

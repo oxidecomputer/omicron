@@ -8320,6 +8320,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-tls-certificates"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hex",
+ "nexus-db-model",
+ "nexus-types",
+ "omicron-certificates",
+ "omicron-rpaths",
+ "omicron-workspace-hack",
+ "openssl",
+ "pq-sys",
+ "rustls",
+ "serde",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-types"
 version = "0.1.0"
 dependencies = [
@@ -9365,6 +9383,7 @@ dependencies = [
  "nexus-test-interface",
  "nexus-test-utils",
  "nexus-test-utils-macros",
+ "nexus-tls-certificates",
  "nexus-types",
  "nexus-types-versions",
  "ntp-admin-client",

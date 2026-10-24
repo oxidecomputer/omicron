@@ -149,6 +149,7 @@ nexus-reconfigurator-execution.workspace = true
 nexus-reconfigurator-planning.workspace = true
 nexus-reconfigurator-preparation.workspace = true
 nexus-reconfigurator-rendezvous.workspace = true
+nexus-tls-certificates.workspace = true
 nexus-types.workspace = true
 nexus-types-versions.workspace = true
 omicron-certificates.workspace = true
