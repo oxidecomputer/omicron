@@ -103,6 +103,8 @@ use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
+use propolis_client::types::InstanceState as PropolisState;
+use propolis_client::types::InstanceStateRequested as PropolisStateRequested;
 use sled_agent_client::TestInterfaces as _;
 use std::collections::HashSet;
 use std::convert::TryFrom;
@@ -10115,19 +10117,13 @@ async fn can_create_instance_with_multiple_nics_and_ephemeral_ip(
     .await;
 }
 
-// Test that we send propolis the correct state and timeout for any given
-// instance shutdown policy specified in instance create/update.
-#[nexus_test]
-async fn test_instances_shutdown_policy_updates(
+async fn setup_shutdown_test_instance_and_mock_propolis(
     cptestctx: &ControlPlaneTestContext,
-) {
-    use propolis_client::types::InstanceState as PropolisState;
-    use propolis_client::types::InstanceStateRequested as PropolisStateRequested;
-
+    instance_name: &str,
+    shutdown_policy: Option<instance::InstanceShutdownPolicy>,
+) -> (Instance, std::net::SocketAddr) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.server_context();
-    let nexus = &apictx.nexus;
-    let instance_name = "resonance-cascade";
+    create_project_and_pool(&client).await;
 
     let sled_agent = cptestctx.first_sled_agent();
     let propolis_addr = sled_agent
@@ -10136,6 +10132,23 @@ async fn test_instances_shutdown_policy_updates(
         .unwrap();
     let propolis_client =
         propolis_client::Client::new(&format!("http://{propolis_addr}"));
+
+    let instance = create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        Vec::<instance::InstanceDiskAttachment>::new(),
+        Vec::<instance::ExternalIpCreate>::new(),
+        true, // start
+        None::<InstanceAutoRestartPolicy>,
+        None::<instance::InstanceCpuPlatform>,
+        Vec::<MulticastGroupJoinSpec>::new(),
+        shutdown_policy,
+    )
+    .await;
+    assert_eq!(instance.identity.name, instance_name);
+    expect_instance_start_ok(client, instance_name).await;
 
     // sled-agent-sim is a little *too* sim. it doesn't send mock propolis
     // the instance_state_monitor calls it needs to advance through
@@ -10167,57 +10180,6 @@ async fn test_instances_shutdown_policy_updates(
             .expect("instance state put to mock server failed");
     }
 
-    // instance state monitor requesting is one thing, but that doesn't let us
-    // see the timeout that was/wasn't sent in the propolis state put request.
-    async fn mock_get_last_state_requested(
-        propolis_addr: std::net::SocketAddr,
-    ) -> propolis_client::types::InstanceStateChange {
-        let url = format!("http://{}/mock/last_state_requested", propolis_addr);
-        reqwest::Client::new()
-            .get(url)
-            .send()
-            .await
-            .expect("retrieving last instance state change failed unexpectedly")
-            .json()
-            .await
-            .expect("invalid JSON response")
-    }
-
-    create_project_and_pool(&client).await;
-
-    // Create an instance with no specified shutdown policy.
-    let instance_default = create_instance_with(
-        client,
-        PROJECT_NAME,
-        instance_name,
-        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        Vec::<instance::InstanceDiskAttachment>::new(),
-        Vec::<instance::ExternalIpCreate>::new(),
-        true, // start
-        None::<InstanceAutoRestartPolicy>,
-        None::<instance::InstanceCpuPlatform>,
-        Vec::<MulticastGroupJoinSpec>::new(),
-        // (that is, this param is None:)
-        None::<instance::InstanceShutdownPolicy>,
-    )
-    .await;
-
-    assert_eq!(instance_default.identity.name, instance_name);
-    // instance create API endpoint sets default policy
-    // (default in DB level is HardOff for migration to preserve existing behaviors)
-    assert_eq!(
-        instance_default.shutdown_policy,
-        Some(instance::InstanceShutdownPolicy::PowerButton {
-            timeout_secs: DEFAULT_ACPI_SHUTDOWN_TIMEOUT_SECS
-        })
-    );
-
-    let instance_id =
-        InstanceUuid::from_untyped_uuid(instance_default.identity.id);
-
-    expect_instance_start_ok(client, instance_name).await;
-    instance_simulate(nexus, &instance_id).await;
-
     propolis_state_put_run(&propolis_client).await;
     let mut generation = 0;
     let state = propolis_state_monitor(&propolis_client, generation).await;
@@ -10227,11 +10189,56 @@ async fn test_instances_shutdown_policy_updates(
     generation += 1;
     let state = propolis_state_monitor(&propolis_client, generation).await;
     assert_eq!(state.gen_, generation);
-    assert_eq!(state.state, PropolisState::Running);
-
     // now that mock-propolis is in Running state, it will happily stay
     // there accepting any stop/reset requests we send it without us
-    // sending further instance state monitor requests
+    // sending further instance state monitor requests.
+    assert_eq!(state.state, PropolisState::Running);
+
+    (instance, propolis_addr)
+}
+
+// We want to test that we (nexus+sled-agent) send propolis the correct state
+// and timeout for any shutdown policy specified in instance create/update.
+// Requesting `instance/state-monitor` as above is one thing, but it doesn't
+// include the timeout that was(n't) sent in the propolis state PUT request.
+async fn mock_get_last_state_requested(
+    propolis_addr: std::net::SocketAddr,
+) -> propolis_client::types::InstanceStateChange {
+    let url = format!("http://{}/mock/last_state_requested", propolis_addr);
+    reqwest::Client::new()
+        .get(url)
+        .send()
+        .await
+        .expect("retrieving last instance state change failed unexpectedly")
+        .json()
+        .await
+        .expect("invalid JSON response")
+}
+
+#[nexus_test]
+async fn test_instances_shutdown_policy_force_hardstop_during_soft(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "resonance-cascade";
+
+    let (instance, propolis_addr) =
+        setup_shutdown_test_instance_and_mock_propolis(
+            &cptestctx,
+            instance_name,
+            // Create an instance with no specified shutdown policy.
+            None,
+        )
+        .await;
+
+    // instance create API endpoint sets default policy
+    // (default in DB level is HardOff for migration to preserve existing behaviors)
+    assert_eq!(
+        instance.shutdown_policy,
+        Some(instance::InstanceShutdownPolicy::PowerButton {
+            timeout_secs: DEFAULT_ACPI_SHUTDOWN_TIMEOUT_SECS
+        })
+    );
 
     // check the default instance's shutdown behavior
     // (should default to AcpiShutdown w/ 600 second timeout)
@@ -10253,24 +10260,58 @@ async fn test_instances_shutdown_policy_updates(
             state: PropolisStateRequested::Stop
         }
     );
+}
 
-    // change shutdown policy to hard-off
-    let base_update = instance::InstanceUpdate {
-        auto_restart_policy: Nullable(None),
-        boot_disk: Nullable(None),
-        cpu_platform: Nullable(None),
-        ncpus: instance_default.ncpus,
-        memory: instance_default.memory,
-        multicast_groups: None,
-        enable_jumbo_frames: instance_default.enable_jumbo_frames,
-        shutdown_policy: None,
-    };
+#[nexus_test]
+async fn test_instances_shutdown_policy_change_policy_and_send_hardstop_during_soft(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "resonance-cascade";
+    const CUSTOM_TIMEOUT_SECS: u64 = 42;
+
+    let (instance_soft, propolis_addr) =
+        setup_shutdown_test_instance_and_mock_propolis(
+            &cptestctx,
+            instance_name,
+            // create with a powerbutton shutdown policy with the given timeout.
+            Some(instance::InstanceShutdownPolicy::PowerButton {
+                timeout_secs: CUSTOM_TIMEOUT_SECS,
+            }),
+        )
+        .await;
+
+    assert_eq!(
+        instance_soft.shutdown_policy,
+        Some(instance::InstanceShutdownPolicy::PowerButton {
+            timeout_secs: CUSTOM_TIMEOUT_SECS,
+        })
+    );
+
+    // check the default instance's shutdown behavior
+    // (should default to AcpiShutdown w/ 600 second timeout)
+    expect_instance_stop_ok(client, instance_name, false).await;
+    assert_matches::assert_matches!(
+        mock_get_last_state_requested(propolis_addr).await,
+        propolis_client::types::InstanceStateChange {
+            acpi_timeout_secs: Some(CUSTOM_TIMEOUT_SECS),
+            state: PropolisStateRequested::AcpiStop
+        }
+    );
+
     let instance_hard = expect_instance_reconfigure_ok(
         client,
-        &instance_default.identity.id,
+        &instance_soft.identity.id,
         instance::InstanceUpdate {
+            auto_restart_policy: Nullable(None),
+            boot_disk: Nullable(None),
+            cpu_platform: Nullable(None),
+            ncpus: instance_soft.ncpus,
+            memory: instance_soft.memory,
+            multicast_groups: None,
+            enable_jumbo_frames: instance_soft.enable_jumbo_frames,
+            // change shutdown policy to hard-off
             shutdown_policy: Some(instance::InstanceShutdownPolicy::HardOff),
-            ..base_update.clone()
         },
     )
     .await;
@@ -10279,7 +10320,7 @@ async fn test_instances_shutdown_policy_updates(
         Some(instance::InstanceShutdownPolicy::HardOff)
     );
 
-    // stop without forcing
+    // stop without forcing, still is hard-off due to new policy
     expect_instance_stop_ok(client, instance_name, false).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
@@ -10288,18 +10329,61 @@ async fn test_instances_shutdown_policy_updates(
             state: PropolisStateRequested::Stop
         }
     );
+}
 
-    // change shutdown policy to soft-off and 30 second timeout (non-default)
+#[nexus_test]
+async fn test_instances_shutdown_policy_change_policy_timeout_change(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "resonance-cascade";
+
+    let (instance_default, propolis_addr) =
+        setup_shutdown_test_instance_and_mock_propolis(
+            &cptestctx,
+            instance_name,
+            // Create an instance with no specified shutdown policy.
+            None::<instance::InstanceShutdownPolicy>,
+        )
+        .await;
+
+    // instance create API endpoint sets default policy
+    assert_eq!(
+        instance_default.shutdown_policy,
+        Some(instance::InstanceShutdownPolicy::PowerButton {
+            timeout_secs: DEFAULT_ACPI_SHUTDOWN_TIMEOUT_SECS
+        })
+    );
+
+    // check the default instance's shutdown behavior
+    // (should default to AcpiShutdown w/ 600 second timeout)
+    expect_instance_stop_ok(client, instance_name, false).await;
+    assert_matches::assert_matches!(
+        mock_get_last_state_requested(propolis_addr).await,
+        propolis_client::types::InstanceStateChange {
+            acpi_timeout_secs: Some(DEFAULT_ACPI_SHUTDOWN_TIMEOUT_SECS),
+            state: PropolisStateRequested::AcpiStop
+        }
+    );
+
     let instance_soft = expect_instance_reconfigure_ok(
         client,
         &instance_default.identity.id,
         instance::InstanceUpdate {
+            auto_restart_policy: Nullable(None),
+            boot_disk: Nullable(None),
+            cpu_platform: Nullable(None),
+            ncpus: instance_default.ncpus,
+            memory: instance_default.memory,
+            multicast_groups: None,
+            enable_jumbo_frames: instance_default.enable_jumbo_frames,
+            // change shutdown policy to soft-off and 30 second timeout
+            // (that is, a non-default timeout)
             shutdown_policy: Some(
                 instance::InstanceShutdownPolicy::PowerButton {
                     timeout_secs: 30,
                 },
             ),
-            ..base_update.clone()
         },
     )
     .await;
@@ -10310,7 +10394,8 @@ async fn test_instances_shutdown_policy_updates(
         })
     );
 
-    // FIXME: why is this sending hard-stop...
+    // we still *send* propolis the different timeout (but per rfd622 it will
+    // be ignored if an existing timeout is underway)
     expect_instance_stop_ok(client, instance_name, false).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
@@ -10319,6 +10404,7 @@ async fn test_instances_shutdown_policy_updates(
             state: PropolisStateRequested::AcpiStop
         }
     );
+
     // test that hard-off is still sent for a force stop request even when
     // an explicit powerbutton shutdown policy is present
     expect_instance_stop_ok(client, instance_name, true).await;
@@ -10329,6 +10415,57 @@ async fn test_instances_shutdown_policy_updates(
             state: PropolisStateRequested::Stop
         }
     );
-
-    // TODO test reboots too
 }
+
+#[nexus_test]
+async fn test_instances_shutdown_policy_unchanged_when_omitted_in_update(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "resonance-cascade";
+
+    let (instance_default, propolis_addr) =
+        setup_shutdown_test_instance_and_mock_propolis(
+            &cptestctx,
+            instance_name,
+            // Create an instance with hard-off shutdown policy.
+            Some(instance::InstanceShutdownPolicy::HardOff),
+        )
+        .await;
+
+    let instance_unchanged = expect_instance_reconfigure_ok(
+        client,
+        &instance_default.identity.id,
+        instance::InstanceUpdate {
+            auto_restart_policy: Nullable(None),
+            boot_disk: Nullable(None),
+            cpu_platform: Nullable(None),
+            ncpus: instance_default.ncpus,
+            memory: instance_default.memory,
+            multicast_groups: None,
+            enable_jumbo_frames: instance_default.enable_jumbo_frames,
+            // no shutdown policy specified -> unchanged
+            shutdown_policy: None,
+        },
+    )
+    .await;
+    assert_eq!(
+        instance_unchanged.shutdown_policy,
+        Some(instance::InstanceShutdownPolicy::HardOff)
+    );
+
+    // test that hard-off is still sent for a force stop; that is, the
+    // 'None' shutdown policy in the update request didn't reset it to
+    // the default 600-second powerbutton configuration that it would've
+    // in an instance create request.
+    expect_instance_stop_ok(client, instance_name, true).await;
+    assert_matches::assert_matches!(
+        mock_get_last_state_requested(propolis_addr).await,
+        propolis_client::types::InstanceStateChange {
+            acpi_timeout_secs: None,
+            state: PropolisStateRequested::Stop
+        }
+    );
+}
+
+// TODO test acpi reboots too
