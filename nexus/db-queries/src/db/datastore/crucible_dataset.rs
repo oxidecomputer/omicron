@@ -303,7 +303,6 @@ mod test {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
-    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
 
@@ -329,7 +328,7 @@ mod test {
                 reservoir_size: (16 << 30).try_into().unwrap(),
                 cpu_family: SledCpuFamily::AmdMilan,
             },
-            RackUuid::new_v4(),
+            nexus_test_utils::RACK_UUID,
             Generation::new(),
         );
         datastore.sled_upsert(sled).await.expect("failed to upsert sled");

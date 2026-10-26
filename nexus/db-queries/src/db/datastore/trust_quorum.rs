@@ -2463,7 +2463,7 @@ mod tests {
         use nexus_db_schema::schema::sled::dsl as sled_dsl;
 
         let hw_ids = insert_hw_baseboard_ids(&db).await;
-        let rack_id = RackUuid::new_v4();
+        let rack_id = nexus_test_utils::RACK_UUID;
         let members: BTreeSet<_> =
             hw_ids.iter().cloned().map(BaseboardId::from).collect();
         let coordinator = members.first().unwrap().clone();
@@ -2531,12 +2531,11 @@ mod tests {
 
         // A sled for the right baseboard but on a different rack does not
         // count as present.
-        let sled9 = insert_sled_for_baseboard(
-            datastore,
-            RackUuid::new_v4(),
-            &hw_ids[9],
-        )
-        .await;
+        let other_rack_id = RackUuid::new_v4();
+        datastore.load_builtin_rack_data(opctx, other_rack_id).await.unwrap();
+        let sled9 =
+            insert_sled_for_baseboard(datastore, other_rack_id, &hw_ids[9])
+                .await;
         assert_eq!(missing_members().await, expected);
 
         // Prepare for next test: reset sleds 0 and 1 to their prior states

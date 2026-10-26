@@ -259,7 +259,6 @@ mod test {
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
-    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use oxide_update_engine_types::buffer::{CompletionReason, TerminalKind};
@@ -403,7 +402,7 @@ mod test {
 
         let sled_id1 = SledUuid::new_v4();
         let sled_id2 = SledUuid::new_v4();
-        let rack_id = RackUuid::new_v4();
+        let rack_id = nexus_test_utils::RACK_UUID;
         for (i, (sled_id, server)) in
             [(sled_id1, &s1), (sled_id2, &s2)].iter().enumerate()
         {

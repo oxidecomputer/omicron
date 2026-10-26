@@ -55,6 +55,7 @@ use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -1074,8 +1075,9 @@ impl DataStore {
     ///
     /// Returns the sled, and whether or not it was updated on success.
     ///
-    /// Returns an error if `sled_agent_gen` is stale, or the sled is
-    /// decommissioned.
+    /// Returns an error if `sled_agent_gen` is stale, the sled is
+    /// decommissioned, or the `rack_id` for the given sled is not yet present
+    /// in the `rack table`.
     pub async fn sled_upsert(
         &self,
         sled_update: SledUpdate,
@@ -1084,33 +1086,68 @@ impl DataStore {
         // required for conditional upsert
         use diesel::query_dsl::methods::FilterDsl;
 
+        let err = OptionalError::new();
+        let conn = self.pool_connection_unauthorized().await?;
+
         let insertable_sled = sled_update.clone().into_insertable();
         let now = insertable_sled.time_modified();
 
-        let sled = diesel::insert_into(dsl::sled)
-            .values(insertable_sled)
-            .on_conflict(dsl::id)
-            .do_update()
-            .set((
-                dsl::time_modified.eq(now),
-                dsl::ip.eq(sled_update.ip),
-                dsl::port.eq(sled_update.port),
-                dsl::repo_depot_port.eq(sled_update.repo_depot_port),
-                dsl::rack_id.eq(sled_update.rack_id),
-                dsl::is_scrimlet.eq(sled_update.is_scrimlet()),
-                dsl::usable_hardware_threads
-                    .eq(sled_update.usable_hardware_threads),
-                dsl::usable_physical_ram.eq(sled_update.usable_physical_ram),
-                dsl::reservoir_size.eq(sled_update.reservoir_size),
-                dsl::cpu_family.eq(sled_update.cpu_family),
-                dsl::sled_agent_gen.eq(sled_update.sled_agent_gen),
-            ))
-            .filter(dsl::sled_agent_gen.lt(sled_update.sled_agent_gen))
-            .filter(dsl::sled_state.ne(SledState::Decommissioned))
-            .returning(Sled::as_returning())
-            .get_result_async(&*self.pool_connection_unauthorized().await?)
+        let sled = self
+            .transaction_retry_wrapper("sled_upsert")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let sled_update = sled_update.clone();
+                let insertable_sled = insertable_sled.clone();
+
+                async move {
+                    if !Self::rack_exists_on_connection(
+                        &conn,
+                        sled_update.rack_id,
+                    )
+                    .await?
+                    {
+                        return Err(err.bail(Error::ObjectNotFound {
+                            type_name: ResourceType::Rack,
+                            lookup_type: LookupType::ById(
+                                sled_update.rack_id.into_untyped_uuid(),
+                            ),
+                        }));
+                    }
+
+                    diesel::insert_into(dsl::sled)
+                        .values(insertable_sled)
+                        .on_conflict(dsl::id)
+                        .do_update()
+                        .set((
+                            dsl::time_modified.eq(now),
+                            dsl::ip.eq(sled_update.ip),
+                            dsl::port.eq(sled_update.port),
+                            dsl::repo_depot_port
+                                .eq(sled_update.repo_depot_port),
+                            dsl::rack_id.eq(sled_update.rack_id),
+                            dsl::is_scrimlet.eq(sled_update.is_scrimlet()),
+                            dsl::usable_hardware_threads
+                                .eq(sled_update.usable_hardware_threads),
+                            dsl::usable_physical_ram
+                                .eq(sled_update.usable_physical_ram),
+                            dsl::reservoir_size.eq(sled_update.reservoir_size),
+                            dsl::cpu_family.eq(sled_update.cpu_family),
+                            dsl::sled_agent_gen.eq(sled_update.sled_agent_gen),
+                        ))
+                        .filter(
+                            dsl::sled_agent_gen.lt(sled_update.sled_agent_gen),
+                        )
+                        .filter(dsl::sled_state.ne(SledState::Decommissioned))
+                        .returning(Sled::as_returning())
+                        .get_result_async(&conn)
+                        .await
+                }
+            })
             .await
             .map_err(|e| {
+                if let Some(err) = err.take() {
+                    return err;
+                }
                 public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
@@ -1124,6 +1161,19 @@ impl DataStore {
         // reading from the database causes us to lose precision.
         let was_modified = now.timestamp() == sled.time_modified().timestamp();
         Ok((sled, was_modified))
+    }
+
+    async fn rack_exists_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        rack_id: DbTypedUuid<RackKind>,
+    ) -> Result<bool, diesel::result::Error> {
+        use nexus_db_schema::schema::rack::dsl;
+
+        diesel::select(diesel::dsl::exists(
+            dsl::rack.filter(dsl::id.eq(rack_id.into_untyped_uuid())),
+        ))
+        .get_result_async::<bool>(conn)
+        .await
     }
 
     /// Returns true if a sled exists and is in-service, false if not.
@@ -2528,6 +2578,46 @@ pub(in crate::db::datastore) mod test {
             .expect("Could not upsert sled during test prep");
         assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
         assert_eq!(observed_sled.sled_agent_gen, sled_update.sled_agent_gen);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn upsert_sled_fails_if_rack_does_not_exist() {
+        let logctx =
+            dev::test_setup_log("upsert_sled_fails_if_rack_does_not_exist");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let missing_rack_id = RackUuid::new_v4();
+        let sled_update =
+            SledUpdateBuilder::new().rack_id(missing_rack_id).build();
+        let sled_id = sled_update.id();
+
+        let err = datastore
+            .sled_upsert(sled_update)
+            .await
+            .expect_err("upsert should fail when the rack row is absent");
+        match err {
+            Error::ObjectNotFound { type_name, lookup_type } => {
+                assert_eq!(type_name, ResourceType::Rack);
+                assert_eq!(
+                    lookup_type,
+                    LookupType::ById(missing_rack_id.into_untyped_uuid())
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+
+        let sleds = datastore
+            .sled_list_all_batched(opctx, SledFilter::All)
+            .await
+            .unwrap();
+        assert!(
+            !sleds.iter().any(|s| s.id() == sled_id),
+            "sled should not have been written"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -5001,7 +5091,7 @@ pub(in crate::db::datastore) mod test {
                     reservoir_size: (56 << 30).try_into().unwrap(),
                     cpu_family: db::model::SledCpuFamily::AmdMilan,
                 },
-                RackUuid::new_v4(),
+                nexus_test_utils::RACK_UUID,
                 Generation::new(),
             );
 

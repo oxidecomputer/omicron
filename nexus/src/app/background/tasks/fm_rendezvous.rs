@@ -1926,7 +1926,6 @@ mod tests {
         use omicron_uuid_kinds::BlueprintUuid;
         use omicron_uuid_kinds::DatasetUuid;
         use omicron_uuid_kinds::PhysicalDiskUuid;
-        use omicron_uuid_kinds::RackUuid;
         use omicron_uuid_kinds::SledUuid;
         use omicron_uuid_kinds::ZpoolUuid;
 
@@ -1947,7 +1946,7 @@ mod tests {
                 reservoir_size: ByteCount::from(0).into(),
                 cpu_family: SledCpuFamily::AmdMilan,
             },
-            RackUuid::new_v4(),
+            nexus_test_utils::RACK_UUID,
             Generation::new(),
         );
         datastore.sled_upsert(sled).await.unwrap();
