@@ -1389,9 +1389,7 @@ pub mod fm_analysis {
         SupportBundleMarkers,
     }
 
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
-    )]
+    #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
     pub struct PreparationStepStatus {
         pub step: PreparationStep,
         /// How long each input-loading step took to complete, whether it
