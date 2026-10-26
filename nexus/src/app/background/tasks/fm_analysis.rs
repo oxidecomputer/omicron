@@ -266,12 +266,9 @@ impl FmAnalysis {
         };
 
         // Load analysis inputs from the database.
-        let mut prep_status = status::PreparationStatus::default();
-        let prep_started = Instant::now();
-        let prepared =
-            self.prepare_inputs(&opctx, builder, &mut prep_status).await;
-        prep_status.total_duration = prep_started.elapsed();
-        let (inputs, input_report) = match prepared {
+        let PreparationResult { prep_status, prep_result } =
+            self.prepare_inputs(&opctx, builder).await;
+        let (inputs, input_report) = match prep_result {
             Ok(prepared) => prepared,
             Err(failure) => {
                 // Each failure has already been logged where it occurred.
@@ -330,8 +327,8 @@ impl FmAnalysis {
         &self,
         opctx: &OpContext,
         mut builder: fm::analysis_input::Builder,
-        prep_status: &mut status::PreparationStatus,
-    ) -> Result<(Input, InputReport), status::PreparationFailure> {
+    ) -> PreparationResult {
+        let started = Instant::now();
         // Dropping this `JoinMap` aborts any tasks still running in it.
         let mut steps = JoinMap::new();
 
@@ -357,11 +354,11 @@ impl FmAnalysis {
         }
 
         let mut step_errors = BTreeMap::new();
+        let mut step_status = IdOrdMap::new();
         while let Some((step, result)) = steps.join_next().await {
             let result = match result {
                 Ok(StepOutput { status, result }) => {
-                    prep_status
-                        .steps
+                    step_status
                         .insert_unique(status)
                         .expect("exactly one step is spawned for each input");
                     result
@@ -418,28 +415,51 @@ impl FmAnalysis {
                 }
             }
         }
+
         if !step_errors.is_empty() {
-            return Err(status::PreparationFailure::StepsFailed(step_errors));
+            return PreparationResult {
+                prep_status: status::PreparationStatus {
+                    total_duration: started.elapsed(),
+                    steps: step_status,
+                },
+                prep_result: Err(status::PreparationFailure::StepsFailed(
+                    step_errors,
+                )),
+            };
         }
 
-        let (input, report) = builder.build().map_err(|err| {
-            // A missing input is a bug in this task: every step which
-            // succeeded must have provided its input to the builder.
-            let error = InlineErrorChain::new(&err);
-            slog::error!(
-                opctx.log,
-                "fault management analysis preparation failed";
-                &error,
-            );
-            status::PreparationFailure::InvalidInputs(error.to_string())
-        })?;
+        let (input, report) = match builder.build() {
+            Ok(built) => built,
+            Err(err) => {
+                // A missing input is a bug in this task, since every step which
+                // succeeded must have provided its input to the builder by this
+                // point.
+                let error = InlineErrorChain::new(&err);
+                slog::error!(
+                    opctx.log,
+                    "fault management analysis preparation failed";
+                    &error,
+                );
+                return PreparationResult {
+                    prep_status: status::PreparationStatus {
+                        total_duration: started.elapsed(),
+                        steps: step_status,
+                    },
+                    prep_result: Err(
+                        status::PreparationFailure::InvalidInputs(
+                            error.to_string(),
+                        ),
+                    ),
+                };
+            }
+        };
 
         // The builder checks ereports' restart IDs only once both ereports and
         // restarts are loaded; report any unknown ones as warnings from the
         // step which loaded the ereports.
         if !report.unknown_restart_ereport_ids.is_empty() {
             let mut ereports_step =
-                prep_status.steps.get_mut(&PreparationStep::Ereports).expect(
+                step_status.get_mut(&PreparationStep::Ereports).expect(
                     "every step succeeded, so every step has a status entry",
                 );
             for id in &report.unknown_restart_ereport_ids {
@@ -452,8 +472,19 @@ impl FmAnalysis {
             }
         }
 
-        Ok((input, report))
+        PreparationResult {
+            prep_status: status::PreparationStatus {
+                total_duration: started.elapsed(),
+                steps: step_status,
+            },
+            prep_result: Ok((input, report)),
+        }
     }
+}
+
+struct PreparationResult {
+    prep_status: status::PreparationStatus,
+    prep_result: Result<(Input, InputReport), status::PreparationFailure>,
 }
 
 /// Loads analysis inputs from the database.
@@ -1570,21 +1601,20 @@ mod tests {
             OmicronZoneUuid::new_v4(),
         );
 
-        let builder = Input::builder(Some(parent.clone()), inv)
+        let builder = Input::builder(Some(parent), inv)
             .expect("parent sitrep was produced from this inventory")
             .config(FmConfig::default());
-        let mut prep = status::PreparationStatus::default();
-        let (input, report) = task
-            .prepare_inputs(opctx, builder, Some(parent), &mut prep)
-            .await
-            .expect("input preparation should succeed");
+        let PreparationResult { prep_status, prep_result } =
+            task.prepare_inputs(opctx, builder).await;
+        let (input, report) =
+            prep_result.expect("input preparation should succeed");
         // Every input-loading step ran and recorded its status, without
         // warnings.
         assert_eq!(
-            prep.steps.iter().map(|s| s.step).collect::<Vec<_>>(),
+            prep_status.steps.iter().map(|s| s.step).collect::<Vec<_>>(),
             status::PreparationStep::iter().collect::<Vec<_>>(),
         );
-        for step in &prep.steps {
+        for step in &prep_status.steps {
             assert!(
                 step.warnings.is_empty(),
                 "unexpected warnings from step {}: {:?}",

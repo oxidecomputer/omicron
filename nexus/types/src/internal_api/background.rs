@@ -1347,7 +1347,7 @@ pub mod fm_analysis {
     use std::num::{NonZeroU32, NonZeroU64};
     use std::time::Duration;
 
-    #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub struct PreparationStatus {
         /// The total duration of this preparation phase.
         pub total_duration: Duration,
