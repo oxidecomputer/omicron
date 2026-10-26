@@ -262,6 +262,13 @@ pub struct Builder {
 }
 
 impl Builder {
+    /// Borrows the parent sitrep passed to this builder when it was
+    /// constructed, or `None` if we are constructing the inputs to the first
+    /// sitrep.
+    pub fn parent_sitrep(&self) -> Option<&CurrentSitrep> {
+        self.parent_sitrep.as_ref()
+    }
+
     /// Adds a set of ereports which have not been marked as "seen" in the
     /// database to the inputs under construction.
     ///

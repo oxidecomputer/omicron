@@ -268,9 +268,8 @@ impl FmAnalysis {
         // Load analysis inputs from the database.
         let mut prep_status = status::PreparationStatus::default();
         let prep_started = Instant::now();
-        let prepared = self
-            .prepare_inputs(&opctx, builder, parent_sitrep, &mut prep_status)
-            .await;
+        let prepared =
+            self.prepare_inputs(&opctx, builder, &mut prep_status).await;
         prep_status.total_duration = prep_started.elapsed();
         let (inputs, input_report) = match prepared {
             Ok(prepared) => prepared,
@@ -331,7 +330,6 @@ impl FmAnalysis {
         &self,
         opctx: &OpContext,
         mut builder: fm::analysis_input::Builder,
-        parent_sitrep: Option<CurrentSitrep>,
         prep_status: &mut status::PreparationStatus,
     ) -> Result<(Input, InputReport), status::PreparationFailure> {
         // Dropping this `JoinMap` aborts any tasks still running in it.
@@ -351,7 +349,7 @@ impl FmAnalysis {
                 "input".to_string(),
                 step.to_string(),
             )]));
-            let parent_sitrep = parent_sitrep.clone();
+            let parent_sitrep = builder.parent_sitrep().cloned();
             steps.spawn(step, async move {
                 let parent = parent_sitrep.as_ref().map(|s| &s.1);
                 loader.run_step(step, &opctx, parent).await
