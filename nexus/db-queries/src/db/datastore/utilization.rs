@@ -86,15 +86,11 @@ impl DataStore {
         use nexus_db_schema::schema::project_utilization::dsl;
         paginated(dsl::project_utilization, dsl::project_id, pagparams)
             .select(ProjectUtilization::as_select())
-            // Match filtering logic from `silo_utilization_list` so that we
-            // include projects whose parent silos appear in that list.
-            .filter(
-                dsl::silo_discoverable
-                    .eq(true)
-                    .or(dsl::silo_cpus_allocated.gt(0))
-                    .or(dsl::silo_memory_allocated.gt(0))
-                    .or(dsl::silo_storage_allocated.gt(0)),
-            )
+            // Note: to match `silo_utilization_list`, we limit to projects that
+            // belong to silos that are either discoverable or set at least one
+            // nonzero resource quota. This logic lives in the
+            // `project_utilization` view, and doesn't need to be recapitulated
+            // here.
             .filter(dsl::silo_id.ne(DEFAULT_SILO_ID))
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
