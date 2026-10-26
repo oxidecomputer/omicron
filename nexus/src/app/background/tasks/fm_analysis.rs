@@ -33,6 +33,7 @@ use nexus_types::fm::FmConfigView;
 use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::fm_analysis as status;
+use nexus_types::internal_api::background::fm_analysis::PreparationStep;
 use nexus_types::inventory;
 use nexus_types::observed_certificate::ObservedCertificate;
 use nexus_types::observed_certificate::ObservedSiloCertificates;
@@ -320,7 +321,7 @@ impl FmAnalysis {
     /// that the steps' queries execute concurrently. Every step runs to
     /// completion even if another fails, so that all failures are reported
     /// together. As each step completes, successfully or otherwise, its status
-    /// recorded in `prep_status`.
+    /// is recorded in `prep_status`.
     ///
     /// # Cancel safety
     ///
@@ -333,11 +334,9 @@ impl FmAnalysis {
         parent_sitrep: Option<CurrentSitrep>,
         prep_status: &mut status::PreparationStatus,
     ) -> Result<(Input, InputReport), status::PreparationFailure> {
-        use status::PreparationStep as Step;
-
         // Dropping this `JoinMap` aborts any tasks still running in it.
         let mut steps = JoinMap::new();
-        for step in Step::iter() {
+        for step in PreparationStep::iter() {
             let loader = InputLoader { datastore: self.datastore.clone() };
             let opctx = opctx.child(BTreeMap::from([(
                 "input".to_string(),
@@ -452,53 +451,52 @@ impl FmAnalysis {
 
 /// Loads analysis inputs from the database.
 ///
-/// This is separate from [`FmAnalysis`] so that each input-loading step can
-/// own the state it needs, and run on its own task.
+/// This is separate from [`FmAnalysis`] so that each input-loading step need
+/// not clone the entire eanalysis task state when spawning tasks to load
+/// inputs.. Presently, this only requires a reference to the [`DataStore`].
 struct InputLoader {
     datastore: Arc<DataStore>,
 }
 
 impl InputLoader {
-    /// Runs the step which loads the `kind` input.
+    /// Runs the provided [`PreparationStep`] and returns its [`StepOutput`].
     async fn run_step(
         &self,
-        step: status::PreparationStep,
+        step: PreparationStep,
         opctx: &OpContext,
         parent_sitrep: Option<&nexus_types::fm::Sitrep>,
     ) -> StepOutput {
-        use status::PreparationStep as Kind;
-
         let started = Instant::now();
         let mut warnings = Vec::new();
         let result = match step {
-            Kind::InServiceDisks => self
+            PreparationStep::InServiceDisks => self
                 .load_in_service_disks(opctx, &mut warnings)
                 .await
                 .map(LoadedInput::InServiceDisks),
-            Kind::ObservedSagas => self
+            PreparationStep::ObservedSagas => self
                 .prepare_observed_sagas(opctx)
                 .await
                 .map(LoadedInput::ObservedSagas),
-            Kind::SiloCertificates => self
+            PreparationStep::SiloCertificates => self
                 .load_silo_certificates(opctx, &mut warnings)
                 .await
                 .map(LoadedInput::SiloCertificates),
-            Kind::EreporterRestarts => self
+            PreparationStep::EreporterRestarts => self
                 .load_ereporter_restarts(opctx)
                 .await
                 .context("failed to load ereporter restarts")
                 .map(LoadedInput::EreporterRestarts),
-            Kind::Ereports => self
+            PreparationStep::Ereports => self
                 .load_new_ereports(opctx, &mut warnings)
                 .await
                 .context("failed to load new ereports")
                 .map(LoadedInput::Ereports),
-            Kind::AlertMarkers => self
+            PreparationStep::AlertMarkers => self
                 .load_existing_alert_markers(opctx, parent_sitrep)
                 .await
                 .context("failed to load existing alert markers")
                 .map(LoadedInput::AlertMarkers),
-            Kind::SupportBundleMarkers => self
+            PreparationStep::SupportBundleMarkers => self
                 .load_existing_support_bundle_markers(opctx, parent_sitrep)
                 .await
                 .context("failed to load existing support bundle markers")
