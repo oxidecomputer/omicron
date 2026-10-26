@@ -4,7 +4,6 @@
 
 use crate::app::background::Activator;
 use crate::app::background::BackgroundTask;
-use crate::app::background::tasks::fm_sitrep_load::CurrentSitrep;
 use crate::app::external_endpoints::TlsCertificate;
 use anyhow::Context;
 use chrono::Utc;
@@ -27,6 +26,7 @@ use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_fm as fm;
+use nexus_types::fm::CurrentSitrep;
 use nexus_types::fm::FmConfig;
 use nexus_types::fm::FmConfigSource;
 use nexus_types::fm::FmConfigView;

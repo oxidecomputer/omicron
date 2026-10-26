@@ -136,7 +136,6 @@ tufaceous-artifact.workspace = true
 url.workspace = true
 usdt.workspace = true
 uuid.workspace = true
-
 nexus-auth.workspace = true
 nexus-defaults.workspace = true
 nexus-db-lookup.workspace = true

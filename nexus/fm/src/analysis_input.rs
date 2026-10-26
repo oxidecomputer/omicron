@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
 use nexus_db_model::EreporterRestart;
 use nexus_types::fm::analysis_reports::ClosedCaseReport;
-use nexus_types::fm::{self, FmConfig, Sitrep, SitrepVersion};
+use nexus_types::fm::{self, CurrentSitrep, FmConfig, Sitrep};
 use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::inventory;
 use nexus_types::observed_certificate::ObservedSiloCertificates;
@@ -40,7 +40,7 @@ pub use nexus_types::fm::analysis_reports::InputReport as Report;
 /// [`Input::builder`].
 #[derive(Debug)]
 pub struct Input {
-    parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
+    parent_sitrep: Option<CurrentSitrep>,
     inv: Arc<inventory::Collection>,
     /// Ereports which are new and should be input to analysis in the next
     /// sitrep.
@@ -162,7 +162,7 @@ impl Input {
     /// parent sitrep's, and did not start recently enough to be considered
     /// newer than the parent sitrep's inventory.
     pub fn builder(
-        parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
+        parent_sitrep: Option<CurrentSitrep>,
         inv: Arc<inventory::Collection>,
     ) -> Result<Builder, InventoryStale> {
         // Before preparing analysis inputs, check that the proposed input
@@ -210,7 +210,7 @@ pub struct MissingInput {
 
 #[must_use]
 pub struct Builder {
-    parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
+    parent_sitrep: Option<CurrentSitrep>,
     inv: Arc<inventory::Collection>,
     // The queried input collections. Each is required: `build()` fails on
     // any still-`None` input, so a caller cannot forget one and silently

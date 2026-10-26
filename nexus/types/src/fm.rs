@@ -37,6 +37,8 @@ use omicron_uuid_kinds::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+pub type CurrentSitrep = Arc<(SitrepVersion, Sitrep)>;
+
 /// A fault management situation report, or _sitrep_.
 ///
 /// The sitrep is a data structure that represents a snapshot of the state of
