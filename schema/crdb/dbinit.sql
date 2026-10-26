@@ -1294,6 +1294,32 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_project_by_silo ON omicron.public.proje
 ) WHERE
     time_deleted IS NULL;
 
+/**
+ * A view of the amount of provisioned resources on a given project.
+ */
+CREATE VIEW IF NOT EXISTS omicron.public.project_utilization
+AS SELECT
+    p.id AS project_id,
+    s.silo_id AS silo_id,
+    c.cpus_provisioned AS cpus_provisioned,
+    c.ram_provisioned AS memory_provisioned,
+    c.virtual_disk_bytes_provisioned AS storage_provisioned
+FROM
+    omicron.public.virtual_provisioning_collection AS c
+    INNER JOIN omicron.public.project AS p
+    ON c.id = p.id
+    INNER JOIN omicron.public.silo_utilization AS s
+    ON p.silo_id = s.silo_id
+WHERE
+    c.collection_type = 'Project'
+    AND (
+        s.silo_discoverable IS TRUE
+            OR s.cpus_allocated > 0
+            OR s.memory_allocated > 0
+            OR s.storage_allocated > 0
+    )
+    AND p.time_deleted IS NULL;
+
 /*
  * Instances
  */
@@ -9800,33 +9826,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.unadopted_sled (
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_unadopted_sled_by_id ON omicron.public.unadopted_sled (
     id
 ) WHERE time_deleted IS NULL;
-
-/**
- * A view of the amount of provisioned resources on a given project.
- */
-CREATE VIEW IF NOT EXISTS omicron.public.project_utilization
-AS SELECT
-    p.id AS project_id,
-    p.name AS project_name,
-    s.silo_id AS silo_id,
-    s.silo_name AS silo_name,
-    s.cpus_allocated AS silo_cpus_allocated,
-    s.memory_allocated AS silo_memory_allocated,
-    s.storage_allocated AS silo_storage_allocated,
-    c.cpus_provisioned AS cpus_provisioned,
-    c.ram_provisioned AS memory_provisioned,
-    c.virtual_disk_bytes_provisioned AS storage_provisioned,
-    s.silo_discoverable as silo_discoverable
-FROM
-    omicron.public.virtual_provisioning_collection AS c
-    INNER JOIN omicron.public.project AS p
-    ON c.id = p.id
-    INNER JOIN omicron.public.silo_utilization AS s
-    ON p.silo_id = s.silo_id
-WHERE
-    c.collection_type = 'Project'
-AND
-    p.time_deleted IS NULL;
 
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.

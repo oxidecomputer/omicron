@@ -2299,7 +2299,8 @@ fn print_task_capacity_metrics(details: &serde_json::Value) {
             "warning: failed to interpret task details: {error:?}: {details:?}",
         ),
         Ok(status) => {
-            println!("    samples queued: {}", status.samples_queued);
+            println!("    silo samples: {}", status.silo_samples);
+            println!("    project samples: {}", status.project_samples);
         }
     }
 }

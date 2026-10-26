@@ -576,13 +576,7 @@ table! {
 table! {
     project_utilization(project_id) {
         project_id -> Uuid,
-        project_name -> Text,
         silo_id -> Uuid,
-        silo_name -> Text,
-        silo_discoverable -> Bool,
-        silo_cpus_allocated -> Int8,
-        silo_memory_allocated -> Int8,
-        silo_storage_allocated -> Int8,
         cpus_provisioned -> Int8,
         memory_provisioned -> Int8,
         storage_provisioned -> Int8,

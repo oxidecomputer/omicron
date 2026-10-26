@@ -2,25 +2,21 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Background task that collects and emits silo quota metrics:
-//!
-//! * silo_quota:{memory,cpu,virtual_storage}_capacity: resource limits set on
-//!   the silo.
-//! * silo_quota:{memory,cpu,virtual_storage}_provisioned: resources charged
-//!   against the silo.
+//! Background task that collects and emits quota metrics, as described in
+//! silo-quota.toml and project-quota.toml.
 //!
 //! Note: because background tasks run on each Nexus instance, these metrics are
 //! emitted once for each Nexus--as of this writing, in triplicate. Callers
 //! should take the mean or maximum datum value over Nexus instance IDs to
 //! deduplicate.
 //!
-//! Note: the `silo_quota` metrics are related to, but distinct from, the
-//! `collection_target` metric. The `silo_quota` metrics are emitted on a regular
-//! interval, and labeled by silo ID. Meanwhile, `collection_target` is currently
-//! emitted only when silo utilization changes, resulting in a sparse timeseries,
-//! and only covers utilization. Users who wish to show quota utilization ratios
-//! (i.e. utilization divided by capacity), or who require regular timeseries,
-//! should use the `silo_quota` metrics.
+//! Note: the `silo_quota` and `project_quota` metrics are related to, but
+//! distinct from, the `collection_target` metric. The quota metrics are emitted
+//! on a regular interval, and labeled by silo or project ID. Meanwhile,
+//! `collection_target` is currently emitted only when silo utilization changes,
+//! resulting in a sparse timeseries, and only covers utilization. Users who
+//! wish to show quota utilization ratios (i.e. utilization divided by
+//! capacity), or who require regular timeseries, should use the quota metrics.
 
 use crate::app::background::BackgroundTask;
 use dropshot::PaginationOrder;
@@ -39,6 +35,7 @@ use oximeter::Sample;
 use oximeter::queue::BoundedQueue;
 use oximeter::types::ProducerRegistry;
 use std::sync::{Arc, Mutex};
+use uuid::Uuid;
 
 oximeter::use_timeseries!("silo-quota.toml");
 oximeter::use_timeseries!("project-quota.toml");
@@ -69,27 +66,58 @@ impl CapacityMetrics {
         &self,
         opctx: &OpContext,
         nexus_id: OmicronZoneUuid,
-    ) -> anyhow::Result<usize> {
+    ) -> CapacityMetricsStatus {
         let now = chrono::Utc::now();
         let nexus_id = nexus_id.into_untyped_uuid();
 
+        let mut status =
+            CapacityMetricsStatus { silo_samples: 0, project_samples: 0 };
+
+        match self.fetch_silo_samples(opctx, nexus_id, now).await {
+            Ok(samples) => {
+                status.silo_samples = samples.len();
+                self.enqueue_samples(opctx, samples);
+            }
+            Err(error) => {
+                slog::warn!(opctx.log, "failed to collect silo metrics"; "error" => format!("{error:#}"));
+            }
+        };
+        match self.fetch_project_samples(opctx, nexus_id, now).await {
+            Ok(samples) => {
+                status.project_samples = samples.len();
+                self.enqueue_samples(opctx, samples);
+            }
+            Err(error) => {
+                slog::warn!(opctx.log, "failed to collect project metrics"; "error" => format!("{error:#}"));
+            }
+        };
+
+        status
+    }
+
+    async fn fetch_silo_samples(
+        &self,
+        opctx: &OpContext,
+        nexus_id: Uuid,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> anyhow::Result<Vec<Sample>> {
         let mut samples = Vec::<Sample>::new();
 
-        let mut silo_paginator =
+        let mut paginator =
             Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Ascending);
-        while let Some(p) = silo_paginator.next() {
-            let silo_utils = self
+        while let Some(p) = paginator.next() {
+            let utils = self
                 .datastore
                 .silo_utilization_list(
                     opctx,
                     &PaginatedBy::Id(p.current_pagparams()),
                 )
                 .await?;
-            silo_paginator = p.found_batch(&silo_utils, &|util| {
+            paginator = p.found_batch(&utils, &|util| {
                 util.silo_id().into_untyped_uuid()
             });
 
-            for util in silo_utils {
+            for util in utils {
                 let target = SiloQuota {
                     silo_id: util.silo_id().into_untyped_uuid(),
                     nexus_id,
@@ -112,20 +140,6 @@ impl CapacityMetrics {
                     Sample::new_with_timestamp(
                         now,
                         &target,
-                        &silo_quota::CpuCapacity {
-                            datum: u64::try_from(util.cpus_allocated)?,
-                        },
-                    )?,
-                    Sample::new_with_timestamp(
-                        now,
-                        &target,
-                        &silo_quota::CpuProvisioned {
-                            datum: u64::try_from(util.cpus_provisioned)?,
-                        },
-                    )?,
-                    Sample::new_with_timestamp(
-                        now,
-                        &target,
                         &silo_quota::VirtualStorageCapacity {
                             datum: util.storage_allocated.to_bytes(),
                         },
@@ -138,20 +152,60 @@ impl CapacityMetrics {
                         },
                     )?,
                 ]);
+
+                match u64::try_from(util.cpus_allocated) {
+                    Ok(datum) => samples.push(Sample::new_with_timestamp(
+                        now,
+                        &target,
+                        &silo_quota::CpuCapacity { datum },
+                    )?),
+                    Err(error) => slog::warn!(
+                        opctx.log,
+                        "invalid CPU count; skipping metric sample";
+                        "silo_id" => %util.silo_id,
+                        "value" => util.cpus_allocated,
+                        "error" => %error,
+                    ),
+                }
+
+                match u64::try_from(util.cpus_provisioned) {
+                    Ok(datum) => samples.push(Sample::new_with_timestamp(
+                        now,
+                        &target,
+                        &silo_quota::CpuProvisioned { datum },
+                    )?),
+                    Err(error) => slog::warn!(
+                        opctx.log,
+                        "invalid CPU count; skipping metric sample";
+                        "silo_id" => %util.silo_id,
+                        "value" => util.cpus_provisioned,
+                        "error" => %error,
+                    ),
+                }
             }
         }
 
-        let mut project_paginator =
+        Ok(samples)
+    }
+
+    async fn fetch_project_samples(
+        &self,
+        opctx: &OpContext,
+        nexus_id: Uuid,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> anyhow::Result<Vec<Sample>> {
+        let mut samples = Vec::<Sample>::new();
+
+        let mut paginator =
             Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Ascending);
-        while let Some(p) = project_paginator.next() {
-            let project_utils = self
+        while let Some(p) = paginator.next() {
+            let utils = self
                 .datastore
                 .project_utilization_list(opctx, &p.current_pagparams())
                 .await?;
-            project_paginator =
-                p.found_batch(&project_utils, &|util| util.project_id);
+            paginator = p.found_batch(&utils, &|util| util.project_id);
 
-            for util in project_utils {
+            for util in utils {
                 let target = ProjectQuota {
                     project_id: util.project_id,
                     silo_id: util.silo_id,
@@ -168,21 +222,33 @@ impl CapacityMetrics {
                     Sample::new_with_timestamp(
                         now,
                         &target,
-                        &project_quota::CpuProvisioned {
-                            datum: u64::try_from(util.cpus_provisioned)?,
-                        },
-                    )?,
-                    Sample::new_with_timestamp(
-                        now,
-                        &target,
                         &project_quota::VirtualStorageProvisioned {
                             datum: util.storage_provisioned.to_bytes(),
                         },
                     )?,
                 ]);
+
+                match u64::try_from(util.cpus_provisioned) {
+                    Ok(datum) => samples.push(Sample::new_with_timestamp(
+                        now,
+                        &target,
+                        &project_quota::CpuProvisioned { datum },
+                    )?),
+                    Err(error) => slog::warn!(
+                        opctx.log,
+                        "invalid CPU count; skipping metric sample";
+                        "project_id" => %util.project_id,
+                        "value" => util.cpus_provisioned,
+                        "error" => %error,
+                    ),
+                }
             }
         }
 
+        Ok(samples)
+    }
+
+    fn enqueue_samples(&self, opctx: &OpContext, samples: Vec<Sample>) {
         let mut metrics = self.metrics.lock().unwrap();
         let n_new_samples = samples.len();
         let n_current_samples = metrics.len();
@@ -196,8 +262,6 @@ impl CapacityMetrics {
                 "n_dropped_samples" => n_dropped_samples,
             );
         }
-
-        Ok(n_new_samples.min(QUEUE_SIZE))
     }
 }
 
@@ -207,16 +271,8 @@ impl BackgroundTask for CapacityMetrics {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async move {
-            match self.fetch_samples(opctx, self.nexus_id).await {
-                Ok(sample_count) => {
-                    serde_json::json!(CapacityMetricsStatus {
-                        samples_queued: sample_count,
-                    })
-                }
-                Err(error) => {
-                    serde_json::json!({"error": format!("{error:#}")})
-                }
-            }
+            let status = self.fetch_samples(opctx, self.nexus_id).await;
+            serde_json::json!(status)
         }
         .boxed()
     }
@@ -390,7 +446,10 @@ mod tests {
 
         assert_eq!(
             task.activate(&opctx).await,
-            serde_json::json!({"samples_queued": 15}),
+            serde_json::json!({
+                "silo_samples": 12,
+                "project_samples": 3,
+            }),
         );
         let samples = collect_samples(&registry);
         assert_eq!(samples.len(), 15);
