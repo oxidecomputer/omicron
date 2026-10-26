@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026101500.0.0"
+    "version": "2026102100.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -30341,7 +30341,7 @@
             "x-rust-type": {
               "crate": "byte-wrapper",
               "path": "byte_wrapper::HexArray::<32>",
-              "version": "0.1.0"
+              "version": "0.2.0"
             },
             "type": "string",
             "pattern": "^[0-9a-fA-F]{64}$",

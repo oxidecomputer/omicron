@@ -30,11 +30,13 @@ use nexus_types::fm::ereport::EreportFilters;
 use nexus_types::support_bundle::BundleDataCategory;
 use nexus_types::support_bundle::BundleDataSelection;
 use nexus_types::support_bundle::BundleTimeRange;
+use nexus_types::support_bundle::SupportBundleSizeLimit;
 use omicron_uuid_kinds::SupportBundleUuid;
 use std::io::Write;
 use std::sync::Arc;
 use support_bundle_collection::BundleCollection;
 use support_bundle_collection::BundleInfo;
+use support_bundle_collection::SIZE_LIMIT_EXCEEDED_FILE;
 use support_bundle_collection::zip::bundle_to_stream;
 use support_bundle_collection::zip::bundle_to_writer;
 
@@ -90,6 +92,13 @@ struct CollectArgs {
     /// that span this bound are included in full.
     #[clap(long, value_parser = humantime::parse_duration)]
     until: Option<std::time::Duration>,
+
+    /// Stop collecting once the bundle reaches this size.
+    ///
+    /// The size limit may be specified either as a number of bytes, or as a
+    /// number with a power-of-two unit suffix, such as "1024MiB" or "8 GiB".
+    #[clap(long, default_value_t = SupportBundleSizeLimit::DEFAULT)]
+    size_limit_bytes: SupportBundleSizeLimit,
 }
 
 impl CollectArgs {
@@ -198,6 +207,7 @@ impl CollectArgs {
             opctx,
             data_selection,
             bundle,
+            self.size_limit_bytes,
         ));
 
         // Wire Ctrl-C to cancel the in-flight collection.
@@ -256,6 +266,14 @@ impl CollectArgs {
                     .unwrap_or_else(|_| details.to_string());
                 eprintln!("{}", textwrap::indent(&pretty, "      "));
             }
+        }
+        if let Some(exceeded) = &report.size_limit_exceeded {
+            eprintln!(
+                "Bundle reached its size limit of {}, so collection \
+                 stopped early. See {SIZE_LIMIT_EXCEEDED_FILE} in the bundle \
+                 for what was left out.",
+                exceeded.limit_bytes,
+            );
         }
         Ok(())
     }

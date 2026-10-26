@@ -100,6 +100,7 @@ use super::tasks::blueprint_load::LoadedTargetBlueprint;
 use super::tasks::blueprint_planner;
 use super::tasks::blueprint_pruner;
 use super::tasks::blueprint_rendezvous;
+use super::tasks::capacity_metrics;
 use super::tasks::crdb_node_id_collector;
 use super::tasks::decommissioned_disk_cleaner;
 use super::tasks::dns_config;
@@ -162,6 +163,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::PendingMgsUpdates;
 
 use nexus_types::inventory::Collection;
+use nexus_types::support_bundle::SupportBundleSizeLimit;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::RackUuid;
 use oximeter::types::ProducerRegistry;
@@ -250,6 +252,7 @@ impl BackgroundTasksInitializer {
             task_region_replacement: Activator::new(),
             task_region_replacement_driver: Activator::new(),
             task_instance_watcher: Activator::new(),
+            task_capacity_metrics: Activator::new(),
             task_instance_updater: Activator::new(),
             task_instance_reincarnation: Activator::new(),
             task_service_firewall_propagation: Activator::new(),
@@ -350,6 +353,7 @@ impl BackgroundTasksInitializer {
             task_region_replacement_driver,
             task_instance_watcher,
             task_instance_updater,
+            task_capacity_metrics,
             task_instance_reincarnation,
             task_service_firewall_propagation,
             task_abandoned_vmm_reaper,
@@ -642,6 +646,7 @@ impl BackgroundTasksInitializer {
                     resolver.clone(),
                     config.support_bundle_collector.disable,
                     nexus_id,
+                    SupportBundleSizeLimit::DEFAULT,
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),
@@ -806,6 +811,23 @@ impl BackgroundTasksInitializer {
                 activator: task_instance_watcher,
             })
         };
+
+        {
+            let capacity_metrics = capacity_metrics::CapacityMetrics::new(
+                datastore.clone(),
+                producer_registry,
+                nexus_id,
+            );
+            driver.register(TaskDefinition {
+                name: "capacity_metrics",
+                description: "periodically emits quota capacity metrics",
+                period: config.capacity_metrics.period_secs,
+                task_impl: Box::new(capacity_metrics),
+                opctx: opctx.child(BTreeMap::new()),
+                watchers: vec![],
+                activator: task_capacity_metrics,
+            });
+        }
 
         // Background task: schedule update sagas for instances in need of
         // state updates.
