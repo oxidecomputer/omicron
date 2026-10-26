@@ -1812,6 +1812,7 @@ mod test {
     use nexus_types::instance::Migrations;
     use nexus_types::instance::VmmFailureReason;
     use nexus_types::instance::VmmState as NexusVmmState;
+    use nexus_types::internal_api::params::InstanceMigrateDestination;
     use nexus_types::internal_api::params::InstanceMigrateRequest;
     use omicron_common::api::external::{
         ByteCount, DataPageParams, IdentityMetadataCreateParams, Name,
@@ -3334,7 +3335,11 @@ mod test {
                 serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
                 instance: state.instance().clone(),
                 src_vmm: vmm.clone(),
-                migrate_params: InstanceMigrateRequest { dst_sled_id },
+                migrate_params: InstanceMigrateRequest {
+                    destination: InstanceMigrateDestination::ById {
+                        dst_sled_id,
+                    },
+                },
             };
 
             nexus

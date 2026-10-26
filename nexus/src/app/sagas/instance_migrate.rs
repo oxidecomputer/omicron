@@ -15,7 +15,9 @@ use nexus_db_model::VmmCpuPlatform;
 use nexus_db_queries::db::datastore::sled::SledReservationReason;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
-use nexus_types::internal_api::params::InstanceMigrateRequest;
+use nexus_types::internal_api::params::{
+    InstanceMigrateDestination, InstanceMigrateRequest,
+};
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
@@ -223,17 +225,26 @@ async fn sim_reserve_sled_resources(
         ))));
     };
 
-    // Add a constraint that requires the allocator to reserve on the
-    // migration's destination sled instead of a random sled.
+    // Add suitable constraints for the allocator:
     //
-    // The destination sled ID is arbitrary (from the internal API), so it's
-    // possible that we were told to migrate to a sled that is incompatible with
-    // the VMM's CPU platform. Constrain by that so we'll fail to pick the
-    // destination sled if it's truly incompatible.
+    // 1. CPU families must be compatible
+    // 2. Either the specified destination sled ID must be chosen (if the caller
+    //    chose the destination), or the current sled ID must NOT be chosen (if
+    //    we choose the destination).
+    //
+    // If the caller chose a destination sled that doesn't satisfy the CPU
+    // family compatibility check, we'll fail to reserve a sled (as we should).
     let constraints = db::model::SledReservationConstraintBuilder::new()
-        .must_select_from(&[params.migrate_params.dst_sled_id])
-        .cpu_families(compatible_sled_families)
-        .build();
+        .cpu_families(compatible_sled_families);
+    let constraints = match params.migrate_params.destination {
+        InstanceMigrateDestination::Autoselect => {
+            constraints.must_not_select_from(&[params.src_vmm.sled_id()])
+        }
+        InstanceMigrateDestination::ById { dst_sled_id } => {
+            constraints.must_select_from(&[dst_sled_id])
+        }
+    }
+    .build();
 
     let resource = super::instance_common::reserve_vmm_resources(
         osagactx.nexus(),
@@ -268,12 +279,9 @@ async fn sim_allocate_propolis_ip(
         &sagactx,
         &params.serialized_authn,
     );
-    allocate_vmm_ipv6(
-        &opctx,
-        sagactx.user_data().datastore(),
-        params.migrate_params.dst_sled_id,
-    )
-    .await
+    let dst_sled_id = sagactx.lookup::<SledUuid>("dst_sled_id")?;
+    allocate_vmm_ipv6(&opctx, sagactx.user_data().datastore(), dst_sled_id)
+        .await
 }
 
 async fn sim_create_migration_record(
@@ -701,7 +709,9 @@ mod tests {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
             instance: state.instance().clone(),
             src_vmm: vmm.clone(),
-            migrate_params: InstanceMigrateRequest { dst_sled_id },
+            migrate_params: InstanceMigrateRequest {
+                destination: InstanceMigrateDestination::ById { dst_sled_id },
+            },
         };
 
         nexus
@@ -766,7 +776,11 @@ mod tests {
                         ),
                         instance: old_instance.clone(),
                         src_vmm: old_vmm.clone(),
-                        migrate_params: InstanceMigrateRequest { dst_sled_id },
+                        migrate_params: InstanceMigrateRequest {
+                            destination: InstanceMigrateDestination::ById {
+                                dst_sled_id,
+                            },
+                        },
                     }
                 }
             })

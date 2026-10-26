@@ -73,6 +73,7 @@ use nexus_types::external_api::system_networking;
 use nexus_types::external_api::vpc;
 use nexus_types::external_api::vpc::VpcSubnet;
 use nexus_types::identity::Resource;
+use nexus_types::internal_api::params::InstanceMigrateDestination;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::address::IpVersion;
@@ -856,7 +857,9 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     let migrate_url = format!("/instances/{}/migrate", instance_id);
     let instance = NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest { dst_sled_id }))
+            .body(Some(&InstanceMigrateRequest {
+                destination: InstanceMigrateDestination::ById { dst_sled_id },
+            }))
             .expect_status(Some(StatusCode::OK)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -1173,7 +1176,9 @@ async fn test_instance_migrate_target_finishes_first(
     let migrate_url = format!("/instances/{}/migrate", instance_id);
     let instance = NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest { dst_sled_id }))
+            .body(Some(&InstanceMigrateRequest {
+                destination: InstanceMigrateDestination::ById { dst_sled_id },
+            }))
             .expect_status(Some(StatusCode::OK)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -1530,7 +1535,9 @@ async fn test_instance_migrate_v2p_and_routes(
     let migrate_url = format!("/instances/{}/migrate", instance_id);
     let _ = NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest { dst_sled_id }))
+            .body(Some(&InstanceMigrateRequest {
+                destination: InstanceMigrateDestination::ById { dst_sled_id },
+            }))
             .expect_status(Some(StatusCode::OK)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -1709,7 +1716,9 @@ async fn test_instance_migration_compatible_cpu_platforms(
     let migrate_url = format!("/instances/{}/migrate", instance_id);
     let instance = NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest { dst_sled_id }))
+            .body(Some(&InstanceMigrateRequest {
+                destination: InstanceMigrateDestination::ById { dst_sled_id },
+            }))
             .expect_status(Some(StatusCode::OK)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -1889,7 +1898,11 @@ async fn test_instance_migration_incompatible_cpu_platforms(
     let migrate_url = format!("/instances/{}/migrate", instance_id);
     NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest { dst_sled_id: milan_sled_id }))
+            .body(Some(&InstanceMigrateRequest {
+                destination: InstanceMigrateDestination::ById {
+                    dst_sled_id: milan_sled_id,
+                },
+            }))
             .expect_status(Some(http::StatusCode::INSUFFICIENT_STORAGE)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -1971,7 +1984,9 @@ async fn test_instance_migration_unknown_sled_type(
     let migrate_url = format!("/instances/{}/migrate", instance_id);
     NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest { dst_sled_id }))
+            .body(Some(&InstanceMigrateRequest {
+                destination: InstanceMigrateDestination::ById { dst_sled_id },
+            }))
             .expect_status(Some(expected_status)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -2828,7 +2843,9 @@ async fn test_instance_metrics_with_migration(
     let migrate_url = format!("/instances/{}/migrate", instance_id);
     let _ = NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest { dst_sled_id }))
+            .body(Some(&InstanceMigrateRequest {
+                destination: InstanceMigrateDestination::ById { dst_sled_id },
+            }))
             .expect_status(Some(StatusCode::OK)),
     )
     .authn_as(AuthnMode::PrivilegedUser)

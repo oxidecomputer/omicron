@@ -215,6 +215,7 @@ struct SledTargetSets {
 fn classify_sled_targets(
     rows: Vec<SledFindTargetsRow>,
     must_use_sleds: Option<&HashSet<SledUuid>>,
+    must_not_use_sleds: Option<&HashSet<SledUuid>>,
 ) -> SledTargetSets {
     let mut sets = SledTargetSets::default();
 
@@ -234,6 +235,28 @@ fn classify_sled_targets(
 
                 None => {
                     sets.targets.insert(sled_id);
+                }
+            }
+
+            // If there is `Some(_)` list of sleds we must not use, _remove_
+            // this target if it's in that list.
+            //
+            // We remove from `sets.targets` instead of adding to `sets.banned`
+            // here because `banned` is specifically for anti-affinity rules
+            // (and produces error messages as such). If we have a "must not use
+            // sled", we silently skip it. (One use of this is to pick a VMM
+            // migration destination sled that must not be the same as its
+            // current source sled.)
+            //
+            // The order of this check relative to the `must_use_sleds` above is
+            // intentional - if a sled is in both sets, we let
+            // `must_not_use_sleds` take precedence. If we only have
+            // `must_not_use_sleds`, this must be second in order to remove the
+            // sled we unconditionally added as a target in the `None` branch
+            // above.
+            if let Some(must_not_use_sleds) = must_not_use_sleds {
+                if must_not_use_sleds.contains(&sled_id) {
+                    sets.targets.remove(&sled_id);
                 }
             }
         }
@@ -1356,12 +1379,13 @@ impl DataStore {
         // arguments to this function.
         let maybe_must_use_sleds: Option<HashSet<SledUuid>> =
             if let Some(must_select_from) = constraints.must_select_from() {
-                let set = must_select_from.into_iter().cloned().collect();
+                let set = must_select_from.clone();
                 info!(&log, "reservation constrained to sleds {set:?}");
                 Some(set)
             } else {
                 None
             };
+        let maybe_must_not_use_sleds = constraints.must_not_select_from();
 
         // If any local storage disks have been allocated already, then this
         // constrains VMM placement and where other unallocated local storage
@@ -1484,6 +1508,7 @@ impl DataStore {
         } = classify_sled_targets(
             possible_sleds,
             maybe_must_use_sleds.as_ref(),
+            maybe_must_not_use_sleds,
         );
 
         // Prior to R18, all Disks using the encrypted local storage dataset
