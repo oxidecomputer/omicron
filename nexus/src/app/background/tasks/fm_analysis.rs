@@ -441,7 +441,7 @@ impl FmAnalysis {
         // step which loaded the ereports.
         if !report.unknown_restart_ereport_ids.is_empty() {
             let mut ereports_step =
-                prep_status.steps.get_mut(&Step::Ereports).expect(
+                prep_status.steps.get_mut(&PreparationStep::Ereports).expect(
                     "every step succeeded, so every step has a status entry",
                 );
             for id in &report.unknown_restart_ereport_ids {
