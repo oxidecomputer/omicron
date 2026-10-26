@@ -336,6 +336,15 @@ impl FmAnalysis {
     ) -> Result<(Input, InputReport), status::PreparationFailure> {
         // Dropping this `JoinMap` aborts any tasks still running in it.
         let mut steps = JoinMap::new();
+
+        // Spawn each preparation step in parallel.
+        //
+        // N.B. that right now, the concurrency limit here is just the number of
+        // steps that are defined. Right now, there are only 7 preparation
+        // steps, so that's fine. In the future, if there are a whole lot of
+        // steps, we may eventually want to think about having a concurrency
+        // limit here, especially if steps can recursively spawn other
+        // steps...but they can't do that today. So.
         for step in PreparationStep::iter() {
             let loader = InputLoader { datastore: self.datastore.clone() };
             let opctx = opctx.child(BTreeMap::from([(
