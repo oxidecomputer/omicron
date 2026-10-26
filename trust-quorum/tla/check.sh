@@ -71,7 +71,7 @@ WORKERS="${TLC_WORKERS:-auto}"
 # cfg  module  expected-exit-status
 EXPECTED=(
     "trust_quorum.cfg          trust_quorum  0"
-    "trust_quorum_nocrash.cfg  trust_quorum  13"
+    "trust_quorum_nocrash.cfg  trust_quorum  0"
 )
 
 selected=("$@")
