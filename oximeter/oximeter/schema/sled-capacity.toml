@@ -1,0 +1,72 @@
+format_version = 1
+
+[target]
+name = "sled_capacity"
+description = "Sled resource capacity"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "nexus_id", "rack_id", "sled_id", "sled_model", "sled_revision", "sled_serial", "sled_policy", "sled_state", "cpu_family" ] },
+]
+
+[fields.nexus_id]
+type = "uuid"
+description = "ID of the Nexus reporting the sample. We emit capacity metrics from each Nexus, so aggregate over Nexus instances by mean or max, but not sum, to avoid double-counting."
+
+[fields.rack_id]
+type = "uuid"
+description = "ID for the rack"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID for the CPU's sled"
+
+[fields.sled_model]
+type = "string"
+description = "Model number of the sled"
+
+[fields.sled_revision]
+type = "u32"
+description = "Revision number of the sled"
+
+[fields.sled_serial]
+type = "string"
+description = "Serial number of the sled"
+
+[fields.sled_policy]
+type = "string"
+description = "Sled policy (in service, expunged)"
+
+[fields.sled_state]
+type = "string"
+description = "Sled state (active, decommissioned)"
+
+[fields.cpu_family]
+type = "string"
+description = "CPU family of the sled"
+
+[[metrics]]
+name = "usable_hardware_threads"
+description = "Hardware threads reported by the OS"
+units = "count"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "usable_physical_ram"
+description = "Physical RAM reported by the OS"
+units = "bytes"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "reservoir_size"
+description = "Physical RAM reserved for virtual machines"
+units = "bytes"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
