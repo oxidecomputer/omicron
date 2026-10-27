@@ -685,9 +685,13 @@ mod tests {
         .await
     }
 
-    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
-    async fn test_saga_basic_usage_succeeds(
+    /// Body of both `test_saga_specific_destination_sled()` and
+    /// `test_saga_autoselect_destination_sled()`: run a basic test of the
+    /// migration saga with the destination sled chosen by `destination`, which
+    /// chooses the migration destination given the sled ID of the source VMM.
+    async fn migrate_saga_succeeds_with_destination(
         cptestctx: &ControlPlaneTestContext,
+        destination: impl FnOnce(SledUuid) -> InstanceMigrateDestination,
     ) {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
@@ -702,15 +706,13 @@ mod tests {
 
         let state = test_helpers::instance_fetch(cptestctx, instance_id).await;
         let vmm = state.vmm().as_ref().unwrap();
-        let dst_sled_id = cptestctx
-            .find_sled_agent(vmm.sled_id())
-            .expect("need at least one other sled");
+        let src_sled_id = vmm.sled_id();
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
             instance: state.instance().clone(),
             src_vmm: vmm.clone(),
             migrate_params: InstanceMigrateRequest {
-                destination: InstanceMigrateDestination::ById { dst_sled_id },
+                destination: destination(src_sled_id),
             },
         };
 
@@ -724,12 +726,49 @@ mod tests {
         // steps in the simulated agents) should not change where the instance
         // is running.
         let new_state =
-            test_helpers::instance_fetch(cptestctx, instance_id).await;
+            test_helpers::instance_fetch_all(cptestctx, instance_id).await;
 
         assert_eq!(
-            new_state.instance().runtime().propolis_id,
+            new_state.instance.runtime().propolis_id,
             state.instance().runtime().propolis_id
         );
+
+        // The migration target should exist, and must not be on the source
+        // sled.
+        let target_vmm = new_state
+            .target_vmm
+            .as_ref()
+            .expect("migration saga should have created a target VMM");
+        assert_ne!(target_vmm.sled_id(), src_sled_id);
+        assert!(
+            cptestctx
+                .all_sled_agents()
+                .any(|s| s.sled_agent.id == target_vmm.sled_id()),
+            "target VMM sled ID does not exist"
+        );
+    }
+
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
+    async fn test_saga_specific_destination_sled(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        migrate_saga_succeeds_with_destination(cptestctx, |src_sled_id| {
+            let dst_sled_id = cptestctx
+                .find_sled_agent(src_sled_id)
+                .expect("need at least one other sled");
+            InstanceMigrateDestination::ById { dst_sled_id }
+        })
+        .await;
+    }
+
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
+    async fn test_saga_autoselect_destination_sled(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        migrate_saga_succeeds_with_destination(cptestctx, |_src_sled_id| {
+            InstanceMigrateDestination::Autoselect
+        })
+        .await;
     }
 
     #[nexus_test(server = crate::Server, extra_sled_agents = 1)]

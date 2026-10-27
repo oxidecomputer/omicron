@@ -3234,8 +3234,10 @@ pub(in crate::db::datastore) mod test {
         id: InstanceUuid,
         groups: Vec<GroupName>,
         force_onto_sled: Option<SledUuid>,
+        avoid_sleds: Vec<SledUuid>,
         resources: db::model::Resources,
         cpu_platform: Option<db::model::InstanceCpuPlatform>,
+        reservation_reason: SledReservationReason,
     }
 
     /// The result of [`Instance::insert_resource`].
@@ -3264,8 +3266,10 @@ pub(in crate::db::datastore) mod test {
                 id,
                 groups: vec![],
                 force_onto_sled: None,
+                avoid_sleds: vec![],
                 resources: small_resource_request(),
                 cpu_platform: None,
+                reservation_reason: SledReservationReason::Start,
             }
         }
 
@@ -3276,12 +3280,14 @@ pub(in crate::db::datastore) mod test {
                 id: local_storage_test_instance.id,
                 groups: vec![],
                 force_onto_sled: None,
+                avoid_sleds: vec![],
                 resources: db::model::Resources::new(
                     local_storage_test_instance.ncpus.into(),
                     local_storage_test_instance.memory.into(),
                     local_storage_test_instance.memory.into(),
                 ),
                 cpu_platform: None,
+                reservation_reason: SledReservationReason::Start,
             }
         }
 
@@ -3296,6 +3302,7 @@ pub(in crate::db::datastore) mod test {
             datastore: &DataStore,
         ) -> Vec<SledFindTargetsRow> {
             assert!(self.force_onto_sled.is_none());
+            assert!(self.avoid_sleds.is_empty());
 
             let families =
                 self.cpu_platform.map(|p| p.compatible_sled_cpu_families());
@@ -3318,6 +3325,7 @@ pub(in crate::db::datastore) mod test {
             reservation_reason: SledReservationReason,
         ) -> InsertResourceOutcome {
             assert!(self.force_onto_sled.is_none());
+            assert!(self.avoid_sleds.is_empty());
 
             let resource = SledResourceVmm::new(
                 propolis_id,
@@ -3370,6 +3378,19 @@ pub(in crate::db::datastore) mod test {
             self
         }
 
+        // Forbid this instance from being placed on a specific sled. Can be
+        // called multiple times.
+        fn avoid_sled(mut self, sled: SledUuid) -> Self {
+            self.avoid_sleds.push(sled);
+            self
+        }
+
+        // Set the reason for this instance's reservation (defaults to `Start`).
+        fn reservation_reason(mut self, reason: SledReservationReason) -> Self {
+            self.reservation_reason = reason;
+            self
+        }
+
         async fn add_to_groups_and_reserve(
             &self,
             opctx: &OpContext,
@@ -3419,8 +3440,11 @@ pub(in crate::db::datastore) mod test {
         instance: &Instance,
     ) -> Result<db::model::SledResourceVmm, SledReservationTransactionError>
     {
+        // Avoid specific sleds, if requested
+        let constraints = db::model::SledReservationConstraintBuilder::new()
+            .must_not_select_from(&instance.avoid_sleds);
+
         // Pick a specific sled, if requested
-        let constraints = db::model::SledReservationConstraintBuilder::new();
         let constraints = if let Some(sled_target) = instance.force_onto_sled {
             constraints.must_select_from(&[sled_target])
         } else {
@@ -3436,7 +3460,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources.clone(),
                 constraints.build(),
-                SledReservationReason::Start,
+                instance.reservation_reason.clone(),
                 &mut StdRng::from_os_rng(),
             )
             .await?;
@@ -3444,6 +3468,10 @@ pub(in crate::db::datastore) mod test {
         if let Some(sled_target) = instance.force_onto_sled {
             assert_eq!(SledUuid::from(result.sled_id), sled_target);
         }
+        assert!(
+            !instance.avoid_sleds.contains(&SledUuid::from(result.sled_id)),
+            "reservation landed on a sled it was told to avoid"
+        );
 
         Ok(result)
     }
@@ -4166,6 +4194,293 @@ pub(in crate::db::datastore) mod test {
             .expect("Should have succeeded allocation");
 
         assert_eq!(resource.sled_id(), sleds[2].id());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // "must not select from" constraint: avoided sleds are never chosen, and
+    // avoiding every sled yields an insufficient-capacity error.
+    #[tokio::test]
+    async fn must_not_select_from_excludes_sled() {
+        let logctx = dev::test_setup_log("must_not_select_from_excludes_sled");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (_authz_project, _project) =
+            create_project(&opctx, &datastore, "project").await;
+
+        const SLED_COUNT: usize = 2;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
+
+        let test_instance = Instance::new().avoid_sled(sleds[0].id());
+        let resource =
+            create_instance_reservation(&datastore, &opctx, &test_instance)
+                .await
+                .expect("Should have placed instance");
+        assert_eq!(resource.sled_id(), sleds[1].id());
+
+        let test_instance =
+            Instance::new().avoid_sled(sleds[0].id()).avoid_sled(sleds[1].id());
+        let err =
+            create_instance_reservation(&datastore, &opctx, &test_instance)
+                .await
+                .expect_err("Should have failed to place instance");
+        let SledReservationTransactionError::Reservation(
+            SledReservationError::NotFound,
+        ) = err
+        else {
+            panic!("Unexpected error: {err:?}");
+        };
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // "must not select from" takes precedence over "must select from" when a
+    // sled appears in both sets.
+    #[tokio::test]
+    async fn must_not_select_from_overrides_must_select_from() {
+        let logctx = dev::test_setup_log(
+            "must_not_select_from_overrides_must_select_from",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (_authz_project, _project) =
+            create_project(&opctx, &datastore, "project").await;
+
+        const SLED_COUNT: usize = 2;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
+
+        let test_instance =
+            Instance::new().sled(sleds[0].id()).avoid_sled(sleds[0].id());
+        let err =
+            create_instance_reservation(&datastore, &opctx, &test_instance)
+                .await
+                .expect_err("Should have failed to place instance");
+        let SledReservationTransactionError::Reservation(
+            SledReservationError::NotFound,
+        ) = err
+        else {
+            panic!("Unexpected error: {err:?}");
+        };
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Affinity, Policy = Fail, combined with "must not select from".
+    #[tokio::test]
+    async fn must_not_select_from_affinity_policy_fail() {
+        let logctx =
+            dev::test_setup_log("must_not_select_from_affinity_policy_fail");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore, "project").await;
+
+        const SLED_COUNT: usize = 2;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
+
+        let groups = [Group {
+            affinity: Affinity::Positive,
+            name: "affinity",
+            policy: affinity::AffinityPolicy::Fail,
+        }];
+        let all_groups =
+            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
+                .await;
+        let instances = [Instance::new().group("affinity").sled(sleds[0].id())];
+        for instance in instances {
+            instance
+                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .await
+                .expect("Failed to set up instances");
+        }
+
+        let test_instance =
+            Instance::new().group("affinity").avoid_sled(sleds[0].id());
+        let err = test_instance
+            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .await
+            .expect_err("Should have failed to place instance");
+        let SledReservationTransactionError::Reservation(
+            SledReservationError::RequiredAffinitySledNotValid,
+        ) = err
+        else {
+            panic!("Unexpected error: {err:?}");
+        };
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Affinity, Policy = Allow, combined with "must not select from"
+    #[tokio::test]
+    async fn must_not_select_from_affinity_policy_allow() {
+        let logctx =
+            dev::test_setup_log("must_not_select_from_affinity_policy_allow");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore, "project").await;
+
+        const SLED_COUNT: usize = 2;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
+
+        let groups = [Group {
+            affinity: Affinity::Positive,
+            name: "affinity",
+            policy: affinity::AffinityPolicy::Allow,
+        }];
+        let all_groups =
+            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
+                .await;
+        let instances = [Instance::new().group("affinity").sled(sleds[0].id())];
+        for instance in instances {
+            instance
+                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .await
+                .expect("Failed to set up instances");
+        }
+
+        let test_instance =
+            Instance::new().group("affinity").avoid_sled(sleds[0].id());
+        let resource = test_instance
+            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .await
+            .expect("Should have placed instance");
+        assert_eq!(resource.sled_id(), sleds[1].id());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Anti-Affinity, Policy = Fail, combined with "must not select from".
+    #[tokio::test]
+    async fn must_not_select_from_anti_affinity_policy_fail() {
+        let logctx = dev::test_setup_log(
+            "must_not_select_from_anti_affinity_policy_fail",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore, "project").await;
+
+        const SLED_COUNT: usize = 3;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
+
+        let groups = [Group {
+            affinity: Affinity::Negative,
+            name: "anti-affinity",
+            policy: affinity::AffinityPolicy::Fail,
+        }];
+        let all_groups =
+            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
+                .await;
+        let instances =
+            [Instance::new().group("anti-affinity").sled(sleds[1].id())];
+        for instance in instances {
+            instance
+                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .await
+                .expect("Failed to set up instances");
+        }
+
+        // sleds[1] is banned by anti-affinity; avoiding sleds[0] and sleds[2]
+        // leaves nothing.
+        let test_instance = Instance::new()
+            .group("anti-affinity")
+            .avoid_sled(sleds[0].id())
+            .avoid_sled(sleds[2].id());
+        let err = test_instance
+            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .await
+            .expect_err("Should have failed to place instance");
+        let SledReservationTransactionError::Reservation(
+            SledReservationError::NotFound,
+        ) = err
+        else {
+            panic!("Unexpected error: {err:?}");
+        };
+
+        // Avoiding only sleds[0] leaves sleds[2].
+        let test_instance =
+            Instance::new().group("anti-affinity").avoid_sled(sleds[0].id());
+        let resource = test_instance
+            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .await
+            .expect("Should have placed instance");
+        assert_eq!(resource.sled_id(), sleds[2].id());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test the typical behavior of a "must not select from" constraint; i.e.,
+    // that we're trying to autoselect a destination sled for VMM migration (and
+    // that auto selection "must not select from" the sled where the VMM is
+    // currently placed).
+    //
+    // We should successfully find an alternative sled, and both the source and
+    // destination reservations should exist with their expected
+    // `SledReservationReason`s.
+    #[tokio::test]
+    async fn must_not_select_from_migration_target_reservation() {
+        let logctx = dev::test_setup_log(
+            "must_not_select_from_migration_target_reservation",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (_authz_project, _project) =
+            create_project(&opctx, &datastore, "project").await;
+
+        const SLED_COUNT: usize = 2;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
+
+        let instance_id = InstanceUuid::new_v4();
+        let start_instance = Instance::new_with_id(instance_id);
+        let start_resource =
+            create_instance_reservation(&datastore, &opctx, &start_instance)
+                .await
+                .expect("Should have placed instance");
+        let src_sled_id = start_resource.sled_id();
+        let expected_dst_sled_id = sleds
+            .iter()
+            .map(|s| s.id())
+            .find(|id| *id != src_sled_id)
+            .expect("two sleds exist");
+
+        let migrate_instance = Instance::new_with_id(instance_id)
+            .reservation_reason(SledReservationReason::MigrationTarget)
+            .avoid_sled(src_sled_id);
+        let target_resource =
+            create_instance_reservation(&datastore, &opctx, &migrate_instance)
+                .await
+                .expect("Should have placed migration target");
+        assert_eq!(target_resource.sled_id(), expected_dst_sled_id);
+        assert_ne!(target_resource.id(), start_resource.id());
+
+        // Both reservations exist for this instance.
+        {
+            use nexus_db_schema::schema::sled_resource_vmm::dsl;
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            let rows = dsl::sled_resource_vmm
+                .filter(dsl::instance_id.eq(to_db_typed_uuid(instance_id)))
+                .select(SledResourceVmm::as_select())
+                .get_results_async(&*conn)
+                .await
+                .unwrap();
+            assert_eq!(rows.len(), 2, "unexpected rows: {rows:?}");
+            let states: Vec<_> = rows.iter().map(|r| r.state).collect();
+            assert!(
+                states.contains(&SledResourceVmmState::Active),
+                "unexpected rows: {rows:?}"
+            );
+            assert!(
+                states.contains(&SledResourceVmmState::Target),
+                "unexpected rows: {rows:?}"
+            );
+        }
 
         db.terminate().await;
         logctx.cleanup_successful();
