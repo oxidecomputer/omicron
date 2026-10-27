@@ -679,7 +679,7 @@ task: "nat_garbage_collector"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to resolve addresses for Dendrite services: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+    last completion reported error: failed to resolve addresses for Dendrite services: DNS error: error response: Server Failure
 
 task: "blueprint_loader"
   configured period: every <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -1031,8 +1031,8 @@ task: "populate_switch_ports"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-switch0 failed: failed to look up dendrite clients: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
-switch1 failed: failed to look up dendrite clients: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+switch0 failed: failed to look up dendrite clients: DNS error: error response: Server Failure
+switch1 failed: failed to look up dendrite clients: DNS error: error response: Server Failure
 
 task: "probe_distributor"
   configured period: every <REDACTED_DURATION>m
@@ -1434,7 +1434,7 @@ task: "nat_garbage_collector"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to resolve addresses for Dendrite services: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+    last completion reported error: failed to resolve addresses for Dendrite services: DNS error: error response: Server Failure
 
 task: "blueprint_loader"
   configured period: every <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -1786,8 +1786,8 @@ task: "populate_switch_ports"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-switch0 failed: failed to look up dendrite clients: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
-switch1 failed: failed to look up dendrite clients: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+switch0 failed: failed to look up dendrite clients: DNS error: error response: Server Failure
+switch1 failed: failed to look up dendrite clients: DNS error: error response: Server Failure
 
 task: "probe_distributor"
   configured period: every <REDACTED_DURATION>m

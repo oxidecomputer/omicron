@@ -640,6 +640,7 @@ impl ExternalHttpClient {
 #[cfg(test)]
 mod test {
     use super::*;
+    use hickory_resolver::net::NetError;
     use internal_dns_types::config::DnsRecord;
     use omicron_common::address::{
         BOOTSTRAP_PREFIX, Ipv6Subnet, RACK_PREFIX_LENGTH, ReservedRackSubnet,
@@ -1017,7 +1018,7 @@ mod test {
         let target = underlay_ip();
         let server = httpmock::MockServer::start_async().await;
         let mock = mock_redirect(&server, &format!("http://[{target}]/")).await;
-        let client = client_without_dns(ExternalClientBuilder::new());
+        let client = client_without_dns(ExternalClientBuilder::new()).unwrap();
         let error = client
             .get(server.url("/redirect"))
             .expect("the initial URL is permitted")
@@ -1046,7 +1047,7 @@ mod test {
             })
             .await;
         let redirect_mock = mock_redirect(&server, &server.url("/ok")).await;
-        let client = client_without_dns(ExternalClientBuilder::new());
+        let client = client_without_dns(ExternalClientBuilder::new()).unwrap();
         let rsp = client
             .get(server.url("/redirect"))
             .expect("the initial URL is permitted")
@@ -1073,7 +1074,8 @@ mod test {
         let redirect_mock = mock_redirect(&server, &server.url("/ok")).await;
         let client = client_without_dns(
             ExternalClientBuilder::new().redirect(redirect::Policy::none()),
-        );
+        )
+        .unwrap();
         let rsp = client
             .get(server.url("/redirect"))
             .expect("the initial URL is permitted")
@@ -1108,7 +1110,8 @@ mod test {
             records,
             ExternalClientBuilder::new(),
         )
-        .await;
+        .await
+        .unwrap();
 
         let error = client
             .get("http://underlay.example.com/")
@@ -1141,7 +1144,8 @@ mod test {
             records,
             ExternalClientBuilder::new(),
         )
-        .await;
+        .await
+        .unwrap();
 
         let server = httpmock::MockServer::start_async().await;
         let mock = mock_redirect(&server, "http://underlay.example.com/").await;
@@ -1178,7 +1182,8 @@ mod test {
             records,
             ExternalClientBuilder::new(),
         )
-        .await;
+        .await
+        .unwrap();
 
         let server = httpmock::MockServer::start_async().await;
         let ok_mock = server
@@ -1210,7 +1215,8 @@ mod test {
         let mock = mock_redirect(&server, &format!("http://[{target}]/")).await;
         let client = client_without_dns(
             ExternalClientBuilder::new().redirect(redirect::Policy::none()),
-        );
+        )
+        .unwrap();
         let error = client
             .get(server.url("/redirect"))
             .expect("the initial URL is permitted")
@@ -1373,15 +1379,15 @@ mod test {
     /// IP-literal URLs.
     fn client_without_dns(
         builder: ExternalClientBuilder,
-    ) -> ExternalHttpClient {
+    ) -> Result<ExternalHttpClient, NetError> {
         // The DNS server address is never actually queried, since the tests
         // using this helper use IP-literal URLs; the resolver just needs to
         // exist in order to build the client.
         let resolver = Arc::new(external_dns::Resolver::new(
             &[IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)],
             test_policy(TreatLoopbackAsExternal::YesForTestPurposesOnly),
-        ));
-        client_with_resolver(builder, resolver)
+        )?);
+        Ok(client_with_resolver(builder, resolver))
     }
 
     /// Spawns a `TransientDnsServer` serving the given `records` in the
@@ -1394,7 +1400,7 @@ mod test {
         log: &slog::Logger,
         records: HashMap<String, Vec<DnsRecord>>,
         builder: ExternalClientBuilder,
-    ) -> (TransientDnsServer, ExternalHttpClient) {
+    ) -> Result<(TransientDnsServer, ExternalHttpClient), NetError> {
         use internal_dns_types::config::DnsConfigParams;
         use internal_dns_types::config::DnsConfigZone;
         use omicron_generation_kinds::Generation;
@@ -1419,8 +1425,8 @@ mod test {
         let resolver = Arc::new(external_dns::Resolver::new_from_addr(
             dns.dns_server.sole_local_address().expect("exactly one address"),
             test_policy(TreatLoopbackAsExternal::YesForTestPurposesOnly),
-        ));
+        )?);
         let client = client_with_resolver(builder, resolver);
-        (dns, client)
+        Ok((dns, client))
     }
 }
