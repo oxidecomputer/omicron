@@ -450,7 +450,7 @@ pub enum SetCurrentRevisionOutcome {
 }
 
 #[cfg(test)]
-mod revision_tests {
+mod test {
     use super::*;
     use crate::db::model::SqlU32;
     use crate::db::pub_test_utils::TestDatabase;
