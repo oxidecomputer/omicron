@@ -15,9 +15,9 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::planning_report::FailedRotUpdateReason;
+use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
-use nexus_types::inventory::RotState;
 use nexus_types::tuf_repo::TufRepoDescription;
 use sled_hardware_types::BaseboardId;
 use slog::debug;
@@ -118,12 +118,18 @@ pub(super) fn try_make_update(
         return Err(FailedRotUpdateReason::SpNotInInventory);
     };
 
-    let RotActiveAndTarget {
-        rot_state,
-        active_version: expected_active_version,
-        artifact,
-    } = active_and_target(baseboard_id, inventory, current_artifacts)?;
+    let Some(rot_state) = inventory.rots.get(baseboard_id) else {
+        return Err(FailedRotUpdateReason::RotStateNotInInventory);
+    };
     let active_slot = rot_state.active_slot;
+    let expected_active_version =
+        active_version(baseboard_id, active_slot, inventory)?;
+    let artifact = target_artifact(
+        baseboard_id,
+        active_slot,
+        inventory,
+        current_artifacts,
+    )?;
 
     // If the artifact's version matches what's deployed, then no update is
     // needed.
@@ -174,52 +180,38 @@ pub(super) fn try_make_update(
     }))
 }
 
-/// Active RoT version on a board, paired with the RoT artifact that a TUF repo
-/// specifies for that board
-pub(super) struct RotActiveAndTarget<'a> {
-    pub(super) rot_state: &'a RotState,
-    pub(super) active_version: ArtifactVersion,
-    pub(super) artifact: &'a Artifact,
+/// Returns the version of the active RoT image on `baseboard_id`, whose RoT
+/// is running from `active_slot`
+pub(super) fn active_version(
+    baseboard_id: &BaseboardId,
+    active_slot: RotSlot,
+    inventory: &Collection,
+) -> Result<ArtifactVersion, FailedRotUpdateReason> {
+    let (active_caboose_which, active_caboose) =
+        active_caboose(baseboard_id, active_slot, inventory)?;
+    active_caboose.caboose.version.parse().map_err(|e| {
+        FailedRotUpdateReason::FailedVersionParse {
+            caboose: active_caboose_which,
+            err: format!("{}", e),
+        }
+    })
 }
 
-/// Finds the active RoT version on `baseboard_id` and the RoT artifact in
-/// `current_artifacts` that applies to that board
+/// Returns the RoT artifact in `current_artifacts` that applies to
+/// `baseboard_id`, whose RoT is running from `active_slot`
 ///
-/// The artifact is the one for the RoT's _inactive_ slot because that is the
-/// slot an update would write.
-///
-/// The caller is responsible for checking that the SP itself is present in
-/// inventory.
-pub(super) fn active_and_target<'a>(
+/// The artifact is chosen based on the board name and signing key in the
+/// active RoT caboose.  That is why this function needs inventory as well as
+/// the TUF repo.  The artifact is the one for the RoT's _inactive_ slot
+/// because that is the slot an update would write.
+pub(super) fn target_artifact<'a>(
     baseboard_id: &BaseboardId,
-    inventory: &'a Collection,
+    active_slot: RotSlot,
+    inventory: &Collection,
     current_artifacts: &'a TufRepoDescription,
-) -> Result<RotActiveAndTarget<'a>, FailedRotUpdateReason> {
-    let Some(rot_state) = inventory.rots.get(baseboard_id) else {
-        return Err(FailedRotUpdateReason::RotStateNotInInventory);
-    };
-
-    let active_slot = rot_state.active_slot;
-
-    let active_caboose_which = CabooseWhich::from_rot_slot(active_slot);
-    let Some(active_caboose) =
-        inventory.caboose_for(active_caboose_which, baseboard_id)
-    else {
-        return Err(FailedRotUpdateReason::CabooseNotInInventory(
-            active_caboose_which,
-        ));
-    };
-
-    let active_version = match active_caboose.caboose.version.parse() {
-        Ok(v) => v,
-        Err(e) => {
-            return Err(FailedRotUpdateReason::FailedVersionParse {
-                caboose: active_caboose_which,
-                err: format!("{}", e),
-            });
-        }
-    };
-
+) -> Result<&'a Artifact, FailedRotUpdateReason> {
+    let (active_caboose_which, active_caboose) =
+        active_caboose(baseboard_id, active_slot, inventory)?;
     let rot_board = active_caboose.caboose.board.clone();
     let Some(rkth) = active_caboose.caboose.sign.clone() else {
         return Err(FailedRotUpdateReason::CabooseMissingSign(
@@ -237,20 +229,35 @@ pub(super) fn active_and_target<'a>(
             RotSlot::B => tufaceous_artifact::RotSlot::B,
         },
     });
-    let artifact =
-        current_artifacts.artifacts.get_only(&tags).map_err(|err| {
-            let tags = tags.to_string();
-            match err {
-                GetError::NotFound => {
-                    FailedRotUpdateReason::NoMatchingArtifactFound(tags)
-                }
-                GetError::TooMany => {
-                    FailedRotUpdateReason::TooManyMatchingArtifacts(tags)
-                }
+    current_artifacts.artifacts.get_only(&tags).map_err(|err| {
+        let tags = tags.to_string();
+        match err {
+            GetError::NotFound => {
+                FailedRotUpdateReason::NoMatchingArtifactFound(tags)
             }
-        })?;
+            GetError::TooMany => {
+                FailedRotUpdateReason::TooManyMatchingArtifacts(tags)
+            }
+        }
+    })
+}
 
-    Ok(RotActiveAndTarget { rot_state, active_version, artifact })
+/// Returns the caboose for the image in `active_slot` of the RoT on
+/// `baseboard_id`, along with which caboose that is
+fn active_caboose<'a>(
+    baseboard_id: &BaseboardId,
+    active_slot: RotSlot,
+    inventory: &'a Collection,
+) -> Result<(CabooseWhich, &'a CabooseFound), FailedRotUpdateReason> {
+    let active_caboose_which = CabooseWhich::from_rot_slot(active_slot);
+    let Some(active_caboose) =
+        inventory.caboose_for(active_caboose_which, baseboard_id)
+    else {
+        return Err(FailedRotUpdateReason::CabooseNotInInventory(
+            active_caboose_which,
+        ));
+    };
+    Ok((active_caboose_which, active_caboose))
 }
 
 #[cfg(test)]

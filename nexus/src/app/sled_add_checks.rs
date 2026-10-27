@@ -14,9 +14,10 @@
 //! 2. The new sled's SP, RoT, RoT bootloader, and host phase 1 images match
 //!    the target release, and the RoT's boot preferences show no RoT update
 //!    that has not fully taken effect.  These come from the latest inventory
-//!    collection.  We use the planner's own logic for choosing artifacts (see
-//!    `nexus_reconfigurator_planning::mgs_updates::check_active_versions()`),
-//!    so this check agrees with what the planner would decide to update.
+//!    collection.  The comparison is done by
+//!    `nexus_reconfigurator_planning::mgs_updates::compare_deployed_versions()`,
+//!    which uses the same logic that the planner uses to decide whether a
+//!    board needs an update.
 //!
 //! If no target release has ever been set, we skip both checks.
 //!
@@ -28,20 +29,20 @@
 //! release, or the sled's software could change, between when we check and
 //! when the sled is actually added.
 
-use super::deployment::SystemNotSettledError;
-use super::deployment::validate_system_settled_on_target_release;
+use super::deployment::BlueprintTargetReleaseStatus;
 use nexus_db_model::TargetReleaseSource;
 use nexus_db_queries::context::OpContext;
 use nexus_reconfigurator_planning::mgs_updates::ActiveImageCheck;
-use nexus_reconfigurator_planning::mgs_updates::ActiveVersionsReport;
 use nexus_reconfigurator_planning::mgs_updates::BoardNotInInventory;
-use nexus_reconfigurator_planning::mgs_updates::RotBootPreferenceCheck;
-use nexus_reconfigurator_planning::mgs_updates::check_active_versions;
+use nexus_reconfigurator_planning::mgs_updates::DeployedVersionsReport;
+use nexus_reconfigurator_planning::mgs_updates::compare_deployed_versions;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::inventory::Collection;
 use nexus_types::tuf_repo::TufRepoDescription;
 use omicron_common::api::external::Error;
 use omicron_generation_kinds::TargetReleaseGeneration;
+use omicron_uuid_kinds::SledUuid;
 use sled_hardware_types::BaseboardId;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
@@ -111,18 +112,43 @@ fn check_sled_software<'a>(
     inventory: Option<&Collection>,
     sleds: impl IntoIterator<Item = &'a BaseboardId>,
 ) -> Result<(), SledSoftwareError> {
-    validate_system_settled_on_target_release(
-        blueprint,
-        target_release_generation,
-        &repo.system_version,
-    )?;
+    // If the system's target release generation is older than the blueprint
+    // requires, the planner has suspended updates (e.g., after a mupdate).
+    if target_release_generation < blueprint.target_release_minimum_generation {
+        return Err(SledSoftwareError::UpdateSuspended {
+            current: target_release_generation,
+            minimum: blueprint.target_release_minimum_generation,
+        });
+    }
+
+    match BlueprintTargetReleaseStatus::new(blueprint, &repo.system_version) {
+        BlueprintTargetReleaseStatus::AllComponentsMatchTargetRelease => (),
+        BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared {
+            how: _,
+            sled_id,
+        } => {
+            return Err(SledSoftwareError::WaitingForMupdateToBeCleared {
+                sled_id,
+            });
+        }
+        BlueprintTargetReleaseStatus::FoundDifferentVersion {
+            sled_id,
+            version_found,
+        } => {
+            return Err(SledSoftwareError::UpdateInProgress {
+                target_release_version: repo.system_version.clone(),
+                sled_id,
+                version_found,
+            });
+        }
+    }
 
     let Some(inventory) = inventory else {
         return Err(SledSoftwareError::NoInventory);
     };
 
     for sled in sleds {
-        let report = check_active_versions(sled, inventory, repo)?;
+        let report = compare_deployed_versions(sled, inventory, repo)?;
         let problems = sled_software_problems(sled, report)?;
         if !problems.is_empty() {
             return Err(SledSoftwareError::Mismatch {
@@ -139,8 +165,29 @@ fn check_sled_software<'a>(
 /// Reasons that a sled's software is not ready for the sled to be added
 #[derive(Debug, thiserror::Error)]
 enum SledSoftwareError {
-    #[error("the system is not ready to add sleds")]
-    SystemNotSettled(#[from] SystemNotSettledError),
+    #[error(
+        "updates are suspended because the current target release has \
+         generation {current}, but the blueprint requires at least \
+         generation {minimum}"
+    )]
+    UpdateSuspended {
+        current: TargetReleaseGeneration,
+        minimum: TargetReleaseGeneration,
+    },
+    #[error(
+        "a support-driven recovery (mupdate) has occurred on sled {sled_id} \
+         and must be cleared first"
+    )]
+    WaitingForMupdateToBeCleared { sled_id: SledUuid },
+    #[error(
+        "an update to target release {target_release_version} is in \
+         progress (sled {sled_id} has components on {version_found})"
+    )]
+    UpdateInProgress {
+        target_release_version: semver::Version,
+        sled_id: SledUuid,
+        version_found: BlueprintArtifactVersion,
+    },
     #[error("no inventory collection is available")]
     NoInventory,
     #[error("the sled's software could not be checked")]
@@ -188,13 +235,9 @@ impl Display for SledComponent {
 enum SledSoftwareProblem {
     /// the component's active image differs from the target release
     WrongImage { component: SledComponent, found: String, expected: String },
-    /// the component's active image could not be compared with the target
-    /// release
-    Indeterminate { component: SledComponent, reason: String },
-    /// the RoT's boot preferences disagree with its active slot
-    RotBootPreferenceUnsettled { detail: String },
-    /// the RoT's boot preferences could not be determined
-    RotBootPreferenceIndeterminate,
+    /// the component's active image could not be confirmed to match the
+    /// target release
+    Unverified { component: SledComponent, reason: String },
 }
 
 impl Display for SledSoftwareProblem {
@@ -206,45 +249,30 @@ impl Display for SledSoftwareProblem {
                     "{component} is running {found} (expected {expected})"
                 )
             }
-            SledSoftwareProblem::Indeterminate { component, reason } => {
-                write!(f, "{component} could not be checked: {reason}")
-            }
-            SledSoftwareProblem::RotBootPreferenceUnsettled { detail } => {
-                write!(
-                    f,
-                    "RoT boot preferences show an update that has not fully \
-                     taken effect ({detail})"
-                )
-            }
-            SledSoftwareProblem::RotBootPreferenceIndeterminate => {
-                write!(f, "RoT boot preferences could not be determined")
+            SledSoftwareProblem::Unverified { component, reason } => {
+                write!(f, "{component} could not be verified: {reason}")
             }
         }
     }
 }
 
-/// Converts a report from `check_active_versions()` into a list of problems
-/// that prevent the sled from being added
+/// Converts a report from `compare_deployed_versions()` into a list of
+/// problems that prevent the sled from being added
 ///
 /// An empty list means the sled's software is ready.
 fn sled_software_problems(
     sled: &BaseboardId,
-    report: ActiveVersionsReport,
+    report: DeployedVersionsReport,
 ) -> Result<Vec<SledSoftwareProblem>, SledSoftwareError> {
-    let ActiveVersionsReport {
-        sp,
-        rot,
-        rot_bootloader,
-        host_phase_1,
-        rot_boot_preferences,
-    } = report;
+    let DeployedVersionsReport { sp, rot, rot_bootloader, host_phase_1 } =
+        report;
 
     // A board without host phase 1 is not a sled.
     let Some(host_phase_1) = host_phase_1 else {
         return Err(SledSoftwareError::NotASled(sled.clone()));
     };
 
-    let mut problems: Vec<_> = [
+    Ok([
         image_problem(SledComponent::Sp, sp),
         image_problem(SledComponent::Rot, rot),
         image_problem(SledComponent::RotBootloader, rot_bootloader),
@@ -252,37 +280,10 @@ fn sled_software_problems(
     ]
     .into_iter()
     .flatten()
-    .collect();
-
-    match rot_boot_preferences {
-        RotBootPreferenceCheck::Settled => (),
-        RotBootPreferenceCheck::Unsettled {
-            active_slot,
-            persistent_boot_preference,
-            pending_persistent_boot_preference,
-            transient_boot_preference,
-        } => {
-            problems.push(SledSoftwareProblem::RotBootPreferenceUnsettled {
-                detail: format!(
-                    "active slot: {active_slot:?}, \
-                     persistent boot preference: \
-                     {persistent_boot_preference:?}, \
-                     pending persistent boot preference: \
-                     {pending_persistent_boot_preference:?}, \
-                     transient boot preference: \
-                     {transient_boot_preference:?}"
-                ),
-            });
-        }
-        RotBootPreferenceCheck::Indeterminate => {
-            problems.push(SledSoftwareProblem::RotBootPreferenceIndeterminate);
-        }
-    }
-
-    Ok(problems)
+    .collect())
 }
 
-/// Converts one component's result from `check_active_versions()` into a
+/// Converts one component's result from `compare_deployed_versions()` into a
 /// problem, if there is one
 fn image_problem<T: Display, E: std::error::Error>(
     component: SledComponent,
@@ -297,8 +298,8 @@ fn image_problem<T: Display, E: std::error::Error>(
                 expected: expected.to_string(),
             })
         }
-        ActiveImageCheck::Indeterminate(error) => {
-            Some(SledSoftwareProblem::Indeterminate {
+        ActiveImageCheck::Error(error) => {
+            Some(SledSoftwareProblem::Unverified {
                 component,
                 reason: InlineErrorChain::new(&error).to_string(),
             })
@@ -310,9 +311,13 @@ fn image_problem<T: Display, E: std::error::Error>(
 mod tests {
     use super::*;
     use gateway_types::rot::RotSlot;
+    use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::mgs_updates::RotCheckError;
     use nexus_types::deployment::planning_report::FailedSpUpdateReason;
     use nexus_types::inventory::CabooseWhich;
+    use std::collections::BTreeMap;
     use tufaceous_artifact::ArtifactHash;
+    use tufaceous_artifact::ArtifactSet;
     use tufaceous_artifact::ArtifactVersion;
 
     fn test_sled() -> BaseboardId {
@@ -322,14 +327,62 @@ mod tests {
         }
     }
 
-    fn all_matching_report() -> ActiveVersionsReport {
-        ActiveVersionsReport {
+    fn all_matching_report() -> DeployedVersionsReport {
+        DeployedVersionsReport {
             sp: ActiveImageCheck::Matches,
             rot: ActiveImageCheck::Matches,
             rot_bootloader: ActiveImageCheck::Matches,
             host_phase_1: Some(ActiveImageCheck::Matches),
-            rot_boot_preferences: RotBootPreferenceCheck::Settled,
         }
+    }
+
+    #[test]
+    fn test_system_not_settled() {
+        let mut blueprint = BlueprintBuilder::build_empty("test");
+        let repo = TufRepoDescription {
+            artifacts: ArtifactSet::default(),
+            metadata: BTreeMap::new(),
+            system_version: "17.0.0".parse().unwrap(),
+            hash: ArtifactHash([0; 32]),
+            file_name: String::new(),
+        };
+        let generation = blueprint.target_release_minimum_generation;
+
+        // With no sleds in the blueprint, the system is settled on any
+        // target release.  We then fail only because there is no inventory.
+        let error = check_sled_software(
+            &blueprint,
+            generation,
+            &repo,
+            None,
+            [&test_sled()],
+        )
+        .expect_err("no inventory");
+        assert!(
+            matches!(error, SledSoftwareError::NoInventory),
+            "unexpected error: {error:?}"
+        );
+
+        // Simulate the planner having noticed a mupdate (which bumps the
+        // blueprint's minimum target release generation) and the operator not
+        // yet having set a new target release.
+        blueprint.target_release_minimum_generation = generation.next();
+        let error = check_sled_software(
+            &blueprint,
+            generation,
+            &repo,
+            None,
+            [&test_sled()],
+        )
+        .expect_err("updates suspended");
+        assert!(
+            matches!(
+                error,
+                SledSoftwareError::UpdateSuspended { current, minimum }
+                    if current == generation && minimum == generation.next()
+            ),
+            "unexpected error: {error:?}"
+        );
     }
 
     #[test]
@@ -342,23 +395,24 @@ mod tests {
 
     #[test]
     fn test_problems_reported() {
-        let report = ActiveVersionsReport {
+        let report = DeployedVersionsReport {
             sp: ActiveImageCheck::Differs {
                 found: ArtifactVersion::new_const("1.0.0"),
                 expected: ArtifactVersion::new_const("2.0.0"),
             },
-            rot: ActiveImageCheck::Matches,
+            rot: ActiveImageCheck::Error(
+                RotCheckError::BootPreferencesUnsettled {
+                    active_slot: RotSlot::A,
+                    persistent_boot_preference: RotSlot::B,
+                    pending_persistent_boot_preference: None,
+                    transient_boot_preference: None,
+                },
+            ),
             rot_bootloader: ActiveImageCheck::Matches,
             host_phase_1: Some(ActiveImageCheck::Differs {
                 found: ArtifactHash([1; 32]),
                 expected: ArtifactHash([2; 32]),
             }),
-            rot_boot_preferences: RotBootPreferenceCheck::Unsettled {
-                active_slot: RotSlot::A,
-                persistent_boot_preference: RotSlot::B,
-                pending_persistent_boot_preference: None,
-                transient_boot_preference: None,
-            },
         };
         let problems = sled_software_problems(&test_sled(), report)
             .expect("board is a sled");
@@ -371,18 +425,21 @@ mod tests {
                 expected: "2.0.0".to_string(),
             }
         );
-        assert_eq!(
+        assert!(matches!(
             problems[1],
+            SledSoftwareProblem::Unverified {
+                component: SledComponent::Rot,
+                ..
+            }
+        ));
+        assert_eq!(
+            problems[2],
             SledSoftwareProblem::WrongImage {
                 component: SledComponent::HostPhase1,
                 found: ArtifactHash([1; 32]).to_string(),
                 expected: ArtifactHash([2; 32]).to_string(),
             }
         );
-        assert!(matches!(
-            problems[2],
-            SledSoftwareProblem::RotBootPreferenceUnsettled { .. }
-        ));
 
         // Check that the error message names the sled, the target release,
         // and each problem.
@@ -395,39 +452,36 @@ mod tests {
         assert!(message.contains("test-sled"));
         assert!(message.contains("17.0.0"));
         assert!(message.contains("SP is running 1.0.0 (expected 2.0.0)"));
+        assert!(message.contains(
+            "RoT could not be verified: RoT boot preferences show an update"
+        ));
         assert!(message.contains("host OS phase 1 is running"));
-        assert!(message.contains("RoT boot preferences show an update"));
     }
 
     #[test]
-    fn test_indeterminate_is_a_problem() {
-        let report = ActiveVersionsReport {
-            sp: ActiveImageCheck::Indeterminate(
+    fn test_unverified_is_a_problem() {
+        let report = DeployedVersionsReport {
+            sp: ActiveImageCheck::Error(
                 FailedSpUpdateReason::CabooseNotInInventory(
                     CabooseWhich::SpSlot0,
                 ),
             ),
-            rot_boot_preferences: RotBootPreferenceCheck::Indeterminate,
             ..all_matching_report()
         };
         let problems = sled_software_problems(&test_sled(), report)
             .expect("board is a sled");
         assert_eq!(
             problems,
-            vec![
-                SledSoftwareProblem::Indeterminate {
-                    component: SledComponent::Sp,
-                    reason: "caboose for SpSlot0 is not in inventory"
-                        .to_string(),
-                },
-                SledSoftwareProblem::RotBootPreferenceIndeterminate,
-            ]
+            vec![SledSoftwareProblem::Unverified {
+                component: SledComponent::Sp,
+                reason: "caboose for SpSlot0 is not in inventory".to_string(),
+            }]
         );
     }
 
     #[test]
     fn test_not_a_sled() {
-        let report = ActiveVersionsReport {
+        let report = DeployedVersionsReport {
             host_phase_1: None,
             ..all_matching_report()
         };

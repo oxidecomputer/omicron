@@ -34,13 +34,8 @@ impl super::Nexus {
             .tq_load_latest_possible_committed_config(opctx, authz_tq.clone())
             .await?;
 
-        // Check the new sleds' software before proposing a new configuration.
-        // (We do this after the lookup above so that callers who are not
-        // allowed to add sleds get the same error they did before this check
-        // existed.)
-        // <review>
-        // Same as other comment
-        // </review>
+        // Check the new sleds' software before allowing them to be added to
+        // the system.
         self.sled_add_check_software(opctx, &new_sleds).await?;
 
         let new_epoch = latest_epoch.next();

@@ -13,6 +13,7 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
 use nexus_types::deployment::planning_report::FailedRotBootloaderUpdateReason;
+use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::tuf_repo::TufRepoDescription;
@@ -72,10 +73,8 @@ pub(super) fn try_make_update(
         return Err(FailedRotBootloaderUpdateReason::SpNotInInventory);
     };
 
-    let RotBootloaderActiveAndTarget {
-        active_version: expected_stage0_version,
-        artifact,
-    } = active_and_target(baseboard_id, inventory, current_artifacts)?;
+    let expected_stage0_version = active_version(baseboard_id, inventory)?;
+    let artifact = target_artifact(baseboard_id, inventory, current_artifacts)?;
 
     // If the artifact's version matches what's deployed, then no update is
     // needed.
@@ -115,44 +114,33 @@ pub(super) fn try_make_update(
     }))
 }
 
-/// Active (stage0) RoT bootloader version on a board, paired with the RoT
-/// bootloader artifact that a TUF repo specifies for that board
-pub(super) struct RotBootloaderActiveAndTarget<'a> {
-    pub(super) active_version: ArtifactVersion,
-    pub(super) artifact: &'a Artifact,
+/// Returns the version of the active RoT bootloader image (stage0) on
+/// `baseboard_id`
+pub(super) fn active_version(
+    baseboard_id: &BaseboardId,
+    inventory: &Collection,
+) -> Result<ArtifactVersion, FailedRotBootloaderUpdateReason> {
+    let stage0_caboose = stage0_caboose(baseboard_id, inventory)?;
+    stage0_caboose.caboose.version.parse().map_err(|e| {
+        FailedRotBootloaderUpdateReason::FailedVersionParse {
+            caboose: CabooseWhich::Stage0,
+            err: format!("{}", e),
+        }
+    })
 }
 
-/// Finds the active RoT bootloader version on `baseboard_id` and the RoT
-/// bootloader artifact in `current_artifacts` that applies to that board
+/// Returns the RoT bootloader artifact in `current_artifacts` that applies to
+/// `baseboard_id`
 ///
-/// The caller is responsible for checking that the SP itself is present in
-/// inventory.
-pub(super) fn active_and_target<'a>(
+/// The artifact is chosen based on the board name and signing key in the
+/// stage0 caboose.  That is why this function needs inventory as well as the
+/// TUF repo.
+pub(super) fn target_artifact<'a>(
     baseboard_id: &BaseboardId,
     inventory: &Collection,
     current_artifacts: &'a TufRepoDescription,
-) -> Result<RotBootloaderActiveAndTarget<'a>, FailedRotBootloaderUpdateReason> {
-// <review>
-// I understand why we want both of these things at the same time, but it also seems weird to couple them together in both the type and the function.  Would it make sense to separate them into two things?
-// </review>
-    let Some(stage0_caboose) =
-        inventory.caboose_for(CabooseWhich::Stage0, baseboard_id)
-    else {
-        return Err(FailedRotBootloaderUpdateReason::CabooseNotInInventory(
-            CabooseWhich::Stage0,
-        ));
-    };
-
-    let active_version = match stage0_caboose.caboose.version.parse() {
-        Ok(v) => v,
-        Err(e) => {
-            return Err(FailedRotBootloaderUpdateReason::FailedVersionParse {
-                caboose: CabooseWhich::Stage0,
-                err: format!("{}", e),
-            });
-        }
-    };
-
+) -> Result<&'a Artifact, FailedRotBootloaderUpdateReason> {
+    let stage0_caboose = stage0_caboose(baseboard_id, inventory)?;
     let rot_board = stage0_caboose.caboose.board.clone();
     let Some(rkth) = stage0_caboose.caboose.sign.clone() else {
         return Err(FailedRotBootloaderUpdateReason::CabooseMissingSign(
@@ -164,24 +152,30 @@ pub(super) fn active_and_target<'a>(
         rot_board,
         rot_rkth: Some(RotKeyTableHash(rkth)),
     });
-    let artifact =
-        current_artifacts.artifacts.get_only(&tags).map_err(|err| {
-            let tags = tags.to_string();
-            match err {
-                GetError::NotFound => {
-                    FailedRotBootloaderUpdateReason::NoMatchingArtifactFound(
-                        tags,
-                    )
-                }
-                GetError::TooMany => {
-                    FailedRotBootloaderUpdateReason::TooManyMatchingArtifacts(
-                        tags,
-                    )
-                }
+    current_artifacts.artifacts.get_only(&tags).map_err(|err| {
+        let tags = tags.to_string();
+        match err {
+            GetError::NotFound => {
+                FailedRotBootloaderUpdateReason::NoMatchingArtifactFound(tags)
             }
-        })?;
+            GetError::TooMany => {
+                FailedRotBootloaderUpdateReason::TooManyMatchingArtifacts(tags)
+            }
+        }
+    })
+}
 
-    Ok(RotBootloaderActiveAndTarget { active_version, artifact })
+/// Returns the caboose for the active RoT bootloader image (stage0) on
+/// `baseboard_id`
+fn stage0_caboose<'a>(
+    baseboard_id: &BaseboardId,
+    inventory: &'a Collection,
+) -> Result<&'a CabooseFound, FailedRotBootloaderUpdateReason> {
+    inventory.caboose_for(CabooseWhich::Stage0, baseboard_id).ok_or(
+        FailedRotBootloaderUpdateReason::CabooseNotInInventory(
+            CabooseWhich::Stage0,
+        ),
+    )
 }
 
 #[cfg(test)]

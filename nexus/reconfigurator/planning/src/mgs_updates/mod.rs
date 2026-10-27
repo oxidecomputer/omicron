@@ -4,7 +4,7 @@
 
 //! Facilities for making choices about MGS-managed updates
 
-mod active_versions;
+mod deployed_versions;
 mod host_phase_1;
 mod rot;
 mod rot_bootloader;
@@ -45,11 +45,11 @@ use thiserror::Error;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
 
-pub use active_versions::ActiveImageCheck;
-pub use active_versions::ActiveVersionsReport;
-pub use active_versions::BoardNotInInventory;
-pub use active_versions::RotBootPreferenceCheck;
-pub use active_versions::check_active_versions;
+pub use deployed_versions::ActiveImageCheck;
+pub use deployed_versions::BoardNotInInventory;
+pub use deployed_versions::DeployedVersionsReport;
+pub use deployed_versions::RotCheckError;
+pub use deployed_versions::compare_deployed_versions;
 pub(crate) use host_phase_1::PendingHostPhase2Changes;
 pub(crate) use sled_evacuation::EvacuatingSleds;
 pub(crate) use sled_evacuation::PendingUpdateDispositionChanges;
