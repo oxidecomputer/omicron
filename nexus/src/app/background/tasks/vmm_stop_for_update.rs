@@ -1021,6 +1021,14 @@ mod tests {
             VmmStopForUpdate::new(datastore.clone(), nexus.sagas.clone());
         let status = task.actually_activate(&opctx).await;
 
+        // No errors are expected
+        assert_eq!(
+            status.error_messages.len(),
+            0,
+            "unexpected errors: {:?}",
+            status.error_messages
+        );
+
         // We stopped the VMMs we expected to stop
         let stopped_count: usize = status
             .vmms_stopped_by_sled
@@ -1045,7 +1053,12 @@ mod tests {
         assert_eq!(failed_to_stop_count, 0);
 
         // No errors are expected
-        assert!(status.error_messages.is_empty());
+        assert_eq!(
+            status.error_messages.len(),
+            0,
+            "unexpected errors: {:?}",
+            status.error_messages
+        );
 
         // Poke each simulated instance so each sled agent reports back to Nexus
         // and wait until each one reports `NoVmm`
