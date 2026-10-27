@@ -3329,7 +3329,7 @@ mod test {
 
             let vmm = state.vmm().as_ref().unwrap();
             let dst_sled_id = cptestctx
-                .find_sled_agent(vmm.sled_id())
+                .find_sled_id_other_than(vmm.sled_id())
                 .expect("need at least one other sled");
             let params = instance_migrate::Params {
                 serialized_authn: authn::saga::Serialized::for_opctx(&opctx),

@@ -2062,7 +2062,7 @@ async fn test_instance_migrate_autoselect_skips_non_provisionable_sled(
         .expect("running instance should have a sled")
         .sled_id;
     let other_sled = cptestctx
-        .find_sled_agent(original_sled)
+        .find_sled_id_other_than(original_sled)
         .expect("need at least one other sled");
 
     // Mark the only other sled non-provisionable.

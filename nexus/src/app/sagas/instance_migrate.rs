@@ -754,7 +754,7 @@ mod tests {
     ) {
         migrate_saga_succeeds_with_destination(cptestctx, |src_sled_id| {
             let dst_sled_id = cptestctx
-                .find_sled_agent(src_sled_id)
+                .find_sled_id_other_than(src_sled_id)
                 .expect("need at least one other sled");
             InstanceMigrateDestination::ById { dst_sled_id }
         })
@@ -801,7 +801,7 @@ mod tests {
                         .expect("instance should have a vmm before migrating");
 
                     let dst_sled_id = cptestctx
-                        .find_sled_agent(old_vmm.sled_id())
+                        .find_sled_id_other_than(old_vmm.sled_id())
                         .expect("need at least one other sled");
 
                     info!(log, "setting up new migration saga";
