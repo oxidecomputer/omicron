@@ -36,7 +36,7 @@ impl super::Nexus {
 
         // Check the new sleds' software before allowing them to be added to
         // the system.
-        self.sled_add_check_software(opctx, &new_sleds).await?;
+        self.sled_check_versions(opctx, &new_sleds).await?;
 
         let new_epoch = latest_epoch.next();
         let proposed = self

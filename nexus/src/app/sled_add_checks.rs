@@ -53,7 +53,7 @@ impl super::Nexus {
     /// for those sleds to be added
     ///
     /// See the module documentation for details.
-    pub(super) async fn sled_add_check_software(
+    pub(super) async fn sled_check_versions(
         &self,
         opctx: &OpContext,
         sleds: impl IntoIterator<Item = &BaseboardId>,
@@ -112,7 +112,7 @@ fn check_sled_software<'a>(
     inventory: Option<&Collection>,
     sleds: impl IntoIterator<Item = &'a BaseboardId>,
 ) -> Result<(), SledSoftwareError> {
-    if blueprint.target_release_updates_suspended(target_release_generation) {
+    if blueprint.updates_suspended(target_release_generation) {
         return Err(SledSoftwareError::UpdateSuspended {
             current: target_release_generation,
             minimum: blueprint.target_release_minimum_generation,

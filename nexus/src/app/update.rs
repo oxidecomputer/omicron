@@ -668,7 +668,7 @@ impl super::Nexus {
         // is less than the blueprint's minimum generation
         let suspended = blueprint_target
             .blueprint
-            .target_release_updates_suspended(db_target_release.generation());
+            .updates_suspended(db_target_release.generation());
 
         // Decide whether to surface a "contact support" signal based on health
         // checks against a subset of components in the system

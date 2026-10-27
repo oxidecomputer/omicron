@@ -838,7 +838,7 @@ impl super::Nexus {
 
         // Check the sled's software before allowing it to be added to the
         // system.
-        self.sled_add_check_software(opctx, [&baseboard_id]).await?;
+        self.sled_check_versions(opctx, [&baseboard_id]).await?;
 
         let subnet = self.db_datastore.rack_subnet(opctx, self.rack_id).await?;
         let rack_subnet =
