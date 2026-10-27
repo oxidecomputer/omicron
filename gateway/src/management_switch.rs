@@ -21,6 +21,7 @@ use self::location_map::ValidatedLocationConfig;
 use crate::error::SpCommsError;
 use crate::error::SpLookupError;
 use crate::error::StartupError;
+use dropshot::HttpError;
 use gateway_messages::IgnitionState;
 use gateway_sp_comms::BindError;
 use gateway_sp_comms::HostPhase2Provider;
@@ -31,6 +32,7 @@ use gateway_sp_comms::default_discovery_addr;
 use gateway_sp_comms::default_ereport_addr;
 use gateway_sp_comms::ereport;
 use gateway_sp_comms::shared_socket;
+use gateway_types::update::SpComponentResetError;
 use serde::Deserialize;
 use serde::Serialize;
 use slog::Logger;
@@ -144,20 +146,6 @@ impl From<SpType> for gateway_types::component::SpType {
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize,
 )]
 pub(crate) struct SwitchPort(usize);
-
-/// Enum representing whether a given [`SpIdentifier`] corresponds to the SP of
-/// a locally-connected device (sled or switch).
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum SpLocality {
-    /// The SP is not local to this MGS.
-    NotLocal,
-
-    /// The SP is that of this MGS's hosting sled.
-    LocalSled,
-
-    /// The SP is that of this MGS's locally-connected switch.
-    LocalSwitch,
-}
 
 #[derive(Debug)]
 pub struct ManagementSwitch {
@@ -388,46 +376,49 @@ impl ManagementSwitch {
         location_map.port_to_id(self.local_ignition_controller_port)
     }
 
-    /// Determine whether a given SP is local to this MGS.
+    /// Determine whether it's valid to issue an SP reset to `id`.
     ///
     /// # Errors
     ///
     /// This method will fail if discovery is not yet complete (i.e., we don't
-    /// know the logical identifiers of any SP yet!).
-    pub(crate) fn sp_locality(
+    /// know the logical identifiers of any SP yet!), or if `id` corresponds to
+    /// our local sled or switch and our config prevents resetting them.
+    pub(crate) fn validate_sp_reset_is_allowed(
         &self,
         id: SpIdentifier,
-    ) -> Result<SpLocality, SpLookupError> {
-        let location_map = self.location_map()?;
+    ) -> Result<(), SpComponentResetError> {
+        // Error conversion here is a little awkward. If we don't yet have our
+        // location map, we can convert that error into an
+        // `SpComponentResetError` by travelling through `HttpError`, which
+        // turns into `SpComponentResetError::Other { .. }`.
+        let location_map = self.location_map().map_err(HttpError::from)?;
 
-        let locality = match id.typ {
+        // If our config allows us to reset local SPs, we have nothing to
+        // validate.
+        if location_map.allow_local_sp_reset() {
+            return Ok(());
+        }
+
+        // Otherwise, check whether `id` corresponds to our local sled or
+        // switch.
+        match id.typ {
             // PSCs are never local to an MGS.
-            SpType::Power => SpLocality::NotLocal,
+            SpType::Power => Ok(()),
             SpType::Switch => {
                 if id == self.local_switch_via_location_map(location_map) {
-                    SpLocality::LocalSwitch
+                    Err(SpComponentResetError::ResetSpOfLocalSwitch)
                 } else {
-                    SpLocality::NotLocal
+                    Ok(())
                 }
             }
             SpType::Sled => {
                 if id.slot == location_map.local_sled() {
-                    SpLocality::LocalSled
+                    Err(SpComponentResetError::ResetSpOfLocalSled)
                 } else {
-                    SpLocality::NotLocal
+                    Ok(())
                 }
             }
-        };
-
-        Ok(locality)
-    }
-
-    /// Get whether our config told us it's okay to reset our local sled or
-    /// switch.
-    pub(crate) fn is_local_sp_reset_allowed(
-        &self,
-    ) -> Result<bool, SpLookupError> {
-        Ok(self.location_map()?.allow_local_sp_reset())
+        }
     }
 
     /// Get the handle for communicating with an SP by its switch port.
