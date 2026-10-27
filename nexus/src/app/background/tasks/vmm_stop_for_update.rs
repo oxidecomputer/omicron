@@ -376,7 +376,7 @@ impl VmmStopForUpdate {
                     // We are running these steps as an _optimisation_ only. The
                     // instance state will be updated eventually by either the
                     // instance watcher task, or sled agent.
-                    optimise_instance_state_update(
+                    try_instance_state_update(
                         &mut result,
                         datastore,
                         sagas,
@@ -401,11 +401,7 @@ impl VmmStopForUpdate {
                         //  - The VMM has not stopped yet, but propolis has
                         //    accepted the `put_state` request and reports
                         //    the VMM's state as `Stopping`.
-                        //  - A propolis zone does not exist yet. In this
-                        //    scenario a VMM could have been in the
-                        //    `Creating` state but had not reached the point
-                        //    where the propolis zone was created. In this
-                        //    case the request succeeded, but the VMM is
+                        //  - A propolis zone does not exist; the VMM is
                         //    reported as `Destroyed`.
                         //  - A VMM should technically never be reported as
                         //    `Stopped` since
@@ -446,11 +442,6 @@ impl VmmStopForUpdate {
                         // Additionally, when `vmm_put_state` returns a
                         // `NO_SUCH_INSTANCE` error, we transition the runtime
                         // state to `VmmState::Failed` above.
-                        //
-                        // While a `VmmState::Failed` could also be due to a
-                        // sled agent or sled restart, `vmm_put_state` would
-                        // report those cases as an `Error`, so we don't
-                        // need to handle those specific cases here.
                         //
                         // Because of this, it's not necessary to stop it
                         // anymore, so we don't add it to the
@@ -593,8 +584,12 @@ struct AssociatedIds {
     sled_id: SledUuid,
 }
 
-// Attempt to update the instance state
-async fn optimise_instance_state_update(
+// Attempt to update the instance state.
+//
+// This function is intended to be run by a caller that does not care whether
+// the instance state is actually successfully updated or not. It does not
+// Errors are not returned, but rather logged and saved in `VmmStopForUpdateResult`.
+async fn try_instance_state_update(
     result: &mut VmmStopForUpdateResult,
     datastore: Arc<DataStore>,
     sagas: Arc<dyn StartSaga>,
@@ -605,7 +600,7 @@ async fn optimise_instance_state_update(
     let AssociatedIds { vmm_id, instance_id, sled_id } = ids;
 
     // Attempt to write the new VMM state to the db.
-    match instance::process_vmm_update(
+    let saga = match instance::process_vmm_update(
         &datastore,
         opctx,
         vmm_id,
@@ -613,11 +608,10 @@ async fn optimise_instance_state_update(
     )
     .await
     {
+        // As mentioned earlier, it's not a huge deal if we fail here. The
+        // instance state will be updated eventually by the instance watcher
+        // task or sled agent.
         Err(err) => {
-            // As mentioned earlier, it's not a huge deal if we
-            // fail here. The instance state will be updated
-            // eventually by the instance watcher task or sled
-            // agent.
             slog::warn!(
                 opctx.log,
                 "Failed to record new VMM state";
@@ -628,36 +622,41 @@ async fn optimise_instance_state_update(
                 InlineErrorChain::new(&err),
             );
             result.errors.push(err);
+            return;
         }
-        Ok(Some((_, saga))) => match sagas.saga_run(saga).await {
-            Ok((saga_id, completed)) => {
-                if let Err(err) = completed.await {
-                    slog::warn!(
-                        opctx.log,
-                        "Instance update saga failed";
-                        "sled_id" => %sled_id,
-                        "vmm_id" => %vmm_id,
-                        "saga_id" => %saga_id,
-                        "instance_id" => %instance_id,
-                        InlineErrorChain::new(&err),
-                    );
-                    result.errors.push(err);
-                }
-            }
-            Err(err) => {
-                slog::warn!(
-                    opctx.log,
-                    "Instance update saga could not \
-                     be started";
-                    "sled_id" => %sled_id,
-                    "vmm_id" => %vmm_id,
-                    "instance_id" => %instance_id,
-                    InlineErrorChain::new(&err),
-                );
-                result.errors.push(err);
-            }
-        },
-        Ok(None) => {}
+        // The new state would like an instance-update saga, so we'll try to
+        // run it.
+        Ok(Some((_, saga))) => saga,
+        // The new state does not require an update saga, nothing left to do
+        // here.
+        Ok(None) => return,
+    };
+    let (saga_id, completed) = match sagas.saga_run(saga).await {
+        Ok(s) => s,
+        Err(err) => {
+            slog::warn!(
+                opctx.log,
+                "Instance update saga could not be started";
+                "sled_id" => %sled_id,
+                "vmm_id" => %vmm_id,
+                "instance_id" => %instance_id,
+                InlineErrorChain::new(&err),
+            );
+            result.errors.push(err);
+            return;
+        }
+    };
+    if let Err(err) = completed.await {
+        slog::warn!(
+            opctx.log,
+            "Instance update saga failed";
+            "sled_id" => %sled_id,
+            "vmm_id" => %vmm_id,
+            "saga_id" => %saga_id,
+            "instance_id" => %instance_id,
+            InlineErrorChain::new(&err),
+        );
+        result.errors.push(err);
     }
 }
 

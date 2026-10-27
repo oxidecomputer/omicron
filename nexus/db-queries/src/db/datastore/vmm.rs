@@ -178,9 +178,9 @@ impl DataStore {
     /// Marks VMMs sleds that are evacuating as needing to be stopped in order
     /// to update the sled.
     ///
-    /// VMMs that are not in one of the `SHOULD_STOP_FOR_EVACUATION` states do
-    /// not need to be stopped, so they are left untouched. VMMs that are
-    /// already marked to be stopped by update are also excluded.
+    /// VMMs that are not in one of the `SHOULD_MARK_TO_STOP_FOR_EVACUATION`
+    /// states do not need to be stopped, so they are left untouched. VMMs that
+    /// are already marked to be stopped by update are also excluded.
     ///
     /// The task to stop instances only needs to know whether a VMM should be
     /// stopped or not, so a boolean would be enough. But, we mark the VMMs
