@@ -73,12 +73,13 @@ use sled_agent_types::system_networking::SystemNetworkingConfig;
 
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
+use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
@@ -136,6 +137,13 @@ pub struct SledAgent {
     pub vpc_routes: Mutex<HashMap<RouterId, RouteSet>>,
     config: Config,
     instance_ensure_state_error: Mutex<Option<Error>>,
+    /// A queue of requests to pause VMM registration requests created by calls
+    /// to [`Self::pause_next_vmm_registration`]. Each time the sled-agent
+    /// receives a request to register a VMM, it will pop from the front of this
+    /// queue, satisfy the oneshot that waits for the request to be received,
+    /// and then wait for the registration request to be resumed by the test
+    /// before continuing. If this queue is empty, requests proceed immediately.
+    vmm_register_pauses: Mutex<VecDeque<PendingVmmRegisterPause>>,
     /// Number of remaining local storage operation failures to inject.
     /// When > 0, local storage ensure/delete operations decrement this
     /// counter and return 503 Service Unavailable.
@@ -153,6 +161,76 @@ pub struct SledAgent {
     network_config_tx: watch::Sender<SystemNetworkingConfig>,
     /// Keeps the scrimlet reconcilers alive.
     scrimlet_reconcilers: ScrimletReconcilers,
+}
+
+struct PendingVmmRegisterPause {
+    tx: oneshot::Sender<PausedVmmRegistration>,
+}
+
+/// A handle to await the next request to register a VMM received by the
+/// simulated sled-agent, returned by
+/// [`SledAgent::pause_next_vmm_registration`].
+///
+/// Use [`Self::wait_for_request`] to wait for the request to arrive and take
+/// control of it. Dropping this handle before a request arrives cancels the
+/// pause. If a request has already been received and is awaiting this pause,
+/// dropping the handle releases it. Otherwise, the handle is removed from the
+/// queue of pending pauses.
+#[must_use = "this type does nothing unless `wait_for_request()` is called"]
+pub struct NextVmmRegistrationRequest {
+    rx: oneshot::Receiver<PausedVmmRegistration>,
+}
+
+/// A request to register a VMM that has been paused by
+/// [`SledAgent::pause_next_vmm_registration`]. This handle is returned by
+/// awaiting [`NextVmmRegistrationRequest::wait_for_request`], and represents a
+/// state in which the request is held by the simulated sled-agent as long as
+/// the handle exists.
+///
+/// This lets a test act at a precise point in the middle of a control plane
+/// operation that registers a VMM: after the request has been sent, but before
+/// the sled agent has acted on it or responded. The request stays held until
+/// the test calls [`Self::resume`] or [`Self::fail`].
+///
+/// Dropping this without calling `resume` or fail` unpauses the request as
+/// though `resume` had been called. However, this results in a warning, since a
+/// test which pauses a test _presumably_ wants to actually control when it is
+/// allowed to continue.
+#[must_use = "why would you pause the next VMM registration request if you '
+    don't want to control when it is unpaused explicitly?"]
+pub struct PausedVmmRegistration {
+    propolis_id: PropolisUuid,
+    resume_tx: oneshot::Sender<Result<(), HttpError>>,
+}
+
+impl PausedVmmRegistration {
+    /// Allows the paused VMM registration request to resume and complete
+    /// successfully.
+    pub fn resume(self) {
+        let _ = self.resume_tx.send(Ok(()));
+    }
+
+    /// Causes the paused VMM registration request to fail with the provided
+    /// error, without the sled agent acting on it.
+    pub fn fail(self, error: impl Into<HttpError>) {
+        let _ = self.resume_tx.send(Err(error.into()));
+    }
+
+    /// Returns the ID of the VMM that the request is attempting to register.
+    pub fn propolis_id(&self) -> PropolisUuid {
+        self.propolis_id
+    }
+}
+
+impl NextVmmRegistrationRequest {
+    /// Waits until a `vmm_register` request arrives and is paused, returning a
+    /// handle that controls when and how the request completes.
+    pub async fn wait_for_request(self) -> PausedVmmRegistration {
+        self.rx.await.expect(
+            "the simulated sled agent has exited before any vmm registration \
+            request was received",
+        )
+    }
 }
 
 /// A synthetic log file injected into the simulated sled-agent by tests,
@@ -255,6 +333,7 @@ impl SledAgent {
             mock_propolis: futures::lock::Mutex::new(None),
             config: config.clone(),
             instance_ensure_state_error: Mutex::new(None),
+            vmm_register_pauses: Mutex::new(VecDeque::new()),
             local_storage_error_count: AtomicU32::new(0),
             repo_depot,
             log,
@@ -317,6 +396,63 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         instance: InstanceEnsureBody,
     ) -> Result<SledVmmState, HttpError> {
+        let pause = {
+            let mut pauses = self.vmm_register_pauses.lock().unwrap();
+            loop {
+                let Some(pause) = pauses.pop_front() else {
+                    // No remaining requests to pause VMM registration in the
+                    // queue, continue handling the request normally.
+                    break None;
+                };
+                if !pause.tx.is_closed() {
+                    // If the test is still holding the handle for this pause,
+                    // return it, otherwise, it has been dropped.
+                    break Some(pause);
+                }
+            }
+        };
+        if let Some(PendingVmmRegisterPause { tx }) = pause {
+            info!(
+                self.log,
+                "holding instance registration request until resumed";
+                "propolis_id" => %propolis_id,
+            );
+            let (resume_tx, resume_rx) = oneshot::channel();
+            // If the test has dropped its handle to pause this request, do
+            // nothing.
+            let _ = tx.send(PausedVmmRegistration { propolis_id, resume_tx });
+            match resume_rx.await {
+                // The test has allowed the VMM registration to proceed.
+                Ok(Ok(())) => {
+                    info!(
+                        self.log,
+                        "resuming held instance_register request";
+                        "propolis_id" => %propolis_id,
+                    );
+                }
+                // The test has requested that we fail the registration request.
+                Ok(Err(error)) => {
+                    info!(
+                        self.log,
+                        "injecting error into held instance_register request";
+                        "propolis_id" => %propolis_id,
+                        "error" => %error,
+                    );
+                    return Err(error);
+                }
+                // The test has dropped its handle! Either this is a test bug,
+                // or the test has already failed and is unwinding.
+                Err(_) => {
+                    warn!(
+                        self.log,
+                        "paused instance_register handle dropped unexpectedly, \
+                         resuming the request";
+                        "propolis_id" => %propolis_id,
+                    );
+                }
+            }
+        }
+
         let InstanceEnsureBody {
             vmm_spec,
             local_config,
@@ -646,6 +782,31 @@ impl SledAgent {
 
     pub async fn set_instance_ensure_state_error(&self, error: Option<Error>) {
         *self.instance_ensure_state_error.lock().unwrap() = error;
+    }
+
+    /// Pause the next request to register a VMM received by the sled-agent
+    /// until the test explicitly resumes or fails that request.
+    ///
+    /// This method can be called before any requests have been sent or
+    /// received. Calling it indicates that the *next* request received should
+    /// be paused, and returns a [`NextVmmRegistrationRequest`] handle that the
+    /// caller may use to wait until a request is received (using
+    /// [`NextVmmRegistrationRequest::wait_for_request`]). When a request is
+    /// received, that future returns a [`PausedVmmRegistration`] which the test
+    /// may use to resume the request or inject a simulated failure.
+    ///
+    /// This method may be called multiple times to pause multiple requests,
+    /// even before any paused request has been awaited. In this case, requests
+    /// are matched to handles in the order they are received, so the
+    /// [`NextVmmRegistrationRequest`] returned by the first call will be
+    /// matched to the first request received, and so on.
+    pub fn pause_next_vmm_registration(&self) -> NextVmmRegistrationRequest {
+        let (tx, rx) = oneshot::channel();
+        self.vmm_register_pauses
+            .lock()
+            .unwrap()
+            .push_back(PendingVmmRegisterPause { tx });
+        NextVmmRegistrationRequest { rx }
     }
 
     /// Set the number of times local storage operations should fail with 503
