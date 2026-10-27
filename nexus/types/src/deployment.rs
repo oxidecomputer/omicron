@@ -341,6 +341,20 @@ impl Blueprint {
         }
     }
 
+    /// Returns whether updates to the target release are suspended, given the
+    /// generation of the current target release
+    ///
+    /// Updates are suspended when the current target release generation is
+    /// lower than [`Self::target_release_minimum_generation`].  This happens
+    /// after reconfigurator detects a MUPdate.  It lasts until an operator sets
+    /// a new target release.
+    pub fn target_release_updates_suspended(
+        &self,
+        current_generation: TargetReleaseGeneration,
+    ) -> bool {
+        current_generation < self.target_release_minimum_generation
+    }
+
     /// Construct a [`ServiceZoneNatEntries`] containing all NAT entries for
     /// relevant in-service zones in this blueprint.
     ///

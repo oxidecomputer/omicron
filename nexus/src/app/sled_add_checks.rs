@@ -112,9 +112,7 @@ fn check_sled_software<'a>(
     inventory: Option<&Collection>,
     sleds: impl IntoIterator<Item = &'a BaseboardId>,
 ) -> Result<(), SledSoftwareError> {
-    // If the system's target release generation is older than the blueprint
-    // requires, the planner has suspended updates (e.g., after a mupdate).
-    if target_release_generation < blueprint.target_release_minimum_generation {
+    if blueprint.target_release_updates_suspended(target_release_generation) {
         return Err(SledSoftwareError::UpdateSuspended {
             current: target_release_generation,
             minimum: blueprint.target_release_minimum_generation,
