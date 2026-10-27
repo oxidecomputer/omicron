@@ -239,7 +239,9 @@ pub(super) async fn networking_resource_instance_state(
     // - starting: see below.
     match (found_instance_state, found_vmm_state) {
         // If there's no VMM, the instance is definitely not on any sled.
-        (InstanceState::NoVmm, _) | (_, Some(VmmState::SagaUnwound)) => {
+        (InstanceState::NoVmm, _)
+        | (InstanceState::SledEvacuating, _)
+        | (_, Some(VmmState::SagaUnwound)) => {
             propolis_and_sled_id = None;
         }
 

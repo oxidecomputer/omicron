@@ -1061,11 +1061,15 @@ mod tests {
         );
 
         // Poke each simulated instance so each sled agent reports back to Nexus
-        // and wait until each one reports `NoVmm`
+        // and wait until each one reports `SledEvacuating`
         for id in &instance_ids {
             instance_simulate(&cptestctx, id).await;
-            instance_wait_for_state(&cptestctx, *id, InstanceState::NoVmm)
-                .await;
+            instance_wait_for_state(
+                &cptestctx,
+                *id,
+                InstanceState::SledEvacuating,
+            )
+            .await;
         }
         // Before fetching the VMMs again, make sure all instance update sagas
         // are finished

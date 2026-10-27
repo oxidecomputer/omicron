@@ -363,6 +363,11 @@ impl<'s> InstanceStateComputer<'s> {
             // - An instance with no VMM is always "stopped" (as long as it's
             //   not "starting" etc.)
             (InstanceState::NoVmm, None) => instance::InstanceState::Stopped,
+            // - An instance with no VMM because it was on a sled that is being
+            //   evacuated is always "rebooting"
+            (InstanceState::SledEvacuating, None) => {
+                instance::InstanceState::Rebooting
+            }
             // - The instance should not be in `InstanceState::Vmm` if there is
             //   no active VMM record, this is probably a bug, but return
             //   `InstanceState::Stopped`, because that's basically true
@@ -382,6 +387,14 @@ impl<'s> InstanceStateComputer<'s> {
                      should be no VMM state"
                 );
                 instance::InstanceState::Stopped
+            }
+            (InstanceState::SledEvacuating, _vmm_state) => {
+                debug_assert_eq!(
+                    _vmm_state, None,
+                    "if the instance is in `InstanceState::SledEvacuating`, \
+                     there should be no VMM state"
+                );
+                instance::InstanceState::Rebooting
             }
             // - If there's no VMM state, use the instance's state.
             (instance_state, None) => instance_state.into(),
