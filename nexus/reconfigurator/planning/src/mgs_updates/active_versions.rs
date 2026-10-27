@@ -3,6 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Comparing the MGS-managed software on one board with a TUF repo
+// <review>
+// _the software in_ a _specific_ TUF repo
+// </review>
 //!
 //! The planner decides whether a board needs an update by finding the
 //! artifact in the target release that applies to the board and comparing it
@@ -11,6 +14,11 @@
 //! the system is already running the target release).  Both paths use the
 //! same functions to choose artifacts, so they cannot disagree about which
 //! artifact a board ought to be running.
+// <review>
+// This is true but it's a confused way to frame it: the function of determining whether what's there matches what it should be is used in two co-equal places: the planner and the "add sled" validation.
+//
+// This also makes me wonder if this is the right module for this functionality.
+// </review>
 
 use super::host_phase_1;
 use super::rot;
@@ -41,6 +49,9 @@ use tufaceous_artifact::ArtifactVersion;
 /// function is intended to work for sleds that are not yet part of the
 /// control plane.
 pub fn check_active_versions(
+// <review>
+// This is a vague name for a `pub` function.  What about `compare_deployed_versions`?
+// </review>
     baseboard_id: &BaseboardId,
     inventory: &Collection,
     repo: &TufRepoDescription,
@@ -122,6 +133,9 @@ pub enum ActiveImageCheck<T, E> {
 
 impl<T: PartialEq, E> ActiveImageCheck<T, E> {
     fn from_result(result: Result<(T, T), E>) -> Self {
+    // <review>
+    // This could use a doc comment.  It's not obvious what it means to turn a `Result` into this type.
+    // </review>
         match result {
             Ok((found, expected)) => {
                 if found == expected {
@@ -144,6 +158,9 @@ impl<T: PartialEq, E> ActiveImageCheck<T, E> {
 /// not yet fully taken effect.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RotBootPreferenceCheck {
+// <review>
+// I wonder about folding this into an Error case of `ActiveImageCheck`.  i.e., we're trying to figure out if the image matches.  If it matches but there's an update pending, that's an error case because we don't expect it.  (That seems true in the "add sled" case.  It's not necessarily true in the regular planning case.)
+// </review>
     /// the persistent boot preference matches the active slot, and neither
     /// the pending persistent boot preference nor the transient boot
     /// preference is set
@@ -191,6 +208,9 @@ pub struct BoardNotInInventory(pub BaseboardId);
 /// Returns the hash of the active host phase 1 image on a sled, paired with
 /// the hash of the phase 1 artifact that `repo` specifies for that sled
 fn host_phase_1_active_and_target(
+// <review>
+// Why is this function not in the `host_phase_1` module like the others?
+// </review>
     baseboard_id: &BaseboardId,
     inventory: &Collection,
     repo: &TufRepoDescription,

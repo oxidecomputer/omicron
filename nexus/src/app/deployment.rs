@@ -976,6 +976,9 @@ fn validate_can_set_target_release_for_update(
 /// and host OS images in the blueprint.  See `is_update_in_progress()` in the
 /// `update` module for why that is sufficient to detect an update in progress.
 pub(super) fn validate_system_settled_on_target_release(
+// <review>
+// Conceptually, this seems duplicative with `BlueprintTargetReleaseStatus`.  Why can't we just use that?
+// </review>
     blueprint: &Blueprint,
     target_release_generation: TargetReleaseGeneration,
     target_release_version: &semver::Version,

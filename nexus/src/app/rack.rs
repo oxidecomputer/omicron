@@ -839,6 +839,11 @@ impl super::Nexus {
         // Check the sled's software before allocating anything for it.  (We
         // do this after the lookup above so that callers who are not allowed
         // to add sleds get the same error they did before this check existed.)
+        // <review>
+        // The parenthetical here should not make reference to how things used to be.  Feel free to strike the whole thing.
+        //
+        // The non-parenthetical part should say "before allowing it to be added to the system".  It's not about what's deployed on it.  Even before we can deploy stuff, we need to be able to initialize it, and that requires a compatible sled agent.
+        // </review>
         self.sled_add_check_software(opctx, [&baseboard_id]).await?;
 
         let subnet = self.db_datastore.rack_subnet(opctx, self.rack_id).await?;

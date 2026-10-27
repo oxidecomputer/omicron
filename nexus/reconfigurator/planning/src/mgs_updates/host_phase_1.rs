@@ -448,6 +448,9 @@ pub(super) struct HostOsTargetArtifacts<'a> {
 /// Finds the host OS artifacts in `current_artifacts` that apply to the sled
 /// identified by `baseboard_id`
 pub(super) fn target_artifacts<'a>(
+// <review>
+// Suggest renaming this to `HostOsTargetArtifacts::for_board`
+// </review>
     baseboard_id: &BaseboardId,
     current_artifacts: &'a TufRepoDescription,
 ) -> Result<HostOsTargetArtifacts<'a>, FailedHostOsUpdateReason> {

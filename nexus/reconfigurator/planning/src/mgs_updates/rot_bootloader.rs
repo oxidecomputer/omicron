@@ -132,6 +132,9 @@ pub(super) fn active_and_target<'a>(
     inventory: &Collection,
     current_artifacts: &'a TufRepoDescription,
 ) -> Result<RotBootloaderActiveAndTarget<'a>, FailedRotBootloaderUpdateReason> {
+// <review>
+// I understand why we want both of these things at the same time, but it also seems weird to couple them together in both the type and the function.  Would it make sense to separate them into two things?
+// </review>
     let Some(stage0_caboose) =
         inventory.caboose_for(CabooseWhich::Stage0, baseboard_id)
     else {

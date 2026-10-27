@@ -38,6 +38,9 @@ impl super::Nexus {
         // (We do this after the lookup above so that callers who are not
         // allowed to add sleds get the same error they did before this check
         // existed.)
+        // <review>
+        // Same as other comment
+        // </review>
         self.sled_add_check_software(opctx, &new_sleds).await?;
 
         let new_epoch = latest_epoch.next();
