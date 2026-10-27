@@ -2370,6 +2370,7 @@ async fn do_switch_port_settings_delete(
 
 #[cfg(test)]
 mod test {
+    use crate::db::datastore::BootstoreGenerationBump;
     use crate::db::datastore::UpdatePrecondition;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_lookup::LookupPath;
@@ -2955,11 +2956,13 @@ mod test {
         datastore.bfd_session_create(&opctx, &bfd).await.unwrap();
 
         // A bootstore generation.
-        let generation = datastore
+        let BootstoreGenerationBump::Bumped(generation) = datastore
             .try_bump_bootstore_generation(opctx, NETWORK_KEY.into(), None)
             .await
             .unwrap()
-            .expect("first bump succeeds");
+        else {
+            panic!("first bump succeeds");
+        };
 
         // The read returns a coherent view of all of the above.
         let data = datastore.switch_config_read(opctx).await.unwrap();

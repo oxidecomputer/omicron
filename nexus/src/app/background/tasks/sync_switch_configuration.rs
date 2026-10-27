@@ -16,7 +16,9 @@ use crate::app::background::BackgroundTask;
 use display_error_chain::DisplayErrorChain;
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use nexus_db_queries::{context::OpContext, db::DataStore};
+use nexus_db_queries::{
+    context::OpContext, db::DataStore, db::datastore::BootstoreGenerationBump,
+};
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::IncompleteBootstoreConfigReport;
 use nexus_types::internal_api::background::SwitchPortSettingsManagerStatus;
@@ -284,7 +286,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 //   again during the next run
                 // * We are able to accomplish the above without inspecting
                 //   the bootstore on the sled-agents
-                // * We never overwrite with an older version of the bootstore.
+                // * We never overwrite the bootstore with an older rack network
+                //   config.
                 //
                 // For example, in the event that we crash after pushing to
                 // the sled-agents successfully, but before writing the
@@ -302,7 +305,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     // We should only write if we manage to bump the bootstore
                     // gen number from `expected_generation`, which is done
                     // atomically with a "compare-and-swap" approach. This
-                    // guarantees that we never write an older version.
+                    // guarantees that we never write a `RackNetworkConfig`
+                    // older than one already written.
                     let generation = match self.datastore
                         .try_bump_bootstore_generation(
                             opctx,
@@ -311,9 +315,17 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         )
                         .await
                     {
-                        Ok(Some(value)) => value,
-                        Ok(None) => {
+                        Ok(BootstoreGenerationBump::Bumped(value)) => value,
+                        Ok(BootstoreGenerationBump::GenerationChanged) => {
                             // Lost the race to another nexus.
+                            info!(
+                                log,
+                                "bootstore generation changed since the config \
+                                 was read (another Nexus likely wrote first); \
+                                 skipping";
+                                "key" => %NETWORK_KEY,
+                                "expected_generation" => ?expected_generation,
+                            );
                             continue;
                         },
                         Err(e) => {
@@ -532,8 +544,9 @@ fn does_bootstore_need_update(
     // Compute staleness and "are there changes" for
     // `desired_rack_network_config`.
     //
-    // TODO-correctness We have no way of computing staleness! We must always
-    // assume `desired_rack_network_config` is not out of date.
+    // We always assume `desired_rack_network_config` is not out of date at
+    // this point. The caller only writes it if its compare-and-swap on the
+    // bootstore generation succeeds.
     let is_network_config_out_of_date = DesiredConfigOutOfDate::No;
     let is_network_config_different = {
         let RackNetworkConfig {
