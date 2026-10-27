@@ -372,6 +372,7 @@ use omicron_common::backoff::BackoffError;
 use omicron_generation_kinds::InstanceStateGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use serde::{Deserialize, Serialize};
@@ -526,7 +527,7 @@ enum NetworkConfigUpdate {
 /// VMM.
 #[derive(Debug, Deserialize, Serialize)]
 struct Deprovision {
-    project_id: Uuid,
+    project_id: ProjectUuid,
     cpus_diff: i64,
     ram_diff: ByteCount,
 }
@@ -775,7 +776,7 @@ impl UpdatesRequired {
             // set of virtual provisioning counters to deallocate also indicates
             // that the instance's oximeter producer should be cleaned up.
             Some(Deprovision {
-                project_id: snapshot.instance.project_id,
+                project_id: snapshot.instance.project_id(),
                 cpus_diff: i64::from(snapshot.instance.ncpus.0.0),
                 ram_diff: snapshot.instance.memory,
             })

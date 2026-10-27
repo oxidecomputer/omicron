@@ -199,7 +199,7 @@ impl Resource {
         // resource name here to determine if the associated database column is
         // a typed id or not
         let primary_key_is_typed_uuid = match name {
-            "SiloUser" => true,
+            "Project" | "SiloUser" => true,
             _ => false,
         };
 

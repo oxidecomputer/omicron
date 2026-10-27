@@ -13,6 +13,7 @@ use nexus_types::external_api::image;
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
@@ -37,7 +38,7 @@ impl ImageType {
         }
     }
 
-    fn project_id(&self) -> Option<Uuid> {
+    fn project_id(&self) -> Option<ProjectUuid> {
         match self {
             ImageType::Project { authz_project, .. } => {
                 Some(authz_project.id())
@@ -135,7 +136,7 @@ async fn simc_get_source_volume(
 
             if let ImageType::Project { authz_project, .. } = &params.image_type
             {
-                if db_snapshot.project_id != authz_project.id() {
+                if db_snapshot.project_id() != authz_project.id() {
                     return Err(saga_action_failed(Error::invalid_request(
                         "snapshot does not belong to this project",
                     )));
@@ -203,7 +204,7 @@ async fn simc_create_image_record(
                     params.create_params.identity.clone(),
                 ),
                 silo_id: params.image_type.silo_id(),
-                project_id: params.image_type.project_id(),
+                project_id: params.image_type.project_id().map(Into::into),
                 volume_id: source_volume.volume_id.into(),
                 url: None,
                 os: params.create_params.os.clone(),
@@ -298,6 +299,8 @@ pub(crate) mod test {
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::ProjectUuid;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -310,7 +313,7 @@ pub(crate) mod test {
 
     async fn new_test_params(
         cptestctx: &ControlPlaneTestContext,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         snapshot_id: Uuid,
     ) -> Params {
         let opctx = test_opctx(cptestctx);
@@ -355,8 +358,9 @@ pub(crate) mod test {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
 
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+        let project_id = ProjectUuid::from_untyped_uuid(
+            create_project(&client, PROJECT_NAME).await.identity.id,
+        );
 
         create_disk(&client, PROJECT_NAME, DISK_NAME).await;
 
@@ -408,8 +412,9 @@ pub(crate) mod test {
         DiskTest::new(cptestctx).await;
         let nexus = &cptestctx.server.server_context().nexus;
 
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+        let project_id = ProjectUuid::from_untyped_uuid(
+            create_project(&client, PROJECT_NAME).await.identity.id,
+        );
 
         create_disk(&client, PROJECT_NAME, DISK_NAME).await;
 
@@ -474,8 +479,9 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+        let project_id = ProjectUuid::from_untyped_uuid(
+            create_project(&client, PROJECT_NAME).await.identity.id,
+        );
         create_disk(&client, PROJECT_NAME, DISK_NAME).await;
         let snapshot_id =
             create_snapshot(&client, PROJECT_NAME, DISK_NAME, "snapshot")
@@ -513,8 +519,9 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+        let project_id = ProjectUuid::from_untyped_uuid(
+            create_project(&client, PROJECT_NAME).await.identity.id,
+        );
         create_disk(&client, PROJECT_NAME, DISK_NAME).await;
         let snapshot_id =
             create_snapshot(&client, PROJECT_NAME, DISK_NAME, "snapshot")
@@ -543,8 +550,9 @@ pub(crate) mod test {
         let client = &cptestctx.external_client;
         DiskTest::new(cptestctx).await;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+        let project_id = ProjectUuid::from_untyped_uuid(
+            create_project(&client, PROJECT_NAME).await.identity.id,
+        );
         create_disk(&client, PROJECT_NAME, DISK_NAME).await;
         let snapshot_id =
             create_snapshot(&client, PROJECT_NAME, DISK_NAME, "snapshot")

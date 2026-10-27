@@ -22,6 +22,7 @@ use crate::db::model::IpPoolResourceType;
 use crate::db::model::IpPoolType;
 use crate::db::model::IpPoolUpdate;
 use crate::db::model::Name;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
@@ -1341,7 +1342,7 @@ impl DataStore {
         for project in &projects {
             let vpcs = vpc_dsl::vpc
                 .filter(vpc_dsl::time_deleted.is_null())
-                .filter(vpc_dsl::project_id.eq(project.id()))
+                .filter(vpc_dsl::project_id.eq(to_db_typed_uuid(project.id())))
                 .select(Vpc::as_select())
                 .load_async(conn)
                 .await
@@ -1438,7 +1439,7 @@ impl DataStore {
         for project in &projects {
             let vpcs = vpc_dsl::vpc
                 .filter(vpc_dsl::time_deleted.is_null())
-                .filter(vpc_dsl::project_id.eq(project.id()))
+                .filter(vpc_dsl::project_id.eq(to_db_typed_uuid(project.id())))
                 .select(Vpc::as_select())
                 .load_async(conn)
                 .await

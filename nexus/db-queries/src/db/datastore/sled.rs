@@ -665,6 +665,7 @@ mod local_storage_pairing_test {
     use nexus_types::external_api::disk;
     use omicron_uuid_kinds::ExternalZpoolUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::ProjectUuid;
     use proptest::prelude::*;
 
     fn request(disk_id: u128, size: i64) -> LocalStorageRequest {
@@ -880,7 +881,7 @@ mod local_storage_pairing_test {
         LocalStorageDisk::new(
             db::model::Disk::new(
                 disk_id,
-                Uuid::new_v4(),
+                ProjectUuid::new_v4(),
                 &params,
                 db::model::BlockSize::AdvancedFormat,
                 db::model::DiskRuntimeState::new(),
@@ -5077,7 +5078,7 @@ pub(in crate::db::datastore) mod test {
                                 description: String::from("desc"),
                             },
                         ),
-                        project_id: authz_project.id(),
+                        project_id: authz_project.id().into(),
                         policy: group.policy.into(),
                         failure_domain: group.failure_domain.into(),
                     },
@@ -5099,7 +5100,7 @@ pub(in crate::db::datastore) mod test {
                                 description: String::from("desc"),
                             },
                         ),
-                        project_id: authz_project.id(),
+                        project_id: authz_project.id().into(),
                         policy: group.policy.into(),
                         failure_domain: group.failure_domain.into(),
                     },
