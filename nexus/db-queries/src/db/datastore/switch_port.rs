@@ -19,7 +19,8 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::{AsyncRunQueryDsl, Connection};
 use diesel::{
     CombineDsl, ExpressionMethods, JoinOnDsl, NullableExpressionMethods,
-    PgConnection, PgExpressionMethods, QueryDsl, SelectableHelper,
+    OptionalExtension, PgConnection, PgExpressionMethods, QueryDsl,
+    SelectableHelper,
 };
 use diesel_dtrace::DTraceConnection;
 use iddqd::IdHashItem;
@@ -31,7 +32,7 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::{
     AddressLot, AddressLotBlock, BfdSession, BgpAnnouncement, BgpConfig,
-    DbSwitchInterfaceKind, DbSwitchSlot, DbTypedUuid, INFRA_LOT,
+    DbSwitchInterfaceKind, DbSwitchSlot, DbTypedUuid, INFRA_LOT, NETWORK_KEY,
     RouterPeerTypeDbRepresentation, SqlU16, SwitchPortBgpPeerConfigAllowExport,
     SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
     to_db_typed_uuid,
@@ -306,6 +307,9 @@ pub struct SwitchConfigData {
     pub infra_blocks: Vec<AddressLotBlock>,
     /// The configured BFD sessions.
     pub bfd_sessions: Vec<BfdSession>,
+    /// The bootstore generation for `NETWORK_KEY`, or `None` if it has never
+    /// been bumped.
+    pub bootstore_generation: Option<i64>,
 }
 
 /// A BGP config, together with the announcements of the announce set it
@@ -612,6 +616,7 @@ impl DataStore {
         use nexus_db_schema::schema::address_lot::dsl as address_lot_dsl;
         use nexus_db_schema::schema::address_lot_block::dsl as address_lot_block_dsl;
         use nexus_db_schema::schema::bgp_config::dsl as bgp_config_dsl;
+        use nexus_db_schema::schema::bootstore_keys::dsl as bootstore_keys_dsl;
 
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -717,11 +722,21 @@ impl DataStore {
                     // Every BFD session.
                     let bfd_sessions = load_all_bfd_sessions(&conn).await?;
 
+                    // The bootstore generation.
+                    let bootstore_generation =
+                        bootstore_keys_dsl::bootstore_keys
+                            .filter(bootstore_keys_dsl::key.eq(NETWORK_KEY))
+                            .select(bootstore_keys_dsl::generation)
+                            .first_async::<i64>(&conn)
+                            .await
+                            .optional()?;
+
                     Ok(SwitchConfigData {
                         applied_ports,
                         bgp_configs,
                         infra_blocks,
                         bfd_sessions,
+                        bootstore_generation,
                     })
                 }
             })
@@ -2359,6 +2374,7 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::INFRA_LOT;
+    use nexus_db_model::NETWORK_KEY;
     use nexus_types::external_api::networking::{
         AddressLotBlockCreate, AddressLotCreate, AddressLotKind,
         BfdSessionEnable, BgpAnnounceSetCreate, BgpAnnouncementCreate,
@@ -2938,6 +2954,13 @@ mod test {
         };
         datastore.bfd_session_create(&opctx, &bfd).await.unwrap();
 
+        // A bootstore generation.
+        let generation = datastore
+            .try_bump_bootstore_generation(opctx, NETWORK_KEY.into(), None)
+            .await
+            .unwrap()
+            .expect("first bump succeeds");
+
         // The read returns a coherent view of all of the above.
         let data = datastore.switch_config_read(opctx).await.unwrap();
 
@@ -2976,6 +2999,9 @@ mod test {
             data.bfd_sessions[0].remote.ip(),
             "10.0.0.1".parse::<IpAddr>().unwrap(),
         );
+
+        // The bootstore generation.
+        assert_eq!(data.bootstore_generation, Some(generation));
 
         db.terminate().await;
         logctx.cleanup_successful();

@@ -114,25 +114,26 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // calculate and apply bootstore changes
                 //
 
-                let input = match nexus_switch_config_preparation::read_and_assemble(
-                    &self.datastore,
-                    opctx,
-                    &log,
-                    rack.rack_subnet,
-                )
-                .await
-                {
-                    Ok(input) => input,
-                    Err(e) => {
-                        error!(
-                            log,
-                            "failed to read bootstore network config; \
-                             skipping rack";
-                            "error" => InlineErrorChain::new(&e),
-                        );
-                        continue;
-                    }
-                };
+                let (input, expected_generation) =
+                    match nexus_switch_config_preparation::read_and_assemble(
+                        &self.datastore,
+                        opctx,
+                        &log,
+                        rack.rack_subnet,
+                    )
+                    .await
+                    {
+                        Ok(result) => result,
+                        Err(e) => {
+                            error!(
+                                log,
+                                "failed to read bootstore network config; \
+                                 skipping rack";
+                                "error" => InlineErrorChain::new(&e),
+                            );
+                            continue;
+                        }
+                    };
 
                 let rack_network_config =
                     match nexus_switch_config::build_rack_network_config(
@@ -283,6 +284,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 //   again during the next run
                 // * We are able to accomplish the above without inspecting
                 //   the bootstore on the sled-agents
+                // * We never overwrite with an older version of the bootstore.
                 //
                 // For example, in the event that we crash after pushing to
                 // the sled-agents successfully, but before writing the
@@ -297,11 +299,23 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // 7. RPW will record the update in the db
                 // 8. We are now back on the happy path
                 if bootstore_needs_update {
+                    // We should only write if we manage to bump the bootstore
+                    // gen number from `expected_generation`, which is done
+                    // atomically with a "compare-and-swap" approach. This
+                    // guarantees that we never write an older version.
                     let generation = match self.datastore
-                        .bump_bootstore_generation(opctx, NETWORK_KEY.into())
+                        .try_bump_bootstore_generation(
+                            opctx,
+                            NETWORK_KEY.into(),
+                            expected_generation,
+                        )
                         .await
                     {
-                        Ok(value) => value,
+                        Ok(Some(value)) => value,
+                        Ok(None) => {
+                            // Lost the race to another nexus.
+                            continue;
+                        },
                         Err(e) => {
                             error!(
                                 log,
@@ -432,9 +446,10 @@ where
 // 3. Our desired config is different from `current_contents` and we are not
 //    operating on stale data. We return `true`.
 //
-// Today, we only partially handle case 2. We store generation numbers that
-// allow us to detect a stale `desired_blueprint_networking_config`, but we have
-// no way of detecting a stale `desired_rack_network_config`. If
+// We store generation numbers that allow us to detect a stale
+// `desired_blueprint_networking_config`. A stale `desired_rack_network_config`
+// is never written, because the caller only bumps the bootstore generation if
+// it hasn't changed since the config was read. If
 // `desired_blueprint_networking_config` is not stale and either desired config
 // is different from `current_contents`, we'll return true.
 fn does_bootstore_need_update(
