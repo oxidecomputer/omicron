@@ -4,6 +4,7 @@
 
 use crate::app::authz;
 use mg_admin_client::types::MessageHistoryRequest;
+use mg_api_types::bgp::history::HistoryBufferSelector;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig};
@@ -324,6 +325,7 @@ impl super::Nexus {
             let history = match client
                 .message_history(&MessageHistoryRequest {
                     asn: sel.asn,
+                    buffer: Some(HistoryBufferSelector::All),
                     direction: None,
                     peer: None,
                 })
