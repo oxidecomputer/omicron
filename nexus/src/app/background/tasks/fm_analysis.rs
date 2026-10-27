@@ -267,7 +267,9 @@ impl FmAnalysis {
 
         // Load analysis inputs from the database.
         let PreparationResult { prep_status, prep_result } =
-            self.prepare_inputs(&opctx, builder).await;
+            InputLoader::new(self.datastore.clone())
+                .prepare_inputs(&opctx, builder)
+                .await;
         let (inputs, input_report) = match prep_result {
             Ok(prepared) => prepared,
             Err(failure) => {
@@ -285,9 +287,9 @@ impl FmAnalysis {
             }
         };
 
-        slog::debug!(
+        slog::info!(
             opctx.log,
-            "prepared fault management analysis inputs (took {:?})",
+            "fault management analysis input preparation completed in {:?}",
             prep_status.total_duration;
             "new_ereports" => input_report.new_ereport_ids.len(),
             "ereporter_restarts" => input_report.num_ereporter_restarts,
@@ -309,6 +311,27 @@ impl FmAnalysis {
             warnings,
         }
     }
+}
+
+struct PreparationResult {
+    prep_status: status::PreparationStatus,
+    prep_result: Result<(Input, InputReport), status::PreparationFailure>,
+}
+
+/// Loads analysis inputs from the database.
+///
+/// This is separate from [`FmAnalysis`] so that each input-loading step need
+/// not clone the entire analysis task state when spawning tasks to load
+/// inputs.. Presently, this only requires a reference to the [`DataStore`].
+#[derive(Clone)]
+struct InputLoader {
+    datastore: Arc<DataStore>,
+}
+
+impl InputLoader {
+    pub fn new(datastore: Arc<DataStore>) -> Self {
+        Self { datastore }
+    }
 
     /// Loads the inputs to analysis from the database into `builder`, and
     /// builds it into an [`Input`].
@@ -326,9 +349,35 @@ impl FmAnalysis {
     async fn prepare_inputs(
         &self,
         opctx: &OpContext,
-        mut builder: fm::analysis_input::Builder,
+        builder: fm::analysis_input::Builder,
     ) -> PreparationResult {
+        // This whole function is *basically* just a call to
+        // `prepare_inputs_internal`, but timed. This way,
+        // `prepare_inputs_internal` can bail out with `?` when it encounters an
+        // error, but we can time the duration of the preparation step
+        // regardless of whether it succeeds or fails.
         let started = Instant::now();
+        let mut steps = IdOrdMap::new();
+
+        let prep_result =
+            self.prepare_inputs_internal(opctx, builder, &mut steps).await;
+
+        let total_duration = started.elapsed();
+        PreparationResult {
+            prep_status: status::PreparationStatus { total_duration, steps },
+            prep_result,
+        }
+    }
+
+    /// Internal implementation of [`Self::prepare_inputs`]. This is factored out into a
+    /// separate function so that `prepare_inputs` can time the total duration
+    /// regardless of whether the preparation step succeeds or fails.
+    async fn prepare_inputs_internal(
+        &self,
+        opctx: &OpContext,
+        mut builder: fm::analysis_input::Builder,
+        step_status: &mut IdOrdMap<status::PreparationStepStatus>,
+    ) -> Result<(Input, InputReport), status::PreparationFailure> {
         // Dropping this `JoinMap` aborts any tasks still running in it.
         let mut steps = JoinMap::new();
 
@@ -341,12 +390,12 @@ impl FmAnalysis {
         // limit here, especially if steps can recursively spawn other
         // steps...but they can't do that today. So.
         for step in PreparationStep::iter() {
-            let loader = InputLoader { datastore: self.datastore.clone() };
             let opctx = opctx.child(BTreeMap::from([(
                 "input".to_string(),
                 step.to_string(),
             )]));
             let parent_sitrep = builder.parent_sitrep().cloned();
+            let loader = self.clone();
             steps.spawn(step, async move {
                 let parent = parent_sitrep.as_ref().map(|s| &s.1);
                 loader.run_step(step, &opctx, parent).await
@@ -354,7 +403,6 @@ impl FmAnalysis {
         }
 
         let mut step_errors = BTreeMap::new();
-        let mut step_status = IdOrdMap::new();
         while let Some((step, result)) = steps.join_next().await {
             let result = match result {
                 Ok(StepOutput { status, result }) => {
@@ -417,45 +465,24 @@ impl FmAnalysis {
         }
 
         if !step_errors.is_empty() {
-            return PreparationResult {
-                prep_status: status::PreparationStatus {
-                    total_duration: started.elapsed(),
-                    steps: step_status,
-                },
-                prep_result: Err(status::PreparationFailure::StepsFailed(
-                    step_errors,
-                )),
-            };
+            return Err(status::PreparationFailure::StepsFailed(step_errors));
         }
 
-        let (input, report) = match builder.build() {
-            Ok(built) => built,
-            Err(err) => {
-                // A missing input is a bug in this task, since every step which
-                // succeeded must have provided its input to the builder by this
-                // point.
-                let error = InlineErrorChain::new(&err);
-                slog::error!(
-                    opctx.log,
-                    "fault management analysis preparation failed";
-                    &error,
-                );
-                return PreparationResult {
-                    prep_status: status::PreparationStatus {
-                        total_duration: started.elapsed(),
-                        steps: step_status,
-                    },
-                    prep_result: Err(
-                        status::PreparationFailure::InvalidInputs(
-                            error.to_string(),
-                        ),
-                    ),
-                };
-            }
-        };
+        let (input, report) = builder.build().map_err(|err| {
+            // A missing input is a bug in this task, since every step which
+            // succeeded must have provided its input to the builder by this
+            // point.
+            let error = InlineErrorChain::new(&err);
+            slog::error!(
+                opctx.log,
+                "fault management analysis preparation failed";
+                &error,
+            );
+            status::PreparationFailure::InvalidInputs(error.to_string())
+        })?;
 
         // The builder checks ereports' restart IDs only once both ereports and
-        // restarts are loaded; report any unknown ones as warnings from the
+        // restarts are loaded. Report any unknown ones as warnings from the
         // step which loaded the ereports.
         if !report.unknown_restart_ereport_ids.is_empty() {
             let mut ereports_step =
@@ -472,31 +499,9 @@ impl FmAnalysis {
             }
         }
 
-        PreparationResult {
-            prep_status: status::PreparationStatus {
-                total_duration: started.elapsed(),
-                steps: step_status,
-            },
-            prep_result: Ok((input, report)),
-        }
+        Ok((input, report))
     }
-}
 
-struct PreparationResult {
-    prep_status: status::PreparationStatus,
-    prep_result: Result<(Input, InputReport), status::PreparationFailure>,
-}
-
-/// Loads analysis inputs from the database.
-///
-/// This is separate from [`FmAnalysis`] so that each input-loading step need
-/// not clone the entire eanalysis task state when spawning tasks to load
-/// inputs.. Presently, this only requires a reference to the [`DataStore`].
-struct InputLoader {
-    datastore: Arc<DataStore>,
-}
-
-impl InputLoader {
     /// Runs the provided [`PreparationStep`] and returns its [`StepOutput`].
     async fn run_step(
         &self,
@@ -1590,22 +1595,13 @@ mod tests {
             sitrep,
         ));
 
-        let (_sitrep_tx, sitrep_rx) = watch::channel(None);
-        let (_inv_tx, inv_rx) = watch::channel(None);
-        let task = FmAnalysis::new(
-            datastore.clone(),
-            sitrep_rx,
-            inv_rx,
-            config_rx(Default::default()),
-            activators(),
-            OmicronZoneUuid::new_v4(),
-        );
-
         let builder = Input::builder(Some(parent), inv)
             .expect("parent sitrep was produced from this inventory")
             .config(FmConfig::default());
         let PreparationResult { prep_status, prep_result } =
-            task.prepare_inputs(opctx, builder).await;
+            InputLoader::new(datastore.clone())
+                .prepare_inputs(opctx, builder)
+                .await;
         let (input, report) =
             prep_result.expect("input preparation should succeed");
         // Every input-loading step ran and recorded its status, without
