@@ -93,7 +93,10 @@ struct CollectArgs {
     #[clap(long, value_parser = humantime::parse_duration)]
     until: Option<std::time::Duration>,
 
-    /// Stop collecting once the bundle reaches this many bytes.
+    /// Stop collecting once the bundle reaches this size.
+    ///
+    /// The size limit may be specified either as a number of bytes, or as a
+    /// number with a power-of-two unit suffix, such as "1024MiB" or "8 GiB".
     #[clap(long, default_value_t = SupportBundleSizeLimit::DEFAULT)]
     size_limit_bytes: SupportBundleSizeLimit,
 }

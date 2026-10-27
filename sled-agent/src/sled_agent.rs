@@ -5,7 +5,7 @@
 //! Sled agent implementation
 
 use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
-use crate::bootstrap::MultirackJoinCompleter;
+use crate::bootstrap::{MultirackJoinAccessor, RssAccessError};
 use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitorHandle;
 use crate::instance_manager::InstanceManager;
@@ -85,6 +85,7 @@ use sled_agent_types::instance::{
     VmmUnregisterResponse,
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig, SledRole};
+use sled_agent_types::multirack::MultirackJoinServiceStatus;
 use sled_agent_types::probes::ProbeCreate;
 use sled_agent_types::resolvable_files::{
     PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
@@ -402,7 +403,6 @@ impl From<Error> for dropshot::HttpError {
                 let err = omicron_common::api::external::Error::from(err);
                 err.into()
             }
-            Error::MultirackJoin(err) => err.into(),
             err @ (Error::BootDiskNotFound
             | Error::Config(_)
             | Error::BackingFs(_)
@@ -424,6 +424,7 @@ impl From<Error> for dropshot::HttpError {
             | Error::UnexpectedRevision(_)
             | Error::RepoDepotStart(_)
             | Error::TimeNotSynchronized
+            | Error::MultirackJoin(_)
             | Error::Rot(_)) => HttpError::for_internal_error(
                 InlineErrorChain::new(&err).to_string(),
             ),
@@ -526,8 +527,8 @@ struct SledAgentInner {
     // Handle to access reference measurements for Sprockets/TrustQuorum
     measurements: Arc<MeasurementsHandle>,
 
-    // A mechanism to complete a multirack join
-    multirack_join_completer: MultirackJoinCompleter,
+    // A mechanism to access a multirack join service task
+    multirack_join_accessor: MultirackJoinAccessor,
 }
 
 impl SledAgentInner {
@@ -560,7 +561,7 @@ impl SledAgent {
         services: ServiceManager,
         long_running_task_handles: LongRunningTaskHandles,
         config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
-        multirack_join_completer: MultirackJoinCompleter,
+        multirack_join_accessor: MultirackJoinAccessor,
     ) -> Result<SledAgent, Error> {
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
@@ -890,7 +891,7 @@ impl SledAgent {
                 metrics_manager,
                 repo_depot,
                 measurements: long_running_task_handles.measurements.clone(),
-                multirack_join_completer,
+                multirack_join_accessor,
             }),
             log: log.clone(),
             sprockets: config.sprockets.clone(),
@@ -1712,8 +1713,14 @@ impl SledAgent {
 
     /// Complete a multirack join operation
     pub(crate) fn complete_multirack_join(&self) -> Result<(), Error> {
-        self.inner.multirack_join_completer.complete_multirack_join()?;
+        self.inner.multirack_join_accessor.complete_multirack_join()?;
         Ok(())
+    }
+
+    pub(crate) fn multirack_join_service_status(
+        &self,
+    ) -> Result<MultirackJoinServiceStatus, RssAccessError> {
+        self.inner.multirack_join_accessor.multirack_join_service_status()
     }
 }
 

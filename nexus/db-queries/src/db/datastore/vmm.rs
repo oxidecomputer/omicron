@@ -11,6 +11,7 @@ use crate::db::model;
 use crate::db::model::Vmm;
 use crate::db::model::VmmState as DbVmmState;
 use crate::db::pagination::paginated;
+use crate::db::pagination::paginated_multicolumn;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateAndQueryResult;
 use crate::db::update_and_check::UpdateStatus;
@@ -24,10 +25,12 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
+use nexus_db_model::ApplySledFilterExt;
 use nexus_db_schema::enums::SledBpAvailabilityEnum;
 use nexus_db_schema::enums::VmmStateEnum;
 use nexus_db_schema::schema::vmm;
 use nexus_db_schema::schema::vmm::dsl;
+use nexus_types::deployment::SledFilter;
 use nexus_types::instance::Migrations;
 use nexus_types::instance::VmmRuntimeState;
 use omicron_common::api::external::CreateResult;
@@ -175,9 +178,9 @@ impl DataStore {
     /// Marks VMMs sleds that are evacuating as needing to be stopped in order
     /// to update the sled.
     ///
-    /// VMMs that are not in one of the `SHOULD_STOP_FOR_EVACUATION` states do
-    /// not need to be stopped, so they are left untouched. VMMs that are
-    /// already marked to be stopped by update are also excluded.
+    /// VMMs that are not in one of the `SHOULD_MARK_TO_STOP_FOR_EVACUATION`
+    /// states do not need to be stopped, so they are left untouched. VMMs that
+    /// are already marked to be stopped by update are also excluded.
     ///
     /// The task to stop instances only needs to know whether a VMM should be
     /// stopped or not, so a boolean would be enough. But, we mark the VMMs
@@ -215,7 +218,7 @@ impl DataStore {
                 model::DbSledBpAvailability::Unavailable,
             )
             .bind::<sql_types::Array<VmmStateEnum>, _>(
-                DbVmmState::SHOULD_STOP_FOR_EVACUATION.to_vec(),
+                DbVmmState::SHOULD_MARK_TO_STOP_FOR_EVACUATION.to_vec(),
             )
             .bind::<sql_types::BigInt, _>(i64::from(batch_size.get()))
             .execute_async(&*conn)
@@ -569,17 +572,44 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
+
+    /// Lists VMMs that have been marked as needing to be stopped for a sled
+    /// update, and that *can* be stopped.
+    ///
+    /// The query performed by this function is paginated by the sled and
+    /// VMM UUIDs, in that order.
+    pub async fn vmm_list_stoppable_for_update_by_sled_id(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, (Uuid, Uuid)>,
+    ) -> ListResultVec<Vmm> {
+        use nexus_db_schema::schema::sled::dsl as sled_dsl;
+
+        paginated_multicolumn(dsl::vmm, (dsl::sled_id, dsl::id), pagparams)
+            .inner_join(sled_dsl::sled.on(sled_dsl::id.eq(dsl::sled_id)))
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::stop_for_update_disposition_generation.is_not_null())
+            .filter(dsl::state.eq_any(DbVmmState::SHOULD_STOP_FOR_EVACUATION))
+            .sled_filter(SledFilter::InService)
+            .select(Vmm::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::authz;
     use crate::db;
     use crate::db::model::Generation;
     use crate::db::model::Migration;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use crate::db::pub_test_utils::helpers::create_vmm_for_instance;
     use iddqd::IdOrdMap;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::ActiveSledBpAvailability;
     use nexus_db_model::SledBlueprintAvailabilityInput;
     use nexus_db_model::SledBpAvailabilityState;
@@ -592,6 +622,7 @@ mod tests {
     use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::SledUuid;
     use sled_agent_types::instance::MigrationState;
+    use std::collections::BTreeSet;
     use std::collections::HashMap;
 
     #[tokio::test]
@@ -1321,6 +1352,130 @@ mod tests {
         assert_eq!(marked.batches, 0);
         assert_eq!(marked.batch_size, SQL_BATCH_SIZE);
 
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_vmm_list_stoppable_for_update_by_sled_id() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "test_vmm_list_stoppable_for_update_by_sled_id",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // The states from which a VMM can still be stopped for an update. Only
+        // marked VMMs in these states should be listed by
+        // `vmm_list_stoppable_for_update_by_sled_id`.
+        let is_stoppable = |state: DbVmmState| {
+            matches!(
+                state,
+                DbVmmState::Starting
+                    | DbVmmState::Running
+                    | DbVmmState::Rebooting
+            )
+        };
+
+        // Insert 2 VMMs (one marked to stop, one not) in each state per sled
+        // (2 in-service and 1 expunged).
+        let generation = UpdateDispositionGeneration::from(1);
+        let sled_a = SledUuid::new_v4();
+        let sled_b = SledUuid::new_v4();
+        let sled_expunged = SledUuid::new_v4();
+        let mut vmms = Vec::new();
+        for sled_id in [sled_a, sled_b, sled_expunged] {
+            // The query only returns VMMs on in-service sleds. We store the
+            // three sleds in the db.
+            datastore
+                .sled_upsert(SledUpdateBuilder::new().sled_id(sled_id).build())
+                .await
+                .expect("sled should be upserted successfully");
+
+            // New sleds are in-service by default. We expunge one of them to
+            // test that no VMMs from that sled are returned.
+            if sled_id == sled_expunged {
+                let (.., authz_sled) = LookupPath::new(&opctx, datastore)
+                    .sled_id(sled_id)
+                    .lookup_for(authz::Action::Modify)
+                    .await
+                    .expect("sled should exist");
+                datastore
+                    .sled_set_policy_to_expunged(&opctx, &authz_sled)
+                    .await
+                    .expect("sled should be expunged");
+            }
+
+            for &state in DbVmmState::ALL_STATES {
+                for marker in [Some(generation), None] {
+                    let failure_reason = (state == DbVmmState::Failed)
+                        .then_some(db::model::VmmFailureReason::FromSledAgent);
+                    let vmm = datastore
+                        .vmm_insert(
+                            &opctx,
+                            Vmm {
+                                id: Uuid::new_v4(),
+                                time_created: Utc::now(),
+                                time_deleted: None,
+                                instance_id: Uuid::new_v4(),
+                                sled_id: sled_id.into(),
+                                propolis_ip: "10.1.9.32".parse().unwrap(),
+                                propolis_port: 420.into(),
+                                cpu_platform: VmmCpuPlatform::SledDefault,
+                                time_state_updated: Utc::now(),
+                                generation: Generation::new(),
+                                state,
+                                failure_reason,
+                                stop_for_update_disposition_generation: marker
+                                    .map(Into::into),
+                            },
+                        )
+                        .await
+                        .expect("VMM should be inserted successfully");
+                    vmms.push(vmm);
+                }
+            }
+        }
+
+        // There should be 60 VMM rows. 2 VMMs (one marked, one not) per state
+        // per sled
+        let row_count: i64 = dsl::vmm
+            // Add a filter to ensure there is no full table scan
+            .filter(dsl::id.ne(Uuid::nil()))
+            .count()
+            .get_result_async(&*conn)
+            .await
+            .expect("VMMs should be counted");
+        assert_eq!(row_count, 60);
+
+        // Check there are 6 stoppable VMMs (3 per in-service sled).
+        let expected_ids: BTreeSet<Uuid> = vmms
+            .iter()
+            .filter(|vmm| {
+                vmm.sled_id() != sled_expunged
+                    && vmm.stop_for_update_disposition_generation.is_some()
+                    && is_stoppable(vmm.state)
+            })
+            .map(|vmm| vmm.id)
+            .collect();
+        assert_eq!(expected_ids.len(), 6);
+
+        // Check the retrieved ids for stoppable VMMs are the same as the
+        // expected ones
+        let listed = datastore
+            .vmm_list_stoppable_for_update_by_sled_id(
+                &opctx,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .expect("marked VMMs should be listed");
+        assert_eq!(listed.len(), expected_ids.len());
+        let listed_ids: BTreeSet<Uuid> =
+            listed.iter().map(|vmm| vmm.id).collect();
+        assert_eq!(listed_ids, expected_ids);
+
+        // Clean up.
         db.terminate().await;
         logctx.cleanup_successful();
     }

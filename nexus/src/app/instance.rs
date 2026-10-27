@@ -20,6 +20,7 @@ use crate::db::datastore::LocalStorageAllocation;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
+use iddqd::IdOrdMap;
 use itertools::Either;
 use itertools::Itertools as _;
 use nexus_db_lookup::LookupPath;
@@ -1667,16 +1668,24 @@ impl super::Nexus {
 
         // TODO-completeness: We need to handle VPC subnets too, see
         // https://github.com/oxidecomputer/omicron/issues/9580.
-        let attached_subnets = self
-            .datastore()
-            .instance_lookup_external_subnets(opctx, authz_instance)
-            .await?
-            .into_iter()
-            .map(|ext| AttachedSubnet {
-                subnet: ext.subnet.into(),
-                kind: AttachedSubnetKind::External,
-            })
-            .collect();
+        let attached_subnets = IdOrdMap::from_iter_unique(
+            self.datastore()
+                .instance_lookup_external_subnets(opctx, authz_instance)
+                .await?
+                .into_iter()
+                .map(|ext| AttachedSubnet {
+                    subnet: ext.subnet.into(),
+                    kind: AttachedSubnetKind::External,
+                }),
+        )
+        .map_err(|dup| {
+            Error::internal_error(&format!(
+                "instance {} has multiple attached subnets with the same \
+                 IP subnet {}",
+                authz_instance.id(),
+                dup.new_item().subnet,
+            ))
+        })?;
 
         // Compute the effective MTU for the instance's primary OPTE port.
         let primary_nic_mtu = if db_instance.enable_jumbo_frames {

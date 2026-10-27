@@ -254,6 +254,7 @@ mod api_impl {
     use sled_agent_types::inventory::OmicronSledUpdateDisposition;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+    use sled_agent_types::multirack::MultirackJoinServiceStatus;
     use sled_agent_types::probes::ProbeSet;
     use sled_agent_types::sled::AddSledRequest;
     use sled_agent_types::support_bundle::RangeRequestHeaders;
@@ -1150,6 +1151,13 @@ mod api_impl {
         async fn multirack_join_complete(
             _request_context: RequestContext<Self::Context>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn multirack_join_service_status(
+            _request_context: RequestContext<Self::Context>,
+        ) -> Result<HttpResponseOk<MultirackJoinServiceStatus>, HttpError>
+        {
             unimplemented!()
         }
     }

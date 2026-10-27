@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "59.0.0"
+    "version": "60.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -385,6 +385,31 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/multirack-join-service-status": {
+      "get": {
+        "summary": "Return the status of this sled's multirack join service.",
+        "description": "Returns a 404 if no multirack join service is running, or a 409 if the service is running but has not yet determined its status.",
+        "operationId": "multirack_join_service_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultirackJoinServiceStatus"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -7202,6 +7227,44 @@
           }
         ]
       },
+      "MultirackJoinServiceStatus": {
+        "type": "object",
+        "properties": {
+          "rack_id": {
+            "$ref": "#/components/schemas/RackUuid"
+          },
+          "rack_subnet": {
+            "$ref": "#/components/schemas/Ipv6Subnet"
+          },
+          "sled_agents": {
+            "title": "BiHashMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SledAgentInfo"
+                }
+              ],
+              "path": "iddqd::BiHashMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SledAgentInfo"
+            },
+            "uniqueItems": true
+          },
+          "sled_id": {
+            "$ref": "#/components/schemas/SledUuid"
+          }
+        },
+        "required": [
+          "rack_id",
+          "rack_subnet",
+          "sled_agents",
+          "sled_id"
+        ]
+      },
       "MupdateOverrideBootInventory": {
         "description": "Inventory representation of the MUPdate override on the boot disk.",
         "type": "object",
@@ -9600,6 +9663,67 @@
         "required": [
           "path",
           "result"
+        ]
+      },
+      "SledAgentInfo": {
+        "description": "Status information for a given sled agent",
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "baseboard_id": {
+            "$ref": "#/components/schemas/BaseboardId"
+          },
+          "sled_id": {
+            "$ref": "#/components/schemas/SledUuid"
+          },
+          "start_state": {
+            "$ref": "#/components/schemas/SledAgentStartState"
+          }
+        },
+        "required": [
+          "address",
+          "baseboard_id",
+          "sled_id",
+          "start_state"
+        ]
+      },
+      "SledAgentStartState": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "last_error": {
+                "nullable": true,
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "in_progress"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "started"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
         ]
       },
       "SledConfigGeneration": {

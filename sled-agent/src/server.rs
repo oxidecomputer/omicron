@@ -7,7 +7,7 @@
 use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
-use crate::bootstrap::MultirackJoinCompleter;
+use crate::bootstrap::MultirackJoinAccessor;
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::nexus::make_nexus_client;
 use crate::services::ServiceManager;
@@ -44,7 +44,7 @@ impl Server {
         long_running_tasks_handles: LongRunningTaskHandles,
         config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
         services: ServiceManager,
-        multirack_join_completer: MultirackJoinCompleter,
+        multirack_join_accessor: MultirackJoinAccessor,
     ) -> Result<Server, String> {
         info!(log, "setting up sled agent server");
 
@@ -67,7 +67,7 @@ impl Server {
             services,
             long_running_tasks_handles,
             config_reconciler_spawn_token,
-            multirack_join_completer,
+            multirack_join_accessor,
         )
         .await
         .map_err(|e| InlineErrorChain::new(&e).to_string())?;

@@ -808,17 +808,7 @@ mod test {
                 attached.iter().all(|att| att.sled_id == sa.sled_agent_id())
             );
             let sa_subnets = sa.sled_agent().attached_subnets.lock().unwrap();
-            assert_eq!(sa_subnets.len(), attached.len());
-            for att in attached.iter() {
-                let on_sled = sa_subnets.get(&att.vmm_id).unwrap();
-                assert_eq!(on_sled.len(), 1);
-                let attached_on_sled = on_sled.iter().next().unwrap();
-                assert!(matches!(
-                    attached_on_sled.kind,
-                    AttachedSubnetKind::External
-                ));
-                assert_eq!(attached_on_sled.subnet, att.subnet);
-            }
+            assert_sled_agent_attached_subnets(&sa_subnets, &attached);
         }
 
         // Now detach the one on the first instance, and check that the
@@ -895,20 +885,45 @@ mod test {
 
             // It should still have a mapping for the _instance_ we detached the
             // subnet from, but that should be empty.
-            assert_eq!(sa_subnets.len(), attached.len() + 1);
             assert!(sa_subnets.get(&removed.vmm_id).unwrap().is_empty());
 
-            // All the attached subnets should still be there.
-            for att in attached.iter() {
-                let on_sled = sa_subnets.get(&att.vmm_id).unwrap();
-                assert_eq!(on_sled.len(), 1);
-                let attached_on_sled = on_sled.iter().next().unwrap();
-                assert!(matches!(
-                    attached_on_sled.kind,
-                    AttachedSubnetKind::External
-                ));
-                assert_eq!(attached_on_sled.subnet, att.subnet);
-            }
+            assert_sled_agent_attached_subnets(&sa_subnets, &attached);
+        }
+    }
+
+    /// Assert that the per-VMM contents from Sled Agent match `attached`.
+    fn assert_sled_agent_attached_subnets(
+        sa_subnets: &HashMap<PropolisUuid, IdOrdMap<AttachedSubnet>>,
+        attached: &[shared::AttachedSubnet],
+    ) {
+        let mut expected: HashMap<PropolisUuid, IdOrdMap<AttachedSubnet>> =
+            HashMap::new();
+        for att in attached {
+            expected
+                .entry(att.vmm_id)
+                .or_default()
+                .insert_unique(AttachedSubnet {
+                    subnet: att.subnet,
+                    kind: AttachedSubnetKind::External,
+                })
+                .expect("each attached subnet appears at most once per VMM");
+        }
+
+        let empty = IdOrdMap::new();
+        for (vmm_id, on_sled) in sa_subnets {
+            let expected_for_vmm = expected.get(vmm_id).unwrap_or(&empty);
+            assert_eq!(
+                on_sled, expected_for_vmm,
+                "sled-agent attached subnets for VMM {vmm_id} \
+                 don't match expectations"
+            );
+        }
+
+        for vmm_id in expected.keys() {
+            assert!(
+                sa_subnets.contains_key(vmm_id),
+                "sled-agent is missing an entry for attached VMM {vmm_id}"
+            );
         }
     }
 

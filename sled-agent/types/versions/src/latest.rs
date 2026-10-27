@@ -232,6 +232,12 @@ pub mod inventory {
     pub use crate::impls::inventory::ZpoolHealthParseError;
 }
 
+pub mod multirack {
+    pub use crate::v60::multirack::MultirackJoinServiceStatus;
+    pub use crate::v60::multirack::SledAgentInfo;
+    pub use crate::v60::multirack::SledAgentStartState;
+}
+
 pub mod probes {
     pub use crate::v10::probes::ExternalIp;
     pub use crate::v10::probes::IpKind;
