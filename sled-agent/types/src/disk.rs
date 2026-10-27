@@ -40,9 +40,7 @@ impl PerDiskDatasetKind {
     pub fn config(self) -> SharedDatasetConfig {
         match self {
             Self::Debug => SharedDatasetConfig {
-                compression: CompressionAlgorithm::GzipN {
-                    level: GzipLevel::new::<9>(),
-                },
+                compression: CompressionAlgorithm::Lz4,
                 quota: Some(U2_DEBUG_DATASET_QUOTA),
                 reservation: None,
             },

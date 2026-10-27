@@ -5,8 +5,8 @@
 //! OxQL shell implementation.
 
 use super::{list_timeseries, prepare_columns};
+use crate::User;
 use crate::{Client, OxqlResult, oxql::query::QueryAuthzScope};
-use crate::{DbWrite as _, User};
 use anyhow::Context as _;
 use clap::Args;
 use crossterm::style::Stylize;
@@ -219,17 +219,14 @@ async fn make_oxql_client(
     port: u16,
     log: &Logger,
 ) -> anyhow::Result<Client> {
-    // Initialize DB, then use a lower-privileged client to query.
     let addr = SocketAddr::new(address, port);
-    Client::new(User::Admin, addr, &log)
-        .init_single_node_db()
-        .await
-        .context("Failed to initialize timeseries database")?;
     let client = Client::new(User::Reader, addr, &log);
 
     // Workaround to ensure the client has all available timeseries.
     let dummy = "foo:bar".parse().unwrap();
-    let _ = client.schema_for_timeseries(&dummy).await;
+    client.schema_for_timeseries(&dummy).await.context(
+        "Error fetching timeseries schema, database may not be initialized",
+    )?;
 
     Ok(client)
 }

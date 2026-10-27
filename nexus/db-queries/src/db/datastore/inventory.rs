@@ -60,6 +60,8 @@ use nexus_db_model::InvOmicronSledConfigZone;
 use nexus_db_model::InvOmicronSledConfigZoneExternalIp;
 use nexus_db_model::InvOmicronSledConfigZoneNic;
 use nexus_db_model::InvPhysicalDisk;
+use nexus_db_model::InvPowerShelfPsu;
+use nexus_db_model::InvPsuSlot;
 use nexus_db_model::InvRootOfTrust;
 use nexus_db_model::InvRotPage;
 use nexus_db_model::InvServiceProcessor;
@@ -73,6 +75,7 @@ use nexus_db_model::InvSvcEnabledNotOnlineService;
 use nexus_db_model::InvZpool;
 use nexus_db_model::RotImageError;
 use nexus_db_model::SledRole;
+use nexus_db_model::SpComponentPresence as DbSpComponentPresence;
 use nexus_db_model::SpType;
 use nexus_db_model::SqlU16;
 use nexus_db_model::SqlU32;
@@ -91,16 +94,20 @@ use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwPowerStateEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::InvConfigReconcilerStatusKindEnum;
+use nexus_db_schema::enums::InvPsuSlotEnum;
 use nexus_db_schema::enums::InvSledUpdateDispositionEnum;
 use nexus_db_schema::enums::InvZoneManifestSourceEnum;
 use nexus_db_schema::enums::RotImageErrorEnum;
 use nexus_db_schema::enums::RotPageWhichEnum;
 use nexus_db_schema::enums::SledRoleEnum;
+use nexus_db_schema::enums::SpComponentPresenceEnum;
 use nexus_db_schema::enums::SpTypeEnum;
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::PhysicalDiskFirmware;
+use nexus_types::inventory::PowerShelf;
+use nexus_types::inventory::Psu;
 use nexus_types::inventory::SledAgent;
 use nexus_types::inventory::TimeSync;
 use omicron_common::api::external::Error;
@@ -108,13 +115,13 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
-use omicron_uuid_kinds::{CollectionUuid, RackUuid};
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::BootPartitionContents;
@@ -154,16 +161,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         collection: &Collection,
-        rack_id: RackUuid,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::INVENTORY).await?;
-
-        // TODO-multirack: this value (and the corresponding plumbing) should no
-        // longer be needed once we have a way to actually find the specific
-        // rack of each record we're inserting. For now, though, we still live
-        // in a single rack world where we can assume everything belongs to the
-        // local rack:
-        let rack_id = to_db_typed_uuid(rack_id);
 
         // In the database, the collection is represented essentially as a tree
         // rooted at an `inv_collection` row.  Other nodes in the tree point
@@ -575,7 +574,7 @@ impl DataStore {
                     ledgered_sled_config,
                     reconciler_status,
                     file_source_resolver,
-                    rack_id,
+                    to_db_typed_uuid(sled_agent.rack_id),
                 )
                 .map_err(|e| Error::internal_error(&e.to_string()))
             })
@@ -807,6 +806,167 @@ impl DataStore {
                         _power_state,
                         _rack_id,
                     ) = sp_dsl::inv_service_processor::all_columns();
+                }
+            }
+
+            // Insert rows for the PSUs reported by power shelf controllers.
+            {
+                use nexus_db_schema::schema::hw_baseboard_id::dsl as baseboard_dsl;
+                use nexus_db_schema::schema::inv_power_shelf_psu::dsl as psu_dsl;
+                use nexus_types::inventory::PsuIdentity;
+                use nexus_types::inventory::PsuIdentityResult;
+
+                for shelf in &collection.power_shelves {
+                    let PowerShelf {
+                        psc_baseboard_id,
+                        // The rack ID and slot are determined from the PSC's
+                        // `inv_service_processor` row when loading, so they are
+                        // not stored in the PSU table.
+                        rack_id: _,
+                        slot: _,
+                        psus,
+                    } = shelf;
+                    for psu in psus {
+                        let Psu {
+                            time_collected,
+                            source,
+                            slot,
+                            hubris_device_type,
+                            // read via `Psu::presence` and `Psu::identity`
+                            state: _,
+                        } = psu;
+                        let presence = psu.presence();
+                        let (
+                            mfr_id,
+                            mfr_model,
+                            mfr_location,
+                            mfr_revision,
+                            mfr_date,
+                            mfr_serial,
+                            vpd_error,
+                        ) = match psu.identity() {
+                            PsuIdentityResult::Present(PsuIdentity {
+                                mfr_id,
+                                mfr_model,
+                                mfr_revision,
+                                mfr_location,
+                                mfr_date,
+                                mfr_serial,
+                            }) => (
+                                Some(mfr_id.clone()),
+                                Some(mfr_model.clone()),
+                                Some(mfr_location.clone()),
+                                Some(mfr_revision.clone()),
+                                Some(mfr_date.clone()),
+                                Some(mfr_serial.clone()),
+                                None,
+                            ),
+                            PsuIdentityResult::Error(error) => (
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                                Some(error.to_owned()),
+                            ),
+                            PsuIdentityResult::NotPresent => {
+                                (None, None, None, None, None, None, None)
+                            }
+                        };
+                        let selection =
+                            nexus_db_schema::schema::hw_baseboard_id::table
+                                .select((
+                                    db_collection_id.into_sql::<
+                                        diesel::sql_types::Uuid,
+                                    >(),
+                                    time_collected.to_owned().into_sql::<
+                                        diesel::sql_types::Timestamptz,
+                                    >(),
+                                    source
+                                        .clone()
+                                        .into_sql::<diesel::sql_types::Text>(),
+                                    baseboard_dsl::id,
+                                    InvPsuSlot::from(*slot)
+                                        .into_sql::<InvPsuSlotEnum>(),
+                                    DbSpComponentPresence::from(presence)
+                                        .into_sql::<SpComponentPresenceEnum>(),
+                                    hubris_device_type
+                                        .clone()
+                                        .into_sql::<diesel::sql_types::Text>(),
+                                    mfr_id.into_sql::<Nullable<
+                                        diesel::sql_types::Text,
+                                    >>(),
+                                    mfr_model.into_sql::<Nullable<
+                                        diesel::sql_types::Text,
+                                    >>(),
+                                    mfr_location.into_sql::<Nullable<
+                                        diesel::sql_types::Text,
+                                    >>(),
+                                    mfr_revision.into_sql::<Nullable<
+                                        diesel::sql_types::Text,
+                                    >>(),
+                                    mfr_date.into_sql::<Nullable<
+                                        diesel::sql_types::Text,
+                                    >>(),
+                                    mfr_serial.into_sql::<Nullable<
+                                        diesel::sql_types::Text,
+                                    >>(),
+                                    vpd_error.into_sql::<Nullable<
+                                        diesel::sql_types::Text,
+                                    >>(),
+                                ))
+                                .filter(
+                                    baseboard_dsl::part_number.eq(
+                                        psc_baseboard_id.part_number.clone(),
+                                    ),
+                                )
+                                .filter(
+                                    baseboard_dsl::serial_number.eq(
+                                        psc_baseboard_id.serial_number.clone(),
+                                    ),
+                                );
+
+                        let _ = diesel::insert_into(
+                            nexus_db_schema::schema::inv_power_shelf_psu::table,
+                        )
+                        .values(selection)
+                        .into_columns((
+                            psu_dsl::inv_collection_id,
+                            psu_dsl::time_collected,
+                            psu_dsl::source,
+                            psu_dsl::psc_baseboard_id,
+                            psu_dsl::location,
+                            psu_dsl::presence,
+                            psu_dsl::hubris_device_type,
+                            psu_dsl::mfr_id,
+                            psu_dsl::mfr_model,
+                            psu_dsl::mfr_location,
+                            psu_dsl::mfr_revision,
+                            psu_dsl::mfr_date,
+                            psu_dsl::mfr_serial,
+                            psu_dsl::vpd_error,
+                        ))
+                        .execute_async(&conn)
+                        .await?;
+
+                        let (
+                            _inv_collection_id,
+                            _time_collected,
+                            _source,
+                            _psc_baseboard_id,
+                            _location,
+                            _presence,
+                            _hubris_device_type,
+                            _mfr_id,
+                            _mfr_model,
+                            _mfr_location,
+                            _mfr_revision,
+                            _mfr_date,
+                            _mfr_serial,
+                            _vpd_error,
+                        ) = psu_dsl::inv_power_shelf_psu::all_columns();
+                    }
                 }
             }
 
@@ -1927,7 +2087,7 @@ impl DataStore {
                                 .into_sql::<Nullable<InvSledUpdateDispositionEnum>>(),
                             instance_manager_num_registered_vmms
                                 .into_sql::<diesel::sql_types::Int8>(),
-                            rack_id
+                            sled_agent.rack_id.into_untyped_uuid()
                                 .into_sql::<diesel::sql_types::Uuid>(),
                         ))
                         .filter(
@@ -2329,6 +2489,7 @@ impl DataStore {
         struct NumRowsDeleted {
             ncollections: usize,
             nsps: usize,
+            npower_shelf_psus: usize,
             nhost_phase1_active_slots: usize,
             nhost_phase1_flash_hashes: usize,
             nrots: usize,
@@ -2373,6 +2534,7 @@ impl DataStore {
         let NumRowsDeleted {
             ncollections,
             nsps,
+            npower_shelf_psus,
             nhost_phase1_active_slots,
             nhost_phase1_flash_hashes,
             nrots,
@@ -2422,6 +2584,16 @@ impl DataStore {
                             dsl::inv_collection
                                 .filter(dsl::id.eq(db_collection_id)),
                         )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    // Remove rows for power shelf PSUs.
+                    let npower_shelf_psus = {
+                        use nexus_db_schema::schema::inv_power_shelf_psu::dsl;
+                        diesel::delete(dsl::inv_power_shelf_psu.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
                         .execute_async(&conn)
                         .await?
                     };
@@ -2802,6 +2974,7 @@ impl DataStore {
                     Ok(NumRowsDeleted {
                         ncollections,
                         nsps,
+                        npower_shelf_psus,
                         nhost_phase1_active_slots,
                         nhost_phase1_flash_hashes,
                         nrots,
@@ -2852,6 +3025,7 @@ impl DataStore {
             "collection_id" => collection_id.to_string(),
             "ncollections" => ncollections,
             "nsps" => nsps,
+            "npower_shelf_psus" => npower_shelf_psus,
             "nhost_phase1_active_slots" => nhost_phase1_active_slots,
             "nhost_phase1_flash_hashes" => nhost_phase1_flash_hashes,
             "nrots" => nrots,
@@ -3055,6 +3229,35 @@ impl DataStore {
                 }));
             }
             sps
+        };
+
+        let power_shelf_psu_rows: Vec<InvPowerShelfPsu> = {
+            use nexus_db_schema::schema::inv_power_shelf_psu::dsl;
+
+            let mut rows = Vec::new();
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_power_shelf_psu,
+                    (dsl::psc_baseboard_id, dsl::location),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvPowerShelfPsu::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.psc_baseboard_id, row.location)
+                });
+                rows.extend(batch);
+            }
+            rows
         };
 
         let rots: BTreeMap<_, _> = {
@@ -3395,6 +3598,7 @@ impl DataStore {
             .keys()
             .chain(rots.keys())
             .cloned()
+            .chain(power_shelf_psu_rows.iter().map(|psu| psu.psc_baseboard_id))
             .chain(sled_agent_rows.iter().filter_map(|s| s.hw_baseboard_id))
             .collect();
         // Fetch the corresponding baseboard records.
@@ -3458,6 +3662,74 @@ impl DataStore {
                     })
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
+
+        let mut power_shelves = IdOrdMap::new();
+        for row in power_shelf_psu_rows {
+            let psc_baseboard_id = row.psc_baseboard_id;
+            let psc =
+                baseboards_by_id.get(&psc_baseboard_id).ok_or_else(|| {
+                    Error::internal_error(
+                        "missing PSC baseboard that we should have fetched",
+                    )
+                })?;
+            let sp = sps.get(psc.as_ref()).ok_or_else(|| {
+                Error::internal_error(format!(
+                    "missing SP entry for PSC baseboard {psc:?}"
+                ))
+            })?;
+            if sp.sp_type != nexus_types::inventory::SpType::Power {
+                return Err(Error::InternalError {
+                    internal_message: format!(
+                        "expected SP entry for baseboard {psc:?} to be a power \
+                        shelf controller, but found: {sp:?}"
+                    ),
+                });
+            }
+
+            let rack_id = sp.rack_id;
+            let slot = sp.sp_slot;
+            let psu = nexus_types::inventory::Psu::try_from(row).map_err(
+                |error| Error::InternalError {
+                    internal_message: format!(
+                        "invalid PSU row for PSC {psc:?} (rack {rack_id} power \
+                         shelf {slot}): {error:#}",
+                    ),
+                },
+            )?;
+
+            // The power shelf's location comes from the PSC's SP row.
+            let mut shelf = power_shelves
+                .entry((&rack_id, slot))
+                .or_insert_with(|| PowerShelf {
+                    psc_baseboard_id: psc.clone(),
+                    rack_id,
+                    slot,
+                    psus: IdOrdMap::with_capacity(6),
+                });
+            // The database schema doesn't prevent us from inserting PSU rows
+            // reported by two different PSC service processors that were found
+            // in the same location, but the collector should not do this. If a
+            // new PSC is inserted between collection attempts from one MGS and
+            // the other, any previously collected PSU entries should be
+            // replaced with the PSUs reported by the new PSC. Therefore, if
+            // we actually encounter this, that's a collector bug.
+            if shelf.psc_baseboard_id != *psc {
+                return Err(Error::InternalError {
+                    internal_message: format!(
+                        "PSU rows for rack {rack_id} power shelf {slot} \
+                         reference multiple PSC baseboards ({:?} and {psc:?})",
+                        shelf.psc_baseboard_id,
+                    ),
+                });
+            }
+            shelf.psus.insert_unique(psu).map_err(|error| {
+                Error::InternalError {
+                    internal_message: format!(
+                        "duplicate PSU row for power shelf {psc:?}: {error}",
+                    ),
+                }
+            })?;
+        }
 
         // Fetch the host phase 1 active slots found.
         let host_phase_1_active_slots = {
@@ -3974,7 +4246,7 @@ impl DataStore {
                 })
                 .transpose()?;
             let mut config_with_id = omicron_sled_configs
-                .get_mut(&z.sled_config_id)
+                .get_mut(z.sled_config_id.into())
                 .ok_or_else(|| {
                     // This error means that we found a row in
                     // inv_omicron_sled_config_zone with no associated record in
@@ -4035,7 +4307,7 @@ impl DataStore {
 
                 for row in batch {
                     let mut config_with_id = omicron_sled_configs
-                        .get_mut(&row.sled_config_id)
+                        .get_mut(row.sled_config_id.into())
                         .ok_or_else(|| {
                             Error::internal_error(&format!(
                                 "dataset config {:?}: unknown config ID: {:?}",
@@ -4076,7 +4348,7 @@ impl DataStore {
 
                 for row in batch {
                     let mut config_with_id = omicron_sled_configs
-                        .get_mut(&row.sled_config_id)
+                        .get_mut(row.sled_config_id.into())
                         .ok_or_else(|| {
                             Error::internal_error(&format!(
                                 "disk config {:?}: unknown config ID: {:?}",
@@ -4982,6 +5254,7 @@ impl DataStore {
                 source: s.source,
                 sled_id,
                 baseboard_id,
+                rack_id: s.rack_id.into(),
                 sled_agent_address: std::net::SocketAddrV6::new(
                     std::net::Ipv6Addr::from(s.sled_agent_ip),
                     u16::from(s.sled_agent_port),
@@ -5165,6 +5438,7 @@ impl DataStore {
             rots,
             cabooses_found,
             rot_pages_found,
+            power_shelves,
             sled_agents,
             clickhouse_keeper_cluster_membership,
             cockroach_status,
@@ -5590,7 +5864,7 @@ mod test {
     use omicron_uuid_kinds::OmicronSledConfigUuid;
     use omicron_uuid_kinds::{
         CollectionUuid, DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid,
-        RackUuid, ZpoolUuid,
+        ZpoolUuid,
     };
     use pretty_assertions::assert_eq;
     use sled_agent_types::disk::M2Slot;
@@ -5695,7 +5969,7 @@ mod test {
         let builder = nexus_inventory::CollectionBuilder::new("test");
         let collection1 = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection1, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection1)
             .await
             .expect("failed to insert collection");
 
@@ -5722,7 +5996,7 @@ mod test {
         let Representative { builder, .. } = representative();
         let collection2 = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection2, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection2)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
@@ -5766,7 +6040,7 @@ mod test {
         let Representative { builder, .. } = representative();
         let collection3 = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection3, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection3)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
@@ -5822,7 +6096,7 @@ mod test {
             .unwrap();
         let collection4 = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection4, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection4)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
@@ -5851,7 +6125,7 @@ mod test {
         let Representative { builder, .. } = representative();
         let collection5 = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection5, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection5)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
@@ -5872,7 +6146,7 @@ mod test {
 
         // Try to insert the same collection again and make sure it fails.
         let error = datastore
-            .inventory_insert_collection(&opctx, &collection5, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection5)
             .await
             .expect_err("unexpectedly succeeded in inserting collection");
         assert!(
@@ -5967,7 +6241,7 @@ mod test {
             collection6.id, collection6.time_started
         );
         datastore
-            .inventory_insert_collection(&opctx, &collection6, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection6)
             .await
             .expect("failed to insert collection");
         assert_eq!(
@@ -6019,7 +6293,7 @@ mod test {
             collection7.id, collection7.time_started
         );
         datastore
-            .inventory_insert_collection(&opctx, &collection7, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection7)
             .await
             .expect("failed to insert collection");
         datastore
@@ -6103,6 +6377,13 @@ mod test {
             assert_eq!(0, count);
             let count =
                 schema::inv_service_processor::dsl::inv_service_processor
+                    .select(diesel::dsl::count_star())
+                    .first_async::<i64>(&conn)
+                    .await
+                    .unwrap();
+            assert_eq!(0, count);
+            let count =
+                schema::inv_power_shelf_psu::dsl::inv_power_shelf_psu
                     .select(diesel::dsl::count_star())
                     .first_async::<i64>(&conn)
                     .await
@@ -6340,7 +6621,7 @@ mod test {
 
         // Write it and read it back.
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
         let read = datastore
@@ -6425,7 +6706,7 @@ mod test {
 
         // Write and read back; the shared IP must round-trip.
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("collection with a shared SNAT IP inserts");
         let collection_read = datastore
@@ -6470,7 +6751,7 @@ mod test {
         let Representative { builder, .. } = representative();
         let collection = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
 
@@ -6517,7 +6798,7 @@ mod test {
         let Representative { builder, .. } = representative();
         let collection = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
 
@@ -6567,7 +6848,7 @@ mod test {
 
         // Write it to the db; read it back and check it survived.
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
@@ -6705,7 +6986,7 @@ mod test {
 
         // Write it to the db; read it back and check it survived.
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
@@ -6771,7 +7052,7 @@ mod test {
 
         // Write it to the db; read it back and check it survived.
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
@@ -6813,7 +7094,7 @@ mod test {
         let collection_id = collection.id;
 
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
 

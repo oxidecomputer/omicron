@@ -39,6 +39,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
+use omicron_common::http_client::internal_http_client_builder;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -888,7 +889,7 @@ impl super::Nexus {
         // production hardware.
         let dur = std::time::Duration::from_secs(300);
         let sa_url = self.get_any_sled_agent_url(opctx).await?;
-        let reqwest_client = reqwest::ClientBuilder::new()
+        let reqwest_client = internal_http_client_builder()
             .connect_timeout(dur)
             .timeout(dur)
             .build()

@@ -598,6 +598,7 @@ impl DataStore {
                     match DebugLogBlueprintPlanning::new(
                         blueprint_id,
                         report.clone(),
+                        &self.git_version,
                     ) {
                         Ok(debug_log) => {
                             use nexus_db_schema::schema::debug_log_blueprint_planning::dsl;
@@ -3551,7 +3552,6 @@ mod tests {
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
-    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use pretty_assertions::assert_eq;
@@ -4348,7 +4348,7 @@ mod tests {
         // `collection`.  This must already be present in the database for
         // blueprint insertion to work.
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert inventory collection");
 

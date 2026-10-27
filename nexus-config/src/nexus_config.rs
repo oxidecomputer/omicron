@@ -447,6 +447,8 @@ pub struct BackgroundTaskConfig {
     pub region_replacement_driver: RegionReplacementDriverConfig,
     /// configuration for instance watcher task
     pub instance_watcher: InstanceWatcherConfig,
+    /// configuration for capacity metrics task
+    pub capacity_metrics: CapacityMetricsConfig,
     /// configuration for instance updater task
     pub instance_updater: InstanceUpdaterConfig,
     /// configuration for instance reincarnation task
@@ -457,6 +459,9 @@ pub struct BackgroundTaskConfig {
     pub v2p_mapping_propagation: V2PMappingPropagationConfig,
     /// configuration for abandoned VMM reaper task
     pub abandoned_vmm_reaper: AbandonedVmmReaperConfig,
+    /// configuration for the task that stops VMMs marked to be stopped for an
+    /// update
+    pub vmm_stop_for_update: VmmStopForUpdateConfig,
     /// configuration for saga recovery task
     pub saga_recovery: SagaRecoveryConfig,
     /// configuration for lookup region port task
@@ -769,6 +774,14 @@ pub struct InstanceWatcherConfig {
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CapacityMetricsConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct InstanceUpdaterConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -820,6 +833,14 @@ pub struct V2PMappingPropagationConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct AbandonedVmmReaperConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct VmmStopForUpdateConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -1381,12 +1402,14 @@ mod test {
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
             instance_watcher.period_secs = 30
+            capacity_metrics.period_secs = 60
             instance_updater.period_secs = 30
             instance_updater.disable = false
             instance_reincarnation.period_secs = 67
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
+            vmm_stop_for_update.period_secs = 300
             saga_recovery.period_secs = 60
             lookup_region_port.period_secs = 60
             region_snapshot_replacement_start.period_secs = 30
@@ -1609,6 +1632,9 @@ mod test {
                         instance_watcher: InstanceWatcherConfig {
                             period_secs: Duration::from_secs(30),
                         },
+                        capacity_metrics: CapacityMetricsConfig {
+                            period_secs: Duration::from_secs(60),
+                        },
                         instance_updater: InstanceUpdaterConfig {
                             period_secs: Duration::from_secs(30),
                             disable: false,
@@ -1626,6 +1652,9 @@ mod test {
                         },
                         abandoned_vmm_reaper: AbandonedVmmReaperConfig {
                             period_secs: Duration::from_secs(60),
+                        },
+                        vmm_stop_for_update: VmmStopForUpdateConfig {
+                            period_secs: Duration::from_secs(300),
                         },
                         saga_recovery: SagaRecoveryConfig {
                             period_secs: Duration::from_secs(60),
@@ -1798,11 +1827,13 @@ mod test {
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
             instance_watcher.period_secs = 30
+            capacity_metrics.period_secs = 60
             instance_updater.period_secs = 30
             instance_reincarnation.period_secs = 67
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
+            vmm_stop_for_update.period_secs = 300
             saga_recovery.period_secs = 60
             lookup_region_port.period_secs = 60
             region_snapshot_replacement_start.period_secs = 30

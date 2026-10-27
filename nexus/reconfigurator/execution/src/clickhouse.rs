@@ -31,6 +31,7 @@ use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use omicron_common::address::CLICKHOUSE_ADMIN_PORT;
+use omicron_common::http_client::internal_http_client;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::error;
@@ -147,7 +148,11 @@ where
         let admin_url = format!("http://{admin_addr}");
         let log = log.new(slog::o!("admin_url" => admin_url.clone()));
         futs.push(Either::Left(async move {
-            let client = ClickhouseKeeperClient::new(&admin_url, log.clone());
+            let client = ClickhouseKeeperClient::new_with_client(
+                &admin_url,
+                internal_http_client(),
+                log.clone(),
+            );
             client
                 .generate_config_and_enable_svc(&config)
                 .await
@@ -176,7 +181,11 @@ where
         let admin_url = format!("http://{admin_addr}");
         let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
         futs.push(Either::Right(async move {
-            let client = ClickhouseServerClient::new(&admin_url, log.clone());
+            let client = ClickhouseServerClient::new_with_client(
+                &admin_url,
+                internal_http_client(),
+                log.clone(),
+            );
             if let Err(e) = client
                 .generate_config_and_enable_svc(&config)
                 .await
@@ -260,7 +269,11 @@ where
         ));
         let admin_url = format!("http://{admin_addr}");
         let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
-        let client = ClickhouseSingleClient::new(&admin_url, log.clone());
+        let client = ClickhouseSingleClient::new_with_client(
+            &admin_url,
+            internal_http_client(),
+            log.clone(),
+        );
         client.init_db().await.map(|_| ()).map_err(|e| {
             anyhow!(
                 "failed to initialize single-node clickhouse database: {e}",

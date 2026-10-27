@@ -20,6 +20,7 @@ use crate::db::datastore::LocalStorageAllocation;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
+use iddqd::IdOrdMap;
 use itertools::Either;
 use itertools::Itertools as _;
 use nexus_db_lookup::LookupPath;
@@ -42,6 +43,7 @@ use nexus_db_queries::db::model::InstanceStateComputer;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_ip;
 use nexus_types::external_api::instance;
+use omicron_common::http_client::internal_http_client;
 // We'll use `InstanceState` frequently, and the code that uses it is already
 // subtle enough: break from the pattern of external API types being referenced
 // by `topic::Name` to help legibility and keep line wrapping under control..
@@ -82,6 +84,8 @@ use sagas::instance_update;
 use sled_agent_client::types::DelegatedZvol;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::VmmPutStateBody;
+use sled_agent_types::attached_subnet::AttachedSubnet;
+use sled_agent_types::attached_subnet::AttachedSubnetKind;
 use sled_agent_types::instance as sled_agent;
 use sled_agent_types::instance::ExternalIpConfig;
 use sled_agent_types::instance::ExternalIps;
@@ -1664,16 +1668,24 @@ impl super::Nexus {
 
         // TODO-completeness: We need to handle VPC subnets too, see
         // https://github.com/oxidecomputer/omicron/issues/9580.
-        let attached_subnets = self
-            .datastore()
-            .instance_lookup_external_subnets(opctx, authz_instance)
-            .await?
-            .into_iter()
-            .map(|ext| sled_agent_client::types::AttachedSubnet {
-                subnet: ext.subnet.into(),
-                kind: sled_agent_client::types::AttachedSubnetKind::External,
-            })
-            .collect();
+        let attached_subnets = IdOrdMap::from_iter_unique(
+            self.datastore()
+                .instance_lookup_external_subnets(opctx, authz_instance)
+                .await?
+                .into_iter()
+                .map(|ext| AttachedSubnet {
+                    subnet: ext.subnet.into(),
+                    kind: AttachedSubnetKind::External,
+                }),
+        )
+        .map_err(|dup| {
+            Error::internal_error(&format!(
+                "instance {} has multiple attached subnets with the same \
+                 IP subnet {}",
+                authz_instance.id(),
+                dup.new_item().subnet,
+            ))
+        })?;
 
         // Compute the effective MTU for the instance's primary OPTE port.
         let primary_nic_mtu = if db_instance.enable_jumbo_frames {
@@ -2216,7 +2228,10 @@ impl super::Nexus {
             .await?;
         Ok((
             vmm,
-            propolis_client::Client::new(&format!("http://{}", client_addr)),
+            propolis_client::Client::new_with_client(
+                &format!("http://{}", client_addr),
+                internal_http_client(),
+            ),
         ))
     }
 

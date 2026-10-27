@@ -314,7 +314,11 @@ impl DbUrlOptions {
         // doesn't match what we expect.  So we use `DataStore::new_unchecked()`
         // here.  We will then check the schema version explicitly and warn the
         // user if it doesn't match.
-        let datastore = Arc::new(DataStore::new_unchecked(log.clone(), pool));
+        let datastore = Arc::new(DataStore::new_unchecked(
+            log.clone(),
+            pool,
+            omicron_git_version::current(),
+        ));
         check_schema_version(&datastore).await;
         Ok(datastore)
     }
@@ -864,9 +868,10 @@ struct DryRunRegionAllocationArgs {
     #[arg(long)]
     block_size: u32,
 
-    /// The size of the virtual disk
+    /// The size of the virtual disk, in bytes or with a power-of-two unit
+    /// suffix (e.g. "10 GiB")
     #[arg(long)]
-    size: i64,
+    size: external::ByteCount,
 
     /// Should the allocated regions be restricted to distinct sleds?
     #[arg(long)]
@@ -1242,8 +1247,9 @@ struct SetStorageBufferArgs {
     /// The UUID of Pool
     id: Uuid,
 
-    /// How many bytes to set the buffer to
-    storage_buffer: i64,
+    /// The size to set the buffer to, in bytes or with a power-of-two unit
+    /// suffix (e.g. "250 GiB")
+    storage_buffer: external::ByteCount,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -2588,6 +2594,7 @@ async fn local_storage_disk_info(
 
         allocation_type: String,
 
+        allocation_id: DatasetUuid,
         dataset_id: DatasetUuid,
         pool_id: ExternalZpoolUuid,
         sled_id: SledUuid,
@@ -2605,6 +2612,7 @@ async fn local_storage_disk_info(
 
                 allocation_type: String::from("unencrypted"),
 
+                allocation_id: allocation.id(),
                 dataset_id: allocation.local_storage_unencrypted_dataset_id(),
                 pool_id: allocation.pool_id(),
                 sled_id: allocation.sled_id(),
@@ -2620,6 +2628,7 @@ async fn local_storage_disk_info(
 
                 allocation_type: String::from("encrypted"),
 
+                allocation_id: allocation.id(),
                 dataset_id: allocation.local_storage_dataset_id(),
                 pool_id: allocation.pool_id(),
                 sled_id: allocation.sled_id(),
@@ -4179,7 +4188,7 @@ async fn cmd_db_dry_run_region_allocation(
         None => VolumeUuid::new_v4(),
     };
 
-    let size: external::ByteCount = args.size.try_into()?;
+    let size = args.size;
     let block_size: BlockSize = args.block_size.try_into()?;
 
     let (blocks_per_extent, extent_count) = DataStore::get_crucible_allocation(
@@ -8595,13 +8604,15 @@ async fn cmd_db_zpool_set_storage_buffer(
         .zpool_set_control_plane_storage_buffer(
             opctx,
             ZpoolUuid::from_untyped_uuid(args.id),
-            args.storage_buffer,
+            args.storage_buffer.into(),
         )
         .await?;
 
     println!(
-        "set pool {} control plane storage buffer bytes to {}",
-        args.id, args.storage_buffer,
+        "set pool {} control plane storage buffer to {} ({} bytes)",
+        args.id,
+        args.storage_buffer,
+        args.storage_buffer.to_bytes(),
     );
 
     Ok(())

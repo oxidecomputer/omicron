@@ -50,7 +50,6 @@ use illumos_utils::smf_helper::Service as _;
 use illumos_utils::smf_helper::SmfHelper;
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
-use illumos_utils::zpool::{PathInPool, ZpoolName, ZpoolOrRamdisk};
 use illumos_utils::{PFEXEC, execute};
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
@@ -80,6 +79,7 @@ use omicron_ddm_admin_client::DdmError;
 use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::RackUuid;
+use sled_agent_config_reconciler::PathInPool;
 use sled_agent_resolvable_files::{
     ZoneImageSourceResolver, ramdisk_file_source,
 };
@@ -245,19 +245,6 @@ pub enum Error {
     #[error("Error migrating old-format services ledger")]
     ServicesMigration(#[source] anyhow::Error),
 
-    #[error(
-        "Invalid filesystem_pool in new zone config: \
-         for zone {zone_id}, expected pool {expected_pool} but got {got_pool}"
-    )]
-    InvalidFilesystemPoolZoneConfig {
-        zone_id: OmicronZoneUuid,
-        expected_pool: ZpoolName,
-        got_pool: ZpoolName,
-    },
-
-    #[error("Unexpected zone config: zone {zone_id} is running on ramdisk ?!")]
-    ZoneIsRunningOnRamdisk { zone_id: OmicronZoneUuid },
-
     #[error("failed to read mupdate override info, not starting zones")]
     MupdateOverrideRead(#[source] MupdateOverrideReadError),
 
@@ -289,17 +276,12 @@ impl Error {
 impl From<Error> for omicron_common::api::external::Error {
     fn from(err: Error) -> Self {
         match err {
-            Error::RequestedConfigConflicts(_)
-            | Error::InvalidFilesystemPoolZoneConfig { .. }
-            | Error::ZoneIsRunningOnRamdisk { .. } => {
+            Error::RequestedConfigConflicts(_) => {
                 omicron_common::api::external::Error::invalid_request(
-                    // InlineErrorChain is not strictly necessary here, but use it in case that
-                    // changes later on.
                     &InlineErrorChain::new(&err).to_string(),
                 )
             }
             Error::RequestedZoneConfigOutdated { .. } => {
-                // InlineErrorChain also isn't strictly necessary here.
                 omicron_common::api::external::Error::conflict(
                     InlineErrorChain::new(&err).to_string(),
                 )
@@ -1201,7 +1183,7 @@ impl ServiceManager {
     async fn initialize_zone(
         &self,
         request: ZoneArgs<'_>,
-        zone_root_path: PathInPool,
+        zone_root_path: Utf8PathBuf,
         filesystems: &[zone::Fs],
         data_links: &[String],
     ) -> Result<RunningZone, Error> {
@@ -3042,7 +3024,7 @@ impl ServiceManager {
         let runtime = self
             .initialize_zone(
                 ZoneArgs::Omicron(zone),
-                zone_root_path,
+                zone_root_path.into_path(),
                 // filesystems=
                 &[],
                 // data_links=
@@ -3757,9 +3739,8 @@ impl ServiceManager {
         // switch zone were on a U.2 device we would not be able to run RSS, as
         // we could not create the U.2 disks due to lack of encryption. To break
         // the cycle we put the switch zone root fs on the ramdisk.
-        let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
         let zone_root_path =
-            PathInPool { pool: ZpoolOrRamdisk::Ramdisk, path: root.clone() };
+            Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
         let zone_args = ZoneArgs::Switch(&request);
         info!(self.inner.log, "Starting switch zone");
         let zone = self

@@ -12,7 +12,7 @@ use dropshot::{
 };
 use dropshot_api_manager_types::api_versions;
 use slog_error_chain::InlineErrorChain;
-use wicketd_commission_types_versions::{latest, v1, v2, v3};
+use wicketd_commission_types_versions::{latest, v1, v2, v3, v4};
 
 // NOTE: The commission API is server-side versioned, but changing it requires
 // coordinating with rkdeploy (it must stay on the oldest version supported
@@ -30,6 +30,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (6, UPDATE_PROGRESS_REPOSITORY),
     (5, MULTIRACK_JOIN),
     (4, UPDATE_ELAPSED),
     (3, BGP_PEER_SRC_ADDR),
@@ -131,7 +132,7 @@ pub trait WicketdCommissionApi {
     /// to ephemeral storage; any previously-uploaded repository is discarded.
     /// This request is rejected with a 400 while any MUPdate is in progress. A
     /// successful upload clears all update progress state, so a subsequent
-    /// `GET /update-progress` returns an empty list.
+    /// `GET /update-progress` returns an empty set of current updates.
     #[endpoint {
         method = PUT,
         path = "/repository",
@@ -142,11 +143,11 @@ pub trait WicketdCommissionApi {
         body: StreamingBody,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Report the progress of every MUPdate
+    /// Report the uploaded system version and the progress of every MUPdate
     #[endpoint {
         method = GET,
         path = "/update-progress",
-        versions = VERSION_UPDATE_ELAPSED..,
+        versions = VERSION_UPDATE_PROGRESS_REPOSITORY..,
     }]
     async fn get_update_progress(
         rqctx: RequestContext<Self::Context>,
@@ -154,6 +155,22 @@ pub trait WicketdCommissionApi {
         HttpResponseOk<latest::update::GetUpdateProgressResponse>,
         HttpError,
     >;
+
+    /// Report the progress of every MUPdate
+    #[endpoint {
+        operation_id = "get_update_progress",
+        method = GET,
+        path = "/update-progress",
+        versions = VERSION_UPDATE_ELAPSED..VERSION_UPDATE_PROGRESS_REPOSITORY,
+    }]
+    async fn get_update_progress_v4(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v4::update::GetUpdateProgressResponse>, HttpError>
+    {
+        Ok(Self::get_update_progress(rqctx)
+            .await?
+            .map(v4::update::GetUpdateProgressResponse::from))
+    }
 
     #[endpoint {
         operation_id = "get_update_progress",
@@ -165,7 +182,7 @@ pub trait WicketdCommissionApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v1::update::GetUpdateProgressResponse>, HttpError>
     {
-        Ok(Self::get_update_progress(rqctx)
+        Ok(Self::get_update_progress_v4(rqctx)
             .await?
             .map(v1::update::GetUpdateProgressResponse::from))
     }

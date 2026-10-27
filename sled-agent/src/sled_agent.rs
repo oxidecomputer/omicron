@@ -5,6 +5,7 @@
 //! Sled agent implementation
 
 use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
+use crate::bootstrap::{MultirackJoinAccessor, RssAccessError};
 use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitorHandle;
 use crate::instance_manager::InstanceManager;
@@ -39,8 +40,6 @@ use illumos_utils::zfs::RemoveReservationError;
 use illumos_utils::zfs::RemoveReservationErrorInner;
 use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
-use illumos_utils::zpool::PathInPool;
-use illumos_utils::zpool::ZpoolOrRamdisk;
 use itertools::Itertools as _;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_common::address::{
@@ -62,6 +61,7 @@ use oxnet::IpNet;
 use sled_agent_bootstrap_common::sprockets::{
     SprocketsClient, SprocketsClientError,
 };
+use sled_agent_config_reconciler::PathInPool;
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
@@ -85,6 +85,7 @@ use sled_agent_types::instance::{
     VmmUnregisterResponse,
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig, SledRole};
+use sled_agent_types::multirack::MultirackJoinServiceStatus;
 use sled_agent_types::probes::ProbeCreate;
 use sled_agent_types::resolvable_files::{
     PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
@@ -199,6 +200,9 @@ pub enum Error {
 
     #[error(transparent)]
     Rot(#[from] crate::rot::RotError),
+
+    #[error("Failed to complete multirack join request")]
+    MultirackJoin(#[from] crate::bootstrap::RssAccessError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -420,6 +424,7 @@ impl From<Error> for dropshot::HttpError {
             | Error::UnexpectedRevision(_)
             | Error::RepoDepotStart(_)
             | Error::TimeNotSynchronized
+            | Error::MultirackJoin(_)
             | Error::Rot(_)) => HttpError::for_internal_error(
                 InlineErrorChain::new(&err).to_string(),
             ),
@@ -521,6 +526,9 @@ struct SledAgentInner {
 
     // Handle to access reference measurements for Sprockets/TrustQuorum
     measurements: Arc<MeasurementsHandle>,
+
+    // A mechanism to access a multirack join service task
+    multirack_join_accessor: MultirackJoinAccessor,
 }
 
 impl SledAgentInner {
@@ -544,6 +552,7 @@ pub struct SledAgent {
 
 impl SledAgent {
     /// Initializes a new [`SledAgent`] object.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         config: &Config,
         log: Logger,
@@ -552,6 +561,7 @@ impl SledAgent {
         services: ServiceManager,
         long_running_task_handles: LongRunningTaskHandles,
         config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
+        multirack_join_accessor: MultirackJoinAccessor,
     ) -> Result<SledAgent, Error> {
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
@@ -881,6 +891,7 @@ impl SledAgent {
                 metrics_manager,
                 repo_depot,
                 measurements: long_running_task_handles.measurements.clone(),
+                multirack_join_accessor,
             }),
             log: log.clone(),
             sprockets: config.sprockets.clone(),
@@ -1328,6 +1339,7 @@ impl SledAgent {
         let sled_agent_address = self.inner.sled_address();
         let is_scrimlet = self.inner.hardware.is_scrimlet();
         let baseboard = self.inner.hardware.baseboard();
+        let rack_id = self.inner.start_request.body.rack_id;
         let usable_hardware_threads =
             self.inner.hardware.online_processor_count();
         let usable_physical_ram =
@@ -1358,6 +1370,7 @@ impl SledAgent {
             sled_agent_address,
             sled_role,
             baseboard_id: baseboard.into(),
+            rack_id,
             usable_hardware_threads,
             usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
             cpu_family,
@@ -1469,11 +1482,8 @@ impl SledAgent {
             .available_datasets_rx()
             .all_mounted_local_storage_unencrypted_datasets()
             .into_iter()
-            .any(|path_in_pool| match path_in_pool.pool {
-                ZpoolOrRamdisk::Zpool(zpool_name) => {
-                    zpool_name == ZpoolName::External(zpool_id)
-                }
-                ZpoolOrRamdisk::Ramdisk => false,
+            .any(|path_in_pool| {
+                path_in_pool.pool() == ZpoolName::External(zpool_id)
             });
 
         if !present {
@@ -1549,11 +1559,8 @@ impl SledAgent {
                 .available_datasets_rx()
                 .all_mounted_local_storage_datasets()
                 .into_iter()
-                .any(|path_in_pool| match path_in_pool.pool {
-                    ZpoolOrRamdisk::Zpool(zpool_name) => {
-                        zpool_name == ZpoolName::External(zpool_id)
-                    }
-                    ZpoolOrRamdisk::Ramdisk => false,
+                .any(|path_in_pool| {
+                    path_in_pool.pool() == ZpoolName::External(zpool_id)
                 });
 
             if !present {
@@ -1575,11 +1582,8 @@ impl SledAgent {
                 .available_datasets_rx()
                 .all_mounted_local_storage_unencrypted_datasets()
                 .into_iter()
-                .any(|path_in_pool| match path_in_pool.pool {
-                    ZpoolOrRamdisk::Zpool(zpool_name) => {
-                        zpool_name == ZpoolName::External(zpool_id)
-                    }
-                    ZpoolOrRamdisk::Ramdisk => false,
+                .any(|path_in_pool| {
+                    path_in_pool.pool() == ZpoolName::External(zpool_id)
                 });
 
             if !present {
@@ -1705,6 +1709,18 @@ impl SledAgent {
             .detach_subnet(propolis_id, subnet)
             .await
             .map_err(|e| Error::Instance(e))
+    }
+
+    /// Complete a multirack join operation
+    pub(crate) fn complete_multirack_join(&self) -> Result<(), Error> {
+        self.inner.multirack_join_accessor.complete_multirack_join()?;
+        Ok(())
+    }
+
+    pub(crate) fn multirack_join_service_status(
+        &self,
+    ) -> Result<MultirackJoinServiceStatus, RssAccessError> {
+        self.inner.multirack_join_accessor.multirack_join_service_status()
     }
 }
 

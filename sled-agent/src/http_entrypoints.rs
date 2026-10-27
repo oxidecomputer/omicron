@@ -5,6 +5,7 @@
 //! HTTP entrypoint functions for the sled agent's exposed API
 
 use super::sled_agent::SledAgent;
+use crate::bootstrap::RssAccessError;
 use crate::sled_agent::Error as SledAgentError;
 use crate::support_bundle::storage::SupportBundleQueryType;
 use crate::zone_bundle::BundleError;
@@ -49,6 +50,7 @@ use sled_agent_types::instance::{
     VmmPutStateResponse, VmmUnregisterResponse, VpcPathParam,
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
+use sled_agent_types::multirack::MultirackJoinServiceStatus;
 use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::rot::{
     Attestation, CertificateChain, MeasurementLog, Nonce, RotPathParams,
@@ -1838,6 +1840,76 @@ impl SledAgentApi for SledAgentImpl {
                     sa.rot_attestor(path_params.into_inner().rot, remote_addr)?;
                 let attestation = rot.attest(nonce.into()).await?;
                 Ok(HttpResponseOk(attestation.into()))
+            })
+            .await
+    }
+
+    async fn multirack_join_complete(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.complete_multirack_join()?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn multirack_join_service_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<MultirackJoinServiceStatus>, HttpError> {
+        let sa = request_context.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let res = sa.multirack_join_service_status();
+                let status = res.map_err(|err| match err {
+                    // Errors returned from multirack join should be a 500.
+                    RssAccessError::MultirackJoinTaskExitedUnexpectedly
+                    | RssAccessError::MultirackJoinFailed { .. }
+                    | RssAccessError::MultirackJoinPanicked => {
+                        HttpError::for_internal_error(err.to_string())
+                    }
+
+                    // RSS running/having run or Multirack join not started
+                    // should return a 404.
+                    //
+                    // We also return a 404 if the multirack join service has
+                    // completed. In this case Nexus will have already recorded
+                    // the results to CRDB, and so there is no real error here.
+                    // We no longer have the status to report anyway, and it
+                    // seems overly complicated to keep track of it and map it
+                    // to an option which the consumer would have to match on.
+                    // This is especially true since we expect the consumer to
+                    // be a background task that next time through will see the
+                    // value in the DB and not make another request.
+                    RssAccessError::MultirackJoinNotYetStarted
+                    | RssAccessError::StillInitializing
+                    | RssAccessError::InitializationFailed { .. }
+                    | RssAccessError::InitializationPanicked
+                    | RssAccessError::AlreadyInitialized
+                    | RssAccessError::MultirackJoinCompleted => {
+                        HttpError::for_not_found(
+                            None,
+                            "No multirack join service running".to_string(),
+                        )
+                    }
+
+                    // If we don't yet have the status available, but we will
+                    // soon we should return a 409.
+                    RssAccessError::MultirackJoinInProgress
+                    | RssAccessError::MembershipChangeNoLongerAllowed
+                    | RssAccessError::RackSubnetChangeNotAllowed
+                    | RssAccessError::MultirackJoinStatusNotYetAvailable => {
+                        HttpError::for_client_error(
+                            Some(err.error_code().to_string()),
+                            dropshot::ClientErrorStatusCode::CONFLICT,
+                            err.to_string(),
+                        )
+                    }
+                })?;
+
+                Ok(HttpResponseOk(status))
             })
             .await
     }

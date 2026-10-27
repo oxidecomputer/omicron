@@ -50,7 +50,7 @@ pub(crate) async fn reconcile(
         let SledBlueprintAvailabilityInput { sled_id, state } = input;
         // Account for this sled; rows left in `existing_db_sleds` after the loop
         // are ones the blueprint doesn't mention (handled below).
-        let existing = existing_db_sleds.remove(&sled_id);
+        let existing = existing_db_sleds.remove(sled_id);
         let existing_state = match &existing {
             None => None,
             Some(row) => Some(row.state()?),

@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "54.0.0"
+    "version": "60.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -42,8 +42,15 @@
             "name": "sha256",
             "required": true,
             "schema": {
+              "x-rust-type": {
+                "crate": "byte-wrapper",
+                "path": "byte_wrapper::HexArray::<32>",
+                "version": "0.2.0"
+              },
               "type": "string",
-              "format": "hex string (32 bytes)"
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "minLength": 64,
+              "maxLength": 64
             }
           },
           {
@@ -95,8 +102,15 @@
             "name": "sha256",
             "required": true,
             "schema": {
+              "x-rust-type": {
+                "crate": "byte-wrapper",
+                "path": "byte_wrapper::HexArray::<32>",
+                "version": "0.2.0"
+              },
               "type": "string",
-              "format": "hex string (32 bytes)"
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "minLength": 64,
+              "maxLength": 64
             }
           },
           {
@@ -353,6 +367,49 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/multirack-join-complete": {
+      "put": {
+        "summary": "Report that this sled's multirack join is complete.",
+        "description": "Sent by Nexus once it has observed this sled on the underlay network.",
+        "operationId": "multirack_join_complete",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/multirack-join-service-status": {
+      "get": {
+        "summary": "Return the status of this sled's multirack join service.",
+        "description": "Returns a 404 if no multirack join service is running, or a 409 if the service is running but has not yet determined its status.",
+        "operationId": "multirack_join_service_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultirackJoinServiceStatus"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1360,8 +1417,15 @@
             "name": "hash",
             "required": true,
             "schema": {
+              "x-rust-type": {
+                "crate": "byte-wrapper",
+                "path": "byte_wrapper::HexArray::<32>",
+                "version": "0.2.0"
+              },
               "type": "string",
-              "format": "hex string (32 bytes)"
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "minLength": 64,
+              "maxLength": 64
             }
           }
         ],
@@ -2989,7 +3053,7 @@
               "x-rust-type": {
                 "crate": "byte-wrapper",
                 "path": "byte_wrapper::HexArray::<32>",
-                "version": "0.1.0"
+                "version": "0.2.0"
               },
               "type": "string",
               "pattern": "^[0-9a-fA-F]{64}$",
@@ -3778,8 +3842,15 @@
         "type": "object",
         "properties": {
           "artifact_hash": {
+            "x-rust-type": {
+              "crate": "byte-wrapper",
+              "path": "byte_wrapper::HexArray::<32>",
+              "version": "0.2.0"
+            },
             "type": "string",
-            "format": "hex string (32 bytes)"
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "minLength": 64,
+            "maxLength": 64
           },
           "artifact_size": {
             "type": "integer",
@@ -5762,8 +5833,15 @@
             "type": "object",
             "properties": {
               "hash": {
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.2.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "type": {
                 "type": "string",
@@ -6084,10 +6162,22 @@
         "type": "object",
         "properties": {
           "attached_subnets": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/AttachedSubnet"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/AttachedSubnet"
-            }
+            },
+            "uniqueItems": true
           },
           "delegated_zvols": {
             "type": "array",
@@ -6315,6 +6405,9 @@
               }
             ]
           },
+          "rack_id": {
+            "$ref": "#/components/schemas/RackUuid"
+          },
           "reconciler_status": {
             "$ref": "#/components/schemas/ConfigReconcilerInventoryStatus"
           },
@@ -6374,6 +6467,7 @@
           "file_source_resolver",
           "fmd",
           "instance_manager_status",
+          "rack_id",
           "reconciler_status",
           "reference_measurements",
           "reservoir_size",
@@ -6911,7 +7005,7 @@
         ]
       },
       "ManifestInventory": {
-        "description": "Inventory representation of a manifest.\n\nPart of [`ZoneImageResolverInventory`].\n\nA manifest is used for both zones and reference measurements. A zone manifest is a listing of all the zones present in a system's install dataset. A measurement manifset is a listing of all the reference measurements present in a system's install dataset. This struct contains information about the install dataset gathered from a system.",
+        "description": "Inventory representation of a manifest.\n\nPart of [`OmicronFileSourceResolverInventory`].\n\nA manifest is used for both zones and reference measurements. A zone manifest is a listing of all the zones present in a system's install dataset. A measurement manifset is a listing of all the reference measurements present in a system's install dataset. This struct contains information about the install dataset gathered from a system.",
         "type": "object",
         "properties": {
           "boot_disk_path": {
@@ -7131,6 +7225,44 @@
               "completed"
             ]
           }
+        ]
+      },
+      "MultirackJoinServiceStatus": {
+        "type": "object",
+        "properties": {
+          "rack_id": {
+            "$ref": "#/components/schemas/RackUuid"
+          },
+          "rack_subnet": {
+            "$ref": "#/components/schemas/Ipv6Subnet"
+          },
+          "sled_agents": {
+            "title": "BiHashMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SledAgentInfo"
+                }
+              ],
+              "path": "iddqd::BiHashMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SledAgentInfo"
+            },
+            "uniqueItems": true
+          },
+          "sled_id": {
+            "$ref": "#/components/schemas/SledUuid"
+          }
+        },
+        "required": [
+          "rack_id",
+          "rack_subnet",
+          "sled_agents",
+          "sled_id"
         ]
       },
       "MupdateOverrideBootInventory": {
@@ -7646,8 +7778,15 @@
         "properties": {
           "hash": {
             "description": "Measurements are the artifacts matching the hashes from the TUF artifact store (aka \"TUF repo depot\")\n\nMeasurements may also come from outside the TUF repo depot via the install dataset from MUPdate but are not explicitly tracked here",
+            "x-rust-type": {
+              "crate": "byte-wrapper",
+              "path": "byte_wrapper::HexArray::<32>",
+              "version": "0.2.0"
+            },
             "type": "string",
-            "format": "hex string (32 bytes)"
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "minLength": 64,
+            "maxLength": 64
           }
         },
         "required": [
@@ -7836,8 +7975,15 @@
             "type": "object",
             "properties": {
               "hash": {
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.2.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "type": {
                 "type": "string",
@@ -9519,6 +9665,67 @@
           "result"
         ]
       },
+      "SledAgentInfo": {
+        "description": "Status information for a given sled agent",
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "baseboard_id": {
+            "$ref": "#/components/schemas/BaseboardId"
+          },
+          "sled_id": {
+            "$ref": "#/components/schemas/SledUuid"
+          },
+          "start_state": {
+            "$ref": "#/components/schemas/SledAgentStartState"
+          }
+        },
+        "required": [
+          "address",
+          "baseboard_id",
+          "sled_id",
+          "start_state"
+        ]
+      },
+      "SledAgentStartState": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "last_error": {
+                "nullable": true,
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "in_progress"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "started"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "SledConfigGeneration": {
         "description": "Generation numbers stored in the database, used for optimistic concurrency control",
         "x-rust-type": {
@@ -10875,8 +11082,15 @@
         "properties": {
           "expected_hash": {
             "description": "The expected digest of the file's contents.",
+            "x-rust-type": {
+              "crate": "byte-wrapper",
+              "path": "byte_wrapper::HexArray::<32>",
+              "version": "0.2.0"
+            },
             "type": "string",
-            "format": "hex string (32 bytes)"
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "minLength": 64,
+            "maxLength": 64
           },
           "expected_size": {
             "description": "The expected size of the file, in bytes.",

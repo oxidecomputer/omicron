@@ -126,6 +126,8 @@
         <replicated_max_ratio_of_wrong_parts>1.0</replicated_max_ratio_of_wrong_parts>
     </merge_tree>
 
+    <remote_url_allow_hosts />
+
     <macros>
         <shard>1</shard>
         <replica>1</replica>
