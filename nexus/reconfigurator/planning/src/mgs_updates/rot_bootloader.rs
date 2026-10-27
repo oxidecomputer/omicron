@@ -19,6 +19,7 @@ use nexus_types::tuf_repo::TufRepoDescription;
 use sled_hardware_types::BaseboardId;
 use slog::debug;
 use std::sync::Arc;
+use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactTags;
 use tufaceous_artifact::RotBootloaderTags;
@@ -71,51 +72,10 @@ pub(super) fn try_make_update(
         return Err(FailedRotBootloaderUpdateReason::SpNotInInventory);
     };
 
-    let Some(stage0_caboose) =
-        inventory.caboose_for(CabooseWhich::Stage0, baseboard_id)
-    else {
-        return Err(FailedRotBootloaderUpdateReason::CabooseNotInInventory(
-            CabooseWhich::Stage0,
-        ));
-    };
-
-    let expected_stage0_version = match stage0_caboose.caboose.version.parse() {
-        Ok(v) => v,
-        Err(e) => {
-            return Err(FailedRotBootloaderUpdateReason::FailedVersionParse {
-                caboose: CabooseWhich::Stage0,
-                err: format!("{}", e),
-            });
-        }
-    };
-
-    let rot_board = stage0_caboose.caboose.board.clone();
-    let Some(rkth) = stage0_caboose.caboose.sign.clone() else {
-        return Err(FailedRotBootloaderUpdateReason::CabooseMissingSign(
-            CabooseWhich::Stage0,
-        ));
-    };
-
-    let tags = KnownArtifactTags::RotBootloader(RotBootloaderTags {
-        rot_board,
-        rot_rkth: Some(RotKeyTableHash(rkth)),
-    });
-    let artifact =
-        current_artifacts.artifacts.get_only(&tags).map_err(|err| {
-            let tags = tags.to_string();
-            match err {
-                GetError::NotFound => {
-                    FailedRotBootloaderUpdateReason::NoMatchingArtifactFound(
-                        tags,
-                    )
-                }
-                GetError::TooMany => {
-                    FailedRotBootloaderUpdateReason::TooManyMatchingArtifacts(
-                        tags,
-                    )
-                }
-            }
-        })?;
+    let RotBootloaderActiveAndTarget {
+        active_version: expected_stage0_version,
+        artifact,
+    } = active_and_target(baseboard_id, inventory, current_artifacts)?;
 
     // If the artifact's version matches what's deployed, then no update is
     // needed.
@@ -153,6 +113,72 @@ pub(super) fn try_make_update(
         artifact_hash: artifact.hash,
         artifact_version: artifact.version.clone(),
     }))
+}
+
+/// Active (stage0) RoT bootloader version on a board, paired with the RoT
+/// bootloader artifact that a TUF repo specifies for that board
+pub(super) struct RotBootloaderActiveAndTarget<'a> {
+    pub(super) active_version: ArtifactVersion,
+    pub(super) artifact: &'a Artifact,
+}
+
+/// Finds the active RoT bootloader version on `baseboard_id` and the RoT
+/// bootloader artifact in `current_artifacts` that applies to that board
+///
+/// The caller is responsible for checking that the SP itself is present in
+/// inventory.
+pub(super) fn active_and_target<'a>(
+    baseboard_id: &BaseboardId,
+    inventory: &Collection,
+    current_artifacts: &'a TufRepoDescription,
+) -> Result<RotBootloaderActiveAndTarget<'a>, FailedRotBootloaderUpdateReason> {
+    let Some(stage0_caboose) =
+        inventory.caboose_for(CabooseWhich::Stage0, baseboard_id)
+    else {
+        return Err(FailedRotBootloaderUpdateReason::CabooseNotInInventory(
+            CabooseWhich::Stage0,
+        ));
+    };
+
+    let active_version = match stage0_caboose.caboose.version.parse() {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(FailedRotBootloaderUpdateReason::FailedVersionParse {
+                caboose: CabooseWhich::Stage0,
+                err: format!("{}", e),
+            });
+        }
+    };
+
+    let rot_board = stage0_caboose.caboose.board.clone();
+    let Some(rkth) = stage0_caboose.caboose.sign.clone() else {
+        return Err(FailedRotBootloaderUpdateReason::CabooseMissingSign(
+            CabooseWhich::Stage0,
+        ));
+    };
+
+    let tags = KnownArtifactTags::RotBootloader(RotBootloaderTags {
+        rot_board,
+        rot_rkth: Some(RotKeyTableHash(rkth)),
+    });
+    let artifact =
+        current_artifacts.artifacts.get_only(&tags).map_err(|err| {
+            let tags = tags.to_string();
+            match err {
+                GetError::NotFound => {
+                    FailedRotBootloaderUpdateReason::NoMatchingArtifactFound(
+                        tags,
+                    )
+                }
+                GetError::TooMany => {
+                    FailedRotBootloaderUpdateReason::TooManyMatchingArtifacts(
+                        tags,
+                    )
+                }
+            }
+        })?;
+
+    Ok(RotBootloaderActiveAndTarget { active_version, artifact })
 }
 
 #[cfg(test)]

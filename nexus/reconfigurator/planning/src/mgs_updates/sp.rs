@@ -18,7 +18,9 @@ use nexus_types::deployment::planning_report::FailedSpUpdateReason;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::tuf_repo::TufRepoDescription;
+use sled_hardware_types::BaseboardId;
 use slog::debug;
+use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactTags;
 use tufaceous_artifact::SpTags;
@@ -72,38 +74,8 @@ pub(super) fn try_make_update(
         return Err(FailedSpUpdateReason::SpNotInInventory);
     };
 
-    let Some(active_caboose) =
-        inventory.caboose_for(CabooseWhich::SpSlot0, baseboard_id)
-    else {
-        return Err(FailedSpUpdateReason::CabooseNotInInventory(
-            CabooseWhich::SpSlot0,
-        ));
-    };
-
-    let expected_active_version = match active_caboose.caboose.version.parse() {
-        Ok(v) => v,
-        Err(e) => {
-            return Err(FailedSpUpdateReason::FailedVersionParse {
-                caboose: CabooseWhich::SpSlot0,
-                err: format!("{}", e),
-            });
-        }
-    };
-
-    let sp_board = active_caboose.caboose.board.clone();
-    let tags = KnownArtifactTags::Sp(SpTags { sp_board });
-    let artifact =
-        current_artifacts.artifacts.get_only(&tags).map_err(|err| {
-            let tags = tags.to_string();
-            match err {
-                GetError::NotFound => {
-                    FailedSpUpdateReason::NoMatchingArtifactFound(tags)
-                }
-                GetError::TooMany => {
-                    FailedSpUpdateReason::TooManyMatchingArtifacts(tags)
-                }
-            }
-        })?;
+    let SpActiveAndTarget { active_version: expected_active_version, artifact } =
+        active_and_target(baseboard_id, inventory, current_artifacts)?;
 
     // If the artifact's version matches what's deployed, then no update is
     // needed.
@@ -149,6 +121,59 @@ pub(super) fn try_make_update(
         artifact_hash: artifact.hash,
         artifact_version: artifact.version.clone(),
     }))
+}
+
+/// Active SP version on a board, paired with the SP artifact that a TUF repo
+/// specifies for that board
+pub(super) struct SpActiveAndTarget<'a> {
+    pub(super) active_version: ArtifactVersion,
+    pub(super) artifact: &'a Artifact,
+}
+
+/// Finds the active SP version on `baseboard_id` and the SP artifact in
+/// `current_artifacts` that applies to that board
+///
+/// The caller is responsible for checking that the SP itself is present in
+/// inventory.
+pub(super) fn active_and_target<'a>(
+    baseboard_id: &BaseboardId,
+    inventory: &Collection,
+    current_artifacts: &'a TufRepoDescription,
+) -> Result<SpActiveAndTarget<'a>, FailedSpUpdateReason> {
+    let Some(active_caboose) =
+        inventory.caboose_for(CabooseWhich::SpSlot0, baseboard_id)
+    else {
+        return Err(FailedSpUpdateReason::CabooseNotInInventory(
+            CabooseWhich::SpSlot0,
+        ));
+    };
+
+    let active_version = match active_caboose.caboose.version.parse() {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(FailedSpUpdateReason::FailedVersionParse {
+                caboose: CabooseWhich::SpSlot0,
+                err: format!("{}", e),
+            });
+        }
+    };
+
+    let sp_board = active_caboose.caboose.board.clone();
+    let tags = KnownArtifactTags::Sp(SpTags { sp_board });
+    let artifact =
+        current_artifacts.artifacts.get_only(&tags).map_err(|err| {
+            let tags = tags.to_string();
+            match err {
+                GetError::NotFound => {
+                    FailedSpUpdateReason::NoMatchingArtifactFound(tags)
+                }
+                GetError::TooMany => {
+                    FailedSpUpdateReason::TooManyMatchingArtifacts(tags)
+                }
+            }
+        })?;
+
+    Ok(SpActiveAndTarget { active_version, artifact })
 }
 
 #[cfg(test)]

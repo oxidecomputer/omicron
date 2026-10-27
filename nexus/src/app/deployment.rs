@@ -966,6 +966,74 @@ fn validate_can_set_target_release_for_update(
     }
 }
 
+/// Checks that the system has finished updating to its current target release
+///
+/// This fails if an update is in progress, if a sled is waiting for a mupdate
+/// to be cleared, or if updates are suspended because the blueprint requires
+/// a newer target release than the current one.
+///
+/// Like `BlueprintTargetReleaseStatus::new()`, this looks only at the zones
+/// and host OS images in the blueprint.  See `is_update_in_progress()` in the
+/// `update` module for why that is sufficient to detect an update in progress.
+pub(super) fn validate_system_settled_on_target_release(
+    blueprint: &Blueprint,
+    target_release_generation: TargetReleaseGeneration,
+    target_release_version: &semver::Version,
+) -> Result<(), SystemNotSettledError> {
+    if target_release_generation < blueprint.target_release_minimum_generation {
+        return Err(SystemNotSettledError::UpdateSuspended {
+            current: target_release_generation,
+            minimum: blueprint.target_release_minimum_generation,
+        });
+    }
+
+    match BlueprintTargetReleaseStatus::new(blueprint, target_release_version) {
+        BlueprintTargetReleaseStatus::AllComponentsMatchTargetRelease => Ok(()),
+        BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared {
+            how: _,
+            sled_id,
+        } => {
+            Err(SystemNotSettledError::WaitingForMupdateToBeCleared { sled_id })
+        }
+        BlueprintTargetReleaseStatus::FoundDifferentVersion {
+            sled_id,
+            version_found,
+        } => Err(SystemNotSettledError::UpdateInProgress {
+            target_release_version: target_release_version.clone(),
+            sled_id,
+            version_found,
+        }),
+    }
+}
+
+/// Reasons that the system has not finished updating to its current target
+/// release
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub(super) enum SystemNotSettledError {
+    #[error(
+        "updates are suspended: the current target release has generation \
+         {current}, but the blueprint requires at least generation {minimum}"
+    )]
+    UpdateSuspended {
+        current: TargetReleaseGeneration,
+        minimum: TargetReleaseGeneration,
+    },
+    #[error(
+        "a support-driven recovery (mupdate) has occurred on sled {sled_id} \
+         and must be cleared first"
+    )]
+    WaitingForMupdateToBeCleared { sled_id: SledUuid },
+    #[error(
+        "an update to target release {target_release_version} is in \
+         progress (sled {sled_id} has components on {version_found})"
+    )]
+    UpdateInProgress {
+        target_release_version: semver::Version,
+        sled_id: SledUuid,
+        version_found: BlueprintArtifactVersion,
+    },
+}
+
 // Ways in which a [`BlueprintSledConfig`] can indicate the sled has been
 // mupdated.
 //
@@ -1574,6 +1642,19 @@ mod tests {
             "should be able to update from {current_version} to {next_version}"
         );
 
+        // The base blueprint is also settled on the current target release.
+        // (The blueprints below are not, and we check that inside the loop.)
+        let target_release_generation =
+            blueprint.target_release_minimum_generation;
+        assert_eq!(
+            validate_system_settled_on_target_release(
+                &blueprint,
+                target_release_generation,
+                &current_version,
+            ),
+            Ok(()),
+        );
+
         // Also pick an old version; one of our tests below is that some
         // component is still on this older version (i.e., we're still trying to
         // update to `current_version`).
@@ -1728,7 +1809,68 @@ mod tests {
                      blueprint: {description}"
                 ),
             }
+
+            // Whatever prevents starting a new update also means that the
+            // system has not settled on its current target release.
+            let settled = validate_system_settled_on_target_release(
+                &blueprint,
+                target_release_generation,
+                &current_version,
+            );
+            match (&expected_err, &settled) {
+                (
+                    TargetReleaseChangeError::WaitingForMupdateToBeCleared,
+                    Err(SystemNotSettledError::WaitingForMupdateToBeCleared {
+                        ..
+                    }),
+                )
+                | (
+                    TargetReleaseChangeError::PreviousUpdateInProgress,
+                    Err(SystemNotSettledError::UpdateInProgress { .. }),
+                ) => (),
+                _ => panic!(
+                    "unexpected result checking whether blueprint is \
+                     settled: {description}: {settled:?}"
+                ),
+            }
         }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_system_not_settled_when_updates_suspended() {
+        static TEST_NAME: &str =
+            "test_system_not_settled_when_updates_suspended";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = &logctx.log;
+
+        let current_version: semver::Version =
+            "16.2.0-0.ci+git544f608e05a".parse().unwrap();
+        let mut blueprint = make_blueprint_matching_system_version(
+            log,
+            TEST_NAME,
+            &current_version,
+        );
+
+        // Simulate the planner having noticed a mupdate (which bumps the
+        // blueprint's minimum target release generation) and the operator not
+        // yet having set a new target release.
+        let target_release_generation =
+            blueprint.target_release_minimum_generation;
+        blueprint.target_release_minimum_generation =
+            target_release_generation.next();
+        assert_eq!(
+            validate_system_settled_on_target_release(
+                &blueprint,
+                target_release_generation,
+                &current_version,
+            ),
+            Err(SystemNotSettledError::UpdateSuspended {
+                current: target_release_generation,
+                minimum: target_release_generation.next(),
+            }),
+        );
 
         logctx.cleanup_successful();
     }
