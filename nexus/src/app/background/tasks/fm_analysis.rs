@@ -1624,7 +1624,11 @@ mod tests {
         // Every input-loading step ran and recorded its status, without
         // warnings.
         assert_eq!(
-            prep_status.steps.iter().map(|s| s.name).collect::<BTreeSet<_>>(),
+            prep_status
+                .steps
+                .iter()
+                .map(|s| s.name.as_ref())
+                .collect::<BTreeSet<_>>(),
             InputStep::iter().map(|s| s.as_str()).collect::<BTreeSet<_>>(),
         );
         for step in &prep_status.steps {
