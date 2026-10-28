@@ -17,12 +17,10 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::instance::SledVmmState;
-use nexus_types::instance::VmmFailureReason;
 use nexus_types::instance::VmmRuntimeState;
 use nexus_types::instance::VmmState;
 use nexus_types::internal_api::background::VmmStopForUpdateStatus;
 use nexus_types::internal_api::background::VmmsBySled;
-use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -47,7 +45,7 @@ const MAX_CONCURRENT_STOPS: usize = 16;
 struct VmmStopForUpdateResult {
     vmms_stopped_by_sled: IdOrdMap<VmmsBySled>,
     vmms_failed_to_stop_by_sled: IdOrdMap<VmmsBySled>,
-    errors: Vec<Error>,
+    errors: Vec<String>,
 }
 
 impl VmmStopForUpdateResult {
@@ -130,12 +128,9 @@ impl VmmStopForUpdate {
                             &err,
                         );
 
-                        result.errors.push(Error::InternalError {
-                            internal_message: format!(
-                                "failed to build the HTTP client: {}",
-                                err
-                            ),
-                        });
+                        result.errors.push(format!(
+                            "failed to build the HTTP client: {err}",
+                        ));
 
                         return result;
                     }
@@ -162,7 +157,7 @@ impl VmmStopForUpdate {
             {
                 Ok(vmms) => vmms,
                 Err(err) => {
-                    result.errors.push(err);
+                    result.errors.push(InlineErrorChain::new(&err).to_string());
                     break;
                 }
             };
@@ -240,7 +235,7 @@ impl VmmStopForUpdate {
                         InlineErrorChain::new(&e),
                     );
 
-                    result.errors.push(e.clone());
+                    result.errors.push(InlineErrorChain::new(&e).to_string());
 
                     continue;
                 }
@@ -282,43 +277,48 @@ impl VmmStopForUpdate {
             {
                 Ok(res) => res.into_inner().updated_runtime.map(Into::into),
                 Err(e) => {
-                    let err = SledAgentInstanceError(e);
+                    let err = SledAgentInstanceError::new(
+                        &opctx, &datastore, sled_id, e,
+                    )
+                    .await;
 
-                    // First we check if the VMM is there, if it isn't, we
-                    // want to report it as such so we don't have to wait on the
-                    // instance watcher to find and restart this instance.
-                    if err.vmm_gone() {
+                    // First we check if the VMM should transition to `Failed`
+                    // based on this error. If it does, we mark it as such so we
+                    // don't have to wait on the instance watcher to find and
+                    // restart this instance.
+                    if let Some(reason) = err.vmm_failure_reason() {
                         slog::info!(
                             opctx.log,
-                            "Failed to mark VMM as Stopped; VMM was already \
-                             gone. Marking as Failed";
+                            "Attempted to stop a VMM, but discovered that it \
+                            should transition to Failed.";
                             "sled_id" => %sled_id,
                             "vmm_id" => %vmm_id,
                             "instance_id" => %instance_id,
-                            InlineErrorChain::new(&err),
+                            "failure_reason" => %reason,
                         );
 
-                        result.errors.push(err.into());
+                        result
+                            .errors
+                            .push(InlineErrorChain::new(&err).to_string());
                         Some(SledVmmState {
-                            vmm_state: vmm.runtime().transition(
-                                VmmState::Failed(
-                                    VmmFailureReason::NoSuchInstance,
-                                ),
-                            ),
+                            vmm_state: vmm
+                                .runtime()
+                                .transition(VmmState::Failed(reason)),
                             migration_in: None,
                             migration_out: None,
                         })
                     } else {
+                        let error = InlineErrorChain::new(&err);
                         slog::info!(
                             opctx.log,
                             "Failed to mark VMM as Stopped";
                             "sled_id" => %sled_id,
                             "vmm_id" => %vmm_id,
                             "instance_id" => %instance_id,
-                            InlineErrorChain::new(&err),
+                            &error,
                         );
 
-                        result.errors.push(err.into());
+                        result.errors.push(error.to_string());
                         result
                             .vmms_failed_to_stop_by_sled
                             .entry(sled_id)
@@ -479,13 +479,11 @@ impl VmmStopForUpdate {
                                 "instance_id" => %instance_id,
                                 "time_updated" => ?time_updated,
                             );
-                            result.errors.push(Error::InternalError {
-                                internal_message: format!(
-                                    "failed to mark VMM {} on sled {} as \
-                                        Stopped; unexpected state reported {}",
-                                    vmm_id, sled_id, state
-                                ),
-                            });
+                            result.errors.push(format!(
+                                "failed to mark VMM {} on sled {} as \
+                                 Stopped; unexpected state reported {}",
+                                vmm_id, sled_id, state
+                            ));
                         }
                     }
                 }
@@ -502,13 +500,8 @@ impl VmmStopForUpdate {
         let VmmStopForUpdateResult {
             vmms_stopped_by_sled,
             vmms_failed_to_stop_by_sled,
-            errors,
+            errors: error_messages,
         } = self.stop_all(opctx).await;
-
-        let error_messages: Vec<String> = errors
-            .iter()
-            .map(|err| InlineErrorChain::new(err).to_string())
-            .collect();
 
         if vmms_stopped_by_sled.is_empty() {
             slog::info!(
@@ -612,6 +605,7 @@ async fn try_instance_state_update(
         // instance state will be updated eventually by the instance watcher
         // task or sled agent.
         Err(err) => {
+            let error = InlineErrorChain::new(&err);
             slog::warn!(
                 opctx.log,
                 "Failed to record new VMM state";
@@ -619,9 +613,9 @@ async fn try_instance_state_update(
                 "vmm_id" => %vmm_id,
                 "state" => ?sled_vmm_state,
                 "instance_id" => %instance_id,
-                InlineErrorChain::new(&err),
+                &error,
             );
-            result.errors.push(err);
+            result.errors.push(error.to_string());
             return;
         }
         // The new state would like an instance-update saga, so we'll try to
@@ -634,19 +628,21 @@ async fn try_instance_state_update(
     let (saga_id, completed) = match sagas.saga_run(saga).await {
         Ok(s) => s,
         Err(err) => {
+            let error = InlineErrorChain::new(&err);
             slog::warn!(
                 opctx.log,
                 "Instance update saga could not be started";
                 "sled_id" => %sled_id,
                 "vmm_id" => %vmm_id,
                 "instance_id" => %instance_id,
-                InlineErrorChain::new(&err),
+                &error,
             );
-            result.errors.push(err);
+            result.errors.push(error.to_string());
             return;
         }
     };
     if let Err(err) = completed.await {
+        let error = InlineErrorChain::new(&err);
         slog::warn!(
             opctx.log,
             "Instance update saga failed";
@@ -654,9 +650,9 @@ async fn try_instance_state_update(
             "vmm_id" => %vmm_id,
             "saga_id" => %saga_id,
             "instance_id" => %instance_id,
-            InlineErrorChain::new(&err),
+            &error,
         );
-        result.errors.push(err);
+        result.errors.push(error.to_string());
     }
 }
 

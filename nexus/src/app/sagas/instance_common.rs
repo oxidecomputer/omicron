@@ -20,9 +20,13 @@ use nexus_db_queries::db::datastore::ExternalSubnetBeginOpResult;
 use nexus_db_queries::db::datastore::sled::SledReservationReason;
 use nexus_db_queries::{authn, context::OpContext, db, db::DataStore};
 use nexus_types::saga::saga_action_failed;
-use omicron_common::api::external::{Error, IpVersion, NameOrId};
+use omicron_common::api::external::{Error, IpVersion, NameOrId, ResourceType};
+use omicron_common::backoff::{
+    BackoffError, retry_notify_ext, retry_policy_internal_service,
+};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::{Deserialize, Serialize};
+use slog_error_chain::InlineErrorChain;
 use steno::ActionError;
 
 /// The port propolis-server listens on inside the propolis zone.
@@ -688,6 +692,122 @@ pub(super) async fn instance_ip_remove_opte(
         })?;
 
     Ok(())
+}
+
+pub(super) async fn unwind_instance_ensure_registered(
+    sagactx: &NexusActionContext,
+    serialized_authn: &authn::saga::Serialized,
+    instance_id: &InstanceUuid,
+    propolis_id: &PropolisUuid,
+    sled_id: &SledUuid,
+) {
+    use crate::app::instance::InstanceStateChangeError as ChangeError;
+    use crate::app::instance::SledAgentInstanceError as SledAgentError;
+
+    let osagactx = sagactx.user_data();
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+
+    retry_notify_ext(
+        retry_policy_internal_service(),
+        || async {
+            let unregister_result = osagactx
+                .nexus()
+                .instance_ensure_unregistered(&opctx, &propolis_id, &sled_id)
+                .await;
+            match unregister_result {
+                // We have unregistered the instance successfully. That's great.
+                Ok(_) => {
+                    debug!(
+                        osagactx.log(),
+                        "unwinding saga: instance unregistered from sled";
+                        "instance_id" => %instance_id,
+                        "propolis_id" => %propolis_id,
+                        "sled_id" => %sled_id,
+                    );
+                    Ok(())
+                }
+                // If the sled-agent reports that it does not know about this
+                // VMM, that's fine. This indicates either that this undo action
+                // has already executed and successfully unregistered the VMM,
+                // or that the action which registered the VMM with the sled `
+                // failed *before* the `instance_ensure_registered` request was
+                // sent to the sled-agent in the first place. In either case, we
+                // now know affirmatively that there is no Propolis zone we must
+                // clean up, so we may safely continue unwinding.
+                Err(ChangeError::SledAgent(SledAgentError::VmmGone {
+                    ..
+                })) => {
+                    debug!(
+                        osagactx.log(),
+                        "unwinding saga: instance already unregistered from \
+                         sled, continuing to unwind";
+                         "instance_id" => %instance_id,
+                         "propolis_id" => %propolis_id,
+                         "sled_id" => %sled_id,
+                    );
+                    Ok(())
+                }
+                // Well, that's real sketchy: the sled record for the sled with
+                // this ID was not found. Our only real options here are to
+                // either assume that this means anything that may have been
+                // running on that sled is similarly erased from reality, or to
+                // return `ActionFailed` and let the saga get stuck unwinding,
+                // requiring support intervention to un-stick. Soo. Let's say
+                // it's probably gone.
+                Err(ChangeError::Other(Error::ObjectNotFound {
+                    type_name: ResourceType::Sled,
+                    ..
+                })) => {
+                    warn!(
+                        osagactx.log(),
+                        "unwinding saga::attempting to unregister instance \
+                         from sled, but the sled appears to no longer exist in \
+                         the database! hopefully, this means the VMM is also \
+                         gone...";
+                        "instance_id" => %instance_id,
+                        "propolis_id" => %propolis_id,
+                        "sled_id" => %sled_id,
+                    );
+                    Ok(())
+                }
+                // Any other error encountered here must be retried
+                // indefinitely, since we cannot be certain as to whether or not
+                // a Propolis zone started by this saga still exists.
+                Err(e) => Err(BackoffError::transient(e)),
+            }
+        },
+        |err, tries, elapsed| {
+            let error = InlineErrorChain::new(&err);
+            if tries == 0 {
+                info!(
+                    osagactx.log(),
+                    "unwinding saga: retrying attempt to unregister instance \
+                    from sled";
+                    "instance_id" => %instance_id,
+                    "propolis_id" => %propolis_id,
+                    "sled_id" => %sled_id,
+                    error
+                );
+            } else {
+                warn!(
+                    osagactx.log(),
+                    "unwinding saga: {} attempts to unregister instance from \
+                     sled have failed, retrying again...", tries + 1;
+                    "instance_id" => %instance_id,
+                    "propolis_id" => %propolis_id,
+                    "sled_id" => %sled_id,
+                    "elapsed" => ?elapsed,
+                    error
+                );
+            }
+        },
+    )
+    .await
+    .expect(
+        "infinite retry loop never fails, as we never return a \
+         `BackoffError::permanent`",
+    );
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

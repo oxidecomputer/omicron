@@ -43,6 +43,7 @@ use nexus_db_queries::db::model::InstanceStateComputer;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_ip;
 use nexus_types::external_api::instance;
+use nexus_types::instance::VmmFailureReason;
 use nexus_types::internal_api::params::InstanceMigrateDestination;
 use omicron_common::http_client::internal_http_client;
 // We'll use `InstanceState` frequently, and the code that uses it is already
@@ -105,26 +106,15 @@ use uuid::Uuid;
 type SledAgentClientError =
     sled_agent_client::Error<sled_agent_client::types::Error>;
 
-// Newtype wrapper to avoid the orphan type rule.
+// Errors returned
 #[derive(Debug, thiserror::Error)]
-pub struct SledAgentInstanceError(pub SledAgentClientError);
-
-impl std::fmt::Display for SledAgentInstanceError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl From<SledAgentClientError> for SledAgentInstanceError {
-    fn from(value: SledAgentClientError) -> Self {
-        Self(value)
-    }
-}
-
-impl From<SledAgentInstanceError> for omicron_common::api::external::Error {
-    fn from(value: SledAgentInstanceError) -> Self {
-        value.0.into()
-    }
+pub enum SledAgentInstanceError {
+    #[error(transparent)]
+    Other(SledAgentClientError),
+    #[error("sled {sled_id} no longer in service")]
+    SledNotInService { sled_id: SledUuid },
+    #[error("VMM no longer exists on sled {sled_id}")]
+    VmmGone { sled_id: SledUuid },
 }
 
 impl From<SledAgentInstanceError> for dropshot::HttpError {
@@ -137,7 +127,9 @@ impl From<SledAgentInstanceError> for dropshot::HttpError {
         match value {
             // Errors communicating with the sled-agent should return 502 Bad
             // Gateway to the caller.
-            SledAgentInstanceError(ClientError::CommunicationError(e)) => {
+            SledAgentInstanceError::Other(ClientError::CommunicationError(
+                e,
+            )) => {
                 // N.B.: it sure *seems* like we should be using the
                 // `HttpError::for_status` constructor here, but that
                 // constructor secretly calls the `for_client_error`
@@ -157,30 +149,53 @@ impl From<SledAgentInstanceError> for dropshot::HttpError {
             }
             // Invalid request errors from the sled-agent should return 500
             // Internal Server Errors.
-            SledAgentInstanceError(ClientError::InvalidRequest(s)) => {
+            SledAgentInstanceError::Other(ClientError::InvalidRequest(s)) => {
                 HttpError::for_internal_error(s)
             }
             // Error responses from sled-agent that indicate the instance is
             // unhealthy should be mapped to a 503 error.
-            e if e.vmm_gone() => {
+            e @ SledAgentInstanceError::VmmGone { .. } => {
                 let mut error = HttpError::for_unavail(None, e.to_string());
                 error.external_message = "The instance was running but is no \
                     longer reachable. It is being moved to the Failed state."
                     .to_string();
                 error
             }
+            // Similarly, if the sled is no longer in service, return a 503
+            // error.
+            e @ SledAgentInstanceError::SledNotInService { sled_id } => {
+                let mut error = HttpError::for_unavail(None, e.to_string());
+                error.external_message = format!(
+                    "The instance was running on sled {sled_id}, but that sled \
+                    is no longer in service. The instance is being moved to \
+                    the Failed state."
+                );
+                error
+            }
             // Other client errors can be handled by the normal
             // `external::Error` to `HttpError` conversions.
-            SledAgentInstanceError(e) => HttpError::from(Error::from(e)),
+            SledAgentInstanceError::Other(e) => HttpError::from(Error::from(e)),
         }
     }
 }
 
 impl SledAgentInstanceError {
-    /// Returns `true` if this error is of a class that indicates that the
-    /// VMM is no longer known to the sled-agent.
-    pub fn vmm_gone(&self) -> bool {
-        match &self.0 {
+    pub async fn new(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        sled_id: SledUuid,
+        error: SledAgentClientError,
+    ) -> Self {
+        use progenitor_client::Error as ClientError;
+        match &error {
+            ClientError::CommunicationError(_)
+                if !datastore
+                    .check_sled_in_service(opctx, sled_id)
+                    .await
+                    .unwrap_or(true) =>
+            {
+                Self::SledNotInService { sled_id }
+            }
             // See RFD 486 §6.3:
             // https://rfd.shared.oxide.computer/rfd/486#_stopping_or_rebooting_a_running_instance
             //
@@ -191,21 +206,25 @@ impl SledAgentInstanceError {
             // > Failed state and trigger an instance update saga that will
             // > remove the dangling VMM ID from the instance and clean up the
             // > VMM’s resources.
-            progenitor_client::Error::ErrorResponse(rv) => {
-                rv.status() == http::StatusCode::NOT_FOUND
-                    && rv.error_code.as_deref() == Some("NO_SUCH_INSTANCE")
+            ClientError::ErrorResponse(rv)
+                if rv.status() == http::StatusCode::NOT_FOUND
+                    && rv.error_code.as_deref() == Some("NO_SUCH_INSTANCE") =>
+            {
+                SledAgentInstanceError::VmmGone { sled_id }
             }
-            _ => false,
+            _ => SledAgentInstanceError::Other(error),
         }
     }
 
     /// If this error indicates that the VMM should be marked as `Failed`,
     /// returns the reason for the failure.
-    pub fn vmm_failure_reason(&self) -> Option<db::model::VmmFailureReason> {
-        if self.vmm_gone() {
-            Some(db::model::VmmFailureReason::NoSuchInstance)
-        } else {
-            None
+    pub fn vmm_failure_reason(&self) -> Option<VmmFailureReason> {
+        match self {
+            Self::VmmGone { .. } => Some(VmmFailureReason::NoSuchInstance),
+            Self::SledNotInService { .. } => {
+                Some(VmmFailureReason::SledExpunged)
+            }
+            Self::Other(_) => None,
         }
     }
 }
@@ -224,17 +243,17 @@ pub enum InstanceStateChangeError {
     Other(#[from] omicron_common::api::external::Error),
 }
 
-// Allow direct conversion of instance state change errors into API errors for
-// callers who don't care about the specific reason the update failed and just
-// need to return an API error.
-impl From<InstanceStateChangeError> for omicron_common::api::external::Error {
-    fn from(value: InstanceStateChangeError) -> Self {
-        match value {
-            InstanceStateChangeError::SledAgent(e) => e.into(),
-            InstanceStateChangeError::Other(e) => e,
-        }
-    }
-}
+// // Allow direct conversion of instance state change errors into API errors for
+// // callers who don't care about the specific reason the update failed and just
+// // need to return an API error.
+// impl From<InstanceStateChangeError> for omicron_common::api::external::Error {
+//     fn from(value: InstanceStateChangeError) -> Self {
+//         match value {
+//             InstanceStateChangeError::SledAgent(e) => e.into(),
+//             InstanceStateChangeError::Other(e) => e,
+//         }
+//     }
+// }
 
 impl From<InstanceStateChangeError> for dropshot::HttpError {
     fn from(value: InstanceStateChangeError) -> Self {
@@ -1202,16 +1221,24 @@ impl super::Nexus {
     /// this sled, this operation rudely terminates it.
     pub(crate) async fn instance_ensure_unregistered(
         &self,
+        opctx: &OpContext,
         propolis_id: &PropolisUuid,
         sled_id: &SledUuid,
     ) -> Result<Option<SledVmmState>, InstanceStateChangeError> {
         let sa = self.sled_client(&sled_id).await?;
-        sa.vmm_unregister(propolis_id)
-            .await
-            .map(|res| res.into_inner().updated_runtime.map(Into::into))
-            .map_err(|e| {
-                InstanceStateChangeError::SledAgent(SledAgentInstanceError(e))
-            })
+        match sa.vmm_unregister(propolis_id).await {
+            Ok(res) => Ok(res.into_inner().updated_runtime.map(Into::into)),
+            Err(e) => {
+                let error = SledAgentInstanceError::new(
+                    opctx,
+                    self.datastore(),
+                    *sled_id,
+                    e,
+                )
+                .await;
+                Err(InstanceStateChangeError::SledAgent(error))
+            }
+        }
     }
 
     /// Determines the action to take on an instance's active VMM given a
@@ -1445,8 +1472,9 @@ impl super::Nexus {
                         &VmmPutStateBody { state: requested.into() },
                     )
                     .await
-                    .map(|res| res.into_inner().updated_runtime.map(Into::into))
-                    .map_err(|e| SledAgentInstanceError(e));
+                    .map(|res| {
+                        res.into_inner().updated_runtime.map(Into::into)
+                    });
 
                 // If the operation succeeded, write the instance state back,
                 // returning any subsequent errors that occurred during that
@@ -1463,7 +1491,16 @@ impl super::Nexus {
                         .await
                         .map_err(Into::into),
                     Ok(None) => Ok(()),
-                    Err(e) => Err(InstanceStateChangeError::SledAgent(e)),
+                    Err(e) => {
+                        let err = SledAgentInstanceError::new(
+                            opctx,
+                            self.datastore(),
+                            sled_id,
+                            e,
+                        )
+                        .await;
+                        Err(InstanceStateChangeError::SledAgent(err))
+                    }
                 }
             }
         }
@@ -1728,7 +1765,8 @@ impl super::Nexus {
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
-        let sa = self.sled_client(&initial_vmm.sled_id()).await?;
+        let sled_id = initial_vmm.sled_id();
+        let sa = self.sled_client(&sled_id).await?;
         // The state of a freshly-created VMM record in the database is always
         // `VmmState::Creating`. Based on whether this VMM is created in order
         // to start or migrate an instance, determine the VMM state we will want
@@ -1765,8 +1803,7 @@ impl super::Nexus {
                 },
             )
             .await
-            .map(|res| res.into_inner().into())
-            .map_err(|e| SledAgentInstanceError(e));
+            .map(|res| res.into_inner().into());
 
         match instance_register_result {
             Ok(state) => {
@@ -1783,20 +1820,27 @@ impl super::Nexus {
                 })
             }
             Err(e) => {
+                let err = SledAgentInstanceError::new(
+                    opctx,
+                    self.datastore(),
+                    sled_id,
+                    e,
+                )
+                .await;
                 // If this error indicates that the VMM should be marked as
                 // `Failed`, do that now.
-                if let Some(reason) = e.vmm_failure_reason() {
+                if let Some(reason) = err.vmm_failure_reason() {
                     let _ = self
                         .mark_vmm_failed(
                             &opctx,
                             authz_instance.clone(),
                             &initial_vmm,
-                            &e,
+                            &err,
                             reason,
                         )
                         .await;
                 }
-                Err(InstanceStateChangeError::SledAgent(e))
+                Err(InstanceStateChangeError::SledAgent(err))
             }
         }
     }
@@ -1823,7 +1867,7 @@ impl super::Nexus {
         authz_instance: authz::Instance,
         vmm: &db::model::Vmm,
         error: &SledAgentInstanceError,
-        reason: db::model::VmmFailureReason,
+        reason: VmmFailureReason,
     ) -> Result<(), Error> {
         let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
         let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
@@ -1838,7 +1882,7 @@ impl super::Nexus {
 
         let new_runtime = vmm
             .runtime()
-            .transition(nexus_types::instance::VmmState::Failed(reason.into()));
+            .transition(nexus_types::instance::VmmState::Failed(reason));
 
         match self.db_datastore.vmm_update_runtime(&vmm_id, &new_runtime).await
         {

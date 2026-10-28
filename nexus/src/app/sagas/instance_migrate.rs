@@ -498,7 +498,11 @@ async fn sim_ensure_destination_propolis(
 
                 // Don't set the instance to Failed in this case. Instead, allow
                 // the saga to unwind, marking the VMM as SagaUnwound.
-                saga_action_failed(Error::from(inner))
+                saga_action_failed(Error::InternalError {
+                    internal_message: format!(
+                        "sled-agent failed to register instance: {inner}"
+                    ),
+                })
             }
             InstanceStateChangeError::Other(inner) => {
                 info!(
@@ -517,6 +521,7 @@ async fn sim_ensure_destination_propolis_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
     let dst_propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
     let dst_sled_id = sagactx.lookup::<SledUuid>("dst_sled_id")?;
     let db_instance =
@@ -533,17 +538,15 @@ async fn sim_ensure_destination_propolis_undo(
     // of unwind to take care of cleaning up the migration IDs in the instance
     // record. Otherwise the unwind has failed and manual intervention is
     // needed.
-    match osagactx
-        .nexus()
-        .instance_ensure_unregistered(&dst_propolis_id, &dst_sled_id)
-        .await
-    {
-        Ok(_) => Ok(()),
-        Err(InstanceStateChangeError::SledAgent(inner)) => {
-            if !inner.vmm_gone() { Ok(()) } else { Err(inner.0.into()) }
-        }
-        Err(e) => Err(e.into()),
-    }
+    super::instance_common::unwind_instance_ensure_registered(
+        &sagactx,
+        &params.serialized_authn,
+        &InstanceUuid::from_untyped_uuid(db_instance.id()),
+        &dst_propolis_id,
+        &dst_sled_id,
+    )
+    .await;
+    Ok(())
 }
 
 async fn sim_instance_migrate(
@@ -609,9 +612,15 @@ async fn sim_instance_migrate(
                       "instance_id" => %db_instance.id(),
                       "error" => ?inner);
 
-            Err(saga_action_failed(omicron_common::api::external::Error::from(
-                inner,
-            )))
+            Err(saga_action_failed(
+                // TODO(eliza): want to get the failure reason written to the
+                // unwound VMM record here...
+                omicron_common::api::external::Error::InternalError {
+                    internal_message: format!(
+                        "sled-agent failed to start migration: {inner}"
+                    ),
+                },
+            ))
         }
         Err(InstanceStateChangeError::Other(inner)) => {
             info!(osagactx.log(),
