@@ -8,8 +8,8 @@ use crate::HardwareView;
 use crate::TofinoSnapshot;
 use crate::TofinoView;
 use crate::disk_bay::{
-    NvmeFacts, ObservedBay, ObservedOccupant, PolledBay, classify_bay,
-    resolve_bays,
+    BayContents, NvmeFacts, ObservedBay, ObservedOccupant, PolledBay,
+    classify_bay, resolve_bays,
 };
 use crate::nvme_instance::NvmeInstance;
 use crate::{DendriteAsic, DiskBay, DiskBayOccupant, SledMode, UnparsedDisk};
@@ -219,7 +219,6 @@ impl HardwareView {
             tofino,
             disks: HashMap::new(),
             disk_bays: Vec::new(),
-            incomplete_disks: None,
             baseboard,
             online_processor_count: sysconf::online_processor_count()?,
             usable_physical_pages: sysconf::usable_physical_pages()?,
@@ -354,8 +353,11 @@ fn poll_bay(
         kind: bay.kind,
         driver: bay.binding_driver.clone(),
     };
-    let facts = match &bay.occupant {
-        ObservedOccupant::Nvme { instance, namespaces, .. } => {
+    let facts = match &bay.contents {
+        Ok(BayContents {
+            occupant: ObservedOccupant::Nvme { instance, namespaces, .. },
+            ..
+        }) => {
             if namespaces.len() > 1 {
                 // Only the first namespace becomes a disk. See
                 // https://github.com/oxidecomputer/omicron/issues/5241.
@@ -382,12 +384,11 @@ fn poll_bay(
                 }
             }
         }
-        ObservedOccupant::Empty
-        | ObservedOccupant::Other { .. }
-        | ObservedOccupant::Unreadable(_) => None,
+        _ => None,
     };
-    let is_boot_disk =
-        pcie_slot_is_boot_disk(sled, bay.pcie_slot, boot_storage_unit);
+    let is_boot_disk = bay.contents.as_ref().is_ok_and(|contents| {
+        pcie_slot_is_boot_disk(sled, contents.pcie_slot, boot_storage_unit)
+    });
     match classify_bay(bay, facts.as_ref(), is_boot_disk) {
         Ok((bay, disk)) => {
             PolledBay::Described { bay, disk: disk.map(Box::new) }
@@ -522,29 +523,6 @@ fn poll_device_tree(
     let HardwareSnapshot { tofino: polled_tofino, bays: polled_bays } =
         polled_hw;
 
-    let incomplete_disks = match &polled_bays {
-        None => Some("could not read the disk bays".to_string()),
-        Some(bays) => {
-            let unreadable: Vec<&str> = bays
-                .iter()
-                .filter_map(|bay| match bay {
-                    PolledBay::Unreadable { location, .. } => {
-                        Some(location.as_str())
-                    }
-                    PolledBay::Described { .. } => None,
-                })
-                .collect();
-            if unreadable.is_empty() {
-                None
-            } else {
-                Some(format!(
-                    "could not read disk bay(s): {}",
-                    unreadable.join(", ")
-                ))
-            }
-        }
-    };
-
     // Bays this poll could not describe keep what the previous view said.
     let polled_disks = polled_bays.map(|bays| {
         let previous = hardware_view_tx.borrow();
@@ -580,12 +558,7 @@ fn poll_device_tree(
             }
         };
 
-        let did_modify_incomplete = inner.incomplete_disks != incomplete_disks;
-        if did_modify_incomplete {
-            inner.incomplete_disks = incomplete_disks.clone();
-        }
-
-        did_modify_tofino || did_modify_disks || did_modify_incomplete
+        did_modify_tofino || did_modify_disks
     });
 
     info!(
@@ -842,8 +815,7 @@ impl HardwareManager {
         // Force the device tree to be polled at least once before returning.
         // This mitigates issues where the Sled Agent could try to propagate
         // an "empty" view of hardware to other consumers before the first
-        // query. If the disk bays could not be read, the view has no disks
-        // and `incomplete_disks` says why.
+        // query.
         match poll_device_tree(&log, &hardware_view_tx, &external_disks) {
             Ok(_) => (),
             // Allow non-sled devices to proceed with a "null" view of
@@ -899,11 +871,6 @@ impl HardwareManager {
 
     pub fn disks(&self) -> HashMap<DiskIdentity, UnparsedDisk> {
         self.hardware_view_rx.borrow().disks()
-    }
-
-    /// See [`HardwareView::incomplete_disks`].
-    pub fn incomplete_disks(&self) -> Option<String> {
-        self.hardware_view_rx.borrow().incomplete_disks().map(str::to_string)
     }
 
     pub fn is_scrimlet(&self) -> bool {

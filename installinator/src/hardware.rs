@@ -5,7 +5,6 @@
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
-use anyhow::bail;
 use anyhow::ensure;
 use sled_agent_types::disk::DiskVariant;
 use sled_hardware::ExternalDisks;
@@ -33,12 +32,6 @@ impl Hardware {
             ExternalDisks::DetectPhysical,
         )
         .map_err(|err| anyhow!("failed to create HardwareManager: {err}"))?;
-
-        // Installing to only the M.2s that happened to be readable would
-        // leave the other with stale contents.
-        if let Some(reason) = hardware.incomplete_disks() {
-            bail!("hardware view of disks is incomplete: {reason}");
-        }
 
         let disks: Vec<RawDisk> =
             hardware.disks().into_values().map(|disk| disk.into()).collect();

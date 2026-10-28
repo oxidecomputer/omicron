@@ -18,7 +18,7 @@
 //! gets a `board` child with an `ic` under it as a placeholder.
 
 use crate::disk_bay::{
-    BayProblem, ObservedBay, ObservedNamespace, ObservedOccupant,
+    BayContents, BayProblem, ObservedBay, ObservedNamespace, ObservedOccupant,
 };
 use crate::nvme_instance::NvmeInstance;
 use libtopo::{Error, Node, Scheme, TopoHdl, WalkAction, hc};
@@ -42,16 +42,28 @@ pub(super) enum TopoError {
     Topo(#[from] libtopo::Error),
 
     #[error("topology node {node} has no location label")]
-    UnlabelledBay { node: String },
+    UnlabelledBay {
+        node: String,
+        #[source]
+        source: Option<libtopo::Error>,
+    },
 
-    #[error("topology node {node} ({location}) has no binding/slot")]
-    BayWithoutSlot { node: String, location: String },
+    #[error("could not read the slot type of topology node {node}")]
+    SlotType {
+        node: String,
+        #[source]
+        source: libtopo::Error,
+    },
 }
 
 /// Takes a fresh topology snapshot and returns every U.2 bay and M.2 socket
 /// with what the topology found behind it, in walk order. A bay the
-/// topology only partly describes comes back as
-/// [`ObservedOccupant::Unreadable`] rather than failing the whole read.
+/// topology only partly describes, or whose nodes cannot be read, comes back
+/// with an `Err` in [`ObservedBay::contents`].
+///
+/// The whole read fails only if the topology cannot be read or a bay cannot
+/// be identified (no label, or a slot whose type cannot be read). Leaving
+/// such a bay out instead would drop its disk until it can be read again.
 ///
 /// A new handle is opened on every call: the wrapper allows one snapshot per
 /// handle (see <https://github.com/oxidecomputer/libtopo/issues/14>), and a
@@ -147,6 +159,8 @@ impl<'a> BayWalker<'a> {
         }
     }
 
+    /// Fails only for a bay that cannot be identified. A node beneath a bay
+    /// that cannot be read makes that bay unreadable instead.
     fn visit(&mut self, node: &Node<'_>) -> Result<(), TopoError> {
         match node.name().as_ref() {
             hc::BAY => self.visit_bay(node, DiskVariant::U2),
@@ -155,17 +169,56 @@ impl<'a> BayWalker<'a> {
                     node,
                     hc::TOPO_PGROUP_SLOT,
                     hc::TOPO_PROP_SLOT_TYPE,
-                )?;
+                )
+                .map_err(|source| TopoError::SlotType {
+                    node: NodeKey::of(node).to_string(),
+                    source,
+                })?;
                 if slot_type == Some(TOPO_SLOT_TYPE_M2) {
                     self.visit_bay(node, DiskVariant::M2)
                 } else {
                     Ok(())
                 }
             }
-            hc::NVME => self.visit_nvme(node),
-            hc::DISK => self.visit_disk(node),
-            hc::BOARD => self.visit_board(node),
-            hc::IC => self.visit_ic(node),
+            hc::NVME => {
+                // An nvme node elsewhere in the tree (a PCIe add-in card, or
+                // a non-Oxide platform) is not in a disk bay.
+                let Some(index) = self.bay_above(node) else {
+                    return Ok(());
+                };
+                if let Err(err) = self.visit_nvme(node, index) {
+                    self.mark_unreadable(index, node, err);
+                }
+                Ok(())
+            }
+            hc::DISK => {
+                let Some(index) = NodeKey::of_parent(node)
+                    .and_then(|key| self.nvme_of.get(&key).copied())
+                else {
+                    return Ok(());
+                };
+                if let Err(err) = self.visit_disk(node, index) {
+                    self.mark_unreadable(index, node, err);
+                }
+                Ok(())
+            }
+            hc::BOARD => {
+                if let Some(index) = self.bay_above(node) {
+                    self.visit_board(node, index);
+                }
+                Ok(())
+            }
+            hc::IC => {
+                let Some(index) = NodeKey::of_parent(node)
+                    .and_then(|key| self.board_of.get(&key).copied())
+                else {
+                    return Ok(());
+                };
+                if let Err(err) = self.visit_ic(node, index) {
+                    self.mark_unreadable(index, node, err);
+                }
+                Ok(())
+            }
             _ => Ok(()),
         }
     }
@@ -178,31 +231,50 @@ impl<'a> BayWalker<'a> {
         let key = NodeKey::of(node);
         let location = match node.label() {
             Ok(label) if !label.is_empty() => label,
-            _ => {
-                return Err(TopoError::UnlabelledBay { node: key.to_string() });
+            Ok(_) => {
+                return Err(TopoError::UnlabelledBay {
+                    node: key.to_string(),
+                    source: None,
+                });
+            }
+            Err(err) => {
+                return Err(TopoError::UnlabelledBay {
+                    node: key.to_string(),
+                    source: Some(err),
+                });
             }
         };
-        let Some(pcie_slot) =
-            optional_u32(node, hc::TOPO_PGROUP_BINDING, hc::TOPO_BINDING_SLOT)?
-        else {
-            return Err(TopoError::BayWithoutSlot {
-                node: key.to_string(),
-                location,
-            });
-        };
-        let binding_driver = optional_string(
+
+        let (binding_driver, driver_problem) = match optional_string(
             node,
             hc::TOPO_PGROUP_BINDING,
             hc::TOPO_BINDING_DRIVER,
-        )?;
+        ) {
+            Ok(driver) => (driver, None),
+            Err(err) => (None, Some(topology_problem(&key, err))),
+        };
+        let pcie_slot = match optional_u32(
+            node,
+            hc::TOPO_PGROUP_BINDING,
+            hc::TOPO_BINDING_SLOT,
+        ) {
+            Ok(Some(slot)) => Ok(i64::from(slot)),
+            Ok(None) => Err(BayProblem::NoPcieSlot),
+            Err(err) => Err(topology_problem(&key, err)),
+        };
+        let contents = match (pcie_slot, driver_problem) {
+            (Err(problem), _) | (Ok(_), Some(problem)) => Err(problem),
+            (Ok(pcie_slot), None) => {
+                Ok(BayContents { pcie_slot, occupant: ObservedOccupant::Empty })
+            }
+        };
 
         self.bay_of.insert(key, self.bays.len());
         self.bays.push(ObservedBay {
             location,
             kind,
-            pcie_slot: i64::from(pcie_slot),
             binding_driver,
-            occupant: ObservedOccupant::Empty,
+            contents,
         });
         Ok(())
     }
@@ -212,62 +284,74 @@ impl<'a> BayWalker<'a> {
         NodeKey::of_parent(node).and_then(|key| self.bay_of.get(&key).copied())
     }
 
+    /// Records why the bay is unreadable, unless an earlier problem already
+    /// made it so.
+    fn set_problem(&mut self, index: usize, problem: BayProblem) {
+        let bay = &mut self.bays[index];
+        if bay.contents.is_ok() {
+            bay.contents = Err(problem);
+        }
+    }
+
+    fn mark_unreadable(&mut self, index: usize, node: &Node<'_>, err: Error) {
+        self.set_problem(index, topology_problem(&NodeKey::of(node), err));
+    }
+
     /// Claims the bay for a new occupant, which should be its first.
     fn occupy(&mut self, index: usize, occupant: ObservedOccupant) {
         let bay = &mut self.bays[index];
-        bay.occupant = if bay.occupant == ObservedOccupant::Empty {
-            occupant
-        } else {
-            ObservedOccupant::Unreadable(BayProblem::MultipleOccupants)
+        let Ok(contents) = &mut bay.contents else {
+            return;
         };
+        if contents.occupant == ObservedOccupant::Empty {
+            contents.occupant = occupant;
+        } else {
+            bay.contents = Err(BayProblem::MultipleOccupants);
+        }
     }
 
-    fn visit_nvme(&mut self, node: &Node<'_>) -> Result<(), TopoError> {
-        // An nvme node elsewhere in the tree (a PCIe add-in card, or a
-        // non-Oxide platform) is not in a disk bay.
-        let Some(index) = self.bay_above(node) else {
-            return Ok(());
-        };
+    fn visit_nvme(
+        &mut self,
+        node: &Node<'_>,
+        index: usize,
+    ) -> Result<(), Error> {
         let driver =
             optional_string(node, hc::TOPO_PGROUP_IO, hc::TOPO_IO_DRIVER)?;
         let devfs_path =
             optional_string(node, hc::TOPO_PGROUP_IO, hc::TOPO_IO_DEV_PATH)?;
-        let occupant = match nvme_instance_of(self.log, node) {
+        match nvme_instance_of(self.log, node) {
             Some(instance) => {
                 self.nvme_of.insert(NodeKey::of(node), index);
-                ObservedOccupant::Nvme {
-                    instance,
-                    driver,
-                    devfs_path,
-                    namespaces: Vec::new(),
-                }
+                self.occupy(
+                    index,
+                    ObservedOccupant::Nvme {
+                        instance,
+                        driver,
+                        devfs_path,
+                        namespaces: Vec::new(),
+                    },
+                );
             }
-            None => {
-                ObservedOccupant::Unreadable(BayProblem::NvmeWithoutInstance)
-            }
-        };
-        self.occupy(index, occupant);
+            None => self.set_problem(index, BayProblem::NvmeWithoutInstance),
+        }
         Ok(())
     }
 
-    fn visit_disk(&mut self, node: &Node<'_>) -> Result<(), TopoError> {
-        let Some(index) = NodeKey::of_parent(node)
-            .and_then(|key| self.nvme_of.get(&key).copied())
-        else {
-            return Ok(());
-        };
-
+    fn visit_disk(
+        &mut self,
+        node: &Node<'_>,
+        index: usize,
+    ) -> Result<(), Error> {
         // topo sets the `storage` and `io/devfs-path` properties only when
         // the namespace has a blkdev attached.
         let mut missing = None;
-        let mut required =
-            |group: &str, name: &str| -> Result<String, TopoError> {
-                let value = optional_string(node, group, name)?;
-                if value.is_none() && missing.is_none() {
-                    missing = Some(format!("{group}/{name}"));
-                }
-                Ok(value.unwrap_or_default())
-            };
+        let mut required = |group: &str, name: &str| -> Result<String, Error> {
+            let value = optional_string(node, group, name)?;
+            if value.is_none() && missing.is_none() {
+                missing = Some(format!("{group}/{name}"));
+            }
+            Ok(value.unwrap_or_default())
+        };
         let namespace = ObservedNamespace {
             manufacturer: required(
                 hc::TOPO_PGROUP_STORAGE,
@@ -283,48 +367,41 @@ impl<'a> BayWalker<'a> {
             )?,
         };
 
-        let bay = &mut self.bays[index];
-        match (&mut bay.occupant, missing) {
-            (ObservedOccupant::Nvme { namespaces, .. }, None) => {
-                namespaces.push(namespace);
-            }
-            (ObservedOccupant::Nvme { .. }, Some(property)) => {
-                bay.occupant =
-                    ObservedOccupant::Unreadable(BayProblem::IncompleteDisk {
-                        node: NodeKey::of(node).to_string(),
-                        property,
-                    });
-            }
-            // An earlier problem already made the bay unreadable.
-            _ => (),
+        if let Some(property) = missing {
+            self.set_problem(
+                index,
+                BayProblem::IncompleteDisk {
+                    node: NodeKey::of(node).to_string(),
+                    property,
+                },
+            );
+        } else if let Ok(BayContents {
+            occupant: ObservedOccupant::Nvme { namespaces, .. },
+            ..
+        }) = &mut self.bays[index].contents
+        {
+            namespaces.push(namespace);
         }
         Ok(())
     }
 
-    fn visit_board(&mut self, node: &Node<'_>) -> Result<(), TopoError> {
-        let Some(index) = self.bay_above(node) else {
-            return Ok(());
-        };
+    fn visit_board(&mut self, node: &Node<'_>, index: usize) {
         self.board_of.insert(NodeKey::of(node), index);
         self.occupy(
             index,
             ObservedOccupant::Other { driver: None, devfs_path: None },
         );
-        Ok(())
     }
 
-    fn visit_ic(&mut self, node: &Node<'_>) -> Result<(), TopoError> {
-        let Some(index) = NodeKey::of_parent(node)
-            .and_then(|key| self.board_of.get(&key).copied())
-        else {
-            return Ok(());
-        };
+    fn visit_ic(&mut self, node: &Node<'_>, index: usize) -> Result<(), Error> {
         let io_driver =
             optional_string(node, hc::TOPO_PGROUP_IO, hc::TOPO_IO_DRIVER)?;
         let io_path =
             optional_string(node, hc::TOPO_PGROUP_IO, hc::TOPO_IO_DEV_PATH)?;
-        if let ObservedOccupant::Other { driver, devfs_path } =
-            &mut self.bays[index].occupant
+        if let Ok(BayContents {
+            occupant: ObservedOccupant::Other { driver, devfs_path },
+            ..
+        }) = &mut self.bays[index].contents
         {
             *driver = io_driver;
             *devfs_path = io_path;
@@ -337,15 +414,20 @@ impl<'a> BayWalker<'a> {
     /// produced nothing.
     fn finish(mut self) -> Vec<ObservedBay> {
         for bay in &mut self.bays {
-            if bay.binding_driver.as_deref() == Some("nvme")
-                && bay.occupant == ObservedOccupant::Empty
-            {
-                bay.occupant =
-                    ObservedOccupant::Unreadable(BayProblem::NvmeNotEnumerated);
+            let empty = matches!(
+                &bay.contents,
+                Ok(BayContents { occupant: ObservedOccupant::Empty, .. })
+            );
+            if empty && bay.binding_driver.as_deref() == Some("nvme") {
+                bay.contents = Err(BayProblem::NvmeNotEnumerated);
             }
         }
         self.bays
     }
+}
+
+fn topology_problem(node: &NodeKey, err: Error) -> BayProblem {
+    BayProblem::Topology { node: node.to_string(), error: err.to_string() }
 }
 
 /// The driver instance of an `nvme` node, from its `io/instance` property.
@@ -390,11 +472,11 @@ fn optional_string(
     node: &Node<'_>,
     group: &str,
     name: &str,
-) -> Result<Option<String>, TopoError> {
+) -> Result<Option<String>, Error> {
     match node.property_string(group, name) {
         Ok(value) => Ok(Some(value)),
         Err(Error::PropertyNotFound { .. }) => Ok(None),
-        Err(err) => Err(err.into()),
+        Err(err) => Err(err),
     }
 }
 
@@ -403,10 +485,10 @@ fn optional_u32(
     node: &Node<'_>,
     group: &str,
     name: &str,
-) -> Result<Option<u32>, TopoError> {
+) -> Result<Option<u32>, Error> {
     match node.property_u32(group, name) {
         Ok(value) => Ok(Some(value)),
         Err(Error::PropertyNotFound { .. }) => Ok(None),
-        Err(err) => Err(err.into()),
+        Err(err) => Err(err),
     }
 }
