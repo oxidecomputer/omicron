@@ -213,8 +213,8 @@ pub mod inventory {
     pub use crate::v55::inventory::OmicronZonesConfig;
     pub use crate::v55::inventory::ZoneArtifactInventory;
 
-    pub use crate::v61::inventory::Inventory;
-    pub use crate::v61::inventory::InventoryDisk;
+    pub use crate::v62::inventory::Inventory;
+    pub use crate::v62::inventory::InventoryDisk;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;

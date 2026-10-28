@@ -852,9 +852,8 @@ fn display_sleds(
         }
         for disk in disks {
             let PhysicalDisk { identity, variant, location, .. } = disk;
-            let loc = location.as_deref().unwrap_or("unknown location");
             let mut indent2 = IndentWriter::new("  ", &mut indented);
-            writeln!(indent2, "{variant:?}: {identity:?} in {loc}")?;
+            writeln!(indent2, "{variant:?}: {identity:?} in {location}")?;
         }
 
         if !zpools.is_empty() {
