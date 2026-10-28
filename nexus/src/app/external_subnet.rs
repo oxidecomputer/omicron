@@ -154,7 +154,9 @@ impl super::Nexus {
                 instance: NameOrId::Id(*id),
             },
             NameOrId::Name(name) => instance_types::InstanceSelector {
-                project: Some(NameOrId::Id(authz_project.id())),
+                project: Some(NameOrId::Id(
+                    authz_project.id().into_untyped_uuid(),
+                )),
                 instance: NameOrId::Name(name.clone()),
             },
         };

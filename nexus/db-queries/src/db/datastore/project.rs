@@ -18,6 +18,7 @@ use crate::db::model::Project;
 use crate::db::model::ProjectUpdate;
 use crate::db::model::Silo;
 use crate::db::model::VirtualProvisioningCollection;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -36,6 +37,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_uuid_kinds::GenericUuid;
 use ref_cast::RefCast;
 
 // Generates internal functions used for validation during project deletion.
@@ -60,7 +62,7 @@ macro_rules! generate_fn_to_ensure_none_in_project {
                 use nexus_db_schema::schema::$i;
 
                 let maybe_label = $i::dsl::$i
-                    .filter($i::dsl::project_id.eq(authz_project.id()))
+                    .filter($i::dsl::project_id.eq(to_db_typed_uuid(authz_project.id())))
                     .filter($i::dsl::time_deleted.is_null())
                     .select($i::dsl::$label)
                     .limit(1)
@@ -193,7 +195,7 @@ impl DataStore {
                     self.virtual_provisioning_collection_create_on_connection(
                         &conn,
                         VirtualProvisioningCollection::new(
-                            project.id(),
+                            project.id().into_untyped_uuid(),
                             CollectionTypeProvisioned::Project,
                         ),
                     )
@@ -263,7 +265,9 @@ impl DataStore {
                     let now = Utc::now();
                     let updated_rows = diesel::update(dsl::project)
                         .filter(dsl::time_deleted.is_null())
-                        .filter(dsl::id.eq(authz_project.id()))
+                        .filter(
+                            dsl::id.eq(to_db_typed_uuid(authz_project.id())),
+                        )
                         .filter(dsl::rcgen.eq(db_project.rcgen))
                         .set(dsl::time_deleted.eq(now))
                         .returning(Project::as_returning())
@@ -289,7 +293,7 @@ impl DataStore {
                     self.virtual_provisioning_collection_delete_on_connection(
                         &opctx.log,
                         &conn,
-                        db_project.id(),
+                        db_project.id().into_untyped_uuid(),
                     )
                     .await?;
                     Ok(())
@@ -345,7 +349,7 @@ impl DataStore {
         use nexus_db_schema::schema::project::dsl;
         diesel::update(dsl::project)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(authz_project.id()))
+            .filter(dsl::id.eq(to_db_typed_uuid(authz_project.id())))
             .set(updates)
             .returning(Project::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
