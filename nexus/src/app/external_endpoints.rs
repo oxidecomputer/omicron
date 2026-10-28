@@ -49,6 +49,8 @@ use omicron_certificates::CertificateValidity;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloUuid;
 use openssl::pkey::PKey;
 use rustls::pki_types::PrivateKeyDer;
 use rustls::pki_types::pem::PemObject;
@@ -103,11 +105,11 @@ impl ExternalEndpoints {
         // be any duplicates since the DNS names are constructed from the
         // (unique) Silo names.  Even if we support aliases in the future, they
         // will presumably need to be unique, too.
-        let silos_by_id: BTreeMap<Uuid, Arc<nexus_db_model::Silo>> = silos
+        let silos_by_id: BTreeMap<SiloUuid, Arc<nexus_db_model::Silo>> = silos
             .into_iter()
             .map(|db_silo| (db_silo.id(), Arc::new(db_silo)))
             .collect();
-        let mut dns_names: BTreeMap<String, Uuid> = BTreeMap::new();
+        let mut dns_names: BTreeMap<String, SiloUuid> = BTreeMap::new();
         for z in external_dns_zones {
             for (_, db_silo) in &silos_by_id {
                 let dns_name = format!(
@@ -147,7 +149,7 @@ impl ExternalEndpoints {
         // (see best_certificate()).  And in the end it'll be better to provide
         // an expired certificate than none at all.
         let parsed_certificates = certs.into_iter().map(|db_cert| {
-            let silo_id = db_cert.silo_id;
+            let silo_id = db_cert.silo_id();
             let tls_cert = TlsCertificate::try_from(db_cert).map_err(|e| {
                 ExternalEndpointError::BadCert { silo_id, reason: Arc::new(e) }
             })?;
@@ -267,7 +269,7 @@ pub struct ExternalEndpoint {
     /// the id of the Silo associated with this endpoint
     // This is redundant with `db_silo`, but it's convenient to put it here and
     // it shows up in the serialized form this way.
-    silo_id: Uuid,
+    silo_id: SiloUuid,
     /// the silo associated with this endpoint
     #[serde(skip)]
     db_silo: Arc<nexus_db_model::Silo>,
@@ -345,16 +347,16 @@ enum ExternalEndpointError {
         ({first_silo_name:?})"
     )]
     DupDnsName {
-        dup_silo_id: Uuid,
+        dup_silo_id: SiloUuid,
         dup_silo_name: String,
-        first_silo_id: Uuid,
+        first_silo_id: SiloUuid,
         first_silo_name: String,
         dns_name: String,
     },
 
     #[error("ignoring certificate for silo {silo_id}: {reason:#}")]
     BadCert {
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         #[source]
         reason: Arc<anyhow::Error>,
     },
@@ -362,7 +364,7 @@ enum ExternalEndpointError {
     #[error(
         "silo {silo_id} with DNS name {dns_name:?} has no usable certificates"
     )]
-    NoSiloCerts { silo_id: Uuid, dns_name: String },
+    NoSiloCerts { silo_id: SiloUuid, dns_name: String },
 
     #[error("no external endpoints were found")]
     NoEndpoints,
@@ -523,7 +525,8 @@ pub(crate) async fn read_all_endpoints(
                 Discoverability::All,
             )
             .await?;
-        paginator = p.found_batch(&batch, &|s: &Silo| s.id());
+        paginator =
+            p.found_batch(&batch, &|s: &Silo| s.id().into_untyped_uuid());
         silos.extend(batch);
     }
 
@@ -821,13 +824,14 @@ mod test {
     use nexus_types::identity::Resource;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_uuid_kinds::SiloUuid;
     use schemars::JsonSchema;
     use serde::Deserialize;
     use serde::Serialize;
     use std::net::SocketAddr;
     use uuid::Uuid;
 
-    fn create_silo(silo_id: Option<Uuid>, name: &str, saml: bool) -> Silo {
+    fn create_silo(silo_id: Option<SiloUuid>, name: &str, saml: bool) -> Silo {
         let identity_mode = if saml {
             silo::SiloIdentityMode::SamlJit
         } else {
@@ -908,7 +912,7 @@ mod test {
 
         // There are also no endpoints if there's a Silo but no external DNS
         // zones.
-        let silo_id: Uuid =
+        let silo_id: SiloUuid =
             "6bcbd3bb-f93b-e8b3-d41c-dce6d98281d3".parse().unwrap();
         let silo = create_silo(Some(silo_id), "dummy", false);
         let ee2 = ExternalEndpoints::new(vec![silo], vec![], vec![]);
@@ -966,7 +970,7 @@ mod test {
         let ee1 = ExternalEndpoints::new(vec![], vec![], vec![]);
 
         // Sample data
-        let silo_id: Uuid =
+        let silo_id: SiloUuid =
             "6bcbd3bb-f93b-e8b3-d41c-dce6d98281d3".parse().unwrap();
         let silo = create_silo(Some(silo_id), "dummy", false);
         let dns_zone1 = create_dns_zone("oxide1");
@@ -1099,13 +1103,13 @@ mod test {
         let low_id = Uuid::from_u128(1);
         let high_id = Uuid::from_u128(2);
         let low = Certificate::new_unvalidated(
-            silo.identity().id,
+            silo.id(),
             low_id,
             ServiceKind::Nexus,
             create_certificate("silo1.sys.oxide1.test", false),
         );
         let high = Certificate::new_unvalidated(
-            silo.identity().id,
+            silo.id(),
             high_id,
             ServiceKind::Nexus,
             create_certificate("silo1.sys.oxide1.test", false),
@@ -1146,7 +1150,7 @@ mod test {
         let silo1_cert1_params =
             create_certificate("silo1.sys.oxide1.test", false);
         let silo1_cert1 = Certificate::new(
-            silo1.identity().id,
+            silo1.id(),
             Uuid::new_v4(),
             ServiceKind::Nexus,
             silo1_cert1_params,
@@ -1156,7 +1160,7 @@ mod test {
         let silo1_cert2_params =
             create_certificate("silo1.sys.oxide1.test", true);
         let silo1_cert2 = Certificate::new_unvalidated(
-            silo1.identity().id,
+            silo1.id(),
             Uuid::new_v4(),
             ServiceKind::Nexus,
             silo1_cert2_params,
@@ -1164,7 +1168,7 @@ mod test {
         let silo2_cert1_params =
             create_certificate("silo2.sys.oxide1.test", true);
         let silo2_cert1 = Certificate::new_unvalidated(
-            silo2.identity().id,
+            silo2.id(),
             Uuid::new_v4(),
             ServiceKind::Nexus,
             silo2_cert1_params,
@@ -1172,7 +1176,7 @@ mod test {
         let silo2_cert2_params =
             create_certificate("silo2.sys.oxide1.test", false);
         let silo2_cert2 = Certificate::new(
-            silo2.identity().id,
+            silo2.id(),
             Uuid::new_v4(),
             ServiceKind::Nexus,
             silo2_cert2_params,
@@ -1182,7 +1186,7 @@ mod test {
         let silo3_cert_params =
             create_certificate("silo3.sys.oxide1.test", false);
         let mut silo3_cert = Certificate::new(
-            silo3.identity().id,
+            silo3.id(),
             Uuid::new_v4(),
             ServiceKind::Nexus,
             silo3_cert_params,
@@ -1195,7 +1199,7 @@ mod test {
         let silo4_cert_params =
             create_certificate("silo4.sys.oxide1.test", true);
         let silo4_cert = Certificate::new_unvalidated(
-            silo4.identity().id,
+            silo4.id(),
             Uuid::new_v4(),
             ServiceKind::Nexus,
             silo4_cert_params,
@@ -1255,10 +1259,7 @@ mod test {
             ee.by_dns_name["silo4.sys.oxide1.test"],
             ee.by_dns_name["silo4.sys.oxide2.test"]
         );
-        assert_eq!(
-            ee.default_endpoint.as_ref().unwrap().silo_id,
-            silo3.identity().id
-        );
+        assert_eq!(ee.default_endpoint.as_ref().unwrap().silo_id, silo3.id());
 
         let e1 = &ee.by_dns_name["silo1.sys.oxide1.test"];
         assert_eq!(e1.silo_id, silo1.id());

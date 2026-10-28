@@ -24,6 +24,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (8, REJECT_LOCAL_SWITCH_RESETS),
     (7, BYTE_WRAPPER_0_2_BUMP),
     (6, ARTIFACT_HASH_SCHEMA),
     (5, RACK_ID),
@@ -236,6 +237,7 @@ pub trait GatewayApi {
     #[endpoint {
         method = POST,
         path = "/sp/{type}/{slot}/component/{component}/reset",
+        versions = VERSION_REJECT_LOCAL_SWITCH_RESETS..,
     }]
     async fn sp_component_reset(
         rqctx: RequestContext<Self::Context>,
@@ -244,6 +246,21 @@ pub trait GatewayApi {
         HttpResponseUpdatedNoContent,
         latest::update::SpComponentResetError,
     >;
+
+    /// Reset an SP component (possibly the SP itself).
+    #[endpoint {
+        operation_id = "sp_component_reset",
+        method = POST,
+        path = "/sp/{type}/{slot}/component/{component}/reset",
+        versions = ..VERSION_REJECT_LOCAL_SWITCH_RESETS,
+    }]
+    async fn sp_component_reset_v1(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponent>,
+    ) -> Result<HttpResponseUpdatedNoContent, v1::update::SpComponentResetError>
+    {
+        Self::sp_component_reset(rqctx, path).await.map_err(From::from)
+    }
 
     /// Update an SP component
     ///

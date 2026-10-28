@@ -63,6 +63,7 @@ use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalZpoolUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use ref_cast::RefCast;
@@ -99,8 +100,8 @@ impl Disk {
         self.model().time_deleted()
     }
 
-    pub fn project_id(&self) -> Uuid {
-        self.model().project_id
+    pub fn project_id(&self) -> ProjectUuid {
+        self.model().project_id()
     }
 
     pub fn runtime(&self) -> DiskRuntimeState {
@@ -155,8 +156,8 @@ impl CrucibleDisk {
         self.model().time_deleted()
     }
 
-    pub fn project_id(&self) -> Uuid {
-        self.model().project_id
+    pub fn project_id(&self) -> ProjectUuid {
+        self.model().project_id()
     }
 
     pub fn runtime(&self) -> DiskRuntimeState {
@@ -280,8 +281,8 @@ impl LocalStorageDisk {
         self.model().time_deleted()
     }
 
-    pub fn project_id(&self) -> Uuid {
-        self.model().project_id
+    pub fn project_id(&self) -> ProjectUuid {
+        self.model().project_id()
     }
 
     pub fn runtime(&self) -> DiskRuntimeState {
@@ -374,7 +375,7 @@ impl Into<api::external::Disk> for Disk {
                 let device_path = format!("/mnt/{}", disk.name().as_str());
                 api::external::Disk {
                     identity: disk.identity(),
-                    project_id: disk.project_id,
+                    project_id: disk.project_id().into_untyped_uuid(),
                     snapshot_id: disk_type_crucible.create_snapshot_id,
                     image_id: disk_type_crucible.create_image_id,
                     size: disk.size.into(),
@@ -395,7 +396,7 @@ impl Into<api::external::Disk> for Disk {
                 let device_path = format!("/mnt/{}", disk.name().as_str());
                 api::external::Disk {
                     identity: disk.identity(),
-                    project_id: disk.project_id,
+                    project_id: disk.project_id().into_untyped_uuid(),
                     snapshot_id: None,
                     image_id: None,
                     size: disk.size.into(),
@@ -769,7 +770,7 @@ impl DataStore {
         let project_id = disk.project_id();
 
         let disk_model: model::Disk = Project::insert_resource(
-            project_id,
+            project_id.into(),
             diesel::insert_into(dsl::disk)
                 .values(disk.model().clone())
                 .on_conflict(dsl::id)
@@ -927,7 +928,7 @@ impl DataStore {
                 .on(dsl::id.eq(disk_type_local_storage_dsl::disk_id)),
         )
         .filter(dsl::time_deleted.is_null())
-        .filter(dsl::project_id.eq(authz_project.id()))
+        .filter(dsl::project_id.eq(to_db_typed_uuid(authz_project.id())))
         .select((
             model::Disk::as_select(),
             Option::<DiskTypeCrucible>::as_select(),

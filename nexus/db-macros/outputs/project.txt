@@ -278,7 +278,7 @@ impl<'a> Project<'a> {
         dsl::project
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
-            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .filter(dsl::silo_id.eq(::nexus_db_model::to_db_typed_uuid(authz_silo.id())))
             .select(nexus_db_model::Project::as_select())
             .get_result_async(&*datastore.pool_connection_authorized(opctx).await?)
             .await
@@ -354,7 +354,7 @@ impl<'a> Project<'a> {
         let (authz_silo, _) = Silo::lookup_by_id_no_authz(
                 opctx,
                 datastore,
-                &db_row.silo_id.into(),
+                &db_row.silo_id(),
             )
             .await?;
         let authz_project = Self::make_authz(

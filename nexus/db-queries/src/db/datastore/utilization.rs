@@ -7,6 +7,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::model::Name;
 use crate::db::model::SiloUtilization;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::BoolExpressionMethods;
@@ -30,7 +31,7 @@ impl DataStore {
 
         use nexus_db_schema::schema::silo_utilization::dsl;
         dsl::silo_utilization
-            .filter(dsl::silo_id.eq(silo_id))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(silo_id)))
             .select(SiloUtilization::as_select())
             .first_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -67,7 +68,7 @@ impl DataStore {
         // solution will be to eliminate the default silo altogether, but this
         // is dramatically easier.
         // See https://github.com/oxidecomputer/omicron/issues/5731
-        .filter(dsl::silo_id.ne(DEFAULT_SILO_ID))
+        .filter(dsl::silo_id.ne(to_db_typed_uuid(DEFAULT_SILO_ID)))
         .load_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))

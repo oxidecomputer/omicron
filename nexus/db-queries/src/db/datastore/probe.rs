@@ -8,6 +8,7 @@ use crate::db;
 use crate::db::datastore::DataStoreConnection;
 use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::model::Name;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -71,7 +72,7 @@ impl super::DataStore {
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
-        .filter(dsl::project_id.eq(authz_project.id()))
+        .filter(dsl::project_id.eq(to_db_typed_uuid(authz_project.id())))
         .filter(dsl::time_deleted.is_null())
         .select(Probe::as_select())
         .load_async(&*conn)
@@ -181,7 +182,9 @@ impl super::DataStore {
             NameOrId::Name(name) => dsl::probe
                 .filter(probe::name.eq(name.to_string()))
                 .filter(probe::time_deleted.is_null())
-                .filter(probe::project_id.eq(authz_project.id()))
+                .filter(
+                    probe::project_id.eq(to_db_typed_uuid(authz_project.id())),
+                )
                 .select(Probe::as_select())
                 .limit(1)
                 .first_async::<Probe>(&*conn)
@@ -197,7 +200,9 @@ impl super::DataStore {
                 }),
             NameOrId::Id(id) => dsl::probe
                 .filter(probe::id.eq(id))
-                .filter(probe::project_id.eq(authz_project.id()))
+                .filter(
+                    probe::project_id.eq(to_db_typed_uuid(authz_project.id())),
+                )
                 .select(Probe::as_select())
                 .limit(1)
                 .first_async::<Probe>(&*conn)
@@ -453,7 +458,9 @@ impl super::DataStore {
             NameOrId::Name(name) => dsl::probe
                 .filter(probe::name.eq(name.to_string()))
                 .filter(probe::time_deleted.is_null())
-                .filter(probe::project_id.eq(authz_project.id()))
+                .filter(
+                    probe::project_id.eq(to_db_typed_uuid(authz_project.id())),
+                )
                 .select(probe::id)
                 .limit(1)
                 .first_async::<Uuid>(&*conn)
@@ -470,7 +477,7 @@ impl super::DataStore {
 
         diesel::update(dsl::probe)
             .filter(dsl::id.eq(id))
-            .filter(dsl::project_id.eq(authz_project.id()))
+            .filter(dsl::project_id.eq(to_db_typed_uuid(authz_project.id())))
             .set(dsl::time_deleted.eq(Utc::now()))
             .execute_async(&*conn)
             .await
