@@ -7,5 +7,5 @@ CREATE TABLE IF NOT EXISTS omicron.public.active_problem (
 
     current_revision INT8 NOT NULL,
 
-    CONSTRAINT revision_is_non_zero CHECK (current_revision > 0)
+    CONSTRAINT revision_is_non_negative CHECK (current_revision >= 0)
 );
