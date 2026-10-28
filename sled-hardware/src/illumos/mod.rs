@@ -18,6 +18,7 @@ use illumos_devinfo::{DevInfo, Node, Property};
 use libnvme::namespace::NamespaceDiscoveryLevel;
 use libnvme::{Nvme, controller::Controller};
 use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::M2Slot;
 use sled_hardware_types::{Baseboard, OxideSled, SledCpuFamily};
 use slog::Logger;
 use slog::debug;
@@ -103,22 +104,13 @@ impl TofinoSnapshot {
     }
 }
 
-// Which BSU (i.e., host flash rom) slot did we boot from?
-#[derive(Debug, Clone, Copy)]
-enum BootStorageUnit {
-    A,
-    B,
-}
-
-impl TryFrom<i64> for BootStorageUnit {
-    type Error = Error;
-
-    fn try_from(raw: i64) -> Result<Self, Self::Error> {
-        match raw {
-            0x41 => Ok(Self::A),
-            0x42 => Ok(Self::B),
-            _ => Err(Error::InvalidBootStorageUnitValue(raw)),
-        }
+// Which BSU (i.e., host flash rom) slot did we boot from? The root node's
+// "boot-storage-unit" property holds the ASCII character 'A' or 'B'.
+fn boot_storage_unit_from_property(raw: i64) -> Result<M2Slot, Error> {
+    match raw {
+        0x41 => Ok(M2Slot::A),
+        0x42 => Ok(M2Slot::B),
+        _ => Err(Error::InvalidBootStorageUnitValue(raw)),
     }
 }
 
@@ -151,14 +143,14 @@ impl HardwareSnapshot {
             )));
         };
         let root_node = root.node_name();
-        let Some(sled_type) = OxideSled::try_from_root_node_name(&root_node)
-        else {
+        if OxideSled::try_from_root_node_name(&root_node).is_none() {
             return Err(Error::NotAnOxideSled(root_node));
-        };
+        }
 
         let properties = find_properties(&root, ["boot-storage-unit"])?;
-        let boot_storage_unit =
-            BootStorageUnit::try_from(i64_from_property(&properties[0])?)?;
+        let boot_storage_unit = boot_storage_unit_from_property(
+            i64_from_property(&properties[0])?,
+        )?;
 
         // Monitor for the Tofino device and driver.
         let tofino = get_tofino_snapshot(log, &mut device_info);
@@ -168,7 +160,7 @@ impl HardwareSnapshot {
         // knows.
         let bays = match external_disks {
             ExternalDisks::DetectPhysical => {
-                match read_bays(log, sled_type, boot_storage_unit) {
+                match read_bays(log, boot_storage_unit) {
                     Ok(bays) => Some(bays),
                     Err(err) => {
                         warn!(
@@ -225,18 +217,6 @@ impl HardwareView {
             usable_physical_ram_bytes: sysconf::usable_physical_ram_bytes()?,
             cpu_family,
         })
-    }
-}
-
-fn pcie_slot_is_boot_disk(
-    sled: OxideSled,
-    pcie_slot: i64,
-    boot_storage_unit: BootStorageUnit,
-) -> bool {
-    let slots = sled.bootdisk_pcie_slots();
-    match boot_storage_unit {
-        BootStorageUnit::A => slots[0] == pcie_slot,
-        BootStorageUnit::B => slots[1] == pcie_slot,
     }
 }
 
@@ -328,14 +308,13 @@ fn find_properties<'a, const N: usize>(
 /// Reads every bay from the hardware topology and describes each one.
 fn read_bays(
     log: &Logger,
-    sled: OxideSled,
-    boot_storage_unit: BootStorageUnit,
+    boot_storage_unit: M2Slot,
 ) -> Result<Vec<PolledBay>, Error> {
     let observed = topo::read_disk_bays(log)?;
     let nvme = Nvme::new()?;
     Ok(observed
         .iter()
-        .map(|bay| poll_bay(log, &nvme, sled, boot_storage_unit, bay))
+        .map(|bay| poll_bay(log, &nvme, boot_storage_unit, bay))
         .collect())
 }
 
@@ -344,8 +323,7 @@ fn read_bays(
 fn poll_bay(
     log: &Logger,
     nvme: &Nvme,
-    sled: OxideSled,
-    boot_storage_unit: BootStorageUnit,
+    boot_storage_unit: M2Slot,
     bay: &ObservedBay,
 ) -> PolledBay {
     let unreadable = || PolledBay::Unreadable {
@@ -386,10 +364,7 @@ fn poll_bay(
         }
         _ => None,
     };
-    let is_boot_disk = bay.contents.as_ref().is_ok_and(|contents| {
-        pcie_slot_is_boot_disk(sled, contents.pcie_slot, boot_storage_unit)
-    });
-    match classify_bay(bay, facts.as_ref(), is_boot_disk) {
+    match classify_bay(bay, facts.as_ref(), boot_storage_unit) {
         Ok((bay, disk)) => {
             PolledBay::Described { bay, disk: disk.map(Box::new) }
         }

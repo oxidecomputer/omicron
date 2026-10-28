@@ -22,6 +22,7 @@ use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::DiskVariant;
+use sled_agent_types::disk::M2Slot;
 use slog::{Logger, warn};
 use std::collections::HashMap;
 
@@ -180,11 +181,11 @@ pub(crate) enum ClassifyError {
 /// manage.
 ///
 /// `nvme` must be `Some` when the observed occupant is an NVMe controller.
-/// `is_boot_disk` is the caller's answer for this bay's PCIe slot.
+/// `boot_storage_unit` is the M.2 the host booted from.
 pub(crate) fn classify_bay(
     bay: &ObservedBay,
     nvme: Option<&NvmeFacts>,
-    is_boot_disk: bool,
+    boot_storage_unit: M2Slot,
 ) -> Result<(DiskBay, Option<UnparsedDisk>), ClassifyError> {
     let describe = |occupant| DiskBay {
         location: bay.location.clone(),
@@ -263,6 +264,10 @@ pub(crate) fn classify_bay(
         serial: namespace.serial.clone(),
         model: disk_model(&namespace.manufacturer, &namespace.model),
     };
+
+    let is_boot_disk = bay.kind == DiskVariant::M2
+        && M2Slot::from_chassis_location(&bay.location)
+            == Some(boot_storage_unit);
 
     let disk = UnparsedDisk::new(
         devfs_path,
@@ -443,7 +448,8 @@ mod tests {
     #[test]
     fn empty_bay() {
         let (described, disk) =
-            classify_bay(&bay(ObservedOccupant::Empty), None, false).unwrap();
+            classify_bay(&bay(ObservedOccupant::Empty), None, M2Slot::A)
+                .unwrap();
         assert_eq!(described.location, "N3");
         assert_eq!(described.kind, DiskVariant::U2);
         assert_eq!(described.occupant, DiskBayOccupant::Empty);
@@ -458,7 +464,8 @@ mod tests {
                 "/pci@0,0/pci1de,fff9@1,1/pci8086,1234@0".to_string(),
             ),
         });
-        let (described, disk) = classify_bay(&observed, None, false).unwrap();
+        let (described, disk) =
+            classify_bay(&observed, None, M2Slot::A).unwrap();
         assert_eq!(
             described.occupant,
             DiskBayOccupant::Device {
@@ -479,7 +486,7 @@ mod tests {
         observed.contents.as_mut().unwrap().pcie_slot = 18;
 
         let (described, disk) =
-            classify_bay(&observed, Some(&facts(1)), true).unwrap();
+            classify_bay(&observed, Some(&facts(1)), M2Slot::B).unwrap();
         let disk = disk.expect("an NVMe disk with a namespace is a disk");
 
         let identity = DiskIdentity {
@@ -508,12 +515,34 @@ mod tests {
     }
 
     #[test]
+    fn boot_disk_is_the_m2_labelled_for_the_boot_storage_unit() {
+        let classify = |location: &str, kind, boot_storage_unit| {
+            let mut observed = nvme_bay(vec![namespace()]);
+            observed.location = location.to_string();
+            observed.kind = kind;
+            let (_, disk) =
+                classify_bay(&observed, Some(&facts(1)), boot_storage_unit)
+                    .unwrap();
+            disk.unwrap().is_boot_disk()
+        };
+
+        assert!(classify("M.2 East", DiskVariant::M2, M2Slot::A));
+        assert!(!classify("M.2 East", DiskVariant::M2, M2Slot::B));
+        assert!(classify("M.2 West", DiskVariant::M2, M2Slot::B));
+        assert!(!classify("M.2 West", DiskVariant::M2, M2Slot::A));
+        assert!(!classify("N0", DiskVariant::U2, M2Slot::A));
+        // Only an M.2 socket can hold the boot disk, whatever its label.
+        assert!(!classify("M.2 East", DiskVariant::U2, M2Slot::A));
+    }
+
+    #[test]
     fn model_keeps_a_real_vendor_string() {
         let mut ns = namespace();
         ns.manufacturer = "Samsung".to_string();
         ns.model = "MZWLR3T8HBLS-00007".to_string();
         let (_, disk) =
-            classify_bay(&nvme_bay(vec![ns]), Some(&facts(1)), false).unwrap();
+            classify_bay(&nvme_bay(vec![ns]), Some(&facts(1)), M2Slot::A)
+                .unwrap();
         assert_eq!(
             disk.unwrap().identity().model,
             "Samsung MZWLR3T8HBLS-00007"
@@ -526,7 +555,8 @@ mod tests {
     #[test]
     fn controller_without_namespace_is_a_device() {
         let (described, disk) =
-            classify_bay(&nvme_bay(vec![]), Some(&facts(0)), false).unwrap();
+            classify_bay(&nvme_bay(vec![]), Some(&facts(0)), M2Slot::A)
+                .unwrap();
         assert_eq!(
             described.occupant,
             DiskBayOccupant::Device {
@@ -541,7 +571,7 @@ mod tests {
 
     #[test]
     fn namespace_missing_from_topology_is_an_error() {
-        let err = classify_bay(&nvme_bay(vec![]), Some(&facts(1)), false)
+        let err = classify_bay(&nvme_bay(vec![]), Some(&facts(1)), M2Slot::A)
             .unwrap_err();
         assert!(
             matches!(
@@ -554,7 +584,7 @@ mod tests {
 
     #[test]
     fn nvme_needs_libnvme_facts() {
-        let err = classify_bay(&nvme_bay(vec![namespace()]), None, false)
+        let err = classify_bay(&nvme_bay(vec![namespace()]), None, M2Slot::A)
             .unwrap_err();
         assert!(matches!(err, ClassifyError::MissingNvmeFacts { .. }), "{err}");
     }
@@ -566,7 +596,7 @@ mod tests {
         let (_, disk) = classify_bay(
             &nvme_bay(vec![namespace(), second]),
             Some(&facts(2)),
-            false,
+            M2Slot::A,
         )
         .unwrap();
         assert_eq!(disk.unwrap().identity().serial, "2345ABCD");
@@ -576,7 +606,7 @@ mod tests {
     fn relative_devfs_path_is_rejected() {
         let mut ns = namespace();
         ns.devfs_path = "pci@0,0/oops".to_string();
-        let err = classify_bay(&nvme_bay(vec![ns]), Some(&facts(1)), false)
+        let err = classify_bay(&nvme_bay(vec![ns]), Some(&facts(1)), M2Slot::A)
             .unwrap_err();
         assert!(
             matches!(err, ClassifyError::RelativeDevfsPath { .. }),
@@ -589,7 +619,8 @@ mod tests {
         let mut ns = namespace();
         ns.logical_disk = None;
         let (_, disk) =
-            classify_bay(&nvme_bay(vec![ns]), Some(&facts(1)), false).unwrap();
+            classify_bay(&nvme_bay(vec![ns]), Some(&facts(1)), M2Slot::A)
+                .unwrap();
         assert_eq!(disk.unwrap().paths().dev_path, None);
     }
 
@@ -605,7 +636,7 @@ mod tests {
         ];
         for problem in problems {
             let observed = unreadable_bay(problem.clone());
-            let err = classify_bay(&observed, None, false).unwrap_err();
+            let err = classify_bay(&observed, None, M2Slot::A).unwrap_err();
             assert!(
                 matches!(
                     &err,
@@ -625,7 +656,7 @@ mod tests {
         observed: &ObservedBay,
         facts: Option<&NvmeFacts>,
     ) -> PolledBay {
-        let (bay, disk) = classify_bay(observed, facts, false).unwrap();
+        let (bay, disk) = classify_bay(observed, facts, M2Slot::A).unwrap();
         PolledBay::Described { bay, disk: disk.map(Box::new) }
     }
 

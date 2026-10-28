@@ -43,19 +43,6 @@ impl OxideSled {
             Self::Cosmo => "cosmo",
         }
     }
-
-    /// PCIe physical slot numbers of boot storage units A and B, in that
-    /// order.
-    ///
-    /// These are the `physical-slot#` values reported by the `pcieb` bridge
-    /// above each M.2 socket, which the hardware topology also records as
-    /// the socket's `binding/slot`. They are internal to the board's PCIe
-    /// topology and are not the labels printed on the chassis.
-    pub fn bootdisk_pcie_slots(&self) -> [i64; 2] {
-        match self {
-            Self::Gimlet | Self::Cosmo => [0x11, 0x12],
-        }
-    }
 }
 
 // Note that, as part of a larger effort to generalize Omicron
