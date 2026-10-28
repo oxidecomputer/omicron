@@ -10589,30 +10589,68 @@ async fn test_instances_shutdown_policy_force_hardstop_during_soft(
 }
 
 #[nexus_test]
+async fn test_instances_shutdown_policy_force_hardstop(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "resonance-cascade";
+    const CUSTOM_TIMEOUT_SECS: u64 = 531;
+    const CUSTOM_POLICY: Option<instance::InstanceShutdownPolicy> =
+        Some(instance::InstanceShutdownPolicy::PowerButton {
+            timeout_secs: CUSTOM_TIMEOUT_SECS,
+        });
+
+    let (instance, propolis_addr) =
+        setup_shutdown_test_instance_and_mock_propolis(
+            &cptestctx,
+            instance_name,
+            CUSTOM_POLICY,
+        )
+        .await;
+
+    assert_eq!(instance.shutdown_policy, CUSTOM_POLICY);
+
+    // stop with skip_os_shutdown=true param.
+    expect_instance_stop_ok(client, instance_name, true).await;
+    assert_matches::assert_matches!(
+        mock_get_last_state_requested(propolis_addr).await,
+        propolis_client::types::InstanceStateChange {
+            acpi_timeout_secs: None,
+            state: PropolisStateRequested::Stop
+        }
+    );
+
+    // subsequent instance stop request after a hard-off?
+    // expect_instance_stop_fail(
+    //     client,
+    //     instance_name,
+    //     TBD,
+    // )
+    // .await;
+}
+
+#[nexus_test]
 async fn test_instances_shutdown_policy_change_policy_and_send_hardstop_during_soft(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
     let instance_name = "resonance-cascade";
     const CUSTOM_TIMEOUT_SECS: u64 = 42;
+    const CUSTOM_POLICY: Option<instance::InstanceShutdownPolicy> =
+        Some(instance::InstanceShutdownPolicy::PowerButton {
+            timeout_secs: CUSTOM_TIMEOUT_SECS,
+        });
 
     let (instance_soft, propolis_addr) =
         setup_shutdown_test_instance_and_mock_propolis(
             &cptestctx,
             instance_name,
             // create with a powerbutton shutdown policy with the given timeout.
-            Some(instance::InstanceShutdownPolicy::PowerButton {
-                timeout_secs: CUSTOM_TIMEOUT_SECS,
-            }),
+            CUSTOM_POLICY,
         )
         .await;
 
-    assert_eq!(
-        instance_soft.shutdown_policy,
-        Some(instance::InstanceShutdownPolicy::PowerButton {
-            timeout_secs: CUSTOM_TIMEOUT_SECS,
-        })
-    );
+    assert_eq!(instance_soft.shutdown_policy, CUSTOM_POLICY);
 
     // check the default instance's shutdown behavior
     // (should default to AcpiShutdown w/ 600 second timeout)
@@ -10658,7 +10696,7 @@ async fn test_instances_shutdown_policy_change_policy_and_send_hardstop_during_s
 }
 
 #[nexus_test]
-async fn test_instances_shutdown_policy_change_policy_timeout_change(
+async fn test_instances_shutdown_policy_change_timeout_and_resend(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -10692,6 +10730,11 @@ async fn test_instances_shutdown_policy_change_policy_timeout_change(
         }
     );
 
+    const CUSTOM_TIMEOUT_SECS: u64 = 76;
+    const CUSTOM_POLICY: Option<instance::InstanceShutdownPolicy> =
+        Some(instance::InstanceShutdownPolicy::PowerButton {
+            timeout_secs: CUSTOM_TIMEOUT_SECS,
+        });
     let instance_soft = expect_instance_reconfigure_ok(
         client,
         &instance_default.identity.id,
@@ -10703,20 +10746,16 @@ async fn test_instances_shutdown_policy_change_policy_timeout_change(
             memory: instance_default.memory,
             multicast_groups: None,
             enable_jumbo_frames: instance_default.enable_jumbo_frames,
-            // change shutdown policy to soft-off and 30 second timeout
+            // change shutdown policy to soft-off and specific timeout
             // (that is, a non-default timeout)
-            shutdown_policy: Some(
-                instance::InstanceShutdownPolicy::PowerButton {
-                    timeout_secs: 30,
-                },
-            ),
+            shutdown_policy: CUSTOM_POLICY,
         },
     )
     .await;
     assert_eq!(
         instance_soft.shutdown_policy,
         Some(instance::InstanceShutdownPolicy::PowerButton {
-            timeout_secs: 30
+            timeout_secs: CUSTOM_TIMEOUT_SECS
         })
     );
 
@@ -10726,7 +10765,7 @@ async fn test_instances_shutdown_policy_change_policy_timeout_change(
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
         propolis_client::types::InstanceStateChange {
-            acpi_timeout_secs: Some(30),
+            acpi_timeout_secs: Some(CUSTOM_TIMEOUT_SECS),
             state: PropolisStateRequested::AcpiStop
         }
     );
