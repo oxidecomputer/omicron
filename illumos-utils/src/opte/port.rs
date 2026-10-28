@@ -16,6 +16,7 @@ use omicron_common::api::internal::shared::RouterKind;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
 use sled_agent_types::inventory::NetworkInterfaceKind;
+use slog_error_chain::InlineErrorChain;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use uuid::Uuid;
@@ -151,11 +152,12 @@ impl Drop for Port {
             }
             Err(e) => e,
         };
-        eprintln!(
-            "WARNING: Failed to delete the xde device. It must be deleted \
+        slog::warn!(
+            self.manager.log(),
+            "Failed to delete the xde device. It must be deleted \
             out of band, and it will not be possible to recreate the xde \
-            device until then. Error: {:?}",
-            err,
+            device until then.";
+            InlineErrorChain::new(&err),
         );
     }
 }

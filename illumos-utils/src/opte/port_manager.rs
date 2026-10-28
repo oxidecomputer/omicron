@@ -70,6 +70,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::btree_map::Entry;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
@@ -81,12 +82,12 @@ use uuid::Uuid;
 
 use super::AttachedSubnetKind;
 
-/// Stored routes (and usage count) for a given VPC/subnet.
+/// Stored routes (and applicable port names) for a given VPC/subnet.
 #[derive(Debug, Default, Clone)]
 struct RouteSet {
     version: Option<RouterVersion>,
     routes: HashSet<ResolvedVpcRoute>,
-    active_ports: usize,
+    active_ports: HashSet<String>,
 }
 
 /// Configuration for multicast groups on an OPTE port.
@@ -105,6 +106,9 @@ pub struct MulticastGroupCfg {
     pub sources: Vec<IpAddr>,
 }
 
+/// Key for each OPTE port in the manager.
+pub type PortKey = (Uuid, NetworkInterfaceKind);
+
 #[derive(Debug)]
 struct PortManagerInner {
     log: Logger,
@@ -117,7 +121,7 @@ struct PortManagerInner {
 
     /// Map of all ports, keyed on the interface Uuid and its kind
     /// (which includes the Uuid of the parent instance or service)
-    ports: Mutex<BTreeMap<(Uuid, NetworkInterfaceKind), PortData>>,
+    ports: Mutex<BTreeMap<PortKey, PortData>>,
 
     /// Map of all current resolved routes.
     routes: Mutex<HashMap<RouterId, RouteSet>>,
@@ -358,6 +362,11 @@ impl PortManager {
         Self { inner }
     }
 
+    /// Return the logger used by the manager.
+    pub(super) fn log(&self) -> &Logger {
+        &self.inner.log
+    }
+
     pub fn underlay_ip(&self) -> &Ipv6Addr {
         &self.inner.underlay_ip
     }
@@ -413,51 +422,55 @@ impl PortManager {
             hdl.create_xde(&port_name, vpc_cfg, mtu)?;
             hdl
         };
-        let port = {
-            let port = Port::new(
-                port_name.clone(),
-                nic.id,
-                nic.kind,
-                nic.ip_config.clone(),
-                mac,
-                nic.slot,
-                vni,
-                self.clone(),
-            );
+        let port = Port::new(
+            port_name.clone(),
+            nic.id,
+            nic.kind,
+            nic.ip_config.clone(),
+            mac,
+            nic.slot,
+            vni,
+            self.clone(),
+        );
 
-            // NOTE: We may add external IPs below, which can fail. If that
-            // does, we drop the `port` on the way out of this block. That
-            // attempts to acquire this lock, in order to remove itself on drop.
-            // We need to drop the lock before that, to avoid a deadlock, so
-            // let's do it right away, after inserting.
-            let old = self
-                .inner
-                .ports
-                .lock()
-                .unwrap()
-                .insert((nic.id, nic.kind), port.data().clone());
-            assert!(
-                old.is_none(),
-                "Duplicate OPTE port detected: interface_id = {}, kind = {:?}",
-                nic.id,
-                nic.kind,
-            );
-
-            // Ports for Probes/Services cannot have EIP<->IGW mappings filled
-            // in dynamically today, so to keep use of their EIPs working we
-            // leave them untagged at both the `nat` and `router` layer.
-            if is_instance {
-                // This is effectively re-asserting the external IP config in order to
-                // set the EIP<->IGW mapping. While this should be part of `vpc_cfg`,
-                // this currently needs to happen here to prevent a case where an old
-                // mapping is not yet removed (and so no 'change' happens to trigger
-                // `Instance::refresh_external_ips_inner`), and to prevent updates
-                // racing with nexus before an instance/port are reachable from their
-                // respective managers.
-                self.external_ips_ensure_port(&port, nic.id, external_ips)?;
+        // NOTE: We may add external IPs below, which can fail. If that
+        // does, we drop the `port` on the way out of this block. That
+        // attempts to acquire this lock, in order to remove itself on drop.
+        // We need to drop the lock before that, to avoid a deadlock, so
+        // let's do it right away, after inserting.
+        match self.inner.ports.lock().unwrap().entry((nic.id, nic.kind)) {
+            Entry::Vacant(entry) => {
+                entry.insert(port.data().clone());
             }
-            port
-        };
+            Entry::Occupied(occupied) => {
+                error!(
+                    self.inner.log,
+                    "duplicate OPTE port detected";
+                    "interface_id" => %nic.id,
+                    "kind" => ?nic.kind,
+                    "new_port_data" => ?port.data(),
+                    "existing_port_data" => ?occupied.get(),
+                );
+                return Err(Error::DuplicateOptePort {
+                    id: nic.id,
+                    kind: nic.kind,
+                });
+            }
+        }
+
+        // Ports for Probes/Services cannot have EIP<->IGW mappings filled
+        // in dynamically today, so to keep use of their EIPs working we
+        // leave them untagged at both the `nat` and `router` layer.
+        if is_instance {
+            // This is effectively re-asserting the external IP config in order to
+            // set the EIP<->IGW mapping. While this should be part of `vpc_cfg`,
+            // this currently needs to happen here to prevent a case where an old
+            // mapping is not yet removed (and so no 'change' happens to trigger
+            // `Instance::refresh_external_ips_inner`), and to prevent updates
+            // racing with nexus before an instance/port are reachable from their
+            // respective managers.
+            self.external_ips_ensure_port(&port, nic.id, external_ips)?;
+        }
 
         // Initialize firewall rules for the new port.
         let rules = opte_firewall_rules(firewall_rules, &vni, &mac);
@@ -483,7 +496,7 @@ impl PortManager {
             let mut route_set = RouteSet {
                 version: None,
                 routes: HashSet::new(),
-                active_ports: 0,
+                active_ports: HashSet::new(),
             };
             if !is_service {
                 return route_set;
@@ -514,12 +527,12 @@ impl PortManager {
         // instance. These are added to the port, but after updating the shared
         // set of all routes maintained by this manager.
         let add_routes = |route_map: &mut HashMap<RouterId, RouteSet>,
-                          key: RouterId|
+                          key: RouterId,
+                          port_name: String|
          -> Result<(), Error> {
             let route_set = route_map
                 .entry(key)
                 .or_insert_with(|| default_route_set(is_service));
-            route_set.active_ports += 1;
             let class = match key.kind {
                 RouterKind::System => RouterClass::System,
                 RouterKind::Custom(_) => RouterClass::Custom,
@@ -539,18 +552,23 @@ impl PortManager {
                     "route" => ?request,
                 );
             }
+            route_set.active_ports.insert(port_name);
             Ok(())
         };
 
         // Actually add all system and custom router entries relevant for this
         // new port.
         let mut route_map = self.inner.routes.lock().unwrap();
-        add_routes(&mut route_map, port.system_router_key())?;
+        add_routes(
+            &mut route_map,
+            port.system_router_key(),
+            port.name().to_string(),
+        )?;
         if let Some(key) = port.custom_ipv4_router_key() {
-            add_routes(&mut route_map, key)?;
+            add_routes(&mut route_map, key, port.name().to_string())?;
         }
         if let Some(key) = port.custom_ipv6_router_key() {
-            add_routes(&mut route_map, key)?;
+            add_routes(&mut route_map, key, port.name().to_string())?;
         }
         drop(route_map);
 
@@ -571,8 +589,8 @@ impl PortManager {
     /// This does not delete the underlying OPTE port from the system. That is
     /// done by `Port::drop()`.
     pub(super) fn remove_port(&self, id: Uuid, kind: NetworkInterfaceKind) {
-        let mut ports = self.inner.ports.lock().unwrap();
-        let Some(port) = ports.remove(&(id, kind)) else {
+        let Some(port) = self.inner.ports.lock().unwrap().remove(&(id, kind))
+        else {
             debug!(
                 self.inner.log,
                 "Tried to release non-existent port";
@@ -581,16 +599,16 @@ impl PortManager {
             );
             return;
         };
-        drop(ports);
 
         // Cleanup the set of subnets we want to receive routes for.
         let remove_key = |routes: &mut HashMap<RouterId, RouteSet>,
-                          key: RouterId| {
+                          key: RouterId,
+                          port_name: &str| {
             let should_remove = routes
                 .get_mut(&key)
-                .map(|v| {
-                    v.active_ports = v.active_ports.saturating_sub(1);
-                    v.active_ports == 0
+                .map(|route_set| {
+                    route_set.active_ports.remove(port_name);
+                    route_set.active_ports.is_empty()
                 })
                 .unwrap_or(false);
 
@@ -604,12 +622,12 @@ impl PortManager {
             }
         };
         let mut routes = self.inner.routes.lock().unwrap();
-        remove_key(&mut routes, port.system_router_key());
+        remove_key(&mut routes, port.system_router_key(), port.name());
         if let Some(key) = port.custom_ipv4_router_key() {
-            remove_key(&mut routes, key);
+            remove_key(&mut routes, key, port.name());
         }
         if let Some(key) = port.custom_ipv6_router_key() {
-            remove_key(&mut routes, key);
+            remove_key(&mut routes, key, port.name());
         }
         drop(routes);
         debug!(
@@ -638,7 +656,7 @@ impl PortManager {
         slog::debug!(self.inner.log, "new routes: {new_routes:#?}");
         for new in new_routes {
             // Disregard any route information for a subnet we don't have.
-            let Some(old) = routes.get(&new.id) else {
+            let Some(existing) = routes.get_mut(&new.id) else {
                 slog::warn!(self.inner.log, "ignoring route {new:#?}");
                 continue;
             };
@@ -648,7 +666,7 @@ impl PortManager {
             // If there's a UUID match, only update if vers increased,
             // otherwise take the update verbatim (including loss of version).
             let (to_add, to_delete): (HashSet<_>, HashSet<_>) =
-                match (old.version, new.version) {
+                match (existing.version, new.version) {
                     (Some(old_vers), Some(new_vers))
                         if !old_vers.is_replaced_by(&new_vers) =>
                     {
@@ -662,21 +680,27 @@ impl PortManager {
                         continue;
                     }
                     _ => (
-                        new.routes.difference(&old.routes).copied().collect(),
-                        old.routes.difference(&new.routes).copied().collect(),
+                        new.routes
+                            .difference(&existing.routes)
+                            .copied()
+                            .collect(),
+                        existing
+                            .routes
+                            .difference(&new.routes)
+                            .copied()
+                            .collect(),
                     ),
                 };
             deltas.insert(new.id, (to_add, to_delete));
 
-            let active_ports = old.active_ports;
-            routes.insert(
-                new.id,
-                RouteSet {
-                    version: new.version,
-                    routes: new.routes,
-                    active_ports,
-                },
-            );
+            // Update the version and actual routes in this route set.
+            //
+            // Note that this cannot change the port names that are active for
+            // this route set. The key here is based on the router ID, which is
+            // a combination of the VNI and router kind, neither of which change
+            // over the lifetime of the port.
+            existing.version = new.version;
+            existing.routes = new.routes;
         }
 
         // Note: We're deliberately holding both locks here
