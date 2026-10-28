@@ -931,20 +931,16 @@ async fn sis_ensure_registered_undo(
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let datastore = osagactx.datastore();
     let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
     let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
     let sled_id = sagactx.lookup::<SledUuid>("sled_id")?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
 
     info!(osagactx.log(), "start saga: unregistering instance from sled";
           "instance_id" => %instance_id,
           "propolis_id" => %propolis_id,
           "sled_id" => %sled_id,
           "start_reason" => ?params.reason);
+
     super::instance_common::unwind_instance_ensure_registered(
         &sagactx,
         &params.serialized_authn,
