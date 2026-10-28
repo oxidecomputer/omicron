@@ -1163,6 +1163,7 @@ impl DataStore {
         Ok((sled, was_modified))
     }
 
+    /// Returns `true` if `rack_id` exists in the `rack` table, `false` if not.
     async fn rack_exists_on_connection(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: DbTypedUuid<RackKind>,

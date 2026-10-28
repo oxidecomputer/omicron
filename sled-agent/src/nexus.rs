@@ -132,6 +132,7 @@ impl NexusNotifierHandle {
         }
     }
 
+    // Currently only used in tests
     #[allow(unused)]
     pub async fn get_status(
         &self,
@@ -203,12 +204,11 @@ type NexusRsp = (
 ///     This will trigger a get request for the latest state. In the case of
 ///     a timeout we are not sure if the last update succeeded and so need to
 ///     learn that. In the case of an explicit rejection from nexus, we also
-///     want to learn the latest state. We need to learn the latest state this
-///     because an update can fail if the sled-agent's state is out of date
-///     with respect to what's in CRDB. The only way to fix that is to get the
-///     latest known state, and it's easiest to just do that unconditionally
-///     rather than trying to reason about exactly why Nexus rejected the
-///     request.
+///     want to learn the latest state. We need to learn the latest state
+///     because an update can fail if the sled-agent's state is out of date with
+///     respect to what's in CRDB. The only way to fix that is to get the latest
+///     known state, and it's easiest to just do that unconditionally rather
+///     than trying to reason about exactly why Nexus rejected the request.
 ///  6. An exception to step 5 is that if the latest state returned from Nexus
 ///     contains `decommissioned = true`, then we stop dead in our tracks and no
 ///     longer send requests to nexus.
@@ -416,9 +416,9 @@ impl NexusNotifierTask {
         }
     }
 
-    /// If we haven't yet learned the latest info that nexus has about us
-    /// then go ahead and send a get request. Otherwise, if necessaary, send
-    /// a put request to nexus with the latest `SledAgentInfo`.
+    /// If we haven't yet learned the latest info that nexus has about us then
+    /// go ahead and send a get request. Otherwise, if necessary, send a put
+    /// request to nexus with the latest `SledAgentInfo`.
     ///
     /// Only one outstanding request is allowed at a time, so if there is
     /// already one outstanding then we return and will try again later.
