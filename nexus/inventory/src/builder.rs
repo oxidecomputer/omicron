@@ -23,6 +23,7 @@ use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::DiscoveredRack;
 use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::HostPhase1FlashHash;
 use nexus_types::inventory::InternalDnsGenerationStatus;
@@ -131,6 +132,7 @@ pub struct CollectionBuilder {
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
     power_shelves: IdOrdMap<PowerShelf>,
     sleds: IdOrdMap<SledAgent>,
+    discovered_racks: IdOrdMap<DiscoveredRack>,
     clickhouse_keeper_cluster_membership:
         BTreeSet<ClickhouseKeeperClusterMembership>,
     cockroach_status: BTreeMap<InternalNodeId, CockroachStatus>,
@@ -167,6 +169,7 @@ impl CollectionBuilder {
             rot_pages_found: BTreeMap::new(),
             power_shelves: IdOrdMap::new(),
             sleds: IdOrdMap::new(),
+            discovered_racks: IdOrdMap::new(),
             clickhouse_keeper_cluster_membership: BTreeSet::new(),
             cockroach_status: BTreeMap::new(),
             ntp_timesync: IdOrdMap::new(),
@@ -194,6 +197,7 @@ impl CollectionBuilder {
             rot_pages_found: self.rot_pages_found,
             power_shelves: self.power_shelves,
             sled_agents: self.sleds,
+            discovered_racks: self.discovered_racks,
             clickhouse_keeper_cluster_membership: self
                 .clickhouse_keeper_cluster_membership,
             cockroach_status: self.cockroach_status,

@@ -5440,6 +5440,7 @@ impl DataStore {
             rot_pages_found,
             power_shelves,
             sled_agents,
+            discovered_racks: IdOrdMap::new(),
             clickhouse_keeper_cluster_membership,
             cockroach_status,
             ntp_timesync,

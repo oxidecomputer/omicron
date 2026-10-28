@@ -22,6 +22,8 @@ pub use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::{RACK_PREFIX_LENGTH, SLED_PREFIX_LENGTH};
 use omicron_common::api::external::ByteCount;
 pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
@@ -55,6 +57,7 @@ pub use sled_agent_types_versions::latest::inventory::ZpoolHealth;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
@@ -158,6 +161,15 @@ pub struct Collection {
 
     /// Sled Agent information, by *sled* id
     pub sled_agents: IdOrdMap<SledAgent>,
+
+    /// Other racks we've discovered via DDM that are not *necessarily* part of
+    /// the multirack cluster yet.
+    ///
+    /// This field includes info on both racks and sleds in those racks. Entries
+    /// are not immediately cleared when the racks and sleds are adopted into
+    /// the cluster, so code that makes use of this data must also consult the
+    /// `rack` and `sled` tables to find out what has already been adopted.
+    pub discovered_racks: IdOrdMap<DiscoveredRack>,
 
     /// The raft configuration (cluster membership) of the clickhouse keeper
     /// cluster as returned from each available keeper via `clickhouse-admin` in
@@ -1129,6 +1141,57 @@ impl IdOrdItem for InternalDnsGenerationStatus {
         self.zone_id
     }
     id_upcast!();
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DiscoveredRack {
+    /// ID of the rack, which will be the same ID used in the `rack` table
+    /// if/when the discovered rack is adopted into the cluster:
+    pub rack_id: RackUuid,
+    /// Rack subnet prefix on the underlay network:
+    pub rack_subnet: Ipv6Subnet<RACK_PREFIX_LENGTH>,
+    /// Underlay address of the sled running the multirack join service:
+    pub join_service_ip: Ipv6Addr,
+    /// Sleds on this rack that we've discovered via the join service:
+    pub discovered_sleds: IdOrdMap<DiscoveredSled>,
+}
+
+impl IdOrdItem for DiscoveredRack {
+    type Key<'a> = RackUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.rack_id
+    }
+    id_upcast!();
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DiscoveredSled {
+    /// ID of the sled, which will be the same ID used by the sled-agent to
+    /// upsert itself into the `sled` table if/when the sled is adopted:
+    pub sled_id: SledUuid,
+    /// Baseboard ID reported by the join service:
+    pub baseboard_id: BaseboardId,
+    /// Underlay subnet prefix of the sled:
+    pub sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
+    /// Status field indicating whether the sled-agent has started, including
+    /// the most recent error seen, if any:
+    pub sled_agent_start_state: SledAgentStartState,
+}
+
+impl IdOrdItem for DiscoveredSled {
+    type Key<'a> = SledUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.sled_id
+    }
+    id_upcast!();
+}
+
+/// Information returned by the multirack join service indicating the current
+/// status of a sled-agent on a given sled.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum SledAgentStartState {
+    InProgress { last_error: Option<String> },
+    Started,
 }
 
 #[cfg(test)]
