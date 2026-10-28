@@ -1625,7 +1625,7 @@ mod tests {
         // warnings.
         assert_eq!(
             prep_status.steps.iter().map(|s| s.name).collect::<BTreeSet<_>>(),
-            InputStep::iter().map(|s| s.as_str()()).collect::<BTreeSet<_>>(),
+            InputStep::iter().map(|s| s.as_str()).collect::<BTreeSet<_>>(),
         );
         for step in &prep_status.steps {
             assert!(
