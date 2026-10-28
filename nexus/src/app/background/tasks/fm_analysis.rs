@@ -25,7 +25,6 @@ use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_fm as fm;
-use nexus_tls_certificates::TlsCertificate;
 use nexus_types::fm::CurrentSitrep;
 use nexus_types::fm::FmConfig;
 use nexus_types::fm::FmConfigSource;
@@ -40,6 +39,7 @@ use nexus_types::observed_saga::{
     ObservedSaga, ObservedSagaState, SagaAbandonInfo, SagaAbandonReason,
     SagaOwnerState,
 };
+use omicron_certificates::TlsCertificate;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::GenericUuid;

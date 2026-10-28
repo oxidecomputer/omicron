@@ -39,12 +39,12 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::pagination::Paginator;
-use nexus_tls_certificates::TlsCertificate;
 use nexus_types::identity::Resource;
 use nexus_types::observed_certificate::CertificateCandidate;
 use nexus_types::observed_certificate::best_certificate;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use nexus_types::silo::silo_dns_name;
+use omicron_certificates::TlsCertificate;
 
 use omicron_common::api::external::Error;
 use omicron_common::api::external::http_pagination::PaginatedBy;
