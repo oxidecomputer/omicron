@@ -35,9 +35,10 @@ use nexus_db_schema::schema::inv_zone_manifest_zone;
 use nexus_db_schema::schema::{
     hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
     inv_cockroachdb_status, inv_collection, inv_collection_error, inv_dataset,
-    inv_fmd_host_case, inv_fmd_resource, inv_fmd_status,
-    inv_host_phase_1_active_slot, inv_host_phase_1_flash_hash,
-    inv_internal_dns, inv_last_reconciliation_dataset_result,
+    inv_discovered_rack, inv_discovered_sled, inv_fmd_host_case,
+    inv_fmd_resource, inv_fmd_status, inv_host_phase_1_active_slot,
+    inv_host_phase_1_flash_hash, inv_internal_dns,
+    inv_last_reconciliation_dataset_result,
     inv_last_reconciliation_disk_result,
     inv_last_reconciliation_orphaned_dataset,
     inv_last_reconciliation_zone_result, inv_measurement_manifest_non_boot,
@@ -54,8 +55,12 @@ use nexus_db_schema::schema::{
 };
 use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::{
-    self, Caboose, CockroachStatus, Collection, InternalDnsGenerationStatus,
-    NvmeFirmware, PowerState, PsuSlot, RotPage, RotSlot, TimeSync,
+    self, Caboose, CockroachStatus, Collection, DiscoveredRack, DiscoveredSled,
+    InternalDnsGenerationStatus, NvmeFirmware, PowerState, PsuSlot, RotPage,
+    RotSlot, SledAgentStartState, TimeSync,
+};
+use omicron_common::address::{
+    Ipv6Subnet, RACK_PREFIX_LENGTH, SLED_PREFIX_LENGTH,
 };
 use omicron_common::disk::DatasetName;
 use omicron_common::update::OmicronInstallManifestSource;
@@ -75,6 +80,7 @@ use omicron_uuid_kinds::OmicronSledConfigKind;
 use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::RackKind;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SvcEnabledNotOnlineKind;
@@ -4107,6 +4113,155 @@ impl InvNtpTimesync {
 impl From<InvNtpTimesync> for nexus_types::inventory::TimeSync {
     fn from(value: InvNtpTimesync) -> Self {
         Self { zone_id: value.zone_id.into(), synced: value.synced }
+    }
+}
+
+/// See [`nexus_types::inventory::DiscoveredRack`].
+///
+/// The rack's discovered sleds are stored separately, in
+/// [`InvDiscoveredSled`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_discovered_rack)]
+pub struct InvDiscoveredRack {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub rack_id: DbTypedUuid<RackKind>,
+    pub rack_subnet: IpNetwork,
+    pub join_service_ip: ipv6::Ipv6Addr,
+}
+
+impl InvDiscoveredRack {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        rack: &DiscoveredRack,
+    ) -> Self {
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            rack_id: rack.rack_id.into(),
+            rack_subnet: IpNetwork::V6(rack.rack_subnet.into()),
+            join_service_ip: ipv6::Ipv6Addr::from(&rack.join_service_ip),
+        }
+    }
+
+    /// Converts this row into a [`DiscoveredRack`], given the already-converted
+    /// sleds that belong to it.
+    pub fn into_inventory(
+        self,
+        discovered_sleds: IdOrdMap<DiscoveredSled>,
+    ) -> Result<DiscoveredRack> {
+        let rack_id: RackUuid = self.rack_id.into();
+        let rack_subnet = match self.rack_subnet {
+            IpNetwork::V4(subnet) => bail!(
+                "inv_discovered_rack row for rack {rack_id} violates \
+                 rack_subnet_family constraint: {subnet} is not Ipv6"
+            ),
+            IpNetwork::V6(subnet) => {
+                if subnet.prefix() != RACK_PREFIX_LENGTH {
+                    bail!(
+                        "inv_discovered_rack row for rack {rack_id} violates \
+                         rack_subnet_prefix constraint: {subnet} has prefix \
+                         length {}, expected {RACK_PREFIX_LENGTH}",
+                        subnet.prefix(),
+                    );
+                }
+                Ipv6Subnet::<RACK_PREFIX_LENGTH>::from(subnet)
+            }
+        };
+        Ok(DiscoveredRack {
+            rack_id,
+            rack_subnet,
+            join_service_ip: self.join_service_ip.into(),
+            discovered_sleds,
+        })
+    }
+}
+
+/// See [`nexus_types::inventory::DiscoveredSled`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_discovered_sled)]
+pub struct InvDiscoveredSled {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    /// ID of the rack this sled was discovered on
+    /// (see [`InvDiscoveredRack::rack_id`]).
+    pub rack_id: DbTypedUuid<RackKind>,
+    pub part_number: String,
+    pub serial_number: String,
+    pub sled_subnet: IpNetwork,
+    pub sled_agent_started: bool,
+    /// Last error seen during the sled-agent start process.
+    ///
+    /// Always `None` once `sled_agent_started` is true.
+    pub last_start_error_seen: Option<String>,
+}
+
+impl InvDiscoveredSled {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        rack_id: RackUuid,
+        sled: &DiscoveredSled,
+    ) -> Self {
+        let (sled_agent_started, last_start_error_seen) =
+            match &sled.sled_agent_start_state {
+                SledAgentStartState::Started => (true, None),
+                SledAgentStartState::InProgress { last_error } => {
+                    (false, last_error.clone())
+                }
+            };
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled.sled_id.into(),
+            rack_id: rack_id.into(),
+            part_number: sled.baseboard_id.part_number.clone(),
+            serial_number: sled.baseboard_id.serial_number.clone(),
+            sled_subnet: IpNetwork::V6(sled.sled_subnet.into()),
+            sled_agent_started,
+            last_start_error_seen,
+        }
+    }
+}
+
+impl TryFrom<InvDiscoveredSled> for DiscoveredSled {
+    type Error = anyhow::Error;
+
+    fn try_from(row: InvDiscoveredSled) -> anyhow::Result<Self> {
+        let sled_id: SledUuid = row.sled_id.into();
+        let sled_subnet = match row.sled_subnet {
+            IpNetwork::V4(subnet) => bail!(
+                "inv_discovered_sled row for sled {sled_id} violates \
+                 sled_subnet_family constraint: {subnet} is not Ipv6"
+            ),
+            IpNetwork::V6(subnet) => {
+                if subnet.prefix() != SLED_PREFIX_LENGTH {
+                    bail!(
+                        "inv_discovered_sled row for sled {sled_id} violates \
+                         sled_subnet_prefix constraint: {subnet} has prefix \
+                         length {}, expected {SLED_PREFIX_LENGTH}",
+                        subnet.prefix(),
+                    );
+                }
+                Ipv6Subnet::<SLED_PREFIX_LENGTH>::from(subnet)
+            }
+        };
+        let sled_agent_start_state =
+            match (row.sled_agent_started, row.last_start_error_seen) {
+                (true, Some(_)) => bail!(
+                    "inv_discovered_sled row for sled {sled_id} violates \
+                     start_error_is_null_if_started constraint"
+                ),
+                (true, None) => SledAgentStartState::Started,
+                (false, last_error) => {
+                    SledAgentStartState::InProgress { last_error }
+                }
+            };
+        Ok(DiscoveredSled {
+            sled_id,
+            baseboard_id: BaseboardId {
+                part_number: row.part_number,
+                serial_number: row.serial_number,
+            },
+            sled_subnet,
+            sled_agent_start_state,
+        })
     }
 }
 
