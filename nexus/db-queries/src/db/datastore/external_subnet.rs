@@ -972,7 +972,7 @@ impl DataStore {
                 &by_name.map_name(|n| Name::ref_cast(n)),
             ),
         }
-        .filter(dsl::project_id.eq(authz_project.id()))
+        .filter(dsl::project_id.eq(to_db_typed_uuid(authz_project.id())))
         .filter(dsl::time_deleted.is_null())
         .select(ExternalSubnet::as_select())
         .get_results_async(&*self.pool_connection_authorized(opctx).await?)

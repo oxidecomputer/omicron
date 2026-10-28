@@ -20,6 +20,7 @@ use crate::db::datastore::LocalStorageAllocation;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
+use iddqd::IdOrdMap;
 use itertools::Either;
 use itertools::Itertools as _;
 use nexus_db_lookup::LookupPath;
@@ -42,6 +43,7 @@ use nexus_db_queries::db::model::InstanceStateComputer;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_ip;
 use nexus_types::external_api::instance;
+use nexus_types::internal_api::params::InstanceMigrateDestination;
 use omicron_common::http_client::internal_http_client;
 // We'll use `InstanceState` frequently, and the code that uses it is already
 // subtle enough: break from the pattern of external API types being referenced
@@ -69,6 +71,7 @@ use omicron_generation_kinds::InstanceStateGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::MulticastGroupUuid;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use propolis_client::support::InstanceSerialConsoleHelper;
@@ -600,7 +603,9 @@ impl super::Nexus {
             Some(disk) => {
                 let selector = disk::DiskSelector {
                     project: match &disk {
-                        NameOrId::Name(_) => Some(authz_project.id().into()),
+                        NameOrId::Name(_) => Some(NameOrId::Id(
+                            authz_project.id().into_untyped_uuid(),
+                        )),
                         NameOrId::Id(_) => None,
                     },
                     disk: disk.clone(),
@@ -990,10 +995,15 @@ impl super::Nexus {
         }
 
         let vmm = vmm.as_ref().unwrap();
-        if vmm.sled_id() == params.dst_sled_id {
-            return Err(Error::invalid_request(
-                "instance is already running on destination sled",
-            ));
+        match params.destination {
+            InstanceMigrateDestination::Autoselect => (),
+            InstanceMigrateDestination::ById { dst_sled_id } => {
+                if vmm.sled_id() == dst_sled_id {
+                    return Err(Error::invalid_request(
+                        "instance is already running on destination sled",
+                    ));
+                }
+            }
         }
 
         if instance.runtime().migration_id.is_some() {
@@ -1618,7 +1628,7 @@ impl super::Nexus {
 
         let metadata = sled_agent_client::types::InstanceMetadata {
             silo_id: authz_silo.id(),
-            project_id: authz_project.id(),
+            project_id: authz_project.id().into_untyped_uuid(),
         };
 
         let mut multicast_groups = Vec::new();
@@ -1667,16 +1677,24 @@ impl super::Nexus {
 
         // TODO-completeness: We need to handle VPC subnets too, see
         // https://github.com/oxidecomputer/omicron/issues/9580.
-        let attached_subnets = self
-            .datastore()
-            .instance_lookup_external_subnets(opctx, authz_instance)
-            .await?
-            .into_iter()
-            .map(|ext| AttachedSubnet {
-                subnet: ext.subnet.into(),
-                kind: AttachedSubnetKind::External,
-            })
-            .collect();
+        let attached_subnets = IdOrdMap::from_iter_unique(
+            self.datastore()
+                .instance_lookup_external_subnets(opctx, authz_instance)
+                .await?
+                .into_iter()
+                .map(|ext| AttachedSubnet {
+                    subnet: ext.subnet.into(),
+                    kind: AttachedSubnetKind::External,
+                }),
+        )
+        .map_err(|dup| {
+            Error::internal_error(&format!(
+                "instance {} has multiple attached subnets with the same \
+                 IP subnet {}",
+                authz_instance.id(),
+                dup.new_item().subnet,
+            ))
+        })?;
 
         // Compute the effective MTU for the instance's primary OPTE port.
         let primary_nic_mtu = if db_instance.enable_jumbo_frames {
@@ -1894,7 +1912,9 @@ impl super::Nexus {
                 opctx,
                 disk::DiskSelector {
                     project: match disk {
-                        NameOrId::Name(_) => Some(authz_project.id().into()),
+                        NameOrId::Name(_) => Some(NameOrId::Id(
+                            authz_project.id().into_untyped_uuid(),
+                        )),
                         NameOrId::Id(_) => None,
                     },
                     disk,
@@ -1955,7 +1975,9 @@ impl super::Nexus {
                 opctx,
                 disk::DiskSelector {
                     project: match disk {
-                        NameOrId::Name(_) => Some(authz_project.id().into()),
+                        NameOrId::Name(_) => Some(NameOrId::Id(
+                            authz_project.id().into_untyped_uuid(),
+                        )),
                         NameOrId::Id(_) => None,
                     },
                     disk,
@@ -2554,7 +2576,7 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         authz_instance: authz::Instance,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         ext_ip: ExternalIpAttach,
     ) -> UpdateResult<external_ip::ExternalIp> {
         let saga_params = sagas::instance_ip_attach::Params {
@@ -3169,7 +3191,7 @@ mod tests {
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
-        let project_id = Uuid::new_v4();
+        let project_id = ProjectUuid::new_v4();
         let instance = DbInstance::new(instance_id, project_id, &params);
 
         let propolis_id = PropolisUuid::from_untyped_uuid(Uuid::new_v4());
@@ -3325,7 +3347,7 @@ mod tests {
             enable_jumbo_frames,
         };
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
-        let project_id = Uuid::new_v4();
+        let project_id = ProjectUuid::new_v4();
         DbInstance::new(instance_id, project_id, &params)
     }
 

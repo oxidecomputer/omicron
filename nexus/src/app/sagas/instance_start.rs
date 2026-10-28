@@ -540,7 +540,7 @@ async fn sis_account_virtual_resources(
         .virtual_provisioning_collection_insert_instance(
             &opctx,
             instance_id,
-            params.db_instance.project_id,
+            params.db_instance.project_id(),
             i64::from(params.db_instance.ncpus.0.0),
             nexus_db_model::ByteCount(*params.db_instance.memory),
         )
@@ -566,7 +566,7 @@ async fn sis_account_virtual_resources_undo(
         .virtual_provisioning_collection_delete_instance(
             &opctx,
             instance_id,
-            params.db_instance.project_id,
+            params.db_instance.project_id(),
             i64::from(params.db_instance.ncpus.0.0),
             nexus_db_model::ByteCount(*params.db_instance.memory),
         )

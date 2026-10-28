@@ -20,6 +20,7 @@ use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Name;
+use omicron_uuid_kinds::ProjectUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use slog_error_chain::InlineErrorChain;
@@ -32,7 +33,7 @@ use uuid::Uuid;
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub silo_id: Uuid,
-    pub project_id: Uuid,
+    pub project_id: ProjectUuid,
     pub disk: datastore::CrucibleDisk,
     pub snapshot_name: Option<Name>,
 }
