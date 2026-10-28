@@ -209,6 +209,19 @@ type NexusRsp = (
 ///     respect to what's in CRDB. The only way to fix that is to get the latest
 ///     known state, and it's easiest to just do that unconditionally rather
 ///     than trying to reason about exactly why Nexus rejected the request.
+///
+///     In two cases this GET will be unnecessary: when there is no state in
+///     nexus for the sled-agent and we get a NOT_FOUND back, and when the rack
+///     has not yet been adopted in a multirack scenario. In both those cases we
+///     want to retry and so no change to the current strategy is required for
+///     correctness. Load will also not increase as only one request (either GET
+///     or PUT) can be outstanding at a time, and each will be sent every timer
+///     tick if there is no request outstanding. While we could change this
+///     logic to only send PUTS in both these cases after we send an initial
+///     GET, this is unnecessary for both performance and correctness. At most
+///     1 extra GET per sled (the last one before a successful PUT) will be sent
+///     in the code as it currently exists.
+///
 ///  6. An exception to step 5 is that if the latest state returned from Nexus
 ///     contains `decommissioned = true`, then we stop dead in our tracks and no
 ///     longer send requests to nexus.

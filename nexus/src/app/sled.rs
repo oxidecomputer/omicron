@@ -60,7 +60,7 @@ impl super::Nexus {
         id: SledUuid,
         info: SledAgentInfo,
     ) -> Result<(), Error> {
-        info!(self.log, "registered sled agent"; "sled_uuid" => id.to_string());
+        info!(self.log, "attempting to register sled agent"; "sled_uuid" => id.to_string());
 
         let is_scrimlet = match info.role {
             SledRole::Gimlet => false,
@@ -86,7 +86,18 @@ impl super::Nexus {
             self.rack_id,
             info.generation.into(),
         );
-        let (_, was_modified) = self.db_datastore.sled_upsert(sled).await?;
+        let was_modified = match self.db_datastore.sled_upsert(sled).await {
+            Ok((_, was_modified)) => was_modified,
+            Err(err) => {
+                warn!(
+                    self.log,
+                    "failed to register sled agent";
+                    "sled_uuid" => id.to_string(),
+                    "error" => %err
+                );
+                return Err(err);
+            }
+        };
 
         // If a new sled-agent just came online we want to trigger inventory
         // collection.
@@ -95,6 +106,17 @@ impl super::Nexus {
         // the control plane.
         if was_modified {
             self.activate_inventory_collection();
+            info!(
+                self.log,
+                "registered sled agent";
+                "sled_uuid" => id.to_string()
+            );
+        } else {
+            info!(
+                self.log,
+                "registered sled agent. no modifications necessary";
+                "sled_uuid" => id.to_string()
+            );
         }
 
         Ok(())

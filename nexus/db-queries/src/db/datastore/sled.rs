@@ -1101,7 +1101,7 @@ impl DataStore {
     ///
     /// Returns an error if `sled_agent_gen` is stale, the sled is
     /// decommissioned, or the `rack_id` for the given sled is not yet present
-    /// in the `rack table`.
+    /// in the `rack` table.
     pub async fn sled_upsert(
         &self,
         sled_update: SledUpdate,
