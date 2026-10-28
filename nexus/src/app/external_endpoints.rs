@@ -49,6 +49,8 @@ use omicron_certificates::TlsCertificate;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloUuid;
 use serde::Serialize;
 use serde_with::SerializeDisplay;
 use std::collections::BTreeMap;
@@ -57,7 +59,6 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::watch;
-use uuid::Uuid;
 
 /// Describes the set of external endpoints, organized by DNS name
 ///
