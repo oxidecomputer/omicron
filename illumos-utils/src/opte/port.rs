@@ -16,6 +16,7 @@ use omicron_common::api::internal::shared::RouterKind;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
 use sled_agent_types::inventory::NetworkInterfaceKind;
+use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
@@ -136,29 +137,35 @@ impl core::fmt::Debug for Port {
     }
 }
 
+/// Attempt to delete the named XDE device.
+///
+/// This currently doesn't return an error because all the places it's called
+/// can't do anything other than log it anyway.
+pub(super) fn delete_xde_device(log: &Logger, name: &str) {
+    let err = match Handle::new() {
+        Ok(hdl) => {
+            if let Err(e) = hdl.delete_xde(name) {
+                e
+            } else {
+                return;
+            }
+        }
+        Err(e) => e,
+    };
+    slog::warn!(
+        log,
+        "Failed to delete the xde device. It must be deleted \
+        out of band, and it will not be possible to recreate the xde \
+        device until then.";
+        InlineErrorChain::new(&err),
+    );
+}
+
 impl Drop for Port {
     fn drop(&mut self) {
         self.manager
             .remove_port(self.data.info.nic_id, self.data.info.nic_kind);
-
-        // Delete the actual XDE device.
-        let err = match Handle::new() {
-            Ok(hdl) => {
-                if let Err(e) = hdl.delete_xde(self.name()) {
-                    e
-                } else {
-                    return;
-                }
-            }
-            Err(e) => e,
-        };
-        slog::warn!(
-            self.manager.log(),
-            "Failed to delete the xde device. It must be deleted \
-            out of band, and it will not be possible to recreate the xde \
-            device until then.";
-            InlineErrorChain::new(&err),
-        );
+        delete_xde_device(self.manager.log(), self.name());
     }
 }
 

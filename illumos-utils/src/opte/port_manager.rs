@@ -14,6 +14,7 @@ use crate::opte::Port;
 use crate::opte::Vni;
 use crate::opte::opte_firewall_rules;
 use crate::opte::port::PortData;
+use crate::opte::port::delete_xde_device;
 use ipnetwork::Ipv4Network;
 use ipnetwork::Ipv6Network;
 use macaddr::MacAddr6;
@@ -422,41 +423,54 @@ impl PortManager {
             hdl.create_xde(&port_name, vpc_cfg, mtu)?;
             hdl
         };
-        let port = Port::new(
-            port_name.clone(),
-            nic.id,
-            nic.kind,
-            nic.ip_config.clone(),
-            mac,
-            nic.slot,
-            vni,
-            self.clone(),
-        );
 
-        // NOTE: We may add external IPs below, which can fail. If that
-        // does, we drop the `port` on the way out of this block. That
-        // attempts to acquire this lock, in order to remove itself on drop.
-        // We need to drop the lock before that, to avoid a deadlock, so
-        // let's do it right away, after inserting.
-        match self.inner.ports.lock().unwrap().entry((nic.id, nic.kind)) {
-            Entry::Vacant(entry) => {
-                entry.insert(port.data().clone());
-            }
-            Entry::Occupied(occupied) => {
-                error!(
-                    self.inner.log,
-                    "duplicate OPTE port detected";
-                    "interface_id" => %nic.id,
-                    "kind" => ?nic.kind,
-                    "new_port_data" => ?port.data(),
-                    "existing_port_data" => ?occupied.get(),
-                );
-                return Err(Error::DuplicateOptePort {
-                    id: nic.id,
-                    kind: nic.kind,
-                });
-            }
-        }
+        // Check for space in the port manager, and then create the port.
+        //
+        // There are a couple of important notes here. First, we're taking the
+        // lock on the ports here, which we need to do for as short a time as
+        // possible. If any of the fallible operations below fail, we'll drop
+        // the port on the way out of this method, which removes it from the
+        // manager's map. So we have to make sure we don't hold the lock on that
+        // as we exit -- hold it for _only_ the insertion, and that's it.
+        //
+        // Second, if we _do_ find a duplicate port, we have the actual XDE
+        // device we made above. Normally, that's destroyed in `Port::drop`. But
+        // we don't call that in the "occupied" arm below. In addition to
+        // destroying the XDE device, `Port::drop` also removes the port from
+        // the map. But if we have a dupe, we don't want to do that! So that
+        // match arm needs to be sure to destroy the XDE device on the way out
+        // too.
+        let port =
+            match self.inner.ports.lock().unwrap().entry((nic.id, nic.kind)) {
+                Entry::Vacant(entry) => {
+                    let port = Port::new(
+                        port_name.clone(),
+                        nic.id,
+                        nic.kind,
+                        nic.ip_config.clone(),
+                        mac,
+                        nic.slot,
+                        vni,
+                        self.clone(),
+                    );
+                    entry.insert(port.data().clone());
+                    port
+                }
+                Entry::Occupied(occupied) => {
+                    error!(
+                        self.inner.log,
+                        "duplicate OPTE port detected";
+                        "interface_id" => %nic.id,
+                        "kind" => ?nic.kind,
+                        "existing_port_data" => ?occupied.get(),
+                    );
+                    delete_xde_device(&self.inner.log, &port_name);
+                    return Err(Error::DuplicateOptePort {
+                        id: nic.id,
+                        kind: nic.kind,
+                    });
+                }
+            };
 
         // Ports for Probes/Services cannot have EIP<->IGW mappings filled
         // in dynamically today, so to keep use of their EIPs working we
