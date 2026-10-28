@@ -564,7 +564,10 @@ impl InstanceAutoRestart {
             .eq(InstanceAutoRestartPolicy::BestEffort)
             // If the auto-restart policy is null, then it should
             // default to "best effort".
-            .or(dsl::auto_restart_policy.is_null()))
+            .or(dsl::auto_restart_policy.is_null())
+            // When an instance is rebooting due to its sled evacuating, it
+            // should be reincarnatable
+            .or(dsl::state.eq(InstanceState::SledEvacuating)))
         // An instance should only be automatically restarted if it is intended
         // to be in the `Running` state. Instances which were requested to stop
         // should not be automatically restarted, even if they have failed.

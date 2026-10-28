@@ -104,6 +104,26 @@ impl BackgroundTask for InstanceReincarnation {
                 ));
             }
 
+            if let Err(error) = self
+                .reincarnate_all(
+                    &opctx,
+                    ReincarnationReason::SledEvacuation,
+                    &mut status,
+                    &mut running_sagas,
+                )
+                .await
+            {
+                error!(
+                    opctx.log,
+                    "failed to find all instances from a sled evacuation \
+                     in need of reincarnation";
+                    "error" => %error,
+                );
+                status.errors.push(format!(
+                    "finding instances from a sled evacuation: {error}"
+                ));
+            }
+
             if status.total_errors() > 0 {
                 warn!(
                     &opctx.log,
@@ -399,7 +419,7 @@ mod test {
                 // `instance-update` saga do so). Therefore, make our
                 // resource requests as small as possible.
                 ncpus: 1i64.try_into().unwrap(),
-                memory: ByteCount::from_gibibytes_u32(2),
+                memory: ByteCount::from_gibibytes_u32(1),
                 hostname: "myhostname".try_into().unwrap(),
                 user_data: Vec::new(),
                 network_interfaces:
@@ -773,6 +793,42 @@ mod test {
             });
         }
 
+        // Create instances in the `SledEvacuating` state that are eligible to
+        // be reincarnated. When an instance state is reincarnated due to its
+        // sled evacuating, the task ignores the auto-restart policy and always
+        // restarts the the instance, so we include instances with both policies
+        let num_sled_evacuating = 4;
+        for i in 0..num_sled_evacuating / 2 {
+            let instance = create_instance(
+                &cptestctx,
+                &opctx,
+                &format!("kolankola-{i}"),
+                InstanceAutoRestartPolicy::BestEffort,
+                InstanceState::SledEvacuating,
+                InstanceIntendedState::Running,
+            )
+            .await;
+            will_reincarnate.insert(ReincarnatableInstance {
+                instance_id: instance.id(),
+                reason: ReincarnationReason::SledEvacuation,
+            });
+        }
+        for i in 0..num_sled_evacuating / 2 {
+            let instance = create_instance(
+                &cptestctx,
+                &opctx,
+                &format!("ekabijin-{i}"),
+                InstanceAutoRestartPolicy::Never,
+                InstanceState::SledEvacuating,
+                InstanceIntendedState::Running,
+            )
+            .await;
+            will_reincarnate.insert(ReincarnatableInstance {
+                instance_id: instance.id(),
+                reason: ReincarnationReason::SledEvacuation,
+            });
+        }
+
         // Create some instances that will not reincarnate.
         let mut will_not_reincarnate = std::collections::BTreeSet::new();
         // Some instances which are `Failed` but don't have policies permitting
@@ -850,6 +906,16 @@ mod test {
         .await;
         attach_saga_unwound_vmm(&cptestctx, &opctx, &unwound_stopped).await;
         will_not_reincarnate.insert(unwound_stopped.id());
+        let evacuating_stopped = create_instance(
+            &cptestctx,
+            &opctx,
+            "anagami-6",
+            InstanceAutoRestartPolicy::BestEffort,
+            InstanceState::SledEvacuating,
+            InstanceIntendedState::Stopped,
+        )
+        .await;
+        will_not_reincarnate.insert(evacuating_stopped.id());
 
         // Activate the task again, and check that our instance had an
         // instance-start saga started.
@@ -862,6 +928,10 @@ mod test {
         assert_eq!(
             status.instances_found.get(&ReincarnationReason::SagaUnwound),
             Some(&num_saga_unwound)
+        );
+        assert_eq!(
+            status.instances_found.get(&ReincarnationReason::SledEvacuation),
+            Some(&num_sled_evacuating)
         );
         assert_eq!(status.instances_reincarnated.len(), will_reincarnate.len());
         assert_eq!(status.changed_state, Vec::new());
