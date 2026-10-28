@@ -123,11 +123,11 @@ impl TryFrom<i64> for BootStorageUnit {
 }
 
 // A snapshot of information about the underlying hardware
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct HardwareSnapshot {
     tofino: TofinoSnapshot,
-    /// `None` if the disk bays could not be read at all this time.
-    bays: Option<Vec<PolledBay>>,
+    /// `Err` if the disk bays could not be read at all this time.
+    bays: Result<Vec<PolledBay>, Error>,
 }
 
 impl HardwareSnapshot {
@@ -168,36 +168,23 @@ impl HardwareSnapshot {
         // knows.
         let bays = match external_disks {
             ExternalDisks::DetectPhysical => {
-                match read_bays(log, sled_type, boot_storage_unit) {
-                    Ok(bays) => Some(bays),
-                    Err(err) => {
-                        warn!(
-                            log,
-                            "Failed to read disk bays; keeping the previous \
-                             view of disks";
-                            InlineErrorChain::new(&err),
-                        );
-                        None
-                    }
-                }
+                read_bays(log, sled_type, boot_storage_unit)
             }
 
             // These stand in for real hardware, so give each one a bay.
-            ExternalDisks::Hardcoded { vdevs: _, disks } => Some(
-                disks
-                    .iter()
-                    .map(|disk| PolledBay::Described {
-                        bay: DiskBay {
-                            location: disk.location().to_string(),
-                            kind: disk.variant(),
-                            occupant: DiskBayOccupant::Disk {
-                                identity: disk.identity().clone(),
-                            },
+            ExternalDisks::Hardcoded { vdevs: _, disks } => Ok(disks
+                .iter()
+                .map(|disk| PolledBay::Described {
+                    bay: DiskBay {
+                        location: disk.location().to_string(),
+                        kind: disk.variant(),
+                        occupant: DiskBayOccupant::Disk {
+                            identity: disk.identity().clone(),
                         },
-                        disk: Some(Box::new(disk.clone())),
-                    })
-                    .collect(),
-            ),
+                    },
+                    disk: Some(Box::new(disk.clone())),
+                })
+                .collect()),
         };
 
         Ok(Self { tofino, bays })
@@ -524,10 +511,21 @@ fn poll_device_tree(
         polled_hw;
 
     // Bays this poll could not describe keep what the previous view said.
-    let polled_disks = polled_bays.map(|bays| {
-        let previous = hardware_view_tx.borrow();
-        resolve_bays(log, bays, &previous.disk_bays, &previous.disks)
-    });
+    // If no bays could be read, the disks are left as they are.
+    let polled_disks = match polled_bays {
+        Ok(bays) => {
+            let previous = hardware_view_tx.borrow();
+            Some(resolve_bays(log, bays, &previous.disk_bays, &previous.disks))
+        }
+        Err(err) => {
+            warn!(
+                log,
+                "Failed to read disk bays; keeping the previous view of disks";
+                InlineErrorChain::new(&err),
+            );
+            None
+        }
+    };
 
     // Check for any changes since the last view.
     let mut did_modify_tofino = false;
