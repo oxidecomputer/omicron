@@ -1,8 +1,4 @@
     input preparation took 42ms
-      in_service_disks:       5ms
-      observed_sagas:         5ms
-      silo_certificates:      5ms
-      ereporter_restarts:     5ms
-      ereports:               5ms
-      alert_markers:          5ms
-      support_bundle_markers: 5ms
+      ereports:          5ms
+      in_service_disks:  5ms
+      silo_certificates: 5ms

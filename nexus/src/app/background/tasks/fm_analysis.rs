@@ -33,7 +33,6 @@ use nexus_types::fm::FmConfigView;
 use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::fm_analysis as status;
-use nexus_types::internal_api::background::fm_analysis::PreparationStep;
 use nexus_types::inventory;
 use nexus_types::observed_certificate::ObservedCertificate;
 use nexus_types::observed_certificate::ObservedSiloCertificates;
@@ -389,7 +388,7 @@ impl InputLoader {
         // steps, we may eventually want to think about having a concurrency
         // limit here, especially if steps can recursively spawn other
         // steps...but they can't do that today. So.
-        for step in PreparationStep::iter() {
+        for step in InputStep::iter() {
             let opctx = opctx.child(BTreeMap::from([(
                 "input".to_string(),
                 step.to_string(),
@@ -459,7 +458,7 @@ impl InputLoader {
                         "input" => %step,
                         &error,
                     );
-                    step_errors.insert(step, error.to_string());
+                    step_errors.insert(step.to_string(), error.to_string());
                 }
             }
         }
@@ -486,7 +485,7 @@ impl InputLoader {
         // step which loaded the ereports.
         if !report.unknown_restart_ereport_ids.is_empty() {
             let mut ereports_step =
-                step_status.get_mut(&PreparationStep::Ereports).expect(
+                step_status.get_mut(InputStep::Ereports.as_str()).expect(
                     "every step succeeded, so every step has a status entry",
                 );
             for id in &report.unknown_restart_ereport_ids {
@@ -502,51 +501,51 @@ impl InputLoader {
         Ok((input, report))
     }
 
-    /// Runs the provided [`PreparationStep`] and returns its [`StepOutput`].
+    /// Runs the provided [`InputStep`] and returns its [`StepOutput`].
     async fn run_step(
         &self,
-        step: PreparationStep,
+        step: InputStep,
         opctx: &OpContext,
         parent_sitrep: Option<&nexus_types::fm::Sitrep>,
     ) -> StepOutput {
         let started = Instant::now();
         let mut warnings = Vec::new();
         let result = match step {
-            PreparationStep::InServiceDisks => self
+            InputStep::InServiceDisks => self
                 .load_in_service_disks(opctx, &mut warnings)
                 .await
                 .map(LoadedInput::InServiceDisks),
-            PreparationStep::ObservedSagas => self
+            InputStep::ObservedSagas => self
                 .prepare_observed_sagas(opctx)
                 .await
                 .map(LoadedInput::ObservedSagas),
-            PreparationStep::SiloCertificates => self
+            InputStep::SiloCertificates => self
                 .load_silo_certificates(opctx, &mut warnings)
                 .await
                 .map(LoadedInput::SiloCertificates),
-            PreparationStep::EreporterRestarts => self
+            InputStep::EreporterRestarts => self
                 .load_ereporter_restarts(opctx)
                 .await
                 .context("failed to load ereporter restarts")
                 .map(LoadedInput::EreporterRestarts),
-            PreparationStep::Ereports => self
+            InputStep::Ereports => self
                 .load_new_ereports(opctx, &mut warnings)
                 .await
                 .context("failed to load new ereports")
                 .map(LoadedInput::Ereports),
-            PreparationStep::AlertMarkers => self
+            InputStep::AlertMarkers => self
                 .load_existing_alert_markers(opctx, parent_sitrep)
                 .await
                 .context("failed to load existing alert markers")
                 .map(LoadedInput::AlertMarkers),
-            PreparationStep::SupportBundleMarkers => self
+            InputStep::SupportBundleMarkers => self
                 .load_existing_support_bundle_markers(opctx, parent_sitrep)
                 .await
                 .context("failed to load existing support bundle markers")
                 .map(LoadedInput::SupportBundleMarkers),
         };
         let status = status::PreparationStepStatus {
-            step,
+            name: step.to_string(),
             duration: started.elapsed(),
             warnings,
         };
@@ -1188,6 +1187,18 @@ struct StepOutput {
     result: anyhow::Result<LoadedInput>,
 }
 
+#[derive(strum::EnumDiscriminants)]
+#[strum_discriminants(name(InputStep))]
+// Traits to derive for the generated `InputStep` enum.
+#[strum_discriminants(derive(
+    PartialOrd,
+    Ord,
+    Hash,
+    strum::Display,
+    strum::EnumIter,
+    strum::IntoStaticStr,
+    strum::VariantNames,
+))]
 enum LoadedInput {
     InServiceDisks(IdOrdMap<InServiceDisk>),
     ObservedSagas(IdOrdMap<ObservedSaga>),
@@ -1196,6 +1207,12 @@ enum LoadedInput {
     Ereports(Vec<fm::Ereport>),
     AlertMarkers(HashSet<AlertUuid>),
     SupportBundleMarkers(HashSet<SupportBundleUuid>),
+}
+
+impl InputStep {
+    pub fn as_str(&self) -> &'static str {
+        <&'static str>::from(*self)
+    }
 }
 
 #[cfg(test)]
@@ -1607,14 +1624,14 @@ mod tests {
         // Every input-loading step ran and recorded its status, without
         // warnings.
         assert_eq!(
-            prep_status.steps.iter().map(|s| s.step).collect::<Vec<_>>(),
-            status::PreparationStep::iter().collect::<Vec<_>>(),
+            prep_status.steps.iter().map(|s| s.name).collect::<BTreeSet<_>>(),
+            InputStep::iter().map(|s| s.as_str()()).collect::<BTreeSet<_>>(),
         );
         for step in &prep_status.steps {
             assert!(
                 step.warnings.is_empty(),
                 "unexpected warnings from step {}: {:?}",
-                step.step,
+                step.name,
                 step.warnings,
             );
         }

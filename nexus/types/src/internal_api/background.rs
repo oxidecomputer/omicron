@@ -1357,41 +1357,9 @@ pub mod fm_analysis {
         pub steps: IdOrdMap<PreparationStepStatus>,
     }
 
-    /// Identifies one of the steps which load analysis inputs from the
-    /// database during the preparation phase.
-    ///
-    /// Each step runs concurrently with the others.
-    #[derive(
-        Copy,
-        Clone,
-        Debug,
-        PartialEq,
-        Eq,
-        PartialOrd,
-        Ord,
-        Hash,
-        Deserialize,
-        Serialize,
-        strum::Display,
-        strum::EnumIter,
-        strum::IntoStaticStr,
-        strum::VariantNames,
-    )]
-    #[serde(rename_all = "snake_case")]
-    #[strum(serialize_all = "snake_case")]
-    pub enum PreparationStep {
-        InServiceDisks,
-        ObservedSagas,
-        SiloCertificates,
-        EreporterRestarts,
-        Ereports,
-        AlertMarkers,
-        SupportBundleMarkers,
-    }
-
     #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
     pub struct PreparationStepStatus {
-        pub step: PreparationStep,
+        pub name: String,
         /// How long each input-loading step took to complete, whether it
         /// succeeded or failed.
         ///
@@ -1404,10 +1372,10 @@ pub mod fm_analysis {
     }
 
     impl IdOrdItem for PreparationStepStatus {
-        type Key<'a> = &'a PreparationStep;
+        type Key<'a> = &'a str;
 
         fn key(&self) -> Self::Key<'_> {
-            &self.step
+            &self.name
         }
 
         iddqd::id_upcast!();
@@ -1415,15 +1383,9 @@ pub mod fm_analysis {
 
     impl std::fmt::Display for PreparationStatus {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            use strum::VariantNames;
-
-            // Calculate the length of the step names statically, so that the
-            // column doesn't move around between activations based on which
-            // steps actually ran.
-            const NAME_WIDTH: usize =
-                crate::fm::display::const_max_len(PreparationStep::VARIANTS);
-
             let Self { total_duration, steps } = self;
+            let name_width =
+                steps.iter().map(|step| step.name.len()).max().unwrap_or(0);
             if steps.iter().any(|step| !step.warnings.is_empty()) {
                 writeln!(
                     f,
@@ -1431,7 +1393,7 @@ pub mod fm_analysis {
                 )?;
                 for step in steps {
                     for warning in &step.warnings {
-                        writeln!(f, "      > {}: {warning}", step.step)?;
+                        writeln!(f, "      > {}: {warning}", step.name)?;
                     }
                 }
             }
@@ -1440,14 +1402,13 @@ pub mod fm_analysis {
                 "    input preparation took {}ms",
                 total_duration.as_millis()
             )?;
-            for step in steps {
-                let name: &'static str = step.step.into();
+            for PreparationStepStatus { name, duration, warnings: _ } in steps {
                 writeln!(
                     f,
                     "      {name}:{:pad$}{}ms",
                     "",
-                    step.duration.as_millis(),
-                    pad = NAME_WIDTH - name.len() + 1,
+                    duration.as_millis(),
+                    pad = name_width - name.len() + 1,
                 )?;
             }
             Ok(())
@@ -1459,7 +1420,7 @@ pub mod fm_analysis {
     pub enum PreparationFailure {
         /// One or more input-loading steps failed. Each failed step is
         /// recorded with its error; steps which succeeded are absent.
-        StepsFailed(BTreeMap<PreparationStep, String>),
+        StepsFailed(BTreeMap<String, String>),
         /// Every input-loading step succeeded, but the loaded inputs could
         /// not be assembled into analysis inputs.
         InvalidInputs(String),
@@ -1864,12 +1825,10 @@ mod test {
     use crate::internal_api::background::BlueprintPrunerStatus;
     use crate::internal_api::background::DeletedBlueprint;
     use crate::internal_api::background::fm_analysis::PreparationStatus;
-    use crate::internal_api::background::fm_analysis::PreparationStep;
     use crate::internal_api::background::fm_analysis::PreparationStepStatus;
     use expectorate::assert_contents;
     use iddqd::IdOrdMap;
     use std::time::Duration;
-    use strum::IntoEnumIterator;
 
     #[test]
     fn test_display_tuf_repo_pruner_status_enabled() {
@@ -1955,12 +1914,12 @@ mod test {
     }
 
     fn fm_preparation_step(
-        step: PreparationStep,
+        name: impl ToString,
         millis: u64,
         warnings: &[&str],
     ) -> PreparationStepStatus {
         PreparationStepStatus {
-            step,
+            name: name.to_string(),
             duration: Duration::from_millis(millis),
             warnings: warnings.iter().map(|w| w.to_string()).collect(),
         }
@@ -1972,13 +1931,13 @@ mod test {
             total_duration: Duration::from_millis(125),
             steps: [
                 fm_preparation_step(
-                    PreparationStep::Ereports,
+                    "ereports",
                     120,
                     &["ereport 1 is invalid", "ereport 2 is also invalid"],
                 ),
-                fm_preparation_step(PreparationStep::InServiceDisks, 8, &[]),
+                fm_preparation_step("in_service_disks", 8, &[]),
                 fm_preparation_step(
-                    PreparationStep::SiloCertificates,
+                    "silo_certificates",
                     3,
                     &["certificate 1 cannot be served"],
                 ),
@@ -1997,7 +1956,8 @@ mod test {
     fn test_display_fm_preparation_status_no_warnings() {
         let status = PreparationStatus {
             total_duration: Duration::from_millis(42),
-            steps: PreparationStep::iter()
+            steps: ["ereports", "in_service_disks", "silo_certificates"]
+                .iter()
                 .map(|step| fm_preparation_step(step, 5, &[]))
                 .collect(),
         };
