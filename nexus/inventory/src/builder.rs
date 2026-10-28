@@ -711,6 +711,18 @@ impl CollectionBuilder {
             .context("NTP service reported time multiple times")
     }
 
+    /// Record information about another rack (and the sleds in it) that we've
+    /// discovered, but which may not be part of the cluster yet
+    pub fn found_discovered_rack(
+        &mut self,
+        rack: DiscoveredRack,
+    ) -> Result<(), anyhow::Error> {
+        self.discovered_racks
+            .insert_unique(rack)
+            .map_err(|err| err.into_owned())
+            .context("discovered rack reported multiple times")
+    }
+
     /// Record metrics from a CockroachDB node
     pub fn found_cockroach_metrics(
         &mut self,
