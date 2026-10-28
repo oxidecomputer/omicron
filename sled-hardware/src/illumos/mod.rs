@@ -163,9 +163,6 @@ impl HardwareSnapshot {
         // Monitor for the Tofino device and driver.
         let tofino = get_tofino_snapshot(log, &mut device_info);
 
-        // Find the disks. The hardware topology says which bays exist and
-        // what is behind each one; libnvme fills in what only the controller
-        // knows.
         let bays = match external_disks {
             ExternalDisks::DetectPhysical => {
                 read_bays(log, sled_type, boot_storage_unit)
