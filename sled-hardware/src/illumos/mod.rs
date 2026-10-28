@@ -8,8 +8,8 @@ use crate::HardwareView;
 use crate::TofinoSnapshot;
 use crate::TofinoView;
 use crate::disk_bay::{
-    NvmeFacts, ObservedBay, ObservedOccupant, PolledBay, classify_bay,
-    resolve_bays,
+    BayContents, NvmeFacts, ObservedBay, ObservedOccupant, PolledBay,
+    classify_bay, resolve_bays,
 };
 use crate::nvme_instance::NvmeInstance;
 use crate::{DendriteAsic, DiskBay, DiskBayOccupant, SledMode, UnparsedDisk};
@@ -353,8 +353,11 @@ fn poll_bay(
         kind: bay.kind,
         driver: bay.binding_driver.clone(),
     };
-    let facts = match &bay.occupant {
-        ObservedOccupant::Nvme { instance, namespaces, .. } => {
+    let facts = match &bay.contents {
+        Ok(BayContents {
+            occupant: ObservedOccupant::Nvme { instance, namespaces, .. },
+            ..
+        }) => {
             if namespaces.len() > 1 {
                 // Only the first namespace becomes a disk. See
                 // https://github.com/oxidecomputer/omicron/issues/5241.
@@ -381,12 +384,11 @@ fn poll_bay(
                 }
             }
         }
-        ObservedOccupant::Empty
-        | ObservedOccupant::Other { .. }
-        | ObservedOccupant::Unreadable(_) => None,
+        _ => None,
     };
-    let is_boot_disk =
-        pcie_slot_is_boot_disk(sled, bay.pcie_slot, boot_storage_unit);
+    let is_boot_disk = bay.contents.as_ref().is_ok_and(|contents| {
+        pcie_slot_is_boot_disk(sled, contents.pcie_slot, boot_storage_unit)
+    });
     match classify_bay(bay, facts.as_ref(), is_boot_disk) {
         Ok((bay, disk)) => {
             PolledBay::Described { bay, disk: disk.map(Box::new) }

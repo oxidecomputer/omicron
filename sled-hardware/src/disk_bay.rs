@@ -63,13 +63,19 @@ pub enum DiskBayOccupant {
 pub(crate) struct ObservedBay {
     pub location: String,
     pub kind: DiskVariant,
-    /// The PCIe physical slot number of the bridge behind the bay
-    /// (`binding/slot`).
-    pub pcie_slot: i64,
     /// `binding/driver` on the bay node: the driver the topology found bound
     /// to the device behind the bay. oxhc records it before it tries to
     /// enumerate the device, so it is present even when enumeration failed.
     pub binding_driver: Option<String>,
+    /// What is behind the bay, or why the topology could not say.
+    pub contents: Result<BayContents, BayProblem>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct BayContents {
+    /// The PCIe physical slot number of the bridge behind the bay
+    /// (`binding/slot`).
+    pub pcie_slot: i64,
     pub occupant: ObservedOccupant,
 }
 
@@ -88,8 +94,6 @@ pub(crate) enum ObservedOccupant {
     },
     /// The topology's placeholder for a device it does not enumerate.
     Other { driver: Option<String>, devfs_path: Option<String> },
-    /// The topology only partly described what is behind the bay.
-    Unreadable(BayProblem),
 }
 
 /// Why the topology could not describe one bay.
@@ -106,6 +110,12 @@ pub(crate) enum BayProblem {
 
     #[error("the topology's nvme node has no usable driver instance")]
     NvmeWithoutInstance,
+
+    #[error("the topology has no binding/slot for the bay")]
+    NoPcieSlot,
+
+    #[error("could not read topology node {node}: {error}")]
+    Topology { node: String, error: String },
 }
 
 /// A `disk` node under an `nvme` node: one NVMe namespace.
@@ -182,7 +192,17 @@ pub(crate) fn classify_bay(
         occupant,
     };
 
-    let (instance, driver, devfs_path, namespaces) = match &bay.occupant {
+    let contents = match &bay.contents {
+        Ok(contents) => contents,
+        Err(problem) => {
+            return Err(ClassifyError::Unreadable {
+                location: bay.location.clone(),
+                problem: problem.clone(),
+            });
+        }
+    };
+
+    let (instance, driver, devfs_path, namespaces) = match &contents.occupant {
         ObservedOccupant::Empty => {
             return Ok((describe(DiskBayOccupant::Empty), None));
         }
@@ -195,12 +215,6 @@ pub(crate) fn classify_bay(
         }
         ObservedOccupant::Nvme { instance, driver, devfs_path, namespaces } => {
             (*instance, driver, devfs_path, namespaces)
-        }
-        ObservedOccupant::Unreadable(problem) => {
-            return Err(ClassifyError::Unreadable {
-                location: bay.location.clone(),
-                problem: problem.clone(),
-            });
         }
     };
 
@@ -253,7 +267,7 @@ pub(crate) fn classify_bay(
     let disk = UnparsedDisk::new(
         devfs_path,
         dev_path,
-        bay.pcie_slot,
+        contents.pcie_slot,
         bay.kind,
         identity.clone(),
         is_boot_disk,
@@ -401,9 +415,17 @@ mod tests {
         ObservedBay {
             location: "N3".to_string(),
             kind: DiskVariant::U2,
-            pcie_slot: 3,
             binding_driver: None,
-            occupant,
+            contents: Ok(BayContents { pcie_slot: 3, occupant }),
+        }
+    }
+
+    fn unreadable_bay(problem: BayProblem) -> ObservedBay {
+        ObservedBay {
+            location: "N3".to_string(),
+            kind: DiskVariant::U2,
+            binding_driver: None,
+            contents: Err(problem),
         }
     }
 
@@ -454,7 +476,7 @@ mod tests {
         let mut observed = nvme_bay(vec![namespace()]);
         observed.location = "M.2 West".to_string();
         observed.kind = DiskVariant::M2;
-        observed.pcie_slot = 18;
+        observed.contents.as_mut().unwrap().pcie_slot = 18;
 
         let (described, disk) =
             classify_bay(&observed, Some(&facts(1)), true).unwrap();
@@ -573,19 +595,26 @@ mod tests {
 
     #[test]
     fn unreadable_bay_is_an_error() {
-        let observed =
-            bay(ObservedOccupant::Unreadable(BayProblem::NvmeNotEnumerated));
-        let err = classify_bay(&observed, None, false).unwrap_err();
-        assert!(
-            matches!(
-                err,
-                ClassifyError::Unreadable {
-                    problem: BayProblem::NvmeNotEnumerated,
-                    ..
-                }
-            ),
-            "{err}"
-        );
+        let problems = [
+            BayProblem::NvmeNotEnumerated,
+            BayProblem::NoPcieSlot,
+            BayProblem::Topology {
+                node: "chassis[0]/bay[3]/nvme[0]".to_string(),
+                error: "libtopo: out of memory".to_string(),
+            },
+        ];
+        for problem in problems {
+            let observed = unreadable_bay(problem.clone());
+            let err = classify_bay(&observed, None, false).unwrap_err();
+            assert!(
+                matches!(
+                    &err,
+                    ClassifyError::Unreadable { location, problem: p }
+                        if location == "N3" && *p == problem
+                ),
+                "{err}"
+            );
+        }
     }
 
     fn log() -> Logger {
