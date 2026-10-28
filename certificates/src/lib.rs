@@ -268,7 +268,7 @@ impl CertificateValidator {
 
 /// A parsed, validated TLS certificate ready to use with an external TLS server
 ///
-/// Constructing one of these (via `TryFrom<Certificate>`) is the acceptance
+/// Constructing one of these (via [`TlsCertificate::new`]) is the acceptance
 /// check for whether Nexus can serve a stored certificate at all. Anything
 /// else that needs to reason about the certificates Nexus actually presents,
 /// like the fault management certificate diagnosis engine, must go through the
