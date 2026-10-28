@@ -44,12 +44,11 @@ use nexus_types::observed_certificate::CertificateCandidate;
 use nexus_types::observed_certificate::best_certificate;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use nexus_types::silo::silo_dns_name;
+use omicron_certificates::CertifiedKey;
 use omicron_certificates::TlsCertificate;
-
 use omicron_common::api::external::Error;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::bail_unless;
-use rustls::sign::CertifiedKey;
 use serde::Serialize;
 use serde_with::SerializeDisplay;
 use std::collections::BTreeMap;
