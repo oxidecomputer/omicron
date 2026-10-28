@@ -73,6 +73,7 @@ members = [
     "gateway-types/versions",
     "generation-kinds",
     "git-version",
+    "git-version/types",
     "illumos-utils",
     "installinator-api",
     "installinator-common",
@@ -182,6 +183,7 @@ members = [
     "trust-quorum/types/versions",
     "typed-rng",
     "uuid-kinds",
+    "wicket-cli-types",
     "wicket-common",
     "wicket-dbg",
     "wicket",
@@ -271,6 +273,7 @@ default-members = [
     "gateway-types/versions",
     "generation-kinds",
     "git-version",
+    "git-version/types",
     "illumos-utils",
     "installinator-api",
     "installinator-common",
@@ -380,6 +383,7 @@ default-members = [
     "test-utils",
     "typed-rng",
     "uuid-kinds",
+    "wicket-cli-types",
     "wicket-common",
     "wicket-dbg",
     "wicket",
@@ -463,7 +467,7 @@ bootstrap-agent-lockstep-client = { path = "clients/bootstrap-agent-lockstep-cli
 bootstrap-agent-lockstep-types = { path = "sled-agent/bootstrap-agent-lockstep-types" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.5.0"
-byte-wrapper = { version = "0.1.0", features = ["serde", "schemars08"] }
+byte-wrapper = { version = "0.2.1", features = ["serde", "schemars08"] }
 bytes = "1.10.1"
 camino = { version = "1.2.0", features = ["serde1"] }
 camino-tempfile = "1.4.1"
@@ -475,6 +479,7 @@ cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 chrono-tz = { version = "0.10.4", features = [ "serde" ] }
 ciborium = "0.2.2"
+ciborium-ll = "0.2.2"
 clap = { version = "4.6", features = ["cargo", "derive", "env", "wrap_help"] }
 clickana = { path = "dev-tools/clickana" }
 clickhouse-admin-api = { path = "clickhouse-admin/api" }
@@ -592,7 +597,7 @@ hyper = "1.6.0"
 hyper-util = "0.1.16"
 hyper-rustls = "0.27.7"
 hyper-staticfile = "0.10.1"
-iddqd = { version = "0.4.2", features = ["daft", "serde", "schemars08"] }
+iddqd = { version = "0.5.0", features = ["daft", "serde", "schemars08"] }
 illumos-nvpair = "0.3.0"
 illumos-nvpair-sys = "0.2.0"
 illumos-utils = { path = "illumos-utils" }
@@ -692,6 +697,7 @@ omicron-dev-lib = { path = "dev-tools/omicron-dev-lib" }
 omicron-ledger = { path = "ledger" }
 omicron-gateway = { path = "gateway" }
 omicron-git-version = { path = "git-version" }
+omicron-git-version-types = { path = "git-version/types" }
 omicron-nexus = { path = "nexus" }
 omicron-ntp-admin = { path = "ntp-admin" }
 omicron-omdb = { path = "dev-tools/omdb" }
@@ -709,6 +715,7 @@ oxide-tokio-rt = "0.1.4"
 oxide-update-engine = "0.1.2"
 oxide-update-engine-types = { version = "0.1.2", features = ["schemars08"] }
 oxide-update-engine-display = "0.1.2"
+oxide-versioned-envelope = { version = "0.1.1", features = ["schemars08"] }
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "fd2d6ad625cef6fb903660e57dcd4729ff66a6fe", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.7"
@@ -806,7 +813,6 @@ secrecy = "0.10.3"
 semver = { version = "1.0.26", features = ["std", "serde"] }
 seq-macro = "0.3.6"
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
-serde_cbor = "0.11.2"
 serde_json = "1.0.145"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
@@ -860,7 +866,7 @@ static_assertions = "1.1.0"
 # Please do not change the Steno version to a Git dependency.  It makes it
 # harder than expected to make breaking changes (even if you specify a specific
 # SHA).  Cut a new Steno release instead.  See omicron#2117.
-steno = "0.4.1"
+steno = "0.5.0"
 strum = { version = "0.27.2", features = [ "derive" ] }
 subprocess = "0.2.9"
 subtle = "2.6.1"
@@ -907,6 +913,7 @@ vergen-gitcl = { version = "1.0.8" }
 walkdir = "2.5"
 whoami = "1.5"
 wicket = { path = "wicket" }
+wicket-cli-types = { path = "wicket-cli-types" }
 wicket-common = { path = "wicket-common" }
 wicketd-api = { path = "wicketd-api" }
 wicketd-client = { path = "clients/wicketd-client" }
@@ -941,8 +948,8 @@ oxide-generation = { version = "0.1.3", default-features = false }
 oxide-generation-macros = "0.2.0"
 omicron-generation-kinds = { path = "generation-kinds", features = ["serde", "schemars08", "slog2"] }
 
-scim2-rs = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "9730595245fc7969c4ffeee5a32345ab7b3167b7" }
-scim2-test-client = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "9730595245fc7969c4ffeee5a32345ab7b3167b7" }
+scim2-rs = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "a024c0918bea9133bd545bc06c42a4a0e14c7915" }
+scim2-test-client = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "a024c0918bea9133bd545bc06c42a4a0e14c7915" }
 
 # NOTE: The test profile inherits from the dev profile, so settings under
 # profile.dev get inherited. AVOID setting anything under profile.test: that

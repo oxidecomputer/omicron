@@ -18,12 +18,13 @@ use crate::dataset_serialization_task::DatasetTaskError;
 use crate::dataset_serialization_task::DatasetTaskHandle;
 use crate::dataset_serialization_task::RekeyRequest;
 use crate::dataset_serialization_task::RekeyResult;
+use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use illumos_utils::zone::OmicronZoneConfigExt;
-use illumos_utils::zpool::PathInPool;
-use illumos_utils::zpool::ZpoolOrRamdisk;
+use illumos_utils::zpool::ZpoolName;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::DatasetUuid;
@@ -42,6 +43,56 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use trust_quorum_types::types::Epoch;
+
+/// A path which exists within a zpool.
+//
+// This structure is very denormalized: a subset of `path` specifically points
+// to `pool`, so we could instead store `pool` plus the `path`-specific
+// information, then reconstruct `path` as needed. We don't do this mostly for
+// simplicity: production code would need to store both a prefix (coming from
+// `MountConfig`) and a suffix (the specific kind of `path`), and test code
+// would be more painful (it often supplies a nonexistent `zpool` and an
+// unrelated `path`; e.g., to a tempdir).
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct PathInPool {
+    pool: ZpoolName,
+    path: Utf8PathBuf,
+}
+
+impl PathInPool {
+    /// Construct a path within `pool`.
+    pub(crate) fn new(
+        pool: ZpoolName,
+        mount_config: &MountConfig,
+        mountpoint: &str,
+    ) -> Self {
+        let path = pool.dataset_mountpoint(&mount_config.root, mountpoint);
+        Self { pool, path }
+    }
+
+    /// Testing only: construct an arbitrary `PathInPool` where `path` may be
+    /// unrelated to `pool` entirely (e.g., `pool` may be fake and `path` may
+    /// live in a tmpdir).
+    #[cfg(feature = "testing")]
+    pub(crate) fn new_arbitrary_for_tests(
+        pool: ZpoolName,
+        path: Utf8PathBuf,
+    ) -> Self {
+        Self { pool, path }
+    }
+
+    pub fn pool(&self) -> ZpoolName {
+        self.pool
+    }
+
+    pub fn path(&self) -> &Utf8Path {
+        &self.path
+    }
+
+    pub fn into_path(self) -> Utf8PathBuf {
+        self.path
+    }
+}
 
 /// Information about a managed disk for rekey filtering.
 ///
@@ -136,13 +187,8 @@ impl OmicronDatasets {
             );
         }
 
-        let zone_root_path = PathInPool {
-            pool: ZpoolOrRamdisk::Zpool(filesystem_pool),
-            // TODO-cleanup Should we get this path from the dataset we found
-            // above?
-            path: filesystem_pool
-                .dataset_mountpoint(&mount_config.root, ZONE_DATASET),
-        };
+        let zone_root_path =
+            PathInPool::new(filesystem_pool, &mount_config, ZONE_DATASET);
 
         // Confirm that the durable dataset for this zone has been ensured, if
         // it has one.
@@ -203,7 +249,7 @@ impl OmicronDatasets {
 
         // Actually remove the gone-from-config datasets
         for dataset_id in datasets_to_remove {
-            self.datasets.remove(&dataset_id);
+            self.datasets.remove(dataset_id);
         }
 
         // Check against the filesystem for any orphaned datasets and attempt to

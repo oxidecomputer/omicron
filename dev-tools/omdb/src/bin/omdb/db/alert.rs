@@ -42,7 +42,7 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_generation_kinds::AlertGeneration;
+use omicron_generation_kinds::SitrepAlertGeneration;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CaseUuid;
@@ -1095,7 +1095,7 @@ async fn cmd_db_alert_list(
         #[tabled(display_with = "display_option_blank")]
         fm_case_id: Option<Uuid>,
         #[tabled(display_with = "display_option_blank")]
-        fm_gen: Option<AlertGeneration>,
+        fm_gen: Option<SitrepAlertGeneration>,
     }
 
     let make_row =

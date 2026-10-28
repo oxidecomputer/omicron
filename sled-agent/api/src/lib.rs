@@ -18,8 +18,8 @@ use omicron_common::api::internal::shared::{
 };
 use sled_agent_types_versions::{
     latest, v1, v11, v14, v18, v20, v22, v24, v25, v26, v28, v29, v30, v31,
-    v32, v33, v34, v37, v39, v40, v41, v42, v43, v46, v47, v48, v49, v50, v51,
-    v52, v53,
+    v32, v33, v34, v37, v39, v40, v41, v42, v43, v44, v46, v47, v48, v49, v50,
+    v51, v52, v53, v55,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -36,6 +36,11 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (60, ADD_MULTIRACK_JOIN_SERVICE_STATUS),
+    (59, INSTANCE_ATTACHED_SUBNETS_MAP),
+    (58, BYTE_WRAPPER_0_2_BUMP),
+    (57, ADD_RACK_ID_TO_INVENTORY),
+    (56, ADD_MULTIRACK_JOIN_COMPLETE),
     (55, ARTIFACT_HASH_SCHEMA),
     (54, ADD_LOG_TIME_RANGE),
     (53, ADD_INSTANCE_MANAGER_STATUS_TO_INVENTORY),
@@ -441,13 +446,41 @@ pub trait SledAgentApi {
         operation_id = "vmm_register",
         method = PUT,
         path = "/vmms/{propolis_id}",
-        versions = VERSION_PROPOLIS_NVME_VWC..
+        versions = VERSION_INSTANCE_ATTACHED_SUBNETS_MAP..
     }]
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<latest::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError>;
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions = VERSION_PROPOLIS_NVME_VWC..VERSION_INSTANCE_ATTACHED_SUBNETS_MAP
+    }]
+    async fn vmm_register_v44(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<v44::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
+        Self::vmm_register(
+            rqctx,
+            path_params,
+            body.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    format!(
+                        "duplicate attached subnet in instance sled-local \
+                         configuration: {}",
+                        InlineErrorChain::new(&err),
+                    ),
+                )
+            })?,
+        )
+        .await
+    }
 
     #[endpoint {
         operation_id = "vmm_register",
@@ -460,7 +493,7 @@ pub trait SledAgentApi {
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<v41::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
-        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+        Self::vmm_register_v44(rqctx, path_params, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -1094,11 +1127,26 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
+        versions = VERSION_ADD_RACK_ID_TO_INVENTORY..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::inventory::Inventory>, HttpError>;
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..VERSION_ADD_RACK_ID_TO_INVENTORY,
+    }]
+    async fn inventory_v55(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v55::inventory::Inventory>, HttpError> {
+        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v55::inventory::Inventory::from(inv))
+        })
+    }
 
     /// Fetch basic information about this sled
     #[endpoint {
@@ -1109,7 +1157,7 @@ pub trait SledAgentApi {
     async fn inventory_v53(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v53::inventory::Inventory>, HttpError> {
-        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+        Self::inventory_v55(rqctx).await.map(|HttpResponseOk(inv)| {
             HttpResponseOk(v53::inventory::Inventory::from(inv))
         })
     }
@@ -1714,4 +1762,32 @@ pub trait SledAgentApi {
         path_params: Path<latest::rot::RotPathParams>,
         body: TypedBody<latest::rot::Nonce>,
     ) -> Result<HttpResponseOk<latest::rot::Attestation>, HttpError>;
+
+    /// Report that this sled's multirack join is complete.
+    ///
+    /// Sent by Nexus once it has observed this sled on the underlay network.
+    #[endpoint {
+        method = PUT,
+        path = "/multirack-join-complete",
+        versions = VERSION_ADD_MULTIRACK_JOIN_COMPLETE..,
+    }]
+    async fn multirack_join_complete(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Return the status of this sled's multirack join service.
+    ///
+    /// Returns a 404 if no multirack join service is running, or a 409 if the
+    /// service is running but has not yet determined its status.
+    #[endpoint {
+        method = GET,
+        path = "/multirack-join-service-status",
+        versions = VERSION_ADD_MULTIRACK_JOIN_SERVICE_STATUS..,
+    }]
+    async fn multirack_join_service_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::multirack::MultirackJoinServiceStatus>,
+        HttpError,
+    >;
 }

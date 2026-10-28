@@ -20,6 +20,7 @@ use omicron_uuid_kinds::{
     CollectionUuid, OmicronZoneUuid, PhysicalDiskUuid, ZpoolUuid,
 };
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// The typed payload of a [`Fact`](super::case::Fact).
 ///
@@ -33,6 +34,8 @@ pub enum FactPayload {
     PhysicalDisk(DiskFact),
     /// A fact owned by the saga diagnosis engine.
     Saga(SagaFact),
+    /// A fact owned by the certificate diagnosis engine.
+    Certificate(CertificateFact),
 }
 
 impl From<DiskFact> for FactPayload {
@@ -47,12 +50,19 @@ impl From<SagaFact> for FactPayload {
     }
 }
 
+impl From<CertificateFact> for FactPayload {
+    fn from(fact: CertificateFact) -> Self {
+        FactPayload::Certificate(fact)
+    }
+}
+
 impl FactPayload {
     /// The diagnosis engine that owns this payload's variant.
     pub fn engine(&self) -> DiagnosisEngineKind {
         match self {
             FactPayload::PhysicalDisk(_) => DiagnosisEngineKind::PhysicalDisk,
             FactPayload::Saga(_) => DiagnosisEngineKind::Saga,
+            FactPayload::Certificate(_) => DiagnosisEngineKind::Certificate,
         }
     }
 
@@ -70,6 +80,15 @@ impl FactPayload {
     pub fn as_saga(&self) -> Option<&SagaFact> {
         match self {
             FactPayload::Saga(fact) => Some(fact),
+            _ => None,
+        }
+    }
+
+    /// The certificate payload, or `None` if this fact belongs to a
+    /// different diagnosis engine.
+    pub fn as_certificate(&self) -> Option<&CertificateFact> {
+        match self {
+            FactPayload::Certificate(fact) => Some(fact),
             _ => None,
         }
     }
@@ -197,4 +216,60 @@ pub struct SagaOwnerNotCurrentFactPayload {
 pub struct SagaAbandonedFactPayload {
     /// The saga this fact (and its parent case) is about.
     pub saga_id: steno::SagaId,
+}
+
+/// Per-fact state for the certificate diagnosis engine.
+///
+/// A certificate case is keyed by silo and carries exactly one fact at a
+/// time: the silo's best certificate (the one Nexus serves, chosen by latest
+/// leaf `not_after`) is either about to expire or has already expired.
+/// `BestCertificateExpired` supersedes `BestCertificateExpiring`: once
+/// `not_after` has passed, the expiring fact is replaced rather than kept
+/// alongside.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CertificateFact {
+    /// The silo's best certificate expires within the configured warning
+    /// window, and no later-expiring certificate is installed.
+    BestCertificateExpiring(CertificateExpiryFactPayload),
+    /// The silo's best certificate has expired, and no later-expiring
+    /// certificate is installed. Nexus still serves it, since serving an
+    /// expired certificate beats serving none.
+    BestCertificateExpired(CertificateExpiryFactPayload),
+}
+
+impl CertificateFact {
+    /// The silo this fact (and its parent case) is about. Common to every
+    /// kind of certificate fact.
+    pub fn silo_id(&self) -> Uuid {
+        match self {
+            CertificateFact::BestCertificateExpiring(p) => p.silo_id,
+            CertificateFact::BestCertificateExpired(p) => p.silo_id,
+        }
+    }
+
+    /// The condition-defining payload, shared by every kind.
+    pub fn payload(&self) -> &CertificateExpiryFactPayload {
+        match self {
+            CertificateFact::BestCertificateExpiring(p) => p,
+            CertificateFact::BestCertificateExpired(p) => p,
+        }
+    }
+}
+
+/// Payload of a [`CertificateFact::BestCertificateExpiring`] or
+/// [`CertificateFact::BestCertificateExpired`] fact.
+///
+/// This carries only the fields that define the condition. Descriptive data
+/// (the silo and certificate names) is looked up from the analysis input
+/// when the case is acted on.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CertificateExpiryFactPayload {
+    /// The silo this fact (and its parent case) is about.
+    pub silo_id: Uuid,
+    /// The silo's best certificate at the time the fact was recorded. If a
+    /// different certificate becomes the best one, the fact is replaced.
+    pub certificate_id: Uuid,
+    /// The leaf `not_after` of that certificate.
+    pub not_after: DateTime<Utc>,
 }

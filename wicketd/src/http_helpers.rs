@@ -94,6 +94,9 @@ pub(crate) fn ba_lockstep_error_to_http(
     >,
     operation: &str,
 ) -> HttpError {
+    // XXX This mirrors wicket's commission_error and has a workaround for the
+    // same reason. We should consider fixing this in progenitor (or
+    // progenitor-extras?).
     use bootstrap_agent_lockstep_client::Error as BaError;
 
     let (status_code, error_code, message) = match &err {
@@ -168,9 +171,10 @@ pub(crate) async fn start_update(
     //    make updating it very unlikely to work anyway)
     // 2. We have pulled its state but our hardware manager says we can't
     //    update it (most likely cause: the target is the sled we're currently
-    //    running on; less likely cause: our hardware manager failed to get our
-    //    local identifying information, and it refuses to update this target
-    //    out of an abundance of caution).
+    //    running on or the switch we're locally connected to; less likely
+    //    cause: our hardware manager failed to get our local identifying
+    //    information, and it refuses to update this target out of an abundance
+    //    of caution).
     //
     // First, get our most-recently-cached inventory view. (Only wait 80% of
     // WICKETD_TIMEOUT for this: if even a cached inventory isn't available,
@@ -195,6 +199,11 @@ pub(crate) async fn start_update(
             ));
         }
     };
+
+    // Get our local switch SP's ID; we need this to ensure we don't allow
+    // updates that include it as a target.
+    let local_switch_id =
+        ctx.local_switch_id().await.map_err(|err| err.to_http_error())?;
 
     // Error cases.
     let mut inventory_absent = BTreeSet::new();
@@ -221,9 +230,11 @@ pub(crate) async fn start_update(
         };
 
         // If we have the state of the SP, are we allowed to update it? We
-        // refuse to try to update our own sled.
-        //
-        if baseboard_id_matches_sp_state(&ctx.baseboard_id, sp_state) {
+        // refuse to try to update our own sled and our locally-attached
+        // sidecar.
+        if baseboard_id_matches_sp_state(&ctx.baseboard_id, sp_state)
+            || *target == local_switch_id
+        {
             self_update = Some(*target);
             continue;
         }
@@ -239,7 +250,7 @@ pub(crate) async fn start_update(
     }
     if let Some(self_update) = self_update {
         errors.push(format!(
-            "cannot update sled where wicketd is running ({})",
+            "cannot update sled or switch where wicketd is running ({})",
             SpIdentifierDisplay(self_update)
         ));
     }

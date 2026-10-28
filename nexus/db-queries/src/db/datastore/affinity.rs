@@ -23,6 +23,7 @@ use crate::db::model::InstanceStateComputer;
 use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::model::VmmState;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::RawPaginator;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -95,7 +96,7 @@ impl DataStore {
             .filter(
                 dsl::id.eq_any(ids.clone()).or(dsl::name.eq_any(names.clone())),
             )
-            .filter(dsl::project_id.eq(authz_project.id()))
+            .filter(dsl::project_id.eq(to_db_typed_uuid(authz_project.id())))
             .filter(dsl::time_deleted.is_null())
             .select((dsl::id, dsl::name))
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
@@ -225,7 +226,9 @@ impl DataStore {
             .sql(AllColumnsOf::<dsl::affinity_group>::as_str())
             .sql(" FROM affinity_group WHERE project_id = ")
             .param()
-            .bind::<diesel::sql_types::Uuid, _>(authz_project.id())
+            .bind::<diesel::sql_types::Uuid, _>(
+                authz_project.id().into_untyped_uuid(),
+            )
             .sql(" AND time_deleted IS NULL");
         paginator
             .paginate_by_id_or_name(pagparams)
@@ -252,7 +255,9 @@ impl DataStore {
             .sql(AllColumnsOf::<dsl::anti_affinity_group>::as_str())
             .sql(" FROM anti_affinity_group WHERE project_id = ")
             .param()
-            .bind::<diesel::sql_types::Uuid, _>(authz_project.id())
+            .bind::<diesel::sql_types::Uuid, _>(
+                authz_project.id().into_untyped_uuid(),
+            )
             .sql(" AND time_deleted IS NULL");
         paginator
             .paginate_by_id_or_name(pagparams)
@@ -276,7 +281,7 @@ impl DataStore {
         let name = group.name().as_str().to_string();
 
         let affinity_group: AffinityGroup = Project::insert_resource(
-            authz_project.id(),
+            authz_project.id().into(),
             diesel::insert_into(dsl::affinity_group).values(group),
         )
         .insert_and_get_result_async(&conn)
@@ -307,7 +312,7 @@ impl DataStore {
         let name = group.name().as_str().to_string();
 
         let anti_affinity_group: AntiAffinityGroup = Project::insert_resource(
-            authz_project.id(),
+            authz_project.id().into(),
             diesel::insert_into(dsl::anti_affinity_group).values(group),
         )
         .insert_and_get_result_async(&conn)

@@ -6,6 +6,9 @@ edition.workspace = true
 [lints]
 workspace = true
 
+[build-dependencies]
+omicron-rpaths.workspace = true
+
 [dependencies]
 chrono.workspace = true
 futures.workspace = true
@@ -20,6 +23,7 @@ nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-generation-kinds.workspace = true
 omicron-uuid-kinds.workspace = true
+pq-sys = "*"
 qorb.workspace = true
 repo-depot-client.workspace = true
 reqwest.workspace = true
@@ -48,6 +52,7 @@ gateway-messages.workspace = true
 gateway-test-utils.workspace = true
 http.workspace = true
 hubtools.workspace = true
+nexus-test-utils.workspace = true
 omicron-test-utils.workspace = true
 rand.workspace = true
 repo-depot-api.workspace = true
@@ -56,3 +61,7 @@ sled-agent-types.workspace = true
 sled-agent-types-versions.workspace = true
 sled-diagnostics.workspace = true
 sp-sim.workspace = true
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true

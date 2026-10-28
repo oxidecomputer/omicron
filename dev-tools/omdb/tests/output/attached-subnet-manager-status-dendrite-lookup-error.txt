@@ -1,0 +1,5 @@
+  error looking up dendrite instances:
+    no dendrite instances in DNS
+   sled 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+     n_subnets=2
+     n_errors=0

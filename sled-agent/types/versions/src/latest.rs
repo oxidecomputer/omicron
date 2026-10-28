@@ -126,10 +126,11 @@ pub mod instance {
     pub use crate::v32::instance::ExternalIps;
     pub use crate::v32::instance::ExternalIpv4Config;
     pub use crate::v32::instance::ExternalIpv6Config;
-    pub use crate::v41::instance::InstanceSledLocalConfig;
 
-    pub use crate::v44::instance::InstanceEnsureBody;
     pub use crate::v44::instance::VmmSpec;
+
+    pub use crate::v59::instance::InstanceEnsureBody;
+    pub use crate::v59::instance::InstanceSledLocalConfig;
 }
 
 pub mod inventory {
@@ -203,7 +204,6 @@ pub mod inventory {
     pub use crate::v55::inventory::ConfigReconcilerInventoryStatus;
     pub use crate::v55::inventory::HostPhase2DesiredContents;
     pub use crate::v55::inventory::HostPhase2DesiredSlots;
-    pub use crate::v55::inventory::Inventory;
     pub use crate::v55::inventory::ManifestBootInventory;
     pub use crate::v55::inventory::ManifestInventory;
     pub use crate::v55::inventory::OmicronFileSourceResolverInventory;
@@ -213,6 +213,8 @@ pub mod inventory {
     pub use crate::v55::inventory::OmicronZoneImageSource;
     pub use crate::v55::inventory::OmicronZonesConfig;
     pub use crate::v55::inventory::ZoneArtifactInventory;
+
+    pub use crate::v57::inventory::Inventory;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;
@@ -228,6 +230,12 @@ pub mod inventory {
     pub use crate::impls::inventory::SourceNatConfigError;
     pub use crate::impls::inventory::ZoneArtifactInventoryDisplay;
     pub use crate::impls::inventory::ZpoolHealthParseError;
+}
+
+pub mod multirack {
+    pub use crate::v60::multirack::MultirackJoinServiceStatus;
+    pub use crate::v60::multirack::SledAgentInfo;
+    pub use crate::v60::multirack::SledAgentStartState;
 }
 
 pub mod probes {

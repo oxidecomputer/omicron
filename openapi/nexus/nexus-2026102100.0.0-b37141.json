@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026101300.0.0"
+    "version": "2026102100.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -1971,8 +1971,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "List certificates for external endpoints",
-        "description": "Returns a list of TLS certificates used for the external API (for the current Silo).  These are sorted by creation date, with the most recent certificates appearing first.",
+        "summary": "List TLS certificates in current silo",
         "operationId": "certificate_list",
         "parameters": [
           {
@@ -2029,8 +2028,8 @@
         "tags": [
           "silos"
         ],
-        "summary": "Create system-wide x.509 certificate",
-        "description": "This certificate is automatically used by the Oxide Control plane to serve external connections.",
+        "summary": "Create TLS certificate in current silo",
+        "description": "This certificate is automatically used by the Oxide control plane to serve API requests.",
         "operationId": "certificate_create",
         "requestBody": {
           "content": {
@@ -2067,8 +2066,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "Fetch certificate",
-        "description": "Returns the details of a specific certificate",
+        "summary": "Fetch TLS certificate in current silo",
         "operationId": "certificate_view",
         "parameters": [
           {
@@ -2104,8 +2102,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "Delete certificate",
-        "description": "Permanently delete a certificate. This operation cannot be undone.",
+        "summary": "Delete TLS certificate in current silo",
         "operationId": "certificate_delete",
         "parameters": [
           {
@@ -7414,6 +7411,207 @@
           "required": [
             "start_time"
           ]
+        }
+      }
+    },
+    "/v1/system/certificates": {
+      "get": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "List TLS certificates in silo",
+        "operationId": "silo_certificate_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "silo"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "Create TLS certificate in silo",
+        "description": "This certificate is automatically used by the Oxide control plane to serve API requests.",
+        "operationId": "silo_certificate_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CertificateCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Certificate"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/certificates/{certificate}": {
+      "get": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "Fetch TLS certificate in silo",
+        "description": "The silo must be specified if the certificate is specified by name, and must not be specified if the certificate is specified by ID.",
+        "operationId": "silo_certificate_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "certificate",
+            "description": "Name or ID of the certificate",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Certificate"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "Delete TLS certificate in silo",
+        "description": "The silo must be specified if the certificate is specified by name, and must not be specified if the certificate is specified by ID.",
+        "operationId": "silo_certificate_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "certificate",
+            "description": "Name or ID of the certificate",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -30143,7 +30341,7 @@
             "x-rust-type": {
               "crate": "byte-wrapper",
               "path": "byte_wrapper::HexArray::<32>",
-              "version": "0.1.0"
+              "version": "0.2.0"
             },
             "type": "string",
             "pattern": "^[0-9a-fA-F]{64}$",

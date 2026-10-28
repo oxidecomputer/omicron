@@ -707,7 +707,8 @@ pub(crate) mod test {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
     use omicron_common::api::external::NameOrId;
-    use uuid::Uuid;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::ProjectUuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -727,10 +728,10 @@ pub(crate) mod test {
         )));
     }
 
-    async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
+    async fn create_org_and_project(client: &ClientTestContext) -> ProjectUuid {
         create_default_ip_pools(&client).await;
         let project = create_project(client, PROJECT_NAME).await;
-        project.identity.id
+        ProjectUuid::from_untyped_uuid(project.identity.id)
     }
 
     // Helper for creating VPC create parameters
@@ -762,12 +763,13 @@ pub(crate) mod test {
 
     async fn get_authz_project(
         cptestctx: &ControlPlaneTestContext,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         action: authz::Action,
     ) -> authz::Project {
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_selector =
-            project::ProjectSelector { project: NameOrId::Id(project_id) };
+        let project_selector = project::ProjectSelector {
+            project: NameOrId::Id(project_id.into_untyped_uuid()),
+        };
         let opctx = test_opctx(&cptestctx);
         let (.., authz_project) = nexus
             .project_lookup(&opctx, project_selector)
@@ -780,7 +782,7 @@ pub(crate) mod test {
 
     async fn delete_project_vpc_defaults(
         cptestctx: &ControlPlaneTestContext,
-        project_id: Uuid,
+        project_id: ProjectUuid,
     ) {
         let opctx = test_opctx(&cptestctx);
         let datastore = cptestctx.server.server_context().nexus.datastore();

@@ -19,7 +19,6 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_model::TufRepoUpload;
 use nexus_db_model::TufTrustRoot;
 use nexus_db_model::saga_types::Saga;
-use nexus_db_model::saga_types::SagaId;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
 use nexus_types::deployment::Blueprint;
@@ -50,6 +49,7 @@ use std::collections::BTreeSet;
 use std::error::Error as _;
 use std::iter;
 use std::sync::Arc;
+use steno::SagaId;
 use tokio::sync::watch;
 use tufaceous::ExpirationEnforcement;
 use tufaceous::RepositoryLoader;
@@ -906,6 +906,7 @@ mod test {
     use nexus_db_model::saga_types::SecId;
     use nexus_inventory::CollectionBuilder;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_test_utils::RACK_UUID;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
@@ -914,7 +915,6 @@ mod test {
     use omicron_common::api::external::ByteCount;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::PropolisUuid;
-    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::disk::M2Slot;
@@ -954,6 +954,7 @@ mod test {
             sled_role: SledRole::Gimlet,
             sled_agent_address: "[::1]:56792".parse().unwrap(),
             sled_id: SledUuid::new_v4(),
+            rack_id: RACK_UUID,
             usable_hardware_threads: 10,
             usable_physical_ram: ByteCount::from(1024 * 1024),
             cpu_family: SledCpuFamily::AmdMilan,
@@ -1068,7 +1069,7 @@ mod test {
         let collection =
             fake_collection_with_ids(sled_id(), zpools, smf_services);
         datastore
-            .inventory_insert_collection(opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(opctx, &collection)
             .await
             .expect("inserted inventory collection");
     }
@@ -1078,7 +1079,7 @@ mod test {
     async fn insert_stuck_running_saga(cptestctx: &ControlPlaneTestContext) {
         let datastore = cptestctx.server.server_context().nexus.datastore();
         let params = steno::SagaCreateParams {
-            id: steno::SagaId(Uuid::new_v4()),
+            id: steno::SagaId::new_v4(),
             name: steno::SagaName::new("test stuck saga"),
             dag: serde_json::Value::Null,
             state: steno::SagaCachedState::Running,
@@ -1093,7 +1094,7 @@ mod test {
     // that exercise `problems()` directly.
     fn fake_saga() -> Saga {
         let params = steno::SagaCreateParams {
-            id: steno::SagaId(saga_uuid()),
+            id: saga_id(),
             name: steno::SagaName::new("test stuck saga"),
             dag: serde_json::Value::Null,
             state: steno::SagaCachedState::Running,
@@ -1181,8 +1182,8 @@ mod test {
         ZpoolUuid::from_untyped_uuid(Uuid::from_u128(0xBBBB))
     }
 
-    fn saga_uuid() -> Uuid {
-        Uuid::from_u128(0xCCCC)
+    fn saga_id() -> SagaId {
+        SagaId::from_u128(0xCCCC)
     }
 
     // `Zpool.time_collected` is stamped by `CollectionBuilder::build` with the

@@ -33,6 +33,7 @@ use crate::db::model::Project;
 use crate::db::model::Sled;
 use crate::db::model::Vmm;
 use crate::db::model::VmmState;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
 use crate::db::update_and_check::UpdateAndCheck;
@@ -163,7 +164,7 @@ impl From<InstanceAndActiveVmm> for instance_types::Instance {
 
         Self {
             identity: value.instance.identity(),
-            project_id: value.instance.project_id,
+            project_id: value.instance.project_id().into_untyped_uuid(),
             ncpus: value.instance.ncpus.into(),
             memory: value.instance.memory.into(),
             hostname: value
@@ -321,7 +322,7 @@ impl DataStore {
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
-        .filter(dsl::project_id.eq(authz_project.id()))
+        .filter(dsl::project_id.eq(to_db_typed_uuid(authz_project.id())))
         .filter(dsl::time_deleted.is_null())
         .left_join(
             vmm_dsl::vmm.on(vmm_dsl::id
@@ -2307,13 +2308,14 @@ mod tests {
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::ProjectUuid;
 
     async fn create_test_project(
         datastore: &DataStore,
         opctx: &OpContext,
     ) -> (authz::Project, Project) {
         let silo_id = DEFAULT_SILO_ID;
-        let project_id = Uuid::new_v4();
+        let project_id = ProjectUuid::new_v4();
         datastore
             .project_create(
                 &opctx,

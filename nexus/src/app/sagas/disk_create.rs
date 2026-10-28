@@ -17,6 +17,7 @@ use nexus_types::external_api::disk;
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use serde::Deserialize;
@@ -34,7 +35,7 @@ use uuid::Uuid;
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
-    pub project_id: Uuid,
+    pub project_id: ProjectUuid,
     pub create_params: disk::DiskCreate,
 }
 
@@ -1082,6 +1083,8 @@ pub(crate) mod test {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
     use omicron_sled_agent::sim::SledAgent;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::ProjectUuid;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -1109,7 +1112,7 @@ pub(crate) mod test {
 
     fn new_readonly_disk_create_params(
         opctx: &OpContext,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         snapshot: &snapshot::Snapshot,
     ) -> Params {
         let create_params = disk::DiskCreate {
@@ -1133,7 +1136,7 @@ pub(crate) mod test {
     }
 
     // Helper for creating disk create parameters
-    fn new_test_params(opctx: &OpContext, project_id: Uuid) -> Params {
+    fn new_test_params(opctx: &OpContext, project_id: ProjectUuid) -> Params {
         Params {
             serialized_authn: Serialized::for_opctx(opctx),
             project_id,
@@ -1156,8 +1159,9 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+        let project_id = ProjectUuid::from_untyped_uuid(
+            create_project(&client, PROJECT_NAME).await.identity.id,
+        );
 
         // Build the saga DAG with the provided test parameters and run it.
         let opctx = test_opctx(cptestctx);
@@ -1178,8 +1182,9 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+        let project_id = ProjectUuid::from_untyped_uuid(
+            create_project(&client, PROJECT_NAME).await.identity.id,
+        );
         resource_helpers::create_disk(&client, PROJECT_NAME, "base-disk").await;
         let snapshot = resource_helpers::create_snapshot(
             &client,
@@ -1429,8 +1434,9 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+        let project_id = ProjectUuid::from_untyped_uuid(
+            create_project(&client, PROJECT_NAME).await.identity.id,
+        );
         let opctx = test_opctx(cptestctx);
 
         crate::app::sagas::test_helpers::action_failure_can_unwind::<
@@ -1459,8 +1465,9 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+        let project_id = ProjectUuid::from_untyped_uuid(
+            create_project(&client, PROJECT_NAME).await.identity.id,
+        );
         let opctx = test_opctx(&cptestctx);
 
         crate::app::sagas::test_helpers::action_failure_can_unwind_idempotently::<
@@ -1485,8 +1492,9 @@ pub(crate) mod test {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
 
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+        let project_id = ProjectUuid::from_untyped_uuid(
+            create_project(&client, PROJECT_NAME).await.identity.id,
+        );
         resource_helpers::create_disk(&client, PROJECT_NAME, "base-disk").await;
         let snapshot = resource_helpers::create_snapshot(
             &client,
@@ -1535,8 +1543,9 @@ pub(crate) mod test {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
 
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+        let project_id = ProjectUuid::from_untyped_uuid(
+            create_project(&client, PROJECT_NAME).await.identity.id,
+        );
         resource_helpers::create_disk(&client, PROJECT_NAME, "base-disk").await;
         let snapshot = resource_helpers::create_snapshot(
             &client,
@@ -1594,8 +1603,9 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+        let project_id = ProjectUuid::from_untyped_uuid(
+            create_project(&client, PROJECT_NAME).await.identity.id,
+        );
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
@@ -1620,8 +1630,9 @@ pub(crate) mod test {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
 
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+        let project_id = ProjectUuid::from_untyped_uuid(
+            create_project(&client, PROJECT_NAME).await.identity.id,
+        );
         resource_helpers::create_disk(&client, PROJECT_NAME, "base-disk").await;
         let snapshot = resource_helpers::create_snapshot(
             &client,
