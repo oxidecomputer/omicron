@@ -7648,6 +7648,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-fm-preparation"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-bb8-diesel",
+ "chrono",
+ "diesel",
+ "dropshot",
+ "fmd-adm-sys",
+ "iddqd",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "nexus-db-schema",
+ "nexus-fm",
+ "nexus-inventory",
+ "nexus-test-utils",
+ "nexus-types",
+ "omicron-certificates",
+ "omicron-common",
+ "omicron-generation-kinds",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "openssl",
+ "pq-sys",
+ "rand 0.9.2",
+ "rcgen",
+ "serde",
+ "serde_json",
+ "slog",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
+ "steno",
+ "strum 0.27.2",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-fm-slippy"
 version = "0.1.0"
 dependencies = [
@@ -9353,6 +9394,7 @@ dependencies = [
  "nexus-defaults",
  "nexus-external-api",
  "nexus-fm",
+ "nexus-fm-preparation",
  "nexus-internal-api",
  "nexus-inventory",
  "nexus-lockstep-api",
