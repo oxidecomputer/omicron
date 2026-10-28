@@ -176,16 +176,6 @@ enum Arch {
     Aarch64,
 }
 
-impl Os {
-    fn env_name(&self) -> &'static str {
-        match self {
-            Os::Illumos => "ILLUMOS",
-            Os::Linux => "LINUX",
-            Os::Mac => "DARWIN",
-        }
-    }
-}
-
 fn os_name() -> Result<Os> {
     let os = match std::env::consts::OS {
         "linux" => Os::Linux,
@@ -203,6 +193,76 @@ fn arch() -> Result<Arch> {
         other => bail!("Architecture not supported: {other}"),
     };
     Ok(arch)
+}
+
+fn cockroach_build(os: Os, arch: Arch) -> Result<(&'static str, &'static str)> {
+    match (os, arch) {
+        (Os::Linux, Arch::X86_64) => Ok(("linux-amd64", "CIDL_SHA256_LINUX")),
+        (Os::Illumos, Arch::X86_64) => {
+            Ok(("illumos-amd64", "CIDL_SHA256_ILLUMOS"))
+        }
+        // Despite the series name, the macOS artifact is universal.
+        (Os::Mac, Arch::X86_64 | Arch::Aarch64) => {
+            Ok(("darwin-amd64", "CIDL_SHA256_DARWIN"))
+        }
+        (Os::Linux, Arch::Aarch64) => bail!(
+            "CockroachDB: unsupported OS/architecture linux/aarch64; \
+             the pinned Linux build is x86_64"
+        ),
+        (Os::Illumos, Arch::Aarch64) => bail!(
+            "CockroachDB: unsupported OS/architecture illumos/aarch64; \
+             no pinned build is configured for this combination"
+        ),
+    }
+}
+
+fn clickhouse_build(
+    os: Os,
+    arch: Arch,
+) -> Result<(&'static str, &'static str)> {
+    match (os, arch) {
+        (Os::Linux, Arch::X86_64) => Ok(("linux", "CIDL_SHA256_LINUX")),
+        (Os::Illumos, Arch::X86_64) => Ok(("illumos", "CIDL_SHA256_ILLUMOS")),
+        // Preserve the existing macOS selection for both architectures.
+        (Os::Mac, Arch::X86_64 | Arch::Aarch64) => {
+            Ok(("macos", "CIDL_SHA256_DARWIN"))
+        }
+        (Os::Linux, Arch::Aarch64) => bail!(
+            "ClickHouse: unsupported OS/architecture linux/aarch64; \
+             the pinned Linux build is x86_64"
+        ),
+        (Os::Illumos, Arch::Aarch64) => bail!(
+            "ClickHouse: unsupported OS/architecture illumos/aarch64; \
+             no pinned build is configured for this combination"
+        ),
+    }
+}
+
+fn cargo_hack_build(
+    os: Os,
+    arch: Arch,
+) -> Result<(&'static str, &'static str)> {
+    match (os, arch) {
+        (Os::Linux, Arch::X86_64) => {
+            Ok(("x86_64-unknown-linux-gnu", "CIDL_SHA256_LINUX_X86_64"))
+        }
+        (Os::Linux, Arch::Aarch64) => {
+            Ok(("aarch64-unknown-linux-gnu", "CIDL_SHA256_LINUX_AARCH64"))
+        }
+        (Os::Mac, Arch::X86_64) => {
+            Ok(("x86_64-apple-darwin", "CIDL_SHA256_DARWIN_X86_64"))
+        }
+        (Os::Mac, Arch::Aarch64) => {
+            Ok(("aarch64-apple-darwin", "CIDL_SHA256_DARWIN_AARCH64"))
+        }
+        (Os::Illumos, Arch::X86_64) => {
+            Ok(("x86_64-unknown-illumos", "CIDL_SHA256_ILLUMOS_X86_64"))
+        }
+        (Os::Illumos, Arch::Aarch64) => bail!(
+            "cargo-hack: unsupported OS/architecture illumos/aarch64; \
+             no pinned build is configured for this combination"
+        ),
+    }
 }
 
 /// An Oxide repository at `revision`.
@@ -676,28 +736,17 @@ impl Downloader<'_> {
     async fn download_cargo_hack(&self) -> Result<()> {
         let os = os_name()?;
         let arch = arch()?;
+        let (target_triple, checksum_key) = cargo_hack_build(os, arch)?;
 
         let download_dir = self.output_dir.join("downloads");
         let destination_dir = self.output_dir.join("cargo-hack");
 
         let checksums =
             KvFile::read(self.versions_dir.join("cargo_hack_checksum")).await?;
-        let checksum = checksums
-            .get_sha256_value(&format!("CIDL_SHA256_{}", os.env_name()))?;
-
+        let checksum = checksums.get_sha256_value(checksum_key)?;
         let version = self.read_version_file("cargo_hack_version").await?;
 
-        let (platform, supported_arch) = match (os, arch) {
-            (Os::Illumos, Arch::X86_64) => ("unknown-illumos", "x86_64"),
-            (Os::Linux, Arch::X86_64) => ("unknown-linux-gnu", "x86_64"),
-            (Os::Linux, Arch::Aarch64) => ("unknown-linux-gnu", "aarch64"),
-            (Os::Mac, Arch::X86_64) => ("apple-darwin", "x86_64"),
-            (Os::Mac, Arch::Aarch64) => ("apple-darwin", "aarch64"),
-            (os, arch) => bail!("Unsupported OS/arch: {os}/{arch}"),
-        };
-
-        let tarball_filename =
-            format!("cargo-hack-{supported_arch}-{platform}.tar.gz");
+        let tarball_filename = format!("cargo-hack-{target_triple}.tar.gz");
         let tarball_url =
             format!("{CARGO_HACK_URL}/v{version}/{tarball_filename}");
 
@@ -721,6 +770,8 @@ impl Downloader<'_> {
 
     async fn download_clickhouse(&self) -> Result<()> {
         let os = os_name()?;
+        let arch = arch()?;
+        let (platform, checksum_key) = clickhouse_build(os, arch)?;
 
         let download_dir = self.output_dir.join("downloads");
         let destination_dir = self.output_dir.join("clickhouse");
@@ -728,19 +779,12 @@ impl Downloader<'_> {
         let checksums =
             KvFile::read(self.versions_dir.join("clickhouse_checksums"))
                 .await?;
-        let checksum = checksums
-            .get_sha256_value(&format!("CIDL_SHA256_{}", os.env_name()))?;
-
+        let checksum = checksums.get_sha256_value(checksum_key)?;
         let version = self.read_version_file("clickhouse_version").await?;
 
         const S3_BUCKET: &'static str =
             "https://oxide-clickhouse-build.s3.us-west-2.amazonaws.com";
 
-        let platform = match os {
-            Os::Illumos => "illumos",
-            Os::Linux => "linux",
-            Os::Mac => "macos",
-        };
         let tarball_filename =
             format!("clickhouse-{version}.{platform}.tar.gz");
         let tarball_url = format!("{S3_BUCKET}/{tarball_filename}");
@@ -770,6 +814,8 @@ impl Downloader<'_> {
 
     async fn download_cockroach(&self) -> Result<()> {
         let os = os_name()?;
+        let arch = arch()?;
+        let (build, checksum_key) = cockroach_build(os, arch)?;
 
         let download_dir = self.output_dir.join("downloads");
         let destination_dir = self.output_dir.join("cockroachdb");
@@ -778,14 +824,7 @@ impl Downloader<'_> {
             KvFile::read(self.versions_dir.join("cockroachdb_checksums"))
                 .await?;
         let commit = checksums.get_git_commit_hash_value("COCKROACH_COMMIT")?;
-        let checksum = checksums
-            .get_sha256_value(&format!("CIDL_SHA256_{}", os.env_name()))?;
-
-        let build = match os {
-            Os::Illumos => "illumos-amd64",
-            Os::Linux => "linux-amd64",
-            Os::Mac => "darwin-amd64",
-        };
+        let checksum = checksums.get_sha256_value(checksum_key)?;
 
         let tarball = OxideBuildomatFile {
             repo: OxideRepoRevision { name: "cockroach", revision: commit },
@@ -1104,6 +1143,118 @@ impl Downloader<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn database_build_selection() {
+        for (os, arch, expected) in [
+            (Os::Linux, Arch::X86_64, ("linux-amd64", "CIDL_SHA256_LINUX")),
+            (
+                Os::Illumos,
+                Arch::X86_64,
+                ("illumos-amd64", "CIDL_SHA256_ILLUMOS"),
+            ),
+            (Os::Mac, Arch::X86_64, ("darwin-amd64", "CIDL_SHA256_DARWIN")),
+            (Os::Mac, Arch::Aarch64, ("darwin-amd64", "CIDL_SHA256_DARWIN")),
+        ] {
+            assert_eq!(cockroach_build(os, arch).unwrap(), expected);
+        }
+
+        for (os, arch, expected) in [
+            (Os::Linux, Arch::X86_64, ("linux", "CIDL_SHA256_LINUX")),
+            (Os::Illumos, Arch::X86_64, ("illumos", "CIDL_SHA256_ILLUMOS")),
+            (Os::Mac, Arch::X86_64, ("macos", "CIDL_SHA256_DARWIN")),
+            (Os::Mac, Arch::Aarch64, ("macos", "CIDL_SHA256_DARWIN")),
+        ] {
+            assert_eq!(clickhouse_build(os, arch).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn database_builds_reject_unsupported_architectures() {
+        assert_eq!(
+            cockroach_build(Os::Linux, Arch::Aarch64).unwrap_err().to_string(),
+            "CockroachDB: unsupported OS/architecture linux/aarch64; \
+         the pinned Linux build is x86_64",
+        );
+        assert_eq!(
+            clickhouse_build(Os::Linux, Arch::Aarch64).unwrap_err().to_string(),
+            "ClickHouse: unsupported OS/architecture linux/aarch64; \
+         the pinned Linux build is x86_64",
+        );
+        assert_eq!(
+            cockroach_build(Os::Illumos, Arch::Aarch64)
+                .unwrap_err()
+                .to_string(),
+            "CockroachDB: unsupported OS/architecture illumos/aarch64; \
+         no pinned build is configured for this combination",
+        );
+        assert_eq!(
+            clickhouse_build(Os::Illumos, Arch::Aarch64)
+                .unwrap_err()
+                .to_string(),
+            "ClickHouse: unsupported OS/architecture illumos/aarch64; \
+         no pinned build is configured for this combination",
+        );
+    }
+
+    #[test]
+    fn cargo_hack_builds_use_matching_checksums() {
+        let checksums = KvFile::parse(
+            Utf8PathBuf::from("tools/cargo_hack_checksum"),
+            include_str!("../../../tools/cargo_hack_checksum"),
+        )
+        .unwrap();
+
+        for (os, arch, triple, key, expected_hash) in [
+            (
+                Os::Linux,
+                Arch::X86_64,
+                "x86_64-unknown-linux-gnu",
+                "CIDL_SHA256_LINUX_X86_64",
+                "ffecd932fc7569975eb77d70f2e299f07b57220868bedeb5867062a4a95a0376",
+            ),
+            (
+                Os::Linux,
+                Arch::Aarch64,
+                "aarch64-unknown-linux-gnu",
+                "CIDL_SHA256_LINUX_AARCH64",
+                "b9aa9af060c89bf3dfbe1fccf73f686b7372cdf7161ae433f5a3bc648d241038",
+            ),
+            (
+                Os::Mac,
+                Arch::X86_64,
+                "x86_64-apple-darwin",
+                "CIDL_SHA256_DARWIN_X86_64",
+                "36645c70d8c8f1f7c071c0d05e0225ef0f940821951f0f3f74f51185e7f5747e",
+            ),
+            (
+                Os::Mac,
+                Arch::Aarch64,
+                "aarch64-apple-darwin",
+                "CIDL_SHA256_DARWIN_AARCH64",
+                "ee00750378126c7e14402a45c34f95ed1ba4be2ae505b0c0020bb39b5b3467a4",
+            ),
+            (
+                Os::Illumos,
+                Arch::X86_64,
+                "x86_64-unknown-illumos",
+                "CIDL_SHA256_ILLUMOS_X86_64",
+                "f80d281343368bf7a027e2a7e94ae98a19e085c0666bff8d15264f39b42997bc",
+            ),
+        ] {
+            assert_eq!(cargo_hack_build(os, arch).unwrap(), (triple, key));
+            assert_eq!(checksums.get_string_value(key).unwrap(), expected_hash);
+            checksums.get_sha256_value(key).unwrap();
+        }
+
+        assert_eq!(
+            cargo_hack_build(Os::Illumos, Arch::Aarch64)
+                .unwrap_err()
+                .to_string(),
+            "cargo-hack: unsupported OS/architecture illumos/aarch64; \
+         no pinned build is configured for this combination",
+        );
+    }
 
     fn example_path() -> Utf8PathBuf {
         Utf8PathBuf::from("tools/example_checksums")
