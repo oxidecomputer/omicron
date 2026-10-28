@@ -22,6 +22,7 @@ use nexus_types::trust_quorum::{
     TrustQuorumConfig as NexusTrustQuorumConfig, TrustQuorumMemberState,
 };
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX_LENGTH, get_64_subnet};
+use omicron_common::http_client::internal_http_client_builder;
 use omicron_uuid_kinds::{RackUuid, SledUuid};
 use parallel_task_set::ParallelTaskSet;
 use rand::seq::SliceRandom;
@@ -678,7 +679,7 @@ async fn get_sled_agent_clients(
     randomized.shuffle(&mut rand::rng());
     let mut clients = Vec::with_capacity(num_clients);
 
-    let reqwest_client = reqwest::ClientBuilder::new()
+    let reqwest_client = internal_http_client_builder()
         .connect_timeout(timeout)
         .timeout(timeout)
         .build()

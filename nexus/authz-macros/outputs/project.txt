@@ -1,0 +1,99 @@
+///`authz` type for a resource of type ProjectUsed to uniquely identify a resource of type Project across renames, moves, etc., and to do authorization checks (see  [`crate::context::OpContext::authorize()`]).  See [`crate::authz`] module-level documentation for more information.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Project {
+    parent: Silo,
+    key: ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::ProjectKind>,
+    lookup_type: LookupType,
+}
+impl Project {
+    /// Makes a new `authz` struct for this resource with the given
+    /// `parent`, unique key `key`, looked up as described by
+    /// `lookup_type`
+    pub fn new(
+        parent: Silo,
+        key: ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::ProjectKind>,
+        lookup_type: LookupType,
+    ) -> Project {
+        Project {
+            parent,
+            key: key.into(),
+            lookup_type,
+        }
+    }
+    /// A version of `new` that takes the primary key type directly.
+    /// This is only different from [`Self::new`] if this resource
+    /// uses a different input key type.
+    pub fn with_primary_key(
+        parent: Silo,
+        key: ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::ProjectKind>,
+        lookup_type: LookupType,
+    ) -> Project {
+        Project {
+            parent,
+            key,
+            lookup_type,
+        }
+    }
+    pub fn id(
+        &self,
+    ) -> ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::ProjectKind> {
+        self.key.clone().into()
+    }
+    /// Describes how to register this type with Oso
+    pub(super) fn init() -> Init {
+        use oso::PolarClass;
+        Init {
+            polar_snippet: "",
+            polar_class: Project::get_polar_class(),
+        }
+    }
+}
+impl Eq for Project {}
+impl PartialEq for Project {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
+}
+impl oso::PolarClass for Project {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_method(
+                "has_role",
+                |r: &Project, actor: AuthenticatedActor, role: String| {
+                    actor
+                        .has_role_resource(
+                            ResourceType::Project,
+                            ::omicron_uuid_kinds::GenericUuid::into_untyped_uuid(r.key),
+                            &role,
+                        )
+                },
+            )
+            .add_attribute_getter("silo", |r: &Project| r.parent.clone())
+    }
+}
+impl ApiResource for Project {
+    fn parent(&self) -> Option<&dyn AuthorizedResource> {
+        Some(&self.parent)
+    }
+    fn resource_type(&self) -> ResourceType {
+        ResourceType::Project
+    }
+    fn lookup_type(&self) -> &LookupType {
+        &self.lookup_type
+    }
+    fn as_resource_with_roles(&self) -> Option<&dyn ApiResourceWithRoles> {
+        Some(self)
+    }
+}
+impl ApiResourceWithRoles for Project {
+    fn resource_id(&self) -> Uuid {
+        ::omicron_uuid_kinds::GenericUuid::into_untyped_uuid(self.key)
+    }
+    fn conferred_roles_by(
+        &self,
+        _authn: &authn::Context,
+    ) -> Result<Option<(ResourceType, Uuid)>, Error> {
+        Ok(None)
+    }
+}

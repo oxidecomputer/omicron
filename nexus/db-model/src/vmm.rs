@@ -75,8 +75,9 @@ pub struct Vmm {
     /// when it was started.
     pub cpu_platform: VmmCpuPlatform,
 
-    /// If this VMM is in the `Failed` state, this field describes why it
-    /// failed. This is `None` for VMMs that are not in the `Failed` state.
+    /// If this VMM is, or has ever been, in the `Failed` state, this field
+    /// describes why it failed. This is `None` for VMMs that have never been in
+    /// the `Failed` state.
     pub failure_reason: Option<VmmFailureReason>,
 
     /// The sled's `update_disposition` generation at which this VMM was marked

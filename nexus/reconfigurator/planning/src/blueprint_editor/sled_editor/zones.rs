@@ -174,7 +174,7 @@ impl ZonesEditor {
         &mut self,
         zone_id: &OmicronZoneUuid,
     ) -> Result<(bool, &BlueprintZoneConfig), ZonesEditError> {
-        let mut config = self.zones.get_mut(zone_id).ok_or_else(|| {
+        let mut config = self.zones.get_mut(*zone_id).ok_or_else(|| {
             ZonesEditError::ExpungeNonexistentZone { id: *zone_id }
         })?;
 
@@ -202,7 +202,7 @@ impl ZonesEditor {
         &mut self,
         zone_id: &OmicronZoneUuid,
     ) -> Result<bool, ZonesEditError> {
-        let mut config = self.zones.get_mut(zone_id).ok_or_else(|| {
+        let mut config = self.zones.get_mut(*zone_id).ok_or_else(|| {
             ZonesEditError::MarkNonexistentZoneReadyForCleanup { id: *zone_id }
         })?;
 
@@ -228,7 +228,7 @@ impl ZonesEditor {
         zone_id: &OmicronZoneUuid,
         image_source: BlueprintZoneImageSource,
     ) -> Result<BlueprintZoneImageSource, ZonesEditError> {
-        let mut config = self.zones.get_mut(zone_id).ok_or_else(|| {
+        let mut config = self.zones.get_mut(*zone_id).ok_or_else(|| {
             ZonesEditError::SetImageSourceForNonexistentZone {
                 id: *zone_id,
                 image_source: image_source.clone(),

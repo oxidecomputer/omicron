@@ -46,11 +46,11 @@ pub trait SitrepGenerationColumn:
 }
 
 impl SitrepGenerationColumn for schema::fm_sitrep::alert_generation {
-    type Kind = omicron_generation_kinds::AlertGenerationKind;
+    type Kind = omicron_generation_kinds::SitrepAlertGenerationKind;
 }
 
 impl SitrepGenerationColumn for schema::fm_sitrep::support_bundle_generation {
-    type Kind = omicron_generation_kinds::SupportBundleGenerationKind;
+    type Kind = omicron_generation_kinds::SitrepSupportBundleGenerationKind;
 }
 
 /// A resource created by FM rendezvous, comprising the Diesel schema types
@@ -153,8 +153,8 @@ pub(crate) mod test_utils {
     use nexus_db_lookup::DbConnection;
     use nexus_types::fm::Sitrep;
     use nexus_types::fm::SitrepMetadata;
-    use omicron_generation_kinds::AlertGeneration;
-    use omicron_generation_kinds::SupportBundleGeneration;
+    use omicron_generation_kinds::SitrepAlertGeneration;
+    use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_generation_kinds::TypedGenerationKind;
     use omicron_generation_kinds::TypedGenerationTag;
     use omicron_uuid_kinds::CollectionUuid;
@@ -276,8 +276,8 @@ pub(crate) mod test_utils {
                 creator_id: OmicronZoneUuid::new_v4(),
                 comment: "rendezvous resource test sitrep".to_string(),
                 time_created: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: IdOrdMap::new(),
             ereports_by_id: IdOrdMap::new(),

@@ -83,7 +83,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type Project, identified by its id
-    pub fn project_id(self, id: Uuid) -> Project<'a> {
+    pub fn project_id(self, id: ProjectUuid) -> Project<'a> {
         Project::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -618,7 +618,7 @@ lookup_resource! {
     ancestors = [ "Silo" ],
     lookup_by_name = true,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = ProjectKind } ]
 }
 
 lookup_resource! {
@@ -875,12 +875,16 @@ lookup_resource! {
     primary_key_columns = [ { column_name = "id", uuid_kind = BuiltInUserKind } ]
 }
 
+// Visible outside the silo so fleet admins can manage any silo's certificates
+// by ID. Lookups on behalf of the current silo must check the silo themselves
+// (see `current_silo_certificate_fetch_for` in Nexus).
 lookup_resource! {
     name = "Certificate",
     ancestors = [ "Silo" ],
     lookup_by_name = true,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
+    visible_outside_silo = true
 }
 
 lookup_resource! {

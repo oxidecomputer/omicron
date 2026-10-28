@@ -66,7 +66,9 @@ region_replacement_driver.period_secs = 10
 service_firewall_propagation.period_secs = 300
 v2p_mapping_propagation.period_secs = 30
 instance_watcher.period_secs = 30
+capacity_metrics.period_secs = 60
 abandoned_vmm_reaper.period_secs = 60
+vmm_stop_for_update.period_secs = 60
 saga_recovery.period_secs = 600
 lookup_region_port.period_secs = 60
 instance_updater.period_secs = 30
@@ -135,6 +137,10 @@ audit_log_cleanup.period_secs = 600
 audit_log_cleanup.retention_days = 90
 audit_log_cleanup.max_deleted_per_activation = 10000
 populate_switch_ports.period_secs = 30
+# This task reads directly from the blueprint rendezvous table, which is updated
+# every 300s. Therefore, this task doesn't need to run more often. In addition,
+# every time the blueprint rendezvous task runs, this task is also activated.
+vmm_mark_stop_for_update.period_secs = 300
 
 [default_region_allocation_strategy]
 # by default, allocate across 3 distinct sleds

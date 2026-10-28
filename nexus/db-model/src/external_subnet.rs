@@ -29,6 +29,8 @@ use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid as _;
 use omicron_uuid_kinds::InstanceKind;
+use omicron_uuid_kinds::ProjectKind;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::SubnetPoolKind;
 use omicron_uuid_kinds::SubnetPoolMemberKind;
 use omicron_uuid_kinds::SubnetPoolMemberUuid;
@@ -230,10 +232,16 @@ pub struct ExternalSubnet {
     pub identity: ExternalSubnetIdentity,
     pub subnet_pool_id: DbTypedUuid<SubnetPoolKind>,
     pub subnet_pool_member_id: DbTypedUuid<SubnetPoolMemberKind>,
-    pub project_id: Uuid,
+    pub project_id: DbTypedUuid<ProjectKind>,
     pub subnet: IpNet,
     pub attach_state: IpAttachState,
     pub instance_id: Option<DbTypedUuid<InstanceKind>>,
+}
+
+impl ExternalSubnet {
+    pub fn project_id(&self) -> ProjectUuid {
+        self.project_id.into()
+    }
 }
 
 impl From<ExternalSubnet> for external_subnet_types::ExternalSubnet {
@@ -241,7 +249,7 @@ impl From<ExternalSubnet> for external_subnet_types::ExternalSubnet {
         Self {
             identity: value.identity(),
             subnet: value.subnet.into(),
-            project_id: value.project_id,
+            project_id: value.project_id.into_untyped_uuid(),
             subnet_pool_id: value.subnet_pool_id.into_untyped_uuid(),
             subnet_pool_member_id: value
                 .subnet_pool_member_id

@@ -89,8 +89,8 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_model::DbTypedGeneration;
 use nexus_db_model::to_db_typed_generation;
 use omicron_common::api::external::Error;
-use omicron_generation_kinds::AlertGeneration;
-use omicron_generation_kinds::SupportBundleGeneration;
+use omicron_generation_kinds::SitrepAlertGeneration;
+use omicron_generation_kinds::SitrepSupportBundleGeneration;
 use omicron_generation_kinds::TypedGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
@@ -114,7 +114,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         sitrep_id: SitrepUuid,
-        sitrep_alert_generation: AlertGeneration,
+        sitrep_alert_generation: SitrepAlertGeneration,
     ) -> Result<MarkerGcResult, Error> {
         self.fm_rendezvous_marker_gc::<nexus_db_model::Alert>(
             opctx,
@@ -131,7 +131,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         sitrep_id: SitrepUuid,
-        sitrep_support_bundle_generation: SupportBundleGeneration,
+        sitrep_support_bundle_generation: SitrepSupportBundleGeneration,
     ) -> Result<MarkerGcResult, Error> {
         self.fm_rendezvous_marker_gc::<nexus_db_model::SupportBundle>(
             opctx,

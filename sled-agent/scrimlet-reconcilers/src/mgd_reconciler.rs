@@ -6,6 +6,7 @@
 //! zone.
 
 use crate::ScrimletReconcilersMode;
+use crate::handle::BgpSocketConfig;
 use crate::reconciler_task::Reconciler;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::mgd::MgdReconcilerStatus;
@@ -22,6 +23,7 @@ mod static_route_reconciler;
 pub(crate) struct MgdReconciler {
     client: Client,
     switch_slot: ThisSledSwitchSlot,
+    bgp_socket_config: BgpSocketConfig,
 }
 
 impl Reconciler for MgdReconciler {
@@ -35,7 +37,19 @@ impl Reconciler for MgdReconciler {
         switch_slot: ThisSledSwitchSlot,
         parent_log: &Logger,
     ) -> Self {
-        Self { client: mode.mgd_client(parent_log), switch_slot }
+        let bgp_socket_config = match mode {
+            ScrimletReconcilersMode::SwitchZone(_) => {
+                BgpSocketConfig::default()
+            }
+            ScrimletReconcilersMode::Test { bgp_socket_config, .. } => {
+                bgp_socket_config
+            }
+        };
+        Self {
+            client: mode.mgd_client(parent_log),
+            switch_slot,
+            bgp_socket_config,
+        }
     }
 
     async fn do_reconciliation(
@@ -55,6 +69,7 @@ impl Reconciler for MgdReconciler {
             &self.client,
             &system_networking_config.rack_network_config,
             self.switch_slot,
+            self.bgp_socket_config,
             log,
         )
         .await;

@@ -483,22 +483,35 @@ impl nexus_test_interface::NexusServer for Server {
         let (ipv4_service_ranges, ipv6_service_ranges): (Vec<_>, Vec<_>) =
             blueprint
                 .in_service_zones()
-                .filter_map(|(_, zc)| match &zc.zone_type {
-                    BlueprintZoneType::BoundaryNtp(
-                        blueprint_zone_type::BoundaryNtp {
-                            external_ip, ..
-                        },
-                    ) => Some(IpRange::from(external_ip.snat_cfg.ip)),
-                    BlueprintZoneType::ExternalDns(
-                        blueprint_zone_type::ExternalDns {
-                            dns_address, ..
-                        },
-                    ) => Some(IpRange::from(dns_address.addr.ip())),
-                    BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                        external_ip,
-                        ..
-                    }) => Some(IpRange::from(external_ip.ip)),
-                    _ => None,
+                .flat_map(|(_, zc)| {
+                    let ranges: Vec<IpRange> = match &zc.zone_type {
+                        BlueprintZoneType::BoundaryNtp(
+                            blueprint_zone_type::BoundaryNtp {
+                                external_ip,
+                                ..
+                            },
+                        ) => external_ip
+                            .iter()
+                            .map(|snat| IpRange::from(snat.snat_cfg.ip))
+                            .collect(),
+                        BlueprintZoneType::ExternalDns(
+                            blueprint_zone_type::ExternalDns {
+                                dns_addresses,
+                                ..
+                            },
+                        ) => dns_addresses
+                            .iter()
+                            .map(|a| IpRange::from(a.addr.ip()))
+                            .collect(),
+                        BlueprintZoneType::Nexus(
+                            blueprint_zone_type::Nexus { external_ips, .. },
+                        ) => external_ips
+                            .iter()
+                            .map(|e| IpRange::from(e.ip))
+                            .collect(),
+                        _ => Vec::new(),
+                    };
+                    ranges
                 })
                 .partition(|r| r.is_ipv4());
 

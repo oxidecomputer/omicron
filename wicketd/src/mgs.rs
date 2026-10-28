@@ -9,6 +9,7 @@ use dropshot::HttpError;
 use futures::StreamExt;
 use gateway_types::ignition::SpIgnition;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
+use omicron_common::http_client::internal_http_client_builder;
 use slog::{Logger, info, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddrV6;
@@ -158,7 +159,7 @@ pub fn make_mgs_client(
     // timeout?
     let endpoint = format!("http://[{}]:{}", mgs_addr.ip(), mgs_addr.port());
     info!(log, "MGS Endpoint: {}", endpoint);
-    let client = reqwest::ClientBuilder::new()
+    let client = internal_http_client_builder()
         .connect_timeout(MGS_TIMEOUT)
         .timeout(MGS_TIMEOUT)
         .build()

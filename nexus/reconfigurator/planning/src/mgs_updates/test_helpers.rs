@@ -34,8 +34,10 @@ use sled_agent_types::inventory::BootPartitionContents;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::CurrentUpdateDisposition;
 use sled_agent_types::inventory::FmdInventory;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
+use sled_agent_types::inventory::InstanceManagerStatus;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
@@ -64,6 +66,7 @@ use tufaceous_artifact::RotTags;
 use tufaceous_artifact::SpTags;
 use tufaceous_artifact::ZoneTags;
 
+use crate::mgs_updates::EvacuatingSleds;
 use crate::mgs_updates::PendingHostPhase2Changes;
 
 /// Version that will be used for all artifacts in the TUF repo
@@ -277,6 +280,41 @@ impl TestBoards {
             (b.id.typ == SpType::Sled && b.id.slot == sp_slot)
                 .then_some(b.sled_id)
         })
+    }
+
+    /// Get the IDs of all sleds.
+    pub fn sled_ids(&self) -> impl Iterator<Item = SledUuid> + '_ {
+        self.boards
+            .iter()
+            .filter_map(|b| (b.id.typ == SpType::Sled).then_some(b.sled_id))
+    }
+
+    /// Get the SP slot of a particular sled.
+    pub fn sled_sp_slot(&self, sled_id: SledUuid) -> Option<u16> {
+        self.boards.iter().find_map(|b| {
+            (b.id.typ == SpType::Sled && b.sled_id == sled_id)
+                .then_some(b.id.slot)
+        })
+    }
+
+    /// Get the serial number of a particular sled.
+    pub fn sled_serial_number(
+        &self,
+        sled_id: SledUuid,
+    ) -> Option<&'static str> {
+        self.boards.iter().find_map(|b| {
+            (b.id.typ == SpType::Sled && b.sled_id == sled_id)
+                .then_some(b.serial)
+        })
+    }
+
+    /// Get an `EvacuatingSleds` describing a blueprint in which every
+    /// sled is marked `Evacuating` at the initial sled config generation.
+    pub fn all_sleds_evacuating(&self) -> EvacuatingSleds {
+        EvacuatingSleds::new_for_test(
+            self.sled_ids()
+                .map(|sled_id| (sled_id, SledConfigGeneration::new())),
+        )
     }
 
     /// Get a helper to build an inventory collection reflecting specific
@@ -651,6 +689,17 @@ impl ExpectedUpdates {
         self.updates.len()
     }
 
+    /// Returns whether we still expect an update to `component` of the board
+    /// in the given SP slot.
+    pub fn contains(
+        &self,
+        sp_type: SpType,
+        sp_slot: u16,
+        component: MgsUpdateComponent,
+    ) -> bool {
+        self.updates.contains_key(&(sp_type, sp_slot, component))
+    }
+
     /// Confirm that `update` matches one of our expected updates, and _remove_
     /// that update.
     ///
@@ -674,7 +723,7 @@ impl ExpectedUpdates {
         println!("found update: {} slot {}", sp_type, sp_slot);
         let ExpectedUpdate { expected_serial, expected_artifact, .. } = self
             .updates
-            .remove(&(sp_type, sp_slot, component))
+            .remove((sp_type, sp_slot, component))
             .expect("unexpected update");
         assert_eq!(update.artifact_hash, expected_artifact);
         assert_eq!(update.artifact_version, ARTIFACT_VERSION_2);
@@ -735,10 +784,8 @@ impl ExpectedUpdates {
 
                 // We should also have a corresponding phase 2 change for this
                 // phase 1 update.
-                let expected_phase2 = self
-                    .phase2
-                    .remove(&sp_slot)
-                    .expect("missing phase2 update");
+                let expected_phase2 =
+                    self.phase2.remove(sp_slot).expect("missing phase2 update");
                 let (actual_phase2_slot, actual_phase2_contents) =
                     pending_host_phase_2_changes
                         .remove(&expected_phase2.sled_id)
@@ -809,6 +856,13 @@ pub(super) struct TestBoardCollectionBuilder<'a> {
 
     // host exceptions are keyed only by slot; they only apply to sleds.
     host_exceptions: BTreeMap<u16, HostOsException>,
+
+    // sled-agent inventory exceptions (relevant to sled evacuation); also
+    // keyed only by slot, and only apply to sleds.
+    sled_config_generation_exceptions: BTreeMap<u16, SledConfigGeneration>,
+    sled_ledgered_disposition_exceptions:
+        BTreeMap<u16, OmicronSledUpdateDisposition>,
+    instance_manager_status_exceptions: BTreeMap<u16, InstanceManagerStatus>,
 }
 
 impl<'a> TestBoardCollectionBuilder<'a> {
@@ -845,6 +899,9 @@ impl<'a> TestBoardCollectionBuilder<'a> {
             rot_active_slot_exceptions: BTreeMap::new(),
             rot_persistent_boot_preference_exceptions: BTreeMap::new(),
             host_exceptions: BTreeMap::new(),
+            sled_config_generation_exceptions: BTreeMap::new(),
+            sled_ledgered_disposition_exceptions: BTreeMap::new(),
+            instance_manager_status_exceptions: BTreeMap::new(),
         }
     }
 
@@ -1005,6 +1062,103 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         self.host_exceptions.contains_key(&slot)
     }
 
+    /// Override the generation of the sled config reported by the sled in the
+    /// given slot (both `ledgered_sled_config` and `last_reconciled_config`).
+    /// By default, all sleds report `SledConfigGeneration::new()`.
+    pub fn sled_config_generation_exception(
+        mut self,
+        sp_slot: u16,
+        generation: SledConfigGeneration,
+    ) -> Self {
+        self.sled_config_generation_exceptions.insert(sp_slot, generation);
+        self
+    }
+
+    /// Override the update disposition in the sled config reported by the sled
+    /// in the given slot (both `ledgered_sled_config` and
+    /// `last_reconciled_config`). By default, all sleds report `Available`.
+    pub fn sled_ledgered_disposition_exception(
+        mut self,
+        sp_slot: u16,
+        disposition: OmicronSledUpdateDisposition,
+    ) -> Self {
+        self.sled_ledgered_disposition_exceptions.insert(sp_slot, disposition);
+        self
+    }
+
+    /// Override the instance manager status reported by the sled in the given
+    /// slot. By default, all sleds report `Known(Available)` with zero
+    /// registered VMMs.
+    pub fn instance_manager_status_exception(
+        mut self,
+        sp_slot: u16,
+        status: InstanceManagerStatus,
+    ) -> Self {
+        self.instance_manager_status_exceptions.insert(sp_slot, status);
+        self
+    }
+
+    /// Make the sled in the given slot report that it has fully evacuated: its
+    /// sled config is at `generation` with an `Evacuating` disposition, and its
+    /// instance manager reports `Evacuating` with zero registered VMMs.
+    pub fn sled_evacuated(
+        self,
+        sp_slot: u16,
+        generation: SledConfigGeneration,
+    ) -> Self {
+        self.sled_config_generation_exception(sp_slot, generation)
+            .sled_ledgered_disposition_exception(
+                sp_slot,
+                OmicronSledUpdateDisposition::Evacuating,
+            )
+            .instance_manager_status_exception(
+                sp_slot,
+                InstanceManagerStatus {
+                    update_disposition: CurrentUpdateDisposition::Known(
+                        OmicronSledUpdateDisposition::Evacuating,
+                    ),
+                    num_registered_vmms: 0,
+                },
+            )
+    }
+
+    /// Make the sled in the given slot report that it is `Available` again
+    /// after an evacuation: its sled config is at `generation` with an
+    /// `Available` disposition, and its instance manager reports `Available`
+    /// with zero registered VMMs.
+    pub fn sled_available(
+        self,
+        sp_slot: u16,
+        generation: SledConfigGeneration,
+    ) -> Self {
+        self.sled_config_generation_exception(sp_slot, generation)
+            .sled_ledgered_disposition_exception(
+                sp_slot,
+                OmicronSledUpdateDisposition::Available,
+            )
+            .instance_manager_status_exception(
+                sp_slot,
+                InstanceManagerStatus {
+                    update_disposition: CurrentUpdateDisposition::Known(
+                        OmicronSledUpdateDisposition::Available,
+                    ),
+                    num_registered_vmms: 0,
+                },
+            )
+    }
+
+    /// Make every sled report that it has fully evacuated at the initial sled
+    /// config generation.
+    pub fn all_sleds_evacuated(mut self) -> Self {
+        for board in &self.boards.boards {
+            if board.id.typ == SpType::Sled {
+                self = self
+                    .sled_evacuated(board.id.slot, SledConfigGeneration::new());
+            }
+        }
+        self
+    }
+
     pub fn build(self) -> Collection {
         let mut builder =
             nexus_inventory::CollectionBuilder::new(self.boards.test_name);
@@ -1074,7 +1228,13 @@ impl<'a> TestBoardCollectionBuilder<'a> {
             let sled_model = OxideSled::try_from_model(&sp_state.model);
 
             let baseboard_id = builder
-                .found_sp_state("test", sp_id.typ, sp_id.slot, sp_state.clone())
+                .found_sp_state(
+                    "test",
+                    nexus_inventory::examples::RACK_UUID,
+                    sp_id.typ,
+                    sp_id.slot,
+                    sp_state.clone(),
+                )
                 .unwrap();
             let sp_active_version = self
                 .sp_active_version_exceptions
@@ -1248,15 +1408,28 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                     )
                     .unwrap();
                 let fake_sled_config = OmicronSledConfig {
-                    generation: SledConfigGeneration::new(),
+                    generation: self
+                        .sled_config_generation_exceptions
+                        .get(&board.id.slot)
+                        .copied()
+                        .unwrap_or_else(SledConfigGeneration::new),
                     disks: IdOrdMap::new(),
                     datasets: IdOrdMap::new(),
                     zones: IdOrdMap::new(),
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
                     measurements: BTreeSet::new(),
-                    update_disposition: OmicronSledUpdateDisposition::Available,
+                    update_disposition: self
+                        .sled_ledgered_disposition_exceptions
+                        .get(&board.id.slot)
+                        .copied()
+                        .unwrap_or(OmicronSledUpdateDisposition::Available),
                 };
+                let instance_manager_status = self
+                    .instance_manager_status_exceptions
+                    .get(&board.id.slot)
+                    .copied()
+                    .unwrap_or(InstanceManagerStatus::available(0));
 
                 // The only sled-agent fields that matter for the purposes of
                 // update testing are:
@@ -1265,6 +1438,9 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                 // * `baseboard` (must match this fake SP's)
                 // * `last_reconciliation` (must contain a valid boot disk and
                 //   active slot phase 2 hash)
+                // * `ledgered_sled_config` (its generation is checked when
+                //   deciding whether a sled has been evacuated)
+                // * `instance_manager_status` (likewise)
                 let fake_phase_2_header = BootImageHeader {
                     flags: 0,
                     data_size: 0,
@@ -1296,6 +1472,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                                 part_number: sp_state.model.clone(),
                                 serial_number: sp_state.serial_number.clone(),
                             },
+                            rack_id: nexus_inventory::examples::RACK_UUID,
                             last_reconciliation: Some(
                                 ConfigReconcilerInventory {
                                     last_reconciled_config: fake_sled_config
@@ -1321,6 +1498,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                             ledgered_sled_config: Some(fake_sled_config),
                             reconciler_status:
                                 ConfigReconcilerInventoryStatus::NotYetRun,
+                            instance_manager_status,
                             file_source_resolver:
                                 OmicronFileSourceResolverInventory::new_fake(),
                             smf_services_enabled_not_online:

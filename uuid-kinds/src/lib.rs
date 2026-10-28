@@ -86,6 +86,7 @@ impl_typed_uuid_kinds! {
         PhysicalDisk = {},
         PhysicalDiskAdoptionRequest = {},
         Probe = {},
+        Project = {},
         Propolis = {},
         Rack = {},
         RackInit = {},

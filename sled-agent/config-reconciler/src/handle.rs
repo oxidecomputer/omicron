@@ -3,24 +3,22 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use camino::Utf8PathBuf;
-use illumos_utils::zpool::PathInPool;
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::DatasetName;
 use sled_agent_types::artifact::ArtifactConfig;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::CurrentUpdateDisposition;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
 use sled_agent_types::inventory::InventoryZpool;
 use sled_agent_types::inventory::OmicronSledConfig;
-use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_storage::config::MountConfig;
-use sled_storage::disk::Disk;
 use sled_storage::nested_dataset::NestedDatasetConfig;
 use sled_storage::nested_dataset::NestedDatasetListOptions;
 use sled_storage::nested_dataset::NestedDatasetLocation;
 use slog::Logger;
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::oneshot;
@@ -31,8 +29,6 @@ use trust_quorum_types::types::Epoch;
 use camino_tempfile::Utf8TempDir;
 #[cfg(feature = "testing")]
 use illumos_utils::zpool::ZpoolName;
-#[cfg(feature = "testing")]
-use illumos_utils::zpool::ZpoolOrRamdisk;
 #[cfg(feature = "testing")]
 use omicron_common::api::internal::shared::DatasetKind;
 #[cfg(feature = "testing")]
@@ -48,6 +44,7 @@ use crate::LedgerTaskError;
 use crate::NestedDatasetDestroyError;
 use crate::NestedDatasetEnsureError;
 use crate::NestedDatasetListError;
+use crate::PathInPool;
 use crate::SledAgentArtifactStore;
 use crate::SledAgentFacilities;
 use crate::TimeSyncStatus;
@@ -90,7 +87,6 @@ struct SpawnTokenCommon {
     time_sync_config: TimeSyncConfig,
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
-    external_disks_tx: watch::Sender<HashSet<Disk>>,
     former_zone_root_archiver: FormerZoneRootArchiver,
     raw_disks_rx: RawDisksReceiver,
     reconciler_task_log: Logger,
@@ -114,13 +110,6 @@ impl ConfigReconcilerSpawnToken {
     pub fn subscribe_update_disposition(&self) -> UpdateDispositionReceiver {
         UpdateDispositionReceiver::new(self.ledger_rx.clone())
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
-pub enum CurrentUpdateDisposition {
-    ConfigNotAvailable,
-    Known(OmicronSledUpdateDisposition),
 }
 
 #[derive(Debug, Clone)]
@@ -175,7 +164,7 @@ impl UpdateDispositionReceiver {
     /// never change.
     #[cfg(any(test, feature = "testing"))]
     pub fn fake_static(
-        update_disposition: OmicronSledUpdateDisposition,
+        update_disposition: sled_agent_types::inventory::OmicronSledUpdateDisposition,
     ) -> Self {
         let (receiver, sender) = Self::fake_dynamic(
             CurrentUpdateDisposition::Known(update_disposition),
@@ -288,11 +277,11 @@ impl ConfigReconcilerHandle {
             );
 
         // Spawn the task that manages dump devices.
-        let (external_disks_tx, external_disks_rx) =
-            watch::channel(HashSet::new());
+        let (debug_dataset_zpools_tx, debug_dataset_zpools_rx) =
+            watch::channel(BTreeSet::new());
         let former_zone_root_archiver = debug_collector::spawn(
             internal_disks_rx.clone(),
-            external_disks_rx,
+            debug_dataset_zpools_rx,
             Arc::clone(&mount_config),
             base_log,
         );
@@ -307,6 +296,8 @@ impl ConfigReconcilerHandle {
         // Spawn the task that serializes dataset operations.
         let dataset_task = DatasetTaskHandle::spawn_dataset_task(
             Arc::clone(&mount_config),
+            former_zone_root_archiver.clone(),
+            debug_dataset_zpools_tx,
             base_log,
         );
 
@@ -328,7 +319,6 @@ impl ConfigReconcilerHandle {
                     time_sync_config,
                     reconciler_result_tx,
                     currently_managed_zpools_tx,
-                    external_disks_tx,
                     former_zone_root_archiver,
                     raw_disks_rx,
                     reconciler_task_log: base_log
@@ -411,7 +401,6 @@ impl ConfigReconcilerHandle {
                     time_sync_config,
                     reconciler_result_tx,
                     currently_managed_zpools_tx,
-                    external_disks_tx,
                     former_zone_root_archiver,
                     raw_disks_rx,
                     reconciler_task_log,
@@ -428,7 +417,6 @@ impl ConfigReconcilerHandle {
             reconciler_result_tx,
             currently_managed_zpools_tx,
             self.internal_disks_rx.clone(),
-            external_disks_tx,
             former_zone_root_archiver,
             raw_disks_rx,
             committed_epoch_rx,
@@ -622,7 +610,7 @@ pub struct AvailableDatasetsReceiver {
 
 impl AvailableDatasetsReceiver {
     #[cfg(feature = "testing")]
-    pub fn fake_in_tempdir_for_tests(zpool: ZpoolOrRamdisk) -> Self {
+    pub fn fake_in_tempdir_for_tests(zpool: ZpoolName) -> Self {
         let tempdir = Arc::new(Utf8TempDir::new().expect("created temp dir"));
         std::fs::create_dir_all(tempdir.path().join(U2_DEBUG_DATASET))
             .expect("created test debug dataset directory");
@@ -671,17 +659,19 @@ impl AvailableDatasetsReceiver {
             }
             #[cfg(feature = "testing")]
             AvailableDatasetsReceiverInner::FakeTempDir { zpool, tempdir } => {
-                vec![PathInPool {
-                    pool: zpool.clone(),
-                    path: tempdir.path().join(U2_DEBUG_DATASET),
-                }]
+                vec![PathInPool::new_arbitrary_for_tests(
+                    *zpool,
+                    tempdir.path().join(U2_DEBUG_DATASET),
+                )]
             }
             #[cfg(feature = "testing")]
             AvailableDatasetsReceiverInner::FakeStatic(pools) => pools
                 .iter()
-                .map(|(pool, path)| PathInPool {
-                    pool: ZpoolOrRamdisk::Zpool(*pool),
-                    path: path.join(U2_DEBUG_DATASET),
+                .map(|(pool, path)| {
+                    PathInPool::new_arbitrary_for_tests(
+                        *pool,
+                        path.join(U2_DEBUG_DATASET),
+                    )
                 })
                 .collect(),
         }
@@ -694,17 +684,19 @@ impl AvailableDatasetsReceiver {
             }
             #[cfg(feature = "testing")]
             AvailableDatasetsReceiverInner::FakeTempDir { zpool, tempdir } => {
-                vec![PathInPool {
-                    pool: zpool.clone(),
-                    path: tempdir.path().join(ZONE_DATASET),
-                }]
+                vec![PathInPool::new_arbitrary_for_tests(
+                    *zpool,
+                    tempdir.path().join(ZONE_DATASET),
+                )]
             }
             #[cfg(feature = "testing")]
             AvailableDatasetsReceiverInner::FakeStatic(pools) => pools
                 .iter()
-                .map(|(pool, path)| PathInPool {
-                    pool: ZpoolOrRamdisk::Zpool(*pool),
-                    path: path.join(ZONE_DATASET),
+                .map(|(pool, path)| {
+                    PathInPool::new_arbitrary_for_tests(
+                        *pool,
+                        path.join(ZONE_DATASET),
+                    )
                 })
                 .collect(),
         }
@@ -717,19 +709,19 @@ impl AvailableDatasetsReceiver {
             }
             #[cfg(feature = "testing")]
             AvailableDatasetsReceiverInner::FakeTempDir { zpool, tempdir } => {
-                vec![PathInPool {
-                    pool: zpool.clone(),
-                    path: tempdir
-                        .path()
-                        .join(DatasetKind::LocalStorage.to_string()),
-                }]
+                vec![PathInPool::new_arbitrary_for_tests(
+                    *zpool,
+                    tempdir.path().join(DatasetKind::LocalStorage.to_string()),
+                )]
             }
             #[cfg(feature = "testing")]
             AvailableDatasetsReceiverInner::FakeStatic(pools) => pools
                 .iter()
-                .map(|(pool, path)| PathInPool {
-                    pool: ZpoolOrRamdisk::Zpool(*pool),
-                    path: path.join(DatasetKind::LocalStorage.to_string()),
+                .map(|(pool, path)| {
+                    PathInPool::new_arbitrary_for_tests(
+                        *pool,
+                        path.join(DatasetKind::LocalStorage.to_string()),
+                    )
                 })
                 .collect(),
         }
@@ -745,19 +737,19 @@ impl AvailableDatasetsReceiver {
                 .collect(),
             #[cfg(feature = "testing")]
             AvailableDatasetsReceiverInner::FakeTempDir { zpool, tempdir } => {
-                vec![PathInPool {
-                    pool: zpool.clone(),
-                    path: tempdir
-                        .path()
-                        .join(DatasetKind::LocalStorage.to_string()),
-                }]
+                vec![PathInPool::new_arbitrary_for_tests(
+                    *zpool,
+                    tempdir.path().join(DatasetKind::LocalStorage.to_string()),
+                )]
             }
             #[cfg(feature = "testing")]
             AvailableDatasetsReceiverInner::FakeStatic(pools) => pools
                 .iter()
-                .map(|(pool, path)| PathInPool {
-                    pool: ZpoolOrRamdisk::Zpool(*pool),
-                    path: path.join(DatasetKind::LocalStorage.to_string()),
+                .map(|(pool, path)| {
+                    PathInPool::new_arbitrary_for_tests(
+                        *pool,
+                        path.join(DatasetKind::LocalStorage.to_string()),
+                    )
                 })
                 .collect(),
         }
@@ -772,7 +764,7 @@ enum AvailableDatasetsReceiverInner {
     // Test path: allow tests to place datasets in a temp directory.
     #[cfg(feature = "testing")]
     FakeTempDir {
-        zpool: ZpoolOrRamdisk,
+        zpool: ZpoolName,
         tempdir: Arc<Utf8TempDir>,
     },
     // Test path: allow tests to specify their own directories.

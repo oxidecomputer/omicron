@@ -22,7 +22,7 @@ use nexus_db_queries::db::model;
 use nexus_types::fm;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::PaginationOrder;
-use omicron_git_version::GitVersion;
+use omicron_git_version_types::GitVersion;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use std::fmt;
@@ -271,16 +271,12 @@ pub(super) async fn cmd_db_sitrep(
             cmd_db_sitrep_history(opctx, datastore, fetch_opts, args).await
         }
         Commands::Info { sitrep, opts: ref args } => {
-            cmd_db_sitrep_show(
-                opctx, datastore, fetch_opts, args, sitrep, colored,
-            )
-            .await
+            cmd_db_sitrep_show(opctx, datastore, args, sitrep, colored).await
         }
         Commands::Current(ref args) => {
             cmd_db_sitrep_show(
                 opctx,
                 datastore,
-                fetch_opts,
                 args,
                 SitrepSelector::Current,
                 colored,
@@ -288,10 +284,7 @@ pub(super) async fn cmd_db_sitrep(
             .await
         }
         Commands::AnalysisReport(ref args) => {
-            cmd_db_sitrep_analysis_report(
-                opctx, datastore, fetch_opts, args, colored,
-            )
-            .await
+            cmd_db_sitrep_analysis_report(opctx, datastore, args, colored).await
         }
         Commands::Slippy { sitrep } => {
             cmd_db_sitrep_slippy(opctx, datastore, sitrep).await
@@ -375,7 +368,6 @@ pub(super) async fn cmd_db_sitrep_history(
 async fn cmd_db_sitrep_show(
     opctx: &OpContext,
     datastore: &DataStore,
-    _fetch_opts: &DbFetchOptions,
     opts: &ShowOptions,
     sitrep_selector: SitrepSelector,
     colored: bool,
@@ -560,7 +552,6 @@ async fn cmd_db_sitrep_slippy(
 async fn cmd_db_sitrep_analysis_report(
     opctx: &OpContext,
     datastore: &DataStore,
-    _fetch_opts: &DbFetchOptions,
     args: &AnalysisReportArgs,
     colored: bool,
 ) -> anyhow::Result<()> {
@@ -590,7 +581,7 @@ fn print_analysis_report(
         analysis_report,
     } = report;
 
-    let our_git_commit = GitVersion::current();
+    let our_git_commit = omicron_git_version::current();
     let git_commit = git_commit.parse::<GitVersion>().expect("infallible");
     if our_git_commit != git_commit {
         eprintln!(
