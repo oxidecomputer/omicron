@@ -3512,6 +3512,63 @@
         "format": "uint64",
         "minimum": 0
       },
+      "CabooseVersionError": {
+        "description": "Reasons that a version could not be determined from a caboose in inventory",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/NotInInventory"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "parse"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "baseboard_id": {
+                    "$ref": "#/components/schemas/BaseboardId"
+                  },
+                  "caboose": {
+                    "$ref": "#/components/schemas/CabooseWhich"
+                  },
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "baseboard_id",
+                  "caboose",
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
       "CabooseWhich": {
         "description": "Describes which caboose this is (which component, which slot)",
         "type": "string",
@@ -4528,56 +4585,6 @@
             ]
           },
           {
-            "description": "The component's caboose was not found in the inventory",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "caboose_not_in_inventory"
-                ]
-              },
-              "value": {
-                "$ref": "#/components/schemas/CabooseWhich"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "The version in the caboose or artifact was not able to be parsed",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "failed_version_parse"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "caboose": {
-                    "$ref": "#/components/schemas/CabooseWhich"
-                  },
-                  "err": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "caboose",
-                  "err"
-                ]
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
             "description": "The inactive host phase 1 hash was not found in inventory",
             "type": "object",
             "properties": {
@@ -4604,51 +4611,6 @@
                 "type": "string",
                 "enum": [
                   "last_reconciliation_not_in_inventory"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "description": "No artifacts with the required conditions for the component were found",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "no_matching_artifacts_found"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "description": "No artifact with the required conditions for phase 1 was found",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "no_matching_phase1_artifact_found"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "description": "No artifact with the required conditions for phase 2 was found",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "no_matching_phase2_artifact_found"
                 ]
               }
             },
@@ -4687,18 +4649,22 @@
             ]
           },
           {
-            "description": "Too many artifacts with the required conditions for the component were found",
+            "description": "The host OS artifacts that the sled ought to be running could not be chosen from the TUF repo",
             "type": "object",
             "properties": {
               "type": {
                 "type": "string",
                 "enum": [
-                  "too_many_matching_artifacts"
+                  "target_artifact"
                 ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/HostOsTargetArtifactError"
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
             ]
           },
           {
@@ -4747,25 +4713,6 @@
                 "type": "string",
                 "enum": [
                   "unsafe_zone_found"
-                ]
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "The sled model could not be determined",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "unable_to_determine_sled_model"
                 ]
               },
               "value": {
@@ -4895,105 +4842,17 @@
         "description": "Describes the reason why an RoT bootloader failed to update",
         "oneOf": [
           {
-            "description": "The component's caboose was missing a value for \"sign\"",
+            "description": "The version in one of the component's cabooses could not be determined",
             "type": "object",
             "properties": {
               "type": {
                 "type": "string",
                 "enum": [
-                  "caboose_missing_sign"
+                  "caboose"
                 ]
               },
               "value": {
-                "$ref": "#/components/schemas/CabooseWhich"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "The component's caboose was not found in the inventory",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "caboose_not_in_inventory"
-                ]
-              },
-              "value": {
-                "$ref": "#/components/schemas/CabooseWhich"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "The version in the caboose or artifact was not able to be parsed",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "failed_version_parse"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "caboose": {
-                    "$ref": "#/components/schemas/CabooseWhich"
-                  },
-                  "err": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "caboose",
-                  "err"
-                ]
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "No artifact with the required conditions for the component was found",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "no_matching_artifact_found"
-                ]
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "Too many artifacts with the required conditions for the component were found",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "too_many_matching_artifacts"
-                ]
-              },
-              "value": {
-                "type": "string"
+                "$ref": "#/components/schemas/CabooseVersionError"
               }
             },
             "required": [
@@ -5015,6 +4874,25 @@
             "required": [
               "type"
             ]
+          },
+          {
+            "description": "The artifact that the component ought to be running could not be chosen from the TUF repo",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "target_artifact"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/TargetArtifactError"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
           }
         ]
       },
@@ -5022,105 +4900,17 @@
         "description": "Describes the reason why an RoT failed to update",
         "oneOf": [
           {
-            "description": "The component's caboose was missing a value for \"sign\"",
+            "description": "The version in one of the component's cabooses could not be determined",
             "type": "object",
             "properties": {
               "type": {
                 "type": "string",
                 "enum": [
-                  "caboose_missing_sign"
+                  "caboose"
                 ]
               },
               "value": {
-                "$ref": "#/components/schemas/CabooseWhich"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "The component's caboose was not found in the inventory",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "caboose_not_in_inventory"
-                ]
-              },
-              "value": {
-                "$ref": "#/components/schemas/CabooseWhich"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "The version in the caboose or artifact was not able to be parsed",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "failed_version_parse"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "caboose": {
-                    "$ref": "#/components/schemas/CabooseWhich"
-                  },
-                  "err": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "caboose",
-                  "err"
-                ]
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "No artifact with the required conditions for the component was found",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "no_matching_artifact_found"
-                ]
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "Too many artifacts with the required conditions for the component were found",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "too_many_matching_artifacts"
-                ]
-              },
-              "value": {
-                "type": "string"
+                "$ref": "#/components/schemas/CabooseVersionError"
               }
             },
             "required": [
@@ -5157,6 +4947,25 @@
             "required": [
               "type"
             ]
+          },
+          {
+            "description": "The artifact that the component ought to be running could not be chosen from the TUF repo",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "target_artifact"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/TargetArtifactError"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
           }
         ]
       },
@@ -5164,86 +4973,17 @@
         "description": "Describes the reason why an SP failed to update",
         "oneOf": [
           {
-            "description": "The component's caboose was not found in the inventory",
+            "description": "The version in one of the component's cabooses could not be determined",
             "type": "object",
             "properties": {
               "type": {
                 "type": "string",
                 "enum": [
-                  "caboose_not_in_inventory"
+                  "caboose"
                 ]
               },
               "value": {
-                "$ref": "#/components/schemas/CabooseWhich"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "The version in the caboose or artifact was not able to be parsed",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "failed_version_parse"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "caboose": {
-                    "$ref": "#/components/schemas/CabooseWhich"
-                  },
-                  "err": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "caboose",
-                  "err"
-                ]
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "No artifact with the required conditions for the component was found",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "no_matching_artifact_found"
-                ]
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "Too many artifacts with the required conditions for the component were found",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "too_many_matching_artifacts"
-                ]
-              },
-              "value": {
-                "type": "string"
+                "$ref": "#/components/schemas/CabooseVersionError"
               }
             },
             "required": [
@@ -5264,6 +5004,25 @@
             },
             "required": [
               "type"
+            ]
+          },
+          {
+            "description": "The artifact that the component ought to be running could not be chosen from the TUF repo",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "target_artifact"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/TargetArtifactError"
+              }
+            },
+            "required": [
+              "type",
+              "value"
             ]
           },
           {
@@ -5536,6 +5295,90 @@
           "debug",
           "held_since",
           "id"
+        ]
+      },
+      "HostOsTargetArtifactError": {
+        "description": "Describes the reason why the host OS artifacts that a sled ought to be running could not be chosen from a TUF repo",
+        "oneOf": [
+          {
+            "description": "No artifacts with the required conditions for the component were found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_matching_artifacts_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "No artifact with the required conditions for phase 1 was found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_matching_phase1_artifact_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "No artifact with the required conditions for phase 2 was found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_matching_phase2_artifact_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Too many artifacts with the required conditions for the component were found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "too_many_matching_artifacts"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The sled model could not be determined",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unable_to_determine_sled_model"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
         ]
       },
       "HostPhase1Status": {
@@ -5994,6 +5837,89 @@
             "type": "string",
             "enum": [
               "destroyed"
+            ]
+          }
+        ]
+      },
+      "InventoryItem": {
+        "description": "Describes an item that inventory collects about a baseboard",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sp"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "rot_state"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "host_phase1_active_slot"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "host_phase1_hash"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/M2Slot"
+              }
+            },
+            "required": [
+              "type",
+              "value"
             ]
           }
         ]
@@ -6687,6 +6613,32 @@
       "NodeName": {
         "description": "Unique name for a saga [`Node`]\n\nEach node requires a string name that's unique within its DAG.  The name is used to identify its output.  Nodes that depend on a given node (either directly or indirectly) can access the node's output using its name.",
         "type": "string"
+      },
+      "NotInInventory": {
+        "description": "An item about a particular baseboard that was not found in an inventory collection",
+        "type": "object",
+        "properties": {
+          "baseboard_id": {
+            "description": "baseboard whose item was not found",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          },
+          "what": {
+            "description": "the item that was not found",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InventoryItem"
+              }
+            ]
+          }
+        },
+        "required": [
+          "baseboard_id",
+          "what"
+        ]
       },
       "OmicronZoneDataset": {
         "description": "Describes a persistent ZFS dataset associated with an Omicron zone",
@@ -10286,6 +10238,87 @@
             "type": "string",
             "enum": [
               "switch1"
+            ]
+          }
+        ]
+      },
+      "TargetArtifactError": {
+        "description": "Describes the reason why the artifact that an SP, RoT, or RoT bootloader ought to be running could not be chosen from a TUF repo",
+        "oneOf": [
+          {
+            "description": "The caboose used to choose the artifact was missing a value for \"sign\"",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_missing_sign"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The caboose used to choose the artifact was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/NotInInventory"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "No artifact with the required conditions for the component was found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_matching_artifact_found"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Too many artifacts with the required conditions for the component were found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "too_many_matching_artifacts"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
             ]
           }
         ]

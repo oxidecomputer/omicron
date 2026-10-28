@@ -2,11 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Comparing the MGS-managed software on one board with the software in a
-//! specific TUF repo
-// <review covers="2 lines above">
-// Should be "Facilities for ..."
-// </review>
+//! Facilities for comparing the MGS-managed software on one board with the
+//! software in a specific TUF repo
 //!
 //! Two parts of the system need to know whether a board is running the
 //! software in a particular TUF repo.  The planner needs to know so that it
@@ -20,20 +17,18 @@
 //! component ought to be running.  The planner uses both of these directly.
 //! This module uses the same functions and combines the results into one
 //! report for callers outside the planner.
-// <review covers="6 lines above">
-// Why does this exist here instead of putting this logic into `sled_add_checks`?
-// </review>
 
 use super::host_phase_1::HostOsTargetArtifacts;
 use super::rot;
 use super::rot_bootloader;
 use super::sp;
 use gateway_types::rot::RotSlot;
-use nexus_types::deployment::planning_report::FailedHostOsUpdateReason;
-use nexus_types::deployment::planning_report::FailedRotBootloaderUpdateReason;
-use nexus_types::deployment::planning_report::FailedRotUpdateReason;
-use nexus_types::deployment::planning_report::FailedSpUpdateReason;
+use nexus_types::deployment::planning_report::HostOsTargetArtifactError;
+use nexus_types::deployment::planning_report::TargetArtifactError;
+use nexus_types::inventory::CabooseVersionError;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::InventoryItem;
+use nexus_types::inventory::NotInInventory;
 use nexus_types::inventory::SpType;
 use nexus_types::tuf_repo::TufRepoDescription;
 use sled_hardware_types::BaseboardId;
@@ -41,82 +36,85 @@ use thiserror::Error;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 
-/// Compares the active SP, RoT, RoT bootloader, and host phase 1 images on
-/// `baseboard_id` with the artifacts in `repo`
-///
-/// The RoT comparison also reports an error if the RoT's boot preferences
-/// show an RoT update that has not fully taken effect.
-///
-/// Host phase 2 (the image on the sled's boot disk) is not checked here.
-/// Inventory only reports it for sleds whose sled-agent is running, and this
-/// function is intended to work for sleds that are not yet part of the
-/// control plane.
-pub fn compare_deployed_versions(
-// <review>
-// Let's make this a method on `DeployedVersions`, like `DeployedVersions::compute`?
-// </review>
-    baseboard_id: &BaseboardId,
-    inventory: &Collection,
-    repo: &TufRepoDescription,
-) -> Result<DeployedVersionsReport, BoardNotInInventory> {
-    let Some(sp_info) = inventory.sps.get(baseboard_id) else {
-        return Err(BoardNotInInventory(baseboard_id.clone()));
-    };
-
-    let sp = ActiveImageCheck::compare(
-        inventory
-            .active_sp_version_for(baseboard_id)
-            .map_err(FailedSpUpdateReason::from),
-        sp::target_artifact(baseboard_id, inventory, repo)
-            .map(|a| a.version.clone()),
-    );
-
-    let rot = compare_rot(baseboard_id, inventory, repo);
-
-    let rot_bootloader = ActiveImageCheck::compare(
-        inventory
-            .active_rot_bootloader_version_for(baseboard_id)
-            .map_err(FailedRotBootloaderUpdateReason::from),
-        rot_bootloader::target_artifact(baseboard_id, inventory, repo)
-            .map(|a| a.version.clone()),
-    );
-
-    let host_phase_1 = match sp_info.sp_type {
-        SpType::Sled => Some(ActiveImageCheck::compare(
-            inventory
-                .active_host_phase_1_hash_for(baseboard_id)
-                .map_err(FailedHostOsUpdateReason::from),
-            HostOsTargetArtifacts::for_board(baseboard_id, repo)
-                .map(|a| a.phase_1.hash),
-        )),
-        SpType::Power | SpType::Switch => None,
-    };
-
-    Ok(DeployedVersionsReport { sp, rot, rot_bootloader, host_phase_1 })
-}
-
 /// Results of comparing the MGS-managed software on one board with the
 /// software in a TUF repo
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DeployedVersionsReport {
-// <review>
-// Rename: `DeployedVersions`
-// </review>
+pub struct DeployedVersions {
     /// comparison of the active SP image (slot 0) with the TUF repo
-    pub sp: ActiveImageCheck<ArtifactVersion, FailedSpUpdateReason>,
-    // <review>
-    // It's weird that we're using an error type here having to do with a FailedSpUpdate.  Are there some update-specific variants that can't happen here?  In that case, should that error type be split up?
-    // </review>
+    pub sp: ActiveImageCheck<
+        ArtifactVersion,
+        ImageCheckError<CabooseVersionError, TargetArtifactError>,
+    >,
     /// comparison of the active RoT image with the TUF repo
     pub rot: ActiveImageCheck<ArtifactVersion, RotCheckError>,
     /// comparison of the active RoT bootloader image (stage0) with the TUF
     /// repo
-    pub rot_bootloader:
-        ActiveImageCheck<ArtifactVersion, FailedRotBootloaderUpdateReason>,
+    pub rot_bootloader: ActiveImageCheck<
+        ArtifactVersion,
+        ImageCheckError<CabooseVersionError, TargetArtifactError>,
+    >,
     /// comparison of the active host phase 1 image with the TUF repo, or
     /// `None` if the board is not a sled
-    pub host_phase_1:
-        Option<ActiveImageCheck<ArtifactHash, FailedHostOsUpdateReason>>,
+    pub host_phase_1: Option<
+        ActiveImageCheck<
+            ArtifactHash,
+            ImageCheckError<NotInInventory, HostOsTargetArtifactError>,
+        >,
+    >,
+}
+
+impl DeployedVersions {
+    /// Compares the active SP, RoT, RoT bootloader, and host phase 1 images
+    /// on `baseboard_id` with the artifacts in `repo`
+    ///
+    /// The RoT comparison also reports an error if the RoT's boot preferences
+    /// show an RoT update that has not fully taken effect.
+    ///
+    /// Host phase 2 (the image on the sled's boot disk) is not checked here.
+    /// Inventory only reports it for sleds whose sled-agent is running, and
+    /// this function is intended to work for sleds that are not yet part of
+    /// the control plane.
+    pub fn compute(
+        baseboard_id: &BaseboardId,
+        inventory: &Collection,
+        repo: &TufRepoDescription,
+    ) -> Result<DeployedVersions, NotInInventory> {
+        let sp_info = inventory.sp_for(baseboard_id)?;
+
+        let sp = ActiveImageCheck::compare(
+            inventory
+                .active_sp_version_for(baseboard_id)
+                .map_err(ImageCheckError::Active),
+            sp::target_artifact(baseboard_id, inventory, repo)
+                .map(|a| a.version.clone())
+                .map_err(ImageCheckError::Target),
+        );
+
+        let rot = compare_rot(baseboard_id, inventory, repo);
+
+        let rot_bootloader = ActiveImageCheck::compare(
+            inventory
+                .active_rot_bootloader_version_for(baseboard_id)
+                .map_err(ImageCheckError::Active),
+            rot_bootloader::target_artifact(baseboard_id, inventory, repo)
+                .map(|a| a.version.clone())
+                .map_err(ImageCheckError::Target),
+        );
+
+        let host_phase_1 = match sp_info.sp_type {
+            SpType::Sled => Some(ActiveImageCheck::compare(
+                inventory
+                    .active_host_phase_1_hash_for(baseboard_id)
+                    .map_err(ImageCheckError::Active),
+                HostOsTargetArtifacts::for_board(baseboard_id, repo)
+                    .map(|a| a.phase_1.hash)
+                    .map_err(ImageCheckError::Target),
+            )),
+            SpType::Power | SpType::Switch => None,
+        };
+
+        Ok(DeployedVersions { sp, rot, rot_bootloader, host_phase_1 })
+    }
 }
 
 /// Result of comparing one component's active image with a TUF repo
@@ -157,13 +155,30 @@ impl<T: PartialEq, E> ActiveImageCheck<T, E> {
     }
 }
 
+/// Reasons that a component's active image could not be compared with the
+/// artifact in a TUF repo
+///
+/// `A` describes why the active image could not be identified from
+/// inventory.  `T` describes why the artifact could not be chosen from the
+/// TUF repo.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ImageCheckError<A, T> {
+    /// the active image could not be identified
+    #[error("could not identify the active image")]
+    Active(#[source] A),
+    /// the artifact that the component ought to be running could not be
+    /// chosen
+    #[error("could not choose the artifact from the TUF repo")]
+    Target(#[source] T),
+}
+
 /// Reasons that an RoT's active image could not be confirmed to match the
 /// artifact in a TUF repo
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum RotCheckError {
     /// the active image could not be compared with the TUF repo
     #[error(transparent)]
-    Comparison(#[from] FailedRotUpdateReason),
+    Image(#[from] ImageCheckError<CabooseVersionError, TargetArtifactError>),
     /// the RoT's boot preferences disagree with its active slot
     #[error(
         "RoT boot preferences show an update that has not fully taken \
@@ -180,15 +195,6 @@ pub enum RotCheckError {
     },
 }
 
-/// The board's SP was not found in inventory, so none of its software could
-/// be checked
-#[derive(Debug, Clone, Error)]
-#[error("SP for board {0} is not in inventory")]
-pub struct BoardNotInInventory(pub BaseboardId);
-// <review covers="5 lines above">
-// I wonder if we could improve a lot by putting this into inventory and having a family of functions that returns this instead of `Option`.
-// </review>
-
 /// Compares the active RoT image on `baseboard_id` with the RoT artifact in
 /// `repo`
 ///
@@ -202,9 +208,11 @@ fn compare_rot(
     inventory: &Collection,
     repo: &TufRepoDescription,
 ) -> ActiveImageCheck<ArtifactVersion, RotCheckError> {
-    let Some(rot_state) = inventory.rots.get(baseboard_id) else {
-        return ActiveImageCheck::Error(RotCheckError::Comparison(
-            FailedRotUpdateReason::RotStateNotInInventory,
+    let Some(rot_state) = inventory.rot_state_for(baseboard_id) else {
+        return ActiveImageCheck::Error(RotCheckError::from(
+            ImageCheckError::Active(CabooseVersionError::from(
+                NotInInventory::new(baseboard_id, InventoryItem::RotState),
+            )),
         ));
     };
 
@@ -230,10 +238,10 @@ fn compare_rot(
     ActiveImageCheck::compare(
         inventory
             .active_rot_version_for(baseboard_id)
-            .map_err(|e| RotCheckError::from(FailedRotUpdateReason::from(e))),
+            .map_err(|e| RotCheckError::from(ImageCheckError::Active(e))),
         rot::target_artifact(baseboard_id, active_slot, inventory, repo)
             .map(|a| a.version.clone())
-            .map_err(RotCheckError::from),
+            .map_err(|e| RotCheckError::from(ImageCheckError::Target(e))),
     )
 }
 
@@ -263,8 +271,8 @@ mod tests {
     }
 
     // Returns a report in which every check succeeded.
-    fn all_matching_sled_report() -> DeployedVersionsReport {
-        DeployedVersionsReport {
+    fn all_matching_sled_report() -> DeployedVersions {
+        DeployedVersions {
             sp: ActiveImageCheck::Matches,
             rot: ActiveImageCheck::Matches,
             rot_bootloader: ActiveImageCheck::Matches,
@@ -281,18 +289,18 @@ mod tests {
         // Check both a Gimlet (slot 0) and a Cosmo (slot 1).
         for sp_slot in [0, 1] {
             let sled = baseboard_id(&collection, SpType::Sled, sp_slot);
-            let report = compare_deployed_versions(&sled, &collection, &repo)
+            let report = DeployedVersions::compute(&sled, &collection, &repo)
                 .expect("sled is in inventory");
             assert_eq!(report, all_matching_sled_report());
         }
 
         // A switch has no host phase 1 to check.
         let switch = baseboard_id(&collection, SpType::Switch, 0);
-        let report = compare_deployed_versions(&switch, &collection, &repo)
+        let report = DeployedVersions::compute(&switch, &collection, &repo)
             .expect("switch is in inventory");
         assert_eq!(
             report,
-            DeployedVersionsReport {
+            DeployedVersions {
                 host_phase_1: None,
                 ..all_matching_sled_report()
             }
@@ -319,13 +327,13 @@ mod tests {
             .build();
         let check = |sp_slot| {
             let sled = baseboard_id(&collection, SpType::Sled, sp_slot);
-            compare_deployed_versions(&sled, &collection, &repo)
+            DeployedVersions::compute(&sled, &collection, &repo)
                 .expect("sled is in inventory")
         };
 
         assert_eq!(
             check(0),
-            DeployedVersionsReport {
+            DeployedVersions {
                 sp: ActiveImageCheck::Differs {
                     found: ARTIFACT_VERSION_1,
                     expected: ARTIFACT_VERSION_2,
@@ -335,7 +343,7 @@ mod tests {
         );
         assert_eq!(
             check(1),
-            DeployedVersionsReport {
+            DeployedVersions {
                 rot: ActiveImageCheck::Differs {
                     found: ARTIFACT_VERSION_1,
                     expected: ARTIFACT_VERSION_2,
@@ -345,7 +353,7 @@ mod tests {
         );
         assert_eq!(
             check(2),
-            DeployedVersionsReport {
+            DeployedVersions {
                 rot_bootloader: ActiveImageCheck::Differs {
                     found: ARTIFACT_VERSION_1,
                     expected: ARTIFACT_VERSION_2,
@@ -355,7 +363,7 @@ mod tests {
         );
         assert_eq!(
             check(3),
-            DeployedVersionsReport {
+            DeployedVersions {
                 host_phase_1: Some(ActiveImageCheck::Differs {
                     found: ARTIFACT_HASH_HOST_PHASE_1_V1,
                     expected: ARTIFACT_HASH_GIMLET_HOST_PHASE_1,
@@ -378,11 +386,11 @@ mod tests {
             )
             .build();
         let sled = baseboard_id(&collection, SpType::Sled, 0);
-        let report = compare_deployed_versions(&sled, &collection, &repo)
+        let report = DeployedVersions::compute(&sled, &collection, &repo)
             .expect("sled is in inventory");
         assert_eq!(
             report,
-            DeployedVersionsReport {
+            DeployedVersions {
                 rot: ActiveImageCheck::Error(
                     RotCheckError::BootPreferencesUnsettled {
                         active_slot: RotSlot::A,
@@ -411,18 +419,23 @@ mod tests {
             .expect("test collection contains SP slot 0 cabooses");
         sp_cabooses.retain(|bb, _| bb.as_ref() != &sled);
         collection.rots.retain(|bb, _| bb.as_ref() != &sled);
-        let report = compare_deployed_versions(&sled, &collection, &repo)
+        let report = DeployedVersions::compute(&sled, &collection, &repo)
             .expect("sled is in inventory");
         assert_eq!(
             report,
-            DeployedVersionsReport {
-                sp: ActiveImageCheck::Error(
-                    FailedSpUpdateReason::CabooseNotInInventory(
-                        CabooseWhich::SpSlot0
+            DeployedVersions {
+                sp: ActiveImageCheck::Error(ImageCheckError::Active(
+                    CabooseVersionError::NotInInventory(NotInInventory::new(
+                        &sled,
+                        InventoryItem::Caboose(CabooseWhich::SpSlot0),
+                    ))
+                )),
+                rot: ActiveImageCheck::Error(RotCheckError::Image(
+                    ImageCheckError::Active(
+                        CabooseVersionError::NotInInventory(
+                            NotInInventory::new(&sled, InventoryItem::RotState,)
+                        )
                     )
-                ),
-                rot: ActiveImageCheck::Error(RotCheckError::Comparison(
-                    FailedRotUpdateReason::RotStateNotInInventory
                 )),
                 ..all_matching_sled_report()
             }
@@ -430,8 +443,8 @@ mod tests {
 
         // Remove the SP itself.  Nothing can be checked.
         collection.sps.retain(|bb, _| bb.as_ref() != &sled);
-        let error = compare_deployed_versions(&sled, &collection, &repo)
+        let error = DeployedVersions::compute(&sled, &collection, &repo)
             .expect_err("sled is not in inventory");
-        assert_eq!(error.0, sled);
+        assert_eq!(error, NotInInventory::new(&sled, InventoryItem::Sp));
     }
 }

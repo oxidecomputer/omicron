@@ -53,6 +53,7 @@ use sled_agent_types_versions::latest::inventory::SledRole;
 use sled_agent_types_versions::latest::inventory::SvcsEnabledNotOnlineResult;
 pub use sled_agent_types_versions::latest::inventory::ZpoolHealth;
 use sled_hardware_types::BaseboardId;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
@@ -61,7 +62,6 @@ use strum::EnumIter;
 use thiserror::Error;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::ArtifactVersionError;
 
 mod display;
 
@@ -242,6 +242,16 @@ impl Collection {
             .and_then(|by_bb| by_bb.get(baseboard_id))
     }
 
+    /// Returns the SP on `baseboard_id`
+    pub fn sp_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Result<&ServiceProcessor, NotInInventory> {
+        self.sps
+            .get(baseboard_id)
+            .ok_or_else(|| NotInInventory::new(baseboard_id, InventoryItem::Sp))
+    }
+
     /// Returns the version in caboose `which` on `baseboard_id`
     pub fn caboose_version_for(
         &self,
@@ -249,13 +259,20 @@ impl Collection {
         baseboard_id: &BaseboardId,
     ) -> Result<ArtifactVersion, CabooseVersionError> {
         let Some(caboose) = self.caboose_for(which, baseboard_id) else {
-            return Err(CabooseVersionError::NotInInventory(which));
+            return Err(CabooseVersionError::NotInInventory(
+                NotInInventory::new(
+                    baseboard_id,
+                    InventoryItem::Caboose(which),
+                ),
+            ));
         };
-        caboose
-            .caboose
-            .version
-            .parse()
-            .map_err(|err| CabooseVersionError::Parse { caboose: which, err })
+        caboose.caboose.version.parse().map_err(|err| {
+            CabooseVersionError::Parse {
+                baseboard_id: baseboard_id.clone(),
+                caboose: which,
+                err: InlineErrorChain::new(&err).to_string(),
+            }
+        })
     }
 
     /// Returns the version of the active SP image (slot 0) on `baseboard_id`
@@ -270,12 +287,14 @@ impl Collection {
     pub fn active_rot_version_for(
         &self,
         baseboard_id: &BaseboardId,
-    ) -> Result<ArtifactVersion, ActiveRotVersionError> {
+    ) -> Result<ArtifactVersion, CabooseVersionError> {
         let Some(rot_state) = self.rot_state_for(baseboard_id) else {
-            return Err(ActiveRotVersionError::RotStateNotInInventory);
+            return Err(CabooseVersionError::NotInInventory(
+                NotInInventory::new(baseboard_id, InventoryItem::RotState),
+            ));
         };
         let which = CabooseWhich::from_rot_slot(rot_state.active_slot);
-        Ok(self.caboose_version_for(which, baseboard_id)?)
+        self.caboose_version_for(which, baseboard_id)
     }
 
     /// Returns the version of the active RoT bootloader image (stage0) on
@@ -291,15 +310,23 @@ impl Collection {
     pub fn active_host_phase_1_hash_for(
         &self,
         baseboard_id: &BaseboardId,
-    ) -> Result<ArtifactHash, ActiveHostPhase1HashError> {
+    ) -> Result<ArtifactHash, NotInInventory> {
         let Some(active_slot) =
             self.host_phase_1_active_slot_for(baseboard_id).map(|s| s.slot)
         else {
-            return Err(ActiveHostPhase1HashError::ActiveSlotNotInInventory);
+            return Err(NotInInventory::new(
+                baseboard_id,
+                InventoryItem::HostPhase1ActiveSlot,
+            ));
         };
         self.host_phase_1_flash_hash_for(active_slot, baseboard_id)
             .map(|h| h.hash)
-            .ok_or(ActiveHostPhase1HashError::HashNotInInventory(active_slot))
+            .ok_or_else(|| {
+                NotInInventory::new(
+                    baseboard_id,
+                    InventoryItem::HostPhase1Hash(active_slot),
+                )
+            })
     }
 
     /// Iterate over all the Omicron zones in the sled-agent ledgers of this
@@ -421,42 +448,104 @@ impl Collection {
     }
 }
 
+/// An item about a particular baseboard that was not found in an inventory
+/// collection
+#[derive(
+    Clone,
+    Debug,
+    Error,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+#[error("{what} for baseboard {baseboard_id} is not in inventory")]
+pub struct NotInInventory {
+    /// baseboard whose item was not found
+    pub baseboard_id: BaseboardId,
+    /// the item that was not found
+    pub what: InventoryItem,
+}
+
+impl NotInInventory {
+    pub fn new(baseboard_id: &BaseboardId, what: InventoryItem) -> Self {
+        NotInInventory { baseboard_id: baseboard_id.clone(), what }
+    }
+}
+
+/// Describes an item that inventory collects about a baseboard
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum InventoryItem {
+    Sp,
+    RotState,
+    Caboose(CabooseWhich),
+    HostPhase1ActiveSlot,
+    HostPhase1Hash(M2Slot),
+}
+
+impl std::fmt::Display for InventoryItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InventoryItem::Sp => write!(f, "SP"),
+            InventoryItem::RotState => write!(f, "RoT state"),
+            InventoryItem::Caboose(which) => write!(f, "caboose {which:?}"),
+            InventoryItem::HostPhase1ActiveSlot => {
+                write!(f, "active host phase 1 slot")
+            }
+            InventoryItem::HostPhase1Hash(slot) => {
+                write!(f, "host phase 1 hash for slot {slot:?}")
+            }
+        }
+    }
+}
+
 /// Reasons that a version could not be determined from a caboose in
 /// inventory
-#[derive(Debug, Error)]
+#[derive(
+    Clone,
+    Debug,
+    Error,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum CabooseVersionError {
-    #[error("caboose for {0:?} is not in inventory")]
-    NotInInventory(CabooseWhich),
-    #[error("version from caboose {caboose:?} could not be parsed")]
-    Parse {
-        caboose: CabooseWhich,
-        #[source]
-        err: ArtifactVersionError,
-    },
-}
-
-/// Reasons that the active RoT version could not be determined from
-/// inventory
-#[derive(Debug, Error)]
-pub enum ActiveRotVersionError {
-    #[error("RoT state is not in inventory")]
-    RotStateNotInInventory,
     #[error(transparent)]
-    Caboose(#[from] CabooseVersionError),
+    NotInInventory(#[from] NotInInventory),
+    // The parse error is stored as a string so that this type can be
+    // serialized as part of a planning report.  That is why the message
+    // includes it.
+    #[error(
+        "version in caboose {caboose:?} for baseboard {baseboard_id} could \
+         not be parsed: {err}"
+    )]
+    Parse { baseboard_id: BaseboardId, caboose: CabooseWhich, err: String },
 }
-
-/// Reasons that the active host phase 1 hash could not be determined from
-/// inventory
-#[derive(Debug, Error)]
-pub enum ActiveHostPhase1HashError {
-    #[error("active host phase 1 slot is not in inventory")]
-    ActiveSlotNotInInventory,
-    #[error("active host phase 1 hash for slot {0:?} is not in inventory")]
-    HashNotInInventory(M2Slot),
-}
-// <review covers="33 lines above">
-// All of these error types should include the baseboard ids.
-// </review>
 
 impl IdOrdItem for Collection {
     type Key<'a> = CollectionUuid;

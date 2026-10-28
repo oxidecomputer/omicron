@@ -31,6 +31,7 @@ use nexus_types::deployment::SledUpdateRebootPolicy;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::planning_report::BlockedMgsUpdate;
 use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
+use nexus_types::inventory::CabooseVersionError;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::tuf_repo::TufRepoDescription;
@@ -46,10 +47,9 @@ use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
 
 pub use deployed_versions::ActiveImageCheck;
-pub use deployed_versions::BoardNotInInventory;
-pub use deployed_versions::DeployedVersionsReport;
+pub use deployed_versions::DeployedVersions;
+pub use deployed_versions::ImageCheckError;
 pub use deployed_versions::RotCheckError;
-pub use deployed_versions::compare_deployed_versions;
 pub(crate) use host_phase_1::PendingHostPhase2Changes;
 pub(crate) use sled_evacuation::EvacuatingSleds;
 pub(crate) use sled_evacuation::PendingUpdateDispositionChanges;
@@ -729,6 +729,25 @@ fn mgs_update_status_inactive_versions(
     }
 }
 
+/// Returns the version in caboose `which` on `baseboard_id` as the version
+/// that an update should expect to find in an inactive slot
+///
+/// A missing caboose is not an error.  It means that the inactive slot holds
+/// no valid image.
+fn expected_inactive_version(
+    inventory: &Collection,
+    which: CabooseWhich,
+    baseboard_id: &BaseboardId,
+) -> Result<ExpectedVersion, CabooseVersionError> {
+    match inventory.caboose_version_for(which, baseboard_id) {
+        Ok(version) => Ok(ExpectedVersion::Version(version)),
+        Err(CabooseVersionError::NotInInventory(_)) => {
+            Ok(ExpectedVersion::NoValidVersion)
+        }
+        Err(error @ CabooseVersionError::Parse { .. }) => Err(error),
+    }
+}
+
 /// Either if an update is unnecessary, or details about the pending MGS update
 #[allow(clippy::large_enum_variant)]
 enum MgsUpdateOutcome {
@@ -971,7 +990,10 @@ mod test {
     use nexus_types::deployment::planning_report::FailedSpUpdateReason;
     use nexus_types::deployment::planning_report::WaitingOnSledEvacuationDetails;
     use nexus_types::deployment::planning_report::ZoneUnsafeToShutdown;
+    use nexus_types::inventory::CabooseVersionError;
     use nexus_types::inventory::CabooseWhich;
+    use nexus_types::inventory::InventoryItem;
+    use nexus_types::inventory::NotInInventory;
     use nexus_types::inventory::SpType;
     use omicron_generation_kinds::SledConfigGeneration;
     use omicron_test_utils::dev::LogContext;
@@ -1145,8 +1167,13 @@ mod test {
             expected_blocked_updates.push(BlockedMgsUpdate {
                 baseboard_id: baseboard_id.clone(),
                 reason: FailedMgsUpdateReason::Sp(
-                    FailedSpUpdateReason::CabooseNotInInventory(
-                        CabooseWhich::SpSlot0,
+                    FailedSpUpdateReason::Caboose(
+                        CabooseVersionError::NotInInventory(
+                            NotInInventory::new(
+                                baseboard_id,
+                                InventoryItem::Caboose(CabooseWhich::SpSlot0),
+                            ),
+                        ),
                     ),
                 ),
             });

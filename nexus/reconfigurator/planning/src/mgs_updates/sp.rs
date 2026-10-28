@@ -5,6 +5,7 @@
 //! Facilities for making choices about SP updates
 
 use super::MgsUpdateStatus;
+use super::expected_inactive_version;
 use super::mgs_update_status_inactive_versions;
 use crate::mgs_updates::MgsUpdateOutcome;
 use crate::mgs_updates::UpdateableBoard;
@@ -15,8 +16,11 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::planning_report::FailedSpUpdateReason;
+use nexus_types::deployment::planning_report::TargetArtifactError;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::InventoryItem;
+use nexus_types::inventory::NotInInventory;
 use nexus_types::tuf_repo::TufRepoDescription;
 use sled_hardware_types::BaseboardId;
 use slog::debug;
@@ -96,20 +100,11 @@ pub(super) fn try_make_update(
     }
 
     // Begin configuring an update.
-    let expected_inactive_version = match inventory
-        .caboose_for(CabooseWhich::SpSlot1, baseboard_id)
-        .map(|c| c.caboose.version.parse::<ArtifactVersion>())
-        .transpose()
-    {
-        Ok(None) => ExpectedVersion::NoValidVersion,
-        Ok(Some(v)) => ExpectedVersion::Version(v),
-        Err(e) => {
-            return Err(FailedSpUpdateReason::FailedVersionParse {
-                caboose: CabooseWhich::SpSlot1,
-                err: format!("{}", e),
-            });
-        }
-    };
+    let expected_inactive_version = expected_inactive_version(
+        inventory,
+        CabooseWhich::SpSlot1,
+        baseboard_id,
+    )?;
 
     Ok(MgsUpdateOutcome::pending_with_update_only(PendingMgsUpdate {
         baseboard_id: baseboard_id.clone(),
@@ -133,13 +128,14 @@ pub(super) fn target_artifact<'a>(
     baseboard_id: &BaseboardId,
     inventory: &Collection,
     current_artifacts: &'a TufRepoDescription,
-) -> Result<&'a Artifact, FailedSpUpdateReason> {
+) -> Result<&'a Artifact, TargetArtifactError> {
     let Some(active_caboose) =
         inventory.caboose_for(CabooseWhich::SpSlot0, baseboard_id)
     else {
-        return Err(FailedSpUpdateReason::CabooseNotInInventory(
-            CabooseWhich::SpSlot0,
-        ));
+        return Err(TargetArtifactError::from(NotInInventory::new(
+            baseboard_id,
+            InventoryItem::Caboose(CabooseWhich::SpSlot0),
+        )));
     };
     let sp_board = active_caboose.caboose.board.clone();
     let tags = KnownArtifactTags::Sp(SpTags { sp_board });
@@ -147,10 +143,10 @@ pub(super) fn target_artifact<'a>(
         let tags = tags.to_string();
         match err {
             GetError::NotFound => {
-                FailedSpUpdateReason::NoMatchingArtifactFound(tags)
+                TargetArtifactError::NoMatchingArtifactFound(tags)
             }
             GetError::TooMany => {
-                FailedSpUpdateReason::TooManyMatchingArtifacts(tags)
+                TargetArtifactError::TooManyMatchingArtifacts(tags)
             }
         }
     })

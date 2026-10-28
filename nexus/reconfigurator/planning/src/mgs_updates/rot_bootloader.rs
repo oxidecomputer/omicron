@@ -5,6 +5,7 @@
 //! Facilities for making choices about RoT bootloader updates
 
 use super::MgsUpdateStatus;
+use super::expected_inactive_version;
 use super::mgs_update_status_inactive_versions;
 use crate::mgs_updates::MgsUpdateOutcome;
 
@@ -13,8 +14,11 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
 use nexus_types::deployment::planning_report::FailedRotBootloaderUpdateReason;
+use nexus_types::deployment::planning_report::TargetArtifactError;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::InventoryItem;
+use nexus_types::inventory::NotInInventory;
 use nexus_types::tuf_repo::TufRepoDescription;
 use sled_hardware_types::BaseboardId;
 use slog::debug;
@@ -84,20 +88,11 @@ pub(super) fn try_make_update(
     }
 
     // Begin configuring an update.
-    let expected_stage0_next_version = match inventory
-        .caboose_for(CabooseWhich::Stage0Next, baseboard_id)
-        .map(|c| c.caboose.version.parse::<ArtifactVersion>())
-        .transpose()
-    {
-        Ok(None) => ExpectedVersion::NoValidVersion,
-        Ok(Some(v)) => ExpectedVersion::Version(v),
-        Err(e) => {
-            return Err(FailedRotBootloaderUpdateReason::FailedVersionParse {
-                caboose: CabooseWhich::Stage0Next,
-                err: format!("{}", e),
-            });
-        }
-    };
+    let expected_stage0_next_version = expected_inactive_version(
+        inventory,
+        CabooseWhich::Stage0Next,
+        baseboard_id,
+    )?;
 
     Ok(MgsUpdateOutcome::pending_with_update_only(PendingMgsUpdate {
         baseboard_id: baseboard_id.clone(),
@@ -124,17 +119,18 @@ pub(super) fn target_artifact<'a>(
     baseboard_id: &BaseboardId,
     inventory: &Collection,
     current_artifacts: &'a TufRepoDescription,
-) -> Result<&'a Artifact, FailedRotBootloaderUpdateReason> {
+) -> Result<&'a Artifact, TargetArtifactError> {
     let Some(stage0_caboose) =
         inventory.caboose_for(CabooseWhich::Stage0, baseboard_id)
     else {
-        return Err(FailedRotBootloaderUpdateReason::CabooseNotInInventory(
-            CabooseWhich::Stage0,
-        ));
+        return Err(TargetArtifactError::from(NotInInventory::new(
+            baseboard_id,
+            InventoryItem::Caboose(CabooseWhich::Stage0),
+        )));
     };
     let rot_board = stage0_caboose.caboose.board.clone();
     let Some(rkth) = stage0_caboose.caboose.sign.clone() else {
-        return Err(FailedRotBootloaderUpdateReason::CabooseMissingSign(
+        return Err(TargetArtifactError::CabooseMissingSign(
             CabooseWhich::Stage0,
         ));
     };
@@ -147,10 +143,10 @@ pub(super) fn target_artifact<'a>(
         let tags = tags.to_string();
         match err {
             GetError::NotFound => {
-                FailedRotBootloaderUpdateReason::NoMatchingArtifactFound(tags)
+                TargetArtifactError::NoMatchingArtifactFound(tags)
             }
             GetError::TooMany => {
-                FailedRotBootloaderUpdateReason::TooManyMatchingArtifacts(tags)
+                TargetArtifactError::TooManyMatchingArtifacts(tags)
             }
         }
     })

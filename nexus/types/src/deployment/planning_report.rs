@@ -12,10 +12,9 @@ use super::PendingMgsUpdates;
 use super::PlannerConfig;
 use crate::deployment::BlueprintSledUpdateDispositionKind;
 use crate::deployment::MgsUpdateComponent;
-use crate::inventory::ActiveHostPhase1HashError;
-use crate::inventory::ActiveRotVersionError;
 use crate::inventory::CabooseVersionError;
 use crate::inventory::CabooseWhich;
+use crate::inventory::NotInInventory;
 
 use daft::Diffable;
 use iddqd::IdOrdItem;
@@ -600,44 +599,16 @@ pub enum FailedMgsUpdateReason {
 #[serde(tag = "type", content = "value")]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum FailedRotBootloaderUpdateReason {
-    /// The component's caboose was missing a value for "sign"
-    #[error("caboose for {0:?} is missing sign")]
-    CabooseMissingSign(CabooseWhich),
-    /// The component's caboose was not found in the inventory
-    #[error("caboose for {0:?} is not in inventory")]
-    CabooseNotInInventory(CabooseWhich),
-    /// The version in the caboose or artifact was not able to be parsed
-    #[error("version from caboose {caboose:?} could not be parsed: {err}")]
-    FailedVersionParse { caboose: CabooseWhich, err: String },
-    /// No artifact with the required conditions for the component was found
-    #[error("no artifact matching {0} was found")]
-    NoMatchingArtifactFound(String),
-    /// Too many artifacts with the required conditions for the component were
-    /// found
-    #[error("too many artifacts matching {0} were found")]
-    TooManyMatchingArtifacts(String),
+    /// The version in one of the component's cabooses could not be determined
+    #[error(transparent)]
+    Caboose(#[from] CabooseVersionError),
     /// The component's corresponding SP was not found in the inventory
     #[error("corresponding SP is not in inventory")]
     SpNotInInventory,
-}
-
-impl From<CabooseVersionError> for FailedRotBootloaderUpdateReason {
-    fn from(error: CabooseVersionError) -> Self {
-        match error {
-            CabooseVersionError::NotInInventory(which) => {
-                FailedRotBootloaderUpdateReason::CabooseNotInInventory(which)
-            }
-            CabooseVersionError::Parse { caboose, err } => {
-                FailedRotBootloaderUpdateReason::FailedVersionParse {
-                    caboose,
-                    err: err.to_string(),
-                    // <review>
-                    // This is almost certainly wrong.  You probably want to be using InlineErrorChain here.
-                    // </review>
-                }
-            }
-        }
-    }
+    /// The artifact that the component ought to be running could not be
+    /// chosen from the TUF repo
+    #[error(transparent)]
+    TargetArtifact(#[from] TargetArtifactError),
 }
 
 /// Describes the reason why an RoT failed to update
@@ -658,60 +629,19 @@ impl From<CabooseVersionError> for FailedRotBootloaderUpdateReason {
 #[serde(tag = "type", content = "value")]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum FailedRotUpdateReason {
-    /// The component's caboose was missing a value for "sign"
-    #[error("caboose for {0:?} is missing sign")]
-    CabooseMissingSign(CabooseWhich),
-    /// The component's caboose was not found in the inventory
-    #[error("caboose for {0:?} is not in inventory")]
-    CabooseNotInInventory(CabooseWhich),
-    /// The version in the caboose or artifact was not able to be parsed
-    #[error("version from caboose {caboose:?} could not be parsed: {err}")]
-    FailedVersionParse { caboose: CabooseWhich, err: String },
-    /// No artifact with the required conditions for the component was found
-    #[error("no artifact matching {0} was found")]
-    NoMatchingArtifactFound(String),
-    /// Too many artifacts with the required conditions for the component were
-    /// found
-    #[error("too many artifacts matching {0} were found")]
-    TooManyMatchingArtifacts(String),
+    /// The version in one of the component's cabooses could not be determined
+    #[error(transparent)]
+    Caboose(#[from] CabooseVersionError),
     /// RoT state was not found in inventory
     #[error("rot state is not in inventory")]
     RotStateNotInInventory,
     /// The component's corresponding SP was not found in the inventory
     #[error("corresponding SP is not in inventory")]
     SpNotInInventory,
-}
-
-impl From<CabooseVersionError> for FailedRotUpdateReason {
-    fn from(error: CabooseVersionError) -> Self {
-        match error {
-            CabooseVersionError::NotInInventory(which) => {
-                FailedRotUpdateReason::CabooseNotInInventory(which)
-            }
-            CabooseVersionError::Parse { caboose, err } => {
-                FailedRotUpdateReason::FailedVersionParse {
-                    caboose,
-                    err: err.to_string(),
-                    // <review>
-                    // InlineErrorChain
-                    // </review>
-                }
-            }
-        }
-    }
-}
-
-impl From<ActiveRotVersionError> for FailedRotUpdateReason {
-    fn from(error: ActiveRotVersionError) -> Self {
-        match error {
-            ActiveRotVersionError::RotStateNotInInventory => {
-                FailedRotUpdateReason::RotStateNotInInventory
-            }
-            ActiveRotVersionError::Caboose(error) => {
-                FailedRotUpdateReason::from(error)
-            }
-        }
-    }
+    /// The artifact that the component ought to be running could not be
+    /// chosen from the TUF repo
+    #[error(transparent)]
+    TargetArtifact(#[from] TargetArtifactError),
 }
 
 /// Describes the reason why an SP failed to update
@@ -732,12 +662,47 @@ impl From<ActiveRotVersionError> for FailedRotUpdateReason {
 #[serde(tag = "type", content = "value")]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum FailedSpUpdateReason {
-    /// The component's caboose was not found in the inventory
-    #[error("caboose for {0:?} is not in inventory")]
-    CabooseNotInInventory(CabooseWhich),
-    /// The version in the caboose or artifact was not able to be parsed
-    #[error("version from caboose {caboose:?} could not be parsed: {err}")]
-    FailedVersionParse { caboose: CabooseWhich, err: String },
+    /// The version in one of the component's cabooses could not be determined
+    #[error(transparent)]
+    Caboose(#[from] CabooseVersionError),
+    /// The component's corresponding SP was not found in the inventory
+    #[error("corresponding SP is not in inventory")]
+    SpNotInInventory,
+    /// The artifact that the component ought to be running could not be
+    /// chosen from the TUF repo
+    #[error(transparent)]
+    TargetArtifact(#[from] TargetArtifactError),
+    /// The component's corresponding sled contains zones that are unsafe to
+    /// shut down
+    #[error("sled contains zones that are unsafe to shut down: {0:?}")]
+    UnsafeZoneFound(String),
+}
+
+/// Describes the reason why the artifact that an SP, RoT, or RoT bootloader
+/// ought to be running could not be chosen from a TUF repo
+#[derive(
+    Error,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum TargetArtifactError {
+    /// The caboose used to choose the artifact was missing a value for "sign"
+    #[error("caboose for {0:?} is missing sign")]
+    CabooseMissingSign(CabooseWhich),
+    /// The caboose used to choose the artifact was not found in inventory
+    #[error(transparent)]
+    CabooseNotInInventory(#[from] NotInInventory),
     /// No artifact with the required conditions for the component was found
     #[error("no artifact matching {0} was found")]
     NoMatchingArtifactFound(String),
@@ -745,32 +710,6 @@ pub enum FailedSpUpdateReason {
     /// found
     #[error("too many artifacts matching {0} were found")]
     TooManyMatchingArtifacts(String),
-    /// The component's corresponding SP was not found in the inventory
-    #[error("corresponding SP is not in inventory")]
-    SpNotInInventory,
-    /// The component's corresponding sled contains zones that are unsafe to
-    /// shut down
-    #[error("sled contains zones that are unsafe to shut down: {0:?}")]
-    UnsafeZoneFound(String),
-}
-
-impl From<CabooseVersionError> for FailedSpUpdateReason {
-    fn from(error: CabooseVersionError) -> Self {
-        match error {
-            CabooseVersionError::NotInInventory(which) => {
-                FailedSpUpdateReason::CabooseNotInInventory(which)
-            }
-            CabooseVersionError::Parse { caboose, err } => {
-                FailedSpUpdateReason::FailedVersionParse {
-                    caboose,
-                    err: err.to_string(),
-                    // <review>
-                    // InlineErrorChain
-                    // </review>
-                }
-            }
-        }
-    }
 }
 
 /// Describes the reason why a Host OS failed to update
@@ -800,37 +739,22 @@ pub enum FailedHostOsUpdateReason {
     /// The active host phase 1 slot was not found in inventory
     #[error("active host phase 1 slot is not in inventory")]
     ActiveHostPhase1SlotNotInInventory,
-    /// The component's caboose was not found in the inventory
-    #[error("caboose for {0:?} is not in inventory")]
-    CabooseNotInInventory(CabooseWhich),
-    /// The version in the caboose or artifact was not able to be parsed
-    #[error("version from caboose {caboose:?} could not be parsed: {err}")]
-    FailedVersionParse { caboose: CabooseWhich, err: String },
     /// The inactive host phase 1 hash was not found in inventory
     #[error("inactive host phase 1 hash for slot {0:?} is not in inventory")]
     InactiveHostPhase1HashNotInInventory(M2Slot),
     /// Last reconciliation details were not found in inventory
     #[error("sled agent last reconciliation is not in inventory")]
     LastReconciliationNotInInventory,
-    /// No artifacts with the required conditions for the component were found
-    #[error("no matching artifacts for phase 1 or 2 were found")]
-    NoMatchingArtifactsFound,
-    /// No artifact with the required conditions for phase 1 was found
-    #[error("no matching artifact for phase 1 was found")]
-    NoMatchingPhase1ArtifactFound,
-    /// No artifact with the required conditions for phase 2 was found
-    #[error("no matching artifact for phase 2 was found")]
-    NoMatchingPhase2ArtifactFound,
     /// Sled agent info was not found in inventory
     #[error("sled agent info is not in inventory")]
     SledAgentInfoNotInInventory,
     /// The component's corresponding SP was not found in the inventory
     #[error("corresponding SP is not in inventory")]
     SpNotInInventory,
-    /// Too many artifacts with the required conditions for the component were
-    /// found
-    #[error("too many matching artifacts were found")]
-    TooManyMatchingArtifacts,
+    /// The host OS artifacts that the sled ought to be running could not be
+    /// chosen from the TUF repo
+    #[error(transparent)]
+    TargetArtifact(#[from] HostOsTargetArtifactError),
     /// The sled agent reported an error determining the boot disk
     #[error("sled agent was unable to determine the boot disk: {0:?}")]
     UnableToDetermineBootDisk(String),
@@ -842,24 +766,43 @@ pub enum FailedHostOsUpdateReason {
     /// shut down
     #[error("sled contains zones that are unsafe to shut down: {0:?}")]
     UnsafeZoneFound(String),
+}
+
+/// Describes the reason why the host OS artifacts that a sled ought to be
+/// running could not be chosen from a TUF repo
+#[derive(
+    Error,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum HostOsTargetArtifactError {
+    /// No artifacts with the required conditions for the component were found
+    #[error("no matching artifacts for phase 1 or 2 were found")]
+    NoMatchingArtifactsFound,
+    /// No artifact with the required conditions for phase 1 was found
+    #[error("no matching artifact for phase 1 was found")]
+    NoMatchingPhase1ArtifactFound,
+    /// No artifact with the required conditions for phase 2 was found
+    #[error("no matching artifact for phase 2 was found")]
+    NoMatchingPhase2ArtifactFound,
+    /// Too many artifacts with the required conditions for the component were
+    /// found
+    #[error("too many matching artifacts were found")]
+    TooManyMatchingArtifacts,
     /// The sled model could not be determined
     #[error("unable to determine the sled model {0:?}")]
     UnableToDetermineSledModel(String),
-}
-
-impl From<ActiveHostPhase1HashError> for FailedHostOsUpdateReason {
-    fn from(error: ActiveHostPhase1HashError) -> Self {
-        match error {
-            ActiveHostPhase1HashError::ActiveSlotNotInInventory => {
-                FailedHostOsUpdateReason::ActiveHostPhase1SlotNotInInventory
-            }
-            ActiveHostPhase1HashError::HashNotInInventory(slot) => {
-                FailedHostOsUpdateReason::ActiveHostPhase1HashNotInInventory(
-                    slot,
-                )
-            }
-        }
-    }
 }
 
 /// Describes the details of what we're waiting on when a sled is being

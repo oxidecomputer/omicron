@@ -15,6 +15,7 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
 use nexus_types::deployment::planning_report::FailedHostOsUpdateReason;
+use nexus_types::deployment::planning_report::HostOsTargetArtifactError;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::SpType;
 use nexus_types::tuf_repo::TufRepoDescription;
@@ -451,11 +452,11 @@ impl<'a> HostOsTargetArtifacts<'a> {
     pub(super) fn for_board(
         baseboard_id: &BaseboardId,
         current_artifacts: &'a TufRepoDescription,
-    ) -> Result<Self, FailedHostOsUpdateReason> {
+    ) -> Result<Self, HostOsTargetArtifactError> {
         let Some(sled_type) =
             OxideSled::try_from_model(&baseboard_id.part_number)
         else {
-            return Err(FailedHostOsUpdateReason::UnableToDetermineSledModel(
+            return Err(HostOsTargetArtifactError::UnableToDetermineSledModel(
                 baseboard_id.part_number.clone(),
             ));
         };
@@ -478,16 +479,18 @@ impl<'a> HostOsTargetArtifacts<'a> {
             (Ok(p1), Ok(p2)) => (p1, p2),
             // "TUF is broken" cases: missing both, one or the other.
             (Err(GetError::NotFound), Err(GetError::NotFound)) => {
-                return Err(FailedHostOsUpdateReason::NoMatchingArtifactsFound);
+                return Err(
+                    HostOsTargetArtifactError::NoMatchingArtifactsFound,
+                );
             }
             (Err(GetError::NotFound), Ok(_)) => {
                 return Err(
-                    FailedHostOsUpdateReason::NoMatchingPhase1ArtifactFound,
+                    HostOsTargetArtifactError::NoMatchingPhase1ArtifactFound,
                 );
             }
             (Ok(_), Err(GetError::NotFound)) => {
                 return Err(
-                    FailedHostOsUpdateReason::NoMatchingPhase2ArtifactFound,
+                    HostOsTargetArtifactError::NoMatchingPhase2ArtifactFound,
                 );
             }
             // "TUF is broken" cases: have multiple of one or the other. This
@@ -495,7 +498,9 @@ impl<'a> HostOsTargetArtifacts<'a> {
             // host OS images. We can't proceed, because we don't know how to
             // pair up which phase 1 matches which phase 2.
             (Err(GetError::TooMany), _) | (_, Err(GetError::TooMany)) => {
-                return Err(FailedHostOsUpdateReason::TooManyMatchingArtifacts);
+                return Err(
+                    HostOsTargetArtifactError::TooManyMatchingArtifacts,
+                );
             }
         };
 

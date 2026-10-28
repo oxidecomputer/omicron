@@ -4,29 +4,16 @@
 
 //! Checks run before adding sleds to the system
 //!
-//! When the system has a target release, a sled being added ought to be
-//! running the software from that release already.  Before adding a sled, we
-// <review covers="2 lines above">
-// Strike the first sentence here.
-// </review>
-//! check two things:
+//! Before adding a sled, we check two things:
 //!
 //! 1. The system itself has finished updating to its target release.  We do
-//!    not add sleds while an update is in progress, while a sled is waiting
-// <review>
-// replace "add sleds" here with "support self-service adding of sleds"
-// </review>
-//!    for a mupdate to be cleared, or while updates are suspended.
+//!    not support self-service adding of sleds while an update is in
+//!    progress, while a sled is waiting for a mupdate to be cleared, or while
+//!    updates are suspended.
 //! 2. The new sled's SP, RoT, RoT bootloader, and host phase 1 images match
 //!    the target release, and the RoT's boot preferences show no RoT update
 //!    that has not fully taken effect.  These come from the latest inventory
-//!    collection.  The comparison is done by
-//!    `nexus_reconfigurator_planning::mgs_updates::compare_deployed_versions()`,
-//!    which uses the same logic that the planner uses to decide whether a
-//!    board needs an update.
-// <review covers="4 lines above">
-// This last sentence isn't necessary here.
-// </review>
+//!    collection.
 //!
 //! If no target release has ever been set, we skip both checks.
 //!
@@ -42,12 +29,12 @@ use super::deployment::BlueprintTargetReleaseStatus;
 use nexus_db_model::TargetReleaseSource;
 use nexus_db_queries::context::OpContext;
 use nexus_reconfigurator_planning::mgs_updates::ActiveImageCheck;
-use nexus_reconfigurator_planning::mgs_updates::BoardNotInInventory;
-use nexus_reconfigurator_planning::mgs_updates::DeployedVersionsReport;
-use nexus_reconfigurator_planning::mgs_updates::compare_deployed_versions;
+use nexus_reconfigurator_planning::mgs_updates::DeployedVersions;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintArtifactVersion;
+use nexus_types::deployment::MgsUpdateComponent;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::NotInInventory;
 use nexus_types::tuf_repo::TufRepoDescription;
 use omicron_common::api::external::Error;
 use omicron_generation_kinds::TargetReleaseGeneration;
@@ -76,10 +63,10 @@ impl super::Nexus {
         })?;
         let tuf_repo_id = match release_source {
             TargetReleaseSource::Unspecified => {
+                // This case exists primarily for systems that have not yet
+                // adopted self-service update.  Those systems have never set a
+                // target release, so there is nothing to check against.
                 info!(
-                // <review>
-                // There should be a comment here that this mode exists primarily for systems that have not yet adopted self-service update and so haven't bothered to ever set a target release.
-                // </review>
                     opctx.log,
                     "skipping software checks for sled add: \
                      no target release has been set"
@@ -110,9 +97,6 @@ impl super::Nexus {
             Error::invalid_request(format!(
                 "sled cannot be added: {}",
                 InlineErrorChain::new(&error)
-                // <review covers="2 lines above">
-                // The message here should just be "sled cannot be added".  The `InlineErrorChain` should appear after a semicolon.  This will cause it to show up as a key-value pair in the structured log rather than just an inline string.
-                // </review>
             ))
         })
     }
@@ -161,7 +145,7 @@ fn check_sled_software<'a>(
     };
 
     for sled in sleds {
-        let report = compare_deployed_versions(sled, inventory, repo)?;
+        let report = DeployedVersions::compute(sled, inventory, repo)?;
         let problems = sled_software_problems(sled, report)?;
         if !problems.is_empty() {
             return Err(SledSoftwareError::Mismatch {
@@ -204,7 +188,7 @@ enum SledSoftwareError {
     #[error("no inventory collection is available")]
     NoInventory,
     #[error("the sled's software could not be checked")]
-    NotInInventory(#[from] BoardNotInInventory),
+    NotInInventory(#[from] NotInInventory),
     #[error("board {0} is not a sled")]
     NotASled(BaseboardId),
     #[error(
@@ -223,37 +207,18 @@ fn join_problems(problems: &[SledSoftwareProblem]) -> String {
     problems.iter().map(|p| p.to_string()).collect::<Vec<_>>().join("; ")
 }
 
-/// A component on a sled whose software we check before adding the sled
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SledComponent {
-    Sp,
-    Rot,
-    RotBootloader,
-    HostPhase1,
-}
-// <review covers="8 lines above">
-// Is there really no existing enum we can use for this?
-// </review>
-
-impl Display for SledComponent {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            SledComponent::Sp => "SP",
-            SledComponent::Rot => "RoT",
-            SledComponent::RotBootloader => "RoT bootloader",
-            SledComponent::HostPhase1 => "host OS phase 1",
-        })
-    }
-}
-
 /// One way in which a sled's software is not ready for the sled to be added
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SledSoftwareProblem {
     /// the component's active image differs from the target release
-    WrongImage { component: SledComponent, found: String, expected: String },
+    WrongImage {
+        component: MgsUpdateComponent,
+        found: String,
+        expected: String,
+    },
     /// the component's active image could not be confirmed to match the
     /// target release
-    Unverified { component: SledComponent, reason: String },
+    Unverified { component: MgsUpdateComponent, reason: String },
 }
 
 impl Display for SledSoftwareProblem {
@@ -272,16 +237,15 @@ impl Display for SledSoftwareProblem {
     }
 }
 
-/// Converts a report from `compare_deployed_versions()` into a list of
+/// Converts a `DeployedVersions` into a list of
 /// problems that prevent the sled from being added
 ///
 /// An empty list means the sled's software is ready.
 fn sled_software_problems(
     sled: &BaseboardId,
-    report: DeployedVersionsReport,
+    report: DeployedVersions,
 ) -> Result<Vec<SledSoftwareProblem>, SledSoftwareError> {
-    let DeployedVersionsReport { sp, rot, rot_bootloader, host_phase_1 } =
-        report;
+    let DeployedVersions { sp, rot, rot_bootloader, host_phase_1 } = report;
 
     // A board without host phase 1 is not a sled.
     let Some(host_phase_1) = host_phase_1 else {
@@ -289,20 +253,20 @@ fn sled_software_problems(
     };
 
     Ok([
-        image_problem(SledComponent::Sp, sp),
-        image_problem(SledComponent::Rot, rot),
-        image_problem(SledComponent::RotBootloader, rot_bootloader),
-        image_problem(SledComponent::HostPhase1, host_phase_1),
+        image_problem(MgsUpdateComponent::Sp, sp),
+        image_problem(MgsUpdateComponent::Rot, rot),
+        image_problem(MgsUpdateComponent::RotBootloader, rot_bootloader),
+        image_problem(MgsUpdateComponent::HostOs, host_phase_1),
     ]
     .into_iter()
     .flatten()
     .collect())
 }
 
-/// Converts one component's result from `compare_deployed_versions()` into a
+/// Converts one component's result from `DeployedVersions` into a
 /// problem, if there is one
 fn image_problem<T: Display, E: std::error::Error>(
-    component: SledComponent,
+    component: MgsUpdateComponent,
     check: ActiveImageCheck<T, E>,
 ) -> Option<SledSoftwareProblem> {
     match check {
@@ -328,9 +292,11 @@ mod tests {
     use super::*;
     use gateway_types::rot::RotSlot;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::mgs_updates::ImageCheckError;
     use nexus_reconfigurator_planning::mgs_updates::RotCheckError;
-    use nexus_types::deployment::planning_report::FailedSpUpdateReason;
+    use nexus_types::inventory::CabooseVersionError;
     use nexus_types::inventory::CabooseWhich;
+    use nexus_types::inventory::InventoryItem;
     use std::collections::BTreeMap;
     use tufaceous_artifact::ArtifactHash;
     use tufaceous_artifact::ArtifactSet;
@@ -343,8 +309,8 @@ mod tests {
         }
     }
 
-    fn all_matching_report() -> DeployedVersionsReport {
-        DeployedVersionsReport {
+    fn all_matching_report() -> DeployedVersions {
+        DeployedVersions {
             sp: ActiveImageCheck::Matches,
             rot: ActiveImageCheck::Matches,
             rot_bootloader: ActiveImageCheck::Matches,
@@ -411,7 +377,7 @@ mod tests {
 
     #[test]
     fn test_problems_reported() {
-        let report = DeployedVersionsReport {
+        let report = DeployedVersions {
             sp: ActiveImageCheck::Differs {
                 found: ArtifactVersion::new_const("1.0.0"),
                 expected: ArtifactVersion::new_const("2.0.0"),
@@ -436,7 +402,7 @@ mod tests {
         assert_eq!(
             problems[0],
             SledSoftwareProblem::WrongImage {
-                component: SledComponent::Sp,
+                component: MgsUpdateComponent::Sp,
                 found: "1.0.0".to_string(),
                 expected: "2.0.0".to_string(),
             }
@@ -444,14 +410,14 @@ mod tests {
         assert!(matches!(
             problems[1],
             SledSoftwareProblem::Unverified {
-                component: SledComponent::Rot,
+                component: MgsUpdateComponent::Rot,
                 ..
             }
         ));
         assert_eq!(
             problems[2],
             SledSoftwareProblem::WrongImage {
-                component: SledComponent::HostPhase1,
+                component: MgsUpdateComponent::HostOs,
                 found: ArtifactHash([1; 32]).to_string(),
                 expected: ArtifactHash([2; 32]).to_string(),
             }
@@ -471,17 +437,18 @@ mod tests {
         assert!(message.contains(
             "RoT could not be verified: RoT boot preferences show an update"
         ));
-        assert!(message.contains("host OS phase 1 is running"));
+        assert!(message.contains("Host OS is running"));
     }
 
     #[test]
     fn test_unverified_is_a_problem() {
-        let report = DeployedVersionsReport {
-            sp: ActiveImageCheck::Error(
-                FailedSpUpdateReason::CabooseNotInInventory(
-                    CabooseWhich::SpSlot0,
-                ),
-            ),
+        let report = DeployedVersions {
+            sp: ActiveImageCheck::Error(ImageCheckError::Active(
+                CabooseVersionError::NotInInventory(NotInInventory::new(
+                    &test_sled(),
+                    InventoryItem::Caboose(CabooseWhich::SpSlot0),
+                )),
+            )),
             ..all_matching_report()
         };
         let problems = sled_software_problems(&test_sled(), report)
@@ -489,18 +456,19 @@ mod tests {
         assert_eq!(
             problems,
             vec![SledSoftwareProblem::Unverified {
-                component: SledComponent::Sp,
-                reason: "caboose for SpSlot0 is not in inventory".to_string(),
+                component: MgsUpdateComponent::Sp,
+                reason: "could not identify the active image: caboose \
+                         SpSlot0 for baseboard 913-0000019:test-sled is not \
+                         in inventory"
+                    .to_string(),
             }]
         );
     }
 
     #[test]
     fn test_not_a_sled() {
-        let report = DeployedVersionsReport {
-            host_phase_1: None,
-            ..all_matching_report()
-        };
+        let report =
+            DeployedVersions { host_phase_1: None, ..all_matching_report() };
         let error = sled_software_problems(&test_sled(), report)
             .expect_err("board is not a sled");
         assert!(matches!(error, SledSoftwareError::NotASled(_)));
