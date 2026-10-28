@@ -5,7 +5,6 @@
 //! Facilities for making choices about SP updates
 
 use super::MgsUpdateStatus;
-use super::expected_inactive_version;
 use super::mgs_update_status_inactive_versions;
 use crate::mgs_updates::MgsUpdateOutcome;
 use crate::mgs_updates::UpdateableBoard;
@@ -100,10 +99,8 @@ pub(super) fn try_make_update(
     }
 
     // Begin configuring an update.
-    let expected_inactive_version = expected_inactive_version(
-        inventory,
-        CabooseWhich::SpSlot1,
-        baseboard_id,
+    let expected_inactive_version = ExpectedVersion::from_caboose(
+        inventory.caboose_version_for(CabooseWhich::SpSlot1, baseboard_id),
     )?;
 
     Ok(MgsUpdateOutcome::pending_with_update_only(PendingMgsUpdate {

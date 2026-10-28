@@ -5,7 +5,6 @@
 //! Facilities for making choices about RoT updates
 
 use super::MgsUpdateStatus;
-use super::expected_inactive_version;
 use super::mgs_update_status_inactive_versions;
 use crate::mgs_updates::MgsUpdateOutcome;
 
@@ -149,10 +148,8 @@ pub(super) fn try_make_update(
     // Begin configuring an update.
     let inactive_caboose_which =
         CabooseWhich::from_rot_slot(active_slot.toggled());
-    let expected_inactive_version = expected_inactive_version(
-        inventory,
-        inactive_caboose_which,
-        baseboard_id,
+    let expected_inactive_version = ExpectedVersion::from_caboose(
+        inventory.caboose_version_for(inactive_caboose_which, baseboard_id),
     )?;
 
     Ok(MgsUpdateOutcome::pending_with_update_only(PendingMgsUpdate {

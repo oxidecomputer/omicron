@@ -14,6 +14,7 @@
 
 use crate::external_api::sled::SledState;
 use crate::internal_api::params::DnsConfigParams;
+use crate::inventory::CabooseVersionError;
 use crate::inventory::Collection;
 pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
@@ -3119,6 +3120,27 @@ pub enum ExpectedVersion {
     NoValidVersion,
     /// We expect to find the specified version in this slot
     Version(ArtifactVersion),
+}
+
+impl ExpectedVersion {
+    /// Converts the result of looking up a caboose's version in inventory
+    /// (e.g., with `Collection::caboose_version_for()`) into the version that
+    /// we expect to find in that slot
+    ///
+    /// A missing caboose is not an error.  It means that we expect the slot
+    /// to hold no valid image.  A caboose whose version cannot be parsed is
+    /// an error.
+    pub fn from_caboose(
+        caboose_version: Result<ArtifactVersion, CabooseVersionError>,
+    ) -> Result<ExpectedVersion, CabooseVersionError> {
+        match caboose_version {
+            Ok(version) => Ok(ExpectedVersion::Version(version)),
+            Err(CabooseVersionError::NotInInventory(_)) => {
+                Ok(ExpectedVersion::NoValidVersion)
+            }
+            Err(error @ CabooseVersionError::Parse { .. }) => Err(error),
+        }
+    }
 }
 
 impl FromStr for ExpectedVersion {

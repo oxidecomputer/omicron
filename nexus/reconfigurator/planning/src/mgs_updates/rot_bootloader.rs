@@ -5,7 +5,6 @@
 //! Facilities for making choices about RoT bootloader updates
 
 use super::MgsUpdateStatus;
-use super::expected_inactive_version;
 use super::mgs_update_status_inactive_versions;
 use crate::mgs_updates::MgsUpdateOutcome;
 
@@ -88,10 +87,8 @@ pub(super) fn try_make_update(
     }
 
     // Begin configuring an update.
-    let expected_stage0_next_version = expected_inactive_version(
-        inventory,
-        CabooseWhich::Stage0Next,
-        baseboard_id,
+    let expected_stage0_next_version = ExpectedVersion::from_caboose(
+        inventory.caboose_version_for(CabooseWhich::Stage0Next, baseboard_id),
     )?;
 
     Ok(MgsUpdateOutcome::pending_with_update_only(PendingMgsUpdate {

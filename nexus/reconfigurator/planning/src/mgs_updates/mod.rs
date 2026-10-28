@@ -31,7 +31,6 @@ use nexus_types::deployment::SledUpdateRebootPolicy;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::planning_report::BlockedMgsUpdate;
 use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
-use nexus_types::inventory::CabooseVersionError;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::tuf_repo::TufRepoDescription;
@@ -726,25 +725,6 @@ fn mgs_update_status_inactive_versions(
             // No problem!
             MgsUpdateStatus::NotDone
         }
-    }
-}
-
-/// Returns the version in caboose `which` on `baseboard_id` as the version
-/// that an update should expect to find in an inactive slot
-///
-/// A missing caboose is not an error.  It means that the inactive slot holds
-/// no valid image.
-fn expected_inactive_version(
-    inventory: &Collection,
-    which: CabooseWhich,
-    baseboard_id: &BaseboardId,
-) -> Result<ExpectedVersion, CabooseVersionError> {
-    match inventory.caboose_version_for(which, baseboard_id) {
-        Ok(version) => Ok(ExpectedVersion::Version(version)),
-        Err(CabooseVersionError::NotInInventory(_)) => {
-            Ok(ExpectedVersion::NoValidVersion)
-        }
-        Err(error @ CabooseVersionError::Parse { .. }) => Err(error),
     }
 }
 
