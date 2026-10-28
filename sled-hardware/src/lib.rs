@@ -402,9 +402,6 @@ pub struct HardwareView {
     tofino: TofinoView,
     disks: HashMap<DiskIdentity, UnparsedDisk>,
     disk_bays: Vec<DiskBay>,
-    /// Why the latest poll could not describe every disk bay, if it could
-    /// not.
-    incomplete_disks: Option<String>,
     baseboard: Baseboard,
     online_processor_count: u32,
     usable_physical_pages: u64,
@@ -435,15 +432,6 @@ impl HardwareView {
     /// topology to read.
     pub fn disk_bays(&self) -> &[DiskBay] {
         &self.disk_bays
-    }
-
-    /// Why the latest hardware poll could not describe every disk bay, or
-    /// `None` if it described them all.
-    ///
-    /// When this is `Some`, [`Self::disks`] may be missing disks that are
-    /// present, or may describe a disk as of an earlier poll.
-    pub fn incomplete_disks(&self) -> Option<&str> {
-        self.incomplete_disks.as_deref()
     }
 
     pub fn into_disks(self) -> HashMap<DiskIdentity, UnparsedDisk> {

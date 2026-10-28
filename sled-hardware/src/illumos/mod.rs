@@ -219,7 +219,6 @@ impl HardwareView {
             tofino,
             disks: HashMap::new(),
             disk_bays: Vec::new(),
-            incomplete_disks: None,
             baseboard,
             online_processor_count: sysconf::online_processor_count()?,
             usable_physical_pages: sysconf::usable_physical_pages()?,
@@ -522,29 +521,6 @@ fn poll_device_tree(
     let HardwareSnapshot { tofino: polled_tofino, bays: polled_bays } =
         polled_hw;
 
-    let incomplete_disks = match &polled_bays {
-        None => Some("could not read the disk bays".to_string()),
-        Some(bays) => {
-            let unreadable: Vec<&str> = bays
-                .iter()
-                .filter_map(|bay| match bay {
-                    PolledBay::Unreadable { location, .. } => {
-                        Some(location.as_str())
-                    }
-                    PolledBay::Described { .. } => None,
-                })
-                .collect();
-            if unreadable.is_empty() {
-                None
-            } else {
-                Some(format!(
-                    "could not read disk bay(s): {}",
-                    unreadable.join(", ")
-                ))
-            }
-        }
-    };
-
     // Bays this poll could not describe keep what the previous view said.
     let polled_disks = polled_bays.map(|bays| {
         let previous = hardware_view_tx.borrow();
@@ -580,12 +556,7 @@ fn poll_device_tree(
             }
         };
 
-        let did_modify_incomplete = inner.incomplete_disks != incomplete_disks;
-        if did_modify_incomplete {
-            inner.incomplete_disks = incomplete_disks.clone();
-        }
-
-        did_modify_tofino || did_modify_disks || did_modify_incomplete
+        did_modify_tofino || did_modify_disks
     });
 
     info!(
@@ -842,8 +813,7 @@ impl HardwareManager {
         // Force the device tree to be polled at least once before returning.
         // This mitigates issues where the Sled Agent could try to propagate
         // an "empty" view of hardware to other consumers before the first
-        // query. If the disk bays could not be read, the view has no disks
-        // and `incomplete_disks` says why.
+        // query.
         match poll_device_tree(&log, &hardware_view_tx, &external_disks) {
             Ok(_) => (),
             // Allow non-sled devices to proceed with a "null" view of
@@ -899,11 +869,6 @@ impl HardwareManager {
 
     pub fn disks(&self) -> HashMap<DiskIdentity, UnparsedDisk> {
         self.hardware_view_rx.borrow().disks()
-    }
-
-    /// See [`HardwareView::incomplete_disks`].
-    pub fn incomplete_disks(&self) -> Option<String> {
-        self.hardware_view_rx.borrow().incomplete_disks().map(str::to_string)
     }
 
     pub fn is_scrimlet(&self) -> bool {
