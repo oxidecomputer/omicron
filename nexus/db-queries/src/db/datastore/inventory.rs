@@ -5482,6 +5482,15 @@ impl DataStore {
                 .expect("database ensures the row has a unique rack_id");
         }
 
+        // Check that every discovered sled belonged to a discovered rack in
+        // this collection. (This shouldn't be possible unless there's a bug on
+        // the insert side or something very weird is going on.)
+        bail_unless!(
+            discovered_sleds_by_rack_id.is_empty(),
+            "found discovered sleds for nonexistent racks: {:?}",
+            discovered_sleds_by_rack_id.keys(),
+        );
+
         // Check that we consumed all the reconciliation results we found in
         // this collection.
         bail_unless!(
