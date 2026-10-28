@@ -817,9 +817,9 @@ mod test {
         }
 
         // Create instances in the `SledEvacuating` state that are eligible to
-        // be reincarnated. When an instance state is reincarnated due to its
-        // sled evacuating, the task ignores the auto-restart policy and always
-        // restarts the the instance, so we include instances with both policies
+        // be reincarnated. When an instance is reincarnated due to its sled
+        // evacuating, the task ignores the auto-restart policy and always
+        // restarts the instance, so we include instances with both policies
         let num_sled_evacuating = 4;
         for i in 0..num_sled_evacuating / 2 {
             let instance = create_instance(
@@ -1162,7 +1162,7 @@ mod test {
             let instance = create_instance(
                 &cptestctx,
                 &opctx,
-                &format!("sattakkhattaparama-{i}"),
+                &format!("sattakkhattuparama-{i}"),
                 policy,
                 InstanceState::Vmm,
                 InstanceIntendedState::Running,
