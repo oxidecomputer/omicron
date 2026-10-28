@@ -21,7 +21,7 @@ use crate::disk_bay::{
     BayContents, BayProblem, ObservedBay, ObservedNamespace, ObservedOccupant,
 };
 use crate::nvme_instance::NvmeInstance;
-use libtopo::{Error, Node, Scheme, TopoHdl, WalkAction, hc};
+use libtopo::{Error, Node, Scheme, Snapshot, WalkAction, hc};
 use sled_agent_types::disk::DiskVariant;
 use slog::{Logger, debug, warn};
 use std::collections::HashMap;
@@ -56,24 +56,19 @@ pub(super) enum TopoError {
     },
 }
 
-/// Takes a fresh topology snapshot and returns every U.2 bay and M.2 socket
-/// with what the topology found behind it, in walk order. A bay the
-/// topology only partly describes, or whose nodes cannot be read, comes back
-/// with an `Err` in [`ObservedBay::contents`].
+/// Returns every U.2 bay and M.2 socket in the snapshot with what the
+/// topology found behind it, in walk order. A bay the topology only partly
+/// describes, or whose nodes cannot be read, comes back with an `Err` in
+/// [`ObservedBay::contents`].
 ///
-/// The whole read fails only if the topology cannot be read or a bay cannot
-/// be identified (no label, or a slot whose type cannot be read). Leaving
-/// such a bay out instead would drop its disk until it can be read again.
-///
-/// A new handle is opened on every call: the wrapper allows one snapshot per
-/// handle (see <https://github.com/oxidecomputer/libtopo/issues/14>), and a
-/// snapshot costs far more than the handle anyway.
+/// The whole read fails only if the walk fails or a bay cannot be identified
+/// (no label, or a slot whose type cannot be read). Leaving such a bay out
+/// instead would drop its disk until it can be read again.
 pub(super) fn read_disk_bays(
     log: &Logger,
+    snap: &Snapshot<'_>,
 ) -> Result<Vec<ObservedBay>, TopoError> {
     let start = Instant::now();
-    let hdl = TopoHdl::open()?;
-    let snap = hdl.snapshot()?;
 
     let mut walker = BayWalker::new(log);
     // The walk callback can only return libtopo's error type, so keep ours

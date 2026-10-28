@@ -17,6 +17,7 @@ use gethostname::gethostname;
 use illumos_devinfo::{DevInfo, Node, Property};
 use libnvme::namespace::NamespaceDiscoveryLevel;
 use libnvme::{Nvme, controller::Controller};
+use libtopo::{Snapshot, TopoHdl};
 use sled_agent_types::disk::DiskIdentity;
 use sled_hardware_types::{Baseboard, OxideSled, SledCpuFamily};
 use slog::Logger;
@@ -163,10 +164,26 @@ impl HardwareSnapshot {
         // Monitor for the Tofino device and driver.
         let tofino = get_tofino_snapshot(log, &mut device_info);
 
-        let bays = match external_disks {
-            ExternalDisks::DetectPhysical => {
-                read_bays(log, sled_type, boot_storage_unit)
+        // One topology snapshot per poll, shared by everything that reads
+        // it. A handle allows only one snapshot (see
+        // <https://github.com/oxidecomputer/libtopo/issues/14>), so each poll
+        // opens its own.
+        let topo_hdl;
+        let topo_snap = match TopoHdl::open() {
+            Ok(hdl) => {
+                topo_hdl = hdl;
+                topo_hdl.snapshot()
             }
+            Err(err) => Err(err),
+        };
+
+        let bays = match external_disks {
+            ExternalDisks::DetectPhysical => match topo_snap {
+                Ok(ref snap) => {
+                    read_bays(log, snap, sled_type, boot_storage_unit)
+                }
+                Err(err) => Err(topo::TopoError::from(err).into()),
+            },
 
             // These stand in for real hardware, so give each one a bay.
             ExternalDisks::Hardcoded { vdevs: _, disks } => Ok(disks
@@ -312,10 +329,11 @@ fn find_properties<'a, const N: usize>(
 /// Reads every bay from the hardware topology and describes each one.
 fn read_bays(
     log: &Logger,
+    snap: &Snapshot<'_>,
     sled: OxideSled,
     boot_storage_unit: BootStorageUnit,
 ) -> Result<Vec<PolledBay>, Error> {
-    let observed = topo::read_disk_bays(log)?;
+    let observed = topo::read_disk_bays(log, snap)?;
     let nvme = Nvme::new()?;
     Ok(observed
         .iter()
