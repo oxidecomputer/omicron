@@ -203,11 +203,11 @@ impl CapacityMetrics {
                 .datastore
                 .project_utilization_list(opctx, &p.current_pagparams())
                 .await?;
-            paginator = p.found_batch(&utils, &|util| util.project_id);
+            paginator = p.found_batch(&utils, &|util| util.project_id());
 
             for util in utils {
                 let target = ProjectQuota {
-                    project_id: util.project_id,
+                    project_id: util.project_id.into_untyped_uuid(),
                     silo_id: util.silo_id,
                     nexus_id,
                 };
@@ -460,7 +460,14 @@ mod tests {
             (populated_silo, None, "provisioned", 4, 16, 100),
             (empty_silo, None, "capacity", 8, 32, 256),
             (empty_silo, None, "provisioned", 0, 0, 0),
-            (populated_silo, Some(project_id), "provisioned", 4, 16, 100),
+            (
+                populated_silo,
+                Some(project_id.into_untyped_uuid()),
+                "provisioned",
+                4,
+                16,
+                100,
+            ),
         ] {
             for (metric, value) in [
                 ("cpu", cpu),
