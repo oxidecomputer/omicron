@@ -4504,7 +4504,7 @@ mod tests {
             .expect("Able to send instance_ensure to mock Propolis");
 
         // Now, actually put the state directly from the instance runner.
-        inst.put_state(put_tx, VmmStateRequested::Running)
+        inst.put_state(put_tx, VmmStateRequested::Running, None)
             .expect("able to queue put_state request");
 
         // Wait until the zone actually starts halting.
@@ -4652,7 +4652,7 @@ mod tests {
             .expect("Able to send instance_ensure to mock Propolis");
 
         // Now, actually put the state directly from the instance runner.
-        inst.put_state(put_tx, VmmStateRequested::Running)
+        inst.put_state(put_tx, VmmStateRequested::Running, None)
             .expect("able to queue put_state request");
 
         // Wait until the zone actually starts halting.

@@ -621,10 +621,27 @@ impl SledAgent {
             )?;
         }
 
-        let new_state =
-            self.vmms.sim_ensure(&propolis_id, current, Some(state)).await?;
+        let vmms = Arc::clone(&self.vmms);
+        let fut = async move {
+            vmms.sim_ensure(&propolis_id, current, Some(state)).await
+        };
 
-        Ok(VmmPutStateResponse { updated_runtime: Some(new_state) })
+        // don't immediately "terminate" the "vmm" for soft-shutdown requests.
+        let nexus_client = Arc::clone(&self.nexus_client);
+        if let Some(timeout) = acpi_timeout_secs {
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(timeout as u64)).await;
+                if let Ok(new_state) = fut.await {
+                    let _: Result<_, _> = nexus_client
+                        .cpapi_instances_put(&propolis_id, &new_state.into())
+                        .await;
+                }
+            });
+            Ok(VmmPutStateResponse { updated_runtime: None })
+        } else {
+            let new_state = fut.await?;
+            Ok(VmmPutStateResponse { updated_runtime: Some(new_state) })
+        }
     }
 
     /// Wrapper around `sim_get_cloned_object` that returns the same error as

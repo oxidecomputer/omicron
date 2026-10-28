@@ -40,7 +40,6 @@ use nexus_types_versions::v2026_05_07_00;
 use nexus_types_versions::v2026_06_05_00;
 use nexus_types_versions::v2026_06_08_00;
 use nexus_types_versions::v2026_08_14_00;
-use nexus_types_versions::v2026_08_14_01;
 
 use omicron_common::address::IpRange;
 use omicron_common::api::external::{

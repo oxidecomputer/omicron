@@ -1991,6 +1991,7 @@ async fn test_instance_migrate_autoselect_no_other_sled(
         Default::default(),
         None,
         Vec::new(),
+        Some(instance::InstanceShutdownPolicy::HardOff),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -2067,6 +2068,7 @@ async fn test_instance_migrate_autoselect_skips_non_provisionable_sled(
         Default::default(),
         None,
         Vec::new(),
+        Some(instance::InstanceShutdownPolicy::HardOff),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -2194,6 +2196,9 @@ async fn test_instance_migrate_autoselect_anti_affinity(
                 )],
                 multicast_groups: Vec::new(),
                 enable_jumbo_frames: false,
+                shutdown_policy: Some(
+                    instance::InstanceShutdownPolicy::HardOff,
+                ),
             },
         )
         .await;
@@ -10610,7 +10615,8 @@ async fn test_instances_shutdown_policy_force_hardstop(
 
     assert_eq!(instance.shutdown_policy, CUSTOM_POLICY);
 
-    // stop with skip_os_shutdown=true param.
+    // stop with skip_os_shutdown=true param should request normal Stop
+    // to propolis, ignoring configured soft-off policy.
     expect_instance_stop_ok(client, instance_name, true).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
@@ -10619,14 +10625,6 @@ async fn test_instances_shutdown_policy_force_hardstop(
             state: PropolisStateRequested::Stop
         }
     );
-
-    // subsequent instance stop request after a hard-off?
-    // expect_instance_stop_fail(
-    //     client,
-    //     instance_name,
-    //     TBD,
-    // )
-    // .await;
 }
 
 #[nexus_test]

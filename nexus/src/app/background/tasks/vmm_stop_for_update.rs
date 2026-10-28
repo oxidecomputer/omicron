@@ -276,7 +276,11 @@ impl VmmStopForUpdate {
             let response = match sled_client
                 .vmm_put_state(
                     &vmm_id,
-                    &VmmPutStateBody { state: VmmStateRequested::Stopped },
+                    &VmmPutStateBody {
+                        state: VmmStateRequested::Stopped,
+                        // FIXME(lif) before undraft PR: add shutdown policy data!
+                        acpi_timeout_secs: None,
+                    },
                 )
                 .await
             {
@@ -687,6 +691,7 @@ mod tests {
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::object_create;
     use nexus_types::external_api::instance::InstanceCreate;
+    use nexus_types::external_api::instance::InstanceShutdownPolicy;
     use nexus_types_versions::latest::instance::Instance;
     use nexus_types_versions::latest::instance::InstanceNetworkInterfaceAttachment;
     use nexus_types_versions::latest::instance::InstanceSelector;
@@ -747,6 +752,7 @@ mod tests {
                 )],
                 multicast_groups: Vec::new(),
                 enable_jumbo_frames: false,
+                shutdown_policy: Some(InstanceShutdownPolicy::HardOff),
             },
         )
         .await;
@@ -769,7 +775,7 @@ mod tests {
             )
             .expect("instance lookup should succeed");
         nexus
-            .instance_reboot(&opctx, &lookup)
+            .instance_reboot(&opctx, &lookup, false)
             .await
             .expect("instance should reboot");
     }

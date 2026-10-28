@@ -3477,7 +3477,7 @@ mod tests {
             shutdown_policy: None,
         };
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
-        let project_id = Uuid::new_v4();
+        let project_id = ProjectUuid::from_untyped_uuid(Uuid::new_v4());
 
         // when shutdown policy omitted at creation, default to 600 seconds
         let db_instance = DbInstance::new(instance_id, project_id, &params);

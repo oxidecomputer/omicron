@@ -10,7 +10,6 @@ use super::{
 use crate::DbTypedUuid;
 use crate::ExternalSubnet;
 use crate::collection::DatastoreAttachTargetConfig;
-use crate::impl_enum_type;
 use crate::serde_time_delta::optional_time_delta;
 use crate::typed_generation::DbTypedGeneration;
 use chrono::{DateTime, TimeDelta, Utc};
