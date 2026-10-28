@@ -10033,6 +10033,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-sush-proxy"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "clap",
+ "futures",
+ "gateway-client",
+ "gateway-types",
+ "omicron-common",
+ "omicron-ddm-admin-client",
+ "omicron-workspace-hack",
+ "oxide-tokio-rt",
+ "reqwest",
+ "sled-hardware-types",
+ "slog",
+ "slog-async",
+ "slog-dtrace",
+ "slog-term",
+ "sush-common",
+ "sush-proxy",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
@@ -10136,6 +10162,7 @@ dependencies = [
  "digest 0.11.3",
  "dof 0.3.0",
  "dof 0.4.0",
+ "ed25519 2.2.3",
  "ed25519-dalek 2.2.0",
  "either",
  "elliptic-curve 0.13.8",
@@ -15877,7 +15904,7 @@ checksum = "b7401a30af6cb5818bb64852270bb722533397edcfc7344954a38f420819ece2"
 [[package]]
 name = "sush-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=4988f69a0f42a44fb480432db93d9dd09980fab0#4988f69a0f42a44fb480432db93d9dd09980fab0"
+source = "git+https://github.com/oxidecomputer/sush?rev=e78d8c4c0c1cad180a470f6346bdefbf517115c1#e78d8c4c0c1cad180a470f6346bdefbf517115c1"
 dependencies = [
  "chrono",
  "dropshot",
@@ -15894,7 +15921,7 @@ dependencies = [
 [[package]]
 name = "sush-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=4988f69a0f42a44fb480432db93d9dd09980fab0#4988f69a0f42a44fb480432db93d9dd09980fab0"
+source = "git+https://github.com/oxidecomputer/sush?rev=e78d8c4c0c1cad180a470f6346bdefbf517115c1#e78d8c4c0c1cad180a470f6346bdefbf517115c1"
 dependencies = [
  "bytes",
  "bytesize",
@@ -15929,33 +15956,32 @@ dependencies = [
 [[package]]
 name = "sush-proxy"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/sush?rev=e78d8c4c0c1cad180a470f6346bdefbf517115c1#e78d8c4c0c1cad180a470f6346bdefbf517115c1"
 dependencies = [
- "anyhow",
  "camino",
- "clap",
- "futures",
- "gateway-client",
- "gateway-types",
- "omicron-common",
- "omicron-ddm-admin-client",
- "omicron-workspace-hack",
- "oxide-tokio-rt",
- "reqwest",
+ "chrono",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "lru 0.18.5",
+ "percent-encoding",
+ "rustls",
+ "serde",
+ "serde_json",
  "sled-hardware-types",
  "slog",
- "slog-async",
- "slog-dtrace",
- "slog-term",
  "sush-common",
- "sush-server",
+ "thiserror 1.0.69",
  "tokio",
+ "tokio-rustls",
  "tokio-util",
 ]
 
 [[package]]
 name = "sush-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=4988f69a0f42a44fb480432db93d9dd09980fab0#4988f69a0f42a44fb480432db93d9dd09980fab0"
+source = "git+https://github.com/oxidecomputer/sush?rev=e78d8c4c0c1cad180a470f6346bdefbf517115c1#e78d8c4c0c1cad180a470f6346bdefbf517115c1"
 dependencies = [
  "async-trait",
  "atomicwrites",
@@ -15972,18 +15998,15 @@ dependencies = [
  "http-body-util",
  "http-range-header",
  "hyper",
- "hyper-util",
  "libc",
  "libcontract-sys",
  "lru 0.18.5",
  "memmap2",
  "p256 0.13.2",
- "percent-encoding",
  "pwd",
  "rand_core 0.6.4",
  "rumors",
  "rustix 1.1.4",
- "rustls",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -15998,7 +16021,6 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
- "tokio-rustls",
  "tokio-stream",
  "tokio-tungstenite 0.28.0",
  "tokio-util",

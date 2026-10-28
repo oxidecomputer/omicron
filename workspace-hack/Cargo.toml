@@ -56,6 +56,7 @@ derive_more = { version = "2.1.1", features = ["as_ref", "is_variant"] }
 dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", rev = "4a39ef08d81e5177edee0bddb1146032aa21074d", default-features = false, features = ["ipcc", "mock"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10.7", features = ["mac", "oid", "std"] }
 digest-a6292c17cd707f01 = { package = "digest", version = "0.11.3", features = ["alloc", "mac", "oid", "rand_core"] }
+ed25519 = { version = "2.2.3", default-features = false, features = ["pem", "std"] }
 ed25519-dalek = { version = "2.2.0", features = ["digest", "pem", "rand_core"] }
 either = { version = "1.15.0", features = ["use_std"] }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
@@ -221,6 +222,7 @@ derive_more-impl = { version = "2.1.1", features = ["as_ref", "is_variant"] }
 dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", rev = "4a39ef08d81e5177edee0bddb1146032aa21074d", default-features = false, features = ["ipcc", "mock"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10.7", features = ["mac", "oid", "std"] }
 digest-a6292c17cd707f01 = { package = "digest", version = "0.11.3", features = ["alloc", "mac", "oid", "rand_core"] }
+ed25519 = { version = "2.2.3", default-features = false, features = ["pem", "std"] }
 ed25519-dalek = { version = "2.2.0", features = ["digest", "pem", "rand_core"] }
 either = { version = "1.15.0", features = ["use_std"] }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }

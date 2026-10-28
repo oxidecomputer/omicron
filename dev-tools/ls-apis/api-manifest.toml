@@ -58,7 +58,7 @@ packages = [
     "lldpd",
     "mgd",
     "omicron-gateway",
-    "sush-proxy",
+    "omicron-sush-proxy",
     "tfportd",
     "wicketd",
 ]
@@ -783,7 +783,7 @@ permalinks = [
 ]
 
 [[intra_deployment_unit_only_edges]]
-server = "sush-proxy"
+server = "omicron-sush-proxy"
 client = "ddm-admin-client"
 note = """
 sush-proxy discovers sleds through its own switch zone's ddmd, always
@@ -794,7 +794,7 @@ permalinks = [
 ]
 
 [[intra_deployment_unit_only_edges]]
-server = "sush-proxy"
+server = "omicron-sush-proxy"
 client = "gateway-client"
 note = """
 sush-proxy reads the cubby map from its own switch zone's MGS.
