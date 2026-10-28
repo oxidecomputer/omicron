@@ -43,6 +43,7 @@ use nexus_db_queries::db::model::InstanceStateComputer;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_ip;
 use nexus_types::external_api::instance;
+use nexus_types::internal_api::params::InstanceMigrateDestination;
 use omicron_common::http_client::internal_http_client;
 // We'll use `InstanceState` frequently, and the code that uses it is already
 // subtle enough: break from the pattern of external API types being referenced
@@ -994,10 +995,15 @@ impl super::Nexus {
         }
 
         let vmm = vmm.as_ref().unwrap();
-        if vmm.sled_id() == params.dst_sled_id {
-            return Err(Error::invalid_request(
-                "instance is already running on destination sled",
-            ));
+        match params.destination {
+            InstanceMigrateDestination::Autoselect => (),
+            InstanceMigrateDestination::ById { dst_sled_id } => {
+                if vmm.sled_id() == dst_sled_id {
+                    return Err(Error::invalid_request(
+                        "instance is already running on destination sled",
+                    ));
+                }
+            }
         }
 
         if instance.runtime().migration_id.is_some() {
