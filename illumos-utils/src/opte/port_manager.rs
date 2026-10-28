@@ -1234,7 +1234,9 @@ impl PortManager {
 mod tests {
     use super::PortCreateParams;
     use super::PortManager;
+    use crate::opte::Error;
     use crate::opte::Handle;
+    use crate::opte::Port;
     use macaddr::MacAddr6;
     use omicron_common::api::external::{MacAddr, Vni};
     use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
@@ -1263,6 +1265,7 @@ mod tests {
     use std::collections::HashSet;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
+    use std::num::NonZeroU8;
     use uuid::Uuid;
 
     // Regression for https://github.com/oxidecomputer/omicron/issues/7541.
@@ -1994,5 +1997,167 @@ mod tests {
         let _ = IpCfg::try_from(&prs).expect_err(
             "Should fail to convert with public IPv4 and private IPv6",
         );
+    }
+
+    fn mac(index: NonZeroU8) -> MacAddr {
+        MacAddr(MacAddr6::new(0xa8, 0x40, 0x25, 0x00, 0x00, index.get()))
+    }
+
+    fn create_service_nic(index: NonZeroU8) -> NetworkInterface {
+        let ip = Ipv4Addr::new(172, 20, 0, index.get());
+        let subnet = Ipv4Net::new(Ipv4Addr::new(172, 20, 0, 0), 24).unwrap();
+        NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Service { id: Uuid::new_v4() },
+            name: "opte0".parse().unwrap(),
+            ip_config: PrivateIpConfig::new_ipv4(ip, subnet).unwrap(),
+            mac: mac(index),
+            vni: Vni::SERVICES_VNI,
+            primary: true,
+            slot: 0,
+        }
+    }
+
+    fn create_port(
+        manager: &PortManager,
+        nic: &NetworkInterface,
+    ) -> Result<Port, Error> {
+        manager.create_port(PortCreateParams {
+            nic,
+            external_ips: &ExternalIpConfig { v4: None, v6: None },
+            firewall_rules: &[],
+            dhcp_config: DhcpCfg {
+                hostname: None,
+                host_domain: None,
+                domain_search_list: vec![],
+                dns4_servers: vec![],
+                dns6_servers: vec![],
+            },
+            attached_subnets: vec![],
+            mtu: None,
+        })
+    }
+
+    /// Return the names of the ports that OPTE knows about.
+    fn opte_ports() -> HashSet<String> {
+        Handle::new()
+            .unwrap()
+            .state()
+            .lock()
+            .unwrap()
+            .ports
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn duplicate_port_does_not_delete_original_port() {
+        let logctx =
+            test_setup_log("duplicate_port_does_not_delete_original_port");
+        let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
+        Handle::new().unwrap().set_xde_underlay("net0", "net1").unwrap();
+
+        let nic = create_service_nic(1.try_into().unwrap());
+        let key = (nic.id, nic.kind);
+        let original =
+            create_port(&manager, &nic).expect("create original port");
+
+        // Now make a port with the same key in the manager, but a different
+        // MAC. OPTE would normally reject this.
+        let dup =
+            NetworkInterface { mac: mac(2.try_into().unwrap()), ..nic.clone() };
+        let err = create_port(&manager, &dup)
+            .expect_err("Failure creating duplicate port");
+        std::assert_matches!(
+            err,
+            Error::DuplicateOptePort { id, kind } if id == nic.id && kind == nic.kind,
+            "Should have failed with a dupe error, found {err:#?}",
+        );
+
+        // But we should still have the OPTE port we made in the first call.
+        assert!(
+            manager.contains_key(&key),
+            "Should not have removed existing entry"
+        );
+        assert_eq!(
+            opte_ports(),
+            HashSet::from([original.name().to_string()]),
+            "XDE should have only the first port created"
+        );
+
+        // But if we drop the port, we _should_ delete the device and the port
+        // in the map.
+        drop(original);
+        assert!(!manager.contains_key(&key));
+        assert!(opte_ports().is_empty());
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn route_set_only_removed_when_last_port_is_deleted() {
+        let logctx =
+            test_setup_log("route_set_only_removed_when_last_port_is_deleted");
+        let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
+        Handle::new().unwrap().set_xde_underlay("net0", "net1").unwrap();
+
+        // Create two ports with the same router keys.
+        let first =
+            create_port(&manager, &create_service_nic(1.try_into().unwrap()))
+                .unwrap();
+        let second =
+            create_port(&manager, &create_service_nic(2.try_into().unwrap()))
+                .unwrap();
+        let system_key = first.system_router_key();
+        let ipv4_key = first.custom_ipv4_router_key().unwrap();
+        assert_eq!(system_key, second.system_router_key());
+        assert_eq!(Some(ipv4_key), second.custom_ipv4_router_key());
+
+        // Check that they're both in the route set's set of associated ports.
+        let first_name = first.name().to_string();
+        let second_name = second.name().to_string();
+        let find_active_ports = |key| {
+            manager
+                .inner
+                .routes
+                .lock()
+                .unwrap()
+                .get(&key)
+                .map(|set| set.active_ports.clone())
+        };
+        for key in [system_key, ipv4_key] {
+            assert_eq!(
+                find_active_ports(key),
+                Some(HashSet::from([first_name.clone(), second_name.clone()])),
+                "Route set should be associated with both ports",
+            );
+        }
+
+        // If we drop the first port, only that one is removed from the set of
+        // active ports.
+        drop(first);
+        for key in [system_key, ipv4_key] {
+            assert_eq!(
+                find_active_ports(key),
+                Some(HashSet::from([second.name().to_string()])),
+                "Should have removed the first port from the route set \
+                associated ports, but not the second"
+            );
+        }
+
+        // Now when we drop the second one, we've removed the route set
+        // entirely.
+        drop(second);
+        for key in [system_key, ipv4_key] {
+            assert_eq!(
+                find_active_ports(key),
+                None,
+                "Should have completely removed set of associated ports, \
+                after dropping the second port"
+            );
+        }
+
+        logctx.cleanup_successful();
     }
 }
