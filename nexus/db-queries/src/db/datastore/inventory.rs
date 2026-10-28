@@ -603,6 +603,22 @@ impl DataStore {
             })
             .collect::<Result<Vec<_>, Error>>()?;
 
+        let (inv_discovered_racks, inv_discovered_sleds) =
+            collection.discovered_racks.iter().fold(
+                (Vec::new(), Vec::new()),
+                |(mut rack_acc, mut sled_acc), rack| {
+                    rack_acc.push(InvDiscoveredRack::new(collection_id, rack));
+                    sled_acc.extend(rack.discovered_sleds.iter().map(|sled| {
+                        InvDiscoveredSled::new(
+                            collection_id,
+                            rack.rack_id,
+                            sled,
+                        )
+                    }));
+                    (rack_acc, sled_acc)
+                },
+            );
+
         let mut inv_clickhouse_keeper_memberships = Vec::new();
         for membership in &collection.clickhouse_keeper_cluster_membership {
             inv_clickhouse_keeper_memberships.push(
@@ -2186,6 +2202,24 @@ impl DataStore {
                 // can insert all of them in one statement.
                 let _ = diesel::insert_into(nexus_db_schema::schema::inv_sled_agent::table)
                     .values(sled_agents_no_baseboards)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert the racks we've discovered
+            {
+                use nexus_db_schema::schema::inv_discovered_rack::dsl;
+                diesel::insert_into(dsl::inv_discovered_rack)
+                    .values(inv_discovered_racks)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert the sleds we've discovered
+            {
+                use nexus_db_schema::schema::inv_discovered_sled::dsl;
+                diesel::insert_into(dsl::inv_discovered_sled)
+                    .values(inv_discovered_sleds)
                     .execute_async(&conn)
                     .await?;
             }
