@@ -12,6 +12,9 @@ use super::PendingMgsUpdates;
 use super::PlannerConfig;
 use crate::deployment::BlueprintSledUpdateDispositionKind;
 use crate::deployment::MgsUpdateComponent;
+use crate::inventory::ActiveHostPhase1HashError;
+use crate::inventory::ActiveRotVersionError;
+use crate::inventory::CabooseVersionError;
 use crate::inventory::CabooseWhich;
 
 use daft::Diffable;
@@ -618,6 +621,22 @@ pub enum FailedRotBootloaderUpdateReason {
     SpNotInInventory,
 }
 
+impl From<CabooseVersionError> for FailedRotBootloaderUpdateReason {
+    fn from(error: CabooseVersionError) -> Self {
+        match error {
+            CabooseVersionError::NotInInventory(which) => {
+                FailedRotBootloaderUpdateReason::CabooseNotInInventory(which)
+            }
+            CabooseVersionError::Parse { caboose, err } => {
+                FailedRotBootloaderUpdateReason::FailedVersionParse {
+                    caboose,
+                    err: err.to_string(),
+                }
+            }
+        }
+    }
+}
+
 /// Describes the reason why an RoT failed to update
 #[derive(
     Error,
@@ -660,6 +679,35 @@ pub enum FailedRotUpdateReason {
     SpNotInInventory,
 }
 
+impl From<CabooseVersionError> for FailedRotUpdateReason {
+    fn from(error: CabooseVersionError) -> Self {
+        match error {
+            CabooseVersionError::NotInInventory(which) => {
+                FailedRotUpdateReason::CabooseNotInInventory(which)
+            }
+            CabooseVersionError::Parse { caboose, err } => {
+                FailedRotUpdateReason::FailedVersionParse {
+                    caboose,
+                    err: err.to_string(),
+                }
+            }
+        }
+    }
+}
+
+impl From<ActiveRotVersionError> for FailedRotUpdateReason {
+    fn from(error: ActiveRotVersionError) -> Self {
+        match error {
+            ActiveRotVersionError::RotStateNotInInventory => {
+                FailedRotUpdateReason::RotStateNotInInventory
+            }
+            ActiveRotVersionError::Caboose(error) => {
+                FailedRotUpdateReason::from(error)
+            }
+        }
+    }
+}
+
 /// Describes the reason why an SP failed to update
 #[derive(
     Error,
@@ -698,6 +746,22 @@ pub enum FailedSpUpdateReason {
     /// shut down
     #[error("sled contains zones that are unsafe to shut down: {0:?}")]
     UnsafeZoneFound(String),
+}
+
+impl From<CabooseVersionError> for FailedSpUpdateReason {
+    fn from(error: CabooseVersionError) -> Self {
+        match error {
+            CabooseVersionError::NotInInventory(which) => {
+                FailedSpUpdateReason::CabooseNotInInventory(which)
+            }
+            CabooseVersionError::Parse { caboose, err } => {
+                FailedSpUpdateReason::FailedVersionParse {
+                    caboose,
+                    err: err.to_string(),
+                }
+            }
+        }
+    }
 }
 
 /// Describes the reason why a Host OS failed to update
@@ -772,6 +836,21 @@ pub enum FailedHostOsUpdateReason {
     /// The sled model could not be determined
     #[error("unable to determine the sled model {0:?}")]
     UnableToDetermineSledModel(String),
+}
+
+impl From<ActiveHostPhase1HashError> for FailedHostOsUpdateReason {
+    fn from(error: ActiveHostPhase1HashError) -> Self {
+        match error {
+            ActiveHostPhase1HashError::ActiveSlotNotInInventory => {
+                FailedHostOsUpdateReason::ActiveHostPhase1SlotNotInInventory
+            }
+            ActiveHostPhase1HashError::HashNotInInventory(slot) => {
+                FailedHostOsUpdateReason::ActiveHostPhase1HashNotInInventory(
+                    slot,
+                )
+            }
+        }
+    }
 }
 
 /// Describes the details of what we're waiting on when a sled is being

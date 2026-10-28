@@ -13,7 +13,6 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
 use nexus_types::deployment::planning_report::FailedRotBootloaderUpdateReason;
-use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::tuf_repo::TufRepoDescription;
@@ -73,7 +72,8 @@ pub(super) fn try_make_update(
         return Err(FailedRotBootloaderUpdateReason::SpNotInInventory);
     };
 
-    let expected_stage0_version = active_version(baseboard_id, inventory)?;
+    let expected_stage0_version =
+        inventory.active_rot_bootloader_version_for(baseboard_id)?;
     let artifact = target_artifact(baseboard_id, inventory, current_artifacts)?;
 
     // If the artifact's version matches what's deployed, then no update is
@@ -114,21 +114,6 @@ pub(super) fn try_make_update(
     }))
 }
 
-/// Returns the version of the active RoT bootloader image (stage0) on
-/// `baseboard_id`
-pub(super) fn active_version(
-    baseboard_id: &BaseboardId,
-    inventory: &Collection,
-) -> Result<ArtifactVersion, FailedRotBootloaderUpdateReason> {
-    let stage0_caboose = stage0_caboose(baseboard_id, inventory)?;
-    stage0_caboose.caboose.version.parse().map_err(|e| {
-        FailedRotBootloaderUpdateReason::FailedVersionParse {
-            caboose: CabooseWhich::Stage0,
-            err: format!("{}", e),
-        }
-    })
-}
-
 /// Returns the RoT bootloader artifact in `current_artifacts` that applies to
 /// `baseboard_id`
 ///
@@ -140,7 +125,13 @@ pub(super) fn target_artifact<'a>(
     inventory: &Collection,
     current_artifacts: &'a TufRepoDescription,
 ) -> Result<&'a Artifact, FailedRotBootloaderUpdateReason> {
-    let stage0_caboose = stage0_caboose(baseboard_id, inventory)?;
+    let Some(stage0_caboose) =
+        inventory.caboose_for(CabooseWhich::Stage0, baseboard_id)
+    else {
+        return Err(FailedRotBootloaderUpdateReason::CabooseNotInInventory(
+            CabooseWhich::Stage0,
+        ));
+    };
     let rot_board = stage0_caboose.caboose.board.clone();
     let Some(rkth) = stage0_caboose.caboose.sign.clone() else {
         return Err(FailedRotBootloaderUpdateReason::CabooseMissingSign(
@@ -163,19 +154,6 @@ pub(super) fn target_artifact<'a>(
             }
         }
     })
-}
-
-/// Returns the caboose for the active RoT bootloader image (stage0) on
-/// `baseboard_id`
-fn stage0_caboose<'a>(
-    baseboard_id: &BaseboardId,
-    inventory: &'a Collection,
-) -> Result<&'a CabooseFound, FailedRotBootloaderUpdateReason> {
-    inventory.caboose_for(CabooseWhich::Stage0, baseboard_id).ok_or(
-        FailedRotBootloaderUpdateReason::CabooseNotInInventory(
-            CabooseWhich::Stage0,
-        ),
-    )
 }
 
 #[cfg(test)]

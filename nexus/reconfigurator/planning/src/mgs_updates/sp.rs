@@ -15,7 +15,6 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::planning_report::FailedSpUpdateReason;
-use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::tuf_repo::TufRepoDescription;
@@ -75,7 +74,8 @@ pub(super) fn try_make_update(
         return Err(FailedSpUpdateReason::SpNotInInventory);
     };
 
-    let expected_active_version = active_version(baseboard_id, inventory)?;
+    let expected_active_version =
+        inventory.active_sp_version_for(baseboard_id)?;
     let artifact = target_artifact(baseboard_id, inventory, current_artifacts)?;
 
     // If the artifact's version matches what's deployed, then no update is
@@ -124,20 +124,6 @@ pub(super) fn try_make_update(
     }))
 }
 
-/// Returns the version of the active SP image (slot 0) on `baseboard_id`
-pub(super) fn active_version(
-    baseboard_id: &BaseboardId,
-    inventory: &Collection,
-) -> Result<ArtifactVersion, FailedSpUpdateReason> {
-    let active_caboose = active_caboose(baseboard_id, inventory)?;
-    active_caboose.caboose.version.parse().map_err(|e| {
-        FailedSpUpdateReason::FailedVersionParse {
-            caboose: CabooseWhich::SpSlot0,
-            err: format!("{}", e),
-        }
-    })
-}
-
 /// Returns the SP artifact in `current_artifacts` that applies to
 /// `baseboard_id`
 ///
@@ -148,7 +134,13 @@ pub(super) fn target_artifact<'a>(
     inventory: &Collection,
     current_artifacts: &'a TufRepoDescription,
 ) -> Result<&'a Artifact, FailedSpUpdateReason> {
-    let active_caboose = active_caboose(baseboard_id, inventory)?;
+    let Some(active_caboose) =
+        inventory.caboose_for(CabooseWhich::SpSlot0, baseboard_id)
+    else {
+        return Err(FailedSpUpdateReason::CabooseNotInInventory(
+            CabooseWhich::SpSlot0,
+        ));
+    };
     let sp_board = active_caboose.caboose.board.clone();
     let tags = KnownArtifactTags::Sp(SpTags { sp_board });
     current_artifacts.artifacts.get_only(&tags).map_err(|err| {
@@ -162,16 +154,6 @@ pub(super) fn target_artifact<'a>(
             }
         }
     })
-}
-
-/// Returns the caboose for the active SP image (slot 0) on `baseboard_id`
-fn active_caboose<'a>(
-    baseboard_id: &BaseboardId,
-    inventory: &'a Collection,
-) -> Result<&'a CabooseFound, FailedSpUpdateReason> {
-    inventory.caboose_for(CabooseWhich::SpSlot0, baseboard_id).ok_or(
-        FailedSpUpdateReason::CabooseNotInInventory(CabooseWhich::SpSlot0),
-    )
 }
 
 #[cfg(test)]

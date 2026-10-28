@@ -58,7 +58,10 @@ use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
+use thiserror::Error;
 use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::ArtifactVersionError;
 
 mod display;
 
@@ -239,6 +242,66 @@ impl Collection {
             .and_then(|by_bb| by_bb.get(baseboard_id))
     }
 
+    /// Returns the version in caboose `which` on `baseboard_id`
+    pub fn caboose_version_for(
+        &self,
+        which: CabooseWhich,
+        baseboard_id: &BaseboardId,
+    ) -> Result<ArtifactVersion, CabooseVersionError> {
+        let Some(caboose) = self.caboose_for(which, baseboard_id) else {
+            return Err(CabooseVersionError::NotInInventory(which));
+        };
+        caboose
+            .caboose
+            .version
+            .parse()
+            .map_err(|err| CabooseVersionError::Parse { caboose: which, err })
+    }
+
+    /// Returns the version of the active SP image (slot 0) on `baseboard_id`
+    pub fn active_sp_version_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Result<ArtifactVersion, CabooseVersionError> {
+        self.caboose_version_for(CabooseWhich::SpSlot0, baseboard_id)
+    }
+
+    /// Returns the version of the active RoT image on `baseboard_id`
+    pub fn active_rot_version_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Result<ArtifactVersion, ActiveRotVersionError> {
+        let Some(rot_state) = self.rot_state_for(baseboard_id) else {
+            return Err(ActiveRotVersionError::RotStateNotInInventory);
+        };
+        let which = CabooseWhich::from_rot_slot(rot_state.active_slot);
+        Ok(self.caboose_version_for(which, baseboard_id)?)
+    }
+
+    /// Returns the version of the active RoT bootloader image (stage0) on
+    /// `baseboard_id`
+    pub fn active_rot_bootloader_version_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Result<ArtifactVersion, CabooseVersionError> {
+        self.caboose_version_for(CabooseWhich::Stage0, baseboard_id)
+    }
+
+    /// Returns the hash of the active host phase 1 image on `baseboard_id`
+    pub fn active_host_phase_1_hash_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Result<ArtifactHash, ActiveHostPhase1HashError> {
+        let Some(active_slot) =
+            self.host_phase_1_active_slot_for(baseboard_id).map(|s| s.slot)
+        else {
+            return Err(ActiveHostPhase1HashError::ActiveSlotNotInInventory);
+        };
+        self.host_phase_1_flash_hash_for(active_slot, baseboard_id)
+            .map(|h| h.hash)
+            .ok_or(ActiveHostPhase1HashError::HashNotInInventory(active_slot))
+    }
+
     /// Iterate over all the Omicron zones in the sled-agent ledgers of this
     /// collection
     pub fn all_ledgered_omicron_zones(
@@ -356,6 +419,40 @@ impl Collection {
     pub fn display(&self) -> CollectionDisplay<'_> {
         CollectionDisplay::new(self)
     }
+}
+
+/// Reasons that a version could not be determined from a caboose in
+/// inventory
+#[derive(Debug, Error)]
+pub enum CabooseVersionError {
+    #[error("caboose for {0:?} is not in inventory")]
+    NotInInventory(CabooseWhich),
+    #[error("version from caboose {caboose:?} could not be parsed")]
+    Parse {
+        caboose: CabooseWhich,
+        #[source]
+        err: ArtifactVersionError,
+    },
+}
+
+/// Reasons that the active RoT version could not be determined from
+/// inventory
+#[derive(Debug, Error)]
+pub enum ActiveRotVersionError {
+    #[error("RoT state is not in inventory")]
+    RotStateNotInInventory,
+    #[error(transparent)]
+    Caboose(#[from] CabooseVersionError),
+}
+
+/// Reasons that the active host phase 1 hash could not be determined from
+/// inventory
+#[derive(Debug, Error)]
+pub enum ActiveHostPhase1HashError {
+    #[error("active host phase 1 slot is not in inventory")]
+    ActiveSlotNotInInventory,
+    #[error("active host phase 1 hash for slot {0:?} is not in inventory")]
+    HashNotInInventory(M2Slot),
 }
 
 impl IdOrdItem for Collection {

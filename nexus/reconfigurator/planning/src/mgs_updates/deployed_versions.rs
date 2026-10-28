@@ -11,13 +11,13 @@
 //! allows a sled to be added to the system because a new sled must already be
 //! running the system's target release.
 //!
-//! The sibling modules for each component (`sp`, `rot`, `rot_bootloader`, and
-//! `host_phase_1`) provide functions that find the component's active image
-//! and the artifact that the component ought to be running.  The planner
-//! calls those functions directly.  This module calls the same functions and
-//! combines the results into one report for callers outside the planner.
+//! Inventory's `Collection` provides each component's active version.  The
+//! sibling modules for each component (`sp`, `rot`, `rot_bootloader`, and
+//! `host_phase_1`) provide functions that choose the artifact that the
+//! component ought to be running.  The planner uses both of these directly.
+//! This module uses the same functions and combines the results into one
+//! report for callers outside the planner.
 
-use super::host_phase_1;
 use super::host_phase_1::HostOsTargetArtifacts;
 use super::rot;
 use super::rot_bootloader;
@@ -55,7 +55,9 @@ pub fn compare_deployed_versions(
     };
 
     let sp = ActiveImageCheck::compare(
-        sp::active_version(baseboard_id, inventory),
+        inventory
+            .active_sp_version_for(baseboard_id)
+            .map_err(FailedSpUpdateReason::from),
         sp::target_artifact(baseboard_id, inventory, repo)
             .map(|a| a.version.clone()),
     );
@@ -63,14 +65,18 @@ pub fn compare_deployed_versions(
     let rot = compare_rot(baseboard_id, inventory, repo);
 
     let rot_bootloader = ActiveImageCheck::compare(
-        rot_bootloader::active_version(baseboard_id, inventory),
+        inventory
+            .active_rot_bootloader_version_for(baseboard_id)
+            .map_err(FailedRotBootloaderUpdateReason::from),
         rot_bootloader::target_artifact(baseboard_id, inventory, repo)
             .map(|a| a.version.clone()),
     );
 
     let host_phase_1 = match sp_info.sp_type {
         SpType::Sled => Some(ActiveImageCheck::compare(
-            host_phase_1::active_phase_1_hash(baseboard_id, inventory),
+            inventory
+                .active_host_phase_1_hash_for(baseboard_id)
+                .map_err(FailedHostOsUpdateReason::from),
             HostOsTargetArtifacts::for_board(baseboard_id, repo)
                 .map(|a| a.phase_1.hash),
         )),
@@ -204,8 +210,9 @@ fn compare_rot(
     }
 
     ActiveImageCheck::compare(
-        rot::active_version(baseboard_id, active_slot, inventory)
-            .map_err(RotCheckError::from),
+        inventory
+            .active_rot_version_for(baseboard_id)
+            .map_err(|e| RotCheckError::from(FailedRotUpdateReason::from(e))),
         rot::target_artifact(baseboard_id, active_slot, inventory, repo)
             .map(|a| a.version.clone())
             .map_err(RotCheckError::from),

@@ -503,27 +503,6 @@ impl<'a> HostOsTargetArtifacts<'a> {
     }
 }
 
-/// Returns the hash of the active host phase 1 image on the sled identified by
-/// `baseboard_id`
-pub(super) fn active_phase_1_hash(
-    baseboard_id: &BaseboardId,
-    inventory: &Collection,
-) -> Result<ArtifactHash, FailedHostOsUpdateReason> {
-    let Some(active_slot) =
-        inventory.host_phase_1_active_slot_for(baseboard_id).map(|s| s.slot)
-    else {
-        return Err(
-            FailedHostOsUpdateReason::ActiveHostPhase1SlotNotInInventory,
-        );
-    };
-    inventory
-        .host_phase_1_flash_hash_for(active_slot, baseboard_id)
-        .map(|h| h.hash)
-        .ok_or(FailedHostOsUpdateReason::ActiveHostPhase1HashNotInInventory(
-            active_slot,
-        ))
-}
-
 #[cfg(test)]
 mod tests {
     use crate::mgs_updates::EvacuatingSleds;
