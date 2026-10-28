@@ -2565,6 +2565,8 @@ impl DataStore {
             ncockroach_status: usize,
             nntp_timesync: usize,
             ninternal_dns: usize,
+            ndiscovered_racks: usize,
+            ndiscovered_sleds: usize,
         }
 
         let NumRowsDeleted {
@@ -2610,6 +2612,8 @@ impl DataStore {
             ncockroach_status,
             nntp_timesync,
             ninternal_dns,
+            ndiscovered_racks,
+            ndiscovered_sleds,
         } =
             self.transaction_retry_wrapper("inventory_delete_collection")
                 .transaction(&conn, |conn| async move {
@@ -3007,6 +3011,30 @@ impl DataStore {
                         .await?
                     };
 
+                    // Remove rows for discovered racks
+                    let ndiscovered_racks = {
+                        use nexus_db_schema::schema::inv_discovered_rack::dsl;
+                        diesel::delete(
+                            dsl::inv_discovered_rack.filter(
+                                dsl::inv_collection_id.eq(db_collection_id),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    // Remove rows for discovered sleds
+                    let ndiscovered_sleds = {
+                        use nexus_db_schema::schema::inv_discovered_sled::dsl;
+                        diesel::delete(
+                            dsl::inv_discovered_sled.filter(
+                                dsl::inv_collection_id.eq(db_collection_id),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
                     Ok(NumRowsDeleted {
                         ncollections,
                         nsps,
@@ -3050,6 +3078,8 @@ impl DataStore {
                         ncockroach_status,
                         nntp_timesync,
                         ninternal_dns,
+                        ndiscovered_racks,
+                        ndiscovered_sleds,
                     })
                 })
                 .await
@@ -3107,6 +3137,8 @@ impl DataStore {
             "ncockroach_status" => ncockroach_status,
             "nntp_timesync" => nntp_timesync,
             "ninternal_dns" => ninternal_dns,
+            "ndiscovered_racks" => ndiscovered_racks,
+            "ndiscovered_sleds" => ndiscovered_sleds,
         );
 
         Ok(())

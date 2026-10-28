@@ -17,6 +17,8 @@ use gateway_types::rot::RotSlot;
 use gateway_types::rot::RotState;
 use iddqd::id_ord_map;
 use nexus_types::inventory::CabooseWhich;
+use nexus_types::inventory::DiscoveredRack;
+use nexus_types::inventory::DiscoveredSled;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::Psu;
 use nexus_types::inventory::PsuIdentity;
@@ -25,10 +27,12 @@ use nexus_types::inventory::PsuState;
 use nexus_types::inventory::PsuStatus;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
+use nexus_types::inventory::SledAgentStartState;
 use nexus_types::inventory::SpType;
 use nexus_types::inventory::ZpoolName;
 use omicron_cockroach_metrics::MetricValue;
 use omicron_cockroach_metrics::PrometheusMetrics;
+use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
@@ -124,6 +128,7 @@ pub const RACK_UUID: RackUuid =
 /// - some missing cabooses
 /// - some cabooses common to multiple baseboards; others not
 /// - serial number reused across different model numbers
+/// - discovered racks and sleds for multirack testing
 pub fn representative() -> Representative {
     let mut builder = CollectionBuilder::new("example");
 
@@ -794,6 +799,59 @@ pub fn representative() -> Representative {
         .found_internal_dns_generation_status(InternalDnsGenerationStatus {
             zone_id: omicron_uuid_kinds::OmicronZoneUuid::new_v4(),
             generation: 1.into(),
+        })
+        .unwrap();
+
+    // Report a couple of other racks we've discovered, so we can test multirack
+    // scenarios. The first has sleds in each of the possible sled-agent start
+    // states; the second has no sleds, which is unlikely to ever happen in
+    // practice, but it's nice to know that we won't blow up if it does.
+    let discovered_sled =
+        |serial_number: &str, sled_subnet: &str, sled_agent_start_state| {
+            DiscoveredSled {
+                sled_id: SledUuid::new_v4(),
+                baseboard_id: BaseboardId {
+                    part_number: "913-0000019".to_string(),
+                    serial_number: serial_number.to_string(),
+                },
+                sled_subnet: Ipv6Subnet::new(sled_subnet.parse().unwrap()),
+                sled_agent_start_state,
+            }
+        };
+    builder
+        .found_discovered_rack(DiscoveredRack {
+            rack_id: RackUuid::new_v4(),
+            rack_subnet: Ipv6Subnet::new("fd00:1122:3344::".parse().unwrap()),
+            join_service_ip: "fd00:1122:3344:101::1".parse().unwrap(),
+            discovered_sleds: id_ord_map! {
+                discovered_sled(
+                    "discovered-sled-started",
+                    "fd00:1122:3344:101::",
+                    SledAgentStartState::Started,
+                ),
+                discovered_sled(
+                    "discovered-sled-in-progress",
+                    "fd00:1122:3344:102::",
+                    SledAgentStartState::InProgress { last_error: None },
+                ),
+                discovered_sled(
+                    "discovered-sled-error",
+                    "fd00:1122:3344:103::",
+                    SledAgentStartState::InProgress {
+                        last_error: Some(
+                            "The System is Down".to_string(),
+                        ),
+                    },
+                ),
+            },
+        })
+        .unwrap();
+    builder
+        .found_discovered_rack(DiscoveredRack {
+            rack_id: RackUuid::new_v4(),
+            rack_subnet: Ipv6Subnet::new("fd00:5566:7788::".parse().unwrap()),
+            join_service_ip: "fd00:5566:7788:101::1".parse().unwrap(),
+            discovered_sleds: id_ord_map! {},
         })
         .unwrap();
 
