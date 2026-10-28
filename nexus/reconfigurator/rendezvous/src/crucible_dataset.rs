@@ -139,7 +139,6 @@ mod tests {
     use sled_agent_types::disk::CompressionAlgorithm;
 
     use omicron_uuid_kinds::PhysicalDiskUuid;
-    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use proptest::prelude::*;
@@ -201,7 +200,7 @@ mod tests {
                         reservoir_size: (16 << 30).try_into().unwrap(),
                         cpu_family: SledCpuFamily::Unknown,
                     },
-                    RackUuid::new_v4(),
+                    nexus_db_queries::db::pub_test_utils::RACK_UUID,
                     Generation::new(),
                 ))
                 .await

@@ -172,7 +172,7 @@ impl Default for SledUpdateBuilder {
             sled_id: SledUuid::new_v4(),
             addr: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
             repo_depot_port: 0,
-            rack_id: RackUuid::new_v4(),
+            rack_id: super::RACK_UUID,
             sled_hardware: SledSystemHardwareBuilder::default(),
         }
     }

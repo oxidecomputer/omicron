@@ -277,7 +277,6 @@ mod test {
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::LookupType;
     use omicron_uuid_kinds::CollectionUuid;
-    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use std::collections::BTreeSet;
     use std::net::Ipv6Addr;
@@ -430,7 +429,7 @@ mod test {
         assert_eq!(initial_found_urls.len(), 2);
 
         // Insert some sleds.
-        let rack_id = RackUuid::new_v4();
+        let rack_id = nexus_test_utils::RACK_UUID;
         let mut sleds = Vec::new();
         for i in 0..64 {
             let sled = SledUpdate::new(
