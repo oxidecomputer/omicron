@@ -9682,6 +9682,7 @@ dependencies = [
  "cargo_metadata",
  "fs-err 3.3.0",
  "omicron-workspace-hack",
+ "semver 1.0.28",
  "serde",
  "toml_edit 0.22.27",
 ]

@@ -2,13 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::{Context, Result};
+use anyhow::Context;
+use anyhow::Result;
+use anyhow::ensure;
 use camino::Utf8Path;
+use semver::Version;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Pins {
+    pub system_version: Version,
     pub helios: Option<Helios>,
 }
 
@@ -33,6 +37,11 @@ impl Pins {
         let pins_text = fs_err::read(&pins_path)?;
         let pins: Pins = toml_edit::de::from_slice(&pins_text)
             .with_context(|| format!("while reading {pins_path}"))?;
+        ensure!(
+            pins.system_version.pre.is_empty()
+                && pins.system_version.build.is_empty(),
+            "`system_version` must have empty prerelease and build metadata"
+        );
         Ok(pins)
     }
 }
