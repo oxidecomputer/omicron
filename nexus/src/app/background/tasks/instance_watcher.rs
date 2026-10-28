@@ -479,7 +479,7 @@ impl VirtualMachine {
             rack_id: sled.rack_id.into_untyped_uuid(),
             nexus_id: nexus_id.into_untyped_uuid(),
             instance_id: instance.id(),
-            silo_id: project.silo_id,
+            silo_id: project.silo_id().into_untyped_uuid(),
             project_id: project.id().into_untyped_uuid(),
             vmm_id: vmm.id,
             // XXX oximeter cannot do typed uuids?

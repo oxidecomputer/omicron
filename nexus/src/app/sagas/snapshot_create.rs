@@ -111,6 +111,7 @@ use omicron_common::{
     api::external, backoff::backon_retry_policy_internal_service,
 };
 use omicron_uuid_kinds::ProjectUuid;
+use omicron_uuid_kinds::SiloUuid;
 use omicron_uuid_kinds::{GenericUuid, PropolisUuid, VolumeUuid};
 use progenitor_extras::retry::GoneCheckResult;
 use progenitor_extras::retry::IndefiniteRetryOperationWhileError;
@@ -138,7 +139,7 @@ type ReplaceSocketsMap = BTreeMap<SocketAddrV6, SocketAddrV6>;
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
-    pub silo_id: Uuid,
+    pub silo_id: SiloUuid,
     pub project_id: ProjectUuid,
     pub disk: db::datastore::CrucibleDisk,
     pub attach_instance_id: Option<Uuid>,
@@ -2022,7 +2023,7 @@ mod test {
     // Helper for creating snapshot create parameters
     fn new_test_params(
         opctx: &OpContext,
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         project_id: ProjectUuid,
         db_disk: db::datastore::CrucibleDisk,
         disk: NameOrId,

@@ -1627,7 +1627,7 @@ impl super::Nexus {
             .await?;
 
         let metadata = sled_agent_client::types::InstanceMetadata {
-            silo_id: authz_silo.id(),
+            silo_id: authz_silo.id().into_untyped_uuid(),
             project_id: authz_project.id().into_untyped_uuid(),
         };
 

@@ -859,7 +859,7 @@ mod test {
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             DEFAULT_SILO_ID,
-            LookupType::ById(DEFAULT_SILO_ID),
+            LookupType::by_id(DEFAULT_SILO_ID),
         );
         datastore
             .silo_user_create(
@@ -879,7 +879,7 @@ mod test {
             .fetch()
             .await
             .unwrap();
-        assert_eq!(DEFAULT_SILO_ID, db_silo_user.silo_id);
+        assert_eq!(DEFAULT_SILO_ID, db_silo_user.silo_id());
 
         // fetch the one we just created
         let (.., fetched) = datastore
@@ -2058,7 +2058,7 @@ mod test {
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             DEFAULT_SILO_ID,
-            LookupType::ById(DEFAULT_SILO_ID),
+            LookupType::by_id(DEFAULT_SILO_ID),
         );
         let silo_user_id = SiloUserUuid::new_v4();
         datastore

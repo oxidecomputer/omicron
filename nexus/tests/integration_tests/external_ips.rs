@@ -261,7 +261,8 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
 
     // now link the pool and everything should work with the exact same params
     let silo_id = DEFAULT_SILO.id();
-    link_ip_pool(&client, "other-pool", &silo_id, false).await;
+    link_ip_pool(&client, "other-pool", &silo_id.into_untyped_uuid(), false)
+        .await;
 
     // Create with no chosen IP from named pool.
     let fip: FloatingIp = object_create(client, &url, &params).await;
@@ -1362,7 +1363,8 @@ async fn test_external_ip_attach_ephemeral_at_pool_exhaustion(
     );
     create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
     let silo_id = DEFAULT_SILO.id();
-    link_ip_pool(&client, "other-pool", &silo_id, false).await;
+    link_ip_pool(&client, "other-pool", &silo_id.into_untyped_uuid(), false)
+        .await;
 
     create_project(client, PROJECT_NAME).await;
 
@@ -1448,7 +1450,7 @@ async fn test_floating_ip_ip_version_conflict(
             .unwrap(),
     );
     create_ip_pool(&client, "v4-pool", Some(v4_range)).await;
-    link_ip_pool(&client, "v4-pool", &silo_id, true).await;
+    link_ip_pool(&client, "v4-pool", &silo_id.into_untyped_uuid(), true).await;
 
     // Create IPv6 default pool via datastore (API rejects IPv6 ranges per PR #5107 atm)
     let v6_identity = IdentityMetadataCreateParams {
@@ -1491,7 +1493,7 @@ async fn test_floating_ip_ip_version_conflict(
     let link = IncompleteIpPoolResource {
         ip_pool_id: v6_pool.id(),
         resource_type: IpPoolResourceType::Silo,
-        resource_id: silo_id,
+        resource_id: silo_id.into_untyped_uuid(),
         is_default: true,
     };
     datastore
@@ -2405,7 +2407,8 @@ async fn test_ephemeral_ip_idempotent_attach_with_exhausted_explicit_pool(
     ))
     .unwrap();
     create_ip_pool(&client, "small-v4-pool", Some(v4_range)).await;
-    link_ip_pool(&client, "small-v4-pool", &silo_id, false).await;
+    link_ip_pool(&client, "small-v4-pool", &silo_id.into_untyped_uuid(), false)
+        .await;
 
     // Create a v6 pool with a normal range
     let v6_range = IpRange::try_from((
@@ -2414,7 +2417,7 @@ async fn test_ephemeral_ip_idempotent_attach_with_exhausted_explicit_pool(
     ))
     .unwrap();
     create_ip_pool(&client, "v6-pool", Some(v6_range)).await;
-    link_ip_pool(&client, "v6-pool", &silo_id, false).await;
+    link_ip_pool(&client, "v6-pool", &silo_id.into_untyped_uuid(), false).await;
 
     create_project(client, PROJECT_NAME).await;
 

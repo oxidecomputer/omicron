@@ -487,7 +487,7 @@ impl FmAnalysis {
             for cert in batch {
                 let cert_id = cert.id();
                 let cert_name = cert.name().clone();
-                let silo_id = cert.silo_id;
+                let silo_id = cert.silo_id();
                 let Some(mut silo) = silos.get_mut(silo_id) else {
                     warnings.push(format!(
                         "certificate {cert_id} belongs to silo {silo_id}, \
@@ -1041,6 +1041,7 @@ mod tests {
     use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CaseUuid;
+    use omicron_uuid_kinds::SiloUuid;
     use omicron_uuid_kinds::SitrepUuid;
     use std::collections::BTreeSet;
     use std::num::NonZeroU32;
@@ -1560,7 +1561,7 @@ mod tests {
 
         const HOSTNAME: &str = "fake.test.oxide.computer";
         let make_cert =
-            |silo_id: Uuid, name: &str, cert: String, key: String| {
+            |silo_id: SiloUuid, name: &str, cert: String, key: String| {
                 Certificate::new_unvalidated(
                     silo_id,
                     Uuid::new_v4(),
@@ -1612,7 +1613,7 @@ mod tests {
 
         // A servable certificate whose silo does not exist. The loader has
         // no silo to attach it to, so it is skipped with a warning.
-        let orphan_silo_id = Uuid::new_v4();
+        let orphan_silo_id = SiloUuid::new_v4();
         let orphan_chain = CertificateChain::new(HOSTNAME);
         let orphan = make_cert(
             orphan_silo_id,

@@ -17,6 +17,7 @@ use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::SiloUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::TypedUuid;
 use oso::PolarClass;
@@ -70,7 +71,7 @@ use uuid::Uuid;
 //   to create.
 pub async fn make_resources(
     mut builder: ResourceBuilder<'_>,
-    main_silo_id: Uuid,
+    main_silo_id: SiloUuid,
 ) -> ResourceSet {
     // Global resources
     builder.new_resource(authz::DATABASE);
@@ -92,7 +93,7 @@ pub async fn make_resources(
 
     // Silo/organization/project hierarchy
     make_silo(&mut builder, "silo1", main_silo_id, true).await;
-    make_silo(&mut builder, "silo2", Uuid::new_v4(), false).await;
+    make_silo(&mut builder, "silo2", SiloUuid::new_v4(), false).await;
 
     // Rack hierarchy
     make_rack(&mut builder);
@@ -286,7 +287,7 @@ fn make_rack(builder: &mut ResourceBuilder<'_>) {
 async fn make_silo(
     builder: &mut ResourceBuilder<'_>,
     silo_name: &str,
-    silo_id: Uuid,
+    silo_id: SiloUuid,
     first_branch: bool,
 ) {
     let silo = authz::Silo::new(

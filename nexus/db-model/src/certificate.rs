@@ -11,7 +11,10 @@ use omicron_certificates::CertificateValidator;
 use omicron_common::api::external::Error;
 use uuid::Uuid;
 
+use crate::DbTypedUuid;
 pub use omicron_certificates::CertificateError;
+use omicron_uuid_kinds::SiloKind;
+use omicron_uuid_kinds::SiloUuid;
 
 /// Representation of x509 certificates used by services.
 #[derive(Queryable, Insertable, Clone, Selectable, Resource)]
@@ -20,7 +23,7 @@ pub struct Certificate {
     #[diesel(embed)]
     identity: CertificateIdentity,
 
-    pub silo_id: Uuid,
+    pub silo_id: DbTypedUuid<SiloKind>,
     pub service: ServiceKind,
 
     pub cert: Vec<u8>,
@@ -39,8 +42,12 @@ impl std::fmt::Debug for Certificate {
 }
 
 impl Certificate {
+    pub fn silo_id(&self) -> SiloUuid {
+        self.silo_id.into()
+    }
+
     pub fn new(
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         id: Uuid,
         service: ServiceKind,
         params: certificate_types::CertificateCreate,
@@ -60,14 +67,14 @@ impl Certificate {
     // For testing only: allow creation of certificates that would otherwise not
     // be allowed (e.g., expired)
     pub fn new_unvalidated(
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         id: Uuid,
         service: ServiceKind,
         params: certificate_types::CertificateCreate,
     ) -> Self {
         Self {
             identity: CertificateIdentity::new(id, params.identity),
-            silo_id,
+            silo_id: silo_id.into(),
             service,
             cert: params.cert.into_bytes(),
             key: params.key.into_bytes(),

@@ -498,7 +498,7 @@ pub async fn create_project_image(
                     time_deleted: None,
                 },
 
-                silo_id: authz_silo.id(),
+                silo_id: authz_silo.id().into(),
                 project_id: authz_project.id().into(),
                 volume_id: VolumeUuid::new_v4().into(),
 
