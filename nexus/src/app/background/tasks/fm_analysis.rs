@@ -1199,6 +1199,7 @@ struct StepOutput {
     strum::IntoStaticStr,
     strum::VariantNames,
 ))]
+#[strum_discriminants(strum(serialize_all = "snake_case"))]
 enum LoadedInput {
     InServiceDisks(IdOrdMap<InServiceDisk>),
     ObservedSagas(IdOrdMap<ObservedSaga>),
