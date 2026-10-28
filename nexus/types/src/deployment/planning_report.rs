@@ -631,6 +631,9 @@ impl From<CabooseVersionError> for FailedRotBootloaderUpdateReason {
                 FailedRotBootloaderUpdateReason::FailedVersionParse {
                     caboose,
                     err: err.to_string(),
+                    // <review>
+                    // This is almost certainly wrong.  You probably want to be using InlineErrorChain here.
+                    // </review>
                 }
             }
         }
@@ -689,6 +692,9 @@ impl From<CabooseVersionError> for FailedRotUpdateReason {
                 FailedRotUpdateReason::FailedVersionParse {
                     caboose,
                     err: err.to_string(),
+                    // <review>
+                    // InlineErrorChain
+                    // </review>
                 }
             }
         }
@@ -758,6 +764,9 @@ impl From<CabooseVersionError> for FailedSpUpdateReason {
                 FailedSpUpdateReason::FailedVersionParse {
                     caboose,
                     err: err.to_string(),
+                    // <review>
+                    // InlineErrorChain
+                    // </review>
                 }
             }
         }

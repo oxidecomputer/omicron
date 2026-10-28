@@ -4,6 +4,9 @@
 
 //! Comparing the MGS-managed software on one board with the software in a
 //! specific TUF repo
+// <review covers="2 lines above">
+// Should be "Facilities for ..."
+// </review>
 //!
 //! Two parts of the system need to know whether a board is running the
 //! software in a particular TUF repo.  The planner needs to know so that it
@@ -17,6 +20,9 @@
 //! component ought to be running.  The planner uses both of these directly.
 //! This module uses the same functions and combines the results into one
 //! report for callers outside the planner.
+// <review covers="6 lines above">
+// Why does this exist here instead of putting this logic into `sled_add_checks`?
+// </review>
 
 use super::host_phase_1::HostOsTargetArtifacts;
 use super::rot;
@@ -46,6 +52,9 @@ use tufaceous_artifact::ArtifactVersion;
 /// function is intended to work for sleds that are not yet part of the
 /// control plane.
 pub fn compare_deployed_versions(
+// <review>
+// Let's make this a method on `DeployedVersions`, like `DeployedVersions::compute`?
+// </review>
     baseboard_id: &BaseboardId,
     inventory: &Collection,
     repo: &TufRepoDescription,
@@ -90,8 +99,14 @@ pub fn compare_deployed_versions(
 /// software in a TUF repo
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeployedVersionsReport {
+// <review>
+// Rename: `DeployedVersions`
+// </review>
     /// comparison of the active SP image (slot 0) with the TUF repo
     pub sp: ActiveImageCheck<ArtifactVersion, FailedSpUpdateReason>,
+    // <review>
+    // It's weird that we're using an error type here having to do with a FailedSpUpdate.  Are there some update-specific variants that can't happen here?  In that case, should that error type be split up?
+    // </review>
     /// comparison of the active RoT image with the TUF repo
     pub rot: ActiveImageCheck<ArtifactVersion, RotCheckError>,
     /// comparison of the active RoT bootloader image (stage0) with the TUF
@@ -170,6 +185,9 @@ pub enum RotCheckError {
 #[derive(Debug, Clone, Error)]
 #[error("SP for board {0} is not in inventory")]
 pub struct BoardNotInInventory(pub BaseboardId);
+// <review covers="5 lines above">
+// I wonder if we could improve a lot by putting this into inventory and having a family of functions that returns this instead of `Option`.
+// </review>
 
 /// Compares the active RoT image on `baseboard_id` with the RoT artifact in
 /// `repo`

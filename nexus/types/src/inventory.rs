@@ -454,6 +454,9 @@ pub enum ActiveHostPhase1HashError {
     #[error("active host phase 1 hash for slot {0:?} is not in inventory")]
     HashNotInInventory(M2Slot),
 }
+// <review covers="33 lines above">
+// All of these error types should include the baseboard ids.
+// </review>
 
 impl IdOrdItem for Collection {
     type Key<'a> = CollectionUuid;

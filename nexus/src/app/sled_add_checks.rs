@@ -6,10 +6,16 @@
 //!
 //! When the system has a target release, a sled being added ought to be
 //! running the software from that release already.  Before adding a sled, we
+// <review covers="2 lines above">
+// Strike the first sentence here.
+// </review>
 //! check two things:
 //!
 //! 1. The system itself has finished updating to its target release.  We do
 //!    not add sleds while an update is in progress, while a sled is waiting
+// <review>
+// replace "add sleds" here with "support self-service adding of sleds"
+// </review>
 //!    for a mupdate to be cleared, or while updates are suspended.
 //! 2. The new sled's SP, RoT, RoT bootloader, and host phase 1 images match
 //!    the target release, and the RoT's boot preferences show no RoT update
@@ -18,6 +24,9 @@
 //!    `nexus_reconfigurator_planning::mgs_updates::compare_deployed_versions()`,
 //!    which uses the same logic that the planner uses to decide whether a
 //!    board needs an update.
+// <review covers="4 lines above">
+// This last sentence isn't necessary here.
+// </review>
 //!
 //! If no target release has ever been set, we skip both checks.
 //!
@@ -68,6 +77,9 @@ impl super::Nexus {
         let tuf_repo_id = match release_source {
             TargetReleaseSource::Unspecified => {
                 info!(
+                // <review>
+                // There should be a comment here that this mode exists primarily for systems that have not yet adopted self-service update and so haven't bothered to ever set a target release.
+                // </review>
                     opctx.log,
                     "skipping software checks for sled add: \
                      no target release has been set"
@@ -98,6 +110,9 @@ impl super::Nexus {
             Error::invalid_request(format!(
                 "sled cannot be added: {}",
                 InlineErrorChain::new(&error)
+                // <review covers="2 lines above">
+                // The message here should just be "sled cannot be added".  The `InlineErrorChain` should appear after a semicolon.  This will cause it to show up as a key-value pair in the structured log rather than just an inline string.
+                // </review>
             ))
         })
     }
@@ -216,6 +231,9 @@ enum SledComponent {
     RotBootloader,
     HostPhase1,
 }
+// <review covers="8 lines above">
+// Is there really no existing enum we can use for this?
+// </review>
 
 impl Display for SledComponent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
