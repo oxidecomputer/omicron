@@ -20,8 +20,9 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ProjectUuid;
 use ref_cast::RefCast;
-use uuid::Uuid;
 
 impl DataStore {
     pub async fn silo_utilization_view(
@@ -80,20 +81,24 @@ impl DataStore {
     pub async fn project_utilization_list(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, ProjectUuid>,
     ) -> ListResultVec<ProjectUtilization> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         use nexus_db_schema::schema::project_utilization::dsl;
-        paginated(dsl::project_utilization, dsl::project_id, pagparams)
-            .select(ProjectUtilization::as_select())
-            // Note: to match `silo_utilization_list`, we limit to projects that
-            // belong to silos that are either discoverable or set at least one
-            // nonzero resource quota. This logic lives in the
-            // `project_utilization` view, and doesn't need to be recapitulated
-            // here.
-            .filter(dsl::silo_id.ne(DEFAULT_SILO_ID))
-            .load_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        paginated(
+            dsl::project_utilization,
+            dsl::project_id,
+            &pagparams.map_name(|id| id.as_untyped_uuid()),
+        )
+        .select(ProjectUtilization::as_select())
+        // Note: to match `silo_utilization_list`, we limit to projects that
+        // belong to silos that are either discoverable or set at least one
+        // nonzero resource quota. This logic lives in the
+        // `project_utilization` view, and doesn't need to be recapitulated
+        // here.
+        .filter(dsl::silo_id.ne(DEFAULT_SILO_ID))
+        .load_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

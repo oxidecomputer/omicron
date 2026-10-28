@@ -10,6 +10,8 @@ use nexus_db_schema::schema::silo_utilization;
 use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::silo;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ProjectKind;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::SiloKind;
 use omicron_uuid_kinds::SiloUuid;
 use serde::{Deserialize, Serialize};
@@ -75,12 +77,18 @@ impl From<SiloUtilization> for silo::Utilization {
 #[derive(Queryable, Debug, Clone, Selectable, Serialize, Deserialize)]
 #[diesel(table_name = project_utilization)]
 pub struct ProjectUtilization {
-    pub project_id: Uuid,
+    pub project_id: DbTypedUuid<ProjectKind>,
     pub silo_id: Uuid,
 
     pub cpus_provisioned: i64,
     pub memory_provisioned: ByteCount,
     pub storage_provisioned: ByteCount,
+}
+
+impl ProjectUtilization {
+    pub fn project_id(&self) -> ProjectUuid {
+        self.project_id.into()
+    }
 }
 
 // Not really a DB model, just the result of a datastore function
