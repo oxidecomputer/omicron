@@ -83,33 +83,39 @@ impl super::Nexus {
             .into();
         let (_, blueprint) =
             self.datastore().blueprint_target_get_current_full(opctx).await?;
-        let inventory =
-            self.datastore().inventory_get_latest_collection(opctx).await?;
-
-        check_sled_software(
-            &blueprint,
-            target_release.generation(),
-            &repo,
-            inventory.as_ref(),
-            sleds,
-        )
-        .map_err(|error| {
+        let reject = |error: SledSoftwareError| {
             Error::invalid_request(format!(
                 "sled cannot be added: {}",
                 InlineErrorChain::new(&error)
             ))
-        })
+        };
+
+        check_system_settled(&blueprint, target_release.generation(), &repo)
+            .map_err(reject)?;
+
+        let Some(inventory) =
+            self.datastore().inventory_get_latest_collection(opctx).await?
+        else {
+            return Err(reject(SledSoftwareError::NoInventory));
+        };
+
+        check_sleds_match(&repo, &inventory, sleds).map_err(reject)
+        // <review covers="17 lines above">
+        // Would this be cleaner as a sequence of `x.and_then(...)` with one `map_err` at the end?
+        // </review>
     }
 }
 
 /// Checks that the system has settled on the target release described by
-/// `repo` and that each sled in `sleds` is running that release's software
-fn check_sled_software<'a>(
+/// `repo`
+///
+/// The system has not settled if updates are suspended, a sled is waiting for
+/// a mupdate to be cleared, or an update to the target release is still in
+/// progress.
+fn check_system_settled(
     blueprint: &Blueprint,
     target_release_generation: TargetReleaseGeneration,
     repo: &TufRepoDescription,
-    inventory: Option<&Collection>,
-    sleds: impl IntoIterator<Item = &'a BaseboardId>,
 ) -> Result<(), SledSoftwareError> {
     if blueprint.updates_suspended(target_release_generation) {
         return Err(SledSoftwareError::UpdateSuspended {
@@ -140,10 +146,16 @@ fn check_sled_software<'a>(
         }
     }
 
-    let Some(inventory) = inventory else {
-        return Err(SledSoftwareError::NoInventory);
-    };
+    Ok(())
+}
 
+/// Checks that each sled in `sleds` is running the software in `repo`,
+/// according to `inventory`
+fn check_sleds_match<'a>(
+    repo: &TufRepoDescription,
+    inventory: &Collection,
+    sleds: impl IntoIterator<Item = &'a BaseboardId>,
+) -> Result<(), SledSoftwareError> {
     for sled in sleds {
         let report = DeployedVersions::compute(sled, inventory, repo)?;
         let problems = sled_software_problems(sled, report)?;
@@ -331,32 +343,16 @@ mod tests {
         let generation = blueprint.target_release_minimum_generation;
 
         // With no sleds in the blueprint, the system is settled on any
-        // target release.  We then fail only because there is no inventory.
-        let error = check_sled_software(
-            &blueprint,
-            generation,
-            &repo,
-            None,
-            [&test_sled()],
-        )
-        .expect_err("no inventory");
-        assert!(
-            matches!(error, SledSoftwareError::NoInventory),
-            "unexpected error: {error:?}"
-        );
+        // target release.
+        check_system_settled(&blueprint, generation, &repo)
+            .expect("system is settled");
 
         // Simulate the planner having noticed a mupdate (which bumps the
         // blueprint's minimum target release generation) and the operator not
         // yet having set a new target release.
         blueprint.target_release_minimum_generation = generation.next();
-        let error = check_sled_software(
-            &blueprint,
-            generation,
-            &repo,
-            None,
-            [&test_sled()],
-        )
-        .expect_err("updates suspended");
+        let error = check_system_settled(&blueprint, generation, &repo)
+            .expect_err("updates suspended");
         assert!(
             matches!(
                 error,
