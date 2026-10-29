@@ -748,6 +748,22 @@ pub(super) async fn unwind_instance_ensure_registered(
                     );
                     Ok(())
                 }
+                // If the sled is no longer in service, give up on trying to
+                // talk to it and similarly assume that the VMM is gone.
+                Err(ChangeError::SledAgent(
+                    SledAgentError::SledNotInService { .. },
+                )) => {
+                    debug!(
+                        osagactx.log(),
+                        "unwinding saga: the sled this instance may have been \
+                         started on has been expunged, assuming the VMM is now \
+                         gone";
+                         "instance_id" => %instance_id,
+                         "propolis_id" => %propolis_id,
+                         "sled_id" => %sled_id,
+                    );
+                    Ok(())
+                }
                 // Well, that's real sketchy: the sled record for the sled with
                 // this ID was not found. Our only real options here are to
                 // either assume that this means anything that may have been
