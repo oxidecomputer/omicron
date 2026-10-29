@@ -217,7 +217,22 @@ impl SledAgentInstanceError {
                 if !datastore
                     .check_sled_in_service(opctx, sled_id)
                     .await
-                    .unwrap_or(true) =>
+                    .unwrap_or_else(|e| {
+                        // We cannot determine conclusively whether or not the
+                        // sled is still in service, so assume it has not been
+                        // expunged until we receive evidence to the contrary,
+                        // and complain about it for now.
+                        warn!(
+                            opctx.log,
+                            "failed to check whether or not sled {sled_id} is \
+                             still in service (in order to determine the \
+                             disposition for a communication error); we shall \
+                             treat it as though it is for now.";
+                            "sled_id" => %sled_id,
+                            "error" => InlineErrorChain::new(&e),
+                        );
+                        true
+                    }) =>
             {
                 Self::SledNotInService { sled_id, source }
             }
