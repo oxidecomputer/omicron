@@ -121,6 +121,28 @@ declare_saga_actions! {
         + sim_set_migration_ids
     }
 
+    // This node is essentially the undo action of the
+    // `sim_ensure_destination_propolis` node, but factored out into a separate
+    // node that's pushed *before* `sim_ensure_destination_propolis`. This is
+    // necessary because we want to ensure that an unwinding saga always
+    // attempts to unregister the VMM it may have created on a sled, regardless
+    // of whether the `sim_ensure_destination_propolis` node completes or fails.
+    // If the Nexus that was executing `sim_ensure_destination_propolis` sends
+    // the VMM ensure request to the destination sled, but crashes before it has
+    // recorded that the node has succeeded, or if it encounters an error after
+    // sending the request and begins unwinding, we may have still created a VMM
+    // and must attempt to tear it down. Because undo actions are only performed
+    // for *completed* nodes, we must push a node immediately *before*
+    // `sim_ensure_destination_propolis` with a no-op forwards action and
+    // `sim_ensure_destination_propolis_undo` as its undo action. That
+    // way, if we have reached the point where we were going to attempt to
+    // ensure a VMM, we ensure it does not exist while unwinding regardless of
+    // whether we made it past that node.
+    UNREGISTER_DESTINATION_IF_UNWINDING -> "unregister_destination_if_unwinding" {
+        + sim_noop
+        - sim_ensure_destination_propolis_undo
+    }
+
     // This step registers the instance with the destination sled. Care is
     // needed at this point because there are two sleds that can send updates
     // that affect the same instance record (though they have separate VMMs that
@@ -128,7 +150,6 @@ declare_saga_actions! {
     // cooperate to return the instance to the correct pre-migration state.
     ENSURE_DESTINATION_PROPOLIS -> "ensure_destination" {
         + sim_ensure_destination_propolis
-        - sim_ensure_destination_propolis_undo
     }
 
     // Finally, this step requests migration by sending a "migrate in" request
@@ -167,6 +188,7 @@ impl NexusSaga for SagaInstanceMigrate {
         builder.append(create_vmm_record_action());
         builder.append(create_migration_record_action());
         builder.append(set_migration_ids_action());
+        builder.append(unregister_destination_if_unwinding_action());
         builder.append(ensure_destination_propolis_action());
         builder.append(instance_migrate_action());
 
@@ -515,6 +537,10 @@ async fn sim_ensure_destination_propolis(
                 saga_action_failed(inner)
             }
         })
+}
+
+async fn sim_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
+    Ok(())
 }
 
 async fn sim_ensure_destination_propolis_undo(
