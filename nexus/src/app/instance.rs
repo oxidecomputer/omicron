@@ -1820,28 +1820,8 @@ impl super::Nexus {
             .map(|res| res.into_inner().into())
             .map_err(|e| SledAgentInstanceError(e));
 
-        match instance_register_result {
-            Ok(state) => {
-                self.notify_vmm_updated(opctx, *propolis_id, &state).await?;
-                let sled_runtime = state.vmm_state;
-                let db_vmm = self
-                    .db_datastore
-                    .vmm_fetch(opctx, propolis_id)
-                    .await
-                    .map_err(|e| {
-                        e.internal_context("failed to re-fetch DB VMM state")
-                    })?;
-                let db_runtime = db_vmm.runtime();
-                if sled_runtime.state != db_runtime.state {
-                    return Err(Error::conflict(format!(
-                        "expected to have advanced VMM {propolis_id} to new \
-                         runtime state {sled_runtime:?}, but found the \
-                         database state {db_runtime:?}"
-                    ))
-                    .into());
-                }
-                Ok(db_vmm)
-            }
+        let sled_state = match instance_register_result {
+            Ok(state) => state,
             Err(e) => {
                 // If this error indicates that the VMM should be marked as
                 // `Failed`, do that now.
@@ -1856,8 +1836,56 @@ impl super::Nexus {
                         )
                         .await;
                 }
-                Err(InstanceStateChangeError::SledAgent(e))
+                return Err(InstanceStateChangeError::SledAgent(e));
             }
+        };
+
+        // Attempt to write the state received from the sled-agent to the
+        // database.
+        self.notify_vmm_updated(opctx, *propolis_id, &sled_state).await?;
+
+        // Now, re-fetch the VMM state from the database to return to the
+        // caller. We shall check whether the state we wrote back to the
+        // database is the VMM's current state. If it is not in the expected
+        // state, then something else has acted on that VMM record, with which
+        // we may have raced!
+        let sled_runtime = sled_state.vmm_state;
+        let mk_err = |internal_msg: &dyn std::fmt::Display| {
+            let error = Error::conflict(match operation {
+                InstanceRegisterReason::Start { .. } => {
+                    "instance changed state before it could be started"
+                }
+                InstanceRegisterReason::Migrate { .. } => {
+                    "instance changed state before it could migrate"
+                }
+            })
+            .internal_context(format!(
+                "after registering {propolis_id}, we received {sled_runtime:?} \
+                 from the sled-agent, but {internal_msg}"
+            ));
+            InstanceStateChangeError::Other(error)
+        };
+        let db_vmm = match self.db_datastore.vmm_fetch(opctx, propolis_id).await
+        {
+            Ok(v) => v,
+            Err(Error::ObjectNotFound { .. }) => {
+                return Err(mk_err(
+                    &"the VMM record in the database has been deleted",
+                ));
+            }
+            Err(e) => {
+                return Err(e
+                    .internal_context("failed to re-fetch VMM record")
+                    .into());
+            }
+        };
+        let db_runtime = db_vmm.runtime();
+        if sled_runtime.state != db_runtime.state {
+            Err(mk_err(&format_args!(
+                "the VMM state in the database has changed to {db_runtime:?}"
+            )))
+        } else {
+            Ok(db_vmm)
         }
     }
 
