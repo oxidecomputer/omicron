@@ -638,8 +638,7 @@ fn validate_can_set_target_release_for_mupdate_recovery(
     log: &Logger,
 ) -> Result<(), TargetReleaseChangeError> {
     let min_target_release_gen_is_ahead_of_actual_target_release_gen =
-        current_blueprint.target_release_minimum_generation
-            > current_target_release_gen;
+        current_blueprint.updates_suspended(current_target_release_gen);
 
     // Check whether all components already match `proposed_new_version`.
     match BlueprintTargetReleaseStatus::new(

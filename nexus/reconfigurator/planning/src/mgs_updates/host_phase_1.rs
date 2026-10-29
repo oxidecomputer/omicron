@@ -15,6 +15,7 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
 use nexus_types::deployment::planning_report::FailedHostOsUpdateReason;
+use nexus_types::deployment::planning_report::HostOsTargetArtifactError;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::SpType;
 use nexus_types::tuf_repo::TufRepoDescription;
@@ -377,52 +378,10 @@ pub(super) fn try_make_update(
         );
     };
 
-    let Some(sled_type) = OxideSled::try_from_model(&baseboard_id.part_number)
-    else {
-        return Err(FailedHostOsUpdateReason::UnableToDetermineSledModel(
-            baseboard_id.part_number.clone(),
-        ));
-    };
-
-    let phase_1_artifact = current_artifacts.artifacts.get_only(
-        &OsPhase1Tags {
-            os_board: match sled_type {
-                OxideSled::Gimlet => OsBoard::GIMLET,
-                OxideSled::Cosmo => OsBoard::COSMO,
-            },
-            os_variant: OsVariant::Host,
-        }
-        .into(),
-    );
-    let phase_2_artifact = current_artifacts
-        .artifacts
-        .get_only(&OsPhase2Tags { os_variant: OsVariant::Host }.into());
-    let (phase_1_artifact, phase_2_artifact) =
-        match (phase_1_artifact, phase_2_artifact) {
-            // Common case: Exactly 1 of each artifact.
-            (Ok(p1), Ok(p2)) => (p1, p2),
-            // "TUF is broken" cases: missing both, one or the other.
-            (Err(GetError::NotFound), Err(GetError::NotFound)) => {
-                return Err(FailedHostOsUpdateReason::NoMatchingArtifactsFound);
-            }
-            (Err(GetError::NotFound), Ok(_)) => {
-                return Err(
-                    FailedHostOsUpdateReason::NoMatchingPhase1ArtifactFound,
-                );
-            }
-            (Ok(_), Err(GetError::NotFound)) => {
-                return Err(
-                    FailedHostOsUpdateReason::NoMatchingPhase2ArtifactFound,
-                );
-            }
-            // "TUF is broken" cases: have multiple of one or the other. This
-            // should be impossible unless we shipped a TUF repo with multiple
-            // host OS images. We can't proceed, because we don't know how to
-            // pair up which phase 1 matches which phase 2.
-            (Err(GetError::TooMany), _) | (_, Err(GetError::TooMany)) => {
-                return Err(FailedHostOsUpdateReason::TooManyMatchingArtifacts);
-            }
-        };
+    let HostOsTargetArtifacts {
+        phase_1: phase_1_artifact,
+        phase_2: phase_2_artifact,
+    } = HostOsTargetArtifacts::for_board(baseboard_id, current_artifacts)?;
 
     // If the artifact matches what's deployed, then no update is needed. We
     // only need to look at the running phase 2; that tells us what we're
@@ -479,6 +438,74 @@ pub(super) fn try_make_update(
         },
         pending_host_phase_2_changes,
     ))
+}
+
+/// Host OS phase 1 and phase 2 artifacts that a TUF repo specifies for a sled
+pub(super) struct HostOsTargetArtifacts<'a> {
+    pub(super) phase_1: &'a Artifact,
+    pub(super) phase_2: &'a Artifact,
+}
+
+impl<'a> HostOsTargetArtifacts<'a> {
+    /// Finds the host OS artifacts in `current_artifacts` that apply to the
+    /// sled identified by `baseboard_id`
+    pub(super) fn for_board(
+        baseboard_id: &BaseboardId,
+        current_artifacts: &'a TufRepoDescription,
+    ) -> Result<Self, HostOsTargetArtifactError> {
+        let Some(sled_type) =
+            OxideSled::try_from_model(&baseboard_id.part_number)
+        else {
+            return Err(HostOsTargetArtifactError::UnableToDetermineSledModel(
+                baseboard_id.part_number.clone(),
+            ));
+        };
+
+        let phase_1_artifact = current_artifacts.artifacts.get_only(
+            &OsPhase1Tags {
+                os_board: match sled_type {
+                    OxideSled::Gimlet => OsBoard::GIMLET,
+                    OxideSled::Cosmo => OsBoard::COSMO,
+                },
+                os_variant: OsVariant::Host,
+            }
+            .into(),
+        );
+        let phase_2_artifact = current_artifacts
+            .artifacts
+            .get_only(&OsPhase2Tags { os_variant: OsVariant::Host }.into());
+        let (phase_1, phase_2) = match (phase_1_artifact, phase_2_artifact) {
+            // Common case: Exactly 1 of each artifact.
+            (Ok(p1), Ok(p2)) => (p1, p2),
+            // "TUF is broken" cases: missing both, one or the other.
+            (Err(GetError::NotFound), Err(GetError::NotFound)) => {
+                return Err(
+                    HostOsTargetArtifactError::NoMatchingArtifactsFound,
+                );
+            }
+            (Err(GetError::NotFound), Ok(_)) => {
+                return Err(
+                    HostOsTargetArtifactError::NoMatchingPhase1ArtifactFound,
+                );
+            }
+            (Ok(_), Err(GetError::NotFound)) => {
+                return Err(
+                    HostOsTargetArtifactError::NoMatchingPhase2ArtifactFound,
+                );
+            }
+            // "TUF is broken" cases: have multiple of one or the other. This
+            // should be impossible unless we shipped a TUF repo with multiple
+            // host OS images. We can't proceed, because we don't know how to
+            // pair up which phase 1 matches which phase 2.
+            (Err(GetError::TooMany), _) | (_, Err(GetError::TooMany)) => {
+                return Err(
+                    HostOsTargetArtifactError::TooManyMatchingArtifacts,
+                );
+            }
+        };
+
+        Ok(HostOsTargetArtifacts { phase_1, phase_2 })
+    }
 }
 
 #[cfg(test)]
