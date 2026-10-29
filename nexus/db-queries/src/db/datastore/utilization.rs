@@ -96,7 +96,7 @@ impl DataStore {
         // nonzero resource quota. This logic lives in the
         // `project_utilization` view, and doesn't need to be recapitulated
         // here.
-        .filter(dsl::silo_id.ne(DEFAULT_SILO_ID))
+        .filter(dsl::silo_id.ne(to_db_typed_uuid(DEFAULT_SILO_ID)))
         .load_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
