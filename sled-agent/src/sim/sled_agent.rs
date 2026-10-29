@@ -630,7 +630,7 @@ impl SledAgent {
         let nexus_client = Arc::clone(&self.nexus_client);
         if let Some(timeout) = acpi_timeout_secs {
             tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(timeout as u64)).await;
+                tokio::time::sleep(Duration::from_secs(timeout)).await;
                 if let Ok(new_state) = fut.await {
                     let _: Result<_, _> = nexus_client
                         .cpapi_instances_put(&propolis_id, &new_state.into())
