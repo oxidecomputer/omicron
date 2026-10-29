@@ -192,7 +192,7 @@ pub struct NextVmmRegistrationRequest {
 /// the sled agent has acted on it or responded. The request stays held until
 /// the test calls [`Self::resume`] or [`Self::fail`].
 ///
-/// Dropping this without calling `resume` or fail` unpauses the request as
+/// Dropping this without calling `resume` or `fail` unpauses the request as
 /// though `resume` had been called. However, this results in a warning, since a
 /// test which pauses a test _presumably_ wants to actually control when it is
 /// allowed to continue.
