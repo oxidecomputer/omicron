@@ -1119,13 +1119,11 @@ async fn sis_ensure_running(
 
 #[cfg(test)]
 mod test {
-    use core::time::Duration;
-    use nexus_types::identity::Asset as _;
-
     use crate::app::sagas::disk_delete::test::ExpungeTestHarness;
     use crate::app::sagas::disk_delete::test::create_disk;
     use crate::app::sagas::disk_delete::test::new_local_disk_create_params;
     use crate::app::{saga::create_saga_dag, sagas::test_helpers};
+    use core::time::Duration;
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::authn;
     use nexus_test_utils::resource_helpers::DiskTest;
@@ -1135,6 +1133,7 @@ mod test {
     };
     use nexus_types::external_api::instance::InstanceCpuCount;
     use nexus_types::external_api::{instance as instance_types, networking};
+    use nexus_types::identity::Asset as _;
     use nexus_types::identity::Resource;
     use nexus_types_versions::latest;
     use omicron_common::api::external::{
@@ -1829,25 +1828,36 @@ mod test {
 
         paused_registration.resume();
         let saga_result =
-            running_saga.wait_until_stopped().await.into_omicron_result();
+            running_saga.wait_until_stopped().await.into_raw_result();
+        match dbg!(saga_result.kind) {
+            // The start saga's VMM failed before it was registered, so the saga
+            // must unwind, and unwinding must unregister the VMM.
+            Ok(output) => {
+                let db_vmm = test_helpers::vmm_fetch_including_deleted(
+                    &cptestctx,
+                    propolis_id,
+                )
+                .await;
+                panic!(
+                    "the start saga succeeded ({output:?}), even though its \
+                     VMM {propolis_id} was marked failed before it was \
+                     registered! \
+                     this is supposed to cause the saga to unwind, so something \
+                     is broken here!\n\
+                     the VMM's database record is {:?} (time_deleted: {:?})",
+                    db_vmm.state, db_vmm.time_deleted,
+                );
+            }
+            // If the saga failed, make sure it did not get stuck unwinding.
+            Err(saga_err) => {
+                if let Some((node, error)) = &saga_err.undo_failure {
+                    panic!(
+                        "saga got stuck unwinding (at node {node:?}): {error:?}"
+                    )
+                }
+            }
+        };
 
-        // The start saga's VMM failed before it was registered, so the saga
-        // must unwind, and unwinding must unregister the VMM.
-        if let Ok(output) = dbg!(&saga_result) {
-            let db_vmm = test_helpers::vmm_fetch_including_deleted(
-                &cptestctx,
-                propolis_id,
-            )
-            .await;
-            panic!(
-                "the start saga succeeded ({output:?}), even though its VMM \
-                 {propolis_id} was marked failed before it was registered! \
-                 this is supposed to cause the saga to unwind, so something \
-                 is broken here!\n\
-                 the VMM's database record is {:?} (time_deleted: {:?})",
-                db_vmm.state, db_vmm.time_deleted,
-            );
-        }
         let sled_state = nexus
             .sled_client(&creating_vmm.sled_id())
             .await
