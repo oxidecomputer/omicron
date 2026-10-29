@@ -83,26 +83,16 @@ impl super::Nexus {
             .into();
         let (_, blueprint) =
             self.datastore().blueprint_target_get_current_full(opctx).await?;
-        let reject = |error: SledSoftwareError| {
-            Error::invalid_request(format!(
-                "sled cannot be added: {}",
-                InlineErrorChain::new(&error)
-            ))
-        };
-
-        check_system_settled(&blueprint, target_release.generation(), &repo)
-            .map_err(reject)?;
+        check_system_settled(&blueprint, target_release.generation(), &repo)?;
 
         let Some(inventory) =
             self.datastore().inventory_get_latest_collection(opctx).await?
         else {
-            return Err(reject(SledSoftwareError::NoInventory));
+            return Err(SledSoftwareError::NoInventory.into());
         };
 
-        check_sleds_match(&repo, &inventory, sleds).map_err(reject)
-        // <review covers="17 lines above">
-        // Would this be cleaner as a sequence of `x.and_then(...)` with one `map_err` at the end?
-        // </review>
+        check_sleds_match(&repo, &inventory, sleds)?;
+        Ok(())
     }
 }
 
@@ -213,6 +203,15 @@ enum SledSoftwareError {
         target_release_version: semver::Version,
         problems: Vec<SledSoftwareProblem>,
     },
+}
+
+impl From<SledSoftwareError> for Error {
+    fn from(error: SledSoftwareError) -> Self {
+        Error::invalid_request(format!(
+            "sled cannot be added: {}",
+            InlineErrorChain::new(&error)
+        ))
+    }
 }
 
 fn join_problems(problems: &[SledSoftwareProblem]) -> String {
