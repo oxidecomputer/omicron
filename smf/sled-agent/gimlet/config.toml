@@ -74,7 +74,9 @@ enforce = "Enforced"
 # Support Shell (RFD 620). TODO: replace the sandbox root with the
 # production certificate.
 [sush]
-roots = [
+production_platform_root = "/usr/share/oxide/idcerts/production.pem"
+staging_platform_root = "/usr/share/oxide/idcerts/staging.pem"
+production_trust_anchors = [
     "/opt/oxide/sled-agent/pkg/sush-sandbox-untrusted.pem",
     "/opt/oxide/sled-agent/pkg/sush-sandbox-s1.pem",
 ]

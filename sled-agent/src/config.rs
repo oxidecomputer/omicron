@@ -349,14 +349,22 @@ pub struct Config {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SushConfig {
-    /// One or more PEM files holding the trusted root certificates for job
-    /// requests, one certificate per file. Job signatures must have one of
-    /// these certificates as their root cert to be accepted.
-    ///
-    /// This list must not be empty, as at least one root cert is required in
-    /// order to be able to run sush jobs.
-    #[serde(deserialize_with = "SushConfig::nonempty_roots")]
-    pub roots: Vec<Utf8PathBuf>,
+    /// A PEM file containing the production platform identity root
+    /// certificate.
+    pub production_platform_root: Utf8PathBuf,
+
+    /// A PEM file containing the staging platform identity root
+    /// certificate.
+    pub staging_platform_root: Utf8PathBuf,
+
+    /// PEM files holding the certificates that *every* sled trusts
+    /// to sign jobs, one certificate per file, in root-to-leaf order.
+    pub production_trust_anchors: Vec<Utf8PathBuf>,
+
+    /// PEM files holding the certificates that *only staging-signed* sleds
+    /// (i.e., Oxide lab systems) trust to sign jobs, in root-to-leaf order.
+    #[serde(default)]
+    pub staging_trust_anchors: Vec<Utf8PathBuf>,
 
     /// Where to record job output before an encrypted dataset is available.
     /// Must be on a ramdisk so that it is never persisted unencrypted.
@@ -391,18 +399,6 @@ impl SushConfig {
 
     fn default_max_output_mb() -> u32 {
         10 * 1024
-    }
-
-    fn nonempty_roots<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Vec<Utf8PathBuf>, D::Error> {
-        let roots = Vec::deserialize(deserializer)?;
-        if roots.is_empty() {
-            return Err(serde::de::Error::custom(
-                "sush needs at least one root certificate to run",
-            ));
-        }
-        Ok(roots)
     }
 }
 
@@ -569,13 +565,13 @@ mod test {
 
     use slog_error_chain::InlineErrorChain;
 
-    #[test]
-    fn test_smf_configs() {
+    /// Parse every sled-agent config we ship.
+    fn smf_configs() -> Vec<(Utf8PathBuf, Config)> {
         let manifest = std::env::var("CARGO_MANIFEST_DIR")
             .expect("Cannot access manifest directory");
         let smf = Utf8PathBuf::from(manifest).join("../smf/sled-agent");
 
-        let mut configs_seen = 0;
+        let mut configs = Vec::new();
         for variant in smf.read_dir_utf8().unwrap() {
             let variant = variant.unwrap();
             if variant.file_type().unwrap().is_dir() {
@@ -583,50 +579,117 @@ mod test {
                     let entry = entry.unwrap();
                     if entry.file_name() == "config.toml" {
                         let path = entry.path();
-                        Config::from_file(&path).unwrap_or_else(|e| {
-                            panic!(
-                                "Failed to parse config {path}: {}",
-                                InlineErrorChain::new(&e)
-                            )
-                        });
-                        configs_seen += 1;
+                        let config =
+                            Config::from_file(&path).unwrap_or_else(|e| {
+                                panic!(
+                                    "Failed to parse config {path}: {}",
+                                    InlineErrorChain::new(&e)
+                                )
+                            });
+                        configs.push((path.to_owned(), config));
                     }
                 }
             }
         }
-        assert!(configs_seen > 0, "No sled-agent configs found");
+        configs
+    }
+
+    #[test]
+    fn test_smf_configs() {
+        assert!(!smf_configs().is_empty(), "No sled-agent configs found");
     }
 
     #[test]
     fn test_sush_config() {
-        // Only `roots` is required. The rest have defaults.
-        let sush: SushConfig =
-            toml::from_str(r#"roots = ["/pkg/sush-root.pem"]"#).unwrap();
-        assert_eq!(sush.roots, vec![Utf8PathBuf::from("/pkg/sush-root.pem")]);
-        assert_eq!(sush.ramdisk_dir, SushConfig::default_ramdisk_dir());
+        // Only the platform roots and the production trust anchors are
+        // required. The rest have defaults.
+        const REQUIRED: &str = r#"
+            production_platform_root = "/idcerts/production.pem"
+            staging_platform_root = "/idcerts/staging.pem"
+            production_trust_anchors = ["/pkg/sush-root.pem"]
+        "#;
+        let SushConfig {
+            production_platform_root,
+            staging_platform_root,
+            production_trust_anchors,
+            staging_trust_anchors,
+            ramdisk_dir,
+            ramdisk_max_output_mb,
+            max_output_mb,
+        } = toml::from_str(REQUIRED).unwrap();
+        assert_eq!(production_platform_root, "/idcerts/production.pem");
+        assert_eq!(staging_platform_root, "/idcerts/staging.pem");
         assert_eq!(
-            sush.ramdisk_max_output_mb,
+            production_trust_anchors,
+            vec![Utf8PathBuf::from("/pkg/sush-root.pem")]
+        );
+        assert!(staging_trust_anchors.is_empty());
+        assert_eq!(ramdisk_dir, SushConfig::default_ramdisk_dir());
+        assert_eq!(
+            ramdisk_max_output_mb,
             SushConfig::default_ramdisk_max_output_mb()
         );
-        assert_eq!(sush.max_output_mb, SushConfig::default_max_output_mb());
+        assert_eq!(max_output_mb, SushConfig::default_max_output_mb());
 
-        let sush: SushConfig = toml::from_str(
-            r#"
-            roots = ["/pkg/sush-root.pem"]
+        let SushConfig {
+            production_platform_root: _,
+            staging_platform_root: _,
+            production_trust_anchors: _,
+            staging_trust_anchors,
+            ramdisk_dir,
+            ramdisk_max_output_mb,
+            max_output_mb,
+        } = toml::from_str(&format!(
+            r#"{REQUIRED}
+            staging_trust_anchors = ["/pkg/sush-staging.pem"]
             ramdisk_dir = "/var/run/sush"
             ramdisk_max_output_mb = 8
             max_output_mb = 128
             "#,
+        ))
+        .unwrap();
+        assert_eq!(
+            staging_trust_anchors,
+            vec![Utf8PathBuf::from("/pkg/sush-staging.pem")]
+        );
+        assert_eq!(ramdisk_dir, "/var/run/sush");
+        assert_eq!(ramdisk_max_output_mb, 8);
+        assert_eq!(max_output_mb, 128);
+
+        // No anchors means no jobs, but is allowed.
+        let SushConfig {
+            production_platform_root: _,
+            staging_platform_root: _,
+            production_trust_anchors,
+            ..
+        } = toml::from_str(
+            r#"
+            production_platform_root = "/idcerts/production.pem"
+            staging_platform_root = "/idcerts/staging.pem"
+            production_trust_anchors = []
+            "#,
         )
         .unwrap();
-        assert_eq!(sush.ramdisk_dir, "/var/run/sush");
-        assert_eq!(sush.ramdisk_max_output_mb, 8);
-        assert_eq!(sush.max_output_mb, 128);
+        assert!(production_trust_anchors.is_empty());
 
-        // No roots would mean no jobs can ever run, so reject at parse time.
-        let err = toml::from_str::<SushConfig>("roots = []").unwrap_err();
-        assert!(
-            err.to_string().contains("needs at least one root certificate")
-        );
+        // A staging anchor listed as a production one would let
+        // staging-signed jobs run on production sleds.
+        for (path, config) in smf_configs() {
+            let Some(SushConfig {
+                production_trust_anchors,
+                staging_trust_anchors,
+                ..
+            }) = config.sush
+            else {
+                continue;
+            };
+            for anchor in &staging_trust_anchors {
+                assert!(
+                    !production_trust_anchors.contains(anchor),
+                    "{path}: {anchor} is both a production and a staging \
+                     sush trust anchor",
+                );
+            }
+        }
     }
 }
