@@ -417,38 +417,51 @@ impl SledAgent {
                 "holding instance registration request until resumed";
                 "propolis_id" => %propolis_id,
             );
+
+            // Signal to the test that we are holding onto a paused registration
+            // request, and are waiting for it to resume.
             let (resume_tx, resume_rx) = oneshot::channel();
-            // If the test has dropped its handle to pause this request, do
-            // nothing.
-            let _ = tx.send(PausedVmmRegistration { propolis_id, resume_tx });
-            match resume_rx.await {
-                // The test has allowed the VMM registration to proceed.
-                Ok(Ok(())) => {
-                    info!(
-                        self.log,
-                        "resuming held instance_register request";
-                        "propolis_id" => %propolis_id,
-                    );
-                }
-                // The test has requested that we fail the registration request.
-                Ok(Err(error)) => {
-                    info!(
-                        self.log,
-                        "injecting error into held instance_register request";
-                        "propolis_id" => %propolis_id,
-                        "error" => %error,
-                    );
-                    return Err(error);
-                }
-                // The test has dropped its handle! Either this is a test bug,
-                // or the test has already failed and is unwinding.
-                Err(_) => {
-                    warn!(
-                        self.log,
-                        "paused instance_register handle dropped unexpectedly, \
-                         resuming the request";
-                        "propolis_id" => %propolis_id,
-                    );
+            let paused = PausedVmmRegistration { propolis_id, resume_tx };
+            if tx.send(paused).is_err() {
+                // If the send fails, that means the test has dropped its
+                // handle, so continue immediately without waiting for it to
+                // resume the request.
+                warn!(
+                    self.log,
+                    "paused vmm_register handle dropped unexpectedly, resuming \
+                     the request";
+                    "propolis_id" => %propolis_id,
+                );
+            } else {
+                match resume_rx.await {
+                    // The test has allowed the VMM registration to proceed.
+                    Ok(Ok(())) => {
+                        info!(
+                            self.log,
+                            "resuming held vmm_register request";
+                            "propolis_id" => %propolis_id,
+                        );
+                    }
+                    // The test has requested that we fail the registration request.
+                    Ok(Err(error)) => {
+                        info!(
+                            self.log,
+                            "injecting error into paused vmm_register request";
+                            "propolis_id" => %propolis_id,
+                            "error" => %error,
+                        );
+                        return Err(error);
+                    }
+                    // The test has dropped its handle! This is probably either
+                    // the test has already failed and is unwinding.
+                    Err(_) => {
+                        warn!(
+                            self.log,
+                            "paused vmm_register handle dropped unexpectedly, \
+                             resuming the request";
+                            "propolis_id" => %propolis_id,
+                        );
+                    }
                 }
             }
         }
