@@ -6,7 +6,8 @@
 //!
 //! See RFD 620. This server runs jobs targeted at this sled on behalf of
 //! Oxide support. A job arrives signed, and this sled runs it only when
-//! the signature chains to one of the root certificates in its config.
+//! the signature chains to one of the trust anchors in its config; see
+//! `trust_anchors` for which ones.
 //! The server is deliberately independent of the rest of the control plane,
 //! because it is one of the tools you reach for when the control plane is
 //! the thing that is broken. It therefore starts during bootstrap, before
@@ -51,6 +52,7 @@
 use crate::config::SushConfig;
 use anyhow::{Context, ensure};
 use camino::{Utf8Path, Utf8PathBuf};
+use dice_verifier::verify_cert_chain;
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer, ServerBuilder};
 use gateway_client::Client as MgsClient;
 use gateway_types::component::SpType;
@@ -67,6 +69,7 @@ use slog_error_chain::InlineErrorChain;
 use sprockets_tls::ipcc::Ipcc;
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeSet;
+use std::fs::read;
 use std::io;
 use std::iter::once;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -80,7 +83,7 @@ use tokio::task::spawn_blocking;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use x509_cert::Certificate;
-use x509_cert::der::{Decode as _, Reader as _, SliceReader};
+use x509_cert::der::{Decode as _, DecodePem as _, Reader as _, SliceReader};
 use x509_cert::time::{Time, Validity};
 
 use sush_common::keys::{EphemeralKey, KeyType, pem_cert_chain};
@@ -221,7 +224,7 @@ pub async fn spawn_sush_tasks(
             );
         }
     }
-    let locker = match Locker::new(&log, slots) {
+    let locker = match Locker::new(&log, own_baseboard.clone(), slots) {
         Ok(locker) => locker,
         Err(err) => {
             error!(
@@ -278,6 +281,7 @@ pub async fn spawn_sush_tasks(
         }
     };
 
+    let anchors = trust_anchors(&log, config).await;
     let (tx_cubbies, rx_cubbies) = watch::channel(Cubbies::new());
     let mut manager = match JobManager::new(
         log.clone(),
@@ -288,7 +292,7 @@ pub async fn spawn_sush_tasks(
         universe,
         linked,
         &locker,
-        &config.roots,
+        &anchors,
         shutdown.clone(),
     )
     .await
@@ -362,7 +366,7 @@ async fn promote_output_dir(
         if let Some(dataset) =
             available_datasets_rx.all_mounted_debug_datasets().first()
         {
-            let dir = dataset.path.join(SUSH_OUTPUT_SUBDIR);
+            let dir = dataset.path().join(SUSH_OUTPUT_SUBDIR);
             match create_dir_all(&dir).await {
                 Ok(()) => {
                     output_dirs_tx.send_modify(|dirs| {
@@ -486,6 +490,91 @@ async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
         }
         sleep(MGS_POLL_INTERVAL).await;
     }
+}
+
+/// Choose the certificates this sled will trust to sign sush jobs.
+/// Every sled trusts the production anchors, and sleds whose platform
+/// identity (fetched here) chains to the staging root trust the staging
+/// anchors as well. This allows, e.g., support to run production-signed
+/// jobs on lab systems, but does not allow engineers to run staging-signed
+/// jobs on production systems.
+async fn trust_anchors(log: &Logger, config: &SushConfig) -> Vec<Utf8PathBuf> {
+    let SushConfig {
+        production_platform_root,
+        staging_platform_root,
+        production_trust_anchors,
+        staging_trust_anchors,
+        ramdisk_dir: _,
+        ramdisk_max_output_mb: _,
+        max_output_mb: _,
+    } = config.clone();
+    let mut anchors = production_trust_anchors;
+    match spawn_blocking(move || {
+        is_sled_staging_signed(
+            &production_platform_root,
+            &staging_platform_root,
+        )
+    })
+    .await
+    .context("fetching the platform identity")
+    .and_then(|result| result)
+    {
+        Ok(false) => info!(
+            log,
+            "production platform identity, trusting only production job signers"
+        ),
+        Ok(true) => {
+            info!(
+                log,
+                "staging platform identity, trusting staging job signers too"
+            );
+            anchors.extend(staging_trust_anchors);
+        }
+        Err(err) => warn!(
+            log, "unknown platform identity, trusting only production job signers";
+            "error" => InlineErrorChain::new(err.as_ref()),
+        ),
+    }
+    anchors
+}
+
+/// Whether this sled's platform identity, read from the RoT, chains to
+/// the `staging` root rather than the `production` one. Uses IPCC, so
+/// performs blocking I/O.
+fn is_sled_staging_signed(
+    production: &Utf8Path,
+    staging: &Utf8Path,
+) -> anyhow::Result<bool> {
+    let ipcc = Ipcc::new().context("opening IPCC")?;
+    let chain_der =
+        ipcc.rot_get_tq_cert_chain().context("fetching the TQ cert chain")?;
+    let chain = der_cert_chain(&chain_der)?;
+    let production_root = read_cert(production)?;
+    let staging_root = read_cert(staging)?;
+    ensure!(is_staging_cert(&staging_root), "{staging} is not a staging root");
+    ensure!(
+        !is_staging_cert(&production_root),
+        "{production} is a staging root, not production"
+    );
+    let roots = [production_root, staging_root.clone()];
+    let root = verify_cert_chain(&chain, Some(&roots))
+        .context("verifying the platform identity")?;
+    Ok(*root == staging_root)
+}
+
+/// Whether a platform identity root's subject includes "Staging", e.g.,
+/// "Platform Identity Staging Root A". (Production roots' subjects do
+/// not include "Production"). This is used only to fail closed in case
+/// roots are accidentally swapped in the config file; it is not used as
+/// a verification criterion.
+fn is_staging_cert(root: &Certificate) -> bool {
+    root.tbs_certificate.subject.to_string().contains("Staging")
+}
+
+/// Read a PEM file holding one certificate.
+fn read_cert(path: &Utf8Path) -> anyhow::Result<Certificate> {
+    let pem = read(path).with_context(|| format!("reading {path}"))?;
+    Certificate::from_pem(&pem).with_context(|| format!("parsing {path}"))
 }
 
 /// Generate the switch zone proxy's TLS identity. This is an ephemeral,

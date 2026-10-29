@@ -223,12 +223,6 @@ impl NextExternalMulticastGroup {
         out.push_sql("UPDATE ");
         schema::ip_pool_range::table.walk_ast(out.reborrow())?;
         out.push_sql(" SET ");
-        out.push_identifier(dsl::time_modified::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
-            &self.now,
-        )?;
-        out.push_sql(", ");
         out.push_identifier(dsl::rcgen::NAME)?;
         out.push_sql(" = ");
         out.push_identifier(dsl::rcgen::NAME)?;

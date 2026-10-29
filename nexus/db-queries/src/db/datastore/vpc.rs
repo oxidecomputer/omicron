@@ -87,6 +87,7 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterTarget;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
 use ref_cast::RefCast;
@@ -380,7 +381,7 @@ impl DataStore {
             ),
         }
         .filter(dsl::time_deleted.is_null())
-        .filter(dsl::project_id.eq(authz_project.id()))
+        .filter(dsl::project_id.eq(to_db_typed_uuid(authz_project.id())))
         .select(Vpc::as_select())
         .load_async(&*self.pool_connection_authorized(opctx).await?)
         .await
@@ -465,7 +466,10 @@ impl DataStore {
     ) -> Result<Option<(authz::Vpc, Vpc)>, Error> {
         use nexus_db_schema::schema::vpc::dsl;
 
-        assert_eq!(authz_project.id(), vpc_query.vpc.project_id);
+        assert_eq!(
+            authz_project.id(),
+            ProjectUuid::from(vpc_query.vpc.project_id)
+        );
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
         let name = vpc_query.vpc.identity.name.clone();
@@ -490,7 +494,7 @@ impl DataStore {
             Err(AsyncInsertError::CollectionNotFound) => {
                 Err(Error::ObjectNotFound {
                     type_name: ResourceType::Project,
-                    lookup_type: LookupType::ById(project_id),
+                    lookup_type: LookupType::by_id(project_id),
                 })
             }
             Err(AsyncInsertError::DatabaseError(
@@ -3287,10 +3291,11 @@ mod tests {
 
         // Helper to convert a zone's nic into an insertable nic.
         let db_nic_from_zone = |zone_config: &BlueprintZoneConfig| {
-            let (_, nic) = zone_config
+            let nic = zone_config
                 .zone_type
                 .external_networking()
-                .expect("external networking for zone type");
+                .expect("external networking for zone type")
+                .nic();
             let ip = nic
                 .ip_config
                 .ipv4_addr()

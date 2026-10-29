@@ -86,9 +86,11 @@ pub fn blueprint_nexus_external_ips(
 ) -> Vec<IpAddr> {
     blueprint
         .in_service_nexus_zones()
-        .filter_map(|(_sled_id, _zone_config, nexus_config)| {
-            (nexus_config.nexus_generation == active_generation)
-                .then_some(nexus_config.external_ip.ip)
+        .filter(|(_sled_id, _zone_config, nexus_config)| {
+            nexus_config.nexus_generation == active_generation
+        })
+        .flat_map(|(_sled_id, _zone_config, nexus_config)| {
+            nexus_config.external_ips.iter().map(|e| e.ip)
         })
         .collect()
 }
@@ -100,11 +102,14 @@ pub fn blueprint_external_dns_nameserver_ips(
 ) -> Vec<IpAddr> {
     blueprint
         .in_service_zones()
-        .filter_map(|(_, z)| match z.zone_type {
-            BlueprintZoneType::ExternalDns(
-                blueprint_zone_type::ExternalDns { dns_address, .. },
-            ) => Some(dns_address.addr.ip()),
-            _ => None,
+        .flat_map(|(_, z)| {
+            let addrs = match &z.zone_type {
+                BlueprintZoneType::ExternalDns(
+                    blueprint_zone_type::ExternalDns { dns_addresses, .. },
+                ) => Some(dns_addresses.iter().map(|a| a.addr.ip())),
+                _ => None,
+            };
+            addrs.into_iter().flatten()
         })
         .collect()
 }

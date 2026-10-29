@@ -10,11 +10,13 @@ use gateway_types::component::SpType;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use omicron_common::api::external::ByteCount;
 use omicron_generation_kinds::ArtifactConfigGeneration;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -27,6 +29,7 @@ use serde::Serialize;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog::Key;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::net::Ipv6Addr;
@@ -35,6 +38,13 @@ use swrite::SWrite;
 use swrite::swriteln;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
+
+/// The status of a successful `capacity_metrics` background task activation.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CapacityMetricsStatus {
+    /// Number of new samples retained in the producer queue.
+    pub samples_queued: usize,
+}
 
 /// The status of a `region_replacement` background task activation
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -104,6 +114,36 @@ pub struct AbandonedVmmReaperStatus {
     pub vmms_deleted: usize,
     pub vmms_already_deleted: usize,
     pub errors: Vec<String>,
+}
+
+/// VMMs on a single sled
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct VmmsBySled {
+    pub sled_id: SledUuid,
+    pub vmm_ids: BTreeSet<PropolisUuid>,
+}
+
+impl IdOrdItem for VmmsBySled {
+    type Key<'a> = SledUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.sled_id
+    }
+
+    id_upcast!();
+}
+
+/// The status of a `vmm_stop_for_update` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct VmmStopForUpdateStatus {
+    /// Number of VMMs stopped in this activation, keyed by the sled they were
+    /// running on.
+    pub vmms_stopped_by_sled: IdOrdMap<VmmsBySled>,
+    /// Number of VMMs that failed to stop in this activation, keyed by the sled
+    /// they are running on.
+    pub vmms_failed_to_stop_by_sled: IdOrdMap<VmmsBySled>,
+    /// Errors encountered during this activation, if any.
+    pub error_messages: Vec<String>,
 }
 
 /// The status of an `instance_updater` background task activation.
@@ -229,6 +269,10 @@ pub enum ReincarnationReason {
     Failed,
     /// A previous instance-start saga for this instance has failed.
     SagaUnwound,
+    // TODO-K: In a follow up PR add a StoppedForUpdate reason, so the instances
+    // we stopped during sled evacuation actually get restarted
+    //
+    // Tracking issue: https://github.com/oxidecomputer/omicron/issues/11169
 }
 
 impl std::fmt::Display for ReincarnationReason {
@@ -284,6 +328,29 @@ pub struct SupportBundleCollectionReport {
     /// All steps taken, alongside their timing information, when collecting the
     /// bundle.
     pub steps: Vec<SupportBundleCollectionStep>,
+
+    /// Set if collection stopped at the bundle's size limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_limit_exceeded: Option<SupportBundleSizeLimitExceeded>,
+}
+
+/// Describes a support bundle collection that stopped early because the
+/// bundle reached its size limit.
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SupportBundleSizeLimitExceeded {
+    /// The bundle's size limit.
+    pub limit_bytes: ByteCount,
+    /// The number of bytes collected into the bundle.
+    pub used_bytes: u64,
+    /// When the limit was first reached.
+    pub exceeded_at: DateTime<Utc>,
+    /// Files refused because they would exceed the limit, relative to the
+    /// bundle's root, in the order refused.
+    pub refused_paths: Vec<String>,
+    /// Steps which stopped before finishing.
+    pub incomplete_steps: BTreeSet<String>,
+    /// Steps which never started because the limit was reached.
+    pub skipped_steps: BTreeSet<String>,
 }
 
 /// Pairs a [`SupportBundleCollectionReport`] with facts known only after
@@ -333,6 +400,9 @@ impl SupportBundleCollectionStep {
 pub enum SupportBundleCollectionStepStatus {
     Ok,
     Skipped,
+    /// The step stopped before finishing, because the bundle reached its
+    /// size limit or was cancelled.
+    Stopped,
     Failed(String),
 }
 
@@ -342,6 +412,7 @@ impl std::fmt::Display for SupportBundleCollectionStepStatus {
         match self {
             Ok => write!(f, "ok"),
             Skipped => write!(f, "skipped"),
+            Stopped => write!(f, "stopped"),
             Failed(why) => write!(f, "failed: {why}"),
         }
     }
@@ -365,7 +436,7 @@ pub struct SupportBundleEreportStatus {
 
 impl SupportBundleCollectionReport {
     pub fn new(bundle: SupportBundleUuid) -> Self {
-        Self { bundle, steps: vec![] }
+        Self { bundle, steps: vec![], size_limit_exceeded: None }
     }
 }
 
@@ -614,24 +685,51 @@ impl IdOrdItem for TufRepoInfo {
     id_upcast!();
 }
 
-/// The status of an `blueprint_rendezvous` background task activation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// The status of a `blueprint_rendezvous` background task activation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlueprintRendezvousStatus {
     /// ID of the target blueprint during this activation.
     pub blueprint_id: BlueprintUuid,
-    /// ID of the inventory collection used by this activation.
-    pub inventory_collection_id: CollectionUuid,
-    /// Counts of operations performed.
-    pub stats: BlueprintRendezvousStats,
+    /// Outcome of reconciling sled availability from the blueprint.
+    pub sled_blueprint_availability: SledBlueprintAvailabilityRendezvousOutcome,
+    /// Outcome of reconciling the dataset rendezvous tables from the blueprint
+    /// and inventory.
+    pub datasets: DatasetRendezvousOutcome,
+}
+
+/// Outcome of reconciling `rendezvous_bp_sled_availability`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SledBlueprintAvailabilityRendezvousOutcome {
+    /// Reconciliation ran to completion.
+    Reconciled(SledBlueprintAvailabilityRendezvousStats),
+    /// Reconciliation failed partway through; rows written before the
+    /// failure stay written.
+    Error(String),
+}
+
+/// Outcome of reconciling the rendezvous dataset tables.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DatasetRendezvousOutcome {
+    /// No inventory collection has been loaded yet, so dataset reconciliation
+    /// was skipped. (It needs inventory to confirm a dataset exists before
+    /// making it available to other subsystems.)
+    NoInventoryCollection,
+    /// Reconciliation ran to completion against `inventory_collection_id`.
+    Reconciled {
+        inventory_collection_id: CollectionUuid,
+        stats: DatasetRendezvousStats,
+    },
+    /// Reconciliation against `inventory_collection_id` failed partway through.
+    /// The rows written before the failure stay written.
+    Error { inventory_collection_id: CollectionUuid, error: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BlueprintRendezvousStats {
+pub struct DatasetRendezvousStats {
     pub debug_dataset: DatasetsRendezvousStats,
     pub crucible_dataset: CrucibleDatasetsRendezvousStats,
     pub local_storage_dataset: DatasetsRendezvousStats,
     pub local_storage_unencrypted_dataset: DatasetsRendezvousStats,
-    pub sled_blueprint_availability: SledBlueprintAvailabilityRendezvousStats,
 }
 
 /// Stats for a sled availability rendezvous run.
@@ -1091,8 +1189,10 @@ pub struct SpEreporterStatus {
     pub status: EreporterStatus,
 }
 
-#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct EreporterStatus {
+    /// the UUID of the rack in which this thing lives.
+    pub rack_id: RackUuid,
     /// total number of ereports received from this reporter
     pub ereports_received: usize,
     /// number of new ereports ingested from this reporter (this may be less
@@ -1485,14 +1585,28 @@ pub enum TrustQuorumManagerStatus {
     Error(String),
 }
 
-#[derive(Default, Deserialize, Serialize)]
-pub struct AttachedSubnetManagerStatus {
-    /// Error reaching the database to fetch attached subnets.
-    pub db_error: Option<String>,
-    /// Details about attached subnets sent to Dendrite instances.
-    pub dendrite: HashMap<SwitchSlot, DendriteSubnetDetails>,
-    /// Details about attached subnets sent to sleds.
-    pub sled: HashMap<SledUuid, SledSubnetDetails>,
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum AttachedSubnetManagerStatus {
+    /// An error occurred while querying the database to fetch attached subnets,
+    /// so nothing was sent to Dendrite or Sled Agents.
+    DatabaseError {
+        /// The error that occurred.
+        error: String,
+    },
+    /// Querying the database the fetch attached subnets succeeded, and the task
+    /// then attempted to make requests to Dendrite and Sled Agents.
+    Listed {
+        /// Details about attached subnets sent to Dendrite instances, or an
+        /// error if dpd clients could not be looked up.
+        ///
+        /// Even in the `Ok` case, there could be errors; see
+        /// [`DendriteSubnetDetails::errors`].
+        #[serde(with = "omicron_common::snake_case_result")]
+        dendrite: Result<HashMap<SwitchSlot, DendriteSubnetDetails>, String>,
+        /// Details about attached subnets sent to sleds.
+        sled: HashMap<SledUuid, SledSubnetDetails>,
+    },
 }
 
 /// Details about attached subnets sent to a single Dendrite instance.
@@ -1540,6 +1654,20 @@ pub struct AuditLogCleanupStatus {
     pub cutoff: DateTime<Utc>,
     /// Configured max rows to delete in this activation.
     pub max_deleted_per_activation: u32,
+    /// Error encountered during this activation, if any.
+    pub error: Option<String>,
+}
+
+/// The status of a `vmm_mark_stop_for_update` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct VmmMarkStopForUpdateStatus {
+    /// Number of VMMs that were marked as needing to be stopped for update in
+    /// this activation.
+    pub vmms_marked: usize,
+    /// The number of batches that marked at least one VMM in this activation.
+    pub batches: usize,
+    /// The maximum number of VMMs marked per batch.
+    pub batch_size: u32,
     /// Error encountered during this activation, if any.
     pub error: Option<String>,
 }

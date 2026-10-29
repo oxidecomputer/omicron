@@ -18,6 +18,11 @@ use gateway_types::rot::RotState;
 use iddqd::id_ord_map;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::InternalDnsGenerationStatus;
+use nexus_types::inventory::Psu;
+use nexus_types::inventory::PsuIdentity;
+use nexus_types::inventory::PsuSlot;
+use nexus_types::inventory::PsuState;
+use nexus_types::inventory::PsuStatus;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::SpType;
@@ -30,6 +35,7 @@ use omicron_common::disk::DatasetName;
 use omicron_generation_kinds::{GenericGeneration, SledConfigGeneration};
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_resolvable_files_examples::BOOT_PATHS;
@@ -54,6 +60,7 @@ use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
 use sled_agent_types::inventory::FmdInventory;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
+use sled_agent_types::inventory::InstanceManagerStatus;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
@@ -87,6 +94,7 @@ use sled_agent_types::resolvable_files::ZoneManifestStatus;
 use sled_agent_types_versions::v4::inventory::OmicronZonesConfig as OmicronZonesConfigV4;
 use sled_agent_types_versions::v10::inventory::OmicronZonesConfig as OmicronZonesConfigV10;
 use sled_agent_types_versions::v11::inventory::OmicronZonesConfig as OmicronZonesConfigV11;
+use sled_agent_types_versions::v51::inventory::OmicronZonesConfig as OmicronZonesConfigV51;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -94,6 +102,15 @@ use std::time::Duration;
 use strum::IntoEnumIterator;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
+
+/// The rack ID used for example and test data.
+///
+/// This is also the rack ID used by the test database setup in
+/// `nexus-db-queries` and `nexus-test-utils`, so test inventory collections
+/// built from these examples will refer to the same rack as the rest of the
+/// test environment.
+pub const RACK_UUID: RackUuid =
+    RackUuid::from_u128(0xc19a698f_c6f9_4a17_ae30_20d711b8f7dc);
 
 /// Returns an example Collection used for testing
 ///
@@ -114,6 +131,7 @@ pub fn representative() -> Representative {
     let sled1_bb = builder
         .found_sp_state(
             "fake MGS 1",
+            RACK_UUID,
             SpType::Sled,
             3,
             SpState {
@@ -139,6 +157,7 @@ pub fn representative() -> Representative {
     let sled2_bb = builder
         .found_sp_state(
             "fake MGS 2",
+            RACK_UUID,
             SpType::Sled,
             4,
             SpState {
@@ -166,6 +185,7 @@ pub fn representative() -> Representative {
     let switch1_bb = builder
         .found_sp_state(
             "fake MGS 2",
+            RACK_UUID,
             SpType::Switch,
             0,
             SpState {
@@ -193,6 +213,7 @@ pub fn representative() -> Representative {
     let psc_bb = builder
         .found_sp_state(
             "fake MGS 1",
+            RACK_UUID,
             SpType::Power,
             1,
             SpState {
@@ -214,10 +235,39 @@ pub fn representative() -> Representative {
         )
         .unwrap();
 
+    let psu_device = ExamplePsuKind::Mwocp68;
+    let mut psus = power_shelf_psus(
+        "fake MGS 1",
+        psu_device,
+        [
+            Some(Ok("LL2111Q9002T")),
+            Some(Ok("LL2111Q9003T")),
+            Some(Ok("LL2111Q9013T")),
+            Some(Err("fake VPD read error")),
+            Some(Ok("LL2115Q1001T")),
+            None,
+        ],
+    );
+    // Simulate a PSU whose VPD was read successfully, but whose `MFR_REVISION`
+    // is not in the expected format, so its firmware revisions could not be
+    // parsed.
+    psus[2].state = Some(PsuState {
+        status: PsuStatus::Present,
+        identity: Ok(psu_identity_with_revision(
+            psu_device,
+            "LL2111Q9013T",
+            "0762-0701",
+        )),
+    });
+    for psu in psus {
+        builder.found_psu(&psc_bb, 1, psu).unwrap();
+    }
+
     // a sled with no RoT state or other optional fields
     let sled3_bb = builder
         .found_sp_state(
             "fake MGS 1",
+            RACK_UUID,
             SpType::Sled,
             5,
             SpState {
@@ -401,6 +451,7 @@ pub fn representative() -> Representative {
         let as_v4: OmicronZonesConfigV4 = serde_json::from_str(data).unwrap();
         OmicronZonesConfigV10::try_from(as_v4)
             .and_then(OmicronZonesConfigV11::try_from)
+            .map(OmicronZonesConfigV51::from)
             .map(OmicronZonesConfig::from)
     };
     let sled14 = extract_current_omicron_zones_config(sled14_data).unwrap();
@@ -818,6 +869,121 @@ pub fn rot_page(unique: &str) -> RotPage {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum ExamplePsuKind {
+    Mwocp68,
+    Mwocp67,
+}
+
+impl ExamplePsuKind {
+    pub fn hubris_device_type(&self) -> String {
+        match self {
+            ExamplePsuKind::Mwocp68 => String::from("mwocp68"),
+            ExamplePsuKind::Mwocp67 => String::from("mwocp67"),
+        }
+    }
+}
+
+/// Constructs a realistic-looking PSU identity for a muRata PSU.
+pub fn psu_identity(
+    kind: ExamplePsuKind,
+    serial: impl ToString,
+) -> PsuIdentity {
+    psu_identity_with_revision(kind, serial, "0762-0701-0000")
+}
+
+/// Constructs a realistic-looking PSU identity for a muRata PSU, with the given
+/// `MFR_REVISION` value.
+pub fn psu_identity_with_revision(
+    kind: ExamplePsuKind,
+    serial: impl ToString,
+    mfr_revision: impl ToString,
+) -> PsuIdentity {
+    let mfr_model = match kind {
+        ExamplePsuKind::Mwocp68 => String::from("MWOCP68-3600-D-RM"),
+        ExamplePsuKind::Mwocp67 => String::from("MWOCP67-5500-B-RM"),
+    };
+    let mfr_serial = serial.to_string();
+    // muRata's date fields are 4 digits, which also appear in the serial
+    // number; if the caller provided a serial number that looks like a real
+    // one, extract the date from that. otherwise, make something up i guess...
+    let mfr_date = mfr_serial
+        .get(2..6)
+        .filter(|date| date.chars().all(|c| c.is_numeric()))
+        .unwrap_or("2111")
+        .to_string();
+    PsuIdentity {
+        mfr_id: String::from("Murata-PS"),
+        mfr_model,
+        mfr_revision: mfr_revision.to_string(),
+        mfr_location: String::from("China"),
+        mfr_date,
+        mfr_serial,
+    }
+}
+
+/// Constructs an entry for a present PSU, with the given source, PSU slot, and
+/// serial number. If `serial` is `Ok`, a valid PSU VPD identity is simulated;
+/// if it is `Err`, a VPD read error with the given message is simulated,
+/// instead.
+pub fn psu(
+    source: impl ToString,
+    slot: PsuSlot,
+    kind: ExamplePsuKind,
+    serial: Result<impl ToString, impl ToString>,
+) -> Psu {
+    let identity = serial
+        .map(|serial| psu_identity(kind, serial))
+        .map_err(|e| e.to_string());
+    Psu {
+        source: source.to_string(),
+        slot,
+        hubris_device_type: kind.hubris_device_type(),
+        time_collected: now_db_precision(),
+        state: Some(PsuState { status: PsuStatus::Present, identity }),
+    }
+}
+
+/// Constructs an entry for a PSU slot that contains no PSU.
+pub fn psu_missing(
+    source: impl ToString,
+    slot: PsuSlot,
+    kind: ExamplePsuKind,
+) -> Psu {
+    Psu {
+        source: source.to_string(),
+        slot,
+        hubris_device_type: kind.hubris_device_type(),
+        time_collected: now_db_precision(),
+        state: None,
+    }
+}
+
+/// Constructs the PSUs reported by a PSC in a single inventory of its power
+/// shelf.
+///
+/// The PSC always reports all six PSU slots, even if some are empty, so this
+/// takes one entry per slot, in order from `PSU0` to `PSU5`. If the entry for a
+/// given slot is `None`, the returned array contains a [`Psu`] representing a
+/// slot where no PSU is present. If the entry is `Some`, then the provided
+/// `Result` represents the result of reading the PSU's VPD identity. `Ok` with
+/// a string represents the serial number of a successful VPD read, while `Err`
+/// represents a simulated error reading the VPD from a PSU.
+pub fn power_shelf_psus(
+    source: &str,
+    kind: ExamplePsuKind,
+    psus: [Option<Result<&str, &str>>; 6],
+) -> [Psu; 6] {
+    let mut slots = PsuSlot::ALL.iter().copied();
+    psus.map(|serial| {
+        let slot = slots.next().expect("PsuSlot::ALL has 6 entries");
+        match serial {
+            Some(serial) => psu(source, slot, kind, serial),
+            None => psu_missing(source, slot, kind),
+        }
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OmicronFileSourceResolverExampleKind {
     /// Success, with or without treating the manifest as deserialized and the
@@ -1137,6 +1303,7 @@ pub fn sled_agent(
         sled_role,
         sled_agent_address: "[::1]:56792".parse().unwrap(),
         sled_id,
+        rack_id: RACK_UUID,
         usable_hardware_threads: 10,
         usable_physical_ram: ByteCount::from(1024 * 1024),
         cpu_family: SledCpuFamily::AmdMilan,
@@ -1146,6 +1313,7 @@ pub fn sled_agent(
         ledgered_sled_config,
         reconciler_status,
         last_reconciliation,
+        instance_manager_status: InstanceManagerStatus::available(3),
         file_source_resolver,
         smf_services_enabled_not_online,
         reference_measurements,

@@ -14,6 +14,7 @@ use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClient;
 use crate::profile::*;
 use crate::zone_bundle::ZoneBundler;
+use omicron_common::http_client::internal_http_client_builder;
 
 use chrono::Utc;
 use iddqd::IdOrdMap;
@@ -26,8 +27,9 @@ use illumos_utils::opte::{
 };
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
-use illumos_utils::zpool::ZpoolOrRamdisk;
-use omicron_common::api::internal::shared::{DelegatedZvol, SledIdentifiers};
+use omicron_common::api::internal::shared::{
+    DelegatedZvol, DhcpConfig, SledIdentifiers,
+};
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
 use omicron_common::zpool_name::ZpoolName;
@@ -41,6 +43,7 @@ use propolis_client::instance_spec::{Component, SpecKey};
 use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
+use sled_agent_config_reconciler::CurrentlyManagedZpoolsReceiver;
 use sled_agent_resolvable_files::ramdisk_file_source;
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::instance::*;
@@ -54,7 +57,9 @@ use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{SetOnce, mpsc, oneshot};
+use tokio::task::JoinHandle;
+use tokio_util::task::AbortOnDropHandle;
 use uuid::Uuid;
 
 // The depth of the request queue for the instance.
@@ -211,20 +216,14 @@ struct RunningState {
     client: Arc<PropolisClient>,
     // Handle to the zone.
     running_zone: RunningZone,
-}
-
-// Named type for values returned during propolis zone creation
-struct PropolisSetup {
-    client: Arc<PropolisClient>,
-    running_zone: RunningZone,
+    // Handle to the zpool monitor task, so that it is aborted once the zone
+    // no longer exists.
+    _zpool_monitor_handle: AbortOnDropHandle<()>,
 }
 
 // Requests that can be made of instances
 #[derive(strum::Display)]
 enum InstanceRequest {
-    GetFilesystemPool {
-        tx: oneshot::Sender<Result<Option<ZpoolName>, ManagerError>>,
-    },
     CurrentState {
         tx: oneshot::Sender<Result<SledVmmState, ManagerError>>,
     },
@@ -304,9 +303,6 @@ impl InstanceRequest {
         };
 
         match this {
-            Self::GetFilesystemPool { tx } => tx
-                .send(Err(error.into()))
-                .map_err(|_| Error::FailedSendClientClosed),
             Self::CurrentState { tx } => tx
                 .send(Err(error.into()))
                 .map_err(|_| Error::FailedSendClientClosed),
@@ -355,7 +351,7 @@ impl InstanceRequest {
 /// publishing unwanted state updates if Nexus reclaims control of a VMM's
 /// state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum VmmStateOwner {
+enum VmmStateOwner {
     /// The [`InstanceRunner`] that manages the VMM is also responsible for
     /// updating its state.
     Runner,
@@ -363,17 +359,6 @@ pub(crate) enum VmmStateOwner {
     /// Nexus has indicated to this runner that it (Nexus) will drive future
     /// state changes to this VM.
     Nexus,
-}
-
-/// A request to immediately shut down an instance runner and terminate its
-/// Propolis zone.
-struct TerminateRequest {
-    /// A channel to which to send the result of this request.
-    tx: oneshot::Sender<Result<VmmUnregisterResponse, ManagerError>>,
-
-    /// The logical owner of the VMM state once this request is successfully
-    /// processed.
-    new_state_owner: VmmStateOwner,
 }
 
 // A small task which tracks the state of the instance, by constantly querying
@@ -526,12 +511,140 @@ struct InstanceMonitorMessage {
     tx: oneshot::Sender<ControlFlow<()>>,
 }
 
+/// Released in 1984 and starring Arnold Schwarzenegger and Linda Hamilton, _The
+/// Terminator_ is an American science fiction film used to request the forceful
+/// termination of a Propolis zone. This is used by the `ensure_unregistered`
+/// API request, and by the [`zpool_monitor`] task in this module, to signal
+/// that the [`InstanceRunner`] must immediately destroy the Propolis zone and
+/// shut itself down, *without* first sending a request to gracefully stop the
+/// VMM.
+///
+/// The termination signal is separate from the [`InstanceRunner`]'s normal
+/// request channel, because termination must take priority over currently in
+/// progress requests. This ensures the zone can always be torn down even if
+/// Propolis (and in turn, the `InstanceRunner`) have gotten stuck while
+/// handling a currently-in-flight request. This struct consists of two
+/// [`tokio::sync::SetOnce`] channels, one of which communicates the termination
+/// request to the [`InstanceRunner`], and the other of which signals whether
+/// termination has completed. Using [`SetOnce`] ensures that once termination
+/// has been requested, it remains requested forever, and (unlike a `mpsc`
+/// channel!) there is no queue which can fill up and exert backpressure on
+/// callers who all, fundamentally, are really just trying to communicate the
+/// same bit of information: "it's time for you to stop".
+///
+/// Termination is requested by the [`Terminator::request_termination`] method,
+/// which takes a [`VmmStateOwner`] that determines whether the termination
+/// request came from Nexus or is internal to the sled-agent. The
+/// [`VmmStateOwner`] from the *first* request to terminate will determine
+/// whether a subsequent state update will be published to Nexus when the VMM
+/// finishes shutting down.
+///
+/// Termination initiated by a Nexus HTTP request
+/// [`Instance::request_termination`], whose callers receive an
+/// `&Arc<Terminator>` which they may `clone` and await
+/// [`Terminator::terminated`] to await the *completion* of the termination
+/// sequence and receive the final [`SledVmmState`]. Callers which do not need
+/// to await the completion of the termination sequence can simply choose not to
+/// do this. The VMM will terminate regardless of whether or not this future is
+/// awaited.
+pub(crate) struct Terminator {
+    // For logging.
+    instance_id: InstanceUuid,
+    propolis_id: PropolisUuid,
+    /// Set when termination of the VMM is requested.
+    signalled: SetOnce<VmmStateOwner>,
+    /// Set with the final state of the VMM once termination has completed.
+    completed: SetOnce<SledVmmState>,
+}
+
+impl Terminator {
+    fn new(instance_id: InstanceUuid, propolis_id: PropolisUuid) -> Arc<Self> {
+        Arc::new(Terminator {
+            instance_id,
+            propolis_id,
+            signalled: SetOnce::new(),
+            completed: SetOnce::new(),
+        })
+    }
+
+    /// Wait for a request to terminate the VMM, returning the new
+    /// [`VmmStateOwner`].
+    ///
+    /// ## Cancellation Safety
+    ///
+    /// This method is cancel-safe: once termination has been requested, it will
+    /// always return a `VmmStateOwner`, even if a previous
+    /// `termination_requested()` future was dropped. This allows us to
+    /// `select!` over calls to this function in the [`InstanceRunner::run`]
+    /// loop without missing a termination signal.
+    async fn termination_requested(&self) -> VmmStateOwner {
+        *(self.signalled.wait().await)
+    }
+
+    /// Wait for the completion of a request to terminate the VMM, returning the
+    /// final [`SledVmmState`] published.
+    ///
+    /// If the VMM has not yet finished terminating, this function will wait
+    /// until it has. Once the VMM has terminated, any time this function is
+    /// called will return the final [`SledVmmState`].
+    ///
+    /// Awaiting this function is **not** necessary to ensure that the VMM will
+    /// terminate. This function only waits for a signal that fires when the
+    /// Propolis zone has been destroyed, and does *not* actually perform the
+    /// work of shutting down the instance.
+    ///
+    /// ## Cancellation Safety
+    ///
+    /// This method is cancel-safe: once the VMM has completed termination, it
+    /// will always return the final [`SledVmmState`].
+    pub(crate) async fn terminated(self: Arc<Self>) -> SledVmmState {
+        self.completed.wait().await.clone()
+    }
+
+    /// Request that this instance's Propolis be rudely terminated (if it has
+    /// one). This signals to the [`InstanceRunner`] task that the instance
+    /// should transition to the `Failed` state and the Propolis zone should be
+    /// destroyed.
+    ///
+    /// Once this method returns, the termination signal has been sent
+    /// successfully, and the `InstanceRunner` will begin the process of
+    /// terminating the VMM. To await the *completion* of the termination
+    /// sequence, the caller *may* clone and await [`Terminator::terminated()`].
+    /// However, awaiting this future is *not* necessary to signal termination
+    /// and the VMM will be terminated regardless of whether or not
+    /// [`Terminator::terminated()`] is awaited.
+    ///
+    /// The provided [`VmmStateOwner`] determines whether or not the VMM's final
+    /// state is published to Nexus, based on whether termination was requested
+    /// *by* Nexus or triggered internally. The first call to this function
+    /// determines the state owner for the termination request.
+    fn request_termination(
+        &self,
+        log: &Logger,
+        new_state_owner: VmmStateOwner,
+    ) {
+        if self.signalled.set(new_state_owner).is_err() {
+            debug!(
+                log,
+                "Requested instance termination, but the instance is already \
+                 terminating...";
+                "instance_id" => %self.instance_id,
+                "propolis_id" => %self.propolis_id,
+            );
+        } else {
+            info!(
+                log,
+                "Requested instance termination";
+                "instance_id" => %self.instance_id,
+                "propolis_id" => %self.propolis_id,
+                "new_state_owner" => ?new_state_owner,
+            );
+        }
+    }
+}
+
 struct InstanceRunner {
     log: Logger,
-
-    // A signal the InstanceRunner should shut down.
-    // This is currently only activated by the runner itself.
-    should_terminate: bool,
 
     // Request channel on which most instance requests are made.
     rx: mpsc::Receiver<InstanceRequest>,
@@ -583,6 +696,12 @@ struct InstanceRunner {
     // Available datasets for choosing zone roots
     available_datasets_rx: AvailableDatasetsReceiver,
 
+    // The set of zpools currently managed by this sled-agent. We must watch for
+    // changes to the set of currently managed zpools, so that if this VMM's
+    // root filesystem is on a zpool that is removed from the set, we can
+    // terminate the propolis zone.
+    currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
+
     // Used to create propolis zones
     zone_builder_factory: ZoneBuilderFactory,
 
@@ -597,6 +716,9 @@ struct InstanceRunner {
 
     // Subnets attached to this instance.
     attached_subnets: IdOrdMap<AttachedSubnet>,
+
+    // Requests that the VMM terminate and publishes the result.
+    terminator: Arc<Terminator>,
 }
 
 impl InstanceRunner {
@@ -604,13 +726,131 @@ impl InstanceRunner {
     /// terminating the zone.
     const STOP_GRACE_PERIOD: Duration = Duration::from_secs(60 * 10);
 
-    async fn run(
-        mut self,
-        mut terminate_rx: mpsc::Receiver<TerminateRequest>,
-        mut ticket: InstanceTicket,
-    ) {
+    #[expect(clippy::too_many_arguments)]
+    fn new(
+        log: Logger,
+        id: InstanceUuid,
+        propolis_id: PropolisUuid,
+        state: InstanceInitialState,
+        services: InstanceManagerServices,
+        sled_identifiers: SledIdentifiers,
+        metadata: InstanceMetadata,
+        rx: mpsc::Receiver<InstanceRequest>,
+        tx_monitor: mpsc::Sender<InstanceMonitorMessage>,
+        rx_monitor: mpsc::Receiver<InstanceMonitorMessage>,
+    ) -> Result<Self, Error> {
+        let InstanceInitialState {
+            vmm_spec,
+            local_config,
+            vmm_runtime,
+            propolis_addr,
+            migration_id,
+        } = state;
+
+        let InstanceManagerServices {
+            nexus_client,
+            vnic_allocator,
+            port_manager,
+            zone_bundler,
+            zone_builder_factory,
+            metrics_queue,
+            available_datasets_rx,
+            currently_managed_zpools_rx,
+        } = services;
+
+        let InstanceSledLocalConfig {
+            hostname,
+            nics,
+            external_ips,
+            attached_subnets,
+            multicast_groups,
+            firewall_rules,
+            dhcp_config,
+            delegated_zvols,
+            primary_nic_mtu,
+        } = local_config;
+        let DhcpConfig { dns_servers, host_domain, search_domains } =
+            dhcp_config;
+
+        let mut dhcp_config = DhcpCfg {
+            hostname: Some(
+                hostname.as_str().parse().map_err(Error::InvalidHostname)?,
+            ),
+            host_domain: host_domain
+                .map(|domain| domain.parse())
+                .transpose()
+                .map_err(Error::InvalidHostname)?,
+            domain_search_list: search_domains
+                .into_iter()
+                .map(|domain| domain.parse())
+                .collect::<Result<_, _>>()
+                .map_err(Error::InvalidHostname)?,
+            dns4_servers: Vec::new(),
+            dns6_servers: Vec::new(),
+        };
+        for ip in dns_servers {
+            match ip {
+                IpAddr::V4(ip) => dhcp_config.dns4_servers.push(ip.into()),
+                IpAddr::V6(ip) => dhcp_config.dns6_servers.push(ip.into()),
+            }
+        }
+
+        // Construct the termination signal and response channel.
+        let terminator = Terminator::new(id, propolis_id);
+
+        let metadata = propolis_client::instance_spec::InstanceMetadata {
+            project_id: metadata.project_id,
+            silo_id: metadata.silo_id,
+            sled_id: sled_identifiers.sled_id,
+            sled_model: sled_identifiers.model,
+            sled_revision: sled_identifiers.revision,
+            sled_serial: sled_identifiers.serial,
+        };
+
+        Ok(Self {
+            log,
+            rx,
+            tx_monitor,
+            rx_monitor,
+            monitor_handle: None,
+            properties: propolis_client::instance_spec::InstanceProperties {
+                id: id.into_untyped_uuid(),
+                name: hostname.to_string(),
+                description: "Omicron-managed VM".to_string(),
+                metadata,
+            },
+            propolis_spec: vmm_spec,
+            propolis_id,
+            propolis_addr,
+            vnic_allocator,
+            port_manager,
+            requested_nics: nics,
+            external_ips,
+            multicast_groups,
+            firewall_rules,
+            dhcp_config,
+            primary_nic_mtu,
+            state: InstanceStates::new(vmm_runtime, migration_id),
+            running_state: None,
+            nexus_client,
+            available_datasets_rx,
+            zone_builder_factory,
+            zone_bundler,
+            metrics_queue,
+            delegated_zvols,
+            attached_subnets,
+            terminator,
+            currently_managed_zpools_rx,
+        })
+    }
+
+    async fn run(mut self, mut ticket: InstanceTicket) {
         use InstanceRequest::*;
 
+        // Clone the arc around the terminator so that we can await the
+        // termination signal even while running an async function that mutably
+        // borrows `self`, below.
+        let terminator = self.terminator.clone();
         let mut state_owner = VmmStateOwner::Runner;
 
         // Timeout for stopping the instance gracefully.
@@ -631,7 +871,7 @@ impl InstanceRunner {
             }
         }
 
-        while !self.should_terminate {
+        while !self.is_terminating() {
             tokio::select! {
                 biased;
 
@@ -672,11 +912,14 @@ impl InstanceRunner {
 
                 // Requests to terminate the instance take priority over any
                 // other request to the instance.
-                request = terminate_rx.recv() => {
-                    state_owner = self.handle_termination_request(
-                        request,
-                        None
-                    ).await;
+                new_owner = terminator.termination_requested() => {
+                    state_owner = new_owner;
+                    info!(
+                        self.log,
+                        "Received request to terminate instance";
+                        "new_state_owner" => ?new_owner,
+                    );
+                    self.fail_vmm_and_terminate().await;
                     break;
                 }
 
@@ -715,10 +958,6 @@ impl InstanceRunner {
                     // request from the termination  channel.
                     let op = async {
                         match request {
-                            GetFilesystemPool { tx } => {
-                                tx.send(Ok(self.get_filesystem_zpool()))
-                                    .map_err(|_| Error::FailedSendClientClosed)
-                            },
                             CurrentState{ tx } => {
                                 tx.send(Ok(self.current_state()))
                                     .map_err(|_| Error::FailedSendClientClosed)
@@ -798,11 +1037,16 @@ impl InstanceRunner {
                     tokio::select! {
                         biased;
 
-                        request = terminate_rx.recv() => {
-                            state_owner = self.handle_termination_request(
-                                request,
-                                Some(&request_variant),
-                            ).await;
+                        new_owner = terminator.termination_requested() => {
+                            state_owner = new_owner;
+                            info!(
+                                self.log,
+                                "Received request to terminate instance while \
+                                 waiting on an ongoing request";
+                                "request" => %request_variant,
+                                "new_state_owner" => ?new_owner,
+                            );
+                            self.fail_vmm_and_terminate().await;
                             break;
                         }
 
@@ -871,7 +1115,6 @@ impl InstanceRunner {
             // instead of bailing out, since we still need to drain the rest of
             // the queue,
             let _ = match request {
-                GetFilesystemPool { tx } => tx.send(Ok(None)).map_err(|_| ()),
                 CurrentState { tx } => {
                     tx.send(Ok(self.current_state())).map_err(|_| ())
                 }
@@ -912,15 +1155,6 @@ impl InstanceRunner {
                     tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
             };
-        }
-
-        // Anyone else who was trying to ask us to go die will be happy to learn
-        // that we have now done so!
-        while let Some(TerminateRequest { tx, .. }) = terminate_rx.recv().await
-        {
-            let _ = tx.send(Ok(VmmUnregisterResponse {
-                updated_runtime: Some(self.current_state()),
-            }));
         }
     }
 
@@ -1272,39 +1506,35 @@ impl InstanceRunner {
         Ok(())
     }
 
-    /// Given a freshly-created Propolis process, sends an ensure request to
-    /// that Propolis and launches all of the tasks needed to monitor the
-    /// resulting Propolis VM.
-    ///
-    /// # Panics
-    ///
-    /// Panics if this routine is called more than once for a given Instance.
-    async fn install_running_state(
-        &mut self,
-        PropolisSetup { client, running_zone }: PropolisSetup,
-    ) {
+    /// Given a freshly-created Propolis process, this launches the task needed
+    /// to monitor the resulting Propolis VM, and returns a handle to it.
+    fn spawn_instance_state_monitor(
+        &self,
+        state: &RunningState,
+    ) -> JoinHandle<()> {
         // Monitor propolis for state changes in the background.
         //
         // This task exits after its associated Propolis has been terminated
         // (either because the task observed a message from Propolis saying that
         // it exited or because the Propolis server was terminated by other
         // means).
+        let runner_log =
+            self.log.new(o!("instance_runner_task" => "instance_monitor"));
         let runner = InstanceMonitorRunner {
-            zone_name: running_zone.name().to_string(),
-            client: client.clone(),
+            zone_name: state.running_zone.name().to_string(),
+            client: state.client.clone(),
             tx_monitor: self.tx_monitor.clone(),
             zones_api: self.zone_builder_factory.zones_api().clone(),
-            log: self.log.clone(),
+            log: runner_log.clone(),
         };
-        let log = self.log.clone();
         let monitor_handle = tokio::task::spawn(async move {
+            let log = runner_log;
             match runner.run().await {
                 Err(e) => warn!(log, "State monitoring task failed: {}", e),
                 Ok(()) => info!(log, "State monitoring task complete"),
             }
         });
-        self.monitor_handle = Some(monitor_handle);
-        self.running_state = Some(RunningState { client, running_zone });
+        monitor_handle
     }
 
     /// Immediately terminates this instance's Propolis zone and cleans up any
@@ -1312,6 +1542,16 @@ impl InstanceRunner {
     ///
     /// This routine is safe to call even if the instance's zone was never
     /// started. It is also safe to call multiple times on a single instance.
+    ///
+    /// # Notes
+    ///
+    /// This method needs to remain cancel-safe. It's possible for the
+    /// `InstanceRunner` to construct a future that calls this, and then have
+    /// new termination requests cancel it. (See the construction of the `op`
+    /// future in `InstanceRunner::run()`, for example.)
+    ///
+    /// That means this must be resumable from any internal await point, so take
+    /// care when updating this method.
     async fn remove_propolis_zone(&mut self) {
         let zname = propolis_zone_name(&self.propolis_id);
 
@@ -1319,14 +1559,15 @@ impl InstanceRunner {
         //
         // If there is nothing here, then there is no `RunningZone`, and so
         // there's no zone or resources to clean up at all.
-        let mut running_state = if let Some(state) = self.running_state.take() {
-            state
-        } else {
+        //
+        // See note on the method about cancel-safety, but we don't take out of
+        // this option until we're completely finished.
+        let Some(running_state) = self.running_state.as_mut() else {
             debug!(
                 self.log,
-                "Instance::terminate() called with no running state"
+                "InstanceRunner::remove_propolis_zone() called with \
+                no running state"
             );
-
             return;
         };
 
@@ -1366,45 +1607,87 @@ impl InstanceRunner {
 
         // Ensure that no zone exists. This succeeds even if no zone was ever
         // created.
-        // NOTE: we call`Zones::halt_and_remove_logged` directly instead of
-        // `RunningZone::stop` in case we're called between creating the
-        // zone and assigning `running_state`.
+        //
+        // NOTE: we call `Zones::halt_and_remove_logged` directly instead of
+        // `RunningZone::stop()`, because that cannot be retried (see #7881)
+        // on failure.
         warn!(self.log, "Halting and removing zone: {}", zname);
-        let result = tokio::time::timeout(
-            Duration::from_secs(60 * 5),
-            omicron_common::backoff::retry(
-                omicron_common::backoff::retry_policy_local(),
-                || async {
-                    self.zone_builder_factory
-                        .zones_api()
-                        .halt_and_remove_logged(&self.log, &zname)
-                        .await
-                        .map_err(|e| {
-                            if e.is_invalid_state() {
-                                BackoffError::transient(e)
-                            } else {
-                                BackoffError::permanent(e)
-                            }
-                        })
-                },
-            ),
+        omicron_common::backoff::retry_notify_ext(
+            omicron_common::backoff::retry_policy_local(),
+            || async {
+                self.zone_builder_factory
+                    .zones_api()
+                    .halt_and_remove_logged(&self.log, &zname)
+                    .await
+                    .map_err(BackoffError::transient)
+            },
+            |e, count, duration| {
+                const WARN_DURATION: Duration = Duration::from_mins(2);
+                const ERR_DURATION: Duration = Duration::from_mins(5);
+                if duration > ERR_DURATION {
+                    error!(
+                        &self.log,
+                        "failed to stop Propolis zone after more than \
+                        {ERR_DURATION:?}. Retries will continue, but the \
+                        zone could be stuck";
+                        "zone_name" => &zname,
+                        "attempts" => count,
+                        "duration" => ?duration,
+                        "error" => InlineErrorChain::new(&e),
+                    );
+                } else if duration > WARN_DURATION {
+                    warn!(
+                        &self.log,
+                        "failed to stop Propolis zone after more than \
+                        {WARN_DURATION:?}, retrying";
+                        "zone_name" => &zname,
+                        "attempts" => count,
+                        "duration" => ?duration,
+                        "error" => InlineErrorChain::new(&e),
+                    );
+                } else {
+                    debug!(
+                        &self.log,
+                        "failed to stop Propolis zone, retrying";
+                        "zone_name" => &zname,
+                        "attempts" => count,
+                        "duration" => ?duration,
+                        "error" => InlineErrorChain::new(&e),
+                    );
+                }
+            },
         )
-        .await;
-        match result {
-            Ok(Ok(_)) => {}
-            Ok(Err(e)) => panic!("{e}"),
-            Err(_) => {
-                panic!("Zone {zname:?} could not be halted within 5 minutes")
-            }
-        }
+        .await
+        .expect("infinite retry loop stopping Propolis zone");
 
         // See if there are any runtime objects to clean up.
         //
-        // We already removed the zone above but mark it as stopped
-        running_state.running_zone.stop().await.unwrap();
+        // We already removed the zone using the "direct" zones API above. While
+        // that does actually operate on the zone on the host, it doesn't touch
+        // the in-memory state in `running_state`. Calling this again here will
+        // update that to reflect the actual state of the zone. This should only
+        // fail if something like `zoneadm list` also fails, since the zone must
+        // be stopped. But regardless, log an error and continue if it does
+        // fail.
+        if let Err(e) = running_state.running_zone.stop().await {
+            error!(
+                &self.log,
+                "RunningZone::stop() failed after Propolis \
+                zone was already stopped";
+                "zone_name" => &zname,
+                "error" => e,
+            );
+        }
 
         // Remove any OPTE ports from the port manager.
         running_state.running_zone.release_opte_ports();
+
+        // Now that we're done, we can actually take the running state out of
+        // the option.
+        //
+        // NOTE: No more await points after this line. This method needs to
+        // remain cancel-safe.
+        let _ = self.running_state.take();
     }
 
     fn merge_existing_ip_stack_with_request(
@@ -1717,6 +2000,28 @@ impl InstanceRunner {
     }
 }
 
+impl Drop for InstanceRunner {
+    fn drop(&mut self) {
+        // An `InstanceRunner` should really never be dropped without publishing
+        // the instance's final state to any callers waiting for it to
+        // terminate. The only ways this could happen are if the runner task is
+        // forcefully aborted (which we don't do), or if the task panics. The
+        // latter will also never happen in production, since we build with
+        // `panic = "abort"`, so the whole process would just exit if we
+        // panicked. However, if this *did* ever happen, anyone awaiting the
+        // termination-completed signal would hang forever, so defensively, we
+        // shall ensure that the final state is published here if we have not
+        // already published termination completion.
+        if self.terminator.completed.set(self.current_state()).is_ok() {
+            error!(
+                self.log,
+                "InstanceRunner dropped without publishing that the instance \
+                 has terminated!"
+            );
+        }
+    }
+}
+
 fn propolis_error_code(
     log: &slog::Logger,
     error: &PropolisClientError,
@@ -1780,11 +2085,8 @@ pub struct Instance {
     /// loop.
     tx: mpsc::Sender<InstanceRequest>,
 
-    /// Sender for requests to terminate the instance.
-    ///
-    /// These are sent over a separate channel so that they can be prioritized
-    /// over all other requests to the instance.
-    terminate_tx: mpsc::Sender<TerminateRequest>,
+    /// Requests that the instance terminates and awaits termination.
+    terminator: Arc<Terminator>,
 
     /// This is reference-counted so that the `Instance` struct may be cloned.
     #[allow(dead_code)]
@@ -1833,138 +2135,35 @@ impl Instance {
               "migration_id" => ?state.migration_id,
               "state" => ?state);
 
-        let InstanceInitialState {
-            vmm_spec,
-            local_config,
-            vmm_runtime,
-            propolis_addr,
-            migration_id,
-        } = state;
-
-        let InstanceManagerServices {
-            nexus_client,
-            vnic_allocator,
-            port_manager,
-            zone_bundler,
-            zone_builder_factory,
-            metrics_queue,
-            available_datasets_rx,
-        } = services;
-
-        let mut dhcp_config = DhcpCfg {
-            hostname: Some(
-                local_config
-                    .hostname
-                    .as_str()
-                    .parse()
-                    .map_err(Error::InvalidHostname)?,
-            ),
-            host_domain: local_config
-                .dhcp_config
-                .host_domain
-                .map(|domain| domain.parse())
-                .transpose()
-                .map_err(Error::InvalidHostname)?,
-            domain_search_list: local_config
-                .dhcp_config
-                .search_domains
-                .into_iter()
-                .map(|domain| domain.parse())
-                .collect::<Result<_, _>>()
-                .map_err(Error::InvalidHostname)?,
-            dns4_servers: Vec::new(),
-            dns6_servers: Vec::new(),
-        };
-        for ip in local_config.dhcp_config.dns_servers {
-            match ip {
-                IpAddr::V4(ip) => dhcp_config.dns4_servers.push(ip.into()),
-                IpAddr::V6(ip) => dhcp_config.dns6_servers.push(ip.into()),
-            }
-        }
-
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
         let (tx_monitor, rx_monitor) = mpsc::channel(1);
 
-        // Request channel for terminating the instance.
-        //
-        // This is a separate channel from the main request channel (`self.rx`)
-        // because we would like to be able to prioritize requests to terminate, and
-        // handle them even when the instance's main request channel may have filled
-        // up.
-        //
-        // Note also that this is *not* part of the `InstanceRunner` struct,
-        // because it's necessary to split mutable borrows in order to allow
-        // selecting between the actual instance operation (which must mutate
-        // the `InstanceRunner`) and awaiting a termination request.
-        let (terminate_tx, terminate_rx) = mpsc::channel(QUEUE_SIZE);
-
-        let metadata = propolis_client::instance_spec::InstanceMetadata {
-            project_id: metadata.project_id,
-            silo_id: metadata.silo_id,
-            sled_id: sled_identifiers.sled_id,
-            sled_model: sled_identifiers.model,
-            sled_revision: sled_identifiers.revision,
-            sled_serial: sled_identifiers.serial,
-        };
-
-        let runner = InstanceRunner {
-            log: log.new(o!("instance_id" => id.to_string())),
-            should_terminate: false,
+        let runner = InstanceRunner::new(
+            log.new(o!("instance_id" => id.to_string())),
+            id,
+            propolis_id,
+            state,
+            services,
+            sled_identifiers,
+            metadata,
             rx,
             tx_monitor,
             rx_monitor,
-            monitor_handle: None,
-            properties: propolis_client::instance_spec::InstanceProperties {
-                id: id.into_untyped_uuid(),
-                name: local_config.hostname.to_string(),
-                description: "Omicron-managed VM".to_string(),
-                metadata,
-            },
-            propolis_spec: vmm_spec,
-            propolis_id,
-            propolis_addr,
-            vnic_allocator,
-            port_manager,
-            requested_nics: local_config.nics,
-            external_ips: local_config.external_ips,
-            multicast_groups: local_config.multicast_groups,
-            firewall_rules: local_config.firewall_rules,
-            dhcp_config,
-            primary_nic_mtu: local_config.primary_nic_mtu,
-            state: InstanceStates::new(vmm_runtime, migration_id),
-            running_state: None,
-            nexus_client,
-            available_datasets_rx,
-            zone_builder_factory,
-            zone_bundler,
-            metrics_queue,
-            delegated_zvols: local_config.delegated_zvols,
-            attached_subnets: IdOrdMap::new(),
-        };
+        )?;
+        let terminator = runner.terminator.clone();
 
-        let runner_handle = tokio::task::spawn(async move {
-            runner.run(terminate_rx, ticket).await
-        });
+        let runner_handle = tokio::task::spawn(runner.run(ticket));
 
         Ok(Instance {
             id,
             tx,
             runner_handle: Arc::new(runner_handle),
-            terminate_tx,
+            terminator,
         })
     }
 
     pub fn id(&self) -> InstanceUuid {
         self.id
-    }
-
-    pub fn get_filesystem_zpool(
-        &self,
-        tx: oneshot::Sender<Result<Option<ZpoolName>, ManagerError>>,
-    ) -> Result<(), Error> {
-        self.tx
-            .try_send(InstanceRequest::GetFilesystemPool { tx })
-            .or_else(InstanceRequest::fail_try_send)
     }
 
     pub fn current_state(
@@ -1997,26 +2196,22 @@ impl Instance {
             .or_else(InstanceRequest::fail_try_send)
     }
 
-    /// Rudely terminates this instance's Propolis (if it has one) and
-    /// immediately transitions the instance to the Destroyed state.
-    pub fn terminate(
-        &self,
-        tx: oneshot::Sender<Result<VmmUnregisterResponse, ManagerError>>,
-        new_state_owner: VmmStateOwner,
-    ) -> Result<(), Error> {
-        self.terminate_tx
-            .try_send(TerminateRequest { tx, new_state_owner })
-            .or_else(|err| match err {
-                mpsc::error::TrySendError::Closed(TerminateRequest {
-                    tx,
-                    ..
-                }) => tx.send(Err(Error::FailedSendChannelClosed.into())),
-                mpsc::error::TrySendError::Full(TerminateRequest {
-                    tx,
-                    ..
-                }) => tx.send(Err(Error::FailedSendChannelFull.into())),
-            })
-            .map_err(|_| Error::FailedSendClientClosed)
+    /// Request that this instance's Propolis be rudely terminated (if it has
+    /// one), in response to a Nexus HTTP request to terminate the instance.
+    /// This signals to the [`InstanceRunner`] task that the instance should
+    /// transition to the `Failed` state and the Propolis zone should be
+    /// destroyed.
+    ///
+    /// Once this method returns, the termination signal has been sent
+    /// successfully, and the `InstanceRunner` will begin the process of
+    /// terminating the VMM. This method returns the [`Terminator`], which the
+    /// caller *may* clone and await [`Terminator::terminated()`] to wait for
+    /// the termination sequence to complete. However, awaiting this future is
+    /// *not* necessary to signal termination and the VMM will be terminated
+    /// regardless of whether or not [`Terminator::terminated()`] is awaited.
+    pub fn request_termination(&self, log: &Logger) -> &Arc<Terminator> {
+        self.terminator.request_termination(log, VmmStateOwner::Nexus);
+        &self.terminator
     }
 
     pub fn issue_snapshot_request(
@@ -2144,16 +2339,6 @@ impl Instance {
 // TODO: Move this implementation higher. I'm just keeping it here to make the
 // incremental diff smaller.
 impl InstanceRunner {
-    fn get_filesystem_zpool(&self) -> Option<ZpoolName> {
-        let Some(run_state) = &self.running_state else {
-            return None;
-        };
-        match run_state.running_zone.root_zpool() {
-            ZpoolOrRamdisk::Zpool(zpool_name) => Some(*zpool_name),
-            ZpoolOrRamdisk::Ramdisk => None,
-        }
-    }
-
     fn current_state(&self) -> SledVmmState {
         self.state.sled_instance_state()
     }
@@ -2184,18 +2369,24 @@ impl InstanceRunner {
         }
 
         // Otherwise, set up the zone first, then ask Propolis to create the VM.
-        let setup = match self.setup_propolis_zone().await {
-            Ok(setup) => setup,
-            Err(e) => {
-                error!(&self.log, "failed to set up Propolis zone"; InlineErrorChain::new(&e));
-                return Err(e);
-            }
+        //
+        // This moves ownership of the zone into the instance now, before
+        // requesting that Propolis start it. This requires that callers shutdown
+        // the zone explicitly, rather than relying on the drop impl. That's more
+        // clear anyway, but the drop impl also spawns a task to actually shutdown
+        // the zone, and the asynchrony can allow Nexus to think the zone is gone
+        // before it's actually been removed. It could then attempt to create it
+        // again, causing conflicts.
+        if let Err(e) = self.setup_propolis_zone().await {
+            error!(&self.log, "failed to set up Propolis zone"; InlineErrorChain::new(&e));
+            return Err(e);
         };
+        let state = self.running_state.as_ref().unwrap();
 
         if let Err(e) = self
             .send_propolis_instance_ensure(
-                &setup.client,
-                &setup.running_zone,
+                &state.client,
+                &state.running_zone,
                 migration_params,
             )
             .await
@@ -2204,10 +2395,8 @@ impl InstanceRunner {
             return Err(e);
         }
 
-        // Move ownership of the zone into the instance and set up state
-        // monitoring. This prevents the zone from being shut down when this
-        // routine returns.
-        self.install_running_state(setup).await;
+        // Set up the state monitor for the running instance.
+        self.monitor_handle = Some(self.spawn_instance_state_monitor(state));
         Ok(())
     }
 
@@ -2216,16 +2405,17 @@ impl InstanceRunner {
         state: VmmStateRequested,
     ) -> Result<SledVmmState, Error> {
         use propolis_client::types::InstanceStateRequested as PropolisRequest;
+        let already_had_zone = self.running_state.is_some();
         let (propolis_request, next_published) = match state {
             VmmStateRequested::MigrationTarget(migration_params) => {
                 if let Err(e) =
                     self.propolis_ensure(Some(migration_params)).await
                 {
-                    // If the ensure call didn't even install a Propolis zone,
-                    // then VM creation has failed entirely and this VMM should
-                    // just move to Failed so that the corresponding instance
-                    // can be stopped.
-                    if self.running_state.is_none() {
+                    // If we didn't already have a zone, i.e., this call to
+                    // propolis_ensure added one, then VM creation has failed
+                    // entirely and this VMM should be moved to Failed so that
+                    // the corresponding instance can be stopped.
+                    if !already_had_zone {
                         self.fail_vmm_and_terminate().await;
                         return Err(e);
                     }
@@ -2235,11 +2425,11 @@ impl InstanceRunner {
             }
             VmmStateRequested::Running => {
                 if let Err(e) = self.propolis_ensure(None).await {
-                    // As above, if the ensure call didn't even install a
-                    // Propolis zone, then VM creation has failed entirely and
-                    // this VMM should just move to Failed so that the
-                    // corresponding instance can be stopped.
-                    if self.running_state.is_none() {
+                    // As above, if the ensure call installed a new Propolis
+                    // zone, then VM creation has failed entirely and this VMM
+                    // should just move to Failed so that the corresponding
+                    // instance can be stopped.
+                    if !already_had_zone {
                         self.fail_vmm_and_terminate().await;
                         return Err(e);
                     }
@@ -2253,7 +2443,7 @@ impl InstanceRunner {
                 // this case, force the VMM into a terminal Destroyed state,
                 // which is what it would have reached if it *had* existed and
                 // then stopped in an orderly manner.
-                if self.running_state.is_none() {
+                if !already_had_zone {
                     self.state.force_state_to_destroyed();
                     self.terminate().await;
                     (None, None)
@@ -2265,9 +2455,10 @@ impl InstanceRunner {
                 }
             }
             VmmStateRequested::Reboot => {
-                if self.running_state.is_none() {
+                if !already_had_zone {
                     return Err(Error::VmNotRunning(self.propolis_id));
                 }
+
                 (
                     Some(PropolisRequest::Reboot),
                     Some(PublishedVmmState::Rebooting),
@@ -2275,18 +2466,15 @@ impl InstanceRunner {
             }
         };
 
-        // All the arms above should either create a Propolis zone on success or
-        // check that one already exists. Note that the calls that create the
-        // zone also send a VM creation request to the new Propolis process, but
-        // this is trickier to assert without actually calling the Propolis API.
-        assert!(
-            self.running_state.is_some(),
-            "should have an active Propolis zone by now"
-        );
+        // If `propolis_request` is Some leaving the above match group, there
+        // must be a Some `self.running_state`, i.e. if there is a request to
+        // send to the propolis process, there must be a propolis process.
+        // `propolis_state_put` unwraps `self.running_state` and will panic the
+        // sled agent if this is not true.
 
-        // Since there's an active Propolis zone with an extant VM, it's
-        // possible to ask Propolis to drive the VM state machine.
         if let Some(p) = propolis_request {
+            // Since there's an active Propolis zone with an extant VM, it's
+            // possible to ask Propolis to drive the VM state machine.
             if let Err(e) = self.propolis_state_put(p).await {
                 match propolis_error_code(&self.log, &e) {
                     Some(
@@ -2317,34 +2505,88 @@ impl InstanceRunner {
                 }
             }
         }
+
         if let Some(s) = next_published {
             self.state.transition_vmm(s, Utc::now());
         }
+
         Ok(self.state.sled_instance_state())
+    }
+
+    /// Construct OPTE port-creation parameters for a NIC.
+    ///
+    /// External IPs, attached subnets, and other "external" data only apply to
+    /// the primary NIC. Nexus only sends NAT entries to Dendrite for the
+    /// primary, and all updates to things like external IPs are only applied
+    /// there as well.
+    fn port_create_params<'a>(
+        nic: &'a NetworkInterface,
+        external_ips: &'a ExternalIpConfig,
+        firewall_rules: &'a [ResolvedVpcFirewallRule],
+        dhcp_config: &DhcpCfg,
+        attached_subnets: &IdOrdMap<AttachedSubnet>,
+        primary_mtu: Option<u32>,
+    ) -> PortCreateParams<'a> {
+        let (external_ips, attached_subnets, mtu) = if nic.primary {
+            (
+                external_ips,
+                attached_subnets.iter().copied().map(Into::into).collect(),
+                primary_mtu,
+            )
+        } else {
+            (&ExternalIpConfig { v4: None, v6: None }, vec![], None)
+        };
+        PortCreateParams {
+            nic,
+            external_ips,
+            firewall_rules,
+            dhcp_config: dhcp_config.clone(),
+            attached_subnets,
+            mtu,
+        }
     }
 
     /// Sets up the Propolis zone that will host this instance's virtual
     /// machine.
-    async fn setup_propolis_zone(&mut self) -> Result<PropolisSetup, Error> {
+    ///
+    /// # Important
+    ///
+    /// As soon as the zone is booted, this stores the `RunningZone` in `self`.
+    /// That means that the zone will _not_ be torn down if an internal call in
+    /// the function fails after that (e.g., waiting for Propolis's HTTP server
+    /// to start). Callers must destroy the instance themselves, though it will
+    /// be eventually destroyed by the drop impl on `RunningZone` as a
+    /// last-resort.
+    ///
+    /// This applies even if the future is cancelled, e.g., by a concurrent
+    /// request to terminate the instance. In that case, we still need to try to
+    /// destroy the zone through the normal termination path, e.g.,
+    /// `fail_vmm_and_terminate()`, to ensure that we destroy the zone if
+    /// possible.
+    ///
+    /// It's still possible that this future is cancelled _during_ zone boot. In
+    /// that case, we won't store the zone in `self.running_state`, and won't
+    /// really have a way to stop the zone either.
+    ///
+    /// # Panics
+    ///
+    /// This method panics if called more than once on the same instance.
+    async fn setup_propolis_zone(&mut self) -> Result<(), Error> {
         // Create OPTE ports for the instance. We also store the names of all
         // those ports to notify the metrics task to start collecting statistics
         // for them.
         let mut opte_ports = Vec::with_capacity(self.requested_nics.len());
         let mut opte_port_names = Vec::with_capacity(self.requested_nics.len());
         for nic in self.requested_nics.iter() {
-            let port = self.port_manager.create_port(PortCreateParams {
-                nic,
-                external_ips: &self.external_ips,
-                firewall_rules: &self.firewall_rules,
-                dhcp_config: self.dhcp_config.clone(),
-                attached_subnets: self
-                    .attached_subnets
-                    .iter()
-                    .copied()
-                    .map(Into::into)
-                    .collect(),
-                mtu: if nic.primary { self.primary_nic_mtu } else { None },
-            })?;
+            let port =
+                self.port_manager.create_port(Self::port_create_params(
+                    nic,
+                    &self.external_ips,
+                    &self.firewall_rules,
+                    &self.dhcp_config,
+                    &self.attached_subnets,
+                    self.primary_nic_mtu,
+                ))?;
             opte_port_names.push(port.0.name().to_string());
             opte_ports.push(port);
         }
@@ -2372,19 +2614,20 @@ impl InstanceRunner {
         let zname = propolis_zone_name(&self.propolis_id);
         let mut rng = rand::rngs::StdRng::from_os_rng();
 
-        let root = self
+        let zone_root_path = self
             .available_datasets_rx
             .all_mounted_zone_root_datasets()
             .into_iter()
             .choose(&mut rng)
             .ok_or_else(|| Error::U2NotFound)?;
+        let filesystem_zpool = zone_root_path.pool();
 
         let installed_zone = self
             .zone_builder_factory
             .builder()
             .with_log(self.log.clone())
             .with_underlay_vnic_allocator(&self.vnic_allocator)
-            .with_zone_root_path(root)
+            .with_zone_root_path(zone_root_path.into_path())
             .with_file_source(&ramdisk_file_source("propolis-server"))
             .with_zone_type("propolis-server")
             .with_unique_name(OmicronZoneUuid::from_untyped_uuid(
@@ -2433,6 +2676,51 @@ impl InstanceRunner {
         let running_zone = RunningZone::boot(installed_zone).await?;
         info!(self.log, "Started propolis in zone: {}", zname);
 
+        // Build the running zone and client to Propolis now.
+        let reqwest_client = internal_http_client_builder().build().unwrap();
+        let client = Arc::new(PropolisClient::new_with_client(
+            &format!("http://{}", self.propolis_addr),
+            reqwest_client,
+        ));
+
+        // Insert the running state for the zone immediately.
+        //
+        // This ensures that if we fail to actually start the Propolis server or
+        // ensure the instance, we have a zone object to actively attempt to
+        // shutdown, rather than relying on the drop impl.
+        //
+        // Start by spawning a task to monitor for whether the Propolis zone's
+        // zpool has gone away.
+        let zpool_monitor_handle = {
+            let log = self.log.new(o!(
+                "instance_runner_task" => "zpool_monitor",
+                "zpool_name" => filesystem_zpool.to_string(),
+            ));
+            let task = tokio::spawn(zpool_monitor(
+                log,
+                filesystem_zpool,
+                self.currently_managed_zpools_rx.clone(),
+                self.terminator.clone(),
+            ));
+            // Once the running zone is destroyed, the zpool monitor task will
+            // no longer be needed, so ensure that dropping the running zone
+            // aborts it rather than leaking it forever.
+            AbortOnDropHandle::new(task)
+        };
+        let new_state = RunningState {
+            client,
+            running_zone,
+            _zpool_monitor_handle: zpool_monitor_handle,
+        };
+        let old = self.running_state.replace(new_state);
+        assert!(
+            old.is_none(),
+            "InstanceRunner::setup_propolis_zone called multiple times",
+        );
+        let running_state = self.running_state.as_ref().unwrap();
+        let running_zone = &running_state.running_zone;
+        let client = &running_state.client;
+
         // This isn't strictly necessary - we wait for the HTTP server below -
         // but it helps distinguish "online in SMF" from "responding to HTTP
         // requests".
@@ -2460,95 +2748,13 @@ impl InstanceRunner {
             ),
         }
 
-        let reqwest_client = reqwest::ClientBuilder::new().build().unwrap();
-        let client = Arc::new(PropolisClient::new_with_client(
-            &format!("http://{}", self.propolis_addr),
-            reqwest_client,
-        ));
-
         // Although the instance is online, the HTTP server may not be running
         // yet. Wait for it to respond to requests, so users of the instance
         // don't need to worry about initialization races.
         wait_for_http_server(&self.log, &client).await?;
         info!(self.log, "Propolis HTTP server online");
 
-        Ok(PropolisSetup { client, running_zone })
-    }
-
-    /// Handles a request to rudely and immediately terminate a running
-    /// Propolis.
-    async fn handle_termination_request(
-        &mut self,
-        req: Option<TerminateRequest>,
-        current_req: Option<&str>,
-    ) -> VmmStateOwner {
-        match req {
-            Some(TerminateRequest { tx, new_state_owner }) => {
-                if let Some(request) = current_req {
-                    info!(
-                        self.log,
-                        "Received request to terminate instance while waiting \
-                         on an ongoing request";
-                        "request" => %request,
-                    );
-                } else {
-                    info!(
-                        self.log,
-                        "Received request to terminate instance";
-                    );
-                }
-
-                self.fail_vmm_and_terminate().await;
-                let result = tx
-                    .send(Ok(VmmUnregisterResponse {
-                        updated_runtime: Some(self.state.sled_instance_state()),
-                    }))
-                    .map_err(|_| Error::FailedSendClientClosed);
-                if let Err(err) = result {
-                    warn!(
-                        self.log,
-                        "Error handling request to terminate instance";
-                        InlineErrorChain::new(&err),
-                    );
-                }
-
-                new_state_owner
-            }
-            None => {
-                // This path shouldn't be reachable (as of this writing): it
-                // requires the sender side of the runner's `terminate_rx` to be
-                // dropped; this is owned by the runner's corresponding
-                // Instance; the instance is only removed from its
-                // InstanceManager in response to the instance ticket being
-                // dropped; and the instance ticket isn't dropped until the
-                // runner exits, which by definition hasn't happened if the
-                // runner is still selecting on its termination receiver.
-                //
-                // This logic relies on an assumption about non-local code
-                // (specifically that the instance manager has no way to drop an
-                // Instance without its ticket being dropped), so defensively
-                // drive the instance into a terminal state here anyway. (If the
-                // instance manager shutdown sequence wants different behavior
-                // it can send an explicit termination request.)
-                if let Some(request) = current_req {
-                    warn!(
-                        self.log,
-                        "Instance termination request channel closed while \
-                         waiting on an ongoing request; shutting down";
-                        "request" => %request,
-                    );
-                } else {
-                    warn!(
-                        self.log,
-                        "Instance termination request channel closed; \
-                         shutting down";
-                    );
-                }
-
-                self.fail_vmm_and_terminate().await;
-                VmmStateOwner::Runner
-            }
-        }
+        Ok(())
     }
 
     /// Forcibly moves this VMM to the Failed state, then goes through the
@@ -2558,11 +2764,26 @@ impl InstanceRunner {
         self.terminate().await;
     }
 
-    /// Ensures that no Propolis zone exists for this instance runner and sets
-    /// its `should_terminate` flag so that the runner will shut down.
+    /// Ensures that no Propolis zone exists for this instance runner, and
+    /// publishes the VMM's final state to anyone awaiting its termination.
+    /// Calling this will indicate that the runner's main loop should exit.
     async fn terminate(&mut self) {
         self.remove_propolis_zone().await;
-        self.should_terminate = true;
+        // Make sure everyone who was waiting on us to go die knows we have
+        // obliged!
+        if self.terminator.completed.set(self.current_state()).is_err() {
+            warn!(
+                self.log,
+                "Tried to publish VMM state after terminating the instance, \
+                 but it seems to have already terminated?"
+            );
+        }
+    }
+
+    /// Returns `true` if this `InstanceRunner` has destroyed its Propolis zone
+    /// and its run loop should exit.
+    fn is_terminating(&self) -> bool {
+        self.terminator.completed.initialized()
     }
 
     async fn issue_snapshot_request(
@@ -2757,13 +2978,42 @@ impl InstanceRunner {
     }
 }
 
-#[cfg(all(test, target_os = "illumos"))]
+async fn zpool_monitor(
+    log: Logger,
+    zpool_name: ZpoolName,
+    mut currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
+    terminator: Arc<Terminator>,
+) {
+    loop {
+        let current_zpools = currently_managed_zpools_rx.current_and_update();
+
+        // Is the sled-agent still managing the zpool on which this Propolis
+        // zone's root filesystem resides?
+        if !current_zpools.contains(&zpool_name) {
+            info!(
+                log,
+                "Propolis zone's root filesystem zpool is no longer managed, \
+                 terminating it!"
+            );
+            terminator.request_termination(&log, VmmStateOwner::Runner);
+
+            // We do not need to sit around and wait for the termination to
+            // complete once it has been signalled, and can exit immediately.
+            return;
+        }
+
+        if currently_managed_zpools_rx.changed().await.is_err() {
+            warn!(log, "currently-managed zpool receiver closed!");
+            return;
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::fakes::nexus::{FakeNexusServer, ServerContext};
-    use crate::instance_manager::{
-        InstanceManagerJobsStatus, VmmRegistrationDisallowedReason,
-    };
+    use crate::instance_manager::VmmRegistrationDisallowedReason;
     use crate::metrics;
     use crate::nexus::make_nexus_client_with_port;
     use crate::vmm_reservoir::VmmReservoirManagerHandle;
@@ -2773,26 +3023,33 @@ mod tests {
     use internal_dns_resolver::Resolver;
     use omicron_common::FileKv;
     use omicron_common::api::external::Hostname;
-    use omicron_common::api::internal::shared::{DhcpConfig, SledIdentifiers};
+    use omicron_common::api::internal::shared::{
+        DhcpConfig, PrivateIpConfig, SledIdentifiers,
+    };
     use omicron_generation_kinds::Generation;
 
     use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
-    use omicron_uuid_kinds::InternalZpoolUuid;
+    use omicron_uuid_kinds::{ExternalZpoolUuid, InternalZpoolUuid};
     use propolis_client::ClientInfo;
     use propolis_client::types::{
         InstanceMigrateStatusResponse, InstanceStateMonitorResponse,
     };
     use sled_agent_config_reconciler::UpdateDispositionReceiver;
     use sled_agent_config_reconciler::{
-        CurrentUpdateDisposition, CurrentlyManagedZpoolsReceiver,
-        InternalDiskDetails, InternalDisksReceiver,
+        CurrentlyManagedZpoolsReceiver, InternalDiskDetails,
+        InternalDisksReceiver,
     };
+    use sled_agent_types::attached_subnet::AttachedSubnetKind;
     use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::instance::ExternalIpv4Config;
     use sled_agent_types::instance::ExternalIpv6Config;
     use sled_agent_types::instance::InstanceEnsureBody;
+    use sled_agent_types::inventory::InstanceManagerStatus;
     use sled_agent_types::inventory::OmicronSledUpdateDisposition;
     use sled_agent_types::inventory::SourceNatConfigV6;
+    use sled_agent_types::inventory::{
+        CurrentUpdateDisposition, NetworkInterfaceKind,
+    };
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_agent_types_versions::v1;
     use sled_storage::config::MountConfig;
@@ -2939,7 +3196,7 @@ mod tests {
         log: &Logger,
         propolis_addr: SocketAddr,
         nexus_client: NexusClient,
-        available_datasets_rx: AvailableDatasetsReceiver,
+        zones: Arc<illumos_utils::fakes::zone::Zones>,
         temp_dir: &str,
     ) -> (Instance, MetricsRx) {
         let id = InstanceUuid::new_v4();
@@ -2949,13 +3206,9 @@ mod tests {
 
         let initial_state = fake_instance_initial_state(propolis_addr);
 
-        let (services, rx) = fake_instance_manager_services(
-            log,
-            available_datasets_rx,
-            nexus_client,
-            temp_dir,
-        )
-        .await;
+        let (services, rx) =
+            fake_instance_manager_services(log, nexus_client, zones, temp_dir)
+                .await;
 
         let metadata = InstanceMetadata {
             silo_id: Uuid::new_v4(),
@@ -3021,7 +3274,7 @@ mod tests {
                 search_domains: vec![],
             },
             delegated_zvols: vec![],
-            attached_subnets: vec![],
+            attached_subnets: IdOrdMap::new(),
             primary_nic_mtu: None,
         };
 
@@ -3089,8 +3342,8 @@ mod tests {
 
     async fn fake_instance_manager_services(
         log: &Logger,
-        available_datasets_rx: AvailableDatasetsReceiver,
         nexus_client: NexusClient,
+        zones: Arc<illumos_utils::fakes::zone::Zones>,
         temp_dir: &str,
     ) -> (InstanceManagerServices, MetricsRx) {
         let vnic_allocator = VnicAllocator::new(
@@ -3103,6 +3356,9 @@ mod tests {
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
         );
 
+        let fake_zpool = ZpoolName::External(ExternalZpoolUuid::new_v4());
+        let available_datasets_rx =
+            AvailableDatasetsReceiver::fake_in_tempdir_for_tests(fake_zpool);
         let cleanup_context = CleanupContext::default();
         let zone_bundler = ZoneBundler::new(
             log.new(o!("component" => "ZoneBundler")),
@@ -3135,9 +3391,13 @@ mod tests {
             zone_bundler,
             zone_builder_factory: ZoneBuilderFactory::fake(
                 Some(temp_dir),
-                illumos_utils::fakes::zone::Zones::new(),
+                zones,
             ),
             metrics_queue,
+            currently_managed_zpools_rx:
+                CurrentlyManagedZpoolsReceiver::fake_static(std::iter::once(
+                    fake_zpool,
+                )),
         };
         (services, rx)
     }
@@ -3171,10 +3431,8 @@ mod tests {
             let temp_guard = Utf8TempDir::new().unwrap();
             let (services, metrics_rx) = fake_instance_manager_services(
                 log,
-                AvailableDatasetsReceiver::fake_in_tempdir_for_tests(
-                    ZpoolOrRamdisk::Ramdisk,
-                ),
                 nexus.nexus_client.clone(),
+                illumos_utils::fakes::zone::Zones::new(),
                 temp_guard.path().as_str(),
             )
             .await;
@@ -3187,6 +3445,7 @@ mod tests {
                 zone_bundler,
                 zone_builder_factory,
                 metrics_queue,
+                currently_managed_zpools_rx,
             } = services;
 
             let vmm_reservoir_manager =
@@ -3197,9 +3456,7 @@ mod tests {
                     nexus_client,
                     vnic_allocator,
                     port_manager,
-                    CurrentlyManagedZpoolsReceiver::fake_static(
-                        std::iter::empty(),
-                    ),
+                    currently_managed_zpools_rx,
                     available_datasets_rx,
                     zone_bundler,
                     zone_builder_factory,
@@ -3243,9 +3500,7 @@ mod tests {
                 &log,
                 propolis_addr,
                 nexus_client,
-                AvailableDatasetsReceiver::fake_in_tempdir_for_tests(
-                    ZpoolOrRamdisk::Ramdisk,
-                ),
+                illumos_utils::fakes::zone::Zones::new(),
                 temp_guard.path().as_str(),
             ),
         )
@@ -3350,9 +3605,7 @@ mod tests {
                         0,
                     )),
                     nexus_client,
-                    AvailableDatasetsReceiver::fake_in_tempdir_for_tests(
-                        ZpoolOrRamdisk::Ramdisk,
-                    ),
+                    illumos_utils::fakes::zone::Zones::new(),
                     temp_guard.path().as_str(),
                 ),
             )
@@ -3594,15 +3847,15 @@ mod tests {
             .await
     }
 
-    /// Wait (with a timeout) until the `InstanceManager`'s jobs status
-    /// satisfies `pred`.
-    async fn wait_for_jobs_status(
+    /// Wait (with a timeout) until the `InstanceManager`'s status satisfies
+    /// `pred`.
+    async fn wait_for_status(
         instance_manager: &crate::instance_manager::InstanceManager,
-        pred: fn(&InstanceManagerJobsStatus) -> bool,
+        pred: fn(&InstanceManagerStatus) -> bool,
     ) {
         wait_for_condition(
             || async {
-                let status = instance_manager.jobs_status();
+                let status = instance_manager.status();
                 if pred(&status) {
                     Ok(())
                 } else {
@@ -3649,7 +3902,7 @@ mod tests {
             )
         );
 
-        let status = test_objects.instance_manager.jobs_status();
+        let status = test_objects.instance_manager.status();
         assert_eq!(status.num_registered_vmms, 0);
         assert_eq!(
             status.update_disposition,
@@ -3698,7 +3951,7 @@ mod tests {
         disposition_tx.set(CurrentUpdateDisposition::Known(
             OmicronSledUpdateDisposition::Available,
         ));
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.update_disposition
                 == CurrentUpdateDisposition::Known(
                     OmicronSledUpdateDisposition::Available,
@@ -3709,7 +3962,7 @@ mod tests {
         try_ensure_registered(&test_objects, propolis_id, instance_id)
             .await
             .expect("registration should succeed once the sled is available");
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.num_registered_vmms == 1
         })
         .await;
@@ -3739,7 +3992,7 @@ mod tests {
         try_ensure_registered(&test_objects, propolis_id_a, instance_id_a)
             .await
             .expect("registration should succeed while available");
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.num_registered_vmms == 1
         })
         .await;
@@ -3747,7 +4000,7 @@ mod tests {
         disposition_tx.set(CurrentUpdateDisposition::Known(
             OmicronSledUpdateDisposition::Evacuating,
         ));
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.update_disposition
                 == CurrentUpdateDisposition::Known(
                     OmicronSledUpdateDisposition::Evacuating,
@@ -3761,7 +4014,7 @@ mod tests {
             .await
             .expect("re-registration should succeed while evacuating");
         assert_eq!(
-            test_objects.instance_manager.jobs_status().num_registered_vmms,
+            test_objects.instance_manager.status().num_registered_vmms,
             1
         );
 
@@ -3781,7 +4034,7 @@ mod tests {
             )
         );
         assert_eq!(
-            test_objects.instance_manager.jobs_status().num_registered_vmms,
+            test_objects.instance_manager.status().num_registered_vmms,
             1
         );
 
@@ -3789,7 +4042,7 @@ mod tests {
         disposition_tx.set(CurrentUpdateDisposition::Known(
             OmicronSledUpdateDisposition::Available,
         ));
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.update_disposition
                 == CurrentUpdateDisposition::Known(
                     OmicronSledUpdateDisposition::Available,
@@ -3799,7 +4052,7 @@ mod tests {
         try_ensure_registered(&test_objects, propolis_id_b, instance_id_b)
             .await
             .expect("registration should succeed once available again");
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.num_registered_vmms == 2
         })
         .await;
@@ -3821,7 +4074,7 @@ mod tests {
         try_ensure_registered(&test_objects, propolis_id_a, instance_id_a)
             .await
             .expect("registration A should succeed");
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.num_registered_vmms == 1
         })
         .await;
@@ -3834,7 +4087,7 @@ mod tests {
         )
         .await
         .expect("registration B should succeed");
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.num_registered_vmms == 2
         })
         .await;
@@ -3844,7 +4097,7 @@ mod tests {
             .await
             .expect("re-registration A should succeed");
         assert_eq!(
-            test_objects.instance_manager.jobs_status().num_registered_vmms,
+            test_objects.instance_manager.status().num_registered_vmms,
             2
         );
 
@@ -3853,7 +4106,7 @@ mod tests {
             .ensure_unregistered(propolis_id_a)
             .await
             .expect("unregistration A should succeed");
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.num_registered_vmms == 1
         })
         .await;
@@ -3863,7 +4116,7 @@ mod tests {
             .ensure_unregistered(propolis_id_b)
             .await
             .expect("unregistration B should succeed");
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.num_registered_vmms == 0
         })
         .await;
@@ -3871,99 +4124,80 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    impl InstanceRunner {
-        fn new_for_test(
-            log: &slog::Logger,
-            propolis_id: PropolisUuid,
-            initial_state: InstanceInitialState,
-            services: InstanceManagerServices,
-            cmd_rx: mpsc::Receiver<InstanceRequest>,
-            monitor_tx: mpsc::Sender<InstanceMonitorMessage>,
-            monitor_rx: mpsc::Receiver<InstanceMonitorMessage>,
-        ) -> Self {
-            let metadata = InstanceMetadata {
-                silo_id: Uuid::new_v4(),
-                project_id: Uuid::new_v4(),
-            };
-            let sled_identifiers = SledIdentifiers {
-                rack_id: Uuid::new_v4(),
-                sled_id: Uuid::new_v4(),
-                model: "fake-model".into(),
-                revision: 1,
-                serial: "fake-serial".into(),
-            };
+    /// Concurrent unregistrations of the same VMM must all complete
+    /// successfully, and must not hang forever.
+    #[tokio::test]
+    async fn test_instance_manager_concurrent_unregister() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_instance_manager_concurrent_unregister",
+        );
+        let log = logctx.log.new(o!(FileKv));
 
-            let metadata = propolis_client::instance_spec::InstanceMetadata {
-                project_id: metadata.project_id,
-                silo_id: metadata.silo_id,
-                sled_id: sled_identifiers.sled_id,
-                sled_model: sled_identifiers.model,
-                sled_revision: sled_identifiers.revision,
-                sled_serial: sled_identifiers.serial,
-            };
+        let test_objects = InstanceTestObjects::new(&log).await;
 
-            let InstanceInitialState {
-                vmm_spec,
-                local_config,
-                vmm_runtime,
-                propolis_addr,
-                migration_id,
-            } = initial_state;
+        let propolis_id = PropolisUuid::new_v4();
+        try_ensure_registered(
+            &test_objects,
+            propolis_id,
+            InstanceUuid::new_v4(),
+        )
+        .await
+        .expect("registration should succeed");
+        wait_for_status(&test_objects.instance_manager, |status| {
+            status.num_registered_vmms == 1
+        })
+        .await;
 
-            let InstanceManagerServices {
-                nexus_client,
-                vnic_allocator,
-                port_manager,
-                available_datasets_rx,
-                zone_bundler,
-                zone_builder_factory,
-                metrics_queue,
-            } = services;
+        let manager = &test_objects.instance_manager;
+        let (rsp1, rsp2) = tokio::time::timeout(TIMEOUT_DURATION, async {
+            tokio::join!(
+                manager.ensure_unregistered(propolis_id),
+                manager.ensure_unregistered(propolis_id),
+            )
+        })
+        .await
+        .expect("concurrent ensure_unregistered requests must all complete");
 
-            let dhcp_config = DhcpCfg::default();
+        let states = [rsp1, rsp2].map(|rsp| {
+            rsp.expect("both ensure_unregistered requests should succeed")
+                .updated_runtime
+                .map(|state| state.vmm_state.state)
+        });
 
-            Self {
-                log: log.new(o!("component" => "TestInstanceRunner")),
-                should_terminate: false,
-                rx: cmd_rx,
-                tx_monitor: monitor_tx,
-                rx_monitor: monitor_rx,
-                monitor_handle: None,
-                properties:
-                    propolis_client::instance_spec::InstanceProperties {
-                        id: propolis_id.into_untyped_uuid(),
-                        name: "test instance".to_string(),
-                        description: "test instance".to_string(),
-                        metadata,
-                    },
-                propolis_spec: vmm_spec,
-                propolis_id,
-                propolis_addr,
-                vnic_allocator,
-                port_manager,
-                requested_nics: local_config.nics,
-                external_ips: local_config.external_ips,
-                multicast_groups: local_config.multicast_groups,
-                firewall_rules: local_config.firewall_rules,
-                dhcp_config,
-                primary_nic_mtu: local_config.primary_nic_mtu,
-                state: InstanceStates::new(vmm_runtime, migration_id),
-                running_state: None,
-                nexus_client,
-                available_datasets_rx,
-                zone_builder_factory,
-                zone_bundler,
-                metrics_queue,
-                delegated_zvols: local_config.delegated_zvols,
-                attached_subnets: IdOrdMap::new(),
-            }
+        // Whether or not a final state was received will depend on whether the
+        // `InstanceManager` has received the request to unregister the VMM's
+        // `InstanceTicket` or not. It's fine if *one* of the requests only
+        // arrived after that occurred, but the one that won the race and
+        // actually resulted in the VMM's termination should get to see its
+        // terminal state.
+        assert!(
+            states.iter().any(Option::is_some),
+            "at least one ensure_unregistered request must receive the VMM's \
+             terminal state: {states:?}"
+        );
+        for state in states.iter().flatten() {
+            assert_eq!(*state, VmmState::Failed, "states: {states:?}");
         }
+
+        wait_for_status(&test_objects.instance_manager, |status| {
+            status.num_registered_vmms == 0
+        })
+        .await;
+
+        // Once the VMM is gone, unregistering it again is a no-op.
+        let rsp = manager
+            .ensure_unregistered(propolis_id)
+            .await
+            .expect("unregistering an absent VMM should succeed");
+        assert!(rsp.updated_runtime.is_none());
+
+        logctx.cleanup_successful();
     }
 
     struct TestInstanceRunner {
         runner_task: tokio::task::JoinHandle<()>,
         state_rx: tokio::sync::watch::Receiver<ReceivedInstanceState>,
-        terminate_tx: mpsc::Sender<TerminateRequest>,
+        terminator: Arc<Terminator>,
         monitor_tx: mpsc::Sender<InstanceMonitorMessage>,
         cmd_tx: mpsc::Sender<InstanceRequest>,
         remove_rx: mpsc::UnboundedReceiver<
@@ -3989,14 +4223,13 @@ mod tests {
             let temp_guard = Utf8TempDir::new().unwrap();
             let (services, _metrics_rx) = fake_instance_manager_services(
                 &log,
-                AvailableDatasetsReceiver::fake_in_tempdir_for_tests(
-                    ZpoolOrRamdisk::Ramdisk,
-                ),
                 nexus_client,
+                illumos_utils::fakes::zone::Zones::new(),
                 temp_guard.path().as_str(),
             )
             .await;
             let propolis_id = PropolisUuid::new_v4();
+            let instance_id = InstanceUuid::new_v4();
             let propolis_addr = SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::new(127, 0, 0, 1),
                 12400,
@@ -4004,30 +4237,48 @@ mod tests {
 
             let initial_state = fake_instance_initial_state(propolis_addr);
 
-            let (terminate_tx, terminate_rx) = mpsc::channel(1);
             let (monitor_tx, monitor_rx) = mpsc::channel(1);
             let (cmd_tx, cmd_rx) = mpsc::channel(QUEUE_SIZE);
             let (remove_tx, remove_rx) = mpsc::unbounded_channel();
             let ticket = InstanceTicket::new(propolis_id, remove_tx);
 
-            let runner = InstanceRunner::new_for_test(
-                &log.new(o!("component" => "InstanceRunner")),
+            let metadata = InstanceMetadata {
+                silo_id: Uuid::new_v4(),
+                project_id: Uuid::new_v4(),
+            };
+            let sled_identifiers = SledIdentifiers {
+                rack_id: Uuid::new_v4(),
+                sled_id: Uuid::new_v4(),
+                model: "fake-model".into(),
+                revision: 1,
+                serial: "fake-serial".into(),
+            };
+            let runner_log = log.new(o!(
+                "component" => "TestInstanceRunner",
+                "instance_id" => instance_id.to_string(),
+                "propolis_id" => propolis_id.to_string(),
+            ));
+            let runner = InstanceRunner::new(
+                runner_log,
+                instance_id,
                 propolis_id,
                 initial_state,
                 services,
+                sled_identifiers,
+                metadata,
                 cmd_rx,
                 monitor_tx.clone(),
                 monitor_rx,
-            );
+            )
+            .expect("constructed instance runner");
+            let terminator = runner.terminator.clone();
 
-            let runner_task = tokio::spawn(async move {
-                runner.run(terminate_rx, ticket).await;
-            });
+            let runner_task = tokio::spawn(runner.run(ticket));
 
             Self {
                 runner_task,
                 state_rx,
-                terminate_tx,
+                terminator,
                 monitor_tx,
                 cmd_tx,
                 remove_rx,
@@ -4047,7 +4298,7 @@ mod tests {
         let TestInstanceRunner {
             runner_task,
             state_rx,
-            terminate_tx,
+            terminator: _terminator,
             monitor_tx,
             cmd_tx,
             mut remove_rx,
@@ -4100,10 +4351,9 @@ mod tests {
         assert_eq!(state.vmm_state.state, VmmState::Destroyed);
 
         // Make sure the runner actually runs to completion once its command
-        // channels are dropped. (This simulates what happens when the "real"
+        // channel is dropped. (This simulates what happens when the "real"
         // instance manager is asked to remove a record from its VMM table.)
         drop(cmd_tx);
-        drop(terminate_tx);
         let _ = runner_task.await;
 
         logctx.cleanup_successful();
@@ -4119,7 +4369,7 @@ mod tests {
         let TestInstanceRunner {
             runner_task: _rt,
             state_rx,
-            terminate_tx: _tt,
+            terminator: _terminator,
             monitor_tx,
             cmd_tx: _ct,
             mut remove_rx,
@@ -4147,6 +4397,463 @@ mod tests {
         };
 
         assert_eq!(state.vmm_state.state, VmmState::Failed);
+        logctx.cleanup_successful();
+    }
+
+    // Test that we correctly clean up a running zone if we fail to start an
+    // instance.
+    //
+    // This is a regression test for
+    // https://github.com/oxidecomputer/omicron/issues/7726. It ensures that we
+    // correctly destroy a running zone under the following circumstances:
+    //
+    // - We've created and booted the zone
+    // - We've started Propolis, and the HTTP server is running
+    // - We fail to send an instance ensure request to Propolis.
+    #[tokio::test]
+    async fn test_cleanup_zone_when_failing_to_start_instance() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_cleanup_zone_when_failing_to_start_instance",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        let (propolis_server, propolis_client) = propolis_mock_server(&log);
+        let propolis_addr = propolis_server.local_addr();
+
+        let FakeNexusParts {
+            nexus_client,
+            mut state_rx,
+            _dns_server,
+            _nexus_server,
+        } = FakeNexusParts::new(&log).await;
+
+        let temp_guard = Utf8TempDir::new().unwrap();
+
+        // Handle to the zones API, for messing with the state.
+        let (zones, mut handle) =
+            illumos_utils::fakes::zone::Zones::new_with_halt_control();
+
+        // Create an instance but don't start it.
+        let (inst, _metrics_rx) = timeout(
+            TIMEOUT_DURATION,
+            instance_struct(
+                &log,
+                propolis_addr,
+                nexus_client,
+                zones,
+                temp_guard.path().as_str(),
+            ),
+        )
+        .await
+        .expect("timed out creating Instance struct");
+
+        // Make a channel to get state updates.
+        let (put_tx, mut put_rx) = oneshot::channel();
+
+        // Intentionally send a bad request to Propolis.
+        //
+        // This sends an out-of-band instance-ensure request directly to
+        // Propolis, with intentionally different instance properties. This
+        // causes Propolis to make a record of this _incorrect_ instance, so
+        // that when we call `Instance::put_state()`, that fails when we send
+        // the instance ensure request to Propolis inside. This simulates an
+        // error where we started the Propolis zone and HTTP server, but then
+        // failed to send the instance_ensure request.
+        let temp = fake_instance_initial_state(propolis_addr);
+        let bad_instance_ensure =
+            propolis_client::types::InstanceEnsureRequest {
+                init:
+                    propolis_client::types::InstanceInitializationMethod::Spec {
+                        spec: temp.vmm_spec.0,
+                    },
+                properties: propolis_api_types::instance::InstanceProperties {
+                    id: inst.id.into_untyped_uuid(),
+                    name: String::from("ernie"),
+                    description: String::from("front-running is my jam"),
+                    metadata: propolis_api_types::instance::InstanceMetadata {
+                        silo_id: Uuid::new_v4(),
+                        project_id: Uuid::new_v4(),
+                        sled_id: Uuid::new_v4(),
+                        sled_serial: String::from("abcdef"),
+                        sled_revision: 1,
+                        sled_model: String::from("ghijkl"),
+                    },
+                },
+            };
+        propolis_client
+            .instance_ensure()
+            .body(bad_instance_ensure)
+            .send()
+            .await
+            .expect("Able to send instance_ensure to mock Propolis");
+
+        // Now, actually put the state directly from the instance runner.
+        inst.put_state(put_tx, VmmStateRequested::Running)
+            .expect("able to queue put_state request");
+
+        // Wait until the zone actually starts halting.
+        let zname = timeout(TIMEOUT_DURATION, handle.halt_started())
+            .await
+            .expect("timed out waiting for zone halt to start")
+            .expect("zone did not start halting");
+        let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
+        assert_eq!(zname, propolis_zone_name(&propolis_id));
+
+        // We should still have no response on the instance state channel.
+        match put_rx.try_recv() {
+            Ok(Ok(state)) => panic!(
+                "Expected no response, but found \
+                an actual instance state response: {state:#?}"
+            ),
+            Ok(Err(e)) => panic!(
+                "Expected no response, but found an error \
+                setting the instance state: {e:#?}",
+            ),
+            Err(oneshot::error::TryRecvError::Closed) => {
+                panic!("Expected no response, but the channel is closed")
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {}
+        }
+
+        // Nexus should still not have received a state update, since the zone
+        // is in the middle of halting.
+        assert_matches!(
+            *state_rx.borrow_and_update(),
+            ReceivedInstanceState::None
+        );
+
+        // Let the zone continue halting.
+        handle.release();
+
+        // Now we should have an error on the instance state channel.
+        let err = timeout(TIMEOUT_DURATION, put_rx)
+            .await
+            .expect("didn't receive state update within timeout")
+            .expect("put_rx failed to recv")
+            .expect_err("Should have failed to set the instance state");
+        assert_matches!(
+            err,
+            ManagerError::Instance(Error::Propolis(_)),
+            "Should have received a Propolis error kind"
+        );
+
+        // Now we _should_ have updated Nexus at some point.
+        timeout(TIMEOUT_DURATION, state_rx.changed())
+            .await
+            .expect("timed out waiting for Nexus state change")
+            .expect("failed to recv Nexus state change");
+        let state = state_rx.borrow();
+        let ReceivedInstanceState::InstancePut(state) = &*state else {
+            panic!(
+                "Expected Nexus to get an InstancePut response, \
+                but found none"
+            );
+        };
+        let SledVmmState { vmm_state, migration_in, migration_out } = state;
+        assert!(migration_in.is_none());
+        assert!(migration_out.is_none());
+        let VmmRuntimeState { state, .. } = vmm_state;
+        assert_eq!(state, &VmmState::Failed);
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_multiple_terminations_cancel_in_progress_zone_shutdown() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_multiple_terminations_cancel_in_progress_zone_shutdown",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        let (propolis_server, propolis_client) = propolis_mock_server(&log);
+        let propolis_addr = propolis_server.local_addr();
+
+        let FakeNexusParts {
+            nexus_client,
+            state_rx,
+            _dns_server,
+            _nexus_server,
+        } = FakeNexusParts::new(&log).await;
+
+        let temp_guard = Utf8TempDir::new().unwrap();
+
+        // Handle to the zones API, for messing with the state.
+        let (zones, mut handle) =
+            illumos_utils::fakes::zone::Zones::new_with_halt_control();
+
+        // Create an instance but don't start it.
+        let (inst, _metrics_rx) = timeout(
+            TIMEOUT_DURATION,
+            instance_struct(
+                &log,
+                propolis_addr,
+                nexus_client,
+                zones,
+                temp_guard.path().as_str(),
+            ),
+        )
+        .await
+        .expect("timed out creating Instance struct");
+
+        // Make a channel to get state updates.
+        let (put_tx, put_rx) = oneshot::channel();
+
+        // Intentionally send a bad request to Propolis.
+        //
+        // This sends an out-of-band instance-ensure request directly to
+        // Propolis, with intentionally different instance properties. This
+        // causes Propolis to make a record of this _incorrect_ instance, so
+        // that when we call `Instance::put_state()`, that fails when we send
+        // the instance ensure request to Propolis inside. This simulates an
+        // error where we started the Propolis zone and HTTP server, but then
+        // failed to send the instance_ensure request.
+        let temp = fake_instance_initial_state(propolis_addr);
+        let bad_instance_ensure =
+            propolis_client::types::InstanceEnsureRequest {
+                init:
+                    propolis_client::types::InstanceInitializationMethod::Spec {
+                        spec: temp.vmm_spec.0,
+                    },
+                properties: propolis_api_types::instance::InstanceProperties {
+                    id: inst.id.into_untyped_uuid(),
+                    name: String::from("ernie"),
+                    description: String::from("front-running is my jam"),
+                    metadata: propolis_api_types::instance::InstanceMetadata {
+                        silo_id: Uuid::new_v4(),
+                        project_id: Uuid::new_v4(),
+                        sled_id: Uuid::new_v4(),
+                        sled_serial: String::from("abcdef"),
+                        sled_revision: 1,
+                        sled_model: String::from("ghijkl"),
+                    },
+                },
+            };
+        propolis_client
+            .instance_ensure()
+            .body(bad_instance_ensure)
+            .send()
+            .await
+            .expect("Able to send instance_ensure to mock Propolis");
+
+        // Now, actually put the state directly from the instance runner.
+        inst.put_state(put_tx, VmmStateRequested::Running)
+            .expect("able to queue put_state request");
+
+        // Wait until the zone actually starts halting.
+        let zname = timeout(TIMEOUT_DURATION, handle.halt_started())
+            .await
+            .expect("timed out waiting for zone halt to start")
+            .expect("zone did not start halting");
+        let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
+        assert_eq!(zname, propolis_zone_name(&propolis_id));
+
+        // The zone is now shutting down, but stuck there until we release it.
+        // If we send _another_ request to terminate the zone, that should cause
+        // the first one to be dropped since it's awaiting the rest of zone
+        // shutdown. We're making sure that, in this case, we still continue to
+        // delete the zone.
+        let terminated =
+            tokio::spawn(inst.request_termination(&log).clone().terminated());
+
+        // We should get a second attempt to start halting the zone.
+        //
+        // This comes from the second call to `remove_propolis_zone()` that
+        // results from the termination bit being set.
+        let zname = timeout(TIMEOUT_DURATION, handle.halt_started())
+            .await
+            .expect("timed out waiting for zone halt to start")
+            .expect("zone did not start halting");
+        assert_eq!(zname, propolis_zone_name(&propolis_id));
+
+        // We shouldn't get anything on the state rx channel from above, since
+        // the future that owns the sending half is dropped.
+        let _ = timeout(TIMEOUT_DURATION, put_rx)
+            .await
+            .expect("should have recv'd something")
+            .expect_err("should have gotten a recv error");
+
+        // The task we spawned to request the instance's termination and then
+        // await it shouldn't be done yet. That's because the completion bit is
+        // only set at the _end_ of the actual instance termination method.
+        assert!(
+            !terminated.is_finished(),
+            "The termination SetOnce should only be signaled after finishing \
+            the zone shutdown and removal, and we haven't done that."
+        );
+
+        // Now let the zone continue to shutdown.
+        handle.release();
+
+        // But the terminated future should resolve now, to the failed state.
+        let state = timeout(TIMEOUT_DURATION, terminated)
+            .await
+            .expect("timed out waiting for termination future to complete")
+            .expect("terminated future should not panic");
+        let SledVmmState { vmm_state, migration_in, migration_out } = state;
+        assert!(migration_in.is_none());
+        assert!(migration_out.is_none());
+        let VmmRuntimeState { state, .. } = vmm_state;
+        assert_eq!(state, VmmState::Failed);
+
+        // We still don't get an update to Nexus, because when the instance is
+        // terminated, it changes the "state owner".
+        let Instance { tx, runner_handle, .. } = inst;
+        drop(tx);
+        let runner =
+            Arc::try_unwrap(runner_handle).expect("Should be the only handle");
+        timeout(TIMEOUT_DURATION, runner).await.unwrap().unwrap();
+        assert!(!state_rx.has_changed().unwrap());
+        assert_matches!(*state_rx.borrow(), ReceivedInstanceState::None);
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test forceful termination with Nexus as the state owner.
+    #[tokio::test]
+    async fn test_terminate_nexus_owned() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_terminate_nexus_owned",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        let published =
+            terminate_with_state_owner(&log, VmmStateOwner::Nexus).await;
+        assert!(
+            matches!(published, ReceivedInstanceState::None),
+            "if Nexus is the VMM state owner, then no terminal state should be \
+             published, but we received: {published:?}"
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test forceful termination with the InstanceRunner as the state owner.
+    #[tokio::test]
+    async fn test_terminate_runner_owned() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_terminate_runner_owned",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        let published =
+            terminate_with_state_owner(&log, VmmStateOwner::Runner).await;
+        let ReceivedInstanceState::InstancePut(published) = published else {
+            panic!(
+                "if InstanceRunner is the VMM state owner, the terminal state \
+                 should be published to Nexus",
+            );
+        };
+        assert_eq!(published.vmm_state.state, VmmState::Failed);
+
+        logctx.cleanup_successful();
+    }
+
+    /// Helper for tests that request instance termination with a
+    /// `VmmStateOwner`, returning the instance state that was published to
+    /// nexus.
+    async fn terminate_with_state_owner(
+        log: &Logger,
+        owner: VmmStateOwner,
+    ) -> ReceivedInstanceState {
+        let TestInstanceRunner {
+            runner_task,
+            state_rx,
+            terminator,
+            monitor_tx: _mt,
+            cmd_tx,
+            mut remove_rx,
+            _nexus_server,
+            _dns_server,
+        } = TestInstanceRunner::new(log).await;
+
+        terminator
+            .signalled
+            .set(owner)
+            .expect("nothing else has signalled this runner to terminate");
+        let state =
+            tokio::time::timeout(TIMEOUT_DURATION, terminator.terminated())
+                .await
+                .expect("runner should complete termination");
+
+        assert_eq!(state.vmm_state.state, VmmState::Failed);
+
+        assert!(
+            remove_rx.recv().await.is_some(),
+            "terminated instance should request removal"
+        );
+        drop(cmd_tx);
+        tokio::time::timeout(TIMEOUT_DURATION, runner_task)
+            .await
+            .expect("runner should exit after its command channel closes")
+            .expect("runner task should not panic");
+
+        state_rx.borrow().clone()
+    }
+
+    /// A request to terminate a VMM that has already stopped should complete
+    /// with the VMM's final state.
+    #[tokio::test]
+    async fn test_terminate_already_destroyed_vmm() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_terminate_already_destroyed_vmm",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        let TestInstanceRunner {
+            runner_task,
+            state_rx: _sr,
+            terminator,
+            monitor_tx,
+            cmd_tx,
+            mut remove_rx,
+            _nexus_server,
+            _dns_server,
+        } = TestInstanceRunner::new(&log).await;
+
+        // Let's say that the Propolis process has exited, advancing the VMM's
+        // state to `Destroyed`.
+        let (resp_tx, resp_rx) = oneshot::channel();
+        monitor_tx
+            .send(InstanceMonitorMessage {
+                update: InstanceMonitorUpdate::State(
+                    InstanceStateMonitorResponse {
+                        gen_: 5,
+                        migration: InstanceMigrateStatusResponse {
+                            migration_in: None,
+                            migration_out: None,
+                        },
+                        state: propolis_client::types::InstanceState::Destroyed,
+                    },
+                ),
+                tx: resp_tx,
+            })
+            .await
+            .unwrap();
+        assert!(resp_rx.await.unwrap().is_break());
+        assert!(remove_rx.recv().await.is_some());
+
+        // Let the runner exit completely before anyone asks it to terminate.
+        drop(cmd_tx);
+        tokio::time::timeout(TIMEOUT_DURATION, runner_task)
+            .await
+            .expect("runner should exit after its command channel closes")
+            .expect("runner task should not panic");
+
+        // A late termination request (say, one where the HTTP request was
+        // received before Propolis exited, but not sent to the `InstanceRunner`
+        // until after the monitor reported Propolis was gone) should succeed
+        // and receive the final state.
+        terminator
+            .signalled
+            .set(VmmStateOwner::Nexus)
+            .expect("nothing else has signalled this runner to terminate");
+        let state =
+            // This is the part where we don't want to hang forever!
+            tokio::time::timeout(TIMEOUT_DURATION, terminator.terminated())
+                .await
+                .expect("termination of an exited runner should complete");
+        assert_eq!(state.vmm_state.state, VmmState::Destroyed);
+
         logctx.cleanup_successful();
     }
 
@@ -4399,5 +5106,76 @@ mod tests {
             ),
         );
         assert_eq!(new_stack, expected_stack);
+    }
+
+    #[test]
+    fn only_primary_nic_gets_external_ips_and_attached_subnets() {
+        let create_nic =
+            |name: &str, ip: &str, mac: &str, primary, slot| NetworkInterface {
+                id: Uuid::new_v4(),
+                kind: NetworkInterfaceKind::Instance { id: Uuid::new_v4() },
+                name: name.parse().unwrap(),
+                ip_config: PrivateIpConfig::new_ipv6(
+                    ip.parse().unwrap(),
+                    "fd00::/64".parse().unwrap(),
+                )
+                .unwrap(),
+                mac: mac.parse().unwrap(),
+                vni: 77.try_into().unwrap(),
+                primary,
+                slot,
+            };
+        let nics = [
+            create_nic("net0", "fd00::10", "a8:40:25:01:01:01", true, 0),
+            create_nic("net1", "fd00::11", "a8:40:25:01:01:02", false, 1),
+        ];
+        let external_ips = ExternalIpConfig {
+            v6: Some(ExternalIpv6Config {
+                source_nat: Some(
+                    SourceNatConfigV6::new(Ipv6Addr::UNSPECIFIED, 0, 16383)
+                        .unwrap(),
+                ),
+                ..Default::default()
+            }),
+            v4: None,
+        };
+        let mut attached_subnets = IdOrdMap::new();
+        attached_subnets
+            .insert_unique(AttachedSubnet {
+                subnet: IpNet::V6("fd00::1/64".parse().unwrap()),
+                kind: AttachedSubnetKind::External,
+            })
+            .unwrap();
+        let dhcp_config = DhcpCfg {
+            hostname: None,
+            host_domain: None,
+            domain_search_list: vec![],
+            dns4_servers: vec![],
+            dns6_servers: vec![],
+        };
+        let mtu = Some(9000);
+
+        for nic in nics.iter() {
+            let params = InstanceRunner::port_create_params(
+                nic,
+                &external_ips,
+                &[],
+                &dhcp_config,
+                &attached_subnets,
+                mtu,
+            );
+            if nic.primary {
+                assert_eq!(params.external_ips, &external_ips);
+                assert_eq!(
+                    params.attached_subnets.len(),
+                    attached_subnets.len()
+                );
+                assert_eq!(params.mtu, mtu);
+            } else {
+                assert_eq!(params.external_ips, &ExternalIpConfig::default());
+                assert!(params.attached_subnets.is_empty());
+                assert!(params.mtu.is_none());
+            }
+        }
     }
 }

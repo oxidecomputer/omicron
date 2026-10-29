@@ -2,23 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use dropshot::HttpError;
 use gateway_messages::UpdateStatus;
 
-use crate::latest::update::{
-    SpComponentResetError, SpUpdateStatus, UpdatePreparationProgress,
-};
-
-impl From<HttpError> for SpComponentResetError {
-    fn from(err: HttpError) -> Self {
-        Self::Other {
-            message: err.external_message,
-            error_code: err.error_code,
-            internal_message: err.internal_message,
-            status: err.status_code,
-        }
-    }
-}
+use crate::latest::update::{SpUpdateStatus, UpdatePreparationProgress};
 
 impl From<UpdateStatus> for SpUpdateStatus {
     fn from(status: UpdateStatus) -> Self {

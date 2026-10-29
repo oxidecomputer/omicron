@@ -13,6 +13,7 @@ use omicron_uuid_kinds::BuiltInUserKind;
 use omicron_uuid_kinds::ConsoleSessionKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
@@ -395,7 +396,7 @@ async fn make_project(
 ) {
     let project = authz::Project::new(
         silo.clone(),
-        Uuid::new_v4(),
+        ProjectUuid::new_v4(),
         LookupType::ByName(project_name.to_string()),
     );
     if first_branch {

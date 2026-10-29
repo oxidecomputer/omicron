@@ -5,6 +5,7 @@
 //! Model types for external IPs, both for instances and externally-facing
 //! services.
 
+use crate::DbTypedUuid;
 use crate::Name;
 use crate::ServiceNetworkInterface;
 use crate::SqlU16;
@@ -28,6 +29,8 @@ use omicron_common::api::external::IdentityMetadata;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::ProjectKind;
+use omicron_uuid_kinds::ProjectUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -129,7 +132,7 @@ pub struct ExternalIp {
     pub first_port: SqlU16,
     pub last_port: SqlU16,
     // Only Some(_) for instance Floating IPs
-    pub project_id: Option<Uuid>,
+    pub project_id: Option<DbTypedUuid<ProjectKind>>,
     pub state: IpAttachState,
     pub is_probe: bool,
 }
@@ -225,7 +228,13 @@ pub struct FloatingIp {
     pub is_service: bool,
     pub parent_id: Option<Uuid>,
     pub ip: IpNetwork,
-    pub project_id: Uuid,
+    pub project_id: DbTypedUuid<ProjectKind>,
+}
+
+impl FloatingIp {
+    pub fn project_id(&self) -> ProjectUuid {
+        self.project_id.into()
+    }
 }
 
 impl TryFrom<ExternalIp> for SourceNatConfigGeneric {
@@ -261,7 +270,7 @@ pub struct IncompleteExternalIp {
     is_probe: bool,
     parent_id: Option<Uuid>,
     pool_id: Uuid,
-    project_id: Option<Uuid>,
+    project_id: Option<DbTypedUuid<ProjectKind>>,
     state: IpAttachState,
     // Optional address requesting that a specific IP address be allocated.
     explicit_ip: Option<IpNetwork>,
@@ -341,7 +350,7 @@ impl IncompleteExternalIp {
         id: Uuid,
         name: &Name,
         description: &str,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         pool_id: Uuid,
         silo_id: Uuid,
     ) -> Self {
@@ -356,7 +365,7 @@ impl IncompleteExternalIp {
             is_probe: false,
             parent_id: None,
             pool_id,
-            project_id: Some(project_id),
+            project_id: Some(project_id.into()),
             explicit_ip: None,
             explicit_port_range: None,
             state: kind.initial_state(),
@@ -367,7 +376,7 @@ impl IncompleteExternalIp {
         id: Uuid,
         name: &Name,
         description: &str,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         explicit_ip: IpAddr,
         pool_id: Uuid,
         silo_id: Uuid,
@@ -383,7 +392,7 @@ impl IncompleteExternalIp {
             is_probe: false,
             parent_id: None,
             pool_id,
-            project_id: Some(project_id),
+            project_id: Some(project_id.into()),
             explicit_ip: Some(explicit_ip.into()),
             explicit_port_range: Some((0, u16::MAX.into())),
             state: kind.initial_state(),
@@ -490,7 +499,7 @@ impl IncompleteExternalIp {
         &self.pool_id
     }
 
-    pub fn project_id(&self) -> &Option<Uuid> {
+    pub fn project_id(&self) -> &Option<DbTypedUuid<ProjectKind>> {
         &self.project_id
     }
 
@@ -632,7 +641,7 @@ impl From<FloatingIp> for floating_ip_types::FloatingIp {
             ip: ip.ip.ip(),
             ip_pool_id: ip.ip_pool_id,
             identity,
-            project_id: ip.project_id,
+            project_id: ip.project_id.into_untyped_uuid(),
             instance_id: ip.parent_id,
         }
     }

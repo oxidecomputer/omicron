@@ -17,6 +17,7 @@ use omicron_common::api::external::ByteCount;
 use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::inventory::SledRole;
 use std::time::Duration;
 
 type ControlPlaneTestContext =
@@ -124,7 +125,7 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
     let sa = nexus_client::types::SledAgentInfo {
         sa_address: "[fd00:1122:3344:0100::1]:8080".parse().unwrap(),
         repo_depot_port: 8081,
-        role: nexus_client::types::SledRole::Gimlet,
+        role: SledRole::Gimlet,
         baseboard: baseboard.into(),
         usable_hardware_threads: 32,
         usable_physical_ram: ByteCount::from_gibibytes_u32(100).into(),

@@ -44,6 +44,7 @@ pub use sled_agent_types::early_networking::RouterPeerIpAddr;
 pub use sled_agent_types::early_networking::RouterPeerType;
 pub use sled_agent_types::early_networking::SwitchSlot;
 pub use sled_agent_types::early_networking::TxEqConfig;
+pub use sled_agent_types::early_networking::UnnumberedRouter;
 pub use sled_agent_types::early_networking::UplinkAddress;
 pub use sled_agent_types::early_networking::UplinkAddressConfig;
 pub use sled_agent_types::early_networking::UplinkIpNet;

@@ -53,7 +53,6 @@ use illumos_utils::smf_helper::Service as _;
 use illumos_utils::smf_helper::SmfHelper;
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
-use illumos_utils::zpool::{PathInPool, ZpoolName, ZpoolOrRamdisk};
 use illumos_utils::{PFEXEC, execute};
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
@@ -84,6 +83,7 @@ use omicron_ddm_admin_client::DdmError;
 use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::RackUuid;
+use sled_agent_config_reconciler::PathInPool;
 use sled_agent_resolvable_files::{
     ZoneImageSourceResolver, ramdisk_file_source,
 };
@@ -249,19 +249,6 @@ pub enum Error {
     #[error("Error migrating old-format services ledger")]
     ServicesMigration(#[source] anyhow::Error),
 
-    #[error(
-        "Invalid filesystem_pool in new zone config: \
-         for zone {zone_id}, expected pool {expected_pool} but got {got_pool}"
-    )]
-    InvalidFilesystemPoolZoneConfig {
-        zone_id: OmicronZoneUuid,
-        expected_pool: ZpoolName,
-        got_pool: ZpoolName,
-    },
-
-    #[error("Unexpected zone config: zone {zone_id} is running on ramdisk ?!")]
-    ZoneIsRunningOnRamdisk { zone_id: OmicronZoneUuid },
-
     #[error("failed to read mupdate override info, not starting zones")]
     MupdateOverrideRead(#[source] MupdateOverrideReadError),
 
@@ -293,17 +280,12 @@ impl Error {
 impl From<Error> for omicron_common::api::external::Error {
     fn from(err: Error) -> Self {
         match err {
-            Error::RequestedConfigConflicts(_)
-            | Error::InvalidFilesystemPoolZoneConfig { .. }
-            | Error::ZoneIsRunningOnRamdisk { .. } => {
+            Error::RequestedConfigConflicts(_) => {
                 omicron_common::api::external::Error::invalid_request(
-                    // InlineErrorChain is not strictly necessary here, but use it in case that
-                    // changes later on.
                     &InlineErrorChain::new(&err).to_string(),
                 )
             }
             Error::RequestedZoneConfigOutdated { .. } => {
-                // InlineErrorChain also isn't strictly necessary here.
                 omicron_common::api::external::Error::conflict(
                     InlineErrorChain::new(&err).to_string(),
                 )
@@ -463,7 +445,7 @@ enum SwitchService {
     Pumpkind { asic: DendriteAsic },
     Tfport { pkt_source: String, asic: DendriteAsic },
     Uplink,
-    MgDdm { mode: String },
+    MgDdm { mode: String, baseboard: Baseboard },
     Mgd,
     SpSim,
     SushProxy { tls: SushProxyTls, baseboard: Baseboard },
@@ -1225,7 +1207,7 @@ impl ServiceManager {
     async fn initialize_zone(
         &self,
         request: ZoneArgs<'_>,
-        zone_root_path: PathInPool,
+        zone_root_path: Utf8PathBuf,
         filesystems: &[zone::Fs],
         data_links: &[String],
     ) -> Result<RunningZone, Error> {
@@ -1873,24 +1855,26 @@ impl ServiceManager {
                     Self::opte_interface_set_up_install(&installed_zone)?;
 
                 // We need to tell external_dns to listen on its OPTE port IP
-                // address, which comes from `nic`. Attach the port from its
-                // true external DNS address (`dns_address`).
-                //
-                // Make sure we take the VPC-private IP address with the same
-                // version as the external address.
-                //
-                // TODO(#11008): external DNS should listen on the private IP
-                // address for *all* of its external addresses. For now we bind
-                // a single address, preferring the IPv4 one (else IPv6) to
-                // match `opte_interface_set_up_install`.
-                let dns_address = dns_addresses.temporary_primary_address();
-                let private_ip = Self::private_ip_for_external_address(
-                    dns_address.ip(),
+                // addresses, which come from `nic`. It can have 1 or 2,
+                // depending on how the zone was configured.
+                let dns_port = dns_addresses
+                    .iter()
+                    .next()
+                    .expect("type guarantees this is non-empty")
+                    .port();
+                let private_ips = Self::private_ips_for_external_addresses(
+                    dns_addresses.iter().map(|addr| addr.ip()),
                     &nic.ip_config,
                     config.zone_type.kind(),
                 )?;
-                let private_dns_address =
-                    SocketAddr::new(private_ip, dns_address.port()).to_string();
+
+                // The DNS SMF service accepts one or more socket addresses for
+                // it to listen on as a comma-separated string.
+                let private_dns_addresses = private_ips
+                    .iter()
+                    .map(|ip| SocketAddr::new(*ip, dns_port).to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
 
                 let external_dns_config = PropertyGroupBuilder::new("config")
                     .add_property(
@@ -1901,7 +1885,7 @@ impl ServiceManager {
                     .add_property(
                         "dns_address",
                         "astring",
-                        private_dns_address,
+                        private_dns_addresses,
                     );
                 let external_dns_service =
                     ServiceBuilder::new("oxide/external_dns").add_instance(
@@ -2239,23 +2223,29 @@ impl ServiceManager {
                     })?;
                 let opte_iface_name = port.name();
 
-                // Fetch the private IP of the same IP version as the external
-                // IP address.
+                // Fetch the private IPs for each of the external addresses.
                 //
-                // TODO(#11006): Nexus should be reachable on the private IP
-                // address for *all* of its external IPs. For now we bind a
-                // single address, preferring the IPv4 one (else IPv6) to match
-                // match `opte_interface_set_up_install`.
-                let external_ip = external_ips.temporary_primary_address();
-                let private_ip = Self::private_ip_for_external_address(
-                    external_ip,
+                // Consume the first private address, which always exists, and
+                // then collect any additional addresses into a list.
+                let nexus_port = if *external_tls { 443 } else { 80 };
+                let mut private_ips = Self::private_ips_for_external_addresses(
+                    external_ips.iter().copied(),
                     &nic.ip_config,
                     config.zone_type.kind(),
-                )?;
+                )?
+                .into_iter();
+                let bind_address = SocketAddr::new(
+                    private_ips.next().expect(
+                        "Always at least one external address for Nexus",
+                    ),
+                    nexus_port,
+                );
+                let dropshot_external_additional_addresses = private_ips
+                    .map(|ip| SocketAddr::new(ip, nexus_port))
+                    .collect();
 
                 // Nexus takes a separate config file for parameters
                 // which cannot be known at packaging time.
-                let nexus_port = if *external_tls { 443 } else { 80 };
                 let deployment_config = DeploymentConfig {
                     id: *id,
                     rack_id: info.rack_id,
@@ -2264,9 +2254,7 @@ impl ServiceManager {
                     dropshot_external: ConfigDropshotWithTls {
                         tls: *external_tls,
                         dropshot: dropshot::ConfigDropshot {
-                            bind_address: SocketAddr::new(
-                                private_ip, nexus_port,
-                            ),
+                            bind_address,
                             default_request_body_max_bytes: 1048576,
                             default_handler_task_mode:
                                 HandlerTaskMode::Detached,
@@ -2274,9 +2262,7 @@ impl ServiceManager {
                             compression: dropshot::CompressionConfig::Gzip,
                         },
                     },
-                    // TODO(#9288): populate additional external addresses here
-                    // once sled-agent assigns dual-stack external IPs to Nexus.
-                    dropshot_external_additional_addresses: vec![],
+                    dropshot_external_additional_addresses,
                     dropshot_internal: dropshot::ConfigDropshot {
                         bind_address: (*internal_address).into(),
                         default_request_body_max_bytes: 1048576,
@@ -2309,6 +2295,7 @@ impl ServiceManager {
                             treat_loopback_as_external:
                                 nexus_config::TreatLoopbackAsExternal::No,
                         },
+                    record_db_claim_backtraces: true,
                 };
 
                 // Copy the partial config file to the expected
@@ -2963,12 +2950,21 @@ impl ServiceManager {
                             .add_property_group(mgd_config),
                     );
                 }
-                SwitchService::MgDdm { mode } => {
+                SwitchService::MgDdm { mode, baseboard } => {
                     info!(self.inner.log, "Setting up mg-ddm service");
 
                     let mut mg_ddm_config = PropertyGroupBuilder::new("config")
                         .add_property("mode", "astring", mode)
-                        .add_property("dendrite", "astring", "true");
+                        .add_property("dendrite", "astring", "true")
+                        // We must bind to "::" so the ddmd scrimlet reconciler
+                        // in the global zone can reach the ddm-admin port in
+                        // the switch zone via the underlay network.
+                        .add_property("admin_host", "astring", "::")
+                        .add_property(
+                            "router_id",
+                            "astring",
+                            &switch_zone_ddm_router_id(&baseboard),
+                        );
 
                     if let Some(i) = info {
                         mg_ddm_config = mg_ddm_config
@@ -3010,11 +3006,6 @@ impl ServiceManager {
                                 // all rear ports, which is what
                                 // we're directing ddmd to listen
                                 // for advertisements on.
-                                //
-                                // This may grow in a multi-rack
-                                // future to include a subset of
-                                // "front" ports too, when racks are
-                                // cabled together.
                                 AddrObject::new(
                                     &format!("tfportrear{}_0", i),
                                     IPV6_LINK_LOCAL_ADDROBJ_NAME,
@@ -3113,7 +3104,7 @@ impl ServiceManager {
         let runtime = self
             .initialize_zone(
                 ZoneArgs::Omicron(zone),
-                zone_root_path,
+                zone_root_path.into_path(),
                 // filesystems=
                 &[],
                 // data_links=
@@ -3210,7 +3201,10 @@ impl ServiceManager {
                     SwitchService::Uplink,
                     SwitchService::Wicketd { baseboard: baseboard.clone() },
                     SwitchService::Mgd,
-                    SwitchService::MgDdm { mode: "transit".to_string() },
+                    SwitchService::MgDdm {
+                        mode: "transit".to_string(),
+                        baseboard: baseboard.clone(),
+                    },
                     SwitchService::SushProxy {
                         tls: SushProxyTls::RotVouched,
                         baseboard: baseboard.clone(),
@@ -3229,7 +3223,10 @@ impl ServiceManager {
                     SwitchService::Uplink,
                     SwitchService::Wicketd { baseboard: baseboard.clone() },
                     SwitchService::Mgd,
-                    SwitchService::MgDdm { mode: "transit".to_string() },
+                    SwitchService::MgDdm {
+                        mode: "transit".to_string(),
+                        baseboard: baseboard.clone(),
+                    },
                     SwitchService::Tfport {
                         pkt_source: "vioif0".to_string(),
                         asic,
@@ -3264,7 +3261,10 @@ impl ServiceManager {
                     SwitchService::Uplink,
                     SwitchService::Wicketd { baseboard: baseboard.clone() },
                     SwitchService::Mgd,
-                    SwitchService::MgDdm { mode: "transit".to_string() },
+                    SwitchService::MgDdm {
+                        mode: "transit".to_string(),
+                        baseboard: baseboard.clone(),
+                    },
                     SwitchService::Tfport {
                         pkt_source: "tfpkt0".to_string(),
                         asic,
@@ -3688,7 +3688,7 @@ impl ServiceManager {
                                 "refreshed mgd service with new configuration"
                             )
                         }
-                        SwitchService::MgDdm { mode } => {
+                        SwitchService::MgDdm { mode, baseboard } => {
                             info!(self.inner.log, "configuring mg-ddm service");
                             smfh.delpropvalue_default_instance(
                                 "config/mode",
@@ -3697,6 +3697,15 @@ impl ServiceManager {
                             smfh.addpropvalue_type_default_instance(
                                 "config/mode",
                                 &mode,
+                                "astring",
+                            )?;
+                            smfh.delpropvalue_default_instance(
+                                "config/router_id",
+                                "*",
+                            )?;
+                            smfh.addpropvalue_type_default_instance(
+                                "config/router_id",
+                                &switch_zone_ddm_router_id(&baseboard),
                                 "astring",
                             )?;
                             if let Some(info) = self.inner.sled_info.get() {
@@ -3825,9 +3834,8 @@ impl ServiceManager {
         // switch zone were on a U.2 device we would not be able to run RSS, as
         // we could not create the U.2 disks due to lack of encryption. To break
         // the cycle we put the switch zone root fs on the ramdisk.
-        let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
         let zone_root_path =
-            PathInPool { pool: ZpoolOrRamdisk::Ramdisk, path: root.clone() };
+            Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
         let zone_args = ZoneArgs::Switch(&request);
         info!(self.inner.log, "Starting switch zone");
         let zone = self
@@ -3891,40 +3899,82 @@ impl ServiceManager {
         }
     }
 
-    fn private_ip_for_external_address(
-        external_ip: IpAddr,
-        ip_config: &PrivateIpConfig,
+    // Return the private IP addresses for each external IP address.
+    //
+    // When given at least one address, this returns 1 or 2 private IPs for
+    // those external addresses, i.e., at least one address and as many as one
+    // per family.
+    fn private_ips_for_external_addresses<'a>(
+        external_ips: impl Iterator<Item = IpAddr> + 'a,
+        ip_config: &'a PrivateIpConfig,
         kind: ZoneKind,
-    ) -> Result<IpAddr, Error> {
-        let maybe_private_ip = if external_ip.is_ipv6() {
-            ip_config.ipv6_addr().copied().map(IpAddr::V6)
-        } else {
-            ip_config.ipv4_addr().copied().map(IpAddr::V4)
-        };
-        maybe_private_ip.ok_or_else(|| {
-            let external_ip_version =
-                if external_ip.is_ipv6() { "6" } else { "4" };
-            let private_ip_stack = if ip_config.is_ipv4_only() {
-                "IPv4"
-            } else if ip_config.is_ipv6_only() {
-                "IPv6"
+    ) -> Result<Vec<IpAddr>, Error> {
+        let mut private_ipv4 = None;
+        let mut private_ipv6 = None;
+        for external_ip in external_ips {
+            if external_ip.is_ipv6() {
+                let Some(pip_v6) = ip_config.ipv6_addr().copied() else {
+                    return Err(Error::BadServiceRequest {
+                        service: kind.report_str().to_string(),
+                        message:
+                            "External IP address is IPv6, but VPC-private \
+                            IP configuration does not have an IPv6 \
+                            address"
+                                .to_string(),
+                    });
+                };
+
+                // We always have at most one private IPv6 address, so
+                // "replacing" it is fine.
+                let _ = private_ipv6.insert(IpAddr::V6(pip_v6));
             } else {
-                "dual-stack"
-            };
-            Error::BadServiceRequest {
-                service: kind.report_str().to_string(),
-                message: format!(
-                    "External IP address is IPv{}, but VPC-private \
-                    IP configuration is {}",
-                    external_ip_version, private_ip_stack,
-                ),
+                let Some(pip_v4) = ip_config.ipv4_addr().copied() else {
+                    return Err(Error::BadServiceRequest {
+                        service: kind.report_str().to_string(),
+                        message:
+                            "External IP address is IPv4, but VPC-private \
+                            IP configuration does not have an IPv4 \
+                            address"
+                                .to_string(),
+                    });
+                };
+
+                // We always have at most one private IPv4 address, so
+                // "replacing" it is fine.
+                let _ = private_ipv4.insert(IpAddr::V4(pip_v4));
             }
-        })
+        }
+        let out =
+            private_ipv4.into_iter().chain(private_ipv6).collect::<Vec<_>>();
+        if out.is_empty() {
+            return Err(Error::BadServiceRequest {
+                service: kind.report_str().to_string(),
+                message: "`private_ips_for_external_addresses()` requires \
+                at least one IP address, but none were provided"
+                    .to_string(),
+            });
+        }
+        Ok(out)
     }
 }
 
 fn internal_dns_addrobj_name(gz_address_index: u32) -> String {
     format!("internaldns{gz_address_index}")
+}
+
+// DDM does path breaking based on router ID. Distinct routers need distinct
+// router IDs. For DDM routers running in the global zone, the router ID comes
+// from the hostname which is a regular baseboard identifier. For DDM routers
+// running in the switch zone, the baseboard identifier of the scrimlet is
+// used with the `sw` prefix to distinguish them from routers with the same
+// baseboard identifier in the global zone.
+//
+// The `sw` prefix itself is somewhat arbitrary and stands for "switch". Any
+// other unique prefix could have been chosen as long as its concatination with
+// the baseboard identifier did not collide with a baseboard identifier used by
+// ddmd elsewhere.
+fn switch_zone_ddm_router_id(baseboard: &Baseboard) -> String {
+    format!("sw{}", baseboard.identifier())
 }
 
 #[cfg(test)]

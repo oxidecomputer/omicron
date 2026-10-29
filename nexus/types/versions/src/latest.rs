@@ -57,8 +57,9 @@ pub mod alert {
     pub use crate::v2025_11_20_00::alert::WebhookSecretSelector;
     pub use crate::v2025_11_20_00::alert::WebhookSecrets;
 
-    pub use crate::v2026_08_14_00::alert::Alert;
     pub use crate::v2026_08_14_00::alert::AlertListParams;
+
+    pub use crate::v2026_09_11_00::alert::Alert;
 }
 
 pub mod audit {
@@ -396,7 +397,6 @@ pub mod silo {
     pub use crate::v2025_11_20_00::silo::Silo;
     pub use crate::v2025_11_20_00::silo::SiloAuthSettings;
     pub use crate::v2025_11_20_00::silo::SiloAuthSettingsUpdate;
-    pub use crate::v2025_11_20_00::silo::SiloCreate;
     pub use crate::v2025_11_20_00::silo::SiloIdentityMode;
     pub use crate::v2025_11_20_00::silo::SiloQuotas;
     pub use crate::v2025_11_20_00::silo::SiloQuotasCreate;
@@ -406,6 +406,8 @@ pub mod silo {
     pub use crate::v2025_11_20_00::silo::UserProvisionType;
     pub use crate::v2025_11_20_00::silo::Utilization;
     pub use crate::v2025_11_20_00::silo::VirtualResourceCounts;
+
+    pub use crate::v2026_09_15_00::silo::SiloCreate;
 }
 
 pub mod snapshot {
@@ -448,8 +450,6 @@ pub mod timeseries {
 pub mod update {
     pub use crate::v2025_11_20_00::update::SetTargetReleaseParams;
     pub use crate::v2025_11_20_00::update::TargetRelease;
-    pub use crate::v2025_11_20_00::update::TufRepo;
-    pub use crate::v2025_11_20_00::update::TufRepoUpload;
     pub use crate::v2025_11_20_00::update::TufRepoUploadStatus;
     pub use crate::v2025_11_20_00::update::TufSignedRootRole;
     pub use crate::v2025_11_20_00::update::UpdatesGetRepositoryParams;
@@ -457,6 +457,9 @@ pub mod update {
     pub use crate::v2025_11_20_00::update::UpdatesTrustRoot;
 
     pub use crate::v2026_05_20_00::update::UpdateStatus;
+
+    pub use crate::v2026_10_13_00::update::TufRepo;
+    pub use crate::v2026_10_13_00::update::TufRepoUpload;
 }
 
 pub mod vpc {

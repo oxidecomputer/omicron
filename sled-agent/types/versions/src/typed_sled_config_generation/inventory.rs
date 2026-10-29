@@ -21,10 +21,11 @@ use std::net::SocketAddrV6;
 use std::time::Duration;
 
 use crate::v1::disk::{DatasetConfig, OmicronPhysicalDiskConfig};
+use crate::v1::inventory::SledRole;
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, OrphanedDataset,
-    RemoveMupdateOverrideInventory, SledRole,
+    RemoveMupdateOverrideInventory,
 };
 use crate::v11::inventory::OmicronZoneConfig;
 use crate::v14::inventory::{

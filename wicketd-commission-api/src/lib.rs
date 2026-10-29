@@ -11,7 +11,8 @@ use dropshot::{
     RequestContext, StreamingBody, TypedBody,
 };
 use dropshot_api_manager_types::api_versions;
-use wicketd_commission_types_versions::{latest, v1, v2};
+use slog_error_chain::InlineErrorChain;
+use wicketd_commission_types_versions::{latest, v1, v2, v3, v4};
 
 // NOTE: The commission API is server-side versioned, but changing it requires
 // coordinating with rkdeploy (it must stay on the oldest version supported
@@ -29,6 +30,9 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (6, UPDATE_PROGRESS_REPOSITORY),
+    (5, MULTIRACK_JOIN),
+    (4, UPDATE_ELAPSED),
     (3, BGP_PEER_SRC_ADDR),
     (2, FULL_SERVICE_IP_POOL_DETAILS),
     (1, INITIAL),
@@ -128,7 +132,7 @@ pub trait WicketdCommissionApi {
     /// to ephemeral storage; any previously-uploaded repository is discarded.
     /// This request is rejected with a 400 while any MUPdate is in progress. A
     /// successful upload clears all update progress state, so a subsequent
-    /// `GET /update-progress` returns an empty list.
+    /// `GET /update-progress` returns an empty set of current updates.
     #[endpoint {
         method = PUT,
         path = "/repository",
@@ -139,10 +143,11 @@ pub trait WicketdCommissionApi {
         body: StreamingBody,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Report the progress of every MUPdate
+    /// Report the uploaded system version and the progress of every MUPdate
     #[endpoint {
         method = GET,
         path = "/update-progress",
+        versions = VERSION_UPDATE_PROGRESS_REPOSITORY..,
     }]
     async fn get_update_progress(
         rqctx: RequestContext<Self::Context>,
@@ -150,6 +155,37 @@ pub trait WicketdCommissionApi {
         HttpResponseOk<latest::update::GetUpdateProgressResponse>,
         HttpError,
     >;
+
+    /// Report the progress of every MUPdate
+    #[endpoint {
+        operation_id = "get_update_progress",
+        method = GET,
+        path = "/update-progress",
+        versions = VERSION_UPDATE_ELAPSED..VERSION_UPDATE_PROGRESS_REPOSITORY,
+    }]
+    async fn get_update_progress_v4(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v4::update::GetUpdateProgressResponse>, HttpError>
+    {
+        Ok(Self::get_update_progress(rqctx)
+            .await?
+            .map(v4::update::GetUpdateProgressResponse::from))
+    }
+
+    #[endpoint {
+        operation_id = "get_update_progress",
+        method = GET,
+        path = "/update-progress",
+        versions = ..VERSION_UPDATE_ELAPSED,
+    }]
+    async fn get_update_progress_v1(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v1::update::GetUpdateProgressResponse>, HttpError>
+    {
+        Ok(Self::get_update_progress_v4(rqctx)
+            .await?
+            .map(v1::update::GetUpdateProgressResponse::from))
+    }
 
     /// Start MUPdating one or more sleds, switches, or PSCs
     ///
@@ -199,12 +235,35 @@ pub trait WicketdCommissionApi {
     #[endpoint {
         method = PUT,
         path = "/rack-setup/config",
-        versions = VERSION_BGP_PEER_SRC_ADDR..,
+        versions = VERSION_MULTIRACK_JOIN..,
     }]
     async fn put_rss_config(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<latest::rack_setup::PutRssUserConfigInsensitive>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        operation_id = "put_rss_config",
+        method = PUT,
+        path = "/rack-setup/config",
+        versions = VERSION_BGP_PEER_SRC_ADDR..VERSION_MULTIRACK_JOIN,
+    }]
+    async fn put_rss_config_v3(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v3::rack_setup::PutRssUserConfigInsensitive>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let body =
+            body.try_map(TryFrom::try_from).map_err(|e: anyhow::Error| {
+                HttpError::for_bad_request(
+                    None,
+                    format!(
+                        "Invalid conversion: {}",
+                        InlineErrorChain::new(e.as_ref())
+                    ),
+                )
+            })?;
+        Self::put_rss_config(rqctx, body).await
+    }
 
     #[endpoint {
         operation_id = "put_rss_config",
@@ -216,7 +275,7 @@ pub trait WicketdCommissionApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v2::rack_setup::PutRssUserConfigInsensitive>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::put_rss_config(rqctx, body.map(Into::into)).await
+        Self::put_rss_config_v3(rqctx, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -327,6 +386,31 @@ pub trait WicketdCommissionApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<
         HttpResponseOk<latest::rack_setup::RunRackSetupResponse>,
+        HttpError,
+    >;
+
+    /// Join this rack into an existing multirack cluster
+    ///
+    /// This is the multirack counterpart to running rack setup, and applies to
+    /// every rack but the first: it initializes this rack's trust quorum,
+    /// starts its sled-agents, and publishes its network configuration, but
+    /// places no control plane services. Reconfigurator adopts the rack
+    /// afterwards.
+    ///
+    /// Unlike rack setup, the configuration is not staged through this API
+    /// beforehand; it is posted here in full and forwarded to the bootstrap
+    /// agent. Progress is reported by `GET /rack-setup`, as a `RackOperation`
+    /// whose `kind` is `multirack-join`.
+    #[endpoint {
+        method = POST,
+        path = "/multirack-join",
+        versions = VERSION_MULTIRACK_JOIN..,
+    }]
+    async fn post_run_multirack_join(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<latest::rack_setup::MultirackJoinRequest>,
+    ) -> Result<
+        HttpResponseOk<latest::rack_setup::RunMultirackJoinResponse>,
         HttpError,
     >;
 }

@@ -1382,8 +1382,7 @@
             "name": "saga_id",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/SagaId"
             }
           }
         ],
@@ -2324,8 +2323,15 @@
             "type": "object",
             "properties": {
               "hash": {
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.2.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "type": {
                 "type": "string",
@@ -2619,8 +2625,15 @@
         "type": "object",
         "properties": {
           "hash": {
+            "x-rust-type": {
+              "crate": "byte-wrapper",
+              "path": "byte_wrapper::HexArray::<32>",
+              "version": "0.2.0"
+            },
             "type": "string",
-            "format": "hex string (32 bytes)"
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "minLength": 64,
+            "maxLength": 64
           },
           "version": {
             "$ref": "#/components/schemas/BlueprintArtifactVersion"
@@ -3093,8 +3106,15 @@
             "type": "object",
             "properties": {
               "hash": {
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.2.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "type": {
                 "type": "string",
@@ -3134,7 +3154,12 @@
                 "type": "string"
               },
               "external_ip": {
-                "$ref": "#/components/schemas/OmicronZoneExternalSnatIp"
+                "description": "The source NAT configuration.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/OmicronZoneExternalSnat"
+                  }
+                ]
               },
               "nic": {
                 "description": "The service vNIC providing outbound connectivity using OPTE.",
@@ -3302,11 +3327,11 @@
               "dataset": {
                 "$ref": "#/components/schemas/OmicronZoneDataset"
               },
-              "dns_address": {
-                "description": "The address at which the external DNS server is reachable.",
+              "dns_addresses": {
+                "description": "The addresses at which the external DNS server is reachable.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/OmicronZoneExternalFloatingAddr"
+                    "$ref": "#/components/schemas/OmicronZoneExternalFloatingAddrs"
                   }
                 ]
               },
@@ -3331,7 +3356,7 @@
             },
             "required": [
               "dataset",
-              "dns_address",
+              "dns_addresses",
               "http_address",
               "nic",
               "type"
@@ -3405,11 +3430,11 @@
                   "format": "ip"
                 }
               },
-              "external_ip": {
-                "description": "The address at which the external nexus server is reachable.",
+              "external_ips": {
+                "description": "The addresses at which the external nexus server is reachable.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/OmicronZoneExternalFloatingIp"
+                    "$ref": "#/components/schemas/OmicronZoneExternalFloatingIps"
                   }
                 ]
               },
@@ -3452,7 +3477,7 @@
             },
             "required": [
               "external_dns_servers",
-              "external_ip",
+              "external_ips",
               "external_tls",
               "internal_address",
               "lockstep_port",
@@ -4133,8 +4158,7 @@
             "$ref": "#/components/schemas/DemoSagaUuid"
           },
           "saga_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/SagaId"
           }
         },
         "required": [
@@ -4833,6 +4857,37 @@
               "type",
               "value"
             ]
+          },
+          {
+            "description": "An update to the given component could be scheduled, but we're waiting for the sled to evacuate",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "waiting_on_sled_evacuation"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "component": {
+                    "$ref": "#/components/schemas/MgsUpdateComponent"
+                  },
+                  "details": {
+                    "$ref": "#/components/schemas/WaitingOnSledEvacuationDetails"
+                  }
+                },
+                "required": [
+                  "component",
+                  "details"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
           }
         ]
       },
@@ -5233,7 +5288,7 @@
         ]
       },
       "FmConfig": {
-        "description": "A fault management configuration.\n\n# Validation\n\nFor a config to be valid, the following requirements must be upheld:\n\n- [`Self::sitrep_limit`] must be at least [`Self::MIN_SITREP_LIMIT`], and no more than [`Self::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be at least [`Self::MIN_HISTORY_PRUNING_THRESHOLD`], and no more than [`Self::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be strictly less than [`Self::sitrep_limit`],\n\nThese rules are checked by the [`Self::validate`] method, which is called prior to accepting a config update.",
+        "description": "A fault management configuration.\n\n# Validation\n\nFor a config to be valid, the following requirements must be upheld:\n\n- [`Self::sitrep_limit`] must be at least [`Self::MIN_SITREP_LIMIT`], and no more than [`Self::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be at least [`Self::MIN_HISTORY_PRUNING_THRESHOLD`], and no more than [`Self::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be strictly less than [`Self::sitrep_limit`], - [`Self::certificate_expiry_warning_days`] must be no more than [`Self::MAX_CERTIFICATE_EXPIRY_WARNING_DAYS`] (it is a `NonZeroU32`, so it is always at least 1).\n\nThese rules are checked by the [`Self::validate`] method, which is called prior to accepting a config update.",
         "type": "object",
         "properties": {
           "analysis_enabled": {
@@ -5241,6 +5296,14 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/FmConfigBooleanSetting"
+              }
+            ]
+          },
+          "certificate_expiry_warning_days": {
+            "description": "How many days before a silo's external TLS certificate expires the certificate diagnosis engine opens a case and requests a `silo.certificate.expiring` alert.\n\nThe window applies to the certificate Nexus actually serves for the silo (the one with the latest expiration time), so a case opens only when no later-expiring replacement is installed. Time is measured against the completion time of the inventory collection each sitrep is generated from, not the wall clock.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FmConfigNonZeroU32Setting"
               }
             ]
           },
@@ -5263,6 +5326,7 @@
         },
         "required": [
           "analysis_enabled",
+          "certificate_expiry_warning_days",
           "history_pruning_threshold",
           "sitrep_limit"
         ]
@@ -6342,6 +6406,15 @@
           "sp"
         ]
       },
+      "MgsUpdateComponent": {
+        "type": "string",
+        "enum": [
+          "sp",
+          "rot",
+          "rot_bootloader",
+          "host_os"
+        ]
+      },
       "MgsUpdateDriverStatus": {
         "description": "Status of ongoing update attempts, recently completed attempts, and update requests that are waiting for retry.",
         "type": "object",
@@ -6643,8 +6716,29 @@
           "id"
         ]
       },
+      "OmicronZoneExternalFloatingAddrs": {
+        "title": "IdOrdMap",
+        "description": "A set of `OmicronZoneExternalFloatingAddrs`s allocated to a single zone.\n\nThe set of IPs is always non-empty, and there are no duplicate IP addresses. Also, the size is bounded above by `MAX_ZONE_EXTERNAL_IPS`.\n\nNOTE: This is the reconfigurator analog of the inventory `ExternalDnsAddrs` type.",
+        "x-rust-type": {
+          "crate": "iddqd",
+          "parameters": [
+            {
+              "$ref": "#/components/schemas/OmicronZoneExternalFloatingAddr"
+            }
+          ],
+          "path": "iddqd::IdOrdMap",
+          "version": "*"
+        },
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/OmicronZoneExternalFloatingAddr"
+        },
+        "minItems": 1,
+        "maxItems": 16,
+        "uniqueItems": true
+      },
       "OmicronZoneExternalFloatingIp": {
-        "description": "Floating external IP allocated to an Omicron-managed zone.\n\nThis is a slimmer `nexus_db_model::ExternalIp` that only stores the fields necessary for blueprint planning, and requires that the zone have a single IP.",
+        "description": "Floating external IP allocated to an Omicron-managed zone.\n\nThis is a slimmer `nexus_db_model::ExternalIp` that only stores the fields necessary for blueprint planning.",
         "type": "object",
         "properties": {
           "id": {
@@ -6660,15 +6754,125 @@
           "ip"
         ]
       },
-      "OmicronZoneExternalSnatIp": {
-        "description": "SNAT (outbound) external IP allocated to an Omicron-managed zone.\n\nThis is a slimmer `nexus_db_model::ExternalIp` that only stores the fields necessary for blueprint planning, and requires that the zone have a single IP.",
+      "OmicronZoneExternalFloatingIps": {
+        "title": "IdOrdMap",
+        "description": "A set of `OmicronZoneExternalFloatingIp`s allocated to a single zone.\n\nThe set of IPs is always non-empty, and there are no duplicate IP addresses. Also, the size is bounded above by `MAX_ZONE_EXTERNAL_IPS`.\n\nNOTE: This is the reconfigurator analog of the inventory `NexusExternalIps` type.",
+        "x-rust-type": {
+          "crate": "iddqd",
+          "parameters": [
+            {
+              "$ref": "#/components/schemas/OmicronZoneExternalFloatingIp"
+            }
+          ],
+          "path": "iddqd::IdOrdMap",
+          "version": "*"
+        },
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/OmicronZoneExternalFloatingIp"
+        },
+        "minItems": 1,
+        "maxItems": 16,
+        "uniqueItems": true
+      },
+      "OmicronZoneExternalSnat": {
+        "description": "SNAT configuration for a boundary NTP zone in a blueprint.\n\nBoundary NTP reaches upstream servers via source NAT and needs a source address per IP version it wants to reach them on: at most one per family, and at least one overall. This is the blueprint-layer analog of the sled-agent wire type `ZoneSnatConfig`, but each entry additionally carries its allocated `ExternalIpUuid`.",
+        "oneOf": [
+          {
+            "description": "An IPv4 SNAT external IP allocated to an Omicron-managed zone.\n\nThe family-typed analog of [`OmicronZoneExternalSnatIp`], used in the variants of [`OmicronZoneExternalSnat`] so the enum can't hold an address of the wrong family.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/ExternalIpUuid"
+              },
+              "snat_cfg": {
+                "$ref": "#/components/schemas/SourceNatConfigV4"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ipv4_only"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "snat_cfg",
+              "type"
+            ]
+          },
+          {
+            "description": "An IPv6 SNAT external IP allocated to an Omicron-managed zone.\n\nThe family-typed analog of [`OmicronZoneExternalSnatIp`], used in the variants of [`OmicronZoneExternalSnat`] so the enum can't hold an address of the wrong family.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/ExternalIpUuid"
+              },
+              "snat_cfg": {
+                "$ref": "#/components/schemas/SourceNatConfigV6"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ipv6_only"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "snat_cfg",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ipv4": {
+                "$ref": "#/components/schemas/OmicronZoneExternalSnatIpv4"
+              },
+              "ipv6": {
+                "$ref": "#/components/schemas/OmicronZoneExternalSnatIpv6"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dual_stack"
+                ]
+              }
+            },
+            "required": [
+              "ipv4",
+              "ipv6",
+              "type"
+            ]
+          }
+        ]
+      },
+      "OmicronZoneExternalSnatIpv4": {
+        "description": "An IPv4 SNAT external IP allocated to an Omicron-managed zone.\n\nThe family-typed analog of [`OmicronZoneExternalSnatIp`], used in the variants of [`OmicronZoneExternalSnat`] so the enum can't hold an address of the wrong family.",
         "type": "object",
         "properties": {
           "id": {
             "$ref": "#/components/schemas/ExternalIpUuid"
           },
           "snat_cfg": {
-            "$ref": "#/components/schemas/SourceNatConfigGeneric"
+            "$ref": "#/components/schemas/SourceNatConfigV4"
+          }
+        },
+        "required": [
+          "id",
+          "snat_cfg"
+        ]
+      },
+      "OmicronZoneExternalSnatIpv6": {
+        "description": "An IPv6 SNAT external IP allocated to an Omicron-managed zone.\n\nThe family-typed analog of [`OmicronZoneExternalSnatIp`], used in the variants of [`OmicronZoneExternalSnat`] so the enum can't hold an address of the wrong family.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/ExternalIpUuid"
+          },
+          "snat_cfg": {
+            "$ref": "#/components/schemas/SourceNatConfigV6"
           }
         },
         "required": [
@@ -7110,8 +7314,15 @@
         "properties": {
           "artifact_hash": {
             "description": "which artifact to apply to this device",
+            "x-rust-type": {
+              "crate": "byte-wrapper",
+              "path": "byte_wrapper::HexArray::<32>",
+              "version": "0.2.0"
+            },
             "type": "string",
-            "format": "hex string (32 bytes)"
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "minLength": 64,
+            "maxLength": 64
           },
           "artifact_version": {
             "$ref": "#/components/schemas/ArtifactVersion"
@@ -7287,8 +7498,15 @@
               },
               "expected_active_phase_1_hash": {
                 "description": "The hash of the phase 1 slot specified by `expected_active_phase_1_hash`.\n\nWe should always be able to fetch this. Even if the phase 1 contents themselves have been corrupted (very scary for the active slot!), the SP can still hash those contents.",
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.2.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "expected_active_phase_1_slot": {
                 "description": "Which slot is currently active according to the SP.\n\nThis controls which slot will be used the next time the sled boots; it will _usually_ match `boot_disk`, but differs in the window of time between telling the SP to change which slot to use and the host OS rebooting to actually use that slot.",
@@ -7300,8 +7518,15 @@
               },
               "expected_active_phase_2_hash": {
                 "description": "The hash of the currently-active phase 2 artifact.\n\nIt's possible sled-agent won't be able to report this value, but that would indicate that we don't know the version currently running. The planner wouldn't stage an update without knowing the current version, so if something has gone wrong in the meantime we won't proceede either.",
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.2.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "expected_boot_disk": {
                 "description": "Which slot the host OS most recently booted from.",
@@ -7313,13 +7538,27 @@
               },
               "expected_inactive_phase_1_hash": {
                 "description": "The hash of the phase 1 slot specified by toggling `expected_active_phase_1_slot` to the other slot.\n\nWe should always be able to fetch this. Even if the phase 1 contents of the inactive slot are entirely bogus, the SP can still hash those contents.",
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.2.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "expected_inactive_phase_2_hash": {
                 "description": "The hash of the currently-inactive phase 2 artifact.\n\nIt's entirely possible that a sled needing a host OS update has no valid artifact in its inactive slot. However, a precondition for us performing a phase 1 update is that `sled-agent` on the target sled has already written the paired phase 2 artifact to the inactive slot; therefore, we don't need to be able to represent an invalid inactive slot.",
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.2.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "sled_agent_address": {
                 "description": "Address for contacting sled-agent to check phase 2 contents.",
@@ -7400,8 +7639,7 @@
             "type": "boolean"
           },
           "saga_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/SagaId"
           },
           "saga_name": {
             "type": "string"
@@ -7503,7 +7741,29 @@
         ]
       },
       "PlannerConfig": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "disruption_policy": {
+            "description": "Disruption policy applied to sleds being evacuated.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReconfiguratorDisruptionPolicy"
+              }
+            ]
+          },
+          "sled_update_reboot_policy": {
+            "description": "Policy for how the planner schedules updates that will induce reboots on sleds.\n\nIf `sled_update_reboot_policy` is [`SledUpdateRebootPolicy::ImmediateNoEvacuation`], the planner will not mark sleds for evacuation at all, which means `disruption_policy` will be ignored.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledUpdateRebootPolicy"
+              }
+            ]
+          }
+        },
+        "required": [
+          "disruption_policy",
+          "sled_update_reboot_policy"
+        ]
       },
       "PlanningAddOutOfEligibleSleds": {
         "description": "How many discretionary zones we actually placed out of how many we wanted to place.",
@@ -7837,11 +8097,18 @@
           },
           "pending_mgs_updates": {
             "$ref": "#/components/schemas/PendingMgsUpdates"
+          },
+          "update_disposition_changes": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BlueprintSledUpdateDispositionKind"
+            }
           }
         },
         "required": [
           "blocked_mgs_updates",
-          "pending_mgs_updates"
+          "pending_mgs_updates",
+          "update_disposition_changes"
         ]
       },
       "PlanningNexusGenerationBumpReport": {
@@ -8091,8 +8358,15 @@
             "type": "object",
             "properties": {
               "artifact_hash": {
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.2.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               },
               "file_name": {
                 "type": "string"
@@ -8933,11 +9207,11 @@
             "format": "uint32",
             "minimum": 0
           },
-          "disruption_policy": {
-            "$ref": "#/components/schemas/ReconfiguratorDisruptionPolicy"
-          },
           "planner_config": {
-            "default": {},
+            "default": {
+              "disruption_policy": "terminate",
+              "sled_update_reboot_policy": "immediate_no_evacuation"
+            },
             "allOf": [
               {
                 "$ref": "#/components/schemas/PlannerConfig"
@@ -8954,7 +9228,6 @@
         "required": [
           "blueprint_pruner_enabled",
           "blueprint_pruner_nkeep",
-          "disruption_policy",
           "planner_enabled",
           "tuf_repo_pruner_enabled"
         ]
@@ -9218,8 +9491,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/SagaId"
           },
           "state": {
             "$ref": "#/components/schemas/SagaState"
@@ -9317,6 +9589,15 @@
             ]
           }
         ]
+      },
+      "SagaId": {
+        "x-rust-type": {
+          "crate": "steno",
+          "path": "steno::SagaId",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "SagaQuiesceStatus": {
         "type": "object",
@@ -9738,6 +10019,25 @@
           }
         ]
       },
+      "SledUpdateRebootPolicy": {
+        "description": "Controls how the planner interacts with sleds that it needs to reboot to perform an update (e.g., of the SP or host OS).",
+        "oneOf": [
+          {
+            "description": "Reboot sleds without evacuating them first.\n\nThis results in the fastest update time, but is the most disruptive to instances on the sled: the sled will be rebooted out from under them.\n\nThis is currently the default, but we expect to change the default to `Evacuate` once all the supporting work to enable that is complete.",
+            "type": "string",
+            "enum": [
+              "immediate_no_evacuation"
+            ]
+          },
+          {
+            "description": "Evacuate sleds before rebooting.\n\nWith this policy, when the planner needs to schedule an update that will cause a sled to reboot, it will first mark the sled for evacuation and then wait for the sled to be fully evacuated before scheduling that update.",
+            "type": "string",
+            "enum": [
+              "evacuate"
+            ]
+          }
+        ]
+      },
       "SledUuid": {
         "x-rust-type": {
           "crate": "omicron-uuid-kinds",
@@ -9746,34 +10046,6 @@
         },
         "type": "string",
         "format": "uuid"
-      },
-      "SourceNatConfigGeneric": {
-        "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
-        "type": "object",
-        "properties": {
-          "first_port": {
-            "description": "The first port used for source NAT, inclusive.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          },
-          "ip": {
-            "description": "The external address provided to the instance or service.",
-            "type": "string",
-            "format": "ip"
-          },
-          "last_port": {
-            "description": "The last port used for source NAT, also inclusive.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "first_port",
-          "ip",
-          "last_port"
-        ]
       },
       "SourceNatConfigV4": {
         "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
@@ -10465,6 +10737,125 @@
         "format": "uint32",
         "minimum": 0
       },
+      "WaitingOnSledEvacuationDetails": {
+        "description": "Describes the details of what we're waiting on when a sled is being evacuated",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_from_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_ledgered_sled_config"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_sled_config_generation"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "current": {
+                    "$ref": "#/components/schemas/SledConfigGeneration"
+                  },
+                  "desired": {
+                    "$ref": "#/components/schemas/SledConfigGeneration"
+                  }
+                },
+                "required": [
+                  "current",
+                  "desired"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance_manager_no_config"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance_manager_available"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance_manager_registered_vmms"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "num_registered_vmms": {
+                    "type": "integer",
+                    "format": "uint",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "num_registered_vmms"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
       "WaitingStatus": {
         "description": "externally-exposed status for waiting updates",
         "type": "object",
@@ -10771,6 +11162,21 @@
                 "type": "string",
                 "enum": [
                   "pending_mgs_updates"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Waiting on sled update disposition changes in support of MGS updates",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sled_update_disposition_changes"
                 ]
               }
             },
