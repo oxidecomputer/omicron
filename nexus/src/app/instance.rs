@@ -111,28 +111,32 @@ type SledAgentClientError =
 pub enum SledAgentInstanceError {
     #[error(transparent)]
     Other(SledAgentClientError),
-    #[error("sled {sled_id} no longer in service")]
-    SledNotInService { sled_id: SledUuid },
+    #[error("sled {sled_id} is no longer in service")]
+    SledNotInService {
+        sled_id: SledUuid,
+        #[source]
+        source: SledAgentClientError,
+    },
     #[error("VMM no longer exists on sled {sled_id}")]
-    VmmGone { sled_id: SledUuid },
+    VmmGone {
+        sled_id: SledUuid,
+        #[source]
+        source: SledAgentClientError,
+    },
 }
 
 impl From<SledAgentInstanceError> for omicron_common::api::external::Error {
     fn from(value: SledAgentInstanceError) -> Self {
         match value {
-            SledAgentInstanceError::Other(e) => e.into(),
-            // The VMM is gone, either per the sled-agent or because its sled is
-            // no longer in service. That's neither the caller's fault nor an
-            // internal bug, so report it as a 503. This is also the status code
-            // we produce in the conversion to `HttpError` directly.
-            e @ (SledAgentInstanceError::VmmGone { .. }
-            | SledAgentInstanceError::SledNotInService { .. }) => {
-                // Sadly, because `Error::ServiceUnavailable` only has an
-                // `internal_message` field, this eats the user-facing message.
-                // Oh well.
-                Error::ServiceUnavailable {
-                    internal_message: InlineErrorChain::new(&e).to_string(),
-                }
+            SledAgentInstanceError::Other(e) => Error::from(e)
+                .internal_context("error sending request to sled-agent"),
+            SledAgentInstanceError::VmmGone { source, .. } => {
+                Error::from(source)
+                    .internal_context("VMM no longer exists on sled")
+            }
+            SledAgentInstanceError::SledNotInService { source, .. } => {
+                Error::from(source)
+                    .internal_context("sled is no longer in service")
             }
         }
     }
@@ -184,7 +188,7 @@ impl From<SledAgentInstanceError> for dropshot::HttpError {
             }
             // Similarly, if the sled is no longer in service, return a 503
             // error.
-            e @ SledAgentInstanceError::SledNotInService { sled_id } => {
+            e @ SledAgentInstanceError::SledNotInService { sled_id, .. } => {
                 let mut error = HttpError::for_unavail(None, e.to_string());
                 error.external_message = format!(
                     "The instance was running on sled {sled_id}, but that sled \
@@ -205,17 +209,17 @@ impl SledAgentInstanceError {
         opctx: &OpContext,
         datastore: &DataStore,
         sled_id: SledUuid,
-        error: SledAgentClientError,
+        source: SledAgentClientError,
     ) -> Self {
         use progenitor_client::Error as ClientError;
-        match &error {
+        match &source {
             ClientError::CommunicationError(_)
                 if !datastore
                     .check_sled_in_service(opctx, sled_id)
                     .await
                     .unwrap_or(true) =>
             {
-                Self::SledNotInService { sled_id }
+                Self::SledNotInService { sled_id, source }
             }
             // See RFD 486 §6.3:
             // https://rfd.shared.oxide.computer/rfd/486#_stopping_or_rebooting_a_running_instance
@@ -231,9 +235,9 @@ impl SledAgentInstanceError {
                 if rv.status() == http::StatusCode::NOT_FOUND
                     && rv.error_code.as_deref() == Some("NO_SUCH_INSTANCE") =>
             {
-                SledAgentInstanceError::VmmGone { sled_id }
+                SledAgentInstanceError::VmmGone { sled_id, source }
             }
-            _ => SledAgentInstanceError::Other(error),
+            _ => SledAgentInstanceError::Other(source),
         }
     }
 
