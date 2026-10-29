@@ -78,7 +78,7 @@ impl From<SiloUtilization> for silo::Utilization {
 #[diesel(table_name = project_utilization)]
 pub struct ProjectUtilization {
     pub project_id: DbTypedUuid<ProjectKind>,
-    pub silo_id: Uuid,
+    pub silo_id: DbTypedUuid<SiloKind>,
 
     pub cpus_provisioned: i64,
     pub memory_provisioned: ByteCount,
@@ -86,6 +86,10 @@ pub struct ProjectUtilization {
 }
 
 impl ProjectUtilization {
+    pub fn silo_id(&self) -> SiloUuid {
+        self.silo_id.into()
+    }
+
     pub fn project_id(&self) -> ProjectUuid {
         self.project_id.into()
     }

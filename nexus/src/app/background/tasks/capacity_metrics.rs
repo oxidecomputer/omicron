@@ -207,8 +207,8 @@ impl CapacityMetrics {
 
             for util in utils {
                 let target = ProjectQuota {
-                    project_id: util.project_id.into_untyped_uuid(),
-                    silo_id: util.silo_id,
+                    project_id: util.project_id().into_untyped_uuid(),
+                    silo_id: util.silo_id().into_untyped_uuid(),
                     nexus_id,
                 };
                 samples.extend([
