@@ -4,7 +4,6 @@
 
 use crate::app::background::Activator;
 use crate::app::background::BackgroundTask;
-use crate::app::external_endpoints::TlsCertificate;
 use anyhow::Context;
 use chrono::Utc;
 use fm::analysis_input::Input;
@@ -40,6 +39,7 @@ use nexus_types::observed_saga::{
     ObservedSaga, ObservedSagaState, SagaAbandonInfo, SagaAbandonReason,
     SagaOwnerState,
 };
+use omicron_certificates::TlsCertificate;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::GenericUuid;

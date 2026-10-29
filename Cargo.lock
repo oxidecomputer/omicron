@@ -8814,16 +8814,21 @@ dependencies = [
 name = "omicron-certificates"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "chrono",
  "display-error-chain",
  "foreign-types 0.3.2",
+ "hex",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "openssl",
  "openssl-sys",
  "rcgen",
+ "rustls",
+ "serde",
  "thiserror 2.0.18",
+ "uuid",
 ]
 
 [[package]]

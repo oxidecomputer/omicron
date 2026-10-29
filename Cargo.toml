@@ -1191,4 +1191,3 @@ path = "workspace-hack"
 omicron-common = { path = "common" }
 omicron-generation-kinds = { path = "generation-kinds" }
 omicron-uuid-kinds = { path = "uuid-kinds" }
-
