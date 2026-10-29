@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "60.0.0"
+    "version": "61.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -1691,7 +1691,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CoordinatorStatus"
+                  "$ref": "#/components/schemas/TrustQuorumCoordinatorStatusResponse"
                 }
               }
             }
@@ -1715,7 +1715,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TrustQuorumNetworkConfig"
+                  "$ref": "#/components/schemas/TrustQuorumNetworkConfigResponse"
                 }
               }
             }
@@ -10422,6 +10422,21 @@
           "rack_network_config"
         ]
       },
+      "TrustQuorumCoordinatorStatusResponse": {
+        "description": "Response type for `trust_quorum_coordinator_status`.",
+        "type": "object",
+        "properties": {
+          "status": {
+            "nullable": true,
+            "description": "The coordinator status, or `None` if this node is not currently coordinating a reconfiguration.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CoordinatorStatus"
+              }
+            ]
+          }
+        }
+      },
       "TrustQuorumNetworkConfig": {
         "description": "Network configuration used to bring up the control plane.\n\nThis type mirrors `bootstore::schemes::v0::NetworkConfig` but adds `JsonSchema` for API compatibility.",
         "type": "object",
@@ -10440,6 +10455,21 @@
           "blob",
           "generation"
         ]
+      },
+      "TrustQuorumNetworkConfigResponse": {
+        "description": "Response type for `trust_quorum_network_config`.",
+        "type": "object",
+        "properties": {
+          "config": {
+            "nullable": true,
+            "description": "The trust quorum network config, or `None` if a config has not been loaded or received since Sled Agent started.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TrustQuorumNetworkConfig"
+              }
+            ]
+          }
+        }
       },
       "TxEqConfig": {
         "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",

@@ -73,7 +73,9 @@ use sled_agent_types::support_bundle::{
     SupportBundleTransferQueryParams,
 };
 use sled_agent_types::trust_quorum::{
-    ProxyCommitRequest, ProxyPrepareAndCommitRequest, TrustQuorumNetworkConfig,
+    ProxyCommitRequest, ProxyPrepareAndCommitRequest,
+    TrustQuorumCoordinatorStatusResponse, TrustQuorumNetworkConfig,
+    TrustQuorumNetworkConfigResponse,
 };
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
@@ -96,7 +98,6 @@ use trust_quorum_types::messages::{
     CommitRequest, LrtqUpgradeMsg, PrepareAndCommitRequest, ReconfigureMsg,
 };
 use trust_quorum_types::status::CommitStatus;
-use trust_quorum_types::status::CoordinatorStatus;
 use trust_quorum_types::status::NodeStatus;
 
 use super::sled_agent::SledAgent;
@@ -1035,7 +1036,8 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn trust_quorum_coordinator_status(
         _request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Option<CoordinatorStatus>>, HttpError> {
+    ) -> Result<HttpResponseOk<TrustQuorumCoordinatorStatusResponse>, HttpError>
+    {
         method_unimplemented()
     }
 
@@ -1075,7 +1077,7 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn trust_quorum_network_config_get(
         _request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Option<TrustQuorumNetworkConfig>>, HttpError>
+    ) -> Result<HttpResponseOk<TrustQuorumNetworkConfigResponse>, HttpError>
     {
         method_unimplemented()
     }

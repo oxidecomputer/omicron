@@ -343,7 +343,15 @@ async fn prepare(
                 config.coordinator
             )
         })?
-        .into_inner();
+        .into_inner()
+        .status
+        .ok_or_else(|| {
+            anyhow!(
+                "Coordinator {} reported no coordinator status: it is not \
+                 currently coordinating a reconfiguration.",
+                config.coordinator
+            )
+        })?;
 
     // Write state back to DB
     let state = datastore

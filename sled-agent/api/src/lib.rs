@@ -6,10 +6,10 @@ use std::collections::BTreeMap;
 
 use camino::Utf8PathBuf;
 use dropshot::{
-    Body, FreeformBody, Header, HttpError, HttpResponseAccepted,
-    HttpResponseCreated, HttpResponseDeleted, HttpResponseHeaders,
-    HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
-    StreamingBody, TypedBody,
+    Body, ClientErrorStatusCode, FreeformBody, Header, HttpError,
+    HttpResponseAccepted, HttpResponseCreated, HttpResponseDeleted,
+    HttpResponseHeaders, HttpResponseOk, HttpResponseUpdatedNoContent, Path,
+    Query, RequestContext, StreamingBody, TypedBody,
 };
 use dropshot_api_manager_types::api_versions;
 use omicron_common::api::internal::shared::{
@@ -17,9 +17,9 @@ use omicron_common::api::internal::shared::{
     SledIdentifiers, VirtualNetworkInterfaceHost,
 };
 use sled_agent_types_versions::{
-    latest, v1, v11, v14, v18, v20, v22, v24, v25, v26, v28, v29, v30, v31,
-    v32, v33, v34, v37, v39, v40, v41, v42, v43, v44, v46, v47, v48, v49, v50,
-    v51, v52, v53, v55,
+    latest, v1, v11, v14, v15, v18, v20, v22, v24, v25, v26, v28, v29, v30,
+    v31, v32, v33, v34, v37, v39, v40, v41, v42, v43, v44, v46, v47, v48, v49,
+    v50, v51, v52, v53, v55,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -36,6 +36,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (61, TRUST_QUORUM_NULLABLE_RESPONSES),
     (60, ADD_MULTIRACK_JOIN_SERVICE_STATUS),
     (59, INSTANCE_ATTACHED_SUBNETS_MAP),
     (58, BYTE_WRAPPER_0_2_BUMP),
@@ -1605,13 +1606,54 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/trust-quorum/coordinator-status",
+        versions = VERSION_TRUST_QUORUM_NULLABLE_RESPONSES..,
     }]
     async fn trust_quorum_coordinator_status(
         request_context: RequestContext<Self::Context>,
     ) -> Result<
-        HttpResponseOk<Option<trust_quorum_types::status::CoordinatorStatus>>,
+        HttpResponseOk<
+            latest::trust_quorum::TrustQuorumCoordinatorStatusResponse,
+        >,
         HttpError,
     >;
+
+    /// Get the coordinator status if this node is coordinating a reconfiguration
+    #[endpoint {
+        operation_id = "trust_quorum_coordinator_status",
+        method = GET,
+        path = "/trust-quorum/coordinator-status",
+        versions = ..VERSION_TRUST_QUORUM_NULLABLE_RESPONSES,
+    }]
+    async fn trust_quorum_coordinator_status_v13(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<
+            trust_quorum_types_versions::v1::status::CoordinatorStatus,
+        >,
+        HttpError,
+    > {
+        // These versions were declared as returning an
+        // Option<CoordinatorStatus>, but their corresponding OpenAPI documents
+        // indicated that the CoordinatorStatus response was non-nullable. (This
+        // is a Dropshot bug; see omicron#11623). We've since changed this API
+        // to return a non-nullable CoordinatorStatus, making the API match the
+        // immutable blessed documents. But that leaves open the question of how
+        // None can be represented on the wire. We return a 404 -- old clients
+        // will receive it as an error and will handle it reasonably well.
+        Self::trust_quorum_coordinator_status(request_context).await?.try_map(
+            |response| {
+                response.status.ok_or_else(|| {
+                    HttpError::for_client_error(
+                        None,
+                        ClientErrorStatusCode::NOT_FOUND,
+                        "this node is not currently coordinating a trust \
+                         quorum reconfiguration"
+                            .to_string(),
+                    )
+                })
+            },
+        )
+    }
 
     /// Attempt to prepare and commit a trust quorum configuration
     #[endpoint {
@@ -1672,13 +1714,43 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/trust-quorum/network-config",
+        versions = VERSION_TRUST_QUORUM_NULLABLE_RESPONSES..,
     }]
     async fn trust_quorum_network_config_get(
         request_context: RequestContext<Self::Context>,
     ) -> Result<
-        HttpResponseOk<Option<latest::trust_quorum::TrustQuorumNetworkConfig>>,
+        HttpResponseOk<latest::trust_quorum::TrustQuorumNetworkConfigResponse>,
         HttpError,
     >;
+
+    /// Get the current network config from trust quorum
+    #[endpoint {
+        operation_id = "trust_quorum_network_config_get",
+        method = GET,
+        path = "/trust-quorum/network-config",
+        versions = ..VERSION_TRUST_QUORUM_NULLABLE_RESPONSES,
+    }]
+    async fn trust_quorum_network_config_get_v15(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<v15::trust_quorum::TrustQuorumNetworkConfig>,
+        HttpError,
+    > {
+        // See the comment in trust_quorum_coordinator_status_v13.
+        Self::trust_quorum_network_config_get(request_context).await?.try_map(
+            |response| {
+                response.config.ok_or_else(|| {
+                    HttpError::for_client_error(
+                        None,
+                        ClientErrorStatusCode::NOT_FOUND,
+                        "this node does not have a trust quorum network \
+                         config"
+                            .to_string(),
+                    )
+                })
+            },
+        )
+    }
 
     /// Update the network config in trust quorum
     #[endpoint {
