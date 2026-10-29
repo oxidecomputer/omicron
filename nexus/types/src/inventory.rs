@@ -242,6 +242,14 @@ impl Collection {
             .and_then(|by_bb| by_bb.get(baseboard_id))
     }
 
+    /// Returns the SP on `baseboard_id`
+    pub fn sp_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Result<&ServiceProcessor, NotInInventory> {
+        self.sps.get(baseboard_id).ok_or(NotInInventory(InventoryItem::Sp))
+    }
+
     /// Returns caboose `which` on `baseboard_id`, along with the version that
     /// it contains
     pub fn caboose_with_version_for(
@@ -277,6 +285,21 @@ impl Collection {
         baseboard_id: &BaseboardId,
     ) -> Result<CabooseWithVersion<'_>, CabooseVersionError> {
         self.caboose_with_version_for(CabooseWhich::Stage0, baseboard_id)
+    }
+
+    /// Returns the hash of the active host phase 1 image on `baseboard_id`
+    pub fn active_host_phase_1_hash_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Result<ArtifactHash, NotInInventory> {
+        let Some(active_slot) =
+            self.host_phase_1_active_slot_for(baseboard_id).map(|s| s.slot)
+        else {
+            return Err(NotInInventory(InventoryItem::HostPhase1ActiveSlot));
+        };
+        self.host_phase_1_flash_hash_for(active_slot, baseboard_id)
+            .map(|h| h.hash)
+            .ok_or(NotInInventory(InventoryItem::HostPhase1Hash(active_slot)))
     }
 
     /// Iterate over all the Omicron zones in the sled-agent ledgers of this
@@ -395,6 +418,46 @@ impl Collection {
     /// to display part or all of a collection.
     pub fn display(&self) -> CollectionDisplay<'_> {
         CollectionDisplay::new(self)
+    }
+}
+
+/// An item about a particular baseboard that was not found in an inventory
+/// collection
+///
+/// This does not identify the baseboard.  Callers generally report it in the
+/// context of a particular baseboard already.
+///
+/// This type is not used in the planner's failure reasons (e.g.,
+/// `FailedSpUpdateReason`).  Those are part of the planning report's
+/// serialized format, and they have their own variant for each kind of
+/// missing item (e.g., `SpNotInInventory`).  A missing caboose is reported
+/// with `CabooseVersionError::NotInInventory` instead.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[error("{0} is not in inventory")]
+pub struct NotInInventory(pub InventoryItem);
+
+/// Describes an item that inventory collects about a baseboard
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InventoryItem {
+    /// the baseboard's SP
+    Sp,
+    /// the active host phase 1 slot of a sled
+    HostPhase1ActiveSlot,
+    /// the hash of the contents of a sled's host phase 1 slot
+    HostPhase1Hash(M2Slot),
+}
+
+impl std::fmt::Display for InventoryItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InventoryItem::Sp => write!(f, "SP"),
+            InventoryItem::HostPhase1ActiveSlot => {
+                write!(f, "active host phase 1 slot")
+            }
+            InventoryItem::HostPhase1Hash(slot) => {
+                write!(f, "host phase 1 hash for slot {slot:?}")
+            }
+        }
     }
 }
 

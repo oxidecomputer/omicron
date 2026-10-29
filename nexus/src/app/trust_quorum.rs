@@ -33,6 +33,11 @@ impl super::Nexus {
         let (latest_committed_config, latest_epoch) = self
             .tq_load_latest_possible_committed_config(opctx, authz_tq.clone())
             .await?;
+
+        // Check the new sleds' software before allowing them to be added to
+        // the system.
+        self.sled_check_versions(opctx, &new_sleds).await?;
+
         let new_epoch = latest_epoch.next();
         let proposed = self
             .add_sleds_proposed_config(
