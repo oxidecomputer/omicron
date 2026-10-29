@@ -223,13 +223,36 @@ impl PausedVmmRegistration {
 }
 
 impl NextVmmRegistrationRequest {
-    /// Waits until a `vmm_register` request arrives and is paused, returning a
-    /// handle that controls when and how the request completes.
-    pub async fn wait_for_request(self) -> PausedVmmRegistration {
-        self.rx.await.expect(
-            "the simulated sled agent has exited before any vmm registration \
-            request was received",
-        )
+    /// Waits for up to `timeout` for a `vmm_register` request to be received by
+    /// the simulated sled-agent and be paused, returning a handle that controls
+    /// when and how the request completes.
+    ///
+    /// # Panics
+    ///
+    /// This function panics if:
+    ///
+    /// - `timeout` elapses before a `vmm_register` request is received, so that
+    ///   the test may fail in a timely manner if one is never sent.
+    /// - The simulated sled-agent task exits before a `vmm_register` request
+    ///   is received.
+    pub async fn wait_for_request(
+        self,
+        timeout: Duration,
+    ) -> PausedVmmRegistration {
+        match tokio::time::timeout(timeout, self.rx).await {
+            Ok(Ok(paused)) => paused,
+            // If the oneshot receive fails, then that means the sender side of
+            // the channel was dropped, indicating the simulated sled-agent has
+            // terminated.
+            Ok(Err(_)) => panic!(
+                "simulated sled-agent exited before a `vmm_register` request \
+                 was received"
+            ),
+            Err(_) => panic!(
+                "simulated sled-agent did not receive a `vmm_register` request \
+                 within {timeout:?}",
+            ),
+        }
     }
 }
 
