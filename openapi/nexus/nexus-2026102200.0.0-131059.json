@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026102100.0.0"
+    "version": "2026102200.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -2103,6 +2103,7 @@
           "silos"
         ],
         "summary": "Delete TLS certificate in current silo",
+        "description": "The silo's last certificate cannot be deleted. Create another certificate first.",
         "operationId": "certificate_delete",
         "parameters": [
           {
@@ -7581,7 +7582,7 @@
           "system/silos"
         ],
         "summary": "Delete TLS certificate in silo",
-        "description": "The silo must be specified if the certificate is specified by name, and must not be specified if the certificate is specified by ID.",
+        "description": "The silo must be specified if the certificate is specified by name, and must not be specified if the certificate is specified by ID.\n\nThe silo's last certificate cannot be deleted. Create another certificate first.",
         "operationId": "silo_certificate_delete",
         "parameters": [
           {

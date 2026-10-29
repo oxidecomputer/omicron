@@ -56,6 +56,8 @@ type ControlPlaneTestContext =
 const CERTS_URL: &str = "/v1/certificates";
 const CERT_NAME: &str = "my-certificate";
 const CERT_NAME2: &str = "my-other-certificate";
+const LAST_CERT_ERROR: &str = "cannot delete the last certificate for a silo; \
+    create another certificate first";
 
 async fn certs_list(client: &ClientTestContext) -> Vec<Certificate> {
     NexusRequest::iter_collection_authn(client, CERTS_URL, "", None)
@@ -194,13 +196,25 @@ async fn test_crud(cptestctx: &ControlPlaneTestContext) {
     let list = certs_list(&client).await;
     assert_eq!(list.len(), 2, "Expected exactly two certificates");
 
-    // We can delete the certificates, and they no longer appear in the API
-    delete_certificate(&client, CERT_NAME2).await;
+    // We can delete a certificate, and it no longer appears in the API
     delete_certificate(&client, CERT_NAME).await;
-    let certs = certs_list(&client).await;
-    assert!(certs.is_empty());
+    let list = certs_list(&client).await;
+    assert_eq!(list.len(), 1, "Expected exactly one certificate");
+    assert_eq!(list[0].identity.name, CERT_NAME2);
     cert_get_expect_not_found(&client).await;
     cert_delete_expect_not_found(&client).await;
+
+    // But we can't delete the silo's last certificate
+    let error = object_delete_error(
+        client,
+        &format!("{CERTS_URL}/{CERT_NAME2}"),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(error.message, LAST_CERT_ERROR);
+    let list = certs_list(&client).await;
+    assert_eq!(list.len(), 1, "Expected exactly one certificate");
+    assert_eq!(list[0].identity.name, CERT_NAME2);
 }
 
 #[nexus_test]
@@ -466,9 +480,39 @@ async fn test_system_certificates_crud(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    // Delete by name, recreate, and delete by ID.
+    // Make sure the last cert check is silo-scoped, i.e., a certificate
+    // existing in another silo doesn't let us delete the target silo's last
+    // certificate.
+    let caller_chain =
+        CertificateChain::new(cptestctx.wildcard_silo_dns_name());
+    create_certificate(
+        client,
+        CERT_NAME,
+        caller_chain.cert_chain_as_pem(),
+        caller_chain.end_cert_private_key_as_pem(),
+    )
+    .await;
+    for url in [&by_name_url, &by_id_url] {
+        let error =
+            object_delete_error(client, url, StatusCode::BAD_REQUEST).await;
+        assert_eq!(error.message, LAST_CERT_ERROR);
+    }
+
+    // With a second certificate in the silo, delete by name, recreate, and
+    // delete by ID.
+    let params2 = CertificateCreate {
+        identity: IdentityMetadataCreateParams {
+            name: CERT_NAME2.parse().unwrap(),
+            description: String::new(),
+        },
+        ..params.clone()
+    };
+    let created2: Certificate =
+        object_create(client, &system_certs_url, &params2).await;
     object_delete(client, &by_name_url).await;
-    assert!(system_certs_list(other_silo_name).await.is_empty());
+    let list = system_certs_list(other_silo_name).await;
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].identity.id, created2.identity.id);
     let created: Certificate =
         object_create(client, &system_certs_url, &params).await;
     object_delete(
@@ -476,7 +520,9 @@ async fn test_system_certificates_crud(cptestctx: &ControlPlaneTestContext) {
         &format!("/v1/system/certificates/{}", created.identity.id),
     )
     .await;
-    assert!(system_certs_list(other_silo_name).await.is_empty());
+    let list = system_certs_list(other_silo_name).await;
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].identity.id, created2.identity.id);
 }
 
 /// Make a request as `authn` and check that it fails with `status`
@@ -668,6 +714,20 @@ async fn test_system_certificates_authz(cptestctx: &ControlPlaneTestContext) {
     let unprivileged = AuthnMode::UnprivilegedUser;
     expect_status(client, &unprivileged, Method::GET, &by_id_url, 404).await;
     expect_status(client, &unprivileged, Method::DELETE, &by_id_url, 404).await;
+
+    // The silo administrator can delete a certificate once it's not the
+    // silo's last.
+    let params2 = CertificateCreate {
+        identity: IdentityMetadataCreateParams {
+            name: CERT_NAME2.parse().unwrap(),
+            description: String::new(),
+        },
+        ..params
+    };
+    NexusRequest::objects_post(client, &url, &params2)
+        .authn_as(admin.clone())
+        .execute_and_parse_unwrap::<Certificate>()
+        .await;
     NexusRequest::object_delete(client, &by_id_url)
         .authn_as(admin)
         .execute()
