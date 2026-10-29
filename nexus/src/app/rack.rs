@@ -825,11 +825,15 @@ impl super::Nexus {
         opctx: &OpContext,
         sled: hardware::UninitializedSledId,
     ) -> Result<SledUuid, Error> {
-        let baseboard_id = sled.clone().into();
+        let baseboard_id: BaseboardId = sled.clone().into();
         let hw_baseboard_id = self
             .db_datastore
             .find_hw_baseboard_id(opctx, &baseboard_id)
             .await?;
+
+        // Check the sled's software before allowing it to be added to the
+        // system.
+        self.sled_check_versions(opctx, [&baseboard_id]).await?;
 
         let subnet = self.db_datastore.rack_subnet(opctx, self.rack_id).await?;
         let rack_subnet =
@@ -854,12 +858,6 @@ impl super::Nexus {
                     ),
                 });
             }
-        };
-
-        // Convert `UninitializedSledId` to the sled-agent type
-        let baseboard_id = BaseboardId {
-            serial_number: sled.serial.clone(),
-            part_number: sled.part.clone(),
         };
 
         // Make the call to sled-agent

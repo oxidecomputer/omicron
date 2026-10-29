@@ -101,6 +101,7 @@ mod scim;
 mod session;
 mod silo;
 pub(crate) mod sled;
+mod sled_add_checks;
 mod sled_instance;
 mod snapshot;
 mod ssh_key;
