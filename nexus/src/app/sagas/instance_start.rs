@@ -1782,7 +1782,7 @@ mod test {
         assert_eq!(creating_vmm.state, nexus_db_model::VmmState::Creating);
 
         // Fail the VMM, as though a request to sled-agent had received a
-        // NO_SUCH_VMM response.
+        // NO_SUCH_INSTANCE response.
         let no_such_instance =
             SledAgentInstanceError(sled_agent_client::Error::ErrorResponse(
                 progenitor_client::ResponseValue::new(
@@ -1797,7 +1797,7 @@ mod test {
             ));
         let reason = no_such_instance
             .vmm_failure_reason()
-            .expect("this should error fail the vmm");
+            .expect("this should fail the vmm");
         let (.., authz_instance) = LookupPath::new(&opctx, nexus.datastore())
             .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
