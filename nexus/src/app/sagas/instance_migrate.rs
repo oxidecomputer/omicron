@@ -516,34 +516,29 @@ async fn sim_ensure_destination_propolis(
 async fn sim_ensure_destination_propolis_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
+    let params = sagactx.saga_params::<Params>()?;
     let osagactx = sagactx.user_data();
     let dst_propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
     let dst_sled_id = sagactx.lookup::<SledUuid>("dst_sled_id")?;
     let db_instance =
         sagactx.lookup::<db::model::Instance>("set_migration_ids")?;
+    let instance_id = db_instance.id();
 
     info!(osagactx.log(), "unregistering destination vmm for migration unwind";
-          "instance_id" => %db_instance.id(),
+          "instance_id" => %instance_id,
           "sled_id" => %dst_sled_id,
           "prev_runtime_state" => ?db_instance.runtime());
 
-    // Ensure that the destination sled has no Propolis matching the description
-    // the saga previously generated. If this succeeds, or if it fails because
-    // the destination sled no longer knows about this instance, allow the rest
-    // of unwind to take care of cleaning up the migration IDs in the instance
-    // record. Otherwise the unwind has failed and manual intervention is
-    // needed.
-    match osagactx
-        .nexus()
-        .instance_ensure_unregistered(&dst_propolis_id, &dst_sled_id)
-        .await
-    {
-        Ok(_) => Ok(()),
-        Err(InstanceStateChangeError::SledAgent(inner)) => {
-            if !inner.vmm_gone() { Ok(()) } else { Err(inner.0.into()) }
-        }
-        Err(e) => Err(e.into()),
-    }
+    super::instance_common::ensure_vmm_unregistered(
+        &sagactx,
+        &params.serialized_authn,
+        InstanceUuid::from_untyped_uuid(instance_id),
+        dst_propolis_id,
+        dst_sled_id,
+    )
+    .await?;
+
+    Ok(())
 }
 
 async fn sim_instance_migrate(

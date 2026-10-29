@@ -1197,23 +1197,6 @@ impl super::Nexus {
             .map_err(Into::into)
     }
 
-    /// Idempotently ensures that the sled specified in `db_instance` does not
-    /// have a record of the instance. If the instance is currently running on
-    /// this sled, this operation rudely terminates it.
-    pub(crate) async fn instance_ensure_unregistered(
-        &self,
-        propolis_id: &PropolisUuid,
-        sled_id: &SledUuid,
-    ) -> Result<Option<SledVmmState>, InstanceStateChangeError> {
-        let sa = self.sled_client(&sled_id).await?;
-        sa.vmm_unregister(propolis_id)
-            .await
-            .map(|res| res.into_inner().updated_runtime.map(Into::into))
-            .map_err(|e| {
-                InstanceStateChangeError::SledAgent(SledAgentInstanceError(e))
-            })
-    }
-
     /// Determines the action to take on an instance's active VMM given a
     /// request to change its state.
     ///
