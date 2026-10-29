@@ -4,8 +4,6 @@
 
 //! Virtual Machine Instances
 
-use super::DEFAULT_ACPI_SHUTDOWN_TIMEOUT_SECS;
-use super::MAX_ACPI_SHUTDOWN_TIMEOUT_SECS;
 use super::MAX_DISKS_PER_INSTANCE;
 use super::MAX_EPHEMERAL_IPS_PER_INSTANCE;
 use super::MAX_EXTERNAL_IPS_PER_INSTANCE;
@@ -42,6 +40,8 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::model::InstanceStateComputer;
+use nexus_defaults::DEFAULT_ACPI_SHUTDOWN_TIMEOUT_SECS;
+use nexus_defaults::MAX_ACPI_SHUTDOWN_TIMEOUT_SECS;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_ip;
 use nexus_types::external_api::instance;
