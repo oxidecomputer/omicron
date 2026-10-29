@@ -24,6 +24,7 @@ use nexus_types::external_api::certificate;
 use nexus_types::external_api::hardware;
 use nexus_types::external_api::networking;
 use nexus_types::external_api::policy;
+use nexus_types::external_api::rack::SledAddPrecheckOverrides;
 use nexus_types::external_api::silo;
 use nexus_types::inventory::SpType;
 use nexus_types::silo::silo_dns_name;
@@ -832,8 +833,14 @@ impl super::Nexus {
             .await?;
 
         // Check the sled's software before allowing it to be added to the
-        // system.
-        self.sled_check_versions(opctx, [&baseboard_id]).await?;
+        // system.  This endpoint was removed from the API before overrides
+        // were added, so its callers cannot skip any checks.
+        self.sled_check_versions(
+            opctx,
+            [&baseboard_id],
+            &SledAddPrecheckOverrides::default(),
+        )
+        .await?;
 
         let subnet = self.db_datastore.rack_subnet(opctx, self.rack_id).await?;
         let rack_subnet =

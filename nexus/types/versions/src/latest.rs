@@ -517,12 +517,14 @@ pub mod physical_disk {
 pub mod rack {
     pub use crate::v2025_11_20_00::rack::Rack;
 
-    pub use crate::v2026_01_21_00::rack::RackMembershipAddSledsRequest;
     pub use crate::v2026_01_21_00::rack::RackMembershipChangeState;
     pub use crate::v2026_01_21_00::rack::RackMembershipConfigPathParams;
     pub use crate::v2026_01_21_00::rack::RackMembershipStatus;
     pub use crate::v2026_01_21_00::rack::RackMembershipVersion;
     pub use crate::v2026_01_21_00::rack::RackMembershipVersionParam;
+
+    pub use crate::v2026_10_29_00::rack::RackMembershipAddSledsRequest;
+    pub use crate::v2026_10_29_00::rack::SledAddPrecheckOverrides;
 }
 
 pub mod subnet_pool {
