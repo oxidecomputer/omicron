@@ -32,6 +32,7 @@ use nexus_types::instance::VmmState;
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::backoff::BackoffError;
 use omicron_common::backoff::backon_retry_policy_internal_service;
