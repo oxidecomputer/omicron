@@ -13,6 +13,7 @@ use nexus_reconfigurator_planning::mgs_updates::DeployedSledVersionsError;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::MgsUpdateComponent;
+use nexus_types::external_api::rack::SledAddPrecheckOverrides;
 use nexus_types::inventory::NotInInventory;
 use nexus_types::inventory::SpType;
 use nexus_types::tuf_repo::TufRepoDescription;
@@ -20,18 +21,26 @@ use omicron_common::api::external::Error;
 use omicron_generation_kinds::TargetReleaseGeneration;
 use omicron_uuid_kinds::SledUuid;
 use sled_hardware_types::BaseboardId;
+use slog::Logger;
 use slog::info;
+use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::fmt::Display;
 
 impl super::Nexus {
     /// Checks that both the system and the sleds are ready for these sleds to
     /// be added.
+    ///
+    /// `overrides` describes checks that the operator asked to skip.  We still
+    /// run those checks when we can, but we log any problem they find instead
+    /// of returning it.
     pub(super) async fn sled_check_versions(
         &self,
         opctx: &OpContext,
         sleds: impl IntoIterator<Item = &BaseboardId>,
+        overrides: &SledAddPrecheckOverrides,
     ) -> Result<(), Error> {
+        let log = opctx.log.new(o!("overrides" => format!("{overrides:?}")));
         let target_release =
             self.datastore().target_release_get_current(opctx).await?;
         let release_source = target_release.release_source().map_err(|e| {
@@ -48,7 +57,7 @@ impl super::Nexus {
                 // adopted self-service update.  In these cases, it's not
                 // obvious what versions of software we would check against.
                 info!(
-                    opctx.log,
+                    &log,
                     "skipping software checks for sled add: \
                      no target release has been set"
                 );
@@ -64,12 +73,35 @@ impl super::Nexus {
             .into();
         let (_, blueprint) =
             self.datastore().blueprint_target_get_current_full(opctx).await?;
-        check_system_settled(&blueprint, target_release.generation(), &repo)
-            .map_err(SledAddPrecheckError::from)?;
+
+        // Each call to `apply_override` names the single field of `overrides`
+        // that applies to every error the check can return.
+        let SledAddPrecheckOverrides {
+            allow_without_settled_target_release,
+            allow_unverified_sled_software,
+        } = *overrides;
+
+        apply_override(
+            &log,
+            allow_without_settled_target_release,
+            check_system_settled(
+                &blueprint,
+                target_release.generation(),
+                &repo,
+            ),
+        )?;
 
         let Some(inventory) =
             self.datastore().inventory_get_latest_collection(opctx).await?
         else {
+            if allow_unverified_sled_software {
+                warn!(
+                    log,
+                    "skipping software checks for sled add: no inventory \
+                     collection found, and the operator overrode these checks"
+                );
+                return Ok(());
+            }
             return Err(Error::internal_error("no inventory collection found"));
         };
 
@@ -84,6 +116,7 @@ impl super::Nexus {
                         })
                     }
                     Err(DeployedSledVersionsError::NotASled(sp_type)) => {
+                        // This is not overridable.  Return immediately.
                         return Err(SledAddPrecheckError::NotASled {
                             board: sled.clone(),
                             sp_type,
@@ -91,10 +124,35 @@ impl super::Nexus {
                         .into());
                     }
                 };
-            report.map_err(SledAddPrecheckError::from)?;
+            apply_override(&log, allow_unverified_sled_software, report)?;
         }
         Ok(())
     }
+}
+
+/// Returns the error from a failed check unless `allowed` is set, in which
+/// case the error is logged instead
+fn apply_override<E>(
+    log: &Logger,
+    allowed: bool,
+    result: Result<(), E>,
+) -> Result<(), SledAddPrecheckError>
+where
+    E: std::error::Error + Into<SledAddPrecheckError>,
+{
+    let Err(error) = result else {
+        return Ok(());
+    };
+    if !allowed {
+        return Err(error.into());
+    }
+    warn!(
+        log,
+        "sled add precheck failed, but proceeding because the operator \
+         overrode it";
+        InlineErrorChain::new(&error),
+    );
+    Ok(())
 }
 
 /// Checks that the system has settled on the target release described by
@@ -170,6 +228,9 @@ enum SledAddPrecheckError {
 }
 
 /// Reasons that the system has not settled on its target release
+///
+/// The operator can override all of these with
+/// `allow_without_settled_target_release`.
 #[derive(Debug, thiserror::Error)]
 enum SystemNotSettledError {
     #[error(
@@ -199,6 +260,9 @@ enum SystemNotSettledError {
 
 /// Reasons that a sled's software could not be confirmed to match the target
 /// release
+///
+/// The operator can override all of these with
+/// `allow_unverified_sled_software`.
 #[derive(Debug, thiserror::Error)]
 enum SledSoftwareError {
     #[error("the software on sled {sled} could not be checked")]
@@ -314,6 +378,7 @@ mod tests {
     use nexus_reconfigurator_planning::mgs_updates::RotCheckError;
     use nexus_types::inventory::CabooseVersionError;
     use nexus_types::inventory::CabooseWhich;
+    use omicron_test_utils::dev::test_setup_log;
     use sled_hardware_types::GIMLET_SLED_MODEL;
     use std::collections::BTreeMap;
     use tufaceous_artifact::ArtifactHash;
@@ -457,5 +522,43 @@ mod tests {
                     .to_string(),
             }]
         );
+    }
+
+    #[test]
+    fn test_apply_override() {
+        let logctx = test_setup_log("test_apply_override");
+        let log = &logctx.log;
+        let mismatch = || SledSoftwareError::Mismatch {
+            sled: test_sled(),
+            target_release_version: "17.0.0".parse().expect("valid version"),
+            problems: vec![SledSoftwareProblem::WrongImage {
+                component: MgsUpdateComponent::Sp,
+                found: "1.0.0".to_string(),
+                expected: "2.0.0".to_string(),
+            }],
+        };
+
+        // A check that passed is never an error, whether or not it was
+        // overridden.
+        apply_override::<SledSoftwareError>(log, false, Ok(()))
+            .expect("check passed");
+        apply_override::<SledSoftwareError>(log, true, Ok(()))
+            .expect("check passed");
+
+        // A check that failed is an error unless it was overridden.
+        let error = apply_override(log, false, Err(mismatch()))
+            .expect_err("not overridden");
+        assert!(
+            matches!(
+                error,
+                SledAddPrecheckError::SledSoftware(
+                    SledSoftwareError::Mismatch { .. }
+                )
+            ),
+            "unexpected error: {error:?}"
+        );
+        apply_override(log, true, Err(mismatch())).expect("overridden");
+
+        logctx.cleanup_successful();
     }
 }

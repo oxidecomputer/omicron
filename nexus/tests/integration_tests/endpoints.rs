@@ -110,6 +110,7 @@ pub static DEMO_RACK_ADD_SLEDS_REQUEST: LazyLock<
         serial_number: "demo-serial".to_string(),
         part_number: "demo-part".to_string(),
     }]),
+    override_prechecks: rack::SledAddPrecheckOverrides::default(),
 });
 
 pub static DEMO_SLED_PROVISION_POLICY: LazyLock<
