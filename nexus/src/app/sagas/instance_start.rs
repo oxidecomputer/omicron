@@ -28,7 +28,6 @@ use nexus_db_queries::db::datastore::LocalStorageDisk;
 use nexus_db_queries::db::datastore::sled::SledReservationReason;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
-use nexus_types::instance::VmmState;
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -152,10 +151,6 @@ declare_saga_actions! {
         + sis_ensure_registered
     }
 
-    CHECK_IT_DIDNT_DIE_ON_US -> "check_it_didnt_die_on_us" {
-        + sis_check_it_didnt_die_on_us
-    }
-
     UPDATE_MULTICAST_SLED_ID -> "multicast_sled_id" {
         + sis_update_multicast_sled_id
         - sis_update_multicast_sled_id_undo
@@ -225,7 +220,6 @@ impl NexusSaga for SagaInstanceStart {
         builder.append(v2p_ensure_action());
         builder.append(ensure_unregistered_if_unwinding_action());
         builder.append(ensure_registered_action());
-        builder.append(check_it_didnt_die_on_us_action());
         builder.append(update_multicast_sled_id_action());
         builder.append(add_virtual_resources_action());
         builder.append(ensure_running_action());
@@ -930,7 +924,7 @@ async fn sis_ensure_registered(
                       "start saga: sled agent failed to register instance";
                       "instance_id" => %instance_id,
                       "sled_id" =>  %sled_id,
-                      "error" => ?inner,
+                      "error" => InlineErrorChain::new(&inner),
                       "start_reason" => ?params.reason);
 
                 // Don't set the instance to Failed in this case. Instead, allow
@@ -943,7 +937,7 @@ async fn sis_ensure_registered(
                 info!(osagactx.log(),
                       "start saga: internal error registering instance";
                       "instance_id" => %instance_id,
-                      "error" => ?inner,
+                      "error" => InlineErrorChain::new(&inner),
                       "start_reason" => ?params.reason);
                 saga_action_failed(inner)
             }
@@ -997,86 +991,6 @@ async fn sis_ensure_unregistered(
     .await?;
 
     Ok(())
-}
-
-async fn sis_check_it_didnt_die_on_us(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    // This step is a bit goofy, but trust me, it (sort of) makes sense. The
-    // goal here is to ensure that the VMM record has not advanced to an
-    // unexpected state or been deleted since the previous action registered the
-    // VMM. Writing back the state returned by the sled-agent to the database
-    // may fail, if the VMM record's generation number has advanced --- such as
-    // if something in the control plane failed or deleted it. However, that
-    // action should not fail if this occurs, because we must now unregister the
-    // VMM from the sled-agent. That can only happen if `sis_ensure_registered`
-    // *succeeds*, since its undo action is what would tell the sled-agent
-    // "actually wait no please make sure that VMM doesn't exist".
-    //
-    // Therefore, we put off actually checking what the database state of the
-    // VMM record is until we have allowed `sis_ensure_registered` to succeed,
-    // so that it can have succeeded enough to undo itself, even though it
-    // logically *should* have failed. Aren't sagas fun?
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let datastore = osagactx.datastore();
-    let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
-    let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
-    retry_notify(
-        retry_policy_internal_service(),
-        || async {
-            let db_vmm = datastore
-                .vmm_fetch(&opctx, &propolis_id)
-                .await
-                .map_err(|e| match e {
-                    e @ Error::ObjectNotFound { .. } => {
-                        BackoffError::permanent(e)
-                    }
-                    e => BackoffError::transient(e),
-                })?;
-
-            let actual_state = db_vmm.runtime().state;
-            if actual_state != VmmState::Starting {
-                Err(BackoffError::permanent(Error::conflict(format!(
-                    "the VMM record's state is {actual_state} (it should be \
-                     Starting)"
-                ))))
-            } else {
-                Ok(())
-            }
-        },
-        |e, after| {
-            warn!(
-                osagactx.log(),
-                "retrying an attempt to check the VMM record's state that \
-                 failed due to a (hopefully transient!) database error";
-                 "instance_id" => %instance_id,
-                 "vmm_id" => %propolis_id,
-                 "retry_after" => ?after,
-                 "error" => %e,
-            );
-        },
-    )
-    .await
-    .map_err(|e| {
-        const BAD_NEWS: &str = "the database record for the VMM this saga just \
-            ensured in the previous action no longer exists in the Starting \
-            state";
-        error!(osagactx.log(),
-            "start saga: bad news: {BAD_NEWS}! this saga must now unwind, as \
-             Nexus and the sled-agent now disagree on the VMMs state, with \
-             potentially disastrous results!";
-            "instance_id" => %instance_id,
-            "vmm_id" => %propolis_id,
-            "error" => %e
-        );
-        saga_action_failed(e.internal_context(BAD_NEWS))
-    })
 }
 
 async fn sis_update_multicast_sled_id(

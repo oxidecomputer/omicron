@@ -1823,16 +1823,24 @@ impl super::Nexus {
         match instance_register_result {
             Ok(state) => {
                 self.notify_vmm_updated(opctx, *propolis_id, &state).await?;
-                let runtime = state.vmm_state;
-                Ok(db::model::Vmm {
-                    time_state_updated: runtime.time_updated,
-                    generation: runtime.generation.into(),
-                    state: DbVmmState::from(runtime.state),
-                    failure_reason: db::model::VmmFailureReason::from_vmm_state(
-                        runtime.state,
-                    ),
-                    ..initial_vmm.clone()
-                })
+                let sled_runtime = state.vmm_state;
+                let db_vmm = self
+                    .db_datastore
+                    .vmm_fetch(opctx, propolis_id)
+                    .await
+                    .map_err(|e| {
+                        e.internal_context("failed to re-fetch DB VMM state")
+                    })?;
+                let db_runtime = db_vmm.runtime();
+                if sled_runtime.state != db_runtime.state {
+                    return Err(Error::conflict(format!(
+                        "expected to have advanced VMM {propolis_id} to new \
+                         runtime state {sled_runtime:?}, but found the \
+                         database state {db_runtime:?}"
+                    ))
+                    .into());
+                }
+                Ok(db_vmm)
             }
             Err(e) => {
                 // If this error indicates that the VMM should be marked as
