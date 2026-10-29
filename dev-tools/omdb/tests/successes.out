@@ -836,6 +836,14 @@ task: "fm_analysis"
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
+    input preparation took <REDACTED DURATION>ms
+      alert_markers:          <REDACTED DURATION>ms
+      ereporter_restarts:     <REDACTED DURATION>ms
+      ereports:               <REDACTED DURATION>ms
+      in_service_disks:       <REDACTED DURATION>ms
+      observed_sagas:         <REDACTED DURATION>ms
+      silo_certificates:      <REDACTED DURATION>ms
+      support_bundle_markers: <REDACTED DURATION>ms
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_config_loader"
@@ -1591,6 +1599,14 @@ task: "fm_analysis"
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
+    input preparation took <REDACTED DURATION>ms
+      alert_markers:          <REDACTED DURATION>ms
+      ereporter_restarts:     <REDACTED DURATION>ms
+      ereports:               <REDACTED DURATION>ms
+      in_service_disks:       <REDACTED DURATION>ms
+      observed_sagas:         <REDACTED DURATION>ms
+      silo_certificates:      <REDACTED DURATION>ms
+      support_bundle_markers: <REDACTED DURATION>ms
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_config_loader"
