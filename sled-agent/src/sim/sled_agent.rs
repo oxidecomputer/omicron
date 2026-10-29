@@ -196,7 +196,7 @@ pub struct NextVmmRegistrationRequest {
 /// though `resume` had been called. However, this results in a warning, since a
 /// test which pauses a test _presumably_ wants to actually control when it is
 /// allowed to continue.
-#[must_use = "why would you pause the next VMM registration request if you '
+#[must_use = "why would you pause the next VMM registration request if you \
     don't want to control when it is unpaused explicitly?"]
 pub struct PausedVmmRegistration {
     propolis_id: PropolisUuid,
