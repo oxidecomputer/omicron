@@ -498,11 +498,7 @@ async fn sim_ensure_destination_propolis(
 
                 // Don't set the instance to Failed in this case. Instead, allow
                 // the saga to unwind, marking the VMM as SagaUnwound.
-                saga_action_failed(Error::InternalError {
-                    internal_message: format!(
-                        "sled-agent failed to register instance: {inner}"
-                    ),
-                })
+                saga_action_failed(Error::from(inner))
             }
             InstanceStateChangeError::Other(inner) => {
                 info!(
@@ -615,11 +611,7 @@ async fn sim_instance_migrate(
             Err(saga_action_failed(
                 // TODO(eliza): want to get the failure reason written to the
                 // unwound VMM record here...
-                omicron_common::api::external::Error::InternalError {
-                    internal_message: format!(
-                        "sled-agent failed to start migration: {inner}"
-                    ),
-                },
+                omicron_common::api::external::Error::from(inner),
             ))
         }
         Err(InstanceStateChangeError::Other(inner)) => {

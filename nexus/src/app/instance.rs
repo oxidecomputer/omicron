@@ -117,6 +117,27 @@ pub enum SledAgentInstanceError {
     VmmGone { sled_id: SledUuid },
 }
 
+impl From<SledAgentInstanceError> for omicron_common::api::external::Error {
+    fn from(value: SledAgentInstanceError) -> Self {
+        match value {
+            SledAgentInstanceError::Other(e) => e.into(),
+            // The VMM is gone, either per the sled-agent or because its sled is
+            // no longer in service. That's neither the caller's fault nor an
+            // internal bug, so report it as a 503. This is also the status code
+            // we produce in the conversion to `HttpError` directly.
+            e @ (SledAgentInstanceError::VmmGone { .. }
+            | SledAgentInstanceError::SledNotInService { .. }) => {
+                // Sadly, because `Error::ServiceUnavailable` only has an
+                // `internal_message` field, this eats the user-facing message.
+                // Oh well.
+                Error::ServiceUnavailable {
+                    internal_message: InlineErrorChain::new(&e).to_string(),
+                }
+            }
+        }
+    }
+}
+
 impl From<SledAgentInstanceError> for dropshot::HttpError {
     fn from(value: SledAgentInstanceError) -> Self {
         use dropshot::ErrorStatusCode;
@@ -243,17 +264,17 @@ pub enum InstanceStateChangeError {
     Other(#[from] omicron_common::api::external::Error),
 }
 
-// // Allow direct conversion of instance state change errors into API errors for
-// // callers who don't care about the specific reason the update failed and just
-// // need to return an API error.
-// impl From<InstanceStateChangeError> for omicron_common::api::external::Error {
-//     fn from(value: InstanceStateChangeError) -> Self {
-//         match value {
-//             InstanceStateChangeError::SledAgent(e) => e.into(),
-//             InstanceStateChangeError::Other(e) => e,
-//         }
-//     }
-// }
+// Allow direct conversion of instance state change errors into API errors for
+// callers who don't care about the specific reason the update failed and just
+// need to return an API error.
+impl From<InstanceStateChangeError> for omicron_common::api::external::Error {
+    fn from(value: InstanceStateChangeError) -> Self {
+        match value {
+            InstanceStateChangeError::SledAgent(e) => e.into(),
+            InstanceStateChangeError::Other(e) => e,
+        }
+    }
+}
 
 impl From<InstanceStateChangeError> for dropshot::HttpError {
     fn from(value: InstanceStateChangeError) -> Self {

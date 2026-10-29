@@ -909,11 +909,7 @@ async fn sis_ensure_registered(
                 // the saga to unwind and restore the instance to the Stopped
                 // state (matching what would happen if there were a failure
                 // prior to this point).
-                saga_action_failed(Error::InternalError {
-                    internal_message: format!(
-                        "sled-agent failed to register instance: {inner}"
-                    ),
-                })
+                saga_action_failed(Error::from(inner))
             }
             InstanceStateChangeError::Other(inner) => {
                 info!(osagactx.log(),
@@ -1062,11 +1058,7 @@ async fn sis_ensure_running(
             // the saga to unwind and restore the instance to the Stopped
             // state (matching what would happen if there were a failure
             // prior to this point).
-            Err(saga_action_failed(Error::InternalError {
-                internal_message: format!(
-                    "sled-agent failed to set instance to running: {inner}"
-                ),
-            }))
+            Err(saga_action_failed(Error::from(inner)))
         }
         Err(InstanceStateChangeError::Other(inner)) => {
             info!(osagactx.log(),
