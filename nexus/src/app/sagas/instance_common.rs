@@ -713,7 +713,7 @@ pub(super) async fn instance_ip_remove_opte(
 /// # Errors
 ///
 /// This function returns an error if the sled could not be looked up in the
-/// database, or if the sled-agent returns a non-retryable error. exists.
+/// database, or if the sled-agent returns a non-retryable error..
 pub(super) async fn ensure_vmm_unregistered(
     sagactx: &NexusActionContext,
     serialized_authn: &authn::saga::Serialized,
