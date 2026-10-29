@@ -1754,7 +1754,7 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3#e577a94678bf0a8d64d719acd3e19edd965f66a3"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=af7c56708b38eb19377728c8f5e090e6abf32255#af7c56708b38eb19377728c8f5e090e6abf32255"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3329,16 +3329,16 @@ dependencies = [
 [[package]]
 name = "dpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3#e577a94678bf0a8d64d719acd3e19edd965f66a3"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=af7c56708b38eb19377728c8f5e090e6abf32255#af7c56708b38eb19377728c8f5e090e6abf32255"
 dependencies = [
  "async-trait",
  "chrono",
- "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
- "crc8",
+ "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=af7c56708b38eb19377728c8f5e090e6abf32255)",
  "futures",
  "http",
  "oxnet",
- "progenitor 0.14.0",
+ "progenitor 0.15.1",
+ "progenitor-extras",
  "regress 0.11.1",
  "reqwest",
  "schemars 0.8.22",
@@ -3353,7 +3353,7 @@ dependencies = [
 [[package]]
 name = "dpd-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3#e577a94678bf0a8d64d719acd3e19edd965f66a3"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=af7c56708b38eb19377728c8f5e090e6abf32255#af7c56708b38eb19377728c8f5e090e6abf32255"
 dependencies = [
  "dpd-types-versions",
 ]
@@ -3361,7 +3361,7 @@ dependencies = [
 [[package]]
 name = "dpd-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3#e577a94678bf0a8d64d719acd3e19edd965f66a3"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=af7c56708b38eb19377728c8f5e090e6abf32255#af7c56708b38eb19377728c8f5e090e6abf32255"
 dependencies = [
  "chrono",
  "dropshot",
@@ -8294,7 +8294,7 @@ dependencies = [
  "chrono",
  "crucible-agent-client",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=af7c56708b38eb19377728c8f5e090e6abf32255)",
  "dropshot",
  "fmd-adm-sys",
  "futures",
@@ -9344,7 +9344,7 @@ dependencies = [
  "display-error-chain",
  "dns-server",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=af7c56708b38eb19377728c8f5e090e6abf32255)",
  "dropshot",
  "ereport-types",
  "expectorate",
@@ -14696,7 +14696,7 @@ dependencies = [
  "daft",
  "ddm-admin-client",
  "ddm-api-types",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=af7c56708b38eb19377728c8f5e090e6abf32255)",
  "dropshot",
  "either",
  "futures",
@@ -17986,7 +17986,7 @@ name = "wicket-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=af7c56708b38eb19377728c8f5e090e6abf32255)",
  "dropshot",
  "gateway-client",
  "gateway-types",
@@ -18053,7 +18053,7 @@ dependencies = [
  "clap",
  "debug-ignore",
  "display-error-chain",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=af7c56708b38eb19377728c8f5e090e6abf32255)",
  "dropshot",
  "either",
  "expectorate",
