@@ -1711,19 +1711,15 @@ mod test {
     /// received while the VMM record is `Creating`, and is forwarded to the
     /// sled agent. At this point in time, the sled-agent has not yet received a
     /// request to register that VMM, and (correctly) indicates that it does not
-    /// exist, which results in Nexus moving the VMM to `Failed`. However, this
-    /// is invisible to the start saga, which continues its attempt to register
-    /// and run the VMM, rather than unwinding.
-    ///
-    /// Between linking its VMM to the instance and registering it with
-    /// sled-agent, the start saga leaves the VMM `Creating` while the instance
-    /// appears to be `Starting`. A stop request that arrives in that window is
-    /// forwarded to sled-agent, which hasn't heard of the VMM and says so.
-    /// Nexus then marks the VMM `Failed`, and an instance-update saga unlinks
-    /// and deletes it. If the start saga registers and runs the VMM anyway,
-    /// sled-agent is left running a VMM that the control plane considers dead,
-    /// while the instance is free to be restarted elsewhere with the same
-    /// disks.
+    /// exist, which results in Nexus moving the VMM to `Failed` and kicking off
+    /// an `instance_update` saga to transition the instance to `Failed` and
+    /// delete the `vmm` record. However, this is invisible to the start saga,
+    /// which continues its attempt to register and run the VMM, rather than
+    /// unwinding. This ultimately results in the sled-agent running a VMM that
+    /// the control plane considers dead. The control plane may then attempt to
+    /// restart the instance elsewhere, which gets stuck when the new VMM tries
+    /// to activate the same crucible disk(s) that the zombie VMM is already
+    /// using.
     ///
     /// Here, we reproduce this race by pausing the `instance_ensure_register`
     /// request once it's received by the sled-agent simulator, and then marking
