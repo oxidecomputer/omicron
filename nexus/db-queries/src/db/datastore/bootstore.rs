@@ -18,8 +18,8 @@ use sled_agent_types::rack_init::rack_init_bootstore_generation;
 pub enum BootstoreGenerationBump {
     /// The generation was bumped to this value.
     Bumped(i64),
-    /// The generation did not match `expected`.
-    GenerationChanged,
+    /// The generation did not match `expected`. Nothing changed.
+    UnexpectedGeneration,
 }
 
 impl DataStore {
@@ -27,11 +27,11 @@ impl DataStore {
     /// gen number being `expected`.
     ///
     /// Returns [`BootstoreGenerationBump::Bumped`] with the new generation, or
-    /// [`BootstoreGenerationBump::GenerationChanged`] if the generation wasn't
-    /// `expected`. This is a "compare-and-swap" approach to help synchronize
-    /// writes to sled agent's bootstore. This guarantees that only one caller
-    /// writes for each gen number and will prevent dueling if the following is
-    /// guaranteed:
+    /// [`BootstoreGenerationBump::UnexpectedGeneration`] if the generation
+    /// wasn't `expected`. This is a "compare-and-swap" approach to help
+    /// synchronize writes to sled agent's bootstore. This guarantees that only
+    /// one caller writes for each gen number and will prevent dueling if the
+    /// following is guaranteed:
     /// - Writers read the gen number before or in the same transaction that
     /// they use to read the config from the DB they wish to write.
     /// - Writers only write if they receive the new gen from calling this
@@ -66,8 +66,8 @@ impl DataStore {
                     key,
                     generation: rack_init_bootstore_generation::NEXUS_INITIAL,
                 })
-                // Doing nothing on conflict is what prevents this race in the
-                // `None` case.
+                // Doing nothing on conflict lets us detect whether another
+                // concurrent writer already inserted this row.
                 .on_conflict(bootstore_keys::key)
                 .do_nothing()
                 .returning(dsl::generation)
@@ -79,7 +79,7 @@ impl DataStore {
 
         Ok(match new_generation {
             Some(generation) => BootstoreGenerationBump::Bumped(generation),
-            None => BootstoreGenerationBump::GenerationChanged,
+            None => BootstoreGenerationBump::UnexpectedGeneration,
         })
     }
 
@@ -131,7 +131,7 @@ impl DataStore {
 
 #[cfg(test)]
 mod test {
-    use super::BootstoreGenerationBump::{Bumped, GenerationChanged};
+    use super::BootstoreGenerationBump::{Bumped, UnexpectedGeneration};
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::NETWORK_KEY;
     use omicron_test_utils::dev;
@@ -153,20 +153,26 @@ mod test {
         };
 
         // Before the first bump, only a caller expecting `None` can bump.
-        assert_eq!(bump(Some(NEXUS_INITIAL)).await.unwrap(), GenerationChanged);
+        assert_eq!(
+            bump(Some(NEXUS_INITIAL)).await.unwrap(),
+            UnexpectedGeneration
+        );
         assert_eq!(bump(None).await.unwrap(), Bumped(NEXUS_INITIAL));
 
         // After that, only a caller expecting the current generation can bump.
-        assert_eq!(bump(None).await.unwrap(), GenerationChanged);
+        assert_eq!(bump(None).await.unwrap(), UnexpectedGeneration);
         assert_eq!(
             bump(Some(NEXUS_INITIAL - 1)).await.unwrap(),
-            GenerationChanged
+            UnexpectedGeneration
         );
         assert_eq!(
             bump(Some(NEXUS_INITIAL)).await.unwrap(),
             Bumped(NEXUS_INITIAL + 1)
         );
-        assert_eq!(bump(Some(NEXUS_INITIAL)).await.unwrap(), GenerationChanged);
+        assert_eq!(
+            bump(Some(NEXUS_INITIAL)).await.unwrap(),
+            UnexpectedGeneration
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

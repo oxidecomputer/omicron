@@ -116,26 +116,26 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // calculate and apply bootstore changes
                 //
 
-                let (input, expected_generation) =
-                    match nexus_switch_config_preparation::read_and_assemble(
-                        &self.datastore,
-                        opctx,
-                        &log,
-                        rack.rack_subnet,
-                    )
-                    .await
-                    {
-                        Ok(result) => result,
-                        Err(e) => {
-                            error!(
-                                log,
-                                "failed to read bootstore network config; \
-                                 skipping rack";
-                                "error" => InlineErrorChain::new(&e),
-                            );
-                            continue;
-                        }
-                    };
+                let input = match nexus_switch_config_preparation::read_and_assemble(
+                    &self.datastore,
+                    opctx,
+                    &log,
+                    rack.rack_subnet,
+                )
+                .await
+                {
+                    Ok(input) => input,
+                    Err(e) => {
+                        error!(
+                            log,
+                            "failed to read bootstore network config; \
+                             skipping rack";
+                            "error" => InlineErrorChain::new(&e),
+                        );
+                        continue;
+                    }
+                };
+                let expected_generation = input.bootstore_generation;
 
                 let rack_network_config =
                     match nexus_switch_config::build_rack_network_config(
@@ -316,7 +316,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         .await
                     {
                         Ok(BootstoreGenerationBump::Bumped(value)) => value,
-                        Ok(BootstoreGenerationBump::GenerationChanged) => {
+                        Ok(BootstoreGenerationBump::UnexpectedGeneration) => {
                             // Lost the race to another nexus.
                             info!(
                                 log,

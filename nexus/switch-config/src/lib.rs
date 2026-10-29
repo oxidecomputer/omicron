@@ -53,6 +53,9 @@ pub struct RackNetworkConfigInput {
     pub infra_ip_last: IpAddr,
     /// The BFD sessions to configure.
     pub bfd: Vec<BfdPeerConfig>,
+    /// The bootstore generation number at the time the inputs above were read.
+    /// `None` if it hasn't yet been bumped by Nexus.
+    pub bootstore_generation: Option<i64>,
 }
 
 /// Per-switch BGP configuration.
@@ -282,6 +285,7 @@ pub fn build_rack_network_config(
         infra_ip_first,
         infra_ip_last,
         bfd,
+        bootstore_generation: _,
     } = input;
 
     let mut problems = Vec::new();
@@ -529,6 +533,7 @@ mod tests {
             infra_ip_first: "fd00:1122:3344:1::1".parse().unwrap(),
             infra_ip_last: "fd00:1122:3344:1::2".parse().unwrap(),
             bfd: vec![],
+            bootstore_generation: None,
         }
     }
 

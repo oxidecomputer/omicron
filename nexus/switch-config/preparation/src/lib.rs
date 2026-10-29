@@ -25,15 +25,12 @@ use std::net::IpAddr;
 
 /// Read the bootstore network config inputs from the database and assemble them
 /// into a [`RackNetworkConfigInput`].
-///
-/// Also returns the bootstore generation read together with the inputs (see
-/// [`SwitchConfigData::bootstore_generation`]).
 pub async fn read_and_assemble(
     datastore: &DataStore,
     opctx: &OpContext,
     log: &Logger,
     rack_subnet: Option<IpNetwork>,
-) -> Result<(RackNetworkConfigInput, Option<i64>), Error> {
+) -> Result<RackNetworkConfigInput, Error> {
     let SwitchConfigData {
         applied_ports,
         bgp_configs,
@@ -126,15 +123,15 @@ pub async fn read_and_assemble(
         })
         .collect();
 
-    let input = assemble(
+    Ok(assemble(
         rack_subnet,
         &applied_port_refs,
         switch_bgp_configs,
         infra_ip_first,
         infra_ip_last,
         bfd,
-    );
-    Ok((input, bootstore_generation))
+        bootstore_generation,
+    ))
 }
 
 /// Assemble the [`RackNetworkConfigInput`] for the bootstore config builder
@@ -153,6 +150,7 @@ pub fn assemble(
     infra_ip_first: IpAddr,
     infra_ip_last: IpAddr,
     bfd: Vec<BfdPeerConfig>,
+    bootstore_generation: Option<i64>,
 ) -> RackNetworkConfigInput {
     // Collapse the per-switch BGP associations into one `SwitchBgpConfig` per
     // switch, flagging conflicting entries.
@@ -170,6 +168,7 @@ pub fn assemble(
         infra_ip_first,
         infra_ip_last,
         bfd,
+        bootstore_generation,
     }
 }
 
