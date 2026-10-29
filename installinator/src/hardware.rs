@@ -7,6 +7,7 @@ use anyhow::Result;
 use anyhow::anyhow;
 use anyhow::ensure;
 use sled_agent_types::disk::DiskVariant;
+use sled_hardware::DiskBayOccupant;
 use sled_hardware::ExternalDisks;
 use sled_hardware::HardwareManager;
 use sled_hardware::SledMode;
@@ -32,6 +33,25 @@ impl Hardware {
             ExternalDisks::DetectPhysical,
         )
         .map_err(|err| anyhow!("failed to create HardwareManager: {err}"))?;
+
+        // An M.2 we cannot read would be left out of the install, so fail the
+        // scan and let the caller retry.
+        let unreadable_m2s: Vec<String> = hardware
+            .disk_bays()
+            .into_iter()
+            .filter(|bay| bay.kind == DiskVariant::M2)
+            .filter_map(|bay| match bay.occupant {
+                DiskBayOccupant::Unreadable { error, .. } => {
+                    Some(format!("{}: {error}", bay.location))
+                }
+                _ => None,
+            })
+            .collect();
+        ensure!(
+            unreadable_m2s.is_empty(),
+            "could not read M.2 bay(s): {}",
+            unreadable_m2s.join("; "),
+        );
 
         let disks: Vec<RawDisk> =
             hardware.disks().into_values().map(|disk| disk.into()).collect();

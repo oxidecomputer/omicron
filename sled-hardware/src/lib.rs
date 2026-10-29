@@ -422,11 +422,15 @@ impl HardwareView {
         self.online_processor_count
     }
 
+    /// The disks last seen in each bay. A disk stays here while its bay is
+    /// [`DiskBayOccupant::Unreadable`], and leaves once the bay is read and
+    /// holds something else.
     pub fn disks(&self) -> HashMap<DiskIdentity, UnparsedDisk> {
         self.disks.clone()
     }
 
-    /// Every U.2 bay and M.2 socket of the chassis and what occupies it.
+    /// Every U.2 bay and M.2 socket of the chassis and what the latest poll
+    /// found in it.
     ///
     /// Empty on hosts that are not Oxide sleds, where there is no chassis
     /// topology to read.

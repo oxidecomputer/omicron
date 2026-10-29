@@ -47,13 +47,20 @@ pub enum DiskBayOccupant {
     /// list under this identity.
     Disk { identity: DiskIdentity },
     /// A device is attached but there is no disk sled-agent can manage: an
-    /// NVMe controller with no usable namespace, something that is not NVMe
-    /// at all, or a device sled-agent could not read.
+    /// NVMe controller with no usable namespace, or something that is not
+    /// NVMe at all.
     Device {
         /// The driver bound to the device, if one is.
         driver: Option<String>,
         /// The device's path under `/devices`, if the topology recorded one.
         devfs_path: Option<String>,
+    },
+    /// The topology or libnvme could not describe the bay on the latest
+    /// poll. A disk last seen in this bay stays in the sled's disk list.
+    Unreadable {
+        /// The driver the topology found bound to the device, if any.
+        driver: Option<String>,
+        error: String,
     },
 }
 
@@ -289,23 +296,24 @@ pub(crate) enum PolledBay {
         location: String,
         kind: DiskVariant,
         driver: Option<String>,
+        error: String,
     },
 }
 
-/// Combines one poll's bays with the previous view into the disks and bays to
-/// report.
+/// Combines one poll's bays with the previous disks into the disks and bays
+/// to report.
 ///
-/// A bay this poll could not describe keeps what the previous view said about
-/// it, so a fault in one bay neither drops its disk nor holds up the others.
-/// With no previous entry, it is reported as a device with no disk.
+/// Bays describe only this poll. A bay this poll could not describe is
+/// reported as unreadable, but the disk previously seen at its location stays
+/// in the disk list, so a fault in one bay neither drops its disk nor holds up
+/// the others.
 ///
 /// If two bays claim the same disk identity, a bay that saw the disk on this
-/// poll wins over one carrying it over from the previous view (the disk may
+/// poll wins over one carrying it over from the previous disks (the disk may
 /// have moved), and otherwise the first bay wins.
 pub(crate) fn resolve_bays(
     log: &Logger,
     polled: Vec<PolledBay>,
-    previous_bays: &[DiskBay],
     previous_disks: &HashMap<DiskIdentity, UnparsedDisk>,
 ) -> (HashMap<DiskIdentity, UnparsedDisk>, Vec<DiskBay>) {
     // Each bay, the disk it claims, and whether that claim is carried over.
@@ -315,25 +323,13 @@ pub(crate) fn resolve_bays(
             PolledBay::Described { bay, disk } => {
                 (bay, disk.map(|d| *d), false)
             }
-            PolledBay::Unreadable { location, kind, driver } => {
-                match previous_bays.iter().find(|b| b.location == location) {
-                    Some(previous) => {
-                        let disk = match &previous.occupant {
-                            DiskBayOccupant::Disk { identity } => {
-                                previous_disks.get(identity).cloned()
-                            }
-                            _ => None,
-                        };
-                        (previous.clone(), disk, true)
-                    }
-                    None => {
-                        let occupant = DiskBayOccupant::Device {
-                            driver,
-                            devfs_path: None,
-                        };
-                        (DiskBay { location, kind, occupant }, None, true)
-                    }
-                }
+            PolledBay::Unreadable { location, kind, driver, error } => {
+                let disk = previous_disks
+                    .values()
+                    .find(|d| d.location() == location)
+                    .cloned();
+                let occupant = DiskBayOccupant::Unreadable { driver, error };
+                (DiskBay { location, kind, occupant }, disk, true)
             }
         })
         .collect();
@@ -357,8 +353,13 @@ pub(crate) fn resolve_bays(
                     "kept" => winner,
                     "ignored" => &bay.location,
                 );
-                bay.occupant =
-                    DiskBayOccupant::Device { driver: None, devfs_path: None };
+                // An unreadable bay already reports that it is unreadable.
+                if !*carried {
+                    bay.occupant = DiskBayOccupant::Device {
+                        driver: None,
+                        devfs_path: None,
+                    };
+                }
             } else {
                 bay_of_disk.insert(identity.clone(), bay.location.clone());
                 disks.insert(identity, disk);
@@ -634,61 +635,80 @@ mod tests {
             location: location.to_string(),
             kind: DiskVariant::U2,
             driver: Some("nvme".to_string()),
+            error: "controller locked".to_string(),
+        }
+    }
+
+    fn unreadable_occupant() -> DiskBayOccupant {
+        DiskBayOccupant::Unreadable {
+            driver: Some("nvme".to_string()),
+            error: "controller locked".to_string(),
         }
     }
 
     #[test]
     fn unreadable_bay_keeps_previous_disk() {
-        let (previous_disks, previous_bays) = resolve_bays(
+        let (previous_disks, _) = resolve_bays(
             &log(),
             vec![described(&nvme_bay(vec![namespace()]), Some(&facts(1)))],
-            &[],
             &HashMap::new(),
         );
         assert_eq!(previous_disks.len(), 1);
 
-        let (disks, bays) = resolve_bays(
-            &log(),
-            vec![unreadable("N3")],
-            &previous_bays,
-            &previous_disks,
-        );
-        assert_eq!(disks, previous_disks);
-        assert_eq!(bays, previous_bays);
+        // The disk stays across consecutive unreadable polls, while the bay
+        // reports only what this poll saw.
+        let mut disks = previous_disks.clone();
+        for _ in 0..2 {
+            let bays;
+            (disks, bays) =
+                resolve_bays(&log(), vec![unreadable("N3")], &disks);
+            assert_eq!(disks, previous_disks);
+            assert_eq!(bays.len(), 1);
+            assert_eq!(bays[0].location, "N3");
+            assert_eq!(bays[0].occupant, unreadable_occupant());
+        }
     }
 
     #[test]
-    fn unreadable_bay_without_history_is_a_device() {
+    fn unreadable_bay_without_history_has_no_disk() {
         let (disks, bays) = resolve_bays(
             &log(),
             vec![
                 described(&bay(ObservedOccupant::Empty), None),
                 unreadable("N4"),
             ],
-            &[],
             &HashMap::new(),
         );
         assert!(disks.is_empty());
         assert_eq!(bays.len(), 2);
         assert_eq!(bays[0].occupant, DiskBayOccupant::Empty);
         assert_eq!(bays[1].location, "N4");
-        assert_eq!(
-            bays[1].occupant,
-            DiskBayOccupant::Device {
-                driver: Some("nvme".to_string()),
-                devfs_path: None,
-            }
+        assert_eq!(bays[1].occupant, unreadable_occupant());
+    }
+
+    #[test]
+    fn readable_bay_drops_previous_disk() {
+        let (previous_disks, _) = resolve_bays(
+            &log(),
+            vec![described(&nvme_bay(vec![namespace()]), Some(&facts(1)))],
+            &HashMap::new(),
         );
+        let (disks, bays) = resolve_bays(
+            &log(),
+            vec![described(&bay(ObservedOccupant::Empty), None)],
+            &previous_disks,
+        );
+        assert!(disks.is_empty());
+        assert_eq!(bays[0].occupant, DiskBayOccupant::Empty);
     }
 
     #[test]
     fn fresh_disk_beats_carried_over_disk() {
         // The disk was in N3; it has moved to N4, and N3 now holds something
         // unreadable that is walked first.
-        let (previous_disks, previous_bays) = resolve_bays(
+        let (previous_disks, _) = resolve_bays(
             &log(),
             vec![described(&nvme_bay(vec![namespace()]), Some(&facts(1)))],
-            &[],
             &HashMap::new(),
         );
         let mut moved = nvme_bay(vec![namespace()]);
@@ -697,15 +717,11 @@ mod tests {
         let (disks, bays) = resolve_bays(
             &log(),
             vec![unreadable("N3"), described(&moved, Some(&facts(1)))],
-            &previous_bays,
             &previous_disks,
         );
         assert_eq!(disks.len(), 1);
         assert_eq!(disks.values().next().unwrap().location(), "N4");
-        assert_eq!(
-            bays[0].occupant,
-            DiskBayOccupant::Device { driver: None, devfs_path: None }
-        );
+        assert_eq!(bays[0].occupant, unreadable_occupant());
         assert!(matches!(bays[1].occupant, DiskBayOccupant::Disk { .. }));
     }
 
@@ -720,7 +736,6 @@ mod tests {
                 described(&first, Some(&facts(1))),
                 described(&second, Some(&facts(1))),
             ],
-            &[],
             &HashMap::new(),
         );
         assert_eq!(disks.len(), 1);

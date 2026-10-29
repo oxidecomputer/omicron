@@ -350,10 +350,11 @@ fn poll_bay(
     boot_storage_unit: BootStorageUnit,
     bay: &ObservedBay,
 ) -> PolledBay {
-    let unreadable = || PolledBay::Unreadable {
+    let unreadable = |error: String| PolledBay::Unreadable {
         location: bay.location.clone(),
         kind: bay.kind,
         driver: bay.binding_driver.clone(),
+        error,
     };
     let facts = match &bay.contents {
         Ok(BayContents {
@@ -382,7 +383,10 @@ fn poll_bay(
                         "nvme_instance" => %instance,
                         InlineErrorChain::new(&err),
                     );
-                    return unreadable();
+                    return unreadable(format!(
+                        "failed to query NVMe controller: {}",
+                        InlineErrorChain::new(&err),
+                    ));
                 }
             }
         }
@@ -401,7 +405,7 @@ fn poll_bay(
                 "Could not describe disk bay";
                 InlineErrorChain::new(&err),
             );
-            unreadable()
+            unreadable(InlineErrorChain::new(&err).to_string())
         }
     }
 }
@@ -525,12 +529,12 @@ fn poll_device_tree(
     let HardwareSnapshot { tofino: polled_tofino, bays: polled_bays } =
         polled_hw;
 
-    // Bays this poll could not describe keep what the previous view said.
-    // If no bays could be read, the disks are left as they are.
+    // Disks in bays this poll could not describe stay in the view. If no
+    // bays could be read, the disks are left as they are.
     let polled_disks = match polled_bays {
         Ok(bays) => {
             let previous = hardware_view_tx.borrow();
-            Some(resolve_bays(log, bays, &previous.disk_bays, &previous.disks))
+            Some(resolve_bays(log, bays, &previous.disks))
         }
         Err(err) => {
             warn!(
@@ -884,6 +888,10 @@ impl HardwareManager {
 
     pub fn disks(&self) -> HashMap<DiskIdentity, UnparsedDisk> {
         self.hardware_view_rx.borrow().disks()
+    }
+
+    pub fn disk_bays(&self) -> Vec<DiskBay> {
+        self.hardware_view_rx.borrow().disk_bays().to_vec()
     }
 
     pub fn is_scrimlet(&self) -> bool {
