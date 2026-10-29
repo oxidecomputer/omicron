@@ -1009,6 +1009,30 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         config: TrustQuorumConfig,
     ) -> Result<(), TransactionError<Error>> {
+        // Baseboard IDs have been embedded in certs via sprockets handshake
+        // and sent to Nexus. Record them here rather than wait for inventory,
+        // whose first collection writes the same rows and may land before or
+        // after this handoff.
+        {
+            use nexus_db_schema::schema::hw_baseboard_id::dsl;
+            let rows: Vec<HwBaseboardId> = config
+                .members
+                .keys()
+                .cloned()
+                .map(HwBaseboardId::from)
+                .collect();
+            diesel::insert_into(dsl::hw_baseboard_id)
+                .values(rows)
+                .on_conflict_do_nothing()
+                .execute_async(conn)
+                .await
+                .map_err(TransactionError::Database)?;
+        }
+
+        // We just inserted records but need to read them again because ON
+        // CONFLICT DO NOTHING ... RETURNING only returns the rows the
+        // statement actually inserted. Members already recorded by
+        // inventory would be missing from the results.
         let hw_baseboard_ids = Self::lookup_hw_baseboard_ids_conn(
             conn,
             config.members.keys().cloned(),
