@@ -21,8 +21,8 @@ use omicron_common::api::external::UpdateResult;
 use omicron_uuid_kinds::ConsoleSessionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::SiloUuid;
 use rand::{RngCore, SeedableRng, rngs::StdRng};
-use uuid::Uuid;
 
 fn generate_session_token() -> String {
     // TODO: "If getrandom is unable to provide secure entropy this method will panic."
@@ -69,7 +69,7 @@ impl super::Nexus {
 
         Ok(authn::ConsoleSessionWithSiloId {
             console_session: db_session,
-            silo_id: db_silo_user.silo_id,
+            silo_id: db_silo_user.silo_id(),
         })
     }
 
@@ -99,7 +99,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_user_id: SiloUserUuid,
-    ) -> Result<Uuid, Reason> {
+    ) -> Result<SiloUuid, Reason> {
         let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
             .silo_user_id(silo_user_id)
             .fetch()
@@ -121,6 +121,6 @@ impl super::Nexus {
                 | Error::NotFound { .. }
                 | Error::Gone => Reason::UnknownError { source: error },
             })?;
-        Ok(db_silo_user.silo_id)
+        Ok(db_silo_user.silo_id())
     }
 }

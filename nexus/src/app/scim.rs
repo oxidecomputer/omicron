@@ -13,6 +13,7 @@ use dropshot::HttpError;
 use http::Response;
 use http::StatusCode;
 use nexus_auth::authz;
+use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authn::{Actor, Reason};
 use nexus_db_queries::context::OpContext;
@@ -108,7 +109,7 @@ impl super::Nexus {
             let now = Utc::now();
             if now > *time_expires {
                 return Err(Reason::BadCredentials {
-                    actor: Actor::Scim { silo_id: bearer_token.silo_id },
+                    actor: Actor::Scim { silo_id: bearer_token.silo_id() },
                     source: anyhow!(
                         "token expired at {time_expires} (current time: {now})"
                     ),
@@ -118,8 +119,8 @@ impl super::Nexus {
 
         // Validate that silo has the SCIM user provision type
         let (_, db_silo) = {
-            self.silo_lookup(opctx, bearer_token.silo_id.into())
-                .map_err(|e| Reason::UnknownError { source: e })?
+            LookupPath::new(opctx, &self.db_datastore)
+                .silo_id(bearer_token.silo_id())
                 .fetch()
                 .await
                 .map_err(|e| Reason::UnknownError { source: e })?
@@ -129,7 +130,7 @@ impl super::Nexus {
             // This should basically be impossible if the bearer token lookup
             // returned something, but double check anyway.
             return Err(Reason::BadCredentials {
-                actor: Actor::Scim { silo_id: bearer_token.silo_id },
+                actor: Actor::Scim { silo_id: bearer_token.silo_id() },
                 source: anyhow!(
                     "silo {} not a SCIM silo!",
                     bearer_token.silo_id,
@@ -138,7 +139,7 @@ impl super::Nexus {
         }
 
         let token_id = bearer_token.id;
-        Ok((Actor::Scim { silo_id: bearer_token.silo_id }, token_id))
+        Ok((Actor::Scim { silo_id: bearer_token.silo_id() }, token_id))
     }
 
     /// For an authenticataed Actor::Scim, return a scim2_rs::Provider
@@ -152,7 +153,7 @@ impl super::Nexus {
                 let silo = authz::Silo::new(
                     authz::FLEET,
                     *silo_id,
-                    LookupType::ById(*silo_id),
+                    LookupType::by_id(*silo_id),
                 );
 
                 Ok(scim2_rs::Provider::new(

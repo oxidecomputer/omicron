@@ -44,6 +44,7 @@ use omicron_common::{
         IdentityMetadataCreateParams, NameOrId, RouteDestination, RouteTarget,
     },
 };
+use omicron_uuid_kinds::GenericUuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -643,7 +644,13 @@ async fn test_setup(c: &ClientTestContext) {
         })),
     )
     .await;
-    link_ip_pool(&c, IP_POOL_NAME, &DEFAULT_SILO.id(), true).await;
+    link_ip_pool(
+        &c,
+        IP_POOL_NAME,
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        true,
+    )
+    .await;
     let _floater = create_floating_ip(
         c,
         FLOATING_IP_NAME,

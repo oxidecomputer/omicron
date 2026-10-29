@@ -48,6 +48,7 @@ use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::BuiltInUserUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::SiloUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -165,13 +166,13 @@ impl Context {
             Actor::SiloUser { silo_id, .. } => Some(authz::Silo::new(
                 authz::FLEET,
                 *silo_id,
-                LookupType::ById(*silo_id),
+                LookupType::by_id(*silo_id),
             )),
             Actor::UserBuiltin { .. } => None,
             Actor::Scim { silo_id } => Some(authz::Silo::new(
                 authz::FLEET,
                 *silo_id,
-                LookupType::ById(*silo_id),
+                LookupType::by_id(*silo_id),
             )),
         })
     }
@@ -271,7 +272,7 @@ impl Context {
                 Details {
                     actor: Actor::SiloUser {
                         silo_user_id: USER_TEST_PRIVILEGED.id(),
-                        silo_id: USER_TEST_PRIVILEGED.silo_id,
+                        silo_id: USER_TEST_PRIVILEGED.silo_id(),
                     },
                     device_token_expiration: None,
                     credential_id: None,
@@ -288,7 +289,7 @@ impl Context {
     pub fn unprivileged_test_user() -> Context {
         Context::for_test_user(
             USER_TEST_UNPRIVILEGED.id(),
-            USER_TEST_UNPRIVILEGED.silo_id,
+            USER_TEST_UNPRIVILEGED.silo_id(),
             SiloAuthnPolicy::try_from(&*DEFAULT_SILO).unwrap(),
         )
     }
@@ -297,7 +298,7 @@ impl Context {
     /// as #[cfg(test)] so that this is available in integration tests.
     pub fn for_test_user(
         silo_user_id: SiloUserUuid,
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         silo_authn_policy: SiloAuthnPolicy,
     ) -> Context {
         Context {
@@ -315,7 +316,7 @@ impl Context {
 
     /// Returns an authenticated context for a Silo's SCIM Actor. Not marked as
     /// #[cfg(test)] so that this is available in integration tests.
-    pub fn for_scim(silo_id: Uuid) -> Context {
+    pub fn for_scim(silo_id: SiloUuid) -> Context {
         Context {
             kind: Kind::Authenticated(
                 Details {
@@ -459,12 +460,12 @@ pub struct Details {
 #[derive(Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
 pub enum Actor {
     UserBuiltin { user_builtin_id: BuiltInUserUuid },
-    SiloUser { silo_user_id: SiloUserUuid, silo_id: Uuid },
-    Scim { silo_id: Uuid },
+    SiloUser { silo_user_id: SiloUserUuid, silo_id: SiloUuid },
+    Scim { silo_id: SiloUuid },
 }
 
 impl Actor {
-    pub fn silo_id(&self) -> Option<Uuid> {
+    pub fn silo_id(&self) -> Option<SiloUuid> {
         match self {
             Actor::UserBuiltin { .. } => None,
             Actor::SiloUser { silo_id, .. } => Some(*silo_id),
@@ -541,7 +542,7 @@ impl std::fmt::Debug for Actor {
 #[derive(Clone, Debug)]
 pub struct ConsoleSessionWithSiloId {
     pub console_session: nexus_db_model::ConsoleSession,
-    pub silo_id: Uuid,
+    pub silo_id: SiloUuid,
 }
 
 // Re-export SchemeName from nexus-types.

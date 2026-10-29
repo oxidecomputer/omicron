@@ -190,7 +190,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
     let mut instance_interfaces: NicMap = HashMap::new();
     for instance_name in &instances {
         if let Ok((.., authz_instance)) = LookupPath::new(opctx, datastore)
-            .project_id(vpc.project_id)
+            .project_id(vpc.project_id())
             .instance_name(instance_name)
             .lookup_for(authz::Action::ListChildren)
             .await
@@ -212,7 +212,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
     let mut vpc_vni_map = HashMap::new();
     for vpc_name in &vpcs {
         if let Ok((.., authz_vpc)) = LookupPath::new(opctx, datastore)
-            .project_id(vpc.project_id)
+            .project_id(vpc.project_id())
             .vpc_name(vpc_name)
             .lookup_for(authz::Action::ListChildren)
             .await
@@ -234,7 +234,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
     let mut subnet_interfaces: NicMap = HashMap::new();
     for subnet_name in &subnets {
         if let Ok((.., authz_subnet)) = LookupPath::new(opctx, datastore)
-            .project_id(vpc.project_id)
+            .project_id(vpc.project_id())
             .vpc_name(&Name::from(vpc.name().clone()))
             .vpc_subnet_name(subnet_name)
             .lookup_for(authz::Action::ListChildren)

@@ -2,12 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::DbTypedUuid;
 use crate::SqlU32;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::silo_auth_settings;
 use nexus_types::external_api::silo;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloKind;
+use omicron_uuid_kinds::SiloUuid;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 #[derive(
     Queryable,
@@ -21,7 +24,7 @@ use uuid::Uuid;
 )]
 #[diesel(table_name = silo_auth_settings)]
 pub struct SiloAuthSettings {
-    pub silo_id: Uuid,
+    pub silo_id: DbTypedUuid<SiloKind>,
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
 
@@ -31,9 +34,13 @@ pub struct SiloAuthSettings {
 }
 
 impl SiloAuthSettings {
-    pub fn new(silo_id: Uuid) -> Self {
+    pub fn silo_id(&self) -> SiloUuid {
+        self.silo_id.into()
+    }
+
+    pub fn new(silo_id: SiloUuid) -> Self {
         Self {
-            silo_id,
+            silo_id: silo_id.into(),
             time_created: Utc::now(),
             time_modified: Utc::now(),
             device_token_max_ttl_seconds: None,
@@ -44,7 +51,7 @@ impl SiloAuthSettings {
 impl From<SiloAuthSettings> for silo::SiloAuthSettings {
     fn from(silo_auth_settings: SiloAuthSettings) -> Self {
         Self {
-            silo_id: silo_auth_settings.silo_id,
+            silo_id: silo_auth_settings.silo_id.into_untyped_uuid(),
             device_token_max_ttl_seconds: silo_auth_settings
                 .device_token_max_ttl_seconds
                 .map(|ttl| ttl.0),

@@ -8,6 +8,7 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::model::ScimClientBearerToken;
+use crate::db::model::to_db_typed_uuid;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -51,7 +52,7 @@ impl DataStore {
 
         use nexus_db_schema::schema::scim_client_bearer_token::dsl;
         let tokens = dsl::scim_client_bearer_token
-            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(authz_silo.id())))
             .filter(dsl::time_deleted.is_null())
             .select(ScimClientBearerToken::as_select())
             .load_async::<ScimClientBearerToken>(&*conn)
@@ -83,7 +84,7 @@ impl DataStore {
             time_deleted: None,
             // TODO: allow setting an expiry? have a silo default?
             time_expires: None,
-            silo_id: authz_silo.id(),
+            silo_id: authz_silo.id().into(),
             bearer_token: generate_scim_client_bearer_token(),
         };
 
@@ -112,7 +113,7 @@ impl DataStore {
 
         use nexus_db_schema::schema::scim_client_bearer_token::dsl;
         let token = dsl::scim_client_bearer_token
-            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(authz_silo.id())))
             .filter(dsl::id.eq(authz_token.id()))
             .filter(dsl::time_deleted.is_null())
             .select(ScimClientBearerToken::as_select())
@@ -138,7 +139,7 @@ impl DataStore {
 
         use nexus_db_schema::schema::scim_client_bearer_token::dsl;
         diesel::update(dsl::scim_client_bearer_token)
-            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(authz_silo.id())))
             .filter(dsl::id.eq(authz_token.id()))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(Utc::now()))
@@ -178,8 +179,8 @@ impl DataStore {
         let authz_token = authz::ScimClientBearerToken::new(
             authz::Silo::new(
                 authz::FLEET,
-                token.silo_id,
-                LookupType::by_id(token.silo_id),
+                token.silo_id(),
+                LookupType::by_id(token.silo_id()),
             ),
             token.id(),
             LookupType::ById(token.id()),

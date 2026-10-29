@@ -36,6 +36,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
 use uuid::Uuid;
 
+use omicron_uuid_kinds::SiloUuid;
 use scim2_test_client::Tester;
 
 type ControlPlaneTestContext =
@@ -485,7 +486,7 @@ async fn test_scim_client_no_auth_with_expired_token(
             time_created: now,
             time_deleted: None,
             time_expires: Some(now),
-            silo_id: silo.identity.id,
+            silo_id: SiloUuid::from_untyped_uuid(silo.identity.id).into(),
             bearer_token: String::from("testpost"),
         };
 

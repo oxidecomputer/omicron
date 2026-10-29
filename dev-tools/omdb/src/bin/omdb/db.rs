@@ -166,6 +166,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -1837,13 +1838,13 @@ async fn lookup_probe(
 /// Helper function to looks up a project with the given ID.
 async fn lookup_project(
     datastore: &DataStore,
-    project_id: Uuid,
+    project_id: ProjectUuid,
 ) -> anyhow::Result<Option<Project>> {
     use nexus_db_schema::schema::project::dsl;
 
     let conn = datastore.pool_connection_for_tests().await?;
     dsl::project
-        .filter(dsl::id.eq(project_id))
+        .filter(dsl::id.eq(to_db_typed_uuid(project_id)))
         .limit(1)
         .select(Project::as_select())
         .get_result_async(&*conn)
@@ -5925,7 +5926,8 @@ async fn cmd_db_eips(
                     };
 
                 let project =
-                    match lookup_project(datastore, instance.project_id).await?
+                    match lookup_project(datastore, instance.project_id())
+                        .await?
                     {
                         Some(project) => project,
                         None => {
@@ -5961,7 +5963,10 @@ async fn cmd_db_eips(
                 }
             };
 
-            Owner::Project { id: project_id, name: project.name().to_string() }
+            Owner::Project {
+                id: project_id.into_untyped_uuid(),
+                name: project.name().to_string(),
+            }
         } else {
             Owner::None
         };
@@ -6045,7 +6050,7 @@ async fn cmd_db_network_list_vnics(
             NetworkInterfaceKind::Instance => {
                 match lookup_instance(datastore, nic.parent_id).await? {
                     Some(instance) => {
-                        match lookup_project(datastore, instance.project_id)
+                        match lookup_project(datastore, instance.project_id())
                             .await?
                         {
                             Some(project) => (
@@ -6073,7 +6078,7 @@ async fn cmd_db_network_list_vnics(
             NetworkInterfaceKind::Probe => {
                 match lookup_probe(datastore, nic.parent_id).await? {
                     Some(probe) => {
-                        match lookup_project(datastore, probe.project_id)
+                        match lookup_project(datastore, probe.project_id())
                             .await?
                         {
                             Some(project) => (

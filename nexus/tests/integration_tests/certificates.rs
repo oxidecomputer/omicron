@@ -42,6 +42,7 @@ use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::SiloUuid;
 use oxide_client::ClientCurrentUserExt;
 use oxide_client::ClientSilosExt;
 use oxide_client::ClientSystemSilosExt;
@@ -397,7 +398,7 @@ async fn test_system_certificates_crud(cptestctx: &ControlPlaneTestContext) {
         .fetch()
         .await
         .unwrap();
-    assert_eq!(db_cert.silo_id, other_silo_id);
+    assert_eq!(db_cert.silo_id(), SiloUuid::from_untyped_uuid(other_silo_id));
 
     // Names are unique per silo.
     let error = object_create_error(

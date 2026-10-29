@@ -24,6 +24,7 @@ use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::inventory::SledRole;
+use std::collections::HashSet;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -386,25 +387,42 @@ impl SledUpdate {
 /// A set of constraints that can be placed on operations that select a sled.
 #[derive(Clone, Debug)]
 pub struct SledReservationConstraints {
-    must_select_from: Vec<SledUuid>,
+    must_select_from: HashSet<SledUuid>,
+    must_not_select_from: HashSet<SledUuid>,
     cpu_families: Vec<SledCpuFamily>,
 }
 
 impl SledReservationConstraints {
     /// Creates a constraint set with no constraints in it.
     pub fn none() -> Self {
-        Self { must_select_from: Vec::new(), cpu_families: Vec::new() }
+        Self {
+            must_select_from: HashSet::new(),
+            must_not_select_from: HashSet::new(),
+            cpu_families: Vec::new(),
+        }
     }
 
     /// If the constraints include a set of sleds that the caller must select
-    /// from, returns `Some` and a slice containing the members of that set.
+    /// from, returns `Some` and the members of that set.
     ///
     /// If no "must select from these" constraint exists, returns None.
-    pub fn must_select_from(&self) -> Option<&[SledUuid]> {
+    pub fn must_select_from(&self) -> Option<&HashSet<SledUuid>> {
         if self.must_select_from.is_empty() {
             None
         } else {
             Some(&self.must_select_from)
+        }
+    }
+
+    /// If the constraints include a set of sleds that the caller must not
+    /// select from, returns `Some` and the members of that set.
+    ///
+    /// If no "must not select from these" constraint exists, returns None.
+    pub fn must_not_select_from(&self) -> Option<&HashSet<SledUuid>> {
+        if self.must_not_select_from.is_empty() {
+            None
+        } else {
+            Some(&self.must_not_select_from)
         }
     }
 
@@ -439,6 +457,14 @@ impl SledReservationConstraintBuilder {
     /// select from" list.
     pub fn must_select_from(mut self, sled_ids: &[SledUuid]) -> Self {
         self.constraints.must_select_from.extend(sled_ids);
+        self
+    }
+
+    /// Adds a "must not select from the following sled IDs" constraint. If such
+    /// a constraint already exists, appends the supplied sled IDs to the "must
+    /// not select from" list.
+    pub fn must_not_select_from(mut self, sled_ids: &[SledUuid]) -> Self {
+        self.constraints.must_not_select_from.extend(sled_ids);
         self
     }
 

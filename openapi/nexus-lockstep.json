@@ -5909,18 +5909,55 @@
           }
         ]
       },
+      "InstanceMigrateDestination": {
+        "description": "Destination target for instance migration requests.",
+        "oneOf": [
+          {
+            "description": "Choose a destination sled automatically (similarly to initial VMM placement).",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "autoselect"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Migrate to a specific sled.",
+            "type": "object",
+            "properties": {
+              "dst_sled_id": {
+                "$ref": "#/components/schemas/SledUuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "by_id"
+                ]
+              }
+            },
+            "required": [
+              "dst_sled_id",
+              "type"
+            ]
+          }
+        ]
+      },
       "InstanceMigrateRequest": {
         "description": "Parameters used when migrating an instance.",
         "type": "object",
         "properties": {
-          "dst_sled_id": {
-            "description": "The ID of the sled to which to migrate the target instance.",
-            "type": "string",
-            "format": "uuid"
+          "destination": {
+            "$ref": "#/components/schemas/InstanceMigrateDestination"
           }
         },
         "required": [
-          "dst_sled_id"
+          "destination"
         ]
       },
       "InstanceState": {

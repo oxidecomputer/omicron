@@ -457,7 +457,7 @@ pub async fn create_project_snapshot(
                     time_deleted: None,
                 },
 
-                project_id: authz_project.id(),
+                project_id: authz_project.id().into(),
                 disk_id,
                 volume_id: VolumeUuid::new_v4().into(),
                 destination_volume_id: VolumeUuid::new_v4().into(),
@@ -498,8 +498,8 @@ pub async fn create_project_image(
                     time_deleted: None,
                 },
 
-                silo_id: authz_silo.id(),
-                project_id: authz_project.id(),
+                silo_id: authz_silo.id().into(),
+                project_id: authz_project.id().into(),
                 volume_id: VolumeUuid::new_v4().into(),
 
                 url: None,

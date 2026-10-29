@@ -190,13 +190,14 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
+    use omicron_uuid_kinds::ProjectUuid;
 
     async fn create_test_instance(
         datastore: &DataStore,
         opctx: &OpContext,
     ) -> authz::Instance {
         let silo_id = DEFAULT_SILO_ID;
-        let project_id = Uuid::new_v4();
+        let project_id = ProjectUuid::new_v4();
         let instance_id = InstanceUuid::new_v4();
 
         let (authz_project, _project) = datastore

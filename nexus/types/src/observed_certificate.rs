@@ -15,6 +15,7 @@
 use chrono::{DateTime, Utc};
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use omicron_common::api::external::Name;
+use omicron_uuid_kinds::SiloUuid;
 use uuid::Uuid;
 
 /// One silo and every non-deleted external TLS certificate installed for it.
@@ -24,7 +25,7 @@ use uuid::Uuid;
 /// certificates" apart from "silo does not exist".
 #[derive(Clone, Debug, PartialEq)]
 pub struct ObservedSiloCertificates {
-    pub silo_id: Uuid,
+    pub silo_id: SiloUuid,
     pub silo_name: Name,
     pub certificates: IdOrdMap<ObservedCertificate>,
 }
@@ -60,7 +61,7 @@ pub fn best_certificate(candidates: &[CertificateCandidate]) -> Option<Uuid> {
 }
 
 impl IdOrdItem for ObservedSiloCertificates {
-    type Key<'a> = Uuid;
+    type Key<'a> = SiloUuid;
     fn key(&self) -> Self::Key<'_> {
         self.silo_id
     }
@@ -105,7 +106,7 @@ mod tests {
         certs: impl IntoIterator<Item = ObservedCertificate>,
     ) -> ObservedSiloCertificates {
         ObservedSiloCertificates {
-            silo_id: Uuid::from_u128(0xA),
+            silo_id: SiloUuid::from_u128(0xA),
             silo_name: "fake-silo".parse().unwrap(),
             certificates: certs.into_iter().collect(),
         }

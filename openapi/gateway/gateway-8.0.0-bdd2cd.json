@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "7.0.0"
+    "version": "8.0.0"
   },
   "paths": {
     "/ignition": {
@@ -3763,6 +3763,21 @@
                 "type": "string",
                 "enum": [
                   "reset_sp_of_local_sled"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "MGS refuses to reset its own sled's connected switch's SP.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "reset_sp_of_local_switch"
                 ]
               }
             },

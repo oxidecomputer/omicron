@@ -35,17 +35,16 @@ use nexus_types::fm::{CertificateExpiryFactPayload, CertificateFact};
 use nexus_types::observed_certificate::{
     ObservedCertificate, ObservedSiloCertificates,
 };
-use omicron_uuid_kinds::{CaseUuid, FactUuid};
+use omicron_uuid_kinds::{CaseUuid, FactUuid, GenericUuid, SiloUuid};
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
-use uuid::Uuid;
 
 /// A parent-forwarded Certificate case, parsed into the form this engine acts
 /// on. Every fact on a certificate case is about the same silo, and a case
 /// carries exactly one fact.
 struct ParsedCertificateCase {
     /// The silo `fact` is about.
-    silo_id: Uuid,
+    silo_id: SiloUuid,
     /// The fact to consider when advancing the case.
     fact: (FactUuid, CertificateFact),
     /// Facts that should not exist: any beyond the first. They carry no
@@ -65,7 +64,7 @@ enum UninterpretableCase {
     #[error(
         "facts reference different silos ({expected} and {found}, 1 expected)"
     )]
-    DisagreeingSilos { expected: Uuid, found: Uuid },
+    DisagreeingSilos { expected: SiloUuid, found: SiloUuid },
     #[error("case has no facts, so the silo it concerns cannot be determined")]
     NoFacts,
 }
@@ -154,7 +153,7 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     // per-silo, so a silo with two parent cases is already pathological. We
     // keep one and close the rest as duplicates. `parent_cases` iterates
     // ascending by CaseUuid, so we deterministically keep the lowest-ID case.
-    let mut case_for_silo: BTreeMap<Uuid, CaseUuid> = BTreeMap::new();
+    let mut case_for_silo: BTreeMap<SiloUuid, CaseUuid> = BTreeMap::new();
     for (case_id, parsed_case) in &parent_cases {
         match case_for_silo.entry(parsed_case.silo_id) {
             Entry::Vacant(slot) => {
@@ -280,7 +279,7 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         // The fact is new in this sitrep, so the condition it describes is
         // new too (or concerns a different certificate than before): alert.
         let alert_silo = alert_types::AlertSilo {
-            id: silo.silo_id,
+            id: silo.silo_id.into_untyped_uuid(),
             name: silo.silo_name.clone(),
         };
         let alert_cert = alert_types::AlertCertificate {
@@ -369,12 +368,13 @@ mod tests {
         SitrepAlertGeneration, SitrepSupportBundleGeneration,
     };
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, SitrepUuid};
+    use omicron_uuid_kinds::{OmicronZoneUuid, SitrepUuid};
     use std::num::NonZeroU32;
     use std::sync::Arc;
+    use uuid::Uuid;
 
-    const SILO_A: Uuid = Uuid::from_u128(0xA);
-    const SILO_B: Uuid = Uuid::from_u128(0xB);
+    const SILO_A: SiloUuid = SiloUuid::from_u128(0xA);
+    const SILO_B: SiloUuid = SiloUuid::from_u128(0xB);
     const CERT_1: Uuid = Uuid::from_u128(0x1);
     const CERT_2: Uuid = Uuid::from_u128(0x2);
 
@@ -406,7 +406,7 @@ mod tests {
     }
 
     fn mk_silo(
-        id: Uuid,
+        id: SiloUuid,
         silo_name: &str,
         certs: impl IntoIterator<Item = ObservedCertificate>,
     ) -> ObservedSiloCertificates {
@@ -634,7 +634,7 @@ mod tests {
             alert_types::SiloCertificateExpiringV0,
         >(alert.payload.clone())
         .expect("alert payload decodes");
-        assert_eq!(payload.silo.id, SILO_A);
+        assert_eq!(payload.silo.id, SILO_A.into_untyped_uuid());
         assert_eq!(payload.silo.name, name("fake-silo-a"));
         assert_eq!(payload.certificate.id, CERT_1);
         assert_eq!(payload.certificate.name, name("fake-cert-1"));
@@ -736,7 +736,7 @@ mod tests {
 
         let cases = open_cert_cases(&sitrep);
         assert_eq!(cases.len(), 2);
-        let mut silos_seen: Vec<Uuid> =
+        let mut silos_seen: Vec<SiloUuid> =
             cases.iter().map(|c| sole_fact(c).1.silo_id()).collect();
         silos_seen.sort();
         assert_eq!(silos_seen, vec![SILO_A, SILO_B]);

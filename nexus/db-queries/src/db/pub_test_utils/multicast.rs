@@ -29,11 +29,12 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::DataStore;
 use crate::db::pub_test_utils::helpers::{SledUpdateBuilder, create_project};
+use omicron_uuid_kinds::ProjectUuid;
 
 /// Common test setup for multicast datastore tests.
 pub struct TestSetup {
     pub authz_project: authz::Project,
-    pub project_id: Uuid,
+    pub project_id: ProjectUuid,
     pub authz_pool: authz::IpPool,
     pub authz_vpc: authz::Vpc,
     pub vpc_id: Uuid,
@@ -141,7 +142,12 @@ pub async fn create_test_setup_with_range(
 
     // Link pool to silo
     let link = IncompleteIpPoolResource {
-        resource_id: opctx.authn.silo_required().unwrap().id(),
+        resource_id: opctx
+            .authn
+            .silo_required()
+            .unwrap()
+            .id()
+            .into_untyped_uuid(),
         resource_type: IpPoolResourceType::Silo,
         ip_pool_id: ip_pool.id(),
         is_default: false,
