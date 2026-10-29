@@ -247,6 +247,7 @@ impl From<InstanceStateChangeError> for dropshot::HttpError {
 
 /// The kinds of state changes that can be requested of an instance's current
 /// VMM (i.e. the VMM pointed to be the instance's `propolis_id` field).
+#[derive(Debug)]
 pub(crate) enum InstanceStateChangeRequest {
     Run,
     Reboot,
@@ -271,6 +272,7 @@ impl From<InstanceStateChangeRequest>
 
 /// The actions that can be taken in response to an
 /// [`InstanceStateChangeRequest`].
+#[derive(Debug)]
 enum InstanceStateChangeRequestAction {
     /// The instance is already in the correct state, so no action is needed.
     AlreadyDone,
@@ -282,6 +284,25 @@ enum InstanceStateChangeRequestAction {
     /// The instance is not currently incarnated on a sled, so just update its
     /// runtime state in the database without communicating with a sled-agent.
     UpdateRuntime(db::model::InstanceRuntimeState),
+}
+
+impl InstanceStateChangeRequestAction {
+    /// Construct a [`Self::UpdateRuntime`] with a runtime state constructed by
+    /// updating `prev_runtime` with `new_nexus_state` (and the expected
+    /// accounting for a state change, such as bumping the generation).
+    fn update_runtime(
+        prev_runtime: db::model::InstanceRuntimeState,
+        new_nexus_state: db::model::InstanceState,
+    ) -> Self {
+        Self::UpdateRuntime(db::model::InstanceRuntimeState {
+            time_updated: chrono::Utc::now(),
+            generation: InstanceStateGeneration::from(prev_runtime.generation)
+                .next()
+                .into(),
+            nexus_state: new_nexus_state,
+            ..prev_runtime
+        })
+    }
 }
 
 /// What is the higher level operation that is calling
@@ -1231,8 +1252,11 @@ impl super::Nexus {
     /// - `Ok(action)` if the request is allowed to proceed. The result payload
     ///   specifies how to handle the request.
     /// - `Err` if the request should be denied.
+    //
+    // This is an associated function rather than a method so it can be tested
+    // independently.
     fn select_runtime_change_action(
-        &self,
+        log: &slog::Logger,
         instance_state: &db::model::Instance,
         vmm_state: &Option<db::model::Vmm>,
         requested: &InstanceStateChangeRequest,
@@ -1314,19 +1338,10 @@ impl super::Nexus {
                         ));
                     }
 
-                    let prev_runtime = instance_state.runtime();
                     return Ok(
-                        InstanceStateChangeRequestAction::UpdateRuntime(
-                            db::model::InstanceRuntimeState {
-                                time_updated: chrono::Utc::now(),
-                                generation: InstanceStateGeneration::from(
-                                    prev_runtime.generation,
-                                )
-                                .next()
-                                .into(),
-                                nexus_state: db::model::InstanceState::NoVmm,
-                                ..prev_runtime.clone()
-                            },
+                        InstanceStateChangeRequestAction::update_runtime(
+                            instance_state.runtime(),
+                            db::model::InstanceState::NoVmm,
                         ),
                     );
                 }
@@ -1339,10 +1354,79 @@ impl super::Nexus {
                     )));
                 }
 
+                // An internal `SledEvacuating` state surfaces as a `Rebooting`
+                // effective state, but it's nontrivially different in practice:
+                // in particular, there is no associated VMM with an instance
+                // that's currently stopped due to sled evacuation. We represent
+                // it as `Rebooting` because it will be reincarnated, but we can
+                // still allow some changes in this state (in particular: the
+                // user should be able to stop it).
+                InstanceState::Rebooting => {
+                    match instance_state.nexus_state {
+                        // This is the state we expect to see, and it should not
+                        // have an associated VMM.
+                        nexus_db_model::InstanceState::SledEvacuating => {
+                            if vmm_state.is_some() {
+                                return Err(Error::internal_error(
+                                    "an instance should not be in the \
+                                     SledEvacuating state if it has an \
+                                     active VMM",
+                                ));
+                            }
+                        }
+                        // These states should not be reachable at this point:
+                        // either they don't result in an effective state of
+                        // `Rebooting`, or if they do, there should be an
+                        // associated sled/VMM.
+                        nexus_db_model::InstanceState::Creating
+                        | nexus_db_model::InstanceState::NoVmm
+                        | nexus_db_model::InstanceState::Vmm
+                        | nexus_db_model::InstanceState::Failed
+                        | nexus_db_model::InstanceState::Destroyed => {
+                            return Err(Error::internal_error(format!(
+                                "instance is rebooting but not resident on a \
+                                 sled; internal state is {:?}",
+                                instance_state.nexus_state,
+                            )));
+                        }
+                    }
+
+                    match requested {
+                        // The instance reincarnation task is already trying to
+                        // run instances in this state; these requests are fine
+                        // and require no work on our part.
+                        InstanceStateChangeRequest::Run
+                        | InstanceStateChangeRequest::Reboot => {
+                            return Ok(
+                                InstanceStateChangeRequestAction::AlreadyDone,
+                            );
+                        }
+                        // Stopping an instance in this state is fine; we'll
+                        // stop trying to reincarnate it.
+                        InstanceStateChangeRequest::Stop => {
+                            return Ok(
+                                InstanceStateChangeRequestAction::update_runtime(
+                                    instance_state.runtime(),
+                                    db::model::InstanceState::NoVmm,
+                                ),
+                            );
+                        }
+                        // We can't migrate instances in this state, which is an
+                        // unfortunate asymmetry with "normal" rebooting
+                        // instances. But there's no source VMM to migrate from.
+                        InstanceStateChangeRequest::Migrate(_) => {
+                            return Err(Error::invalid_request(
+                                "cannot migrate instance that was stopped \
+                                 due to sled evacuation",
+                            ));
+                        }
+                    }
+                }
+
                 // In other states, the instance should have a sled, and an
                 // internal invariant has been violated if it doesn't have one.
                 _ => {
-                    error!(self.log, "instance has no sled but isn't halted";
+                    error!(log, "instance has no sled but isn't halted";
                            "instance_id" => %instance_state.id(),
                            "state" => ?effective_state);
 
@@ -1406,7 +1490,8 @@ impl super::Nexus {
         prev_vmm_state: &Option<db::model::Vmm>,
         requested: InstanceStateChangeRequest,
     ) -> Result<(), InstanceStateChangeError> {
-        match self.select_runtime_change_action(
+        match Self::select_runtime_change_action(
+            &self.log,
             prev_instance_state,
             prev_vmm_state,
             &requested,
@@ -3316,6 +3401,206 @@ mod tests {
                 instance_start::Reason::User
             )
             .is_ok()
+        );
+        logctx.cleanup_successful();
+    }
+
+    fn migrate_request() -> InstanceStateChangeRequest {
+        InstanceStateChangeRequest::Migrate(InstanceMigrationTargetParams {
+            src_propolis_addr: "[::1]:12400".parse().unwrap(),
+        })
+    }
+
+    #[test]
+    fn test_select_action_sled_evacuating_stop() {
+        let logctx = test_setup_log("test_select_action_sled_evacuating_stop");
+        let (mut instance, _vmm) = make_instance_and_vmm();
+        instance.nexus_state = DbInstanceState::SledEvacuating;
+        let action = Nexus::select_runtime_change_action(
+            &logctx.log,
+            &instance,
+            &None,
+            &InstanceStateChangeRequest::Stop,
+        )
+        .expect("stopping a SledEvacuating instance should be allowed");
+        let InstanceStateChangeRequestAction::UpdateRuntime(rt) = action else {
+            panic!("expected UpdateRuntime, got {action:?}");
+        };
+        assert_eq!(rt.nexus_state, DbInstanceState::NoVmm);
+        assert_eq!(rt.propolis_id, None);
+        assert_eq!(
+            InstanceStateGeneration::from(rt.generation),
+            InstanceStateGeneration::from(instance.state_generation).next(),
+        );
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_select_action_sled_evacuating_reboot_and_run() {
+        let logctx =
+            test_setup_log("test_select_action_sled_evacuating_reboot_and_run");
+        let (mut instance, _vmm) = make_instance_and_vmm();
+        instance.nexus_state = DbInstanceState::SledEvacuating;
+        for requested in [
+            InstanceStateChangeRequest::Reboot,
+            InstanceStateChangeRequest::Run,
+        ] {
+            let action = Nexus::select_runtime_change_action(
+                &logctx.log,
+                &instance,
+                &None,
+                &requested,
+            )
+            .unwrap_or_else(|e| panic!("{requested:?} should succeed: {e}"));
+            assert!(
+                matches!(action, InstanceStateChangeRequestAction::AlreadyDone),
+                "{requested:?} should be AlreadyDone, got {action:?}"
+            );
+        }
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_select_action_sled_evacuating_migrate() {
+        let logctx =
+            test_setup_log("test_select_action_sled_evacuating_migrate");
+        let (mut instance, _vmm) = make_instance_and_vmm();
+        instance.nexus_state = DbInstanceState::SledEvacuating;
+        let err = Nexus::select_runtime_change_action(
+            &logctx.log,
+            &instance,
+            &None,
+            &migrate_request(),
+        )
+        .expect_err("migrating a SledEvacuating instance should fail");
+        assert!(
+            matches!(err, Error::InvalidRequest { .. }),
+            "expected InvalidRequest, got {err:?}"
+        );
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_select_action_vmm_rebooting_stop_goes_to_sled() {
+        let logctx = test_setup_log(
+            "test_select_action_vmm_rebooting_stop_goes_to_sled",
+        );
+        let (mut instance, mut vmm) = make_instance_and_vmm();
+        instance.nexus_state = DbInstanceState::Vmm;
+        instance.propolis_id = Some(vmm.id);
+        vmm.state = DbVmmState::Rebooting;
+        let expected_sled_id = vmm.sled_id();
+        let expected_propolis_id = PropolisUuid::from_untyped_uuid(vmm.id);
+        let action = Nexus::select_runtime_change_action(
+            &logctx.log,
+            &instance,
+            &Some(vmm),
+            &InstanceStateChangeRequest::Stop,
+        )
+        .expect("stopping a rebooting instance with a VMM should be allowed");
+        match action {
+            InstanceStateChangeRequestAction::SendToSled {
+                sled_id,
+                propolis_id,
+            } => {
+                assert_eq!(sled_id, expected_sled_id);
+                assert_eq!(propolis_id, expected_propolis_id);
+            }
+            other => panic!("expected SendToSled, got {other:?}"),
+        }
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_select_action_failed_stop() {
+        let logctx = test_setup_log("test_select_action_failed_stop");
+        let (mut instance, _vmm) = make_instance_and_vmm();
+        instance.nexus_state = DbInstanceState::Failed;
+        let action = Nexus::select_runtime_change_action(
+            &logctx.log,
+            &instance,
+            &None,
+            &InstanceStateChangeRequest::Stop,
+        )
+        .expect("stopping a Failed instance should be allowed");
+        let InstanceStateChangeRequestAction::UpdateRuntime(rt) = action else {
+            panic!("expected UpdateRuntime, got {action:?}");
+        };
+        assert_eq!(rt.nexus_state, DbInstanceState::NoVmm);
+        assert_eq!(rt.propolis_id, None);
+        assert_eq!(
+            InstanceStateGeneration::from(rt.generation),
+            InstanceStateGeneration::from(instance.state_generation).next(),
+        );
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_select_action_no_vmm_stop_is_idempotent() {
+        let logctx =
+            test_setup_log("test_select_action_no_vmm_stop_is_idempotent");
+        let (mut instance, _vmm) = make_instance_and_vmm();
+        instance.nexus_state = DbInstanceState::NoVmm;
+        let action = Nexus::select_runtime_change_action(
+            &logctx.log,
+            &instance,
+            &None,
+            &InstanceStateChangeRequest::Stop,
+        )
+        .expect("stopping a stopped instance should succeed");
+        assert!(
+            matches!(action, InstanceStateChangeRequestAction::AlreadyDone),
+            "expected AlreadyDone, got {action:?}"
+        );
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_select_action_no_vmm_run_reboot_migrate_rejected() {
+        let logctx = test_setup_log(
+            "test_select_action_no_vmm_run_reboot_migrate_rejected",
+        );
+        let (mut instance, _vmm) = make_instance_and_vmm();
+        instance.nexus_state = DbInstanceState::NoVmm;
+        for requested in [
+            InstanceStateChangeRequest::Run,
+            InstanceStateChangeRequest::Reboot,
+            migrate_request(),
+        ] {
+            let err = match Nexus::select_runtime_change_action(
+                &logctx.log,
+                &instance,
+                &None,
+                &requested,
+            ) {
+                Ok(action) => {
+                    panic!("{requested:?} should fail, got {action:?}")
+                }
+                Err(err) => err,
+            };
+            assert!(
+                matches!(err, Error::InvalidRequest { .. }),
+                "{requested:?}: expected InvalidRequest, got {err:?}"
+            );
+        }
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_select_action_creating_rejected() {
+        let logctx = test_setup_log("test_select_action_creating_rejected");
+        let (mut instance, _vmm) = make_instance_and_vmm();
+        instance.nexus_state = DbInstanceState::Creating;
+        let err = Nexus::select_runtime_change_action(
+            &logctx.log,
+            &instance,
+            &None,
+            &InstanceStateChangeRequest::Stop,
+        )
+        .expect_err("changing state of a Creating instance should fail");
+        assert!(
+            matches!(err, Error::InvalidRequest { .. }),
+            "expected InvalidRequest, got {err:?}"
         );
         logctx.cleanup_successful();
     }
