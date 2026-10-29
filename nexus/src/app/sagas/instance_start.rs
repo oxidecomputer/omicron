@@ -32,7 +32,10 @@ use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::backoff::BackoffError;
 use omicron_common::backoff::backon_retry_policy_internal_service;
+use omicron_common::backoff::retry_notify_ext;
+use omicron_common::backoff::retry_policy_internal_service;
 use omicron_generation_kinds::InstanceStateGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -925,17 +928,42 @@ async fn sis_ensure_registered(
 async fn sis_ensure_registered_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
     let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
     let sled_id = sagactx.lookup::<SledUuid>("sled_id")?;
 
-    super::instance_common::ensure_vmm_unregistered(
-        &sagactx,
-        &params.serialized_authn,
-        instance_id,
-        propolis_id,
-        sled_id,
+    // `ensure_vmm_unregistered` will not retry errors checking if the sled is
+    // out of service (which may include potentially transient errors querying
+    // the database), nor will it retry errors from the sled-agent that
+    // progenitor-extras considers "permanent". Therefore, we wrap the entire
+    // thing in a second retry loop, so that the saga doesn't get stuck.
+    retry_notify_ext(
+        retry_policy_internal_service(),
+        || async {
+            super::instance_common::ensure_vmm_unregistered(
+                &sagactx,
+                &params.serialized_authn,
+                instance_id,
+                propolis_id,
+                sled_id,
+            )
+            .await
+            .map_err(BackoffError::transient)
+        },
+        |error, call_count, total_duration| {
+            warn!(
+                osagactx.log(),
+                "start saga: failed to unregister VMM; retrying";
+                "instance_id" => %instance_id,
+                "propolis_id" => %propolis_id,
+                "sled_id" => %sled_id,
+                "call_count" => call_count,
+                "total_duration" => ?total_duration,
+                InlineErrorChain::new(&error),
+            );
+        },
     )
     .await?;
 

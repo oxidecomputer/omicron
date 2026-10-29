@@ -20,11 +20,15 @@ use nexus_types::internal_api::params::{
 };
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
+use omicron_common::backoff::{
+    BackoffError, retry_notify_ext, retry_policy_internal_service,
+};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::net::{Ipv6Addr, SocketAddr};
 use steno::ActionError;
 use steno::Node;
@@ -522,19 +526,44 @@ async fn sim_ensure_destination_propolis_undo(
     let dst_sled_id = sagactx.lookup::<SledUuid>("dst_sled_id")?;
     let db_instance =
         sagactx.lookup::<db::model::Instance>("set_migration_ids")?;
-    let instance_id = db_instance.id();
+    let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
 
     info!(osagactx.log(), "unregistering destination vmm for migration unwind";
           "instance_id" => %instance_id,
           "sled_id" => %dst_sled_id,
           "prev_runtime_state" => ?db_instance.runtime());
 
-    super::instance_common::ensure_vmm_unregistered(
-        &sagactx,
-        &params.serialized_authn,
-        InstanceUuid::from_untyped_uuid(instance_id),
-        dst_propolis_id,
-        dst_sled_id,
+    // `ensure_vmm_unregistered` will not retry errors checking if the sled is
+    // out of service (which may include potentially transient errors querying
+    // the database), nor will it retry errors from the sled-agent that
+    // progenitor-extras considers "permanent". Therefore, we wrap the entire
+    // thing in a second retry loop, so that the saga doesn't get stuck.
+    retry_notify_ext(
+        retry_policy_internal_service(),
+        || async {
+            super::instance_common::ensure_vmm_unregistered(
+                &sagactx,
+                &params.serialized_authn,
+                instance_id,
+                dst_propolis_id,
+                dst_sled_id,
+            )
+            .await
+            .map_err(BackoffError::transient)
+        },
+        |error, call_count, total_duration| {
+            warn!(
+                osagactx.log(),
+                "migration saga: failed to unregister destination VMM; \
+                 retrying";
+                "instance_id" => %instance_id,
+                "dst_propolis_id" => %dst_propolis_id,
+                "dst_sled_id" => %dst_sled_id,
+                "call_count" => call_count,
+                "total_duration" => ?total_duration,
+                InlineErrorChain::new(&error),
+            );
+        },
     )
     .await?;
 
