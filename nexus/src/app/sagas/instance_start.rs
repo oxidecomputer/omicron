@@ -1857,12 +1857,8 @@ mod test {
             .await
             .expect("saga should start");
 
-        let paused_registration = tokio::time::timeout(
-            Duration::from_secs(60),
-            register_pause.wait_for_request(),
-        )
-        .await
-        .expect("the start saga should try to register its VMM");
+        let paused_registration =
+            register_pause.wait_for_request(Duration::from_secs(60)).await;
         let propolis_id = paused_registration.propolis_id();
 
         // The saga is now waiting on the `instance_ensure_registered` request
