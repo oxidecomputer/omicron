@@ -884,7 +884,7 @@ impl MetricsRequestQueue {
         self.0
             .try_send(Message::TrackOptePort {
                 zone_name: zone_name.into(),
-                port_name: port_info.port.name().into(),
+                port_name: port_info.name.to_string(),
                 interface_id: port_info.nic_id,
                 interface_kind: parent_kind.into(),
                 parent_id,

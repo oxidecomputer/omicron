@@ -1680,7 +1680,7 @@ impl InstanceRunner {
         }
 
         // Remove any OPTE ports from the port manager.
-        running_state.running_zone.release_opte_ports();
+        running_state.running_zone.delete_opte_ports();
 
         // Now that we're done, we can actually take the running state out of
         // the option.
@@ -2587,7 +2587,7 @@ impl InstanceRunner {
                     &self.attached_subnets,
                     self.primary_nic_mtu,
                 ))?;
-            opte_port_names.push(port.0.name().to_string());
+            opte_port_names.push(port.name().to_string());
             opte_ports.push(port);
         }
 
