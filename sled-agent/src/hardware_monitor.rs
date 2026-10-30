@@ -256,11 +256,15 @@ impl HardwareMonitor {
     //
     // We use this on startup and any time the snapshot changes.
     async fn check_latest_hardware_snapshot(&mut self) {
+        // borrow_and_update must happen before notifying Nexus, so that if a
+        // hardware change happens after this point, changed() is fired and
+        // this method is re-run.
+        let snapshot = self.hardware_view_rx.borrow_and_update().clone();
+
         if let Some(sled_agent) = &self.sled_agent {
             sled_agent.notify_nexus_about_self(&self.log).await;
         }
 
-        let snapshot = self.hardware_view_rx.borrow_and_update().clone();
         info!(
             self.log, "Checking current full hardware snapshot";
             "snapshot" => ?snapshot,
