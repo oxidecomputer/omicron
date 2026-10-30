@@ -54,6 +54,7 @@ use sled_agent_types_versions::latest::inventory::SledCpuFamily;
 use sled_agent_types_versions::latest::inventory::SledRole;
 use sled_agent_types_versions::latest::inventory::SvcsEnabledNotOnlineResult;
 pub use sled_agent_types_versions::latest::inventory::ZpoolHealth;
+use sled_agent_types_versions::latest::multirack::SledAgentStartState;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -1184,14 +1185,6 @@ impl IdOrdItem for DiscoveredSled {
         self.sled_id
     }
     id_upcast!();
-}
-
-/// Information returned by the multirack join service indicating the current
-/// status of a sled-agent on a given sled.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub enum SledAgentStartState {
-    InProgress { last_error: Option<String> },
-    Started,
 }
 
 #[cfg(test)]
