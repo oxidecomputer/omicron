@@ -16436,6 +16436,11 @@
         "description": "A resource impacted by an Active Problem.",
         "type": "object",
         "properties": {
+          "problem_id": {
+            "description": "ID of the Active Problem impacting this resource.",
+            "type": "string",
+            "format": "uuid"
+          },
           "reason": {
             "description": "A human-readable summary of how this resource is impacted by the problem.",
             "type": "string"
@@ -16456,6 +16461,7 @@
           }
         },
         "required": [
+          "problem_id",
           "reason",
           "resource",
           "revision_added"
