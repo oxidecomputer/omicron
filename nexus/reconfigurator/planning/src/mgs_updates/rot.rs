@@ -15,12 +15,16 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::planning_report::FailedRotUpdateReason;
+use nexus_types::deployment::planning_report::TargetArtifactError;
+use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseWhich;
+use nexus_types::inventory::CabooseWithVersion;
 use nexus_types::inventory::Collection;
 use nexus_types::tuf_repo::TufRepoDescription;
 use sled_hardware_types::BaseboardId;
 use slog::debug;
 use std::sync::Arc;
+use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactTags;
 use tufaceous_artifact::RotKeyTableHash;
@@ -119,57 +123,16 @@ pub(super) fn try_make_update(
     let Some(rot_state) = inventory.rots.get(baseboard_id) else {
         return Err(FailedRotUpdateReason::RotStateNotInInventory);
     };
-
     let active_slot = rot_state.active_slot;
-
-    let active_caboose_which = CabooseWhich::from_rot_slot(active_slot);
-    let Some(active_caboose) =
-        inventory.caboose_for(active_caboose_which, baseboard_id)
-    else {
-        return Err(FailedRotUpdateReason::CabooseNotInInventory(
-            active_caboose_which,
-        ));
-    };
-
-    let expected_active_version = match active_caboose.caboose.version.parse() {
-        Ok(v) => v,
-        Err(e) => {
-            return Err(FailedRotUpdateReason::FailedVersionParse {
-                caboose: active_caboose_which,
-                err: format!("{}", e),
-            });
-        }
-    };
-
-    let rot_board = active_caboose.caboose.board.clone();
-    let Some(rkth) = active_caboose.caboose.sign.clone() else {
-        return Err(FailedRotUpdateReason::CabooseMissingSign(
-            active_caboose_which,
-        ));
-    };
-
-    let tags = KnownArtifactTags::Rot(RotTags {
-        rot_board,
-        rot_rkth: Some(RotKeyTableHash(rkth)),
-        // We'll be updating the inactive slot, so we choose the
-        // artifact based on the inactive slot's kind.
-        rot_slot: match active_slot.toggled() {
-            RotSlot::A => tufaceous_artifact::RotSlot::A,
-            RotSlot::B => tufaceous_artifact::RotSlot::B,
-        },
-    });
+    let CabooseWithVersion {
+        caboose: active_caboose,
+        version: expected_active_version,
+    } = inventory.caboose_with_version_for(
+        CabooseWhich::from_rot_slot(active_slot),
+        baseboard_id,
+    )?;
     let artifact =
-        current_artifacts.artifacts.get_only(&tags).map_err(|err| {
-            let tags = tags.to_string();
-            match err {
-                GetError::NotFound => {
-                    FailedRotUpdateReason::NoMatchingArtifactFound(tags)
-                }
-                GetError::TooMany => {
-                    FailedRotUpdateReason::TooManyMatchingArtifacts(tags)
-                }
-            }
-        })?;
+        target_artifact(active_slot, active_caboose, current_artifacts)?;
 
     // If the artifact's version matches what's deployed, then no update is
     // needed.
@@ -186,20 +149,10 @@ pub(super) fn try_make_update(
     // Begin configuring an update.
     let inactive_caboose_which =
         CabooseWhich::from_rot_slot(active_slot.toggled());
-    let expected_inactive_version = match inventory
-        .caboose_for(inactive_caboose_which, baseboard_id)
-        .map(|c| c.caboose.version.parse::<ArtifactVersion>())
-        .transpose()
-    {
-        Ok(None) => ExpectedVersion::NoValidVersion,
-        Ok(Some(v)) => ExpectedVersion::Version(v),
-        Err(e) => {
-            return Err(FailedRotUpdateReason::FailedVersionParse {
-                caboose: inactive_caboose_which,
-                err: format!("{}", e),
-            });
-        }
-    };
+    let expected_inactive_version = ExpectedVersion::for_inactive_caboose(
+        inventory
+            .caboose_with_version_for(inactive_caboose_which, baseboard_id),
+    )?;
 
     Ok(MgsUpdateOutcome::pending_with_update_only(PendingMgsUpdate {
         baseboard_id: baseboard_id.clone(),
@@ -218,6 +171,47 @@ pub(super) fn try_make_update(
         artifact_hash: artifact.hash,
         artifact_version: artifact.version.clone(),
     }))
+}
+
+/// Returns the RoT artifact in `current_artifacts` that applies to a board
+/// whose RoT is running from `active_slot`, which contains `active_caboose`
+///
+/// The artifact is chosen based on the board name and signing key in that
+/// caboose.  The artifact is the one for the RoT's _inactive_ slot because
+/// that is the slot an update would write.
+pub(super) fn target_artifact<'a>(
+    active_slot: RotSlot,
+    active_caboose: &Caboose,
+    current_artifacts: &'a TufRepoDescription,
+) -> Result<&'a Artifact, TargetArtifactError> {
+    let rot_board = active_caboose.board.clone();
+    let Some(rkth) = active_caboose.sign.clone() else {
+        return Err(TargetArtifactError::CabooseMissingSign(
+            CabooseWhich::from_rot_slot(active_slot),
+        ));
+    };
+
+    let tags = KnownArtifactTags::Rot(RotTags {
+        rot_board,
+        rot_rkth: Some(RotKeyTableHash(rkth)),
+        // We'll be updating the inactive slot, so we choose the
+        // artifact based on the inactive slot's kind.
+        rot_slot: match active_slot.toggled() {
+            RotSlot::A => tufaceous_artifact::RotSlot::A,
+            RotSlot::B => tufaceous_artifact::RotSlot::B,
+        },
+    });
+    current_artifacts.artifacts.get_only(&tags).map_err(|err| {
+        let tags = tags.to_string();
+        match err {
+            GetError::NotFound => {
+                TargetArtifactError::NoMatchingArtifactFound(tags)
+            }
+            GetError::TooMany => {
+                TargetArtifactError::TooManyMatchingArtifacts(tags)
+            }
+        }
+    })
 }
 
 #[cfg(test)]

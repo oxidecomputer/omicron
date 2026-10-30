@@ -53,12 +53,15 @@ use sled_agent_types_versions::latest::inventory::SledRole;
 use sled_agent_types_versions::latest::inventory::SvcsEnabledNotOnlineResult;
 pub use sled_agent_types_versions::latest::inventory::ZpoolHealth;
 use sled_hardware_types::BaseboardId;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
+use thiserror::Error;
 use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactVersion;
 
 mod display;
 
@@ -239,6 +242,43 @@ impl Collection {
             .and_then(|by_bb| by_bb.get(baseboard_id))
     }
 
+    /// Returns caboose `which` on `baseboard_id`, along with the version that
+    /// it contains
+    pub fn caboose_with_version_for(
+        &self,
+        which: CabooseWhich,
+        baseboard_id: &BaseboardId,
+    ) -> Result<CabooseWithVersion<'_>, CabooseVersionError> {
+        let Some(found) = self.caboose_for(which, baseboard_id) else {
+            return Err(CabooseVersionError::NotInInventory(which));
+        };
+        let version = found.caboose.version.parse().map_err(|err| {
+            CabooseVersionError::Parse {
+                caboose: which,
+                err: InlineErrorChain::new(&err).to_string(),
+            }
+        })?;
+        Ok(CabooseWithVersion { caboose: &found.caboose, version })
+    }
+
+    /// Returns the caboose for the active SP image (slot 0) on
+    /// `baseboard_id`, along with the version that it contains
+    pub fn active_sp_caboose_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Result<CabooseWithVersion<'_>, CabooseVersionError> {
+        self.caboose_with_version_for(CabooseWhich::SpSlot0, baseboard_id)
+    }
+
+    /// Returns the caboose for the active RoT bootloader image (stage0) on
+    /// `baseboard_id`, along with the version that it contains
+    pub fn active_rot_bootloader_caboose_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Result<CabooseWithVersion<'_>, CabooseVersionError> {
+        self.caboose_with_version_for(CabooseWhich::Stage0, baseboard_id)
+    }
+
     /// Iterate over all the Omicron zones in the sled-agent ledgers of this
     /// collection
     pub fn all_ledgered_omicron_zones(
@@ -356,6 +396,49 @@ impl Collection {
     pub fn display(&self) -> CollectionDisplay<'_> {
         CollectionDisplay::new(self)
     }
+}
+
+/// A caboose found in inventory, along with the version parsed from it
+#[derive(Clone, Debug)]
+pub struct CabooseWithVersion<'a> {
+    /// the caboose
+    pub caboose: &'a Caboose,
+    /// the version in the caboose
+    pub version: ArtifactVersion,
+}
+
+/// Reasons that a version could not be determined from a caboose in
+/// inventory
+#[derive(
+    Clone,
+    Debug,
+    Error,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum CabooseVersionError {
+    /// the caboose was not in inventory
+    #[error("caboose for {0:?} is not in inventory")]
+    NotInInventory(CabooseWhich),
+    /// the version in the caboose could not be parsed
+    // The parse error is stored as a string so that this type can be
+    // serialized as part of a planning report.  That is why the message
+    // includes it.
+    #[error("version from caboose {caboose:?} could not be parsed: {err}")]
+    Parse {
+        /// the caboose whose version could not be parsed
+        caboose: CabooseWhich,
+        /// description of the parse error
+        err: String,
+    },
 }
 
 impl IdOrdItem for Collection {

@@ -14,6 +14,8 @@
 
 use crate::external_api::sled::SledState;
 use crate::internal_api::params::DnsConfigParams;
+use crate::inventory::CabooseVersionError;
+use crate::inventory::CabooseWithVersion;
 use crate::inventory::Collection;
 pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
@@ -339,6 +341,15 @@ impl Blueprint {
             comment: self.comment.clone(),
             source: self.source.clone(),
         }
+    }
+
+    /// Returns whether updates are suspended due to having detected a MUPdate
+    /// since the last time the target release was set
+    pub fn updates_suspended(
+        &self,
+        current_generation: TargetReleaseGeneration,
+    ) -> bool {
+        current_generation < self.target_release_minimum_generation
     }
 
     /// Construct a [`ServiceZoneNatEntries`] containing all NAT entries for
@@ -3112,6 +3123,33 @@ pub enum ExpectedVersion {
     Version(ArtifactVersion),
 }
 
+impl ExpectedVersion {
+    /// Converts the result of looking up an _inactive_ slot's caboose in
+    /// inventory (e.g., with `Collection::caboose_with_version_for()`) into
+    /// the version that we expect to find in that slot
+    ///
+    /// A missing caboose is not an error.  It means that we expect the slot
+    /// to hold no valid image.  A caboose whose version cannot be parsed is
+    /// an error.
+    ///
+    /// This is not appropriate for an active slot.  A missing caboose for an
+    /// active slot means that inventory is incomplete, not that the slot is
+    /// empty.
+    pub fn for_inactive_caboose(
+        caboose: Result<CabooseWithVersion<'_>, CabooseVersionError>,
+    ) -> Result<ExpectedVersion, CabooseVersionError> {
+        match caboose {
+            Ok(CabooseWithVersion { caboose: _, version }) => {
+                Ok(ExpectedVersion::Version(version))
+            }
+            Err(CabooseVersionError::NotInInventory(_)) => {
+                Ok(ExpectedVersion::NoValidVersion)
+            }
+            Err(error @ CabooseVersionError::Parse { .. }) => Err(error),
+        }
+    }
+}
+
 impl FromStr for ExpectedVersion {
     type Err = ArtifactVersionError;
 
@@ -3894,10 +3932,52 @@ mod test {
     use super::PendingMgsUpdateDetails;
     use super::PendingMgsUpdateSpDetails;
     use super::PendingMgsUpdates;
+    use crate::inventory::Caboose;
+    use crate::inventory::CabooseVersionError;
+    use crate::inventory::CabooseWhich;
+    use crate::inventory::CabooseWithVersion;
     use gateway_types::component::SpType;
     use sled_hardware_types::BaseboardId;
     use sled_hardware_types::GIMLET_SLED_MODEL;
     use std::sync::Arc;
+    use tufaceous_artifact::ArtifactVersion;
+
+    #[test]
+    fn test_expected_version_for_inactive_caboose() {
+        let version = ArtifactVersion::new_const("1.2.3");
+        let caboose = Caboose {
+            board: "test-board".to_string(),
+            git_commit: "test-commit".to_string(),
+            name: "test-name".to_string(),
+            version: version.to_string(),
+            sign: None,
+        };
+        assert_eq!(
+            ExpectedVersion::for_inactive_caboose(Ok(CabooseWithVersion {
+                caboose: &caboose,
+                version: version.clone(),
+            })),
+            Ok(ExpectedVersion::Version(version)),
+        );
+
+        // A missing caboose means we expect no valid image in the slot.
+        let missing =
+            CabooseVersionError::NotInInventory(CabooseWhich::SpSlot1);
+        assert_eq!(
+            ExpectedVersion::for_inactive_caboose(Err(missing)),
+            Ok(ExpectedVersion::NoValidVersion),
+        );
+
+        // A caboose whose version cannot be parsed is an error.
+        let unparseable = CabooseVersionError::Parse {
+            caboose: CabooseWhich::SpSlot1,
+            err: "bad version".to_string(),
+        };
+        assert_eq!(
+            ExpectedVersion::for_inactive_caboose(Err(unparseable.clone())),
+            Err(unparseable),
+        );
+    }
 
     #[test]
     fn test_serialize_pending_mgs_updates() {
