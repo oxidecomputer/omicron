@@ -264,6 +264,8 @@ mod api_impl {
     use sled_agent_types::support_bundle::SupportBundleMetadata;
     use sled_agent_types::support_bundle::SupportBundlePathParam;
     use sled_agent_types::support_bundle::SupportBundleTransferQueryParams;
+    use sled_agent_types::trust_quorum::TrustQuorumCoordinatorStatusResponse;
+    use sled_agent_types::trust_quorum::TrustQuorumNetworkConfigResponse;
     use sled_agent_types::zone_bundle::BundleUtilization;
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_agent_types::zone_bundle::CleanupContextUpdate;
@@ -1003,9 +1005,7 @@ mod api_impl {
         async fn trust_quorum_coordinator_status(
             _request_context: RequestContext<Self::Context>,
         ) -> Result<
-            HttpResponseOk<
-                Option<trust_quorum_types::status::CoordinatorStatus>,
-            >,
+            HttpResponseOk<TrustQuorumCoordinatorStatusResponse>,
             HttpError,
         > {
             unimplemented!()
@@ -1065,14 +1065,8 @@ mod api_impl {
 
         async fn trust_quorum_network_config_get(
             _request_context: RequestContext<Self::Context>,
-        ) -> Result<
-            HttpResponseOk<
-                Option<
-                    sled_agent_types::trust_quorum::TrustQuorumNetworkConfig,
-                >,
-            >,
-            HttpError,
-        > {
+        ) -> Result<HttpResponseOk<TrustQuorumNetworkConfigResponse>, HttpError>
+        {
             unimplemented!()
         }
 
