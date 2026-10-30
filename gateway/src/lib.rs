@@ -109,7 +109,8 @@ fn start_dropshot_server(
                 dropshot::ClientSpecifiesVersionInHeader::new(
                     omicron_common::api::VERSION_HEADER,
                     gateway_api::latest_version(),
-                ),
+                )
+                .min_version(gateway_api::oldest_version()),
             )))
             .start()
             .map_err(|error| {

@@ -92,7 +92,8 @@ pub async fn start_servers(
             dropshot::ClientSpecifiesVersionInHeader::new(
                 omicron_common::api::VERSION_HEADER,
                 dns_server_api::VERSION_SOA_AND_NS,
-            ),
+            )
+            .min_version(dns_server_api::oldest_version()),
         )))
         .start()
         .map_err(|error| anyhow!("setting up HTTP server: {:#}", error))?
