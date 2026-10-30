@@ -40,6 +40,8 @@ use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvConfigReconcilerStatus;
 use nexus_db_model::InvConfigReconcilerStatusKind;
 use nexus_db_model::InvDataset;
+use nexus_db_model::InvDiscoveredRack;
+use nexus_db_model::InvDiscoveredSled;
 use nexus_db_model::InvFmdHostCase;
 use nexus_db_model::InvFmdResource;
 use nexus_db_model::InvFmdStatus;
@@ -623,6 +625,22 @@ impl DataStore {
                 })
             })
             .collect::<Result<Vec<_>, Error>>()?;
+
+        let (inv_discovered_racks, inv_discovered_sleds) =
+            collection.discovered_racks.iter().fold(
+                (Vec::new(), Vec::new()),
+                |(mut rack_acc, mut sled_acc), rack| {
+                    rack_acc.push(InvDiscoveredRack::new(collection_id, rack));
+                    sled_acc.extend(rack.discovered_sleds.iter().map(|sled| {
+                        InvDiscoveredSled::new(
+                            collection_id,
+                            rack.rack_id,
+                            sled,
+                        )
+                    }));
+                    (rack_acc, sled_acc)
+                },
+            );
 
         let mut inv_clickhouse_keeper_memberships = Vec::new();
         for membership in &collection.clickhouse_keeper_cluster_membership {
@@ -2200,6 +2218,24 @@ impl DataStore {
                     .await?;
             }
 
+            // Insert the racks we've discovered
+            if !inv_discovered_racks.is_empty() {
+                use nexus_db_schema::schema::inv_discovered_rack::dsl;
+                diesel::insert_into(dsl::inv_discovered_rack)
+                    .values(inv_discovered_racks)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert the sleds we've discovered
+            if !inv_discovered_sleds.is_empty() {
+                use nexus_db_schema::schema::inv_discovered_sled::dsl;
+                diesel::insert_into(dsl::inv_discovered_sled)
+                    .values(inv_discovered_sleds)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
             // Insert the clickhouse keeper memberships we've received
             {
                 use nexus_db_schema::schema::inv_clickhouse_keeper_membership::dsl;
@@ -2541,6 +2577,8 @@ impl DataStore {
             ncockroach_status: usize,
             nntp_timesync: usize,
             ninternal_dns: usize,
+            ndiscovered_racks: usize,
+            ndiscovered_sleds: usize,
         }
 
         let NumRowsDeleted {
@@ -2586,6 +2624,8 @@ impl DataStore {
             ncockroach_status,
             nntp_timesync,
             ninternal_dns,
+            ndiscovered_racks,
+            ndiscovered_sleds,
         } =
             self.transaction_retry_wrapper("inventory_delete_collection")
                 .transaction(&conn, |conn| async move {
@@ -2983,6 +3023,30 @@ impl DataStore {
                         .await?
                     };
 
+                    // Remove rows for discovered racks
+                    let ndiscovered_racks = {
+                        use nexus_db_schema::schema::inv_discovered_rack::dsl;
+                        diesel::delete(
+                            dsl::inv_discovered_rack.filter(
+                                dsl::inv_collection_id.eq(db_collection_id),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    // Remove rows for discovered sleds
+                    let ndiscovered_sleds = {
+                        use nexus_db_schema::schema::inv_discovered_sled::dsl;
+                        diesel::delete(
+                            dsl::inv_discovered_sled.filter(
+                                dsl::inv_collection_id.eq(db_collection_id),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
                     Ok(NumRowsDeleted {
                         ncollections,
                         nsps,
@@ -3026,6 +3090,8 @@ impl DataStore {
                         ncockroach_status,
                         nntp_timesync,
                         ninternal_dns,
+                        ndiscovered_racks,
+                        ndiscovered_sleds,
                     })
                 })
                 .await
@@ -3083,6 +3149,8 @@ impl DataStore {
             "ncockroach_status" => ncockroach_status,
             "nntp_timesync" => nntp_timesync,
             "ninternal_dns" => ninternal_dns,
+            "ndiscovered_racks" => ndiscovered_racks,
+            "ndiscovered_sleds" => ndiscovered_sleds,
         );
 
         Ok(())
@@ -5331,6 +5399,110 @@ impl DataStore {
                 .expect("database ensures sled_agent_rows has unique sled_id");
         }
 
+        let discovered_rack_rows: Vec<_> = {
+            use nexus_db_schema::schema::inv_discovered_rack::dsl;
+
+            let mut rows = Vec::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::inv_discovered_rack,
+                    dsl::rack_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvDiscoveredRack::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| row.rack_id);
+                rows.extend(batch);
+            }
+
+            rows
+        };
+
+        let discovered_sled_rows: Vec<_> = {
+            use nexus_db_schema::schema::inv_discovered_sled::dsl;
+
+            let mut rows = Vec::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::inv_discovered_sled,
+                    dsl::sled_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvDiscoveredSled::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| row.sled_id);
+                rows.extend(batch);
+            }
+
+            rows
+        };
+
+        let mut discovered_sleds_by_rack_id: BTreeMap<_, IdOrdMap<_>> =
+            BTreeMap::new();
+
+        for sled_row in discovered_sled_rows.into_iter() {
+            discovered_sleds_by_rack_id
+                .entry(sled_row.rack_id)
+                .or_default()
+                .insert_unique(sled_row.try_into().map_err(
+                    |e: anyhow::Error| {
+                        Error::internal_error(
+                            &InlineErrorChain::new(&*e).to_string(),
+                        )
+                    },
+                )?)
+                .expect("database ensures the row has a unique sled_id");
+        }
+
+        let mut discovered_racks = IdOrdMap::new();
+
+        for rack_row in discovered_rack_rows.into_iter() {
+            let sleds = discovered_sleds_by_rack_id
+                .remove(&rack_row.rack_id)
+                .unwrap_or_default();
+            let rack = rack_row.into_inventory(sleds).map_err(
+                |e: anyhow::Error| {
+                    Error::internal_error(
+                        &InlineErrorChain::new(&*e).to_string(),
+                    )
+                },
+            )?;
+            discovered_racks
+                .insert_unique(rack)
+                .expect("database ensures the row has a unique rack_id");
+        }
+
+        // Check that every discovered sled belonged to a discovered rack in
+        // this collection. (This shouldn't be possible unless there's a bug on
+        // the insert side or something very weird is going on.)
+        bail_unless!(
+            discovered_sleds_by_rack_id.is_empty(),
+            "found discovered sleds for nonexistent racks: {:?}",
+            discovered_sleds_by_rack_id.keys(),
+        );
+
         // Check that we consumed all the reconciliation results we found in
         // this collection.
         bail_unless!(
@@ -5452,6 +5624,7 @@ impl DataStore {
             rot_pages_found,
             power_shelves,
             sled_agents,
+            discovered_racks,
             clickhouse_keeper_cluster_membership,
             cockroach_status,
             ntp_timesync,
