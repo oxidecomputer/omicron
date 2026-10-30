@@ -20,11 +20,15 @@ use nexus_types::internal_api::params::{
 };
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
+use omicron_common::backoff::{
+    BackoffError, retry_notify_ext, retry_policy_internal_service,
+};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::net::{Ipv6Addr, SocketAddr};
 use steno::ActionError;
 use steno::Node;
@@ -117,6 +121,26 @@ declare_saga_actions! {
         + sim_set_migration_ids
     }
 
+    // This node is essentially the undo action of the
+    // `sim_ensure_destination_propolis` node, but factored out into a separate
+    // node that's pushed *before* `sim_ensure_destination_propolis`. This is
+    // necessary because we want to ensure that an unwinding saga always
+    // attempts to unregister the VMM it may have created on a sled, regardless
+    // of whether the `sim_ensure_destination_propolis` node completes or fails.
+    // If that action sends a VMM ensure request to the sled but then encounters
+    // an error and begins unwinding before the node *completes*, we may have
+    // still created a VMM and must attempt to tear it down. Because undo
+    // actions are only performed for *completed* nodes, we must push a node
+    // immediately *before* `sim_ensure_destination_propolis` with a no-op
+    // forwards action and `sim_ensure_destination_propolis_undo` as its undo
+    // action. That way, if we have reached the point where we were going to
+    // attempt to ensure a VMM, we ensure it does not exist while unwinding
+    // regardless of whether we made it past that node.
+    UNREGISTER_DESTINATION_IF_UNWINDING -> "unregister_destination_if_unwinding" {
+        + sim_noop
+        - sim_ensure_destination_propolis_undo
+    }
+
     // This step registers the instance with the destination sled. Care is
     // needed at this point because there are two sleds that can send updates
     // that affect the same instance record (though they have separate VMMs that
@@ -124,7 +148,6 @@ declare_saga_actions! {
     // cooperate to return the instance to the correct pre-migration state.
     ENSURE_DESTINATION_PROPOLIS -> "ensure_destination" {
         + sim_ensure_destination_propolis
-        - sim_ensure_destination_propolis_undo
     }
 
     // Finally, this step requests migration by sending a "migrate in" request
@@ -163,6 +186,7 @@ impl NexusSaga for SagaInstanceMigrate {
         builder.append(create_vmm_record_action());
         builder.append(create_migration_record_action());
         builder.append(set_migration_ids_action());
+        builder.append(unregister_destination_if_unwinding_action());
         builder.append(ensure_destination_propolis_action());
         builder.append(instance_migrate_action());
 
@@ -513,37 +537,61 @@ async fn sim_ensure_destination_propolis(
         })
 }
 
+async fn sim_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
+    Ok(())
+}
+
 async fn sim_ensure_destination_propolis_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
+    let params = sagactx.saga_params::<Params>()?;
     let osagactx = sagactx.user_data();
     let dst_propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
     let dst_sled_id = sagactx.lookup::<SledUuid>("dst_sled_id")?;
     let db_instance =
         sagactx.lookup::<db::model::Instance>("set_migration_ids")?;
+    let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
 
     info!(osagactx.log(), "unregistering destination vmm for migration unwind";
-          "instance_id" => %db_instance.id(),
+          "instance_id" => %instance_id,
           "sled_id" => %dst_sled_id,
           "prev_runtime_state" => ?db_instance.runtime());
 
-    // Ensure that the destination sled has no Propolis matching the description
-    // the saga previously generated. If this succeeds, or if it fails because
-    // the destination sled no longer knows about this instance, allow the rest
-    // of unwind to take care of cleaning up the migration IDs in the instance
-    // record. Otherwise the unwind has failed and manual intervention is
-    // needed.
-    match osagactx
-        .nexus()
-        .instance_ensure_unregistered(&dst_propolis_id, &dst_sled_id)
-        .await
-    {
-        Ok(_) => Ok(()),
-        Err(InstanceStateChangeError::SledAgent(inner)) => {
-            if !inner.vmm_gone() { Ok(()) } else { Err(inner.0.into()) }
-        }
-        Err(e) => Err(e.into()),
-    }
+    // `ensure_vmm_unregistered` will not retry errors checking if the sled is
+    // out of service (which may include potentially transient errors querying
+    // the database), nor will it retry errors from the sled-agent that
+    // progenitor-extras considers "permanent". Therefore, we wrap the entire
+    // thing in a second retry loop, so that the saga doesn't get stuck.
+    retry_notify_ext(
+        retry_policy_internal_service(),
+        || async {
+            super::instance_common::ensure_vmm_unregistered(
+                &sagactx,
+                &params.serialized_authn,
+                instance_id,
+                dst_propolis_id,
+                dst_sled_id,
+            )
+            .await
+            .map_err(BackoffError::transient)
+        },
+        |error, call_count, total_duration| {
+            warn!(
+                osagactx.log(),
+                "migration saga: failed to unregister destination VMM; \
+                 retrying";
+                "instance_id" => %instance_id,
+                "dst_propolis_id" => %dst_propolis_id,
+                "dst_sled_id" => %dst_sled_id,
+                "call_count" => call_count,
+                "total_duration" => ?total_duration,
+                InlineErrorChain::new(&error),
+            );
+        },
+    )
+    .await?;
+
+    Ok(())
 }
 
 async fn sim_instance_migrate(

@@ -10,34 +10,77 @@ use diesel::SelectableHelper;
 use diesel::prelude::*;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_model::{BootstoreConfig, BootstoreKeys};
-use omicron_common::api::external::{CreateResult, LookupResult};
+use omicron_common::api::external::{CreateResult, Error, LookupResult};
 use sled_agent_types::rack_init::rack_init_bootstore_generation;
 
+/// Outcome of [`DataStore::try_bump_bootstore_generation`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BootstoreGenerationBump {
+    /// The generation was bumped to this value.
+    Bumped(i64),
+    /// The generation did not match `expected`. Nothing changed.
+    UnexpectedGeneration,
+}
+
 impl DataStore {
-    pub async fn bump_bootstore_generation(
+    /// Bump the bootstore generation for `key` conditionally on the current
+    /// gen number being `expected`.
+    ///
+    /// Returns [`BootstoreGenerationBump::Bumped`] with the new generation, or
+    /// [`BootstoreGenerationBump::UnexpectedGeneration`] if the generation
+    /// wasn't `expected`. This is a "compare-and-swap" approach to help
+    /// synchronize writes to sled agent's bootstore. This guarantees that only
+    /// one caller writes for each gen number and will prevent dueling if the
+    /// following is guaranteed:
+    /// - Writers read the gen number before or in the same transaction that
+    /// they use to read the config from the DB they wish to write.
+    /// - Writers only write if they receive the new gen from calling this
+    /// function.
+    ///
+    /// This also relies on sled agent's bootstore rejecting writes with a lower
+    /// generation (`StaleNetworkConfig`), so a really slow write with a lower
+    /// generation can't overwrite a newer one.
+    pub async fn try_bump_bootstore_generation(
         &self,
         opctx: &OpContext,
         key: String,
-    ) -> LookupResult<i64> {
+        expected: Option<i64>,
+    ) -> Result<BootstoreGenerationBump, Error> {
         use nexus_db_schema::schema::bootstore_keys;
         use nexus_db_schema::schema::bootstore_keys::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let bks = diesel::insert_into(dsl::bootstore_keys)
-            .values(BootstoreKeys {
-                key: key.clone(),
-                generation: rack_init_bootstore_generation::NEXUS_INITIAL,
-            })
-            .on_conflict(bootstore_keys::key)
-            .do_update()
-            .set(bootstore_keys::generation.eq(dsl::generation + 1))
-            .returning(BootstoreKeys::as_returning())
-            .get_result_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        let new_generation = match expected {
+            Some(expected) => diesel::update(dsl::bootstore_keys)
+                .filter(dsl::key.eq(key))
+                // Only bump if the generation is still `expected`.
+                .filter(dsl::generation.eq(expected))
+                .set(dsl::generation.eq(dsl::generation + 1))
+                .returning(dsl::generation)
+                .get_result_async::<i64>(&*conn)
+                .await
+                .optional(),
+            None => diesel::insert_into(dsl::bootstore_keys)
+                .values(BootstoreKeys {
+                    key,
+                    generation: rack_init_bootstore_generation::NEXUS_INITIAL,
+                })
+                // Doing nothing on conflict lets us detect whether another
+                // concurrent writer already inserted this row.
+                .on_conflict(bootstore_keys::key)
+                .do_nothing()
+                .returning(dsl::generation)
+                .get_result_async::<i64>(&*conn)
+                .await
+                .optional(),
+        }
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        Ok(bks.generation)
+        Ok(match new_generation {
+            Some(generation) => BootstoreGenerationBump::Bumped(generation),
+            None => BootstoreGenerationBump::UnexpectedGeneration,
+        })
     }
 
     pub async fn ensure_bootstore_config(
@@ -83,5 +126,55 @@ impl DataStore {
         } else {
             Ok(None)
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::BootstoreGenerationBump::{Bumped, UnexpectedGeneration};
+    use crate::db::pub_test_utils::TestDatabase;
+    use nexus_db_model::NETWORK_KEY;
+    use omicron_test_utils::dev;
+    use rack_init_bootstore_generation::NEXUS_INITIAL;
+    use sled_agent_types::rack_init::rack_init_bootstore_generation;
+
+    #[tokio::test]
+    async fn test_try_bump_bootstore_generation() {
+        let logctx = dev::test_setup_log("test_try_bump_bootstore_generation");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let bump = |expected| {
+            datastore.try_bump_bootstore_generation(
+                opctx,
+                NETWORK_KEY.into(),
+                expected,
+            )
+        };
+
+        // Before the first bump, only a caller expecting `None` can bump.
+        assert_eq!(
+            bump(Some(NEXUS_INITIAL)).await.unwrap(),
+            UnexpectedGeneration
+        );
+        assert_eq!(bump(None).await.unwrap(), Bumped(NEXUS_INITIAL));
+
+        // After that, only a caller expecting the current generation can bump.
+        assert_eq!(bump(None).await.unwrap(), UnexpectedGeneration);
+        assert_eq!(
+            bump(Some(NEXUS_INITIAL - 1)).await.unwrap(),
+            UnexpectedGeneration
+        );
+        assert_eq!(
+            bump(Some(NEXUS_INITIAL)).await.unwrap(),
+            Bumped(NEXUS_INITIAL + 1)
+        );
+        assert_eq!(
+            bump(Some(NEXUS_INITIAL)).await.unwrap(),
+            UnexpectedGeneration
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 }
