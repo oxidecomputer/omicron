@@ -145,6 +145,9 @@ pub struct SledAgent {
     /// Pending pauses for `vmm_get_state` requests, queued by
     /// [`Self::pause_next_vmm_get_state`].
     vmm_get_state_pauses: VmmRequestPauseQueue,
+    /// Pending pauses for `vmm_unregister` requests, queued by
+    /// [`Self::pause_next_vmm_unregister`].
+    vmm_unregister_pauses: VmmRequestPauseQueue,
     /// Number of remaining local storage operation failures to inject.
     /// When > 0, local storage ensure/delete operations decrement this
     /// counter and return 503 Service Unavailable.
@@ -285,8 +288,9 @@ impl VmmRequestPauseQueue {
 
 /// A handle to await the next request to one of the simulated sled-agent's VMM
 /// endpoints, returned by [`SledAgent::pause_next_vmm_registration`],
-/// [`SledAgent::pause_next_vmm_put_state`], or
-/// [`SledAgent::pause_next_vmm_get_state`].
+/// [`SledAgent::pause_next_vmm_put_state`],
+/// [`SledAgent::pause_next_vmm_get_state`], or
+/// [`SledAgent::pause_next_vmm_unregister`].
 ///
 /// Use [`Self::wait_for_request`] to wait for the request to arrive and take
 /// control of it. Dropping this handle before a request arrives cancels the
@@ -475,6 +479,7 @@ impl SledAgent {
             vmm_register_pauses: VmmRequestPauseQueue::new("vmm_register"),
             vmm_put_state_pauses: VmmRequestPauseQueue::new("vmm_put_state"),
             vmm_get_state_pauses: VmmRequestPauseQueue::new("vmm_get_state"),
+            vmm_unregister_pauses: VmmRequestPauseQueue::new("vmm_unregister"),
             local_storage_error_count: AtomicU32::new(0),
             repo_depot,
             log,
@@ -741,6 +746,20 @@ impl SledAgent {
         Ok(instance_run_time_state)
     }
 
+    /// Handles a `vmm_unregister` request.
+    ///
+    /// This is [`Self::instance_unregister`], except that the request may be
+    /// held by [`Self::pause_next_vmm_unregister`]. Tests that call
+    /// `instance_unregister` directly do not need to wait for pauses, so this
+    /// is a separate function.
+    pub(super) async fn handle_vmm_unregister_request(
+        self: &Arc<Self>,
+        propolis_id: PropolisUuid,
+    ) -> Result<VmmUnregisterResponse, HttpError> {
+        self.vmm_unregister_pauses.hold_request(&self.log, propolis_id).await?;
+        Ok(self.instance_unregister(propolis_id).await?)
+    }
+
     /// Forcibly unregisters an instance. To simulate the rude termination that
     /// this produces in the real sled agent, the instance's mock Propolis is
     /// not notified.
@@ -888,6 +907,17 @@ impl SledAgent {
     /// wait for the request to arrive. See [`NextVmmRequest`] for more details.
     pub fn pause_next_vmm_get_state(&self) -> NextVmmRequest {
         self.vmm_get_state_pauses.pause_next()
+    }
+
+    /// Pauses the next `vmm_unregister` request received by the sled-agent
+    /// until the test explicitly resumes or fails it.
+    ///
+    /// Direct calls to [`Self::instance_unregister`] are not paused.
+    ///
+    /// Call [`NextVmmRequest::wait_for_request`] on the returned handle to
+    /// wait for the request to arrive. See [`NextVmmRequest`] for more details.
+    pub fn pause_next_vmm_unregister(&self) -> NextVmmRequest {
+        self.vmm_unregister_pauses.pause_next()
     }
 
     /// Set the number of times local storage operations should fail with 503
