@@ -91,7 +91,7 @@ pub async fn start_servers(
         .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
             dropshot::ClientSpecifiesVersionInHeader::new(
                 omicron_common::api::VERSION_HEADER,
-                dns_server_api::VERSION_SOA_AND_NS,
+                dns_server_api::latest_version(),
             )
             .min_version(dns_server_api::oldest_version()),
         )))
