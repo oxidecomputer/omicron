@@ -2697,28 +2697,28 @@ async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors(
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
-    let sled_agent = cptestctx.first_sled_agent();
-    sled_agent
-        .set_instance_ensure_state_error(Some(
-            omicron_common::api::external::Error::internal_error(
-                "somebody set up us the bomb",
-            ),
-        ))
-        .await;
-
-    // Attempting to reboot the instance will fail, but it should *not* go to
-    // Failed.
-    expect_instance_reboot_fail(
-        client,
-        instance_name,
-        http::StatusCode::INTERNAL_SERVER_ERROR,
-    )
-    .await;
+    // Fail the reboot request's call to the sled-agent with an error that does
+    // not indicate the VMM is gone. The reboot will fail, but the instance
+    // should *not* go to Failed.
+    let next_put_state =
+        cptestctx.first_sled_agent().pause_next_vmm_put_state();
+    tokio::join!(
+        expect_instance_reboot_fail(
+            client,
+            instance_name,
+            http::StatusCode::INTERNAL_SERVER_ERROR,
+        ),
+        async {
+            next_put_state.wait_for_request(Duration::from_secs(60)).await.fail(
+                omicron_common::api::external::Error::internal_error(
+                    "somebody set up us the bomb",
+                ),
+            )
+        },
+    );
 
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
-
-    sled_agent.set_instance_ensure_state_error(None).await;
 
     expect_instance_reboot_ok(client, instance_name).await;
 }
@@ -2741,20 +2741,24 @@ async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors_by_inst
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
-    let sled_agent = cptestctx.first_sled_agent();
-    sled_agent
-        .set_instance_ensure_state_error(Some(
-            omicron_common::api::external::Error::internal_error(
-                "you have no chance to survive, make your time",
-            ),
-        ))
-        .await;
-
-    nexus_test_utils::background::activate_background_task(
-        &cptestctx.lockstep_client,
-        "instance_watcher",
-    )
-    .await;
+    // Fail the instance-watcher's health check with an error that does not
+    // indicate the VMM is gone. The check is inconclusive, so the instance
+    // should *not* go to Failed.
+    let next_get_state =
+        cptestctx.first_sled_agent().pause_next_vmm_get_state();
+    tokio::join!(
+        nexus_test_utils::background::activate_background_task(
+            &cptestctx.lockstep_client,
+            "instance_watcher",
+        ),
+        async {
+            next_get_state.wait_for_request(Duration::from_secs(60)).await.fail(
+                omicron_common::api::external::Error::internal_error(
+                    "you have no chance to survive, make your time",
+                ),
+            )
+        },
+    );
 
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
