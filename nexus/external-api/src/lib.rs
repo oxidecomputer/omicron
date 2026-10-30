@@ -88,6 +88,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_10_22_00, ACTIVE_PROBLEMS),
     (2026_10_21_00, BYTE_WRAPPER_0_2_BUMP),
     (2026_10_15_00, SYSTEM_CERTIFICATES),
     (2026_10_13_00, ARTIFACT_HASH_SCHEMA),
@@ -338,6 +339,13 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                 description = "Virtual Private Clouds (VPCs) provide isolated network environments for managing and deploying services.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/vpcs"
+                }
+            },
+            "system/active-problems" = {
+                description = "Problems detected by the fault management \
+                 subsystem.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/active-problems"
                 }
             },
             "system/alerts" = {
@@ -9532,6 +9540,142 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<latest::device_params::DeviceAccessTokenRequest>,
     ) -> Result<Response<Body>, HttpError>;
+
+    // Active Problems
+
+    /// List Active Problems
+    ///
+    /// Active Problems are sorted by the time at which they were detected, and
+    /// may be filtered by state.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/active-problems",
+        tags = ["system/active-problems"],
+        versions = VERSION_ACTIVE_PROBLEMS..,
+    }]
+    async fn active_problem_list(
+        rqctx: RequestContext<Self::Context>,
+        pagination: Query<
+            PaginatedByTimeAndId<
+                latest::active_problem::ActiveProblemListParams,
+            >,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::active_problem::ActiveProblem>>,
+        HttpError,
+    >;
+
+    /// Fetch Active Problem
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/active-problems/{problem_id}",
+        tags = ["system/active-problems"],
+        versions = VERSION_ACTIVE_PROBLEMS..,
+    }]
+    async fn active_problem_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::active_problem::ActiveProblemSelector>,
+    ) -> Result<HttpResponseOk<latest::active_problem::ActiveProblem>, HttpError>;
+
+    /// List Active Problem's causes
+    ///
+    /// Returns any other Active Problems which are the causes of the
+    /// specified Active Problem. If the specified Active Problem has no causes,
+    /// this list may be empty.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/active-problems/{problem_id}/causes",
+        tags = ["system/active-problems"],
+        versions = VERSION_ACTIVE_PROBLEMS..,
+    }]
+    async fn active_problem_causes_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::active_problem::ActiveProblemSelector>,
+        pagination: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::active_problem::RelatedActiveProblem>,
+        >,
+        HttpError,
+    >;
+
+    /// List Active Problem's consequences
+    ///
+    /// Returns any other Active Problems which are caused by the specified
+    /// Active Problem. If no other Active Problem is caused by the specified
+    /// Active Problem, then this list may be empty.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/active-problems/{problem_id}/consequences",
+        tags = ["system/active-problems"],
+        versions = VERSION_ACTIVE_PROBLEMS..,
+    }]
+    async fn active_problem_consequences_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::active_problem::ActiveProblemSelector>,
+        pagination: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::active_problem::RelatedActiveProblem>,
+        >,
+        HttpError,
+    >;
+
+    /// List resources impacted by Active Problem
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/active-problems/{problem_id}/impacts",
+        tags = ["system/active-problems"],
+        versions = VERSION_ACTIVE_PROBLEMS..,
+    }]
+    async fn active_problem_impact_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::active_problem::ActiveProblemSelector>,
+        pagination: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::active_problem::ActiveProblemImpact>,
+        >,
+        HttpError,
+    >;
+
+    /// List support bundles attached to Active Problem
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/active-problems/{problem_id}/support-bundles",
+        // XXX(eliza): it would be nice if this could also have the
+        // `system/support-bundles` tag, but only one tag is allowed per
+        // endpoint (why is it an array, then?)...
+        tags = ["system/active-problems"],
+        versions = VERSION_ACTIVE_PROBLEMS..,
+    }]
+    async fn active_problem_support_bundles_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::active_problem::ActiveProblemSelector>,
+        query_params: Query<PaginatedByTimeAndId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::support_bundle::SupportBundleInfo>>,
+        HttpError,
+    >;
+
+    /// List alerts for Active Problem
+    ///
+    /// Lists alerts associated with the requested Active Problem.
+    /// Alerts may be filtered by alert class or alert class glob and
+    /// by an inclusive creation time range.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/active-problems/{problem_id}/alerts",
+        // XXX(eliza): it would be nice if this could also have the
+        // `system/alerts` tag, but only one tag is allowed per endpoint...
+        tags = ["system/active-problems"],
+        versions = VERSION_ACTIVE_PROBLEMS..,
+    }]
+    async fn active_problem_alert_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::active_problem::ActiveProblemSelector>,
+        pagination: Query<PaginatedByTimeAndId<latest::alert::AlertListParams>>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::alert::Alert>>, HttpError>;
 
     // Alerts
 
