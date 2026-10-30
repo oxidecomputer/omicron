@@ -89,4 +89,9 @@ esac
 pfexec zfs create -p "rpool/images/$USER/host"
 pfexec zfs create -p "rpool/images/$USER/recovery"
 
-cargo xtask releng --output-dir /work --mkincorp --verify-debug-libraries
+# DO NOT MERGE: build the recovery image from oxidecomputer/helios#274.
+git clone -b recovery-keep-topo-libs \
+    https://github.com/oxidecomputer/helios.git ../helios
+
+cargo xtask releng --output-dir /work --mkincorp --verify-debug-libraries \
+    --ignore-helios-origin
