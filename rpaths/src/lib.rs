@@ -13,6 +13,11 @@
 //! - **libpq** (via pq-sys, pulled in by diesel)
 //! - **libfmd_adm** (via fmd-adm-sys, pulled in by fmd-adm in sled-agent)
 //!
+//! This crate is for cross-platform libraries whose install location varies
+//! with the host OS.  An illumos-only library with a fixed install location,
+//! such as libipcc or libtopo, is handled once for the whole workspace by the
+//! illumos target rustflags in `.cargo/config.toml` instead.
+//!
 //! Cargo/Rust have no built-in way to set the RPATH for a transitively-linked
 //! native library.  (See below.)  So we've developed the pattern here instead.
 //! It works like this:

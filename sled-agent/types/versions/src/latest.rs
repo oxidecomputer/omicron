@@ -138,7 +138,6 @@ pub mod inventory {
     pub use crate::v1::inventory::BootImageHeader;
     pub use crate::v1::inventory::ConfigReconcilerInventoryResult;
     pub use crate::v1::inventory::InventoryDataset;
-    pub use crate::v1::inventory::InventoryDisk;
     pub use crate::v1::inventory::ManifestNonBootInventory;
     pub use crate::v1::inventory::MupdateOverrideBootInventory;
     pub use crate::v1::inventory::MupdateOverrideInventory;
@@ -214,7 +213,8 @@ pub mod inventory {
     pub use crate::v55::inventory::OmicronZonesConfig;
     pub use crate::v55::inventory::ZoneArtifactInventory;
 
-    pub use crate::v57::inventory::Inventory;
+    pub use crate::v61::inventory::Inventory;
+    pub use crate::v61::inventory::InventoryDisk;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;
