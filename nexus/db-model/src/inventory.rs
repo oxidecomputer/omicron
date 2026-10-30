@@ -57,7 +57,7 @@ use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::{
     self, Caboose, CockroachStatus, Collection, DiscoveredRack, DiscoveredSled,
     InternalDnsGenerationStatus, NvmeFirmware, PowerState, PsuSlot, RotPage,
-    RotSlot, SledAgentStartState, TimeSync,
+    RotSlot, TimeSync,
 };
 use omicron_common::address::{
     Ipv6Subnet, RACK_PREFIX_LENGTH, SLED_PREFIX_LENGTH,
@@ -134,6 +134,7 @@ use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneDataset, OmicronZoneImageSource, OmicronZoneType,
 };
+use sled_agent_types::multirack::SledAgentStartState;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddr, SocketAddrV6};
@@ -4299,11 +4300,12 @@ impl From<InvInternalDns> for InternalDnsGenerationStatus {
 mod test {
     use iddqd::IdOrdMap;
     use nexus_types::inventory::{
-        DiscoveredRack, DiscoveredSled, NvmeFirmware, SledAgentStartState,
+        DiscoveredRack, DiscoveredSled, NvmeFirmware,
     };
     use omicron_common::address::Ipv6Subnet;
     use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::{CollectionKind, SledUuid, TypedUuid};
+    use sled_agent_types::multirack::SledAgentStartState;
     use sled_hardware_types::BaseboardId;
 
     use crate::{InvDiscoveredRack, InvDiscoveredSled};
