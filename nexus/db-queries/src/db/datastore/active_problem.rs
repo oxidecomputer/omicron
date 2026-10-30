@@ -24,33 +24,60 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_schema::schema::active_problem::dsl as problem_dsl;
 use nexus_db_schema::schema::active_problem_revision::dsl as rev_dsl;
 use nexus_types::external_api::active_problem as api;
+use nexus_types::identity::Asset;
 use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_uuid_kinds::GenericUuid;
 use uuid::Uuid;
 
 impl DataStore {
-    pub async fn active_problem_fetch(
+    /// Fetches the current revision of an already-fetched Active Problem
+    /// record, returning a view of the problem at that revision.
+    ///
+    /// Since revisions are immutable once written, the returned
+    /// [`ActiveProblemView`] is consistent as of the time `problem` was
+    /// fetched, even if a newer revision has been created since then.
+    ///
+    /// The `problem` and `authz_problem` arguments must represent the same
+    /// Active Problem (i.e. because they were both returned by a call to
+    /// `lookup::ActiveProblem::fetch_for`). If they do not, this method returns
+    /// an internal error.
+    pub async fn active_problem_fetch_current_revision(
         &self,
         opctx: &OpContext,
         authz_problem: &authz::ActiveProblem,
+        problem: ActiveProblem,
     ) -> LookupResult<ActiveProblemView> {
+        // Make sure the authz problem and the problem model refer to the same
+        // Active Problem ID. We don't *strictly* need to check this before
+        // hitting the DB, since the returned revision would not match the
+        // problem, and `ActiveProblemView::try_from` will fail, but this saves
+        // us a database query and lets us return a slightly more descriptive
+        // error message.
+        if problem.id() != authz_problem.id() {
+            return Err(Error::InternalError {
+                internal_message: format!(
+                    "attempted to fetch the current revision of Active \
+                     Problem {} using an `authz::ActiveProblem` for \
+                     Active Problem {}. this is a bug!",
+                    problem.id(),
+                    authz_problem.id(),
+                ),
+            });
+        }
+
         opctx.authorize(authz::Action::Read, authz_problem).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        let (problem, revision) = problem_dsl::active_problem
-            .filter(problem_dsl::id.eq(authz_problem.id().into_untyped_uuid()))
-            .filter(problem_dsl::time_deleted.is_null())
-            .inner_join(
-                rev_dsl::active_problem_revision.on(rev_dsl::problem_id
-                    .eq(problem_dsl::id)
-                    .and(rev_dsl::revision.eq(problem_dsl::current_revision))),
+
+        let revision = rev_dsl::active_problem_revision
+            .filter(
+                rev_dsl::problem_id.eq(authz_problem.id().into_untyped_uuid()),
             )
-            .select((
-                ActiveProblem::as_select(),
-                ActiveProblemRevision::as_select(),
-            ))
-            .get_result_async::<(ActiveProblem, ActiveProblemRevision)>(&*conn)
+            .filter(rev_dsl::revision.eq(problem.current_revision))
+            .select(ActiveProblemRevision::as_select())
+            .get_result_async(&*conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel(
