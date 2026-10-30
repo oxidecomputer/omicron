@@ -159,27 +159,23 @@ pub(crate) struct NvmeFacts {
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ClassifyError {
-    #[error("{location}: {problem}")]
-    Unreadable { location: String, problem: BayProblem },
+    #[error(transparent)]
+    Unreadable { problem: BayProblem },
 
     #[error(
-        "{location} ({nvme_instance}) has {usable_namespaces} usable \
-         namespace(s) but the hardware topology describes none"
+        "{nvme_instance} has {usable_namespaces} usable namespace(s) but the \
+         hardware topology describes none"
     )]
-    MissingNamespace {
-        location: String,
-        nvme_instance: NvmeInstance,
-        usable_namespaces: usize,
-    },
+    MissingNamespace { nvme_instance: NvmeInstance, usable_namespaces: usize },
 
     #[error(
-        "{location} ({nvme_instance}) holds an NVMe controller but libnvme \
-         was not consulted about it"
+        "{nvme_instance} is an NVMe controller but libnvme was not consulted \
+         about it"
     )]
-    MissingNvmeFacts { location: String, nvme_instance: NvmeInstance },
+    MissingNvmeFacts { nvme_instance: NvmeInstance },
 
-    #[error("{location}: topology devfs path {path:?} is not absolute")]
-    RelativeDevfsPath { location: String, path: String },
+    #[error("topology devfs path {path:?} is not absolute")]
+    RelativeDevfsPath { path: String },
 }
 
 /// Combines what the topology and libnvme said about a bay into the bay as
@@ -202,10 +198,7 @@ pub(crate) fn classify_bay(
     let contents = match &bay.contents {
         Ok(contents) => contents,
         Err(problem) => {
-            return Err(ClassifyError::Unreadable {
-                location: bay.location.clone(),
-                problem: problem.clone(),
-            });
+            return Err(ClassifyError::Unreadable { problem: problem.clone() });
         }
     };
 
@@ -227,7 +220,6 @@ pub(crate) fn classify_bay(
 
     let Some(nvme) = nvme else {
         return Err(ClassifyError::MissingNvmeFacts {
-            location: bay.location.clone(),
             nvme_instance: instance,
         });
     };
@@ -244,7 +236,6 @@ pub(crate) fn classify_bay(
             return Ok((describe(device), None));
         }
         return Err(ClassifyError::MissingNamespace {
-            location: bay.location.clone(),
             nvme_instance: instance,
             usable_namespaces: nvme.usable_namespaces,
         });
@@ -254,7 +245,6 @@ pub(crate) fn classify_bay(
     // view; userspace sees it under "/devices".
     if !namespace.devfs_path.starts_with('/') {
         return Err(ClassifyError::RelativeDevfsPath {
-            location: bay.location.clone(),
             path: namespace.devfs_path.clone(),
         });
     }
@@ -610,8 +600,7 @@ mod tests {
             assert!(
                 matches!(
                     &err,
-                    ClassifyError::Unreadable { location, problem: p }
-                        if location == "N3" && *p == problem
+                    ClassifyError::Unreadable { problem: p } if *p == problem
                 ),
                 "{err}"
             );

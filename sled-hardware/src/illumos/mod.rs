@@ -384,7 +384,7 @@ fn poll_bay(
                         InlineErrorChain::new(&err),
                     );
                     return unreadable(format!(
-                        "failed to query NVMe controller: {}",
+                        "failed to query NVMe controller {instance}: {}",
                         InlineErrorChain::new(&err),
                     ));
                 }
@@ -403,6 +403,7 @@ fn poll_bay(
             warn!(
                 log,
                 "Could not describe disk bay";
+                "location" => &bay.location,
                 InlineErrorChain::new(&err),
             );
             unreadable(InlineErrorChain::new(&err).to_string())
