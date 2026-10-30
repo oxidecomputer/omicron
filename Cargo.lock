@@ -911,7 +911,7 @@ name = "bootstrap-agent-lockstep-api"
 version = "0.1.0"
 dependencies = [
  "bootstrap-agent-lockstep-types",
- "dropshot",
+ "dropshot 0.18.0",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
 ]
@@ -1252,7 +1252,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "dropshot",
+ "dropshot 0.18.0",
  "futures",
  "libc",
  "omicron-common",
@@ -1447,7 +1447,7 @@ dependencies = [
  "clap",
  "clickhouse-admin-server-client",
  "clickhouse-admin-types",
- "dropshot",
+ "dropshot 0.18.0",
  "futures",
  "omicron-common",
  "omicron-workspace-hack",
@@ -1469,7 +1469,7 @@ name = "clickhouse-admin-api"
 version = "0.1.0"
 dependencies = [
  "clickhouse-admin-types-versions",
- "dropshot",
+ "dropshot 0.18.0",
  "dropshot-api-manager-types",
  "omicron-generation-kinds",
  "omicron-uuid-kinds",
@@ -1536,7 +1536,7 @@ dependencies = [
  "camino",
  "clickhouse-admin-types",
  "clickward",
- "dropshot",
+ "dropshot 0.18.0",
  "omicron-workspace-hack",
 ]
 
@@ -1648,7 +1648,7 @@ name = "cockroach-admin-api"
 version = "0.1.0"
 dependencies = [
  "cockroach-admin-types-versions",
- "dropshot",
+ "dropshot 0.18.0",
  "dropshot-api-manager-types",
  "http",
  "omicron-workspace-hack",
@@ -2040,7 +2040,7 @@ name = "crdb-seed"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dropshot",
+ "dropshot 0.18.0",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "slog",
@@ -2217,7 +2217,7 @@ dependencies = [
  "anyhow",
  "atty",
  "crucible-workspace-hack",
- "dropshot",
+ "dropshot 0.17.1",
  "nix 0.31.2",
  "rustls-pemfile",
  "schemars 0.8.22",
@@ -3175,7 +3175,7 @@ dependencies = [
  "clap",
  "dns-server-api",
  "dns-service-client",
- "dropshot",
+ "dropshot 0.18.0",
  "git-stub-vcs",
  "hickory-client",
  "hickory-proto 0.25.2",
@@ -3209,7 +3209,7 @@ name = "dns-server-api"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "dropshot",
+ "dropshot 0.18.0",
  "dropshot-api-manager-types",
  "internal-dns-types-versions",
  "omicron-workspace-hack",
@@ -3245,7 +3245,7 @@ dependencies = [
  "clap",
  "dns-server",
  "dns-service-client",
- "dropshot",
+ "dropshot 0.18.0",
  "expectorate",
  "internal-dns-types",
  "omicron-test-utils",
@@ -3364,7 +3364,7 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3#e577a94678bf0a8d64d719acd3e19edd965f66a3"
 dependencies = [
  "chrono",
- "dropshot",
+ "dropshot 0.17.1",
  "omicron-common",
  "oxnet",
  "rand 0.9.2",
@@ -3391,6 +3391,61 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.17.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "803c4a57fd2a611df2ddd7069a62a565253368ee96ad4e5ac2e74e625dcf8430"
+dependencies = [
+ "async-compression",
+ "async-stream",
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "camino",
+ "chrono",
+ "debug-ignore",
+ "dropshot_endpoint 0.17.1",
+ "form_urlencoded",
+ "futures",
+ "hostname 0.4.2",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "indexmap 2.14.0",
+ "multer",
+ "openapiv3",
+ "paste",
+ "percent-encoding",
+ "rustls",
+ "rustls-pemfile",
+ "schemars 0.8.22",
+ "scopeguard",
+ "semver 1.0.28",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "serde_urlencoded",
+ "sha1 0.11.0",
+ "slog",
+ "slog-async",
+ "slog-bunyan",
+ "slog-json",
+ "slog-term",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
+ "toml 1.1.2+spec-1.1.0",
+ "usdt 0.6.0",
+ "uuid",
+ "version_check",
+ "waitgroup",
+]
+
+[[package]]
+name = "dropshot"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a9e64e150bf661306cc9fa32c25996cb37025edebcbe55e80669750aa90b703"
 dependencies = [
  "async-compression",
  "async-stream",
@@ -3400,7 +3455,7 @@ dependencies = [
  "camino",
  "chrono",
  "debug-ignore",
- "dropshot_endpoint",
+ "dropshot_endpoint 0.18.0",
  "form_urlencoded",
  "futures",
  "hostname 0.4.2",
@@ -3440,7 +3495,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot-api-manager"
-version = "0.8.0"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "638600c0fcc6b8aa0e30576ce7505639f2753474f4b90e222cf19cfd3a897643"
 dependencies = [
  "anyhow",
  "atomicwrites",
@@ -3448,7 +3505,7 @@ dependencies = [
  "clap",
  "debug-ignore",
  "drift",
- "dropshot",
+ "dropshot 0.18.0",
  "dropshot-api-manager-types",
  "fs-err 3.3.0",
  "git-stub",
@@ -3471,7 +3528,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot-api-manager-types"
-version = "0.8.0"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bfd52348da2ad7f65156bfec30234a723170944046d0411d7f334d7ccd6a63a3"
 dependencies = [
  "anyhow",
  "camino",
@@ -3483,6 +3542,23 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.17.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f176851eb52822c728ad7a1c5aea0e3c95e68d9876cfa06ae32d5018730acb4"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "semver 1.0.28",
+ "serde",
+ "serde_tokenstream 0.2.3",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "dropshot_endpoint"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7dfe21674cd808e8b344cc9d3ea107108846effc782c535ddf0bd2753443226"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -3834,7 +3910,7 @@ dependencies = [
 name = "ereport-types"
 version = "0.1.0"
 dependencies = [
- "dropshot",
+ "dropshot 0.18.0",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
@@ -4283,7 +4359,7 @@ dependencies = [
 name = "gateway-api"
 version = "0.1.0"
 dependencies = [
- "dropshot",
+ "dropshot 0.18.0",
  "dropshot-api-manager-types",
  "ereport-types",
  "gateway-types-versions",
@@ -4422,7 +4498,7 @@ name = "gateway-test-utils"
 version = "0.1.0"
 dependencies = [
  "camino",
- "dropshot",
+ "dropshot 0.18.0",
  "gateway-client",
  "gateway-messages",
  "gateway-types",
@@ -4451,7 +4527,7 @@ name = "gateway-types-versions"
 version = "0.1.0"
 dependencies = [
  "daft",
- "dropshot",
+ "dropshot 0.18.0",
  "gateway-messages",
  "hex",
  "omicron-uuid-kinds",
@@ -5616,7 +5692,7 @@ dependencies = [
  "chrono",
  "crucible-smf",
  "debug-ignore",
- "dropshot",
+ "dropshot 0.18.0",
  "futures",
  "http",
  "iddqd",
@@ -5857,7 +5933,7 @@ name = "installinator-api"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dropshot",
+ "dropshot 0.18.0",
  "dropshot-api-manager-types",
  "hyper",
  "installinator-common-versions",
@@ -5936,7 +6012,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "dropshot",
+ "dropshot 0.18.0",
  "hickory-resolver 0.25.2",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -5957,7 +6033,7 @@ dependencies = [
  "dns-server",
  "dns-server-api",
  "dns-service-client",
- "dropshot",
+ "dropshot 0.18.0",
  "expectorate",
  "futures",
  "hickory-proto 0.25.2",
@@ -7241,7 +7317,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "cookie",
- "dropshot",
+ "dropshot 0.18.0",
  "futures",
  "headers",
  "http",
@@ -7311,7 +7387,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
- "dropshot",
+ "dropshot 0.18.0",
  "expectorate",
  "ipnet",
  "libc",
@@ -7464,7 +7540,7 @@ dependencies = [
  "db-macros",
  "diesel",
  "diesel-dtrace",
- "dropshot",
+ "dropshot 0.18.0",
  "ereport-types",
  "expectorate",
  "fmd-adm-sys",
@@ -7586,7 +7662,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "api_identity",
- "dropshot",
+ "dropshot 0.18.0",
  "dropshot-api-manager-types",
  "http",
  "ipnetwork",
@@ -7646,7 +7722,7 @@ dependencies = [
  "async-bb8-diesel",
  "chrono",
  "diesel",
- "dropshot",
+ "dropshot 0.18.0",
  "fmd-adm-sys",
  "iddqd",
  "nexus-db-model",
@@ -7696,7 +7772,7 @@ dependencies = [
 name = "nexus-internal-api"
 version = "0.1.0"
 dependencies = [
- "dropshot",
+ "dropshot 0.18.0",
  "dropshot-api-manager-types",
  "http",
  "nexus-types",
@@ -7768,7 +7844,7 @@ dependencies = [
 name = "nexus-lockstep-api"
 version = "0.1.0"
 dependencies = [
- "dropshot",
+ "dropshot 0.18.0",
  "http",
  "nexus-types",
  "nexus-types-versions",
@@ -7860,7 +7936,7 @@ dependencies = [
  "assert_matches",
  "camino",
  "chrono",
- "dropshot",
+ "dropshot 0.18.0",
  "fmd-adm-sys",
  "futures",
  "gateway-client",
@@ -8057,7 +8133,7 @@ dependencies = [
  "cockroach-admin-types",
  "daft",
  "debug-ignore",
- "dropshot",
+ "dropshot 0.18.0",
  "expectorate",
  "gateway-client",
  "gateway-types",
@@ -8286,7 +8362,7 @@ dependencies = [
  "crucible-agent-client",
  "dns-service-client",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
- "dropshot",
+ "dropshot 0.18.0",
  "fmd-adm-sys",
  "futures",
  "gateway-messages",
@@ -8367,7 +8443,7 @@ dependencies = [
  "daft",
  "derive-where",
  "derive_more 0.99.20",
- "dropshot",
+ "dropshot 0.18.0",
  "either",
  "ereport-types",
  "expectorate",
@@ -8439,7 +8515,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "daft",
- "dropshot",
+ "dropshot 0.18.0",
  "http",
  "mg-admin-client",
  "mg-api-types",
@@ -8555,7 +8631,7 @@ checksum = "61807f77802ff30975e01f4f071c8ba10c022052f98b3294119f3e615d13e5be"
 name = "ntp-admin-api"
 version = "0.1.0"
 dependencies = [
- "dropshot",
+ "dropshot 0.18.0",
  "dropshot-api-manager-types",
  "http",
  "ntp-admin-types-versions",
@@ -8874,7 +8950,7 @@ dependencies = [
  "clickhouse-admin-test-utils",
  "clickhouse-admin-types",
  "clickward",
- "dropshot",
+ "dropshot 0.18.0",
  "expectorate",
  "flume",
  "http",
@@ -8920,7 +8996,7 @@ dependencies = [
  "cockroach-admin-types",
  "cockroach-admin-types-versions",
  "csv",
- "dropshot",
+ "dropshot 0.18.0",
  "expectorate",
  "fmd-adm-sys",
  "http",
@@ -8987,7 +9063,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "daft",
- "dropshot",
+ "dropshot 0.18.0",
  "expectorate",
  "futures",
  "hex",
@@ -9076,7 +9152,7 @@ dependencies = [
  "anyhow",
  "camino",
  "clap",
- "dropshot",
+ "dropshot 0.18.0",
  "expectorate",
  "fmd-adm-sys",
  "futures",
@@ -9152,7 +9228,7 @@ dependencies = [
  "camino",
  "chrono",
  "clap",
- "dropshot",
+ "dropshot 0.18.0",
  "ereport-types",
  "expectorate",
  "futures",
@@ -9232,7 +9308,7 @@ dependencies = [
  "atomicwrites",
  "camino",
  "camino-tempfile",
- "dropshot",
+ "dropshot 0.18.0",
  "omicron-workspace-hack",
  "serde",
  "serde_json",
@@ -9249,7 +9325,7 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "dns-service-client",
- "dropshot",
+ "dropshot 0.18.0",
  "futures",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -9336,7 +9412,7 @@ dependencies = [
  "dns-server",
  "dns-service-client",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
- "dropshot",
+ "dropshot 0.18.0",
  "ereport-types",
  "expectorate",
  "fatfs",
@@ -9504,7 +9580,7 @@ dependencies = [
  "camino",
  "chrono",
  "clap",
- "dropshot",
+ "dropshot 0.18.0",
  "expectorate",
  "fmd-adm-sys",
  "http",
@@ -9562,7 +9638,7 @@ dependencies = [
  "daft",
  "diesel",
  "display-error-chain",
- "dropshot",
+ "dropshot 0.18.0",
  "dyn-clone",
  "erebor",
  "ereport-types",
@@ -9723,7 +9799,7 @@ dependencies = [
  "anyhow",
  "camino",
  "clap",
- "dropshot",
+ "dropshot 0.18.0",
  "internal-dns-resolver",
  "internal-dns-types",
  "nexus-db-model",
@@ -9808,7 +9884,7 @@ dependencies = [
  "camino",
  "clap",
  "display-error-chain",
- "dropshot",
+ "dropshot 0.18.0",
  "futures",
  "libc",
  "omicron-common",
@@ -9857,7 +9933,7 @@ dependencies = [
  "derive_more 0.99.20",
  "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?rev=ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc)",
  "display-error-chain",
- "dropshot",
+ "dropshot 0.18.0",
  "expectorate",
  "flate2",
  "flume",
@@ -9980,7 +10056,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
- "dropshot",
+ "dropshot 0.18.0",
  "expectorate",
  "filetime",
  "futures",
@@ -10590,7 +10666,7 @@ dependencies = [
 name = "oximeter-api"
 version = "0.1.0"
 dependencies = [
- "dropshot",
+ "dropshot 0.18.0",
  "dropshot-api-manager-types",
  "omicron-common",
  "omicron-workspace-hack",
@@ -10623,7 +10699,7 @@ dependencies = [
  "camino",
  "chrono",
  "clap",
- "dropshot",
+ "dropshot 0.18.0",
  "expectorate",
  "futures",
  "httpmock",
@@ -10687,7 +10763,7 @@ dependencies = [
  "crossterm 0.29.0",
  "debug-ignore",
  "display-error-chain",
- "dropshot",
+ "dropshot 0.18.0",
  "expectorate",
  "futures",
  "gethostname",
@@ -10743,7 +10819,7 @@ dependencies = [
  "anyhow",
  "cfg-if",
  "chrono",
- "dropshot",
+ "dropshot 0.18.0",
  "futures",
  "http",
  "hyper",
@@ -10773,7 +10849,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
- "dropshot",
+ "dropshot 0.18.0",
  "omicron-common",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
@@ -10801,7 +10877,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
- "dropshot",
+ "dropshot 0.18.0",
  "either",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -10827,7 +10903,7 @@ dependencies = [
 name = "oximeter-producer-api"
 version = "0.1.0"
 dependencies = [
- "dropshot",
+ "dropshot 0.18.0",
  "omicron-workspace-hack",
  "oximeter-types-versions",
 ]
@@ -12240,7 +12316,7 @@ dependencies = [
  "anyhow",
  "base64 0.21.7",
  "clap",
- "dropshot",
+ "dropshot 0.17.1",
  "futures",
  "hyper",
  "progenitor 0.15.1",
@@ -12615,7 +12691,7 @@ name = "range-requests"
 version = "0.1.0"
 dependencies = [
  "bytes",
- "dropshot",
+ "dropshot 0.18.0",
  "futures",
  "http",
  "http-body",
@@ -12739,7 +12815,7 @@ dependencies = [
  "colored 2.2.0",
  "daft",
  "datatest-stable",
- "dropshot",
+ "dropshot 0.18.0",
  "expectorate",
  "gateway-types",
  "glob",
@@ -12787,7 +12863,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
- "dropshot",
+ "dropshot 0.18.0",
  "futures",
  "gateway-client",
  "gateway-types",
@@ -12981,7 +13057,7 @@ checksum = "ba39f3699c378cd8970968dcbff9c43159ea4cfbd88d43c00b22f2ef10a435d2"
 name = "repo-depot-api"
 version = "0.1.0"
 dependencies = [
- "dropshot",
+ "dropshot 0.18.0",
  "dropshot-api-manager-types",
  "omicron-workspace-hack",
  "schemars 0.8.22",
@@ -13657,11 +13733,11 @@ dependencies = [
 [[package]]
 name = "scim2-rs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/scim2-rs?rev=a024c0918bea9133bd545bc06c42a4a0e14c7915#a024c0918bea9133bd545bc06c42a4a0e14c7915"
+source = "git+https://github.com/oxidecomputer/scim2-rs?rev=d217d08c6664a97cb8a16bb537c507dfff52b1b4#d217d08c6664a97cb8a16bb537c507dfff52b1b4"
 dependencies = [
  "anyhow",
  "chrono",
- "dropshot",
+ "dropshot 0.18.0",
  "http",
  "iddqd",
  "schemars 0.8.22",
@@ -13676,7 +13752,7 @@ dependencies = [
 [[package]]
 name = "scim2-test-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/scim2-rs?rev=a024c0918bea9133bd545bc06c42a4a0e14c7915#a024c0918bea9133bd545bc06c42a4a0e14c7915"
+source = "git+https://github.com/oxidecomputer/scim2-rs?rev=d217d08c6664a97cb8a16bb537c507dfff52b1b4#d217d08c6664a97cb8a16bb537c507dfff52b1b4"
 dependencies = [
  "anyhow",
  "clap",
@@ -14354,7 +14430,7 @@ version = "0.1.0"
 dependencies = [
  "camino",
  "chrono",
- "dropshot",
+ "dropshot 0.18.0",
  "dropshot-api-manager-types",
  "http",
  "iddqd",
@@ -14445,7 +14521,7 @@ dependencies = [
  "chrono",
  "debug-ignore",
  "derive_more 0.99.20",
- "dropshot",
+ "dropshot 0.18.0",
  "either",
  "expectorate",
  "filetime",
@@ -14501,7 +14577,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "derive_more 0.99.20",
- "dropshot",
+ "dropshot 0.18.0",
  "futures",
  "illumos-utils",
  "omicron-uuid-kinds",
@@ -14638,7 +14714,7 @@ version = "0.1.0"
 dependencies = [
  "camino",
  "camino-tempfile-ext",
- "dropshot",
+ "dropshot 0.18.0",
  "expectorate",
  "iddqd",
  "illumos-utils",
@@ -14689,7 +14765,7 @@ dependencies = [
  "ddm-admin-client",
  "ddm-api-types",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
- "dropshot",
+ "dropshot 0.18.0",
  "either",
  "futures",
  "gateway-client",
@@ -15185,7 +15261,7 @@ dependencies = [
  "ciborium",
  "ciborium-ll",
  "clap",
- "dropshot",
+ "dropshot 0.18.0",
  "futures",
  "gateway-ereport-messages",
  "gateway-messages",
@@ -15583,7 +15659,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "criterion",
- "dropshot",
+ "dropshot 0.18.0",
  "futures",
  "gateway-client",
  "gateway-types",
@@ -16788,7 +16864,7 @@ dependencies = [
  "camino-tempfile",
  "dns-server",
  "dns-service-client",
- "dropshot",
+ "dropshot 0.18.0",
  "hickory-proto 0.25.2",
  "hickory-resolver 0.25.2",
  "internal-dns-types",
@@ -16811,7 +16887,7 @@ dependencies = [
  "daft",
  "debug-ignore",
  "derive_more 0.99.20",
- "dropshot",
+ "dropshot 0.18.0",
  "futures",
  "gfss",
  "hex",
@@ -16860,7 +16936,7 @@ dependencies = [
  "ciborium",
  "daft",
  "derive_more 0.99.20",
- "dropshot",
+ "dropshot 0.18.0",
  "gfss",
  "hex",
  "hkdf 0.12.4",
@@ -16896,7 +16972,7 @@ dependencies = [
  "bootstore",
  "camino",
  "daft",
- "dropshot",
+ "dropshot 0.18.0",
  "gfss",
  "iddqd",
  "omicron-uuid-kinds",
@@ -17979,7 +18055,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
- "dropshot",
+ "dropshot 0.18.0",
  "gateway-client",
  "gateway-types",
  "iddqd",
@@ -18046,7 +18122,7 @@ dependencies = [
  "debug-ignore",
  "display-error-chain",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
- "dropshot",
+ "dropshot 0.18.0",
  "either",
  "expectorate",
  "flate2",
@@ -18133,7 +18209,7 @@ name = "wicketd-api"
 version = "0.1.0"
 dependencies = [
  "bootstrap-agent-lockstep-types",
- "dropshot",
+ "dropshot 0.18.0",
  "gateway-client",
  "iddqd",
  "omicron-uuid-kinds",
@@ -18180,7 +18256,7 @@ name = "wicketd-commission-api"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dropshot",
+ "dropshot 0.18.0",
  "dropshot-api-manager-types",
  "iddqd",
  "omicron-uuid-kinds",
@@ -19123,7 +19199,7 @@ dependencies = [
  "anyhow",
  "camino",
  "clap",
- "dropshot",
+ "dropshot 0.18.0",
  "illumos-utils",
  "omicron-common",
  "omicron-workspace-hack",
