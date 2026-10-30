@@ -821,22 +821,22 @@ pub fn representative() -> Representative {
     builder
         .found_discovered_rack(DiscoveredRack {
             rack_id: RackUuid::new_v4(),
-            rack_subnet: Ipv6Subnet::new("fd00:1122:3344::".parse().unwrap()),
-            join_service_ip: "fd00:1122:3344:101::1".parse().unwrap(),
+            rack_subnet: Ipv6Subnet::new("fd00:5566:7788::".parse().unwrap()),
+            join_service_ip: "fd00:5566:7788:101::1".parse().unwrap(),
             discovered_sleds: id_ord_map! {
                 discovered_sled(
                     "discovered-sled-started",
-                    "fd00:1122:3344:101::",
+                    "fd00:5566:7788:101::",
                     SledAgentStartState::Started,
                 ),
                 discovered_sled(
                     "discovered-sled-in-progress",
-                    "fd00:1122:3344:102::",
+                    "fd00:5566:7788:102::",
                     SledAgentStartState::InProgress { last_error: None },
                 ),
                 discovered_sled(
                     "discovered-sled-error",
-                    "fd00:1122:3344:103::",
+                    "fd00:5566:7788:103::",
                     SledAgentStartState::InProgress {
                         last_error: Some(
                             "The System is Down".to_string(),
@@ -849,8 +849,8 @@ pub fn representative() -> Representative {
     builder
         .found_discovered_rack(DiscoveredRack {
             rack_id: RackUuid::new_v4(),
-            rack_subnet: Ipv6Subnet::new("fd00:5566:7788::".parse().unwrap()),
-            join_service_ip: "fd00:5566:7788:101::1".parse().unwrap(),
+            rack_subnet: Ipv6Subnet::new("fd00:99aa:bbcc::".parse().unwrap()),
+            join_service_ip: "fd00:99aa:bbcc:101::1".parse().unwrap(),
             discovered_sleds: id_ord_map! {},
         })
         .unwrap();
