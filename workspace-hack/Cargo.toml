@@ -76,7 +76,7 @@ group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown-3575ec1268b04181 = { package = "hashbrown", version = "0.15.5" }
 hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17.1", default-features = false, features = ["allocator-api2", "default-hasher", "inline-more"] }
 hex = { version = "0.4.3", features = ["serde"] }
-hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
+hickory-proto = { version = "0.25.2", default-features = false, features = ["serde", "text-parsing", "tokio"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hybrid-array = { version = "0.4.13", default-features = false, features = ["alloc", "ctutils", "extra-sizes", "subtle", "zeroize"] }
 hyper = { version = "1.10.1", features = ["full"] }
@@ -161,7 +161,6 @@ toml = { version = "1.1.2" }
 toml_datetime-3b31131e45eafb45 = { package = "toml_datetime", version = "0.6.11", default-features = false, features = ["serde"] }
 toml_datetime-dff4ba8e3ae991db = { package = "toml_datetime", version = "1.1.1", default-features = false, features = ["serde", "std"] }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", features = ["serde"] }
-toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 toml_parser = { version = "1.1.2" }
 tracing = { version = "0.1.44", features = ["log"] }
 tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", default-features = false, features = ["hubtools", "proptest", "schemars"] }
@@ -239,7 +238,7 @@ hashbrown-3575ec1268b04181 = { package = "hashbrown", version = "0.15.5" }
 hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17.1", default-features = false, features = ["allocator-api2", "default-hasher", "inline-more"] }
 heck = { version = "0.4.1", features = ["unicode"] }
 hex = { version = "0.4.3", features = ["serde"] }
-hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
+hickory-proto = { version = "0.25.2", default-features = false, features = ["serde", "text-parsing", "tokio"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hybrid-array = { version = "0.4.13", default-features = false, features = ["alloc", "ctutils", "extra-sizes", "subtle", "zeroize"] }
 hyper = { version = "1.10.1", features = ["full"] }
@@ -327,7 +326,6 @@ toml = { version = "1.1.2" }
 toml_datetime-3b31131e45eafb45 = { package = "toml_datetime", version = "0.6.11", default-features = false, features = ["serde"] }
 toml_datetime-dff4ba8e3ae991db = { package = "toml_datetime", version = "1.1.1", default-features = false, features = ["serde", "std"] }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", features = ["serde"] }
-toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 toml_parser = { version = "1.1.2" }
 tracing = { version = "0.1.44", features = ["log"] }
 tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", default-features = false, features = ["hubtools", "proptest", "schemars"] }
@@ -441,6 +439,7 @@ object = { version = "0.37.3", default-features = false, features = ["read", "st
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.44", features = ["fs", "stdio", "system", "termios"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.4", default-features = false, features = ["stdio", "termios"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs"] }
+toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 winnow = { version = "1.0.3" }
 
 [target.x86_64-unknown-illumos.build-dependencies]
@@ -457,6 +456,7 @@ object = { version = "0.37.3", default-features = false, features = ["read", "st
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.44", features = ["fs", "stdio", "system", "termios"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.4", default-features = false, features = ["stdio", "termios"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs"] }
+toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 winnow = { version = "1.0.3" }
 
 ### END HAKARI SECTION
