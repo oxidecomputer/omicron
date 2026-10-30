@@ -3405,12 +3405,6 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    fn migrate_request() -> InstanceStateChangeRequest {
-        InstanceStateChangeRequest::Migrate(InstanceMigrationTargetParams {
-            src_propolis_addr: "[::1]:12400".parse().unwrap(),
-        })
-    }
-
     #[test]
     fn test_select_action_sled_evacuating_stop() {
         let logctx = test_setup_log("test_select_action_sled_evacuating_stop");
@@ -3470,7 +3464,11 @@ mod tests {
             &logctx.log,
             &instance,
             &None,
-            &migrate_request(),
+            &InstanceStateChangeRequest::Migrate(
+                InstanceMigrationTargetParams {
+                    src_propolis_addr: "[::1]:12400".parse().unwrap(),
+                },
+            ),
         )
         .expect_err("migrating a SledEvacuating instance should fail");
         assert!(
@@ -3565,7 +3563,11 @@ mod tests {
         for requested in [
             InstanceStateChangeRequest::Run,
             InstanceStateChangeRequest::Reboot,
-            migrate_request(),
+            InstanceStateChangeRequest::Migrate(
+                InstanceMigrationTargetParams {
+                    src_propolis_addr: "[::1]:12400".parse().unwrap(),
+                },
+            ),
         ] {
             let err = match Nexus::select_runtime_change_action(
                 &logctx.log,
