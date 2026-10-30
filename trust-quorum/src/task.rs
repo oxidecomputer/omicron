@@ -50,6 +50,12 @@ const API_CHANNEL_BOUND: usize = 32;
 /// similar to using an unbounded channel but will not use all possible memory.
 const CONN_TO_MAIN_CHANNEL_BOUND: usize = 1024;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CoordinatorStatusSnapshot {
+    Coordinating { status: CoordinatorStatus },
+    NotCoordinating { latest_config_epoch: Option<Epoch> },
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub baseboard_id: BaseboardId,
@@ -74,7 +80,7 @@ pub enum NodeApiRequest {
     ConnMgrStatus { tx: oneshot::Sender<ConnMgrStatus> },
 
     /// Return the status of this node if it is a coordinator
-    CoordinatorStatus { tx: oneshot::Sender<Option<CoordinatorStatus>> },
+    CoordinatorStatus { tx: oneshot::Sender<CoordinatorStatusSnapshot> },
 
     /// Load a rack secret for the given epoch
     ///
@@ -256,11 +262,28 @@ impl NodeTaskHandle {
     /// Return the status of this node if it is coordinating the `Prepare` phase
     /// of a reconfiguration or LRTQ upgrade. Return `Ok(None)` or an error
     /// otherwise.
-    ///
-    /// Must be accessible via a sled-agent API endpoint
     pub async fn coordinator_status(
         &self,
     ) -> Result<Option<CoordinatorStatus>, NodeApiError> {
+        // TODO: Clean up coordinator_status after switching all callers to
+        // coordinator_status_snapshot.
+        match self.coordinator_status_snapshot().await? {
+            CoordinatorStatusSnapshot::Coordinating { status } => {
+                Ok(Some(status))
+            }
+            CoordinatorStatusSnapshot::NotCoordinating {
+                latest_config_epoch: _,
+            } => Ok(None),
+        }
+    }
+
+    /// Return the coordinator status of this node, including the latest config
+    /// epoch if this node is not coordinating.
+    ///
+    /// Must be accessible via a sled-agent API endpoint.
+    pub async fn coordinator_status_snapshot(
+        &self,
+    ) -> Result<CoordinatorStatusSnapshot, NodeApiError> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(NodeApiRequest::CoordinatorStatus { tx }).await?;
         let res = rx.await?;
@@ -712,13 +735,22 @@ impl NodeTask {
                 let _ = tx.send(self.conn_mgr.status());
             }
             NodeApiRequest::CoordinatorStatus { tx } => {
-                let status = self.node.get_coordinator_state().map(|cs| {
-                    CoordinatorStatus {
-                        config: cs.config().clone(),
-                        acked_prepares: cs.op().acked_prepares(),
-                    }
-                });
-                let _ = tx.send(status);
+                let snapshot = match self.node.get_coordinator_state() {
+                    Some(cs) => CoordinatorStatusSnapshot::Coordinating {
+                        status: CoordinatorStatus {
+                            config: cs.config().clone(),
+                            acked_prepares: cs.op().acked_prepares(),
+                        },
+                    },
+                    None => CoordinatorStatusSnapshot::NotCoordinating {
+                        latest_config_epoch: self
+                            .ctx
+                            .persistent_state()
+                            .latest_config()
+                            .map(|c| c.epoch),
+                    },
+                };
+                let _ = tx.send(snapshot);
             }
             NodeApiRequest::LoadRackSecret { epoch, tx } => {
                 let res = self.node.load_rack_secret(&mut self.ctx, epoch);
@@ -1479,7 +1511,36 @@ mod tests {
         }
 
         let coordinator = setup.node_handles.first().unwrap();
-        coordinator.reconfigure(initial_config).await.unwrap();
+
+        // Before reconfiguration starts, the coordinator is neither
+        // coordinating nor has persisted any config.
+        assert_eq!(
+            coordinator.coordinator_status_snapshot().await.unwrap(),
+            CoordinatorStatusSnapshot::NotCoordinating {
+                latest_config_epoch: None,
+            },
+        );
+
+        coordinator.reconfigure(initial_config.clone()).await.unwrap();
+
+        let snapshot = coordinator.coordinator_status_snapshot().await.unwrap();
+        let CoordinatorStatusSnapshot::Coordinating { status } = snapshot
+        else {
+            panic!("expected coordinator to be coordinating, got {snapshot:?}");
+        };
+        assert_eq!(status.config.epoch, Epoch(1));
+
+        // Starting reconfiguration with an identical ReconfigureMsg is rejected
+        // by `check_epoch`.
+        assert_matches!(
+            coordinator.reconfigure(initial_config).await,
+            Err(NodeApiError::Reconfigure(
+                ReconfigurationError::PreparedEpochMismatch {
+                    existing: Epoch(1),
+                    new: Epoch(1),
+                }
+            ))
+        );
 
         let poll_interval = Duration::from_millis(10);
         let poll_max = Duration::from_secs(10);
@@ -1514,6 +1575,15 @@ mod tests {
             }
         }
         assert_eq!(acked, num_nodes);
+
+        // After committing, the coordinator stops coordinating but still
+        // reports the persisted epoch.
+        assert_eq!(
+            coordinator.coordinator_status_snapshot().await.unwrap(),
+            CoordinatorStatusSnapshot::NotCoordinating {
+                latest_config_epoch: Some(Epoch(1))
+            },
+        );
 
         // Now load the rack secret at all nodes
         setup

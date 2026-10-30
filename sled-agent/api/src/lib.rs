@@ -1640,17 +1640,22 @@ pub trait SledAgentApi {
         // immutable blessed documents. But that leaves open the question of how
         // None can be represented on the wire. We return a 404 -- old clients
         // will receive it as an error and will handle it reasonably well.
+        use latest::trust_quorum::TrustQuorumCoordinatorStatusResponse;
+
         Self::trust_quorum_coordinator_status(request_context).await?.try_map(
-            |response| {
-                response.status.ok_or_else(|| {
-                    HttpError::for_client_error(
-                        None,
-                        ClientErrorStatusCode::NOT_FOUND,
-                        "this node is not currently coordinating a trust \
-                         quorum reconfiguration"
-                            .to_string(),
-                    )
-                })
+            |response| match response {
+                TrustQuorumCoordinatorStatusResponse::Coordinating {
+                    status,
+                } => Ok(status),
+                TrustQuorumCoordinatorStatusResponse::NotCoordinating {
+                    latest_config_epoch: _,
+                } => Err(HttpError::for_client_error(
+                    None,
+                    ClientErrorStatusCode::NOT_FOUND,
+                    "this node is not currently coordinating a trust \
+                     quorum reconfiguration"
+                        .to_string(),
+                )),
             },
         )
     }

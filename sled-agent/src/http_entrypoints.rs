@@ -74,6 +74,7 @@ use sled_agent_types::zone_bundle::{
 };
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
+use trust_quorum::CoordinatorStatusSnapshot;
 use trust_quorum_types::messages::{
     CommitRequest, LrtqUpgradeMsg, PrepareAndCommitRequest, ReconfigureMsg,
 };
@@ -1557,17 +1558,30 @@ impl SledAgentApi for SledAgentImpl {
         let sa = request_context.context();
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
-                let status =
-                    sa.trust_quorum().coordinator_status().await.map_err(
-                        |e| {
-                            HttpError::for_internal_error(
-                                InlineErrorChain::new(&e).to_string(),
-                            )
-                        },
-                    )?;
-                Ok(HttpResponseOk(TrustQuorumCoordinatorStatusResponse {
-                    status,
-                }))
+                let snapshot = sa
+                    .trust_quorum()
+                    .coordinator_status_snapshot()
+                    .await
+                    .map_err(|e| {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    })?;
+                let response = match snapshot {
+                    CoordinatorStatusSnapshot::Coordinating { status } => {
+                        TrustQuorumCoordinatorStatusResponse::Coordinating {
+                            status,
+                        }
+                    }
+                    CoordinatorStatusSnapshot::NotCoordinating {
+                        latest_config_epoch,
+                    } => {
+                        TrustQuorumCoordinatorStatusResponse::NotCoordinating {
+                            latest_config_epoch,
+                        }
+                    }
+                };
+                Ok(HttpResponseOk(response))
             })
             .await
     }

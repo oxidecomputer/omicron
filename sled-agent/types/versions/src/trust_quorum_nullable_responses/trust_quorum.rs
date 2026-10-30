@@ -5,15 +5,29 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use trust_quorum_types_versions::v1::status::CoordinatorStatus;
+use trust_quorum_types_versions::v1::types::Epoch;
 
 use crate::v15::trust_quorum::TrustQuorumNetworkConfig;
 
 /// Response type for `trust_quorum_coordinator_status`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct TrustQuorumCoordinatorStatusResponse {
-    /// The coordinator status, or `None` if this node is not currently
-    /// coordinating a reconfiguration.
-    pub status: Option<CoordinatorStatus>,
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum TrustQuorumCoordinatorStatusResponse {
+    /// The node is currently coordinating a reconfiguration or LRTQ upgrade.
+    Coordinating {
+        /// The coordinator status.
+        status: CoordinatorStatus,
+    },
+    /// The node is not currently coordinating a reconfiguration or LRTQ upgrade.
+    NotCoordinating {
+        /// The latest configuration epoch this node has persisted.
+        ///
+        /// If this is greater than or equal to the epoch that Nexus is driving,
+        /// the coordinator started that epoch and then stopped for some reason,
+        /// and Nexus can abort this configuration. If lower than the Nexus
+        /// epoch, then reconfiguration has not started yet.
+        latest_config_epoch: Option<Epoch>,
+    },
 }
 
 /// Response type for `trust_quorum_network_config`.

@@ -10424,18 +10424,54 @@
       },
       "TrustQuorumCoordinatorStatusResponse": {
         "description": "Response type for `trust_quorum_coordinator_status`.",
-        "type": "object",
-        "properties": {
-          "status": {
-            "nullable": true,
-            "description": "The coordinator status, or `None` if this node is not currently coordinating a reconfiguration.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/CoordinatorStatus"
+        "oneOf": [
+          {
+            "description": "The node is currently coordinating a reconfiguration or LRTQ upgrade.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "coordinating"
+                ]
+              },
+              "status": {
+                "description": "The coordinator status.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/CoordinatorStatus"
+                  }
+                ]
               }
+            },
+            "required": [
+              "state",
+              "status"
+            ]
+          },
+          {
+            "description": "The node is not currently coordinating a reconfiguration or LRTQ upgrade.",
+            "type": "object",
+            "properties": {
+              "latest_config_epoch": {
+                "nullable": true,
+                "description": "The latest configuration epoch this node has persisted.\n\nIf this is greater than or equal to the epoch that Nexus is driving, the coordinator started that epoch and then stopped for some reason, and Nexus can abort this configuration. If lower than the Nexus epoch, then reconfiguration has not started yet.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "not_coordinating"
+                ]
+              }
+            },
+            "required": [
+              "state"
             ]
           }
-        }
+        ]
       },
       "TrustQuorumNetworkConfig": {
         "description": "Network configuration used to bring up the control plane.\n\nThis type mirrors `bootstore::schemes::v0::NetworkConfig` but adds `JsonSchema` for API compatibility.",
