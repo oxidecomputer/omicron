@@ -247,17 +247,25 @@ impl Instance {
         active_vmm: Option<&Vmm>,
     ) -> InstanceKarmicStatus {
         let runtime = self.runtime();
-        // Instances only need to be automatically restarted if they are in the
-        // `Failed` state, or if their active VMM is in the `SagaUnwound` state.
+        // Instances only need to be automatically restarted if they are in
+        // either one of the `Failed` or `SledEvacuating` states, or if their
+        // active VMM is in the `SagaUnwound` state.
         //
-        // If the instance's intended state is not Running, it should
-        // not be reincarnated, even if it has failed.
+        // If the instance's intended state is not Running, it should not be
+        // reincarnated, even if it has failed or its VMM's sled is being
+        // evacuated.
         let needs_reincarnation =
             match (self.intended_state, self.nexus_state, active_vmm) {
-                (IntendedState::Running, InstanceState::Failed, _vmm) => {
+                (
+                    IntendedState::Running,
+                    InstanceState::Failed | InstanceState::SledEvacuating,
+                    _vmm,
+                ) => {
                     debug_assert!(
                         _vmm.is_none(),
-                        "a Failed instance will never have an active VMM!"
+                        "an instance in a {} state will never have an active \
+                        VMM!",
+                        self.nexus_state
                     );
                     true
                 }
@@ -480,11 +488,29 @@ impl InstanceAutoRestart {
         &self,
         state: &InstanceRuntimeState,
     ) -> Reincarnatability {
-        // Check if the instance's configured auto-restart policy permits the
-        // control plane to automatically restart it.
-        let policy = self.policy.unwrap_or(Self::DEFAULT_POLICY);
-        if policy == InstanceAutoRestartPolicy::Never {
-            return Reincarnatability::Nirvana;
+        // There is not much need for a `match` here, but we use one in case a
+        // new state is introduced. This forces the person introducing the new
+        // state to decide whether this is a state where we are going to honour
+        // the auto-restart policy or we are forced to override it.
+        match state.nexus_state {
+            InstanceState::Failed
+            | InstanceState::Creating
+            | InstanceState::Destroyed
+            | InstanceState::NoVmm
+            | InstanceState::Vmm => {
+                // Check if the instance's configured auto-restart policy permits the
+                // control plane to automatically restart it.
+                let policy = self.policy.unwrap_or(Self::DEFAULT_POLICY);
+                if policy == InstanceAutoRestartPolicy::Never {
+                    return Reincarnatability::Nirvana;
+                }
+            }
+            // An instance that is in the `SledEvacuating` state will always be
+            // reincarnatable. This is because the instance has not actually failed,
+            // but rather its VMM has been stopped due to its sled being evacuated.
+            // The instance should be restarted automatically regardless of the
+            // auto-restart policy.
+            InstanceState::SledEvacuating => {}
         }
 
         // If the instance is permitted to reincarnate, ensure that its last
@@ -538,7 +564,10 @@ impl InstanceAutoRestart {
             .eq(InstanceAutoRestartPolicy::BestEffort)
             // If the auto-restart policy is null, then it should
             // default to "best effort".
-            .or(dsl::auto_restart_policy.is_null()))
+            .or(dsl::auto_restart_policy.is_null())
+            // When an instance is rebooting due to its sled evacuating, it
+            // should be reincarnatable
+            .or(dsl::state.eq(InstanceState::SledEvacuating)))
         // An instance should only be automatically restarted if it is intended
         // to be in the `Running` state. Instances which were requested to stop
         // should not be automatically restarted, even if they have failed.

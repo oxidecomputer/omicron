@@ -958,6 +958,7 @@ task: "instance_reincarnation"
     instances eligible for reincarnation:                          0
       instance failed instances:                                   0
       start saga failed instances:                                 0
+      sled evacuated instances:                                    0
     instances reincarnated successfully:                           0
     instances which changed state before they could reincarnate:   0
     instances which failed to reincarnate:                         0
@@ -1721,6 +1722,7 @@ task: "instance_reincarnation"
     instances eligible for reincarnation:                          0
       instance failed instances:                                   0
       start saga failed instances:                                 0
+      sled evacuated instances:                                    0
     instances reincarnated successfully:                           0
     instances which changed state before they could reincarnate:   0
     instances which failed to reincarnate:                         0

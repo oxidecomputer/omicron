@@ -883,6 +883,13 @@ mod tests {
                 .customize_nexus_config(&|config| {
                     let one_day = Duration::from_secs(86_400);
                     let tasks = &mut config.pkg.background_tasks;
+                    // The `instance-update` saga activates the real
+                    // `instance_reincarnation` background task when an
+                    // instance's state changes to `SledEvacuating`. Disable
+                    // that task so we can accurately verify the instance
+                    // ends up in that state after the `vmm_stop_for_update`
+                    // task runs.
+                    tasks.instance_reincarnation.disable = true;
                     tasks.instance_watcher.period_secs = one_day;
                     tasks.abandoned_vmm_reaper.period_secs = one_day;
                     tasks.vmm_mark_stop_for_update.period_secs = one_day;
