@@ -67,7 +67,6 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_generation_kinds::InstanceStateGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::MulticastGroupUuid;
@@ -284,25 +283,6 @@ enum InstanceStateChangeRequestAction {
     /// The instance is not currently incarnated on a sled, so just update its
     /// runtime state in the database without communicating with a sled-agent.
     UpdateRuntime(db::model::InstanceRuntimeState),
-}
-
-impl InstanceStateChangeRequestAction {
-    /// Construct a [`Self::UpdateRuntime`] with a runtime state constructed by
-    /// updating `prev_runtime` with `new_nexus_state` (and the expected
-    /// accounting for a state change, such as bumping the generation).
-    fn update_runtime(
-        prev_runtime: db::model::InstanceRuntimeState,
-        new_nexus_state: db::model::InstanceState,
-    ) -> Self {
-        Self::UpdateRuntime(db::model::InstanceRuntimeState {
-            time_updated: chrono::Utc::now(),
-            generation: InstanceStateGeneration::from(prev_runtime.generation)
-                .next()
-                .into(),
-            nexus_state: new_nexus_state,
-            ..prev_runtime
-        })
-    }
 }
 
 /// What is the higher level operation that is calling
@@ -1339,9 +1319,10 @@ impl super::Nexus {
                     }
 
                     return Ok(
-                        InstanceStateChangeRequestAction::update_runtime(
-                            instance_state.runtime(),
-                            db::model::InstanceState::NoVmm,
+                        InstanceStateChangeRequestAction::UpdateRuntime(
+                            instance_state.runtime().with_new_nexus_state(
+                                db::model::InstanceState::NoVmm,
+                            ),
                         ),
                     );
                 }
@@ -1405,9 +1386,12 @@ impl super::Nexus {
                         // stop trying to reincarnate it.
                         InstanceStateChangeRequest::Stop => {
                             return Ok(
-                                InstanceStateChangeRequestAction::update_runtime(
-                                    instance_state.runtime(),
-                                    db::model::InstanceState::NoVmm,
+                                InstanceStateChangeRequestAction::UpdateRuntime(
+                                    instance_state
+                                        .runtime()
+                                        .with_new_nexus_state(
+                                            db::model::InstanceState::NoVmm,
+                                        ),
                                 ),
                             );
                         }
@@ -3150,6 +3134,7 @@ mod tests {
     use omicron_common::api::external::{
         Hostname, IdentityMetadataCreateParams, Name,
     };
+    use omicron_generation_kinds::InstanceStateGeneration;
     use omicron_test_utils::dev::test_setup_log;
     use propolis_client::support::tungstenite::protocol::Role;
     use propolis_client::support::{

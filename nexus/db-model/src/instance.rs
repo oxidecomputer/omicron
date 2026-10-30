@@ -387,6 +387,40 @@ pub struct InstanceRuntimeState {
     pub time_last_auto_restarted: Option<DateTime<Utc>>,
 }
 
+impl InstanceRuntimeState {
+    /// Construct an `InstanceRuntimeState` with a new Nexus state, performing
+    /// the necessary accounting for a state change (such as bumping the
+    /// generation).
+    ///
+    /// Fields not related to modifying the Nexus state remain unchanged from
+    /// `self`.
+    pub fn with_new_nexus_state(self, new_nexus_state: InstanceState) -> Self {
+        let Self {
+            // fields we overwrite
+            time_updated: _,
+            nexus_state: _,
+
+            // fields we modify
+            generation,
+
+            // fields we carry forward unchanged
+            propolis_id,
+            dst_propolis_id,
+            migration_id,
+            time_last_auto_restarted,
+        } = self;
+        Self {
+            time_updated: chrono::Utc::now(),
+            nexus_state: new_nexus_state,
+            generation: DbTypedGeneration(generation.0.next()),
+            propolis_id,
+            dst_propolis_id,
+            migration_id,
+            time_last_auto_restarted,
+        }
+    }
+}
+
 /// Configuration for automatic instance restarts.
 #[derive(
     Clone,
