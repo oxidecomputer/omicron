@@ -139,7 +139,10 @@ impl InstanceWatcher {
             };
 
             let Some(state) = check
-                .run(&opctx, inv_rx, &instance, &vmm, &sled, gateways, &client)
+                .run(
+                    &opctx, &datastore, inv_rx, &instance, &vmm, &sled,
+                    gateways, &client,
+                )
                 .await
             else {
                 // Check did not result in an updated state, nothing else to
@@ -201,6 +204,7 @@ impl Check {
     async fn run(
         &mut self,
         opctx: &OpContext,
+        datastore: &DataStore,
         inv_rx: watch::Receiver<Option<Arc<inventory::Collection>>>,
         instance: &Instance,
         vmm: &Vmm,
@@ -234,16 +238,16 @@ impl Check {
         }
 
         // Ask the sled-agent what it has to say for itself.
-        let rsp = client
+        let result = client
             .vmm_get_state(&PropolisUuid::from_untyped_uuid(vmm.id))
-            .await
-            .map_err(SledAgentInstanceError);
-        match rsp {
-            // We received a response from the sled-agent. We shall update the
-            // instance's state to match.
-            //
-            // Note that this does not always mean that the *VMM* is healthy,
-            // but only that we successfully got its state from the sled-agent.
+            .await;
+
+        // We received a response from the sled-agent. We shall update the
+        // instance's state to match.
+        //
+        // Note that this does not always mean that the *VMM* is healthy,
+        // but only that we successfully got its state from the sled-agent.
+        let error = match result {
             Ok(rsp) => {
                 let vmm_state = SledVmmState::from(rsp.into_inner());
                 let instance_state = {
@@ -261,28 +265,46 @@ impl Check {
                     )
                 };
                 self.outcome = CheckOutcome::Success(instance_state);
-                Some(vmm_state)
+                return Some(vmm_state);
             }
+            Err(e) => {
+                SledAgentInstanceError::new(opctx, datastore, sled.id(), e)
+                    .await
+            }
+        };
+
+        match error {
             // Oh, this error indicates that the VMM should transition to
             // `Failed`. Let's synthesize a `SledInstanceState` that does
             // that.
-            Err(e) if e.vmm_gone() => {
-                let error = InlineErrorChain::new(&e);
+            SledAgentInstanceError::VmmGone { .. } => {
                 slog::info!(
                     opctx.log,
-                    "sled-agent error indicates that this instance's \
-                     VMM has failed!";
-                    error,
+                    "sled-agent error indicates that this instance's VMM has \
+                    failed!";
+                    "error" => InlineErrorChain::new(&error)
                 );
+                // TODO(eliza): if `CheckOutcome::Failure` used the same
+                // `VmmFailureReason` as the rest of nexus, this could all be a
+                // bit less gross eventually.
                 self.outcome = CheckOutcome::Failure(Failure::NoSuchInstance);
                 mk_failed(VmmFailureReason::NoSuchInstance)
+            }
+            SledAgentInstanceError::SledNotInService { .. } => {
+                slog::info!(
+                    opctx.log,
+                    "sled-agent no longer in service, failing VMM";
+                    "error" => InlineErrorChain::new(&error),
+                );
+                self.outcome = CheckOutcome::Failure(Failure::SledExpunged);
+                mk_failed(VmmFailureReason::SledExpunged)
             }
             // We were able to contact the sled-agent, but it responded with an
             // error which does *not* tell us that the VMM has failed. Either
             // the sled-agent is unhealthy, or we sent an invalid request for
             // some reason. In either case, the check is inconclusive and the
             // instance's state will not change.
-            Err(SledAgentInstanceError(ClientError::ErrorResponse(rsp))) => {
+            SledAgentInstanceError::Other(ClientError::ErrorResponse(rsp)) => {
                 // This is a bit goofy: we destructure the error because
                 // `ResponseValue` has a `status()` which is not optional (so we
                 // don't have to unwrap it), but then we re-construct the
@@ -319,7 +341,9 @@ impl Check {
             // powered on. If we determine conclusively that it is not present
             // and in A0, the instance is moved to `Failed`. Otherwise, the
             // check is inconclusive and the instance's state will not change.
-            Err(SledAgentInstanceError(ClientError::CommunicationError(e))) => {
+            SledAgentInstanceError::Other(ClientError::CommunicationError(
+                e,
+            )) => {
                 slog::info!(
                     opctx.log,
                     "sled-agent is unreachable";
@@ -359,7 +383,7 @@ impl Check {
                 None
             }
             // Any other errors mean that the check is inconclusive.
-            Err(SledAgentInstanceError(e)) => {
+            SledAgentInstanceError::Other(e) => {
                 slog::warn!(
                     opctx.log,
                     "error checking up on instance";

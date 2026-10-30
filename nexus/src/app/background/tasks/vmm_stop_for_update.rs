@@ -17,7 +17,6 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::instance::SledVmmState;
-use nexus_types::instance::VmmFailureReason;
 use nexus_types::instance::VmmRuntimeState;
 use nexus_types::instance::VmmState;
 use nexus_types::internal_api::background::VmmStopForUpdateStatus;
@@ -282,29 +281,31 @@ impl VmmStopForUpdate {
             {
                 Ok(res) => res.into_inner().updated_runtime.map(Into::into),
                 Err(e) => {
-                    let err = SledAgentInstanceError(e);
+                    let err = SledAgentInstanceError::new(
+                        &opctx, &datastore, sled_id, e,
+                    )
+                    .await;
 
-                    // First we check if the VMM is there, if it isn't, we
-                    // want to report it as such so we don't have to wait on the
-                    // instance watcher to find and restart this instance.
-                    if err.vmm_gone() {
+                    // First we check if the VMM should transition to `Failed`
+                    // based on this error. If it does, we mark it as such so we
+                    // don't have to wait on the instance watcher to find and
+                    // restart this instance.
+                    if let Some(reason) = err.vmm_failure_reason() {
                         slog::info!(
                             opctx.log,
-                            "Failed to mark VMM as Stopped; VMM was already \
-                             gone. Marking as Failed";
+                            "Attempted to stop a VMM, but discovered that it \
+                            should transition to Failed.";
                             "sled_id" => %sled_id,
                             "vmm_id" => %vmm_id,
                             "instance_id" => %instance_id,
-                            InlineErrorChain::new(&err),
+                            "failure_reason" => %reason,
                         );
 
                         result.errors.push(err.into());
                         Some(SledVmmState {
-                            vmm_state: vmm.runtime().transition(
-                                VmmState::Failed(
-                                    VmmFailureReason::NoSuchInstance,
-                                ),
-                            ),
+                            vmm_state: vmm
+                                .runtime()
+                                .transition(VmmState::Failed(reason)),
                             migration_in: None,
                             migration_out: None,
                         })
