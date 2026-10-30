@@ -1146,13 +1146,13 @@ impl IdOrdItem for InternalDnsGenerationStatus {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DiscoveredRack {
     /// ID of the rack, which will be the same ID used in the `rack` table
-    /// if/when the discovered rack is adopted into the cluster:
+    /// if/when the discovered rack is adopted into the cluster.
     pub rack_id: RackUuid,
-    /// Rack subnet prefix on the underlay network:
+    /// Rack subnet prefix on the underlay network.
     pub rack_subnet: Ipv6Subnet<RACK_PREFIX_LENGTH>,
-    /// Underlay address of the sled running the multirack join service:
+    /// Underlay address of the sled running the multirack join service.
     pub join_service_ip: Ipv6Addr,
-    /// Sleds on this rack that we've discovered via the join service:
+    /// Sleds on this rack that we've discovered via the join service.
     pub discovered_sleds: IdOrdMap<DiscoveredSled>,
 }
 
