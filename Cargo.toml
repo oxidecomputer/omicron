@@ -643,10 +643,10 @@ ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "389016069197dc8ca611f4b1dc63dfafbe634b7c" }
-mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "389016069197dc8ca611f4b1dc63dfafbe634b7c" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "389016069197dc8ca611f4b1dc63dfafbe634b7c" }
-ddm-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "389016069197dc8ca611f4b1dc63dfafbe634b7c" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "6fee306970763d27025c408cbbf690d6e30a9593" }
+mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "6fee306970763d27025c408cbbf690d6e30a9593" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "6fee306970763d27025c408cbbf690d6e30a9593" }
+ddm-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "6fee306970763d27025c408cbbf690d6e30a9593" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -719,7 +719,7 @@ oxide-update-engine = "0.1.2"
 oxide-update-engine-types = { version = "0.1.2", features = ["schemars08"] }
 oxide-update-engine-display = "0.1.2"
 oxide-versioned-envelope = { version = "0.1.1", features = ["schemars08"] }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "fd2d6ad625cef6fb903660e57dcd4729ff66a6fe", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "44052786cb63ad9ff32ec47bd8d65edb6a184e21", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.7"
 once_cell = "1.21.3"
@@ -728,7 +728,7 @@ openapiv3 = "2.2.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "fd2d6ad625cef6fb903660e57dcd4729ff66a6fe" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "44052786cb63ad9ff32ec47bd8d65edb6a184e21" }
 oso = "0.27"
 owo-colors = "4.2.2"
 oximeter = { path = "oximeter/oximeter" }
