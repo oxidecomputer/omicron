@@ -119,6 +119,9 @@ pub struct ActiveProblemSelector {
 /// A resource impacted by an Active Problem.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ActiveProblemImpact {
+    /// ID of the Active Problem impacting this resource.
+    #[schemars(with = "Uuid")]
+    pub problem_id: ActiveProblemUuid,
     /// The impacted resource.
     pub resource: ImpactedResource,
     /// The revision of the Active Problem in which this impact was added.
