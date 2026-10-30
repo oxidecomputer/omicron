@@ -3012,7 +3012,7 @@ fn check_instance_shutdown_policy_valid(
     }) = policy
     {
         return Err(Error::invalid_value(
-            "seconds",
+            "timeout_secs",
             format!(
                 "shutdown timeout must be between \
                 1 and {MAX_ACPI_SHUTDOWN_TIMEOUT_SECS}"

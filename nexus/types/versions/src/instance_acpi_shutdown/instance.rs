@@ -31,8 +31,16 @@ pub enum InstanceShutdownPolicy {
     /// Instance is sent PWRBTN_STS as described in ACPI chapter 4. If the VM
     /// guest has not stopped itself with a power event within the given timeout,
     /// it is *then* forcefully terminated.
-    PowerButton { timeout_secs: u64 },
+    PowerButton {
+        #[schemars(range(min = 1, max = 3600))]
+        timeout_secs: u64,
+    },
 }
+
+// schemars(range(max)) above is required to be a *literal*. if the constant
+// changes, and you're here because of the assertion, change it accordingly.
+const _: () =
+    const { assert!(nexus_defaults::MAX_ACPI_SHUTDOWN_TIMEOUT_SECS == 3600) };
 
 /// View of an Instance
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]

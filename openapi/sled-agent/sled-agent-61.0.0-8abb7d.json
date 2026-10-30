@@ -10701,6 +10701,7 @@
         "properties": {
           "acpi_timeout_secs": {
             "nullable": true,
+            "description": "The number of seconds to wait between sending the VM guest a power button signal and forcefully terminating it, if it does not power itself down by then after receiving the signal.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0

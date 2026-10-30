@@ -5823,6 +5823,7 @@
           },
           "shutdown_policy": {
             "nullable": true,
+            "description": "The method by which the instance will be powered down when transitioning to the stopped state, either forcefully or by giving the guest an ACPI power button signal first.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceShutdownPolicy"
@@ -5969,8 +5970,10 @@
         ]
       },
       "InstanceShutdownPolicy": {
+        "description": "Instance-stopping method choices",
         "oneOf": [
           {
+            "description": "Instance's VM is forcefully terminated immediately.",
             "type": "object",
             "properties": {
               "action": {
@@ -5985,6 +5988,7 @@
             ]
           },
           {
+            "description": "Instance is sent PWRBTN_STS as described in ACPI chapter 4. If the VM guest has not stopped itself with a power event within the given timeout, it is *then* forcefully terminated.",
             "type": "object",
             "properties": {
               "action": {
@@ -5996,7 +6000,8 @@
               "timeout_secs": {
                 "type": "integer",
                 "format": "uint64",
-                "minimum": 0
+                "minimum": 1,
+                "maximum": 3600
               }
             },
             "required": [
