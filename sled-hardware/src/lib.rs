@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -23,6 +23,8 @@ cfg_if::cfg_if! {
 pub mod cleanup;
 pub mod disk;
 pub use disk::*;
+pub mod disk_bay;
+pub use disk_bay::{DiskBay, DiskBayOccupant};
 pub mod nvme_instance;
 pub mod softnpu;
 pub mod underlay;
@@ -399,6 +401,7 @@ enum TofinoView {
 pub struct HardwareView {
     tofino: TofinoView,
     disks: HashMap<DiskIdentity, UnparsedDisk>,
+    disk_bays: BTreeMap<String, DiskBay>,
     baseboard: Baseboard,
     online_processor_count: u32,
     usable_physical_pages: u64,
@@ -419,8 +422,20 @@ impl HardwareView {
         self.online_processor_count
     }
 
+    /// The disks last seen in each bay. A disk stays here while its bay is
+    /// [`DiskBayOccupant::Unreadable`], and leaves once the bay is read and
+    /// holds something else.
     pub fn disks(&self) -> HashMap<DiskIdentity, UnparsedDisk> {
         self.disks.clone()
+    }
+
+    /// Every U.2 bay and M.2 socket of the chassis, by location, and what the
+    /// latest poll found in it.
+    ///
+    /// Empty on hosts that are not Oxide sleds, where there is no chassis
+    /// topology to read.
+    pub fn disk_bays(&self) -> &BTreeMap<String, DiskBay> {
+        &self.disk_bays
     }
 
     pub fn into_disks(self) -> HashMap<DiskIdentity, UnparsedDisk> {

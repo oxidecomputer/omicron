@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::disk::{DiskPaths, Partition, PooledDiskError, UnparsedDisk};
-use crate::{ExternalDisks, HardwareView, SledMode};
+use crate::{DiskBay, ExternalDisks, HardwareView, SledMode};
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::DiskVariant;
@@ -60,6 +60,10 @@ impl HardwareManager {
     }
 
     pub fn disks(&self) -> HashMap<DiskIdentity, UnparsedDisk> {
+        unimplemented!("Accessing hardware unsupported on non-illumos");
+    }
+
+    pub fn disk_bays(&self) -> BTreeMap<String, DiskBay> {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
