@@ -2219,7 +2219,7 @@ impl DataStore {
             }
 
             // Insert the racks we've discovered
-            {
+            if !inv_discovered_racks.is_empty() {
                 use nexus_db_schema::schema::inv_discovered_rack::dsl;
                 diesel::insert_into(dsl::inv_discovered_rack)
                     .values(inv_discovered_racks)
@@ -2228,7 +2228,7 @@ impl DataStore {
             }
 
             // Insert the sleds we've discovered
-            {
+            if !inv_discovered_sleds.is_empty() {
                 use nexus_db_schema::schema::inv_discovered_sled::dsl;
                 diesel::insert_into(dsl::inv_discovered_sled)
                     .values(inv_discovered_sleds)
