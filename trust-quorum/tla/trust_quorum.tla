@@ -413,11 +413,6 @@ CommittedNodesHaveShares ==
 (* Temporal properties *)
 AllNodesUnlock == <>[](\A id \in nexus.config.members: nodeOp[id] # "Unlock")
 
-\* This is currently expected to FAIL under trust_quorum_nocrash.cfg, because
-\* RecvCommit never fires for the coordinator (it stays in CoordinatePrepare),
-\* so NexusRecvCommitAck never reaches Idle and epoch 2 never starts.
-\* trust_quorum.cfg only gets there because n1 is in CRASHSET and commits after
-\* restarting.
 ReconfigurationStarts == <>(nexus.config.epoch = 2)
 
 -----------------------------------------------------------------------------
@@ -898,6 +893,8 @@ RecvCommit(id) ==
     /\ m # NONE
     /\ \/ nodeOp[id] = "Idle"
        \/ nodeOp[id] = "Uncommitted"
+       \* The coordinator commits its own config like any other member.
+       \/ nodeOp[id] = "CoordinatePrepare"
     /\ Assert(nodes[id].has_share,
               <<"Commits should only be sent to nodes that have prepared", id>>)
     /\ nodeOp' = [nodeOp EXCEPT ![id] = "Idle"]
