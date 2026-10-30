@@ -10148,6 +10148,7 @@ dependencies = [
  "digest 0.11.3",
  "dof 0.3.0",
  "dof 0.4.0",
+ "dropshot 0.17.1",
  "ed25519-dalek 2.2.0",
  "either",
  "elliptic-curve 0.13.8",
