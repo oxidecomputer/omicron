@@ -1126,6 +1126,12 @@ opt-level = 3
 # dependencies.  If you want to use those, uncomment one of these blocks.
 #
 [patch.crates-io]
+# XXX-dap Temporary patches for testing unreleased Dropshot and
+# dropshot-api-manager.  Remove these before landing.
+dropshot = { path = "../dropshot/dropshot" }
+dropshot_endpoint = { path = "../dropshot/dropshot_endpoint" }
+dropshot-api-manager = { path = "../dropshot-api-manager/crates/dropshot-api-manager" }
+dropshot-api-manager-types = { path = "../dropshot-api-manager/crates/dropshot-api-manager-types" }
 # diesel = { path = "../../diesel/diesel" }
 # drift = { path = "../drift" }
 # dropshot = { path = "../dropshot/dropshot" }

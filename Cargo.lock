@@ -3391,13 +3391,11 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.17.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "803c4a57fd2a611df2ddd7069a62a565253368ee96ad4e5ac2e74e625dcf8430"
 dependencies = [
  "async-compression",
  "async-stream",
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "camino",
  "chrono",
@@ -3416,7 +3414,6 @@ dependencies = [
  "paste",
  "percent-encoding",
  "rustls",
- "rustls-pemfile",
  "schemars 0.8.22",
  "scopeguard",
  "semver 1.0.28",
@@ -3444,8 +3441,6 @@ dependencies = [
 [[package]]
 name = "dropshot-api-manager"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "717b8725b0ba287944e595d1bd6873f36bd955fc2846ea6f80b1fa649cbbb035"
 dependencies = [
  "anyhow",
  "atomicwrites",
@@ -3477,8 +3472,6 @@ dependencies = [
 [[package]]
 name = "dropshot-api-manager-types"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db49298fe751d1a7e8ecfbe0c94fffe3b99bcafbbc5d182c4e89e750f9c97886"
 dependencies = [
  "anyhow",
  "camino",
@@ -3490,16 +3483,14 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.17.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f176851eb52822c728ad7a1c5aea0e3c95e68d9876cfa06ae32d5018730acb4"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
  "quote",
  "semver 1.0.28",
  "serde",
- "serde_tokenstream 0.2.3",
- "syn 2.0.117",
+ "serde_tokenstream 0.3.0",
+ "syn 3.0.3",
 ]
 
 [[package]]
