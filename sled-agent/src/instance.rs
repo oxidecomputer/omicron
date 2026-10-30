@@ -230,6 +230,7 @@ enum InstanceRequest {
     PutState {
         state: VmmStateRequested,
         tx: oneshot::Sender<Result<VmmPutStateResponse, ManagerError>>,
+        acpi_timeout_secs: Option<u64>,
     },
     IssueSnapshotRequest {
         disk_id: Uuid,
@@ -723,7 +724,8 @@ struct InstanceRunner {
 
 impl InstanceRunner {
     /// How long to wait for VMM shutdown to complete before forcefully
-    /// terminating the zone.
+    /// terminating the zone. This is added to the stop request's ACPI
+    /// shutdown timeout, if any.
     const STOP_GRACE_PERIOD: Duration = Duration::from_secs(60 * 10);
 
     #[expect(clippy::too_many_arguments)]
@@ -962,7 +964,7 @@ impl InstanceRunner {
                                 tx.send(Ok(self.current_state()))
                                     .map_err(|_| Error::FailedSendClientClosed)
                             },
-                            PutState { state, tx } => {
+                            PutState { state, acpi_timeout_secs, tx } => {
                                 // If we're going to stop the instance, start
                                 // the timeout after which we will forcefully
                                 // terminate the VMM.
@@ -972,13 +974,16 @@ impl InstanceRunner {
                                     // requests to stop coming in don't reset
                                     // the clock.
                                     if stop_timeout.is_none() {
+                                        let acpi_timeout = Duration::from_secs(
+                                            acpi_timeout_secs.unwrap_or(0)
+                                        );
                                         stop_timeout = Some(Box::pin(tokio::time::sleep(
-                                            Self::STOP_GRACE_PERIOD
+                                            Self::STOP_GRACE_PERIOD + acpi_timeout
                                         )));
                                     }
                                 }
 
-                                tx.send(self.put_state(state).await
+                                tx.send(self.put_state(state, acpi_timeout_secs).await
                                     .map(|r| VmmPutStateResponse { updated_runtime: Some(r) })
                                     .map_err(|e| e.into()))
                                     .map_err(|_| Error::FailedSendClientClosed)
@@ -1347,7 +1352,7 @@ impl InstanceRunner {
     /// Sends an instance state PUT request to this instance's Propolis.
     async fn propolis_state_put(
         &self,
-        request: propolis_client::types::InstanceStateRequested,
+        request: propolis_client::types::InstanceStateChange,
     ) -> Result<(), PropolisClientError> {
         let res = self
             .running_state
@@ -2190,9 +2195,14 @@ impl Instance {
         &self,
         tx: oneshot::Sender<Result<VmmPutStateResponse, ManagerError>>,
         state: VmmStateRequested,
+        acpi_timeout_secs: Option<u64>,
     ) -> Result<(), Error> {
         self.tx
-            .try_send(InstanceRequest::PutState { state, tx })
+            .try_send(InstanceRequest::PutState {
+                state,
+                acpi_timeout_secs,
+                tx,
+            })
             .or_else(InstanceRequest::fail_try_send)
     }
 
@@ -2403,7 +2413,9 @@ impl InstanceRunner {
     async fn put_state(
         &mut self,
         state: VmmStateRequested,
+        acpi_timeout_secs: Option<u64>,
     ) -> Result<SledVmmState, Error> {
+        use propolis_client::types::InstanceStateChange as PropolisStateChange;
         use propolis_client::types::InstanceStateRequested as PropolisRequest;
         let already_had_zone = self.running_state.is_some();
         let (propolis_request, next_published) = match state {
@@ -2448,21 +2460,24 @@ impl InstanceRunner {
                     self.terminate().await;
                     (None, None)
                 } else {
-                    (
-                        Some(PropolisRequest::Stop),
-                        Some(PublishedVmmState::Stopping),
-                    )
+                    let p = if acpi_timeout_secs.is_some() {
+                        PropolisRequest::AcpiStop
+                    } else {
+                        PropolisRequest::Stop
+                    };
+                    (Some(p), Some(PublishedVmmState::Stopping))
                 }
             }
             VmmStateRequested::Reboot => {
                 if !already_had_zone {
                     return Err(Error::VmNotRunning(self.propolis_id));
                 }
-
-                (
-                    Some(PropolisRequest::Reboot),
-                    Some(PublishedVmmState::Rebooting),
-                )
+                let p = if acpi_timeout_secs.is_some() {
+                    PropolisRequest::AcpiReboot
+                } else {
+                    PropolisRequest::Reboot
+                };
+                (Some(p), Some(PublishedVmmState::Rebooting))
             }
         };
 
@@ -2475,7 +2490,8 @@ impl InstanceRunner {
         if let Some(p) = propolis_request {
             // Since there's an active Propolis zone with an extant VM, it's
             // possible to ask Propolis to drive the VM state machine.
-            if let Err(e) = self.propolis_state_put(p).await {
+            let change = PropolisStateChange { state: p, acpi_timeout_secs };
+            if let Err(e) = self.propolis_state_put(change).await {
                 match propolis_error_code(&self.log, &e) {
                     Some(
                         code @ PropolisErrorCode::NoInstance
@@ -3511,7 +3527,7 @@ mod tests {
 
         // pretending we're InstanceManager::ensure_state, start our "instance"
         // (backed by fakes and propolis_mock_server)
-        inst.put_state(put_tx, VmmStateRequested::Running)
+        inst.put_state(put_tx, VmmStateRequested::Running, None)
             .expect("failed to send Instance::put_state");
 
         // even though we ignore this result at instance creation time in
@@ -3618,7 +3634,7 @@ mod tests {
 
             // pretending we're InstanceManager::ensure_state, try in vain
             // to start our "instance", but no propolis server is running
-            inst.put_state(put_tx, VmmStateRequested::Running)
+            inst.put_state(put_tx, VmmStateRequested::Running, None)
                 .expect("failed to send Instance::put_state");
 
             let timeout_fut = timeout(TIMEOUT_DURATION, put_rx);
@@ -3673,7 +3689,7 @@ mod tests {
 
         test_objects
             .instance_manager
-            .ensure_state(propolis_id, VmmStateRequested::Running)
+            .ensure_state(propolis_id, VmmStateRequested::Running, None)
             .await
             .unwrap();
 
@@ -3747,7 +3763,7 @@ mod tests {
 
         test_objects
             .instance_manager
-            .ensure_state(propolis_id, VmmStateRequested::Running)
+            .ensure_state(propolis_id, VmmStateRequested::Running, None)
             .await
             .unwrap();
 
@@ -3776,7 +3792,7 @@ mod tests {
         // Request the VMM stop
         test_objects
             .instance_manager
-            .ensure_state(propolis_id, VmmStateRequested::Stopped)
+            .ensure_state(propolis_id, VmmStateRequested::Stopped, None)
             .await
             .unwrap();
 
@@ -4488,7 +4504,7 @@ mod tests {
             .expect("Able to send instance_ensure to mock Propolis");
 
         // Now, actually put the state directly from the instance runner.
-        inst.put_state(put_tx, VmmStateRequested::Running)
+        inst.put_state(put_tx, VmmStateRequested::Running, None)
             .expect("able to queue put_state request");
 
         // Wait until the zone actually starts halting.
@@ -4636,7 +4652,7 @@ mod tests {
             .expect("Able to send instance_ensure to mock Propolis");
 
         // Now, actually put the state directly from the instance runner.
-        inst.put_state(put_tx, VmmStateRequested::Running)
+        inst.put_state(put_tx, VmmStateRequested::Running, None)
             .expect("able to queue put_state request");
 
         // Wait until the zone actually starts halting.

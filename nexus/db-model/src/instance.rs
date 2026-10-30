@@ -151,6 +151,15 @@ pub struct Instance {
     /// the OPTE port is created with the default MTU regardless of this field.
     /// Changes to this field only take effect on the next instance restart.
     pub enable_jumbo_frames: bool,
+
+    /// When `shutdown_policy_action` is `PowerButton`, this represents the time
+    /// propolis will wait for the guest to power itself down after sending it
+    /// the power button event, before forcefully terminating it.
+    /// Must be None if the action is `HardOff`.
+    pub shutdown_policy_timeout: Option<TimeDelta>,
+
+    /// The means by which to stop the instance.
+    pub shutdown_policy_action: InstanceShutdownAction,
 }
 
 impl Instance {
@@ -178,6 +187,35 @@ impl Instance {
             IntendedState::Stopped
         };
 
+        use instance_types::InstanceShutdownPolicy;
+        let (shutdown_policy_action, shutdown_policy_timeout) = match params
+            .shutdown_policy
+        {
+            Some(InstanceShutdownPolicy::HardOff) => {
+                (InstanceShutdownAction::HardOff, None)
+            }
+            // RFD 622: "A user-configurable timeout for the instance to
+            // finish stopping itself should be present, bounded between
+            // 1 and 3600 seconds, inclusive." This is enforced at the API
+            // level and as a crdb constraint (expect `timeout_secs as i64`
+            // to be handled as an error elsewhere if somehow in the range
+            // where the cast would be problematic)
+            Some(InstanceShutdownPolicy::PowerButton { timeout_secs }) => (
+                InstanceShutdownAction::PowerButton,
+                Some(TimeDelta::seconds(timeout_secs as i64)),
+            ),
+            // RFD 622: "To generally match the behavior of other cloud
+            // providers, the default action for an instance that does not
+            // have an explicit policy should be graceful-stop with a
+            // timeout of 600 seconds."
+            None => (
+                InstanceShutdownAction::PowerButton,
+                Some(TimeDelta::seconds(
+                    nexus_defaults::DEFAULT_ACPI_SHUTDOWN_TIMEOUT_SECS as i64,
+                )),
+            ),
+        };
+
         Self {
             identity,
             project_id: project_id.into(),
@@ -201,6 +239,8 @@ impl Instance {
             intended_state,
             cpu_platform: params.cpu_platform.map(Into::into),
             enable_jumbo_frames: params.enable_jumbo_frames,
+            shutdown_policy_action,
+            shutdown_policy_timeout,
         }
     }
 
@@ -279,6 +319,26 @@ impl Instance {
         InstanceKarmicStatus {
             needs_reincarnation,
             can_reincarnate: self.auto_restart.can_reincarnate(&runtime),
+        }
+    }
+
+    pub fn shutdown_policy(
+        &self,
+    ) -> Option<instance_types::InstanceShutdownPolicy> {
+        use instance_types::InstanceShutdownPolicy;
+        match self.shutdown_policy_action {
+            InstanceShutdownAction::HardOff => {
+                Some(InstanceShutdownPolicy::HardOff)
+            }
+            InstanceShutdownAction::PowerButton => {
+                // return None if timeout NULL or negative (enforced by sql-side check)
+                let timeout_secs: u64 = self
+                    .shutdown_policy_timeout?
+                    .num_seconds()
+                    .try_into()
+                    .ok()?;
+                Some(InstanceShutdownPolicy::PowerButton { timeout_secs })
+            }
         }
     }
 }
@@ -571,6 +631,37 @@ impl InstanceAutoRestart {
         .and(dsl::updater_id.is_null())
     }
 }
+
+crate::impl_enum_type!(
+    InstanceShutdownActionEnum:
+
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        AsExpression,
+        FromSqlRow,
+        PartialEq,
+        Eq,
+        Hash,
+        PartialOrd,
+        Ord,
+        Serialize,
+        Deserialize,
+    )]
+    pub enum InstanceShutdownAction;
+
+    HardOff => b"hard_off"
+    PowerButton => b"power_button"
+);
+
+#[allow(clippy::derivable_impls)] // impl_enum_type doesn't afford #[default]
+impl Default for InstanceShutdownAction {
+    fn default() -> Self {
+        Self::HardOff
+    }
+}
+
 /// The parts of an Instance that can be directly updated after creation.
 #[derive(Clone, Debug, AsChangeset, Serialize, Deserialize)]
 #[diesel(table_name = instance, treat_none_as_null = true)]
@@ -590,4 +681,10 @@ pub struct InstanceUpdate {
     pub cpu_platform: Option<InstanceCpuPlatform>,
 
     pub enable_jumbo_frames: bool,
+
+    /// If this is `None`, the instance's shutdown policy will be unchanged by
+    /// this update request.
+    #[diesel(treat_none_as_null = false)]
+    pub shutdown_policy_action: Option<InstanceShutdownAction>,
+    pub shutdown_policy_timeout: Option<TimeDelta>,
 }

@@ -149,6 +149,9 @@ async fn test_project_create_defaults(cptestctx: &ControlPlaneTestContext) {
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
                 enable_jumbo_frames: false,
+                shutdown_policy: Some(
+                    instance::InstanceShutdownPolicy::HardOff,
+                ),
             },
             StatusCode::NOT_FOUND,
         )
@@ -324,6 +327,7 @@ async fn test_project_deletion_with_instance(
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
             enable_jumbo_frames: false,
+            shutdown_policy: None,
         },
     )
     .await;

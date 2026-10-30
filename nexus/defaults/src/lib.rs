@@ -92,6 +92,14 @@ pub static DEFAULT_FIREWALL_RULES: LazyLock<VpcFirewallRuleUpdateParams> =
         }
     });
 
+/// Upper bound of the timeout of the 'power button' instance shutdown policy,
+/// which the time before the VMM force-kills an instance that was requested
+/// to shut down gracefully.
+pub const MAX_ACPI_SHUTDOWN_TIMEOUT_SECS: u64 = 3600;
+/// Default timeout of the 'power button' instance shutdown policy used for
+/// newly-created instances when a policy is not specified.
+pub const DEFAULT_ACPI_SHUTDOWN_TIMEOUT_SECS: u64 = 600;
+
 /// Generate a random VPC IPv6 prefix, in the range `fd00::/48`.
 pub fn random_vpc_ipv6_prefix() -> Result<Ipv6Net, external::Error> {
     let mut bytes = [0u8; 16];

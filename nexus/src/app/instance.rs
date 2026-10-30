@@ -40,6 +40,8 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::model::InstanceStateComputer;
+use nexus_defaults::DEFAULT_ACPI_SHUTDOWN_TIMEOUT_SECS;
+use nexus_defaults::MAX_ACPI_SHUTDOWN_TIMEOUT_SECS;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_ip;
 use nexus_types::external_api::instance;
@@ -249,8 +251,8 @@ impl From<InstanceStateChangeError> for dropshot::HttpError {
 /// VMM (i.e. the VMM pointed to be the instance's `propolis_id` field).
 pub(crate) enum InstanceStateChangeRequest {
     Run,
-    Reboot,
-    Stop,
+    Reboot { skip_os_shutdown: bool },
+    Stop { skip_os_shutdown: bool },
     Migrate(InstanceMigrationTargetParams),
 }
 
@@ -260,8 +262,8 @@ impl From<InstanceStateChangeRequest>
     fn from(value: InstanceStateChangeRequest) -> Self {
         match value {
             InstanceStateChangeRequest::Run => Self::Running,
-            InstanceStateChangeRequest::Reboot => Self::Reboot,
-            InstanceStateChangeRequest::Stop => Self::Stopped,
+            InstanceStateChangeRequest::Reboot { .. } => Self::Reboot,
+            InstanceStateChangeRequest::Stop { .. } => Self::Stopped,
             InstanceStateChangeRequest::Migrate(params) => {
                 Self::MigrationTarget(params)
             }
@@ -579,9 +581,11 @@ impl super::Nexus {
             cpu_platform,
             multicast_groups,
             enable_jumbo_frames,
+            shutdown_policy,
         } = params;
 
         check_instance_cpu_memory_sizes(*ncpus, *memory)?;
+        check_instance_shutdown_policy_valid(shutdown_policy)?;
 
         // Opting in to jumbo frames requires the fleet-wide opt-in. Opting out
         // (`Some(false)`) is always allowed.
@@ -625,6 +629,22 @@ impl super::Nexus {
         let memory = (*memory).into();
         let cpu_platform = cpu_platform.map(Into::into);
 
+        let (shutdown_policy_action, shutdown_policy_timeout) =
+            match shutdown_policy {
+                Some(instance::InstanceShutdownPolicy::HardOff) => (
+                    Some(nexus_db_model::InstanceShutdownAction::HardOff),
+                    None,
+                ),
+                Some(instance::InstanceShutdownPolicy::PowerButton {
+                    timeout_secs,
+                }) => (
+                    Some(nexus_db_model::InstanceShutdownAction::PowerButton),
+                    Some(chrono::TimeDelta::seconds((*timeout_secs) as i64)),
+                ),
+                // if policy action omitted from the update request, leave as-is
+                None => (None, None),
+            };
+
         let update = InstanceUpdate {
             boot_disk_id,
             auto_restart_policy,
@@ -632,6 +652,8 @@ impl super::Nexus {
             memory,
             cpu_platform,
             enable_jumbo_frames: *enable_jumbo_frames,
+            shutdown_policy_action,
+            shutdown_policy_timeout,
         };
 
         // Update the instance configuration
@@ -671,6 +693,7 @@ impl super::Nexus {
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
         check_instance_cpu_memory_sizes(params.ncpus, params.memory)?;
+        check_instance_shutdown_policy_valid(&params.shutdown_policy)?;
 
         let all_disks: Vec<&instance::InstanceDiskAttachment> =
             params.boot_disk.iter().chain(params.disks.iter()).collect();
@@ -801,6 +824,16 @@ impl super::Nexus {
         )
         .await?;
 
+        // RFD 622: default newly created instances to ACPI shutdown with
+        // 600-second timeout (rather than the previous behavior of
+        // hard-poweroff when instance stop state is requested).
+        let shutdown_policy =
+            Some(params.shutdown_policy.to_owned().unwrap_or(
+                instance::InstanceShutdownPolicy::PowerButton {
+                    timeout_secs: DEFAULT_ACPI_SHUTDOWN_TIMEOUT_SECS,
+                },
+            ));
+
         // It is deceptively inconvenient to do an early check that the boot
         // disk is valid here! We accept boot disk by name or ID, but disk
         // creation and attachment requests as part of instance creation all
@@ -815,6 +848,7 @@ impl super::Nexus {
             create_params: instance::InstanceCreate {
                 ssh_public_keys: ssh_keys,
                 anti_affinity_groups,
+                shutdown_policy,
                 ..params.clone()
             },
             boundary_switches: self
@@ -1038,6 +1072,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
+        skip_os_shutdown: bool,
     ) -> Result<InstanceAndActiveVmm, InstanceStateChangeError> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
@@ -1060,7 +1095,7 @@ impl super::Nexus {
                 opctx,
                 state.instance(),
                 state.vmm(),
-                InstanceStateChangeRequest::Reboot,
+                InstanceStateChangeRequest::Reboot { skip_os_shutdown },
             )
             .await
         {
@@ -1145,6 +1180,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
+        skip_os_shutdown: bool,
     ) -> Result<InstanceAndActiveVmm, InstanceStateChangeError> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
@@ -1167,7 +1203,7 @@ impl super::Nexus {
                 opctx,
                 state.instance(),
                 state.vmm(),
-                InstanceStateChangeRequest::Stop,
+                InstanceStateChangeRequest::Stop { skip_os_shutdown },
             )
             .await
         {
@@ -1258,12 +1294,12 @@ impl super::Nexus {
                             effective_state
                         )));
                     }
-                    InstanceStateChangeRequest::Stop => {
+                    InstanceStateChangeRequest::Stop { .. } => {
                         return Ok(
                             InstanceStateChangeRequestAction::AlreadyDone,
                         );
                     }
-                    InstanceStateChangeRequest::Reboot => {
+                    InstanceStateChangeRequest::Reboot { .. } => {
                         return Err(Error::invalid_request(&format!(
                             "cannot reboot an instance in state {} with no VMM",
                             effective_state
@@ -1302,7 +1338,7 @@ impl super::Nexus {
                 InstanceState::Failed
                     if matches!(
                         requested,
-                        InstanceStateChangeRequest::Stop
+                        InstanceStateChangeRequest::Stop { .. }
                     ) =>
                 {
                     // As discussed above, this shouldn't happen, so return an
@@ -1360,18 +1396,20 @@ impl super::Nexus {
         // TODO(#2825): Failed instances should be allowed to stop. See above.
         let allowed = match requested {
             InstanceStateChangeRequest::Run
-            | InstanceStateChangeRequest::Reboot
-            | InstanceStateChangeRequest::Stop => match effective_state {
-                InstanceState::Creating
-                | InstanceState::Starting
-                | InstanceState::Running
-                | InstanceState::Stopping
-                | InstanceState::Stopped
-                | InstanceState::Rebooting
-                | InstanceState::Migrating => true,
-                InstanceState::Repairing | InstanceState::Failed => false,
-                InstanceState::Destroyed => false,
-            },
+            | InstanceStateChangeRequest::Reboot { .. }
+            | InstanceStateChangeRequest::Stop { .. } => {
+                match effective_state {
+                    InstanceState::Creating
+                    | InstanceState::Starting
+                    | InstanceState::Running
+                    | InstanceState::Stopping
+                    | InstanceState::Stopped
+                    | InstanceState::Rebooting
+                    | InstanceState::Migrating => true,
+                    InstanceState::Repairing | InstanceState::Failed => false,
+                    InstanceState::Destroyed => false,
+                }
+            }
             InstanceStateChangeRequest::Migrate(_) => match effective_state {
                 InstanceState::Running
                 | InstanceState::Rebooting
@@ -1439,10 +1477,27 @@ impl super::Nexus {
                 propolis_id,
             } => {
                 let sa = self.sled_client(&sled_id).await?;
+                let acpi_timeout_secs = match requested {
+                    InstanceStateChangeRequest::Reboot { skip_os_shutdown }
+                    | InstanceStateChangeRequest::Stop { skip_os_shutdown }
+                    if !skip_os_shutdown => match prev_instance_state.shutdown_policy_action {
+                        nexus_db_model::InstanceShutdownAction::HardOff => None,
+                        nexus_db_model::InstanceShutdownAction::PowerButton => {
+                            prev_instance_state
+                                .shutdown_policy_timeout
+                                // non-neg enforced by api impl & crdb constraint
+                                .and_then(|d| d.num_seconds().try_into().ok())
+                        }
+                    },
+                    _ => None
+                };
                 let instance_put_result = sa
                     .vmm_put_state(
                         &propolis_id,
-                        &VmmPutStateBody { state: requested.into() },
+                        &VmmPutStateBody {
+                            state: requested.into(),
+                            acpi_timeout_secs,
+                        },
                     )
                     .await
                     .map(|res| res.into_inner().updated_runtime.map(Into::into))
@@ -2948,6 +3003,25 @@ fn check_instance_cpu_memory_sizes(
     Ok(())
 }
 
+fn check_instance_shutdown_policy_valid(
+    policy: &Option<instance::InstanceShutdownPolicy>,
+) -> Result<(), Error> {
+    const MAX_PLUS_1: u64 = MAX_ACPI_SHUTDOWN_TIMEOUT_SECS + 1;
+    if let Some(instance::InstanceShutdownPolicy::PowerButton {
+        timeout_secs: 0 | MAX_PLUS_1..,
+    }) = policy
+    {
+        return Err(Error::invalid_value(
+            "timeout_secs",
+            format!(
+                "shutdown timeout must be between \
+                1 and {MAX_ACPI_SHUTDOWN_TIMEOUT_SECS}"
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// Effective MTU for an instance's primary OPTE port. Jumbo frames are only
 /// applied when both the fleet-wide opt-in is enabled and the per-instance bit
 /// is set; otherwise this returns `None` and OPTE applies the default MTU.
@@ -3058,8 +3132,9 @@ mod tests {
     use futures::{SinkExt, StreamExt};
     use instance::InstanceNetworkInterfaceAttachment;
     use nexus_db_model::{
-        Instance as DbInstance, InstanceState as DbInstanceState,
-        VmmCpuPlatform, VmmState as DbVmmState,
+        Instance as DbInstance, InstanceShutdownAction,
+        InstanceState as DbInstanceState, VmmCpuPlatform,
+        VmmState as DbVmmState,
     };
     use nexus_types::external_api::instance;
     use omicron_common::api::external::{
@@ -3188,6 +3263,7 @@ mod tests {
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
             enable_jumbo_frames: false,
+            shutdown_policy: None,
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
@@ -3345,6 +3421,7 @@ mod tests {
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
             enable_jumbo_frames,
+            shutdown_policy: None,
         };
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
         let project_id = ProjectUuid::new_v4();
@@ -3371,6 +3448,88 @@ mod tests {
         assert_eq!(
             primary_nic_mtu_for_jumbo_frames(true, true),
             Some(omicron_common::address::EXTERNAL_JUMBO_FRAMES_MTU),
+        );
+    }
+
+    #[test]
+    fn test_instance_shutdown_policy() {
+        let mut params = instance::InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: Name::try_from("acpi".to_owned()).unwrap(),
+                description: "instance under acpi shutdown policy test"
+                    .to_owned(),
+            },
+            ncpus: instance::InstanceCpuCount(1),
+            memory: ByteCount::from_gibibytes_u32(1),
+            hostname: Hostname::try_from("jumbo").unwrap(),
+            user_data: vec![],
+            network_interfaces: InstanceNetworkInterfaceAttachment::None,
+            external_ips: vec![],
+            disks: vec![],
+            boot_disk: None,
+            cpu_platform: None,
+            ssh_public_keys: None,
+            start: false,
+            auto_restart_policy: Default::default(),
+            anti_affinity_groups: Vec::new(),
+            multicast_groups: Vec::new(),
+            enable_jumbo_frames: false,
+            shutdown_policy: None,
+        };
+        let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
+        let project_id = ProjectUuid::from_untyped_uuid(Uuid::new_v4());
+
+        // when shutdown policy omitted at creation, default to 600 seconds
+        let db_instance = DbInstance::new(instance_id, project_id, &params);
+        assert_eq!(
+            db_instance.shutdown_policy_action,
+            InstanceShutdownAction::PowerButton
+        );
+        assert_eq!(
+            db_instance.shutdown_policy_timeout.unwrap().num_seconds(),
+            600
+        );
+
+        // explicitly set hard-off
+        params.shutdown_policy =
+            Some(instance::InstanceShutdownPolicy::HardOff);
+        let db_instance = DbInstance::new(instance_id, project_id, &params);
+        assert_eq!(
+            db_instance.shutdown_policy_action,
+            InstanceShutdownAction::HardOff
+        );
+        assert_eq!(db_instance.shutdown_policy_timeout, None);
+
+        // explicitly set power button with timeout
+        params.shutdown_policy =
+            Some(instance::InstanceShutdownPolicy::PowerButton {
+                timeout_secs: 42,
+            });
+        let db_instance = DbInstance::new(instance_id, project_id, &params);
+        assert_eq!(
+            db_instance.shutdown_policy_action,
+            InstanceShutdownAction::PowerButton
+        );
+        assert_eq!(
+            db_instance.shutdown_policy_timeout.unwrap().num_seconds(),
+            42
+        );
+
+        // DbInstance::new doesn't clamp an invalid timeout
+        // (enforced instead by check_instance_shutdown_policy_valid
+        // and crdb constraint)
+        params.shutdown_policy =
+            Some(instance::InstanceShutdownPolicy::PowerButton {
+                timeout_secs: 999000,
+            });
+        let db_instance = DbInstance::new(instance_id, project_id, &params);
+        assert_eq!(
+            db_instance.shutdown_policy_action,
+            InstanceShutdownAction::PowerButton
+        );
+        assert_eq!(
+            db_instance.shutdown_policy_timeout.unwrap().num_seconds(),
+            999000
         );
     }
 }

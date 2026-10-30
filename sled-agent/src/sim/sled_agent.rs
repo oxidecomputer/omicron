@@ -721,6 +721,7 @@ impl SledAgent {
         self: &Arc<Self>,
         propolis_id: PropolisUuid,
         state: VmmStateRequested,
+        acpi_timeout_secs: Option<u64>,
     ) -> Result<VmmPutStateResponse, HttpError> {
         if let Some(e) =
             self.instance_ensure_state_error.lock().unwrap().as_ref()
@@ -733,7 +734,7 @@ impl SledAgent {
 
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
-            let body = match state {
+            let p_state = match state {
                 VmmStateRequested::MigrationTarget(_) => {
                     return Err(Error::internal_error(
                         "migration not implemented for mock Propolis",
@@ -763,11 +764,23 @@ impl SledAgent {
                     return Ok(VmmPutStateResponse { updated_runtime: None });
                 }
                 VmmStateRequested::Stopped => {
-                    propolis_client::types::InstanceStateRequested::Stop
+                    if acpi_timeout_secs.is_some() {
+                        propolis_client::types::InstanceStateRequested::AcpiStop
+                    } else {
+                        propolis_client::types::InstanceStateRequested::Stop
+                    }
                 }
                 VmmStateRequested::Reboot => {
-                    propolis_client::types::InstanceStateRequested::Reboot
+                    if acpi_timeout_secs.is_some() {
+                        propolis_client::types::InstanceStateRequested::AcpiReboot
+                    } else {
+                        propolis_client::types::InstanceStateRequested::Reboot
+                    }
                 }
+            };
+            let body = propolis_client::types::InstanceStateChange {
+                state: p_state,
+                acpi_timeout_secs,
             };
             client.instance_state_put().body(body).send().await.map_err(
                 |e| {
@@ -780,10 +793,27 @@ impl SledAgent {
             )?;
         }
 
-        let new_state =
-            self.vmms.sim_ensure(&propolis_id, current, Some(state)).await?;
+        let vmms = Arc::clone(&self.vmms);
+        let fut = async move {
+            vmms.sim_ensure(&propolis_id, current, Some(state)).await
+        };
 
-        Ok(VmmPutStateResponse { updated_runtime: Some(new_state) })
+        // don't immediately "terminate" the "vmm" for soft-shutdown requests.
+        let nexus_client = Arc::clone(&self.nexus_client);
+        if let Some(timeout) = acpi_timeout_secs {
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(timeout)).await;
+                if let Ok(new_state) = fut.await {
+                    let _: Result<_, _> = nexus_client
+                        .cpapi_instances_put(&propolis_id, &new_state.into())
+                        .await;
+                }
+            });
+            Ok(VmmPutStateResponse { updated_runtime: None })
+        } else {
+            let new_state = fut.await?;
+            Ok(VmmPutStateResponse { updated_runtime: Some(new_state) })
+        }
     }
 
     /// Wrapper around `sim_get_cloned_object` that returns the same error as

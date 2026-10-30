@@ -414,6 +414,7 @@ mod test {
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
                 enable_jumbo_frames: false,
+                shutdown_policy: None,
             },
         )
         .await;

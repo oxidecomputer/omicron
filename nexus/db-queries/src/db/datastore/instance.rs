@@ -183,6 +183,7 @@ impl From<InstanceAndActiveVmm> for instance_types::Instance {
             },
             auto_restart_status,
             enable_jumbo_frames: value.instance.enable_jumbo_frames,
+            shutdown_policy: value.instance.shutdown_policy(),
         }
     }
 }
@@ -1075,6 +1076,8 @@ impl DataStore {
                     memory,
                     cpu_platform,
                     enable_jumbo_frames,
+                    shutdown_policy_action,
+                    shutdown_policy_timeout,
                 } = update.clone();
                 async move {
                     // Set the auto-restart policy.
@@ -1096,6 +1099,23 @@ impl DataStore {
                         )
                         .execute_async(&conn)
                         .await?;
+
+                    // Set the instance shutdown policy, if specified.
+                    // (Leave as-is if not, so as not to clobber explicitly-set
+                    // policy with default values if the nexus instance update
+                    // API is ever touched by an older client without the field)
+                    if let Some(shut_update_action) = shutdown_policy_action {
+                        diesel::update(instance_dsl::instance)
+                            .filter(instance_dsl::id.eq(authz_instance.id()))
+                            .set((
+                                instance_dsl::shutdown_policy_action
+                                    .eq(shut_update_action),
+                                instance_dsl::shutdown_policy_timeout
+                                    .eq(shutdown_policy_timeout),
+                            ))
+                            .execute_async(&conn)
+                            .await?;
+                    }
 
                     // Set vCPUs and memory size.
                     self.instance_set_cpu_and_mem_on_conn(
@@ -2361,6 +2381,7 @@ mod tests {
                         anti_affinity_groups: Vec::new(),
                         multicast_groups: Vec::new(),
                         enable_jumbo_frames: false,
+                        shutdown_policy: None,
                     },
                 ),
             )

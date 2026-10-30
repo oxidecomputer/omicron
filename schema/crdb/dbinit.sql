@@ -1387,6 +1387,17 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_intended_state AS ENUM (
 );
 
 /*
+ * Represents the method by which an instance VM should be stopped.
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.instance_shutdown_action AS ENUM (
+    /* Terminate the instance immediately, without giving the guest warning */
+    'hard_off',
+    /* Send the ACPI fixed power button signal, giving the VM guest up to a
+     * configured timeout to shut itself down gracefully. */
+    'power_button'
+);
+
+/*
  * TODO consider how we want to manage multiple sagas operating on the same
  * Instance -- e.g., reboot concurrent with destroy or concurrent reboots or the
  * like.  Or changing # of CPUs or memory size.
@@ -1474,6 +1485,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      *
      * This may differ from its current state, and is used to determine what
      * action should be taken when the instance's VMM state changes.
+     *
+     * Note: This field's `guest_shutdown` enum variant is used when the
+     * guest OS *independently* shuts itself down while the control plane's
+     * intent was 'running'. If an ACPI shutdown is performed by way of the
+     * instance's `shutdown_policy_action`, the intended state is `stopped`.
      */
     intended_state omicron.public.instance_intended_state NOT NULL,
 
@@ -1498,9 +1514,32 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      */
     enable_jumbo_frames BOOL NOT NULL,
 
+    /*
+     * When shutdown_policy_action is 'power_button', this represents the time
+     * in seconds (the unit of `INTERVAL(0)`) propolis will wait for the guest
+     * to power itself down after sending it the power button event, before
+     * forcefully terminating it. Must be NULL if the action is 'hard_off'.
+     */
+    shutdown_policy_timeout INTERVAL(0),
+
+    /*
+     * The means by which to stop the instance.
+     */
+    shutdown_policy_action omicron.public.instance_shutdown_action NOT NULL default 'hard_off',
+
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
         ((state != 'vmm') AND (active_propolis_id IS NULL))
+    ),
+    CONSTRAINT shutdown_policy_valid CHECK (
+        (
+            (shutdown_policy_action = 'power_button')
+            AND (shutdown_policy_timeout IS NOT NULL)
+            AND (shutdown_policy_timeout >= INTERVAL '1' SECOND)
+        ) OR (
+            (shutdown_policy_action = 'hard_off')
+            AND (shutdown_policy_timeout IS NULL)
+        )
     )
 );
 
@@ -9810,7 +9849,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '311.0.0', NULL)
+    (TRUE, NOW(), NOW(), '312.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

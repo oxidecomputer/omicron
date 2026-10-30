@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026102100.0.0"
+    "version": "2026102800.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -4597,6 +4597,15 @@
             }
           },
           {
+            "in": "query",
+            "name": "skip_os_shutdown",
+            "description": "Whether to override the instance's configured Shutdown Policy, if any, and hard-cut the power of the VM guest for this stop or reboot request.",
+            "schema": {
+              "nullable": true,
+              "type": "boolean"
+            }
+          },
+          {
             "in": "path",
             "name": "instance",
             "description": "Name or ID of the instance",
@@ -4893,6 +4902,15 @@
             "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip_os_shutdown",
+            "description": "Whether to override the instance's configured Shutdown Policy, if any, and hard-cut the power of the VM guest for this stop or reboot request.",
+            "schema": {
+              "nullable": true,
+              "type": "boolean"
             }
           },
           {
@@ -23167,6 +23185,15 @@
           "run_state": {
             "$ref": "#/components/schemas/InstanceState"
           },
+          "shutdown_policy": {
+            "nullable": true,
+            "description": "The method by which the instance will be powered down when transitioning to the stopped state, either forcefully or by giving the guest an ACPI power button signal first.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceShutdownPolicy"
+              }
+            ]
+          },
           "time_created": {
             "description": "Timestamp when this resource was created",
             "type": "string",
@@ -23364,6 +23391,16 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceNetworkInterfaceAttachment"
+              }
+            ]
+          },
+          "shutdown_policy": {
+            "nullable": true,
+            "description": "The method by which the instance should be stopped. If not provided, new instances will be created with a default of an ACPI fixed power button press, with a 10-minute timeout for the guest OS to shut itself down before the instance is forcibly terminated.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceShutdownPolicy"
               }
             ]
           },
@@ -23816,6 +23853,48 @@
           "last_byte_offset"
         ]
       },
+      "InstanceShutdownPolicy": {
+        "description": "Instance-stopping method choices",
+        "oneOf": [
+          {
+            "description": "Instance's VM is forcefully terminated immediately.",
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "hard_off"
+                ]
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          {
+            "description": "Instance is sent PWRBTN_STS as described in ACPI chapter 4. If the VM guest has not stopped itself with a power event within the given timeout, it is *then* forcefully terminated.",
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "power_button"
+                ]
+              },
+              "timeout_secs": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 1,
+                "maximum": 3600
+              }
+            },
+            "required": [
+              "action",
+              "timeout_secs"
+            ]
+          }
+        ]
+      },
       "InstanceState": {
         "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
         "oneOf": [
@@ -23948,6 +24027,15 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceCpuCount"
+              }
+            ]
+          },
+          "shutdown_policy": {
+            "nullable": true,
+            "description": "The method by which the instance should be stopped. If omitted from the update request, the instance's existing shutdown policy is left as-is. Changes to soft-shutdown timeout do not affect instances that are already in the process of shutting down until their next start.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceShutdownPolicy"
               }
             ]
           }
