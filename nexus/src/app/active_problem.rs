@@ -51,9 +51,15 @@ impl Nexus {
         opctx: &OpContext,
         problem_lookup: &lookup::ActiveProblem<'_>,
     ) -> LookupResult<ActiveProblemView> {
-        let (.., authz_problem) =
-            problem_lookup.lookup_for(authz::Action::Read).await?;
-        self.db_datastore.active_problem_fetch(opctx, &authz_problem).await
+        let (authz_problem, problem) =
+            problem_lookup.fetch_for(authz::Action::Read).await?;
+        self.db_datastore
+            .active_problem_fetch_current_revision(
+                opctx,
+                &authz_problem,
+                problem,
+            )
+            .await
     }
 
     /// Lists the Active Problems which cause the requested Active Problem.
