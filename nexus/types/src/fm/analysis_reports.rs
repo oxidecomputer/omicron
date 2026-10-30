@@ -12,6 +12,7 @@ use super::ereport::EreportId;
 use crate::observed_saga::{ObservedSagaState, SagaOwnerState};
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
+use omicron_uuid_kinds::SiloUuid;
 use omicron_uuid_kinds::{
     AlertUuid, CaseUuid, CollectionUuid, PhysicalDiskUuid, SitrepUuid,
     SupportBundleUuid,
@@ -524,6 +525,14 @@ pub struct InputReport {
     pub closed_cases_copied_forward: BTreeMap<CaseUuid, ClosedCaseReport>,
     /// Number of entries in the ereporter restart table.
     pub num_ereporter_restarts: usize,
+    /// Unmarked ereports whose restart ID was not found in the ereporter
+    /// restart table.
+    ///
+    /// Every ereport's reporter restart is expected to be recorded when the
+    /// ereport is ingested, so a non-empty set indicates a bug or database
+    /// inconsistency. The ereports are still input to analysis.
+    #[serde(default)]
+    pub unknown_restart_ereport_ids: BTreeSet<EreportId>,
     /// All control-plane-managed physical disks visible to the diagnosis
     /// engines for this analysis pass.
     #[serde(default)]
@@ -535,7 +544,7 @@ pub struct InputReport {
     /// Every silo, with its installed external TLS certificates, visible to
     /// the diagnosis engines for this analysis pass. Keyed by silo ID.
     #[serde(default)]
-    pub observed_silo_certificates: BTreeMap<Uuid, SiloCertificatesReport>,
+    pub observed_silo_certificates: BTreeMap<SiloUuid, SiloCertificatesReport>,
     /// The fault management configuration diagnosis engines ran with. `None`
     /// only for reports written before this field existed.
     #[serde(default)]
@@ -656,6 +665,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     open_cases,
                     closed_cases_copied_forward,
                     num_ereporter_restarts,
+                    unknown_restart_ereport_ids,
                     in_service_disks,
                     observed_sagas,
                     observed_silo_certificates,
@@ -750,6 +760,24 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
             "",
             heading.style("total known ereport restart IDs"),
         )?;
+
+        if !unknown_restart_ereport_ids.is_empty() {
+            writeln!(
+                f,
+                "{:indent$}{} {}",
+                "",
+                styles.warning().style("/!\\ WEIRD:"),
+                styles.warning_text().style(format_args!(
+                    "{} ereports have restart IDs not in the \
+                     ereporter restart table:",
+                    unknown_restart_ereport_ids.len()
+                )),
+            )?;
+            let indent = indent + 2;
+            for ereport_id in unknown_restart_ereport_ids {
+                writeln!(f, "{:indent$}* ereport {ereport_id}", "")?;
+            }
+        }
 
         if !new_ereport_ids.is_empty() {
             writeln!(
@@ -1167,6 +1195,13 @@ mod tests {
             inv_id,
             reference_time: Some("2024-01-01T00:00:00Z".parse().unwrap()),
             num_ereporter_restarts: 420,
+            unknown_restart_ereport_ids: BTreeSet::from([EreportId {
+                restart_id: EreporterRestartUuid::from_str(
+                    "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+                )
+                .unwrap(),
+                ena: Ena(0x1),
+            }]),
             new_ereport_ids,
             open_cases,
             closed_cases_copied_forward,
@@ -1180,7 +1215,7 @@ mod tests {
     }
 
     fn example_observed_silo_certificates()
-    -> BTreeMap<Uuid, SiloCertificatesReport> {
+    -> BTreeMap<SiloUuid, SiloCertificatesReport> {
         let mut certificates = BTreeMap::new();
         certificates.insert(
             Uuid::from_str("cccccccc-0000-0000-0000-000000000001").unwrap(),
@@ -1192,7 +1227,7 @@ mod tests {
         );
         let mut silos = BTreeMap::new();
         silos.insert(
-            Uuid::from_str("5110aaaa-0000-0000-0000-000000000001").unwrap(),
+            SiloUuid::from_str("5110aaaa-0000-0000-0000-000000000001").unwrap(),
             SiloCertificatesReport {
                 silo_name: "fake-silo".to_string(),
                 certificates,
@@ -1243,6 +1278,7 @@ mod tests {
             inv_id,
             reference_time: None,
             num_ereporter_restarts: 0,
+            unknown_restart_ereport_ids: BTreeSet::new(),
             new_ereport_ids: BTreeSet::new(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
@@ -1267,6 +1303,7 @@ mod tests {
             inv_id,
             reference_time: Some("2024-01-01T00:00:00Z".parse().unwrap()),
             num_ereporter_restarts: 420,
+            unknown_restart_ereport_ids: BTreeSet::new(),
             new_ereport_ids: BTreeSet::new(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),

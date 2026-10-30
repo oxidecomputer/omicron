@@ -265,7 +265,10 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
     }
 
     /// Find a sled agent that doesn't match the provided ID
-    pub fn find_sled_agent(&self, exclude_sled: SledUuid) -> Option<SledUuid> {
+    pub fn find_sled_id_other_than(
+        &self,
+        exclude_sled: SledUuid,
+    ) -> Option<SledUuid> {
         self.all_sled_agents()
             .find(|sa| sa.sled_agent.id != exclude_sled)
             .map(|sa| sa.sled_agent.id)

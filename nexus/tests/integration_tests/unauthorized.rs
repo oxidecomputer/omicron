@@ -209,7 +209,7 @@ async fn test_unauthorized() {
             time_created: now,
             time_deleted: None,
             time_expires: None,
-            silo_id: DEFAULT_SILO_ID,
+            silo_id: DEFAULT_SILO_ID.into(),
             bearer_token: String::from("test-scim-token"),
         };
 

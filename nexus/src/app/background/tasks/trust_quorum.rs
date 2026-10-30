@@ -33,6 +33,7 @@ use sled_agent_client::types::StartSledAgentRequestBody;
 use sled_agent_client::types::{
     ProxyCommitRequest, ProxyPrepareAndCommitRequest,
 };
+use sled_agent_types::trust_quorum::TrustQuorumCoordinatorStatusResponse;
 use sled_hardware_types::BaseboardId;
 use slog::{Logger, error, info, o};
 use slog_error_chain::InlineErrorChain;
@@ -334,7 +335,7 @@ async fn prepare(
         ));
     };
 
-    let status = coordinator_sa
+    let response = coordinator_sa
         .trust_quorum_coordinator_status()
         .await
         .with_context(|| {
@@ -344,6 +345,23 @@ async fn prepare(
             )
         })?
         .into_inner();
+    let status = match response {
+        TrustQuorumCoordinatorStatusResponse::Coordinating { status } => status,
+        TrustQuorumCoordinatorStatusResponse::NotCoordinating {
+            latest_config_epoch,
+        } => {
+            let latest_config_epoch = match latest_config_epoch {
+                Some(epoch) => epoch.to_string(),
+                None => "none".to_string(),
+            };
+            bail!(
+                "Coordinator {} reported no coordinator status: it is not \
+                 currently coordinating a reconfiguration (latest persisted \
+                 configuration epoch: {latest_config_epoch}).",
+                config.coordinator,
+            );
+        }
+    };
 
     // Write state back to DB
     let state = datastore

@@ -454,9 +454,6 @@ impl ProbeManagerInner {
                         error!(self.log, "delete probe link {}: {e}", l.name());
                     }
                 }
-
-                // Ask the sled-agent to stop tracking our datalinks, and then
-                // delete the OPTE ports.
                 match self.metrics_queue.untrack_zone_links(&running_zone) {
                     Ok(_) => debug!(
                         self.log,
@@ -471,11 +468,14 @@ impl ProbeManagerInner {
                         "errors" => ?errors,
                     ),
                 }
-                running_zone.release_opte_ports();
 
+                // We need to stop the zone, then delete the OPTE ports. The
+                // other order risks EBUSY, since the ports are still in use by
+                // the zone.
                 if let Err(e) = running_zone.stop().await {
-                    error!(self.log, "stop probe: {e}")
+                    error!(self.log, "stop probe: {e}");
                 }
+                running_zone.delete_opte_ports();
                 // TODO are there storage resources that need to be cleared
                 // out here too?
             }

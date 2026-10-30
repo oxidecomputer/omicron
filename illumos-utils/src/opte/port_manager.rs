@@ -13,6 +13,8 @@ use crate::opte::Handle;
 use crate::opte::Port;
 use crate::opte::Vni;
 use crate::opte::opte_firewall_rules;
+use crate::opte::port::PortData;
+use crate::opte::port::delete_xde_device;
 use ipnetwork::Ipv4Network;
 use ipnetwork::Ipv6Network;
 use macaddr::MacAddr6;
@@ -69,6 +71,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::btree_map::Entry;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
@@ -80,12 +83,12 @@ use uuid::Uuid;
 
 use super::AttachedSubnetKind;
 
-/// Stored routes (and usage count) for a given VPC/subnet.
+/// Stored routes (and applicable port names) for a given VPC/subnet.
 #[derive(Debug, Default, Clone)]
 struct RouteSet {
     version: Option<RouterVersion>,
     routes: HashSet<ResolvedVpcRoute>,
-    active_ports: usize,
+    active_ports: HashSet<String>,
 }
 
 /// Configuration for multicast groups on an OPTE port.
@@ -104,6 +107,9 @@ pub struct MulticastGroupCfg {
     pub sources: Vec<IpAddr>,
 }
 
+/// Key for each OPTE port in the manager.
+pub type PortKey = (Uuid, NetworkInterfaceKind);
+
 #[derive(Debug)]
 struct PortManagerInner {
     log: Logger,
@@ -116,7 +122,7 @@ struct PortManagerInner {
 
     /// Map of all ports, keyed on the interface Uuid and its kind
     /// (which includes the Uuid of the parent instance or service)
-    ports: Mutex<BTreeMap<(Uuid, NetworkInterfaceKind), Port>>,
+    ports: Mutex<BTreeMap<PortKey, PortData>>,
 
     /// Map of all current resolved routes.
     routes: Mutex<HashMap<RouterId, RouteSet>>,
@@ -357,15 +363,17 @@ impl PortManager {
         Self { inner }
     }
 
+    /// Return the logger used by the manager.
+    pub(super) fn log(&self) -> &Logger {
+        &self.inner.log
+    }
+
     pub fn underlay_ip(&self) -> &Ipv6Addr {
         &self.inner.underlay_ip
     }
 
     /// Create an OPTE port
-    pub fn create_port(
-        &self,
-        params: PortCreateParams,
-    ) -> Result<(Port, PortTicket), Error> {
+    pub fn create_port(&self, params: PortCreateParams) -> Result<Port, Error> {
         let ip_cfg = IpCfg::try_from(&params)?;
         let PortCreateParams {
             nic,
@@ -398,11 +406,10 @@ impl PortManager {
         // So we:
         //
         // - create the xde device
-        // - create the port ticket
         // - create the port
-        // - add both to the PortManager's map
+        // - add the port data to the PortManager's map
         //
-        // The Port object's drop implementation will clean up both of those, if
+        // The Port object's drop implementation will clean up everything, if
         // any of the remaining fallible operations fail.
         let port_name = self.inner.next_port_name();
         debug!(
@@ -416,49 +423,68 @@ impl PortManager {
             hdl.create_xde(&port_name, vpc_cfg, mtu)?;
             hdl
         };
-        let (port, ticket) = {
-            let ticket = PortTicket::new(nic.id, nic.kind, self.inner.clone());
-            let port = Port::new(
-                port_name.clone(),
-                nic.ip_config.clone(),
-                mac,
-                nic.slot,
-                vni,
-            );
 
-            // NOTE: We may add external IPs below, which can fail. If that
-            // does, we drop the `ticket` on the way out of this block. That
-            // attempts to acquire this lock, in order to remove itself on drop.
-            // We need to drop the lock before that, to avoid a deadlock, so
-            // let's do it right away, after inserting.
-            let old = self
-                .inner
-                .ports
-                .lock()
-                .unwrap()
-                .insert((nic.id, nic.kind), port.clone());
-            assert!(
-                old.is_none(),
-                "Duplicate OPTE port detected: interface_id = {}, kind = {:?}",
-                nic.id,
-                nic.kind,
-            );
+        // Check for space in the port manager, and then create the port.
+        //
+        // There are a couple of important notes here. First, we're taking the
+        // lock on the ports here, which we need to do for as short a time as
+        // possible. If any of the fallible operations below fail, we'll drop
+        // the port on the way out of this method, which removes it from the
+        // manager's map. So we have to make sure we don't hold the lock on that
+        // as we exit -- hold it for _only_ the insertion, and that's it.
+        //
+        // Second, if we _do_ find a duplicate port, we have the actual XDE
+        // device we made above. Normally, that's destroyed in `Port::drop`. But
+        // we don't call that in the "occupied" arm below. In addition to
+        // destroying the XDE device, `Port::drop` also removes the port from
+        // the map. But if we have a dupe, we don't want to do that! So that
+        // match arm needs to be sure to destroy the XDE device on the way out
+        // too.
+        let port =
+            match self.inner.ports.lock().unwrap().entry((nic.id, nic.kind)) {
+                Entry::Vacant(entry) => {
+                    let port = Port::new(
+                        port_name.clone(),
+                        nic.id,
+                        nic.kind,
+                        nic.ip_config.clone(),
+                        mac,
+                        nic.slot,
+                        vni,
+                        self.clone(),
+                    );
+                    entry.insert(port.data().clone());
+                    port
+                }
+                Entry::Occupied(occupied) => {
+                    error!(
+                        self.inner.log,
+                        "duplicate OPTE port detected";
+                        "interface_id" => %nic.id,
+                        "kind" => ?nic.kind,
+                        "existing_port_data" => ?occupied.get(),
+                    );
+                    delete_xde_device(&self.inner.log, &port_name);
+                    return Err(Error::DuplicateOptePort {
+                        id: nic.id,
+                        kind: nic.kind,
+                    });
+                }
+            };
 
-            // Ports for Probes/Services cannot have EIP<->IGW mappings filled
-            // in dynamically today, so to keep use of their EIPs working we
-            // leave them untagged at both the `nat` and `router` layer.
-            if is_instance {
-                // This is effectively re-asserting the external IP config in order to
-                // set the EIP<->IGW mapping. While this should be part of `vpc_cfg`,
-                // this currently needs to happen here to prevent a case where an old
-                // mapping is not yet removed (and so no 'change' happens to trigger
-                // `Instance::refresh_external_ips_inner`), and to prevent updates
-                // racing with nexus before an instance/port are reachable from their
-                // respective managers.
-                self.external_ips_ensure_port(&port, nic.id, external_ips)?;
-            }
-            (port, ticket)
-        };
+        // Ports for Probes/Services cannot have EIP<->IGW mappings filled
+        // in dynamically today, so to keep use of their EIPs working we
+        // leave them untagged at both the `nat` and `router` layer.
+        if is_instance {
+            // This is effectively re-asserting the external IP config in order to
+            // set the EIP<->IGW mapping. While this should be part of `vpc_cfg`,
+            // this currently needs to happen here to prevent a case where an old
+            // mapping is not yet removed (and so no 'change' happens to trigger
+            // `Instance::refresh_external_ips_inner`), and to prevent updates
+            // racing with nexus before an instance/port are reachable from their
+            // respective managers.
+            self.external_ips_ensure_port(&port, nic.id, external_ips)?;
+        }
 
         // Initialize firewall rules for the new port.
         let rules = opte_firewall_rules(firewall_rules, &vni, &mac);
@@ -484,7 +510,7 @@ impl PortManager {
             let mut route_set = RouteSet {
                 version: None,
                 routes: HashSet::new(),
-                active_ports: 0,
+                active_ports: HashSet::new(),
             };
             if !is_service {
                 return route_set;
@@ -515,12 +541,12 @@ impl PortManager {
         // instance. These are added to the port, but after updating the shared
         // set of all routes maintained by this manager.
         let add_routes = |route_map: &mut HashMap<RouterId, RouteSet>,
-                          key: RouterId|
+                          key: RouterId,
+                          port_name: String|
          -> Result<(), Error> {
             let route_set = route_map
                 .entry(key)
                 .or_insert_with(|| default_route_set(is_service));
-            route_set.active_ports += 1;
             let class = match key.kind {
                 RouterKind::System => RouterClass::System,
                 RouterKind::Custom(_) => RouterClass::Custom,
@@ -540,27 +566,91 @@ impl PortManager {
                     "route" => ?request,
                 );
             }
+            route_set.active_ports.insert(port_name);
             Ok(())
         };
 
         // Actually add all system and custom router entries relevant for this
         // new port.
         let mut route_map = self.inner.routes.lock().unwrap();
-        add_routes(&mut route_map, port.system_router_key())?;
+        add_routes(
+            &mut route_map,
+            port.system_router_key(),
+            port.name().to_string(),
+        )?;
         if let Some(key) = port.custom_ipv4_router_key() {
-            add_routes(&mut route_map, key)?;
+            add_routes(&mut route_map, key, port.name().to_string())?;
         }
         if let Some(key) = port.custom_ipv6_router_key() {
-            add_routes(&mut route_map, key)?;
+            add_routes(&mut route_map, key, port.name().to_string())?;
         }
         drop(route_map);
 
         info!(
             self.inner.log,
             "Created OPTE port";
-            "port" => ?&port,
+            "port" => ?port.data(),
         );
-        Ok((port, ticket))
+        Ok(port)
+    }
+
+    /// Ensure a port no longer exists in the manager.
+    ///
+    /// This always succeeds, even if the port doesn't exist.
+    ///
+    /// # Important
+    ///
+    /// This does not delete the underlying OPTE port from the system. That is
+    /// done by `Port::drop()`.
+    pub(super) fn remove_port(&self, id: Uuid, kind: NetworkInterfaceKind) {
+        let Some(port) = self.inner.ports.lock().unwrap().remove(&(id, kind))
+        else {
+            debug!(
+                self.inner.log,
+                "Tried to release non-existent port";
+                "id" => ?&id,
+                "kind" => ?&kind,
+            );
+            return;
+        };
+
+        // Cleanup the set of subnets we want to receive routes for.
+        let remove_key = |routes: &mut HashMap<RouterId, RouteSet>,
+                          key: RouterId,
+                          port_name: &str| {
+            let should_remove = routes
+                .get_mut(&key)
+                .map(|route_set| {
+                    route_set.active_ports.remove(port_name);
+                    route_set.active_ports.is_empty()
+                })
+                .unwrap_or(false);
+
+            if should_remove {
+                routes.remove(&key);
+                info!(
+                    self.inner.log,
+                    "Removed route set for subnet";
+                    "id" => ?&key,
+                );
+            }
+        };
+        let mut routes = self.inner.routes.lock().unwrap();
+        remove_key(&mut routes, port.system_router_key(), port.name());
+        if let Some(key) = port.custom_ipv4_router_key() {
+            remove_key(&mut routes, key, port.name());
+        }
+        if let Some(key) = port.custom_ipv6_router_key() {
+            remove_key(&mut routes, key, port.name());
+        }
+        drop(routes);
+        debug!(
+            self.inner.log,
+            "Removed OPTE port from manager";
+            "id" => ?&id,
+            "kind" => ?&kind,
+            "port_name" => ?&port.name(),
+        );
     }
 
     pub fn vpc_routes_list(&self) -> Vec<ResolvedVpcRouteState> {
@@ -580,7 +670,7 @@ impl PortManager {
         slog::debug!(self.inner.log, "new routes: {new_routes:#?}");
         for new in new_routes {
             // Disregard any route information for a subnet we don't have.
-            let Some(old) = routes.get(&new.id) else {
+            let Some(existing) = routes.get_mut(&new.id) else {
                 slog::warn!(self.inner.log, "ignoring route {new:#?}");
                 continue;
             };
@@ -590,7 +680,7 @@ impl PortManager {
             // If there's a UUID match, only update if vers increased,
             // otherwise take the update verbatim (including loss of version).
             let (to_add, to_delete): (HashSet<_>, HashSet<_>) =
-                match (old.version, new.version) {
+                match (existing.version, new.version) {
                     (Some(old_vers), Some(new_vers))
                         if !old_vers.is_replaced_by(&new_vers) =>
                     {
@@ -604,21 +694,27 @@ impl PortManager {
                         continue;
                     }
                     _ => (
-                        new.routes.difference(&old.routes).copied().collect(),
-                        old.routes.difference(&new.routes).copied().collect(),
+                        new.routes
+                            .difference(&existing.routes)
+                            .copied()
+                            .collect(),
+                        existing
+                            .routes
+                            .difference(&new.routes)
+                            .copied()
+                            .collect(),
                     ),
                 };
             deltas.insert(new.id, (to_add, to_delete));
 
-            let active_ports = old.active_ports;
-            routes.insert(
-                new.id,
-                RouteSet {
-                    version: new.version,
-                    routes: new.routes,
-                    active_ports,
-                },
-            );
+            // Update the version and actual routes in this route set.
+            //
+            // Note that this cannot change the port names that are active for
+            // this route set. The key here is based on the router ID, which is
+            // a combination of the VNI and router kind, neither of which change
+            // over the lifetime of the port.
+            existing.version = new.version;
+            existing.routes = new.routes;
         }
 
         // Note: We're deliberately holding both locks here
@@ -726,7 +822,7 @@ impl PortManager {
     /// Ensure external IPs for an OPTE port are up to date.
     pub fn external_ips_ensure_port(
         &self,
-        port: &Port,
+        port: &PortData,
         nic_id: Uuid,
         external_ips: &ExternalIpConfig,
     ) -> Result<(), Error> {
@@ -984,7 +1080,7 @@ impl PortManager {
 
     fn attached_subnets_ensure_port(
         &self,
-        port: &Port,
+        port: &PortData,
         ensure_removed: Vec<IpCidr>,
         ensure_added: Vec<AttachedSubnet>,
     ) -> EnsureAttachedSubnetResult {
@@ -1039,7 +1135,7 @@ impl PortManager {
 
     fn attach_subnet_port(
         &self,
-        port: &Port,
+        port: &PortData,
         subnet: AttachedSubnet,
     ) -> Result<(), Error> {
         let hdl = Handle::new()?;
@@ -1088,7 +1184,7 @@ impl PortManager {
 
     fn detach_subnet_port(
         &self,
-        port: &Port,
+        port: &PortData,
         subnet: IpCidr,
     ) -> Result<(), Error> {
         let hdl = Handle::new()?;
@@ -1134,117 +1230,13 @@ impl PortManager {
     }
 }
 
-pub struct PortTicket {
-    id: Uuid,
-    kind: NetworkInterfaceKind,
-    manager: Arc<PortManagerInner>,
-}
-
-impl std::fmt::Debug for PortTicket {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.debug_struct("PortTicket")
-            .field("id", &self.id)
-            .field("kind", &self.kind)
-            .field("manager", &"{ .. }")
-            .finish()
-    }
-}
-
-impl PortTicket {
-    fn new(
-        id: Uuid,
-        kind: NetworkInterfaceKind,
-        manager: Arc<PortManagerInner>,
-    ) -> Self {
-        Self { id, kind, manager }
-    }
-
-    pub fn id(&self) -> Uuid {
-        self.id
-    }
-
-    pub fn kind(&self) -> NetworkInterfaceKind {
-        self.kind
-    }
-
-    fn release_inner(&mut self) -> Result<(), Error> {
-        let mut ports = self.manager.ports.lock().unwrap();
-        let Some(port) = ports.remove(&(self.id, self.kind)) else {
-            error!(
-                self.manager.log,
-                "Tried to release non-existent port";
-                "id" => ?&self.id,
-                "kind" => ?&self.kind,
-            );
-            return Err(Error::ReleaseMissingPort(self.id, self.kind));
-        };
-        drop(ports);
-
-        // Cleanup the set of subnets we want to receive routes for.
-        let remove_key = |routes: &mut HashMap<RouterId, RouteSet>,
-                          key: RouterId| {
-            let should_remove = routes
-                .get_mut(&key)
-                .map(|v| {
-                    v.active_ports = v.active_ports.saturating_sub(1);
-                    v.active_ports == 0
-                })
-                .unwrap_or(false);
-
-            if should_remove {
-                routes.remove(&key);
-                info!(
-                    self.manager.log,
-                    "Removed route set for subnet";
-                    "id" => ?&key,
-                );
-            }
-        };
-        let mut routes = self.manager.routes.lock().unwrap();
-        remove_key(&mut routes, port.system_router_key());
-        if let Some(key) = port.custom_ipv4_router_key() {
-            remove_key(&mut routes, key);
-        }
-        if let Some(key) = port.custom_ipv6_router_key() {
-            remove_key(&mut routes, key);
-        }
-        drop(routes);
-        debug!(
-            self.manager.log,
-            "Removed OPTE port from manager";
-            "id" => ?&self.id,
-            "kind" => ?&self.kind,
-            "port" => ?&port,
-        );
-        Ok(())
-    }
-
-    pub fn release(mut self) {
-        // There can only be a single `PortTicket` per-port
-        // and we've taken it here by value, so the port must
-        // still exist in the manager.
-        self.release_inner()
-            .expect("failed to release Port with valid PortTicket");
-
-        // NOTE: We've already called `release_inner` so let's
-        // skip the Drop impl which also calls `release_inner`.
-        std::mem::forget(self);
-    }
-}
-
-impl Drop for PortTicket {
-    fn drop(&mut self) {
-        // We're ignoring the value since (1) it's already logged and (2) we
-        // can't do anything with it anyway.
-        let _ = self.release_inner();
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::PortCreateParams;
     use super::PortManager;
+    use crate::opte::Error;
     use crate::opte::Handle;
+    use crate::opte::Port;
     use macaddr::MacAddr6;
     use omicron_common::api::external::{MacAddr, Vni};
     use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
@@ -1273,6 +1265,7 @@ mod tests {
     use std::collections::HashSet;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
+    use std::num::NonZeroU8;
     use uuid::Uuid;
 
     // Regression for https://github.com/oxidecomputer/omicron/issues/7541.
@@ -1326,7 +1319,7 @@ mod tests {
             v6: None,
         };
         const MAX_PORT: u16 = (1 << 14) - 1;
-        let (port0, _ticket0) = manager
+        let port0 = manager
             .create_port(PortCreateParams {
                 nic: &NetworkInterface {
                     id: Uuid::new_v4(),
@@ -1506,7 +1499,7 @@ mod tests {
             }),
             v6: None,
         };
-        let (port1, _ticket1) = manager
+        let port1 = manager
             .create_port(PortCreateParams {
                 nic: &NetworkInterface {
                     id: Uuid::new_v4(),
@@ -2004,5 +1997,167 @@ mod tests {
         let _ = IpCfg::try_from(&prs).expect_err(
             "Should fail to convert with public IPv4 and private IPv6",
         );
+    }
+
+    fn mac(index: NonZeroU8) -> MacAddr {
+        MacAddr(MacAddr6::new(0xa8, 0x40, 0x25, 0x00, 0x00, index.get()))
+    }
+
+    fn create_service_nic(index: NonZeroU8) -> NetworkInterface {
+        let ip = Ipv4Addr::new(172, 20, 0, index.get());
+        let subnet = Ipv4Net::new(Ipv4Addr::new(172, 20, 0, 0), 24).unwrap();
+        NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Service { id: Uuid::new_v4() },
+            name: "opte0".parse().unwrap(),
+            ip_config: PrivateIpConfig::new_ipv4(ip, subnet).unwrap(),
+            mac: mac(index),
+            vni: Vni::SERVICES_VNI,
+            primary: true,
+            slot: 0,
+        }
+    }
+
+    fn create_port(
+        manager: &PortManager,
+        nic: &NetworkInterface,
+    ) -> Result<Port, Error> {
+        manager.create_port(PortCreateParams {
+            nic,
+            external_ips: &ExternalIpConfig { v4: None, v6: None },
+            firewall_rules: &[],
+            dhcp_config: DhcpCfg {
+                hostname: None,
+                host_domain: None,
+                domain_search_list: vec![],
+                dns4_servers: vec![],
+                dns6_servers: vec![],
+            },
+            attached_subnets: vec![],
+            mtu: None,
+        })
+    }
+
+    /// Return the names of the ports that OPTE knows about.
+    fn opte_ports() -> HashSet<String> {
+        Handle::new()
+            .unwrap()
+            .state()
+            .lock()
+            .unwrap()
+            .ports
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn duplicate_port_does_not_delete_original_port() {
+        let logctx =
+            test_setup_log("duplicate_port_does_not_delete_original_port");
+        let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
+        Handle::new().unwrap().set_xde_underlay("net0", "net1").unwrap();
+
+        let nic = create_service_nic(1.try_into().unwrap());
+        let key = (nic.id, nic.kind);
+        let original =
+            create_port(&manager, &nic).expect("create original port");
+
+        // Now make a port with the same key in the manager, but a different
+        // MAC. OPTE would normally reject this.
+        let dup =
+            NetworkInterface { mac: mac(2.try_into().unwrap()), ..nic.clone() };
+        let err = create_port(&manager, &dup)
+            .expect_err("Failure creating duplicate port");
+        std::assert_matches!(
+            err,
+            Error::DuplicateOptePort { id, kind } if id == nic.id && kind == nic.kind,
+            "Should have failed with a dupe error, found {err:#?}",
+        );
+
+        // But we should still have the OPTE port we made in the first call.
+        assert!(
+            manager.contains_key(&key),
+            "Should not have removed existing entry"
+        );
+        assert_eq!(
+            opte_ports(),
+            HashSet::from([original.name().to_string()]),
+            "XDE should have only the first port created"
+        );
+
+        // But if we drop the port, we _should_ delete the device and the port
+        // in the map.
+        drop(original);
+        assert!(!manager.contains_key(&key));
+        assert!(opte_ports().is_empty());
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn route_set_only_removed_when_last_port_is_deleted() {
+        let logctx =
+            test_setup_log("route_set_only_removed_when_last_port_is_deleted");
+        let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
+        Handle::new().unwrap().set_xde_underlay("net0", "net1").unwrap();
+
+        // Create two ports with the same router keys.
+        let first =
+            create_port(&manager, &create_service_nic(1.try_into().unwrap()))
+                .unwrap();
+        let second =
+            create_port(&manager, &create_service_nic(2.try_into().unwrap()))
+                .unwrap();
+        let system_key = first.system_router_key();
+        let ipv4_key = first.custom_ipv4_router_key().unwrap();
+        assert_eq!(system_key, second.system_router_key());
+        assert_eq!(Some(ipv4_key), second.custom_ipv4_router_key());
+
+        // Check that they're both in the route set's set of associated ports.
+        let first_name = first.name().to_string();
+        let second_name = second.name().to_string();
+        let find_active_ports = |key| {
+            manager
+                .inner
+                .routes
+                .lock()
+                .unwrap()
+                .get(&key)
+                .map(|set| set.active_ports.clone())
+        };
+        for key in [system_key, ipv4_key] {
+            assert_eq!(
+                find_active_ports(key),
+                Some(HashSet::from([first_name.clone(), second_name.clone()])),
+                "Route set should be associated with both ports",
+            );
+        }
+
+        // If we drop the first port, only that one is removed from the set of
+        // active ports.
+        drop(first);
+        for key in [system_key, ipv4_key] {
+            assert_eq!(
+                find_active_ports(key),
+                Some(HashSet::from([second.name().to_string()])),
+                "Should have removed the first port from the route set \
+                associated ports, but not the second"
+            );
+        }
+
+        // Now when we drop the second one, we've removed the route set
+        // entirely.
+        drop(second);
+        for key in [system_key, ipv4_key] {
+            assert_eq!(
+                find_active_ports(key),
+                None,
+                "Should have completely removed set of associated ports, \
+                after dropping the second port"
+            );
+        }
+
+        logctx.cleanup_successful();
     }
 }

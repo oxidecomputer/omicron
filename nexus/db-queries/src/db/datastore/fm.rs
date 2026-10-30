@@ -2189,6 +2189,7 @@ mod tests {
     use omicron_uuid_kinds::FactUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::RackUuid;
+    use omicron_uuid_kinds::SiloUuid;
     use omicron_uuid_kinds::SupportBundleUuid;
     use std::sync::Arc;
 
@@ -3106,7 +3107,7 @@ mod tests {
                     },
                     payload: fm::FactPayload::Certificate(kind(
                         fm::CertificateExpiryFactPayload {
-                            silo_id: Uuid::new_v4(),
+                            silo_id: SiloUuid::new_v4(),
                             certificate_id: Uuid::new_v4(),
                             not_after: omicron_common::now_db_precision(),
                         },
@@ -3185,6 +3186,7 @@ mod tests {
             parent_sitrep_id: sitrep.parent_id(),
             parent_inv_id: None,
             num_ereporter_restarts: 0,
+            unknown_restart_ereport_ids: Default::default(),
             inv_id: sitrep.inv_id(),
             reference_time: None,
             new_ereport_ids: Default::default(),
@@ -3832,6 +3834,7 @@ mod tests {
                 open_cases: Default::default(),
                 closed_cases_copied_forward: Default::default(),
                 num_ereporter_restarts: 0,
+                unknown_restart_ereport_ids: Default::default(),
                 in_service_disks: Default::default(),
                 observed_sagas: Default::default(),
                 observed_silo_certificates: Default::default(),

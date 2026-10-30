@@ -2,10 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::DbTypedUuid;
 use chrono::DateTime;
 use chrono::Utc;
 use nexus_db_schema::schema::scim_client_bearer_token;
 use nexus_types::external_api::scim;
+use omicron_uuid_kinds::SiloKind;
+use omicron_uuid_kinds::SiloUuid;
 use uuid::Uuid;
 
 /// A SCIM client sends requests to a SCIM provider (in this case, Nexus) using
@@ -20,12 +23,16 @@ pub struct ScimClientBearerToken {
     pub time_deleted: Option<DateTime<Utc>>,
     pub time_expires: Option<DateTime<Utc>>,
 
-    pub silo_id: Uuid,
+    pub silo_id: DbTypedUuid<SiloKind>,
 
     pub bearer_token: String,
 }
 
 impl ScimClientBearerToken {
+    pub fn silo_id(&self) -> SiloUuid {
+        self.silo_id.into()
+    }
+
     pub fn id(&self) -> Uuid {
         self.id
     }

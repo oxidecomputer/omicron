@@ -129,14 +129,13 @@ steno.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
-tokio-util = { workspace = true, features = ["codec", "rt"] }
+tokio-util = { workspace = true, features = ["codec", "rt", "join-map"] }
 trust-quorum-types.workspace = true
 tufaceous.workspace = true
 tufaceous-artifact.workspace = true
 url.workspace = true
 usdt.workspace = true
 uuid.workspace = true
-
 nexus-auth.workspace = true
 nexus-defaults.workspace = true
 nexus-db-lookup.workspace = true
@@ -144,6 +143,7 @@ nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
 nexus-db-schema.workspace = true
 nexus-fm.workspace = true
+nexus-fm-preparation.workspace = true
 nexus-inventory.workspace = true
 nexus-metrics-producer-gc.workspace = true
 nexus-reconfigurator-execution.workspace = true

@@ -114,7 +114,6 @@ use super::tasks::fm_rendezvous::FmRendezvous;
 use super::tasks::fm_sitrep_gc;
 use super::tasks::fm_sitrep_history_pruner;
 use super::tasks::fm_sitrep_load;
-use super::tasks::fm_sitrep_load::CurrentSitrep;
 use super::tasks::instance_reincarnation;
 use super::tasks::instance_updater;
 use super::tasks::instance_watcher;
@@ -162,6 +161,7 @@ use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::fm::CurrentSitrep;
 
 use nexus_types::inventory::Collection;
 use nexus_types::support_bundle::SupportBundleSizeLimit;

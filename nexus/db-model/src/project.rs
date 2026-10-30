@@ -6,6 +6,7 @@ use super::{
     AffinityGroup, AntiAffinityGroup, Disk, Generation, Instance, Name,
     Snapshot, Vpc,
 };
+use crate::DbTypedUuid;
 use crate::Image;
 use crate::collection::DatastoreCollectionConfig;
 use chrono::{DateTime, Utc};
@@ -16,9 +17,12 @@ use nexus_db_schema::schema::{
 };
 use nexus_types::external_api::project as project_types;
 use nexus_types::identity::Resource;
+use omicron_uuid_kinds::ProjectKind;
+use omicron_uuid_kinds::ProjectUuid;
+use omicron_uuid_kinds::SiloKind;
+use omicron_uuid_kinds::SiloUuid;
 use serde::Deserialize;
 use serde::Serialize;
-use uuid::Uuid;
 
 /// Describes a project within the database.
 #[derive(
@@ -32,31 +36,39 @@ use uuid::Uuid;
     Deserialize,
 )]
 #[diesel(table_name = project)]
+#[resource(uuid_kind = ProjectKind)]
 pub struct Project {
     #[diesel(embed)]
     identity: ProjectIdentity,
 
     /// child resource generation number, per RFD 192
     pub rcgen: Generation,
-    pub silo_id: Uuid,
+    pub silo_id: DbTypedUuid<SiloKind>,
 }
 
 impl Project {
+    pub fn silo_id(&self) -> SiloUuid {
+        self.silo_id.into()
+    }
+
     /// Creates a new database Project object.
-    pub fn new(silo_id: Uuid, params: project_types::ProjectCreate) -> Self {
-        Self::new_with_id(Uuid::new_v4(), silo_id, params)
+    pub fn new(
+        silo_id: SiloUuid,
+        params: project_types::ProjectCreate,
+    ) -> Self {
+        Self::new_with_id(ProjectUuid::new_v4(), silo_id, params)
     }
 
     /// Creates a new database Project object with a specific ID.
     pub fn new_with_id(
-        id: Uuid,
-        silo_id: Uuid,
+        id: ProjectUuid,
+        silo_id: SiloUuid,
         params: project_types::ProjectCreate,
     ) -> Self {
         Self {
             identity: ProjectIdentity::new(id, params.identity),
             rcgen: Generation::new(),
-            silo_id,
+            silo_id: silo_id.into(),
         }
     }
 }
@@ -68,49 +80,49 @@ impl From<Project> for project_types::Project {
 }
 
 impl DatastoreCollectionConfig<Instance> for Project {
-    type CollectionId = Uuid;
+    type CollectionId = DbTypedUuid<ProjectKind>;
     type GenerationNumberColumn = project::dsl::rcgen;
     type CollectionTimeDeletedColumn = project::dsl::time_deleted;
     type CollectionIdColumn = instance::dsl::project_id;
 }
 
 impl DatastoreCollectionConfig<AffinityGroup> for Project {
-    type CollectionId = Uuid;
+    type CollectionId = DbTypedUuid<ProjectKind>;
     type GenerationNumberColumn = project::dsl::rcgen;
     type CollectionTimeDeletedColumn = project::dsl::time_deleted;
     type CollectionIdColumn = affinity_group::dsl::project_id;
 }
 
 impl DatastoreCollectionConfig<AntiAffinityGroup> for Project {
-    type CollectionId = Uuid;
+    type CollectionId = DbTypedUuid<ProjectKind>;
     type GenerationNumberColumn = project::dsl::rcgen;
     type CollectionTimeDeletedColumn = project::dsl::time_deleted;
     type CollectionIdColumn = anti_affinity_group::dsl::project_id;
 }
 
 impl DatastoreCollectionConfig<Disk> for Project {
-    type CollectionId = Uuid;
+    type CollectionId = DbTypedUuid<ProjectKind>;
     type GenerationNumberColumn = project::dsl::rcgen;
     type CollectionTimeDeletedColumn = project::dsl::time_deleted;
     type CollectionIdColumn = disk::dsl::project_id;
 }
 
 impl DatastoreCollectionConfig<Image> for Project {
-    type CollectionId = Uuid;
+    type CollectionId = DbTypedUuid<ProjectKind>;
     type GenerationNumberColumn = project::dsl::rcgen;
     type CollectionTimeDeletedColumn = project::dsl::time_deleted;
     type CollectionIdColumn = image::dsl::project_id;
 }
 
 impl DatastoreCollectionConfig<Snapshot> for Project {
-    type CollectionId = Uuid;
+    type CollectionId = DbTypedUuid<ProjectKind>;
     type GenerationNumberColumn = project::dsl::rcgen;
     type CollectionTimeDeletedColumn = project::dsl::time_deleted;
     type CollectionIdColumn = snapshot::dsl::project_id;
 }
 
 impl DatastoreCollectionConfig<Vpc> for Project {
-    type CollectionId = Uuid;
+    type CollectionId = DbTypedUuid<ProjectKind>;
     type GenerationNumberColumn = project::dsl::rcgen;
     type CollectionTimeDeletedColumn = project::dsl::time_deleted;
     type CollectionIdColumn = vpc::dsl::project_id;

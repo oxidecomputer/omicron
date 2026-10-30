@@ -136,7 +136,14 @@ async fn test_metrics(
 
     // silo metrics start out zero
     assert_system_metrics(&cptestctx, None, 0, 0, 0).await;
-    assert_system_metrics(&cptestctx, Some(DEFAULT_SILO_ID), 0, 0, 0).await;
+    assert_system_metrics(
+        &cptestctx,
+        Some(DEFAULT_SILO_ID.into_untyped_uuid()),
+        0,
+        0,
+        0,
+    )
+    .await;
     assert_silo_metrics(&cptestctx, None, 0, 0, 0).await;
 
     let project1_id = create_project(&client, "p-1").await.identity.id;
@@ -168,14 +175,28 @@ async fn test_metrics(
     assert_silo_metrics(&cptestctx, Some(project1_id), 0, 4, GIB).await;
     assert_silo_metrics(&cptestctx, None, 0, 4, GIB).await;
     assert_system_metrics(&cptestctx, None, 0, 4, GIB).await;
-    assert_system_metrics(&cptestctx, Some(DEFAULT_SILO_ID), 0, 4, GIB).await;
+    assert_system_metrics(
+        &cptestctx,
+        Some(DEFAULT_SILO_ID.into_untyped_uuid()),
+        0,
+        4,
+        GIB,
+    )
+    .await;
 
     // create disk in project 1
     create_disk(&client, "p-1", "d-1").await;
     assert_silo_metrics(&cptestctx, Some(project1_id), GIB, 4, GIB).await;
     assert_silo_metrics(&cptestctx, None, GIB, 4, GIB).await;
     assert_system_metrics(&cptestctx, None, GIB, 4, GIB).await;
-    assert_system_metrics(&cptestctx, Some(DEFAULT_SILO_ID), GIB, 4, GIB).await;
+    assert_system_metrics(
+        &cptestctx,
+        Some(DEFAULT_SILO_ID.into_untyped_uuid()),
+        GIB,
+        4,
+        GIB,
+    )
+    .await;
 
     // project 2 metrics still empty
     assert_silo_metrics(&cptestctx, Some(project2_id), 0, 0, 0).await;
@@ -190,7 +211,7 @@ async fn test_metrics(
     assert_system_metrics(&cptestctx, None, 2 * GIB, 8, 2 * GIB).await;
     assert_system_metrics(
         &cptestctx,
-        Some(DEFAULT_SILO_ID),
+        Some(DEFAULT_SILO_ID.into_untyped_uuid()),
         2 * GIB,
         8,
         2 * GIB,

@@ -6,7 +6,6 @@
 //! management blueprint.
 
 use crate::app::background::BackgroundTask;
-use crate::app::background::tasks::fm_sitrep_load::CurrentSitrep;
 use futures::future::BoxFuture;
 use nexus_background_task_interface::Activator;
 use nexus_db_queries::context::OpContext;
@@ -16,6 +15,7 @@ use nexus_db_queries::db::datastore::FmSupportBundleCreateError;
 use nexus_db_queries::db::datastore::MarkerGcResult;
 use nexus_db_queries::db::datastore::SupportBundleCreateParams;
 use nexus_types::fm;
+use nexus_types::fm::CurrentSitrep;
 use nexus_types::fm::case::AlertRequest;
 use nexus_types::internal_api::background::FmRendezvousStatus as Status;
 use nexus_types::internal_api::background::fm_rendezvous::*;

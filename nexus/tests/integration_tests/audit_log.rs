@@ -32,6 +32,7 @@ use nexus_types::{identity::Asset, silo::DEFAULT_SILO_ID};
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, Name, UserId,
 };
+use omicron_uuid_kinds::GenericUuid;
 use std::str::FromStr;
 
 type ControlPlaneTestContext =
@@ -125,7 +126,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
         e1.actor,
         AuditLogEntryActor::SiloUser {
             silo_user_id: USER_TEST_PRIVILEGED.id(),
-            silo_id: DEFAULT_SILO_ID,
+            silo_id: DEFAULT_SILO_ID.into_untyped_uuid(),
         }
     );
 
@@ -841,7 +842,7 @@ fn verify_entry(
         entry.actor,
         AuditLogEntryActor::SiloUser {
             silo_user_id: USER_TEST_PRIVILEGED.id(),
-            silo_id: DEFAULT_SILO_ID,
+            silo_id: DEFAULT_SILO_ID.into_untyped_uuid(),
         }
     );
     assert_eq!(entry.source_ip.to_string(), "127.0.0.1");
@@ -892,7 +893,7 @@ async fn test_audit_log_access_token_auth(ctx: &ControlPlaneTestContext) {
         entry.actor,
         AuditLogEntryActor::SiloUser {
             silo_user_id: USER_TEST_PRIVILEGED.id(),
-            silo_id: DEFAULT_SILO_ID,
+            silo_id: DEFAULT_SILO_ID.into_untyped_uuid(),
         }
     );
     assert_eq!(

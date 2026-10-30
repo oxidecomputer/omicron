@@ -7,6 +7,7 @@ use super::{
     ByteCount, Disk, ExternalIp, InstanceAutoRestartPolicy, InstanceCpuCount,
     InstanceCpuPlatform, InstanceState, Vmm, VmmState,
 };
+use crate::DbTypedUuid;
 use crate::ExternalSubnet;
 use crate::collection::DatastoreAttachTargetConfig;
 use crate::serde_time_delta::optional_time_delta;
@@ -23,6 +24,8 @@ use omicron_generation_kinds::{
     InstanceStateGeneration, InstanceStateGenerationKind,
     InstanceUpdaterGeneration, InstanceUpdaterGenerationKind,
 };
+use omicron_uuid_kinds::ProjectKind;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
 use serde::Serialize;
@@ -45,7 +48,7 @@ pub struct Instance {
     identity: InstanceIdentity,
 
     /// id for the project containing this Instance
-    pub project_id: Uuid,
+    pub project_id: DbTypedUuid<ProjectKind>,
 
     /// user data for instance initialization systems (e.g. cloud-init)
     pub user_data: Vec<u8>,
@@ -155,7 +158,7 @@ impl Instance {
     /// to be in the Creating state.
     pub fn new(
         instance_id: InstanceUuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         params: &instance_types::InstanceCreate,
     ) -> Self {
         let identity = InstanceIdentity::new(
@@ -177,7 +180,7 @@ impl Instance {
 
         Self {
             identity,
-            project_id,
+            project_id: project_id.into(),
             user_data: params.user_data.clone(),
             time_state_updated: creation_time,
             state_generation: InstanceStateGeneration::new().into(),
@@ -199,6 +202,10 @@ impl Instance {
             cpu_platform: params.cpu_platform.map(Into::into),
             enable_jumbo_frames: params.enable_jumbo_frames,
         }
+    }
+
+    pub fn project_id(&self) -> ProjectUuid {
+        self.project_id.into()
     }
 
     /// Returns the runtime state of this instance.
@@ -378,6 +385,40 @@ pub struct InstanceRuntimeState {
     /// This field is guarded by the instance's `gen`.
     #[diesel(column_name = time_last_auto_restarted)]
     pub time_last_auto_restarted: Option<DateTime<Utc>>,
+}
+
+impl InstanceRuntimeState {
+    /// Construct an `InstanceRuntimeState` with a new Nexus state, performing
+    /// the necessary accounting for a state change (such as bumping the
+    /// generation).
+    ///
+    /// Fields not related to modifying the Nexus state remain unchanged from
+    /// `self`.
+    pub fn with_new_nexus_state(self, new_nexus_state: InstanceState) -> Self {
+        let Self {
+            // fields we overwrite
+            time_updated: _,
+            nexus_state: _,
+
+            // fields we modify
+            generation,
+
+            // fields we carry forward unchanged
+            propolis_id,
+            dst_propolis_id,
+            migration_id,
+            time_last_auto_restarted,
+        } = self;
+        Self {
+            time_updated: chrono::Utc::now(),
+            nexus_state: new_nexus_state,
+            generation: DbTypedGeneration(generation.0.next()),
+            propolis_id,
+            dst_propolis_id,
+            migration_id,
+            time_last_auto_restarted,
+        }
+    }
 }
 
 /// Configuration for automatic instance restarts.

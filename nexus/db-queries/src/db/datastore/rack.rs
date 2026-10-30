@@ -36,6 +36,7 @@ use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use nexus_db_fixed_data::vpc_subnet::NTP_VPC_SUBNET;
 use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
+use nexus_db_model::HwBaseboardId;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::InitialDnsGroup;
 use nexus_db_model::PasswordHashString;
@@ -519,7 +520,7 @@ impl DataStore {
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             db_silo.id(),
-            LookupType::ById(db_silo.id()),
+            LookupType::by_id(db_silo.id()),
         );
         let (q1, q2) = Self::role_assignment_replace_visible_queries(
             opctx,
@@ -791,6 +792,7 @@ impl DataStore {
                     }
 
                     // Otherwise, insert:
+                    // - Trust quorum member baseboards
                     // - IP Pools and ranges
                     // - Services
                     // - PhysicalDisks
@@ -800,6 +802,35 @@ impl DataStore {
                     // - Nexus database access records
                     //
                     // Which RSS has already allocated during bootstrapping.
+
+                    // Baseboard IDs have been embedded in certs via sprockets
+                    // handshake and sent to Nexus. Record them here rather
+                    // than wait for inventory, whose first collection writes
+                    // the same rows and may land before or after this
+                    // handoff. The trust quorum configuration written later
+                    // in this transaction depends on these rows.
+                    if let Some(tq_config) =
+                        &rack_init.initial_trust_quorum_configuration
+                    {
+                        let baseboards = tq_config
+                            .members
+                            .iter()
+                            .cloned()
+                            .map(HwBaseboardId::from)
+                            .collect();
+                        Self::hw_baseboard_ids_insert_conn(&conn, baseboards)
+                            .await
+                            .map_err(|e| {
+                                error!(
+                                    log,
+                                    "Initializing Rack: Failed to insert \
+                                     trust quorum member baseboards";
+                                    InlineErrorChain::new(&e),
+                                );
+                                err.set(RackInitError::Database(e)).unwrap();
+                                DieselError::RollbackTransaction
+                            })?;
+                    }
 
                     // Add the service IP Pools and ranges for each.
                     for pool_config in rack_init.service_ip_pools {

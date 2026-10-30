@@ -3,10 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::UserProvisionType;
+use crate::DbTypedUuid;
 use db_macros::Asset;
 use nexus_db_schema::schema::silo_user;
+use omicron_uuid_kinds::SiloKind;
 use omicron_uuid_kinds::SiloUserUuid;
-use uuid::Uuid;
+use omicron_uuid_kinds::SiloUuid;
 
 /// Describes a silo user within the database.
 #[derive(Asset, Queryable, Insertable, Debug, Selectable)]
@@ -17,7 +19,7 @@ pub struct SiloUser {
     pub identity: SiloUserIdentity,
 
     pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
-    pub silo_id: Uuid,
+    pub silo_id: DbTypedUuid<SiloKind>,
 
     /// If the user provision type is ApiOnly or JIT, then the external id is
     /// the identity provider's ID for this user. There is a database constraint
@@ -45,15 +47,19 @@ pub struct SiloUser {
 }
 
 impl SiloUser {
+    pub fn silo_id(&self) -> SiloUuid {
+        self.silo_id.into()
+    }
+
     pub fn new_api_only(
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         user_id: SiloUserUuid,
         external_id: String,
     ) -> Self {
         Self {
             identity: SiloUserIdentity::new(user_id),
             time_deleted: None,
-            silo_id,
+            silo_id: silo_id.into(),
             external_id: Some(external_id),
             user_provision_type: UserProvisionType::ApiOnly,
             user_name: None,
@@ -62,14 +68,14 @@ impl SiloUser {
     }
 
     pub fn new_jit(
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         user_id: SiloUserUuid,
         external_id: String,
     ) -> Self {
         Self {
             identity: SiloUserIdentity::new(user_id),
             time_deleted: None,
-            silo_id,
+            silo_id: silo_id.into(),
             external_id: Some(external_id),
             user_provision_type: UserProvisionType::Jit,
             user_name: None,
@@ -78,7 +84,7 @@ impl SiloUser {
     }
 
     pub fn new_scim(
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         user_id: SiloUserUuid,
         user_name: String,
         external_id: Option<String>,
@@ -87,7 +93,7 @@ impl SiloUser {
         Self {
             identity: SiloUserIdentity::new(user_id),
             time_deleted: None,
-            silo_id,
+            silo_id: silo_id.into(),
             external_id,
             user_provision_type: UserProvisionType::Scim,
             user_name: Some(user_name),
