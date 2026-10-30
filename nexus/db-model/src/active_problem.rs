@@ -24,8 +24,8 @@ use nexus_types::external_api::active_problem as api;
 use nexus_types::fm::active_problem::ProblemCode;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::Error;
-use omicron_generation_kinds::ActiveProblemGeneration;
-use omicron_generation_kinds::ActiveProblemGenerationKind;
+use omicron_generation_kinds::ActiveProblemRevKind;
+use omicron_generation_kinds::ActiveProblemRevNum;
 use omicron_uuid_kinds::ActiveProblemKind;
 use omicron_uuid_kinds::ActiveProblemUuid;
 
@@ -43,7 +43,13 @@ pub struct ActiveProblem {
     ///
     /// This selects the current revision from the `active_problem_revision`
     /// table.
-    pub current_revision: DbTypedGeneration<ActiveProblemGenerationKind>,
+    pub current_revision: DbTypedGeneration<ActiveProblemRevKind>,
+}
+
+impl ActiveProblem {
+    pub fn current_revision(&self) -> ActiveProblemRevNum {
+        self.current_revision.into()
+    }
 }
 
 /// A revision of an Active Problem.
@@ -53,7 +59,7 @@ pub struct ActiveProblem {
 #[diesel(table_name = active_problem_revision)]
 pub struct ActiveProblemRevision {
     pub problem_id: DbTypedUuid<ActiveProblemKind>,
-    pub revision: DbTypedGeneration<ActiveProblemGenerationKind>,
+    pub revision: DbTypedGeneration<ActiveProblemRevKind>,
     /// The time at which this revision was created.
     ///
     /// This is *not* the time at which the Active Problem itself was created.
@@ -76,7 +82,7 @@ pub struct ActiveProblemView {
     pub identity: ActiveProblemIdentity,
     pub time_deleted: Option<DateTime<Utc>>,
     pub time_resolved: Option<DateTime<Utc>>,
-    pub revision: ActiveProblemGeneration,
+    pub revision: ActiveProblemRevNum,
     pub code: ProblemCode,
     pub summary: String,
     pub description: String,

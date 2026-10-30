@@ -1317,7 +1317,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_state_v2 AS ENUM (
     /* The instance has been destroyed. */
     'destroyed',
 
-    /* 
+    /*
      * The instance has no active VMM due to a sled being evacutated.
      * Corresponds to the "rebooting" external state.
      */
@@ -8388,7 +8388,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep (
     -- from a stale sitrep. (It is the `rendezvous_support_bundle_created`
     -- marker, not this generation, that prevents a deleted bundle from being
     -- resurrected.)
-    support_bundle_generation INT8 NOT NULL
+    support_bundle_generation INT8 NOT NULL,
+
+    -- Generation counter for Active Problems. This is incremented every time
+    -- the set of Active Problems which exist in the sitrep differs from the
+    -- parent, like the alert and support bundle generations. Note that this
+    -- generation only applies to the set of Active Problems which *exist*;
+    -- changes to active problems once they are created are tracked by the
+    -- individual active problems' revision counters.
+    active_problem_generation INT8 NOT NULL
 );
 
 -- Index for looking up all potential children of a given parent sitrep.
@@ -9824,6 +9832,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.active_problem (
     -- select the current revision from the `active_problem_revision` table.
     current_revision INT8 NOT NULL,
 
+    -- An Active Problem is allowed to exist at its zeroth revision if and only
+    -- if it is in the process of being created. Such Active Problems are not
+    -- returned when listing Active Problems.
     CONSTRAINT revision_is_non_negative CHECK (current_revision >= 0)
 );
 
@@ -9883,6 +9894,182 @@ CREATE TABLE IF NOT EXISTS omicron.public.active_problem_revision (
     PRIMARY KEY (problem_id, revision)
 );
 
+-- The fault management sitrep's representation of an Active Problem.
+--
+-- Records in this table are inserted when a sitrep is created, and are deleted
+-- when the sitrep corresponding to the record's `sitrep_id` is deleted. Active
+-- Problems are carried forwards into subsequent sitreps until they are
+-- resolved.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_active_problem (
+    -- UUID of the Active Problem.
+    id UUID NOT NULL,
+    -- UUID of the current sitrep that this record is part of.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the original sitrep in which the Active Problem was first
+    -- created.
+    created_sitrep_id UUID NOT NULL,
+
+    -- A human-readable comment explaining why the diagnosis engine created
+    -- this Active Problem. This is *not* part of the externally visible Active
+    -- Problem, and is only used for debugging the sitrep itself.
+    comment TEXT NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id)
+);
+
+-- Marker written by `SitrepGuardedInsert` atomically with a corresponding
+-- Active Problem row when FM rendezvous successfully creates an Active Problem.
+-- This serves as a guard against resurrection: if the Active Problem is deleted
+-- after its initial creation, but an executing sitrep still contains an
+-- fm_active_problem record for the same Active Problem, this marker prevents
+-- `SitrepGuardedInsert` from re-creating the Active Problem.
+--
+-- A marker can be GC'ed in FM rendezvous when:
+--   * its problem_id is not present in any fm_active_problem record in
+--     the executing sitrep,
+--   * its created_at_generation is less than that of the
+--     active_problem_generation on the sitrep being executed.
+-- Taken together, these two conditions ensure that no sitrep will ever attempt
+-- to resurrect a deleted active problem, meaning the marker is no longer needed.
+CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_active_problem_created (
+    problem_id UUID PRIMARY KEY,
+    created_at_generation INT8 NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_active_problem_revision (
+    -- UUID of the Active Problem.
+    problem_id UUID NOT NULL,
+    -- The revision number of this revision.
+    --
+    -- This is referenced by the `current_revision` field in the
+    -- `active_problem` table.
+    revision INT8 NOT NULL,
+
+    -- UUID of the current sitrep that this record is part of.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the original sitrep in which this revision of the Active
+    -- Problem was first created.
+    created_sitrep_id UUID NOT NULL,
+
+    -- If this is NULL, the Active Problem is Active, and if it is non-NULL, the
+    -- problem has been Resolved.
+    time_resolved TIMESTAMPTZ,
+
+    -- The Active Problem's problem code as of this revision.
+    --
+    -- This determines the problem class as well as the Active Problem's
+    -- documentation.
+    code INT8 NOT NULL,
+
+    -- A human-readable summary (one sentence) describing this problem at this
+    -- revision.
+    summary STRING NOT NULL,
+
+    -- A human-readable description (one or more paragraphs) describing the
+    -- problem at this revision.
+    description STRING NOT NULL,
+
+    -- A human-readable description (one or more paragraphs) of any operator
+    -- actions required to address this problem.
+    action_required STRING NOT NULL,
+
+    -- A human-readable comment explaining why the diagnosis engine requested
+    -- this revision to the Active Problem. This is *not* part of the externally
+    -- visible Active Problem revision, and is only used for debugging the
+    -- sitrep itself.
+    comment TEXT NOT NULL,
+
+    CONSTRAINT revision_is_non_zero CHECK (revision > 0),
+    CONSTRAINT problem_code_is_non_negative CHECK (code >= 0),
+
+    PRIMARY KEY (sitrep_id, problem_id, revision)
+);
+
+-- Associations (many-to-many) between cases and Active Problems.
+--
+-- These are tracked for internal use by diagnosis engines, such as to determine
+-- which of their open cases have existing Active Problems.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_case_active_problem (
+    -- The ID of the case associated with this Active Problem.
+    case_id UUID NOT NULL,
+    -- The ID of the Active Problem associated with this case.
+    problem_id UUID NOT NULL,
+    -- The ID of the current sitrep in which this association exists.
+    sitrep_id UUID NOT NULL,
+    -- The ID of the *first* sitrep in which this association between the case
+    -- and the Active Problem was created. This is *not* the sitrep in which
+    -- either the case or the Active Problem was created.
+    linked_sitrep_id UUID NOT NULL,
+
+    -- A human-readable comment explaining why the Active Problem is related to
+    -- the case.
+    comment TEXT NOT NULL,
+
+    PRIMARY KEY (sitrep_id, case_id, problem_id)
+);
+
+-- Links between Active Problems and alerts in a sitrep.
+--
+-- An alert may be linked to an Active Problem either in the sitrep that
+-- requests the alert, or in any later sitrep, so a link refers to the alert
+-- only by its ID and does not require a corresponding `fm_alert_request` row
+-- in the same sitrep.
+--
+-- A link exists for as long as the Active Problem it belongs to remains in the
+-- sitrep, and is never removed from or modified Active Problem once created.
+-- Therefore, rendezvous can create link records without needing a separate
+-- generation counter: as long as the Active Problem itself exists, its links
+-- may be created during execution.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_active_problem_alert (
+    -- The ID of the Active Problem.
+    problem_id UUID NOT NULL,
+    -- The ID of the linked alert.
+    alert_id UUID NOT NULL,
+    -- The ID of the current sitrep in which this link exists.
+    sitrep_id UUID NOT NULL,
+    -- The ID of the *first* sitrep in which this link was created. This is
+    -- *not* the sitrep that requested the alert.
+    linked_sitrep_id UUID NOT NULL,
+    -- The Active Problem revision with which the alert is associated, used to
+    -- order an Active Problem's alerts by revision.
+    revision INT8 NOT NULL,
+
+    -- A human-readable comment explaining why the alert is linked to the
+    -- Active Problem.
+    comment TEXT NOT NULL,
+
+    CONSTRAINT revision_is_non_zero CHECK (revision > 0),
+
+    PRIMARY KEY (sitrep_id, problem_id, alert_id)
+);
+
+-- Links between Active Problems and support bundles in a sitrep.
+--
+-- Like `fm_active_problem_alert`, a link may be created in the sitrep that
+-- requests the support bundle or in any later sitrep, and does not require a
+-- corresponding `fm_support_bundle_request` row in the same sitrep.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_active_problem_support_bundle (
+    -- The ID of the Active Problem.
+    problem_id UUID NOT NULL,
+    -- The ID of the linked support bundle.
+    support_bundle_id UUID NOT NULL,
+    -- The ID of the current sitrep in which this link exists.
+    sitrep_id UUID NOT NULL,
+    -- The ID of the *first* sitrep in which this link was created. This is
+    -- *not* the sitrep that requested the support bundle.
+    linked_sitrep_id UUID NOT NULL,
+    -- The Active Problem revision with which the support bundle is associated.
+    revision INT8 NOT NULL,
+
+    -- A human-readable comment explaining why the support bundle is linked to
+    -- the Active Problem.
+    comment TEXT NOT NULL,
+
+    CONSTRAINT revision_is_non_zero CHECK (revision > 0),
+
+    PRIMARY KEY (sitrep_id, problem_id, support_bundle_id)
+);
+
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
@@ -9892,7 +10079,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '312.0.0', NULL)
+    (TRUE, NOW(), NOW(), '313.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -94,6 +94,7 @@ impl AllCases {
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
                     facts: Default::default(),
+                    active_problems: Default::default(),
                 };
                 let mut builder =
                     CaseBuilder::new(&self.log, sitrep_id, case, case_rng);

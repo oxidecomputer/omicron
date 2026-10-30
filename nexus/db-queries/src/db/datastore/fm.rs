@@ -21,6 +21,7 @@ use crate::db::model::DbTypedUuid;
 use crate::db::model::SqlU32;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
+use crate::db::pagination::paginated_multicolumn;
 use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use crate::db::raw_query_builder::QueryBuilder;
 use crate::db::raw_query_builder::TypedSqlQuery;
@@ -31,14 +32,20 @@ use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use dropshot::PaginationOrder;
+use iddqd::IdOrdMap;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::ereport::dsl as ereport_dsl;
+use nexus_db_schema::schema::fm_active_problem::dsl as problem_dsl;
+use nexus_db_schema::schema::fm_active_problem_alert::dsl as problem_alert_dsl;
+use nexus_db_schema::schema::fm_active_problem_revision::dsl as problem_rev_dsl;
+use nexus_db_schema::schema::fm_active_problem_support_bundle::dsl as problem_bundle_dsl;
 use nexus_db_schema::schema::fm_alert_request::dsl as alert_req_dsl;
 use nexus_db_schema::schema::fm_case::dsl as case_dsl;
+use nexus_db_schema::schema::fm_case_active_problem::dsl as case_problem_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
 use nexus_db_schema::schema::fm_fact_certificate::dsl as fact_cert_dsl;
 use nexus_db_schema::schema::fm_fact_physical_disk::dsl as fact_pd_dsl;
@@ -49,11 +56,15 @@ use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
 use nexus_db_schema::schema::fm_support_bundle_request::dsl as support_bundle_req_dsl;
 use nexus_types::fm;
 use nexus_types::fm::Sitrep;
+use nexus_types::fm::active_problem::SitrepActiveProblem;
+use nexus_types::fm::active_problem::SitrepRevision;
+use nexus_types::fm::case::CaseActiveProblem;
 use nexus_types::support_bundle::{BundleData, BundleDataSelection};
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
+use omicron_uuid_kinds::ActiveProblemUuid;
 use omicron_uuid_kinds::AlertKind;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CaseEreportKind;
@@ -135,6 +146,11 @@ sitrep_child_tables! {
     SupportBundleRequestDataSelectionEreports => { table: "fm_support_bundle_request_data_selection_ereports" },
     SupportBundleRequestDataSelectionTimeRange => { table: "fm_support_bundle_request_data_selection_time_range" },
     SupportBundleRequest => { table: "fm_support_bundle_request" },
+    ActiveProblem => { table: "fm_active_problem" },
+    ActiveProblemRevision => { table: "fm_active_problem_revision" },
+    ActiveProblemAlert => { table: "fm_active_problem_alert" },
+    ActiveProblemSupportBundle => { table: "fm_active_problem_support_bundle" },
+    CaseActiveProblem => { table: "fm_case_active_problem" },
     Case => { table: "fm_case" },
     FmFactPhysicalDisk => { table: "fm_fact_physical_disk" },
     FmFactSaga => { table: "fm_fact_saga" },
@@ -432,6 +448,12 @@ impl DataStore {
 
         let mut case_facts = self.fm_facts_read_on_conn(id, conn).await?;
 
+        let mut case_active_problems =
+            self.case_active_problems_read_on_conn(id, conn).await?;
+
+        let active_problems =
+            self.active_problems_read_on_conn(id, conn).await?;
+
         // Next, load the case metadata entries and marry them to the sets of
         // ereports, alert requests, and support bundle requests for those
         // cases that we loaded in the previous steps.
@@ -475,6 +497,8 @@ impl DataStore {
                     let support_bundles_requested =
                         support_bundle_requests.remove(&id).unwrap_or_default();
                     let facts = case_facts.remove(&id).unwrap_or_default();
+                    let active_problems =
+                        case_active_problems.remove(&id).unwrap_or_default();
                     fm::Case {
                         id,
                         metadata: fm::case::Metadata {
@@ -487,6 +511,7 @@ impl DataStore {
                         ereports,
                         support_bundles_requested,
                         facts,
+                        active_problems,
                     }
                 }));
             }
@@ -505,7 +530,339 @@ impl DataStore {
         let metadata =
             self.fm_sitrep_metadata_read_on_conn(id, &conn).await?.into();
 
-        Ok(Sitrep { metadata, cases, ereports_by_id: ereports })
+        Ok(Sitrep {
+            metadata,
+            cases,
+            ereports_by_id: ereports,
+            active_problems,
+        })
+    }
+
+    /// Fetch all Active Problems in the given sitrep, along with all of their
+    /// revisions.
+    ///
+    /// Every Active Problem in a sitrep must have at least one revision, which
+    /// is ensured by the `SitrepBuilder` APIs that create Active Problems.
+    /// Therefore, any Active Problem which has no revisions, or any orphaned
+    /// revisions for which there are no corresponding Active Problems, are
+    /// treated as an error.
+    async fn active_problems_read_on_conn(
+        &self,
+        sitrep_id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<IdOrdMap<fm::active_problem::SitrepActiveProblem>, Error> {
+        use nexus_db_schema::schema::fm_active_problem::dsl;
+        use nexus_db_schema::schema::fm_active_problem_revision::dsl as rev_dsl;
+
+        // First, load every revision of every Active Problem in this sitrep,
+        // grouped by problem.
+        let mut revisions_by_problem = HashMap::<_, iddqd::IdOrdMap<_>>::new();
+        let mut paginator =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated_multicolumn(
+                rev_dsl::fm_active_problem_revision,
+                (rev_dsl::problem_id, rev_dsl::revision),
+                &p.current_pagparams(),
+            )
+            .filter(rev_dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+            .select(model::fm::FmActiveProblemRevision::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to load active problem revisions")
+            })?;
+
+            paginator = p.found_batch(&batch, &|revision| {
+                (revision.problem_id, revision.revision)
+            });
+            for revision in batch {
+                let problem_id: ActiveProblemUuid = revision.problem_id.into();
+                let revision = SitrepRevision::try_from(revision)?;
+                let number = revision.number;
+                revisions_by_problem
+                    .entry(problem_id)
+                    .or_default()
+                    .insert_unique(revision)
+                    .map_err(|_| {
+                        let internal_message = format!(
+                            "encountered revision {number} of active problem \
+                             {problem_id} more than once. this should really \
+                             not be possible, as the problem ID and revision \
+                             number are a primary key!",
+                        );
+                        Error::InternalError { internal_message }
+                    })?;
+            }
+        }
+
+        // Load every alert and support bundle link in this sitrep, grouped by
+        // problem.
+        let mut alerts_by_problem =
+            Self::active_problem_alerts_read_on_conn(sitrep_id, conn).await?;
+        let mut support_bundles_by_problem =
+            Self::active_problem_support_bundles_read_on_conn(sitrep_id, conn)
+                .await?;
+
+        // Then, load the Active Problems themselves, and attach each one's
+        // revisions and links.
+        let mut problems = iddqd::IdOrdMap::new();
+        let mut paginator =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated(
+                dsl::fm_active_problem,
+                dsl::id,
+                &p.current_pagparams(),
+            )
+            .filter(dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+            .select(model::fm::FmActiveProblem::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to load active problems")
+            })?;
+
+            paginator = p.found_batch(&batch, &|problem| problem.id);
+            for problem in batch {
+                let model::fm::FmActiveProblem {
+                    id,
+                    sitrep_id: _,
+                    created_sitrep_id,
+                    comment,
+                } = problem;
+                let id = ActiveProblemUuid::from(id);
+                let revisions = revisions_by_problem
+                    .remove(&id)
+                    .filter(|revisions| !revisions.is_empty())
+                    .ok_or_else(|| {
+                        let internal_message = format!(
+                            "active problem {id} in sitrep {sitrep_id} has \
+                             no revisions. every active problem in a sitrep \
+                             must have at least one revision",
+                        );
+                        Error::InternalError { internal_message }
+                    })?;
+                // Unlike revisions, an Active Problem need not have any links.
+                let alerts = alerts_by_problem.remove(&id).unwrap_or_default();
+                let support_bundles =
+                    support_bundles_by_problem.remove(&id).unwrap_or_default();
+                problems
+                    .insert_unique(SitrepActiveProblem {
+                        id,
+                        created_sitrep_id: created_sitrep_id.into(),
+                        comment,
+                        revisions,
+                        alerts,
+                        support_bundles,
+                    })
+                    .map_err(|_| {
+                        let internal_message = format!(
+                            "encountered active problem {id} multiple times in \
+                             sitrep {sitrep_id}. this should really not be \
+                             possible, as the ID is a primary key!",
+                        );
+                        Error::InternalError { internal_message }
+                    })?;
+            }
+        }
+
+        if let Some(orphaned) = revisions_by_problem.keys().next() {
+            let internal_message = format!(
+                "sitrep {sitrep_id} contains revisions of active problem \
+                 {orphaned},  but no record of that active problem",
+            );
+            return Err(Error::InternalError { internal_message });
+        }
+        if let Some(orphaned) = alerts_by_problem.keys().next() {
+            let internal_message = format!(
+                "sitrep {sitrep_id} contains alert links for active problem \
+                 {orphaned}, but no record of that active problem",
+            );
+            return Err(Error::InternalError { internal_message });
+        }
+        if let Some(orphaned) = support_bundles_by_problem.keys().next() {
+            let internal_message = format!(
+                "sitrep {sitrep_id} contains support bundle links for active \
+                 problem {orphaned}, but no record of that active problem",
+            );
+            return Err(Error::InternalError { internal_message });
+        }
+
+        Ok(problems)
+    }
+
+    /// Fetch all links between Active Problems and alerts in the given sitrep,
+    /// grouped by Active Problem.
+    async fn active_problem_alerts_read_on_conn(
+        sitrep_id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<
+        HashMap<ActiveProblemUuid, IdOrdMap<fm::active_problem::AlertLink>>,
+        Error,
+    > {
+        use nexus_db_schema::schema::fm_active_problem_alert::dsl;
+
+        let mut by_problem = HashMap::<_, IdOrdMap<_>>::new();
+        let mut paginator =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated_multicolumn(
+                dsl::fm_active_problem_alert,
+                (dsl::problem_id, dsl::alert_id),
+                &p.current_pagparams(),
+            )
+            .filter(dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+            .select(model::fm::FmActiveProblemAlert::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to load active problem alert links",
+                    )
+            })?;
+
+            paginator =
+                p.found_batch(&batch, &|link| (link.problem_id, link.alert_id));
+            for link in batch {
+                let problem_id: ActiveProblemUuid = link.problem_id.into();
+                let alert_id: AlertUuid = link.alert_id.into();
+                by_problem
+                    .entry(problem_id)
+                    .or_default()
+                    .insert_unique(link.into())
+                    .map_err(|_| {
+                        let internal_message = format!(
+                            "encountered multiple links between active \
+                             problem {problem_id} and alert {alert_id}. this \
+                             should really not be possible, as the problem ID \
+                             and alert ID are a primary key!",
+                        );
+                        Error::InternalError { internal_message }
+                    })?;
+            }
+        }
+
+        Ok(by_problem)
+    }
+
+    /// Fetch all links between Active Problems and support bundles in the
+    /// given sitrep, grouped by Active Problem.
+    async fn active_problem_support_bundles_read_on_conn(
+        sitrep_id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<
+        HashMap<
+            ActiveProblemUuid,
+            IdOrdMap<fm::active_problem::SupportBundleLink>,
+        >,
+        Error,
+    > {
+        use nexus_db_schema::schema::fm_active_problem_support_bundle::dsl;
+
+        let mut by_problem = HashMap::<_, IdOrdMap<_>>::new();
+        let mut paginator =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated_multicolumn(
+                dsl::fm_active_problem_support_bundle,
+                (dsl::problem_id, dsl::support_bundle_id),
+                &p.current_pagparams(),
+            )
+            .filter(dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+            .select(model::fm::FmActiveProblemSupportBundle::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to load active problem support bundle links",
+                    )
+            })?;
+
+            paginator = p.found_batch(&batch, &|link| {
+                (link.problem_id, link.support_bundle_id)
+            });
+            for link in batch {
+                let problem_id: ActiveProblemUuid = link.problem_id.into();
+                let bundle_id: SupportBundleUuid =
+                    link.support_bundle_id.into();
+                by_problem
+                    .entry(problem_id)
+                    .or_default()
+                    .insert_unique(link.into())
+                    .map_err(|_| {
+                        let internal_message = format!(
+                            "encountered multiple links between active \
+                             problem {problem_id} and support bundle \
+                             {bundle_id}. this should really not be \
+                             possible, as the problem ID and support bundle \
+                             ID are a primary key!",
+                        );
+                        Error::InternalError { internal_message }
+                    })?;
+            }
+        }
+
+        Ok(by_problem)
+    }
+
+    /// Fetch all associations between cases and Active Problems in the given
+    /// sitrep, grouped by case.
+    async fn case_active_problems_read_on_conn(
+        &self,
+        id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<HashMap<CaseUuid, IdOrdMap<CaseActiveProblem>>, Error> {
+        use nexus_db_schema::schema::fm_case_active_problem::dsl;
+
+        let mut by_case = HashMap::<_, IdOrdMap<_>>::new();
+        let mut paginator =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated_multicolumn(
+                dsl::fm_case_active_problem,
+                (dsl::case_id, dsl::problem_id),
+                &p.current_pagparams(),
+            )
+            .filter(dsl::sitrep_id.eq(id.into_untyped_uuid()))
+            .select(model::fm::CaseActiveProblem::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to load case active problem associations",
+                    )
+            })?;
+
+            paginator = p.found_batch(&batch, &|association| {
+                (association.case_id, association.problem_id)
+            });
+            for association in batch {
+                let case_id: CaseUuid = association.case_id.into();
+                let problem_id: ActiveProblemUuid =
+                    association.problem_id.into();
+                by_case
+                    .entry(case_id)
+                    .or_default()
+                    .insert_unique(association.into())
+                    .map_err(|_| {
+                        let internal_message = format!(
+                            "encountered multiple associations between case \
+                             {case_id} and active problem {problem_id}. this \
+                             should really not be possible, as the case ID \
+                             and problem ID are a primary key!",
+                        );
+                        Error::InternalError { internal_message }
+                    })?;
+            }
+        }
+
+        Ok(by_case)
     }
 
     /// Fetch all alert requests belonging to cases in the given sitrep.
@@ -930,9 +1287,19 @@ impl DataStore {
         let mut physical_disk_facts = Vec::new();
         let mut saga_facts = Vec::new();
         let mut certificate_facts = Vec::new();
+        let mut case_active_problems = Vec::new();
         for case in sitrep.cases {
             let case_id = case.id;
             cases.push(model::fm::CaseMetadata::from_sitrep(sitrep_id, &case));
+            case_active_problems.extend(case.active_problems.into_iter().map(
+                |association| {
+                    model::fm::CaseActiveProblem::from_sitrep(
+                        sitrep_id,
+                        case_id,
+                        association,
+                    )
+                },
+            ));
             case_ereports.extend(case.ereports.into_iter().map(|ereport| {
                 model::fm::CaseEreport::from_sitrep(sitrep_id, case_id, ereport)
             }));
@@ -1090,6 +1457,106 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                         .internal_context("failed to insert case records")
                 })?;
+        }
+
+        if !case_active_problems.is_empty() {
+            diesel::insert_into(case_problem_dsl::fm_case_active_problem)
+                .values(case_active_problems)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to insert case active problem associations",
+                        )
+                })?;
+        }
+
+        // Create Active Problem records, and records for each of their
+        // revisions. Like case records, these are keyed on `sitrep_id`, so the
+        // ordering of these inserts relative to the others does not matter.
+        let mut active_problems =
+            Vec::with_capacity(sitrep.active_problems.len());
+        let mut active_problem_revisions = Vec::new();
+        let mut active_problem_alerts = Vec::new();
+        let mut active_problem_support_bundles = Vec::new();
+        for problem in sitrep.active_problems {
+            active_problems.push(model::fm::FmActiveProblem::from_sitrep(
+                sitrep_id, &problem,
+            ));
+            active_problem_revisions.extend(problem.revisions.into_iter().map(
+                |revision| {
+                    model::fm::FmActiveProblemRevision::from_sitrep(
+                        sitrep_id, problem.id, revision,
+                    )
+                },
+            ));
+            active_problem_alerts.extend(problem.alerts.into_iter().map(
+                |link| {
+                    model::fm::FmActiveProblemAlert::from_sitrep(
+                        sitrep_id, problem.id, link,
+                    )
+                },
+            ));
+            active_problem_support_bundles.extend(
+                problem.support_bundles.into_iter().map(|link| {
+                    model::fm::FmActiveProblemSupportBundle::from_sitrep(
+                        sitrep_id, problem.id, link,
+                    )
+                }),
+            );
+        }
+
+        if !active_problems.is_empty() {
+            diesel::insert_into(problem_dsl::fm_active_problem)
+                .values(active_problems)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context("failed to insert active problems")
+                })?;
+        }
+
+        if !active_problem_revisions.is_empty() {
+            diesel::insert_into(problem_rev_dsl::fm_active_problem_revision)
+                .values(active_problem_revisions)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to insert active problem revisions",
+                        )
+                })?;
+        }
+
+        if !active_problem_alerts.is_empty() {
+            diesel::insert_into(problem_alert_dsl::fm_active_problem_alert)
+                .values(active_problem_alerts)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to insert active problem alert links",
+                        )
+                })?;
+        }
+
+        if !active_problem_support_bundles.is_empty() {
+            diesel::insert_into(
+                problem_bundle_dsl::fm_active_problem_support_bundle,
+            )
+            .values(active_problem_support_bundles)
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to insert active problem support bundle links",
+                    )
+            })?;
         }
 
         // Now, try to make the sitrep current.
@@ -2174,12 +2641,15 @@ mod tests {
     use crate::db::pub_test_utils::TEST_GIT_VERSION;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
+    use chrono::DateTime;
     use chrono::Utc;
     use diesel::pg::Pg;
     use ereport_types;
     use nexus_types::alert::AlertClass;
     use nexus_types::fm;
     use nexus_types::fm::ereport::{EreportData, Reporter};
+    use omicron_generation_kinds::ActiveProblemRevNum;
+    use omicron_generation_kinds::SitrepActiveProblemGeneration;
     use omicron_generation_kinds::SitrepAlertGeneration;
     use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_test_utils::dev;
@@ -2401,9 +2871,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            active_problems: Default::default(),
         };
 
         datastore.fm_sitrep_insert(&opctx, sitrep.clone(), None).await.unwrap();
@@ -2454,9 +2926,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            active_problems: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep1.clone(), None)
@@ -2475,9 +2949,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            active_problems: Default::default(),
         };
         datastore.fm_sitrep_insert(&opctx, sitrep2.clone(), None).await.expect(
             "inserting a sitrep whose parent is current should succeed",
@@ -2520,9 +2996,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            active_problems: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep1.clone(), None)
@@ -2542,9 +3020,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            active_problems: Default::default(),
         };
 
         let result = datastore.fm_sitrep_insert(&opctx, sitrep2, None).await;
@@ -2581,9 +3061,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            active_problems: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep1.clone(), None)
@@ -2602,9 +3084,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            active_problems: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep2.clone(), None)
@@ -2624,9 +3108,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            active_problems: Default::default(),
         };
         let result =
             datastore.fm_sitrep_insert(&opctx, sitrep3.clone(), None).await;
@@ -2657,7 +3143,8 @@ mod tests {
     /// round-tripping through cockroachdb and may no longer be "equal".
     ///
     /// NOTE FOR FUTURE GENERATIONS: If we add other top-level child records
-    /// other than cases, we should also assert that they match here.
+    /// other than cases and active problems, we should also assert that they
+    /// match here.
     #[track_caller]
     fn assert_sitreps_eq(this: &Sitrep, that: &Sitrep) {
         // Verify the sitrep metadata matches --- ignore the timestamp.
@@ -2668,6 +3155,11 @@ mod tests {
             this.metadata.parent_sitrep_id,
             that.metadata.parent_sitrep_id
         );
+
+        // Active problems contain no timestamps other than revisions'
+        // `time_resolved`, which callers must construct at database precision,
+        // so the whole map can be compared directly.
+        assert_eq!(this.active_problems, that.active_problems);
 
         // Verify all the expected cases exist in both sitreps
         assert_eq!(this.cases.len(), that.cases.len());
@@ -2685,6 +3177,7 @@ mod tests {
                 alerts_requested,
                 support_bundles_requested,
                 facts,
+                active_problems,
             } = case;
             let case_id = id;
             let Some(expected) = this.cases.get(&case_id) else {
@@ -2770,6 +3263,10 @@ mod tests {
                 support_bundles_requested, &expected.support_bundles_requested,
                 "while checking case {case_id}"
             );
+            assert_eq!(
+                active_problems, &expected.active_problems,
+                "while checking case {case_id}"
+            );
         }
     }
 
@@ -2827,6 +3324,101 @@ mod tests {
 
         let sitrep_id = SitrepUuid::new_v4();
         let creator_id = OmicronZoneUuid::new_v4();
+
+        // Two Active Problems, which should be sufficient to exercise the
+        // fm_active_problem, fm_active_problem_revision,
+        // fm_active_problem_alert, fm_active_problem_support_bundle, and
+        // fm_case_active_problem read, write, and GC paths. One problem has
+        // multiple revisions, the latest of which is resolved. The other is
+        // associated with more than one case.
+        //
+        // Both problems link the same alert, which is requested by case 1 in
+        // this sitrep. The resolved problem also links to alert which is not
+        // requested in this sitrep, as though it had been requested by a
+        // previous one, and a support bundle requested by case 1.
+        let linked_alert_id = AlertUuid::new_v4();
+        let linked_bundle_id = SupportBundleUuid::new_v4();
+        let alert_link = |alert_id: AlertUuid, revision: u32, comment: &str| {
+            fm::active_problem::AlertLink {
+                alert_id,
+                revision: ActiveProblemRevNum::from_u32(revision),
+                linked_sitrep_id: sitrep_id,
+                comment: comment.to_string(),
+            }
+        };
+        let revision = |number: u32,
+                        time_resolved: Option<DateTime<Utc>>,
+                        summary: &str| {
+            fm::active_problem::SitrepRevision {
+                number: ActiveProblemRevNum::from_u32(number),
+                created_sitrep_id: sitrep_id,
+                time_resolved,
+                code: fm::active_problem::ProblemCode::NotARealProblem,
+                summary: summary.to_string(),
+                description: format!("a longer description: {summary}"),
+                action_required: "none, it's not a real problem".to_string(),
+                comment: format!("revision {number}"),
+            }
+        };
+        let resolved_problem = fm::active_problem::SitrepActiveProblem {
+            id: ActiveProblemUuid::new_v4(),
+            created_sitrep_id: sitrep_id,
+            comment: "a problem that has since been resolved".to_string(),
+            revisions: [
+                revision(1, None, "something is wrong"),
+                revision(
+                    2,
+                    Some(omicron_common::now_db_precision()),
+                    "something was wrong, but it's fine now",
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            alerts: [
+                alert_link(linked_alert_id, 1, "requested along with it"),
+                alert_link(
+                    AlertUuid::new_v4(),
+                    2,
+                    "requested by an earlier sitrep",
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            support_bundles: [fm::active_problem::SupportBundleLink {
+                support_bundle_id: linked_bundle_id,
+                revision: ActiveProblemRevNum::from_u32(2),
+                linked_sitrep_id: sitrep_id,
+                comment: "collected when the problem was resolved".to_string(),
+            }]
+            .into_iter()
+            .collect(),
+        };
+        let shared_problem = fm::active_problem::SitrepActiveProblem {
+            id: ActiveProblemUuid::new_v4(),
+            created_sitrep_id: sitrep_id,
+            comment: "a problem shared by two cases".to_string(),
+            revisions: [revision(1, None, "two cases agree this is wrong")]
+                .into_iter()
+                .collect(),
+            alerts: [alert_link(
+                linked_alert_id,
+                1,
+                "also linked to the resolved problem",
+            )]
+            .into_iter()
+            .collect(),
+            support_bundles: iddqd::IdOrdMap::new(),
+        };
+        let case_problem =
+            |problem: &fm::active_problem::SitrepActiveProblem,
+             comment: &str| {
+                fm::case::CaseActiveProblem {
+                    problem_id: problem.id,
+                    linked_sitrep_id: sitrep_id,
+                    comment: comment.to_string(),
+                }
+            };
+
         let case1 = {
             let mut ereports = iddqd::IdOrdMap::new();
             ereports
@@ -2847,7 +3439,7 @@ mod tests {
             let mut alerts_requested = iddqd::IdOrdMap::new();
             alerts_requested
                 .insert_unique(fm::case::AlertRequest {
-                    id: AlertUuid::new_v4(),
+                    id: linked_alert_id,
                     class: AlertClass::TestFoo,
                     version: 0,
                     payload: serde_json::json!({}),
@@ -2869,7 +3461,7 @@ mod tests {
             let mut support_bundles_requested = iddqd::IdOrdMap::new();
             support_bundles_requested
                 .insert_unique(fm::case::SupportBundleRequest {
-                    id: SupportBundleUuid::new_v4(),
+                    id: linked_bundle_id,
                     requested_sitrep_id: sitrep_id,
                     data_selection: BundleDataSelection::all(),
                     comment: String::new(),
@@ -2946,6 +3538,18 @@ mod tests {
                 alerts_requested,
                 support_bundles_requested,
                 facts,
+                active_problems: [
+                    case_problem(
+                        &resolved_problem,
+                        "case 1 found a problem, which is now resolved",
+                    ),
+                    case_problem(
+                        &shared_problem,
+                        "case 1 shares this problem with case 2",
+                    ),
+                ]
+                .into_iter()
+                .collect(),
             }
         };
 
@@ -2990,6 +3594,12 @@ mod tests {
                 alerts_requested,
                 support_bundles_requested: iddqd::IdOrdMap::new(),
                 facts: iddqd::IdOrdMap::new(),
+                active_problems: [case_problem(
+                    &shared_problem,
+                    "case 2 shares this problem with case 1",
+                )]
+                .into_iter()
+                .collect(),
             }
         };
 
@@ -3053,6 +3663,7 @@ mod tests {
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
                 facts,
+                active_problems: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -3087,6 +3698,7 @@ mod tests {
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
                 facts,
+                active_problems: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -3126,6 +3738,7 @@ mod tests {
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
                 facts,
+                active_problems: iddqd::IdOrdMap::new(),
             }
         };
         let case5 = certificate_case(
@@ -3161,9 +3774,13 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases,
             ereports_by_id,
+            active_problems: [resolved_problem, shared_problem]
+                .into_iter()
+                .collect(),
         }
     }
 
@@ -3353,6 +3970,7 @@ mod tests {
             alerts_requested: iddqd::IdOrdMap::new(),
             support_bundles_requested,
             facts: iddqd::IdOrdMap::new(),
+            active_problems: iddqd::IdOrdMap::new(),
         };
 
         let mut cases = iddqd::IdOrdMap::new();
@@ -3368,9 +3986,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases,
             ereports_by_id: Default::default(),
+            active_problems: Default::default(),
         };
 
         datastore
@@ -3427,9 +4047,12 @@ mod tests {
                         alert_generation: SitrepAlertGeneration::new(),
                         support_bundle_generation:
                             SitrepSupportBundleGeneration::new(),
+                        active_problem_generation:
+                            SitrepActiveProblemGeneration::new(),
                     },
                     cases: Default::default(),
                     ereports_by_id: Default::default(),
+                    active_problems: Default::default(),
                 },
                 None,
             )
@@ -3585,9 +4208,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            active_problems: Default::default(),
         };
         let child_report = make_test_analysis_report(&child);
         datastore
@@ -3723,9 +4348,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            active_problems: Default::default(),
         };
         let sitrep1_id = sitrep1.id();
         let sitrep1_report = make_test_analysis_report(&sitrep1);
@@ -4040,9 +4667,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            active_problems: Default::default(),
         };
         let sitrep1_report = make_test_analysis_report(&sitrep1);
         datastore
@@ -4170,9 +4799,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            active_problems: Default::default(),
         };
         let sitrep1_report = make_test_analysis_report(&sitrep1);
         datastore
@@ -4327,9 +4958,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                active_problem_generation: SitrepActiveProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            active_problems: Default::default(),
         };
         let child_report = make_test_analysis_report(&child);
         datastore
