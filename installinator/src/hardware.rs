@@ -38,7 +38,7 @@ impl Hardware {
         // scan and let the caller retry.
         let unreadable_m2s: Vec<String> = hardware
             .disk_bays()
-            .into_iter()
+            .into_values()
             .filter(|bay| bay.kind == DiskVariant::M2)
             .filter_map(|bay| match bay.occupant {
                 DiskBayOccupant::Unreadable { error, .. } => {

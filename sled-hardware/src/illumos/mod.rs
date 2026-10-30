@@ -27,7 +27,7 @@ use slog::info;
 use slog::o;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use tokio::sync::watch;
 use uuid::Uuid;
 
@@ -219,7 +219,7 @@ impl HardwareView {
         Ok(Self {
             tofino,
             disks: HashMap::new(),
-            disk_bays: Vec::new(),
+            disk_bays: BTreeMap::new(),
             baseboard,
             online_processor_count: sysconf::online_processor_count()?,
             usable_physical_pages: sysconf::usable_physical_pages()?,
@@ -530,21 +530,15 @@ fn poll_device_tree(
     let HardwareSnapshot { tofino: polled_tofino, bays: polled_bays } =
         polled_hw;
 
-    // Disks in bays this poll could not describe stay in the view. If no
-    // bays could be read, the disks are left as they are.
-    let polled_disks = match polled_bays {
-        Ok(bays) => {
-            let previous = hardware_view_tx.borrow();
-            Some(resolve_bays(log, bays, &previous.disks))
-        }
-        Err(err) => {
-            warn!(
-                log,
-                "Failed to read disk bays; keeping the previous view of disks";
-                InlineErrorChain::new(&err),
-            );
-            None
-        }
+    let polled_bays = polled_bays.map_err(|err| {
+        warn!(log, "Failed to read disk bays"; InlineErrorChain::new(&err));
+        InlineErrorChain::new(&err).to_string()
+    });
+    // Disks in bays this poll could not describe, or did not find, stay in
+    // the view.
+    let (polled_disks, polled_bays) = {
+        let previous = hardware_view_tx.borrow();
+        resolve_bays(log, polled_bays, &previous.disk_bays, &previous.disks)
     };
 
     // Check for any changes since the last view.
@@ -563,18 +557,14 @@ fn poll_device_tree(
             TofinoView::Stub { .. } => false,
         };
 
-        did_modify_disks = match &polled_disks {
-            None => false,
-            Some((disks, bays)) => {
-                if inner.disks == *disks && inner.disk_bays == *bays {
-                    false
-                } else {
-                    inner.disks = disks.clone();
-                    inner.disk_bays = bays.clone();
-                    true
-                }
-            }
-        };
+        did_modify_disks =
+            if inner.disks == polled_disks && inner.disk_bays == polled_bays {
+                false
+            } else {
+                inner.disks = polled_disks.clone();
+                inner.disk_bays = polled_bays.clone();
+                true
+            };
 
         did_modify_tofino || did_modify_disks
     });
@@ -588,13 +578,11 @@ fn poll_device_tree(
         info!(log, "Updated tofino"; "tofino" => ?polled_tofino);
     }
     if did_modify_disks {
-        if let Some((disks, bays)) = &polled_disks {
-            info!(
-                log, "Updated disks";
-                "disks" => ?disks,
-                "disk_bays" => ?bays,
-            );
-        }
+        info!(
+            log, "Updated disks";
+            "disks" => ?polled_disks,
+            "disk_bays" => ?polled_bays,
+        );
     }
 
     Ok(())
@@ -891,8 +879,8 @@ impl HardwareManager {
         self.hardware_view_rx.borrow().disks()
     }
 
-    pub fn disk_bays(&self) -> Vec<DiskBay> {
-        self.hardware_view_rx.borrow().disk_bays().to_vec()
+    pub fn disk_bays(&self) -> BTreeMap<String, DiskBay> {
+        self.hardware_view_rx.borrow().disk_bays().clone()
     }
 
     pub fn is_scrimlet(&self) -> bool {

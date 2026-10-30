@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::DiskVariant;
 use slog::{Logger, warn};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// One U.2 bay or M.2 socket of the chassis, as the hardware topology
 /// describes it.
@@ -290,22 +290,63 @@ pub(crate) enum PolledBay {
     },
 }
 
-/// Combines one poll's bays with the previous disks into the disks and bays
-/// to report.
+impl PolledBay {
+    fn location(&self) -> &str {
+        match self {
+            PolledBay::Described { bay, .. } => &bay.location,
+            PolledBay::Unreadable { location, .. } => location,
+        }
+    }
+}
+
+/// Combines one poll's bays, or the error that kept the poll from reading
+/// any, with the previous view into the disks and bays to report.
 ///
 /// Bays describe only this poll. A bay this poll could not describe is
-/// reported as unreadable, but the disk previously seen at its location stays
-/// in the disk list, so a fault in one bay neither drops its disk nor holds up
-/// the others.
+/// reported as unreadable, and so is a previous bay this poll did not report
+/// at all. Either way the disk previously seen at its location stays in the
+/// disk list, so a fault in one bay neither drops its disk nor holds up the
+/// others.
 ///
 /// If two bays claim the same disk identity, a bay that saw the disk on this
 /// poll wins over one carrying it over from the previous disks (the disk may
 /// have moved), and otherwise the first bay wins.
 pub(crate) fn resolve_bays(
     log: &Logger,
-    polled: Vec<PolledBay>,
+    polled: Result<Vec<PolledBay>, String>,
+    previous_bays: &BTreeMap<String, DiskBay>,
     previous_disks: &HashMap<DiskIdentity, UnparsedDisk>,
-) -> (HashMap<DiskIdentity, UnparsedDisk>, Vec<DiskBay>) {
+) -> (HashMap<DiskIdentity, UnparsedDisk>, BTreeMap<String, DiskBay>) {
+    let (mut polled, missing_error) = match polled {
+        Ok(polled) => (polled, "not in the hardware topology".to_string()),
+        Err(error) => {
+            (Vec::new(), format!("could not read the disk bays: {error}"))
+        }
+    };
+
+    let mut seen = HashSet::new();
+    polled.retain(|bay| {
+        let first = seen.insert(bay.location().to_string());
+        if !first {
+            warn!(
+                log,
+                "more than one bay has the same location; keeping the first";
+                "location" => bay.location(),
+            );
+        }
+        first
+    });
+    for previous in previous_bays.values() {
+        if !seen.contains(&previous.location) {
+            polled.push(PolledBay::Unreadable {
+                location: previous.location.clone(),
+                kind: previous.kind,
+                driver: None,
+                error: missing_error.clone(),
+            });
+        }
+    }
+
     // Each bay, the disk it claims, and whether that claim is carried over.
     let mut claims: Vec<(DiskBay, Option<UnparsedDisk>, bool)> = polled
         .into_iter()
@@ -356,7 +397,10 @@ pub(crate) fn resolve_bays(
             }
         }
     }
-    let bays = claims.into_iter().map(|(bay, _, _)| bay).collect();
+    let bays = claims
+        .into_iter()
+        .map(|(bay, _, _)| (bay.location.clone(), bay))
+        .collect();
     (disks, bays)
 }
 
@@ -635,83 +679,160 @@ mod tests {
         }
     }
 
+    type View =
+        (HashMap<DiskIdentity, UnparsedDisk>, BTreeMap<String, DiskBay>);
+
+    fn poll(
+        polled: Result<Vec<PolledBay>, String>,
+        (previous_disks, previous_bays): &View,
+    ) -> View {
+        resolve_bays(&log(), polled, previous_bays, previous_disks)
+    }
+
+    /// The view after one poll that found a disk in N3.
+    fn disk_in_n3() -> View {
+        let view = poll(
+            Ok(vec![described(&nvme_bay(vec![namespace()]), Some(&facts(1)))]),
+            &View::default(),
+        );
+        assert_eq!(view.0.len(), 1);
+        view
+    }
+
     #[test]
     fn unreadable_bay_keeps_previous_disk() {
-        let (previous_disks, _) = resolve_bays(
-            &log(),
-            vec![described(&nvme_bay(vec![namespace()]), Some(&facts(1)))],
-            &HashMap::new(),
-        );
-        assert_eq!(previous_disks.len(), 1);
+        let first = disk_in_n3();
 
         // The disk stays across consecutive unreadable polls, while the bay
         // reports only what this poll saw.
-        let mut disks = previous_disks.clone();
+        let mut view = first.clone();
         for _ in 0..2 {
-            let bays;
-            (disks, bays) =
-                resolve_bays(&log(), vec![unreadable("N3")], &disks);
-            assert_eq!(disks, previous_disks);
-            assert_eq!(bays.len(), 1);
-            assert_eq!(bays[0].location, "N3");
-            assert_eq!(bays[0].occupant, unreadable_occupant());
+            view = poll(Ok(vec![unreadable("N3")]), &view);
+            assert_eq!(view.0, first.0);
+            assert_eq!(view.1.len(), 1);
+            assert_eq!(view.1["N3"].occupant, unreadable_occupant());
         }
     }
 
     #[test]
     fn unreadable_bay_without_history_has_no_disk() {
-        let (disks, bays) = resolve_bays(
-            &log(),
-            vec![
+        let (disks, bays) = poll(
+            Ok(vec![
                 described(&bay(ObservedOccupant::Empty), None),
                 unreadable("N4"),
-            ],
-            &HashMap::new(),
+            ]),
+            &View::default(),
         );
         assert!(disks.is_empty());
         assert_eq!(bays.len(), 2);
-        assert_eq!(bays[0].occupant, DiskBayOccupant::Empty);
-        assert_eq!(bays[1].location, "N4");
-        assert_eq!(bays[1].occupant, unreadable_occupant());
+        assert_eq!(bays["N3"].occupant, DiskBayOccupant::Empty);
+        assert_eq!(bays["N4"].occupant, unreadable_occupant());
     }
 
     #[test]
     fn readable_bay_drops_previous_disk() {
-        let (previous_disks, _) = resolve_bays(
-            &log(),
-            vec![described(&nvme_bay(vec![namespace()]), Some(&facts(1)))],
-            &HashMap::new(),
-        );
-        let (disks, bays) = resolve_bays(
-            &log(),
-            vec![described(&bay(ObservedOccupant::Empty), None)],
-            &previous_disks,
+        let (disks, bays) = poll(
+            Ok(vec![described(&bay(ObservedOccupant::Empty), None)]),
+            &disk_in_n3(),
         );
         assert!(disks.is_empty());
-        assert_eq!(bays[0].occupant, DiskBayOccupant::Empty);
+        assert_eq!(bays["N3"].occupant, DiskBayOccupant::Empty);
+    }
+
+    #[test]
+    fn missing_bay_keeps_previous_disk() {
+        let first = disk_in_n3();
+        let missing = DiskBayOccupant::Unreadable {
+            driver: None,
+            error: "not in the hardware topology".to_string(),
+        };
+
+        let mut view = first.clone();
+        for _ in 0..2 {
+            view = poll(Ok(vec![]), &view);
+            assert_eq!(view.0, first.0);
+            assert_eq!(view.1.len(), 1);
+            assert_eq!(view.1["N3"].kind, DiskVariant::U2);
+            assert_eq!(view.1["N3"].occupant, missing);
+        }
+
+        // Once the bay is back, it reports what it holds again.
+        let (disks, bays) = poll(
+            Ok(vec![described(&bay(ObservedOccupant::Empty), None)]),
+            &view,
+        );
+        assert!(disks.is_empty());
+        assert_eq!(bays["N3"].occupant, DiskBayOccupant::Empty);
+    }
+
+    #[test]
+    fn failed_read_marks_every_bay_unreadable() {
+        let mut empty = bay(ObservedOccupant::Empty);
+        empty.location = "N4".to_string();
+        let first = poll(
+            Ok(vec![
+                described(&nvme_bay(vec![namespace()]), Some(&facts(1))),
+                described(&empty, None),
+            ]),
+            &View::default(),
+        );
+
+        let (disks, bays) = poll(Err("snapshot failed".to_string()), &first);
+        assert_eq!(disks, first.0);
+        assert_eq!(bays.len(), 2);
+        for bay in bays.values() {
+            assert_eq!(
+                bay.occupant,
+                DiskBayOccupant::Unreadable {
+                    driver: None,
+                    error: "could not read the disk bays: snapshot failed"
+                        .to_string(),
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn failed_first_read_reports_nothing() {
+        let (disks, bays) =
+            poll(Err("snapshot failed".to_string()), &View::default());
+        assert!(disks.is_empty());
+        assert!(bays.is_empty());
     }
 
     #[test]
     fn fresh_disk_beats_carried_over_disk() {
         // The disk was in N3; it has moved to N4, and N3 now holds something
         // unreadable that is walked first.
-        let (previous_disks, _) = resolve_bays(
-            &log(),
-            vec![described(&nvme_bay(vec![namespace()]), Some(&facts(1)))],
-            &HashMap::new(),
-        );
         let mut moved = nvme_bay(vec![namespace()]);
         moved.location = "N4".to_string();
 
-        let (disks, bays) = resolve_bays(
-            &log(),
-            vec![unreadable("N3"), described(&moved, Some(&facts(1)))],
-            &previous_disks,
+        let (disks, bays) = poll(
+            Ok(vec![unreadable("N3"), described(&moved, Some(&facts(1)))]),
+            &disk_in_n3(),
         );
         assert_eq!(disks.len(), 1);
         assert_eq!(disks.values().next().unwrap().location(), "N4");
-        assert_eq!(bays[0].occupant, unreadable_occupant());
-        assert!(matches!(bays[1].occupant, DiskBayOccupant::Disk { .. }));
+        assert_eq!(bays["N3"].occupant, unreadable_occupant());
+        assert!(matches!(bays["N4"].occupant, DiskBayOccupant::Disk { .. }));
+    }
+
+    #[test]
+    fn fresh_disk_beats_disk_of_missing_bay() {
+        // The disk was in N3; N3 is gone from the topology and the disk is
+        // now seen in N4.
+        let mut moved = nvme_bay(vec![namespace()]);
+        moved.location = "N4".to_string();
+
+        let (disks, bays) =
+            poll(Ok(vec![described(&moved, Some(&facts(1)))]), &disk_in_n3());
+        assert_eq!(disks.len(), 1);
+        assert_eq!(disks.values().next().unwrap().location(), "N4");
+        assert!(matches!(
+            bays["N3"].occupant,
+            DiskBayOccupant::Unreadable { .. }
+        ));
+        assert!(matches!(bays["N4"].occupant, DiskBayOccupant::Disk { .. }));
     }
 
     #[test]
@@ -719,20 +840,33 @@ mod tests {
         let first = nvme_bay(vec![namespace()]);
         let mut second = nvme_bay(vec![namespace()]);
         second.location = "N4".to_string();
-        let (disks, bays) = resolve_bays(
-            &log(),
-            vec![
+        let (disks, bays) = poll(
+            Ok(vec![
                 described(&first, Some(&facts(1))),
                 described(&second, Some(&facts(1))),
-            ],
-            &HashMap::new(),
+            ]),
+            &View::default(),
         );
         assert_eq!(disks.len(), 1);
         assert_eq!(disks.values().next().unwrap().location(), "N3");
-        assert!(matches!(bays[0].occupant, DiskBayOccupant::Disk { .. }));
+        assert!(matches!(bays["N3"].occupant, DiskBayOccupant::Disk { .. }));
         assert_eq!(
-            bays[1].occupant,
+            bays["N4"].occupant,
             DiskBayOccupant::Device { driver: None, devfs_path: None }
         );
+    }
+
+    #[test]
+    fn duplicate_location_keeps_first_bay() {
+        let (disks, bays) = poll(
+            Ok(vec![
+                described(&bay(ObservedOccupant::Empty), None),
+                described(&nvme_bay(vec![namespace()]), Some(&facts(1))),
+            ]),
+            &View::default(),
+        );
+        assert!(disks.is_empty());
+        assert_eq!(bays.len(), 1);
+        assert_eq!(bays["N3"].occupant, DiskBayOccupant::Empty);
     }
 }

@@ -48,6 +48,11 @@ pub(super) enum TopoError {
         source: Option<libtopo::Error>,
     },
 
+    #[error(
+        "topology node {node} has location {location:?}, as does another bay"
+    )]
+    DuplicateLocation { node: String, location: String },
+
     #[error("could not read the slot type of topology node {node}")]
     SlotType {
         node: String,
@@ -62,8 +67,9 @@ pub(super) enum TopoError {
 /// [`ObservedBay::contents`].
 ///
 /// The whole read fails only if the walk fails or a bay cannot be identified
-/// (no label, or a slot whose type cannot be read). Leaving such a bay out
-/// instead would drop its disk until it can be read again.
+/// (no label, a label another bay also has, or a slot whose type cannot be
+/// read). A bay left out of a successful read would look like one the
+/// topology no longer has.
 pub(super) fn read_disk_bays(
     log: &Logger,
     snap: &Snapshot<'_>,
@@ -239,6 +245,13 @@ impl<'a> BayWalker<'a> {
                 });
             }
         };
+
+        if self.bays.iter().any(|bay| bay.location == location) {
+            return Err(TopoError::DuplicateLocation {
+                node: key.to_string(),
+                location,
+            });
+        }
 
         let (binding_driver, driver_problem) = match optional_string(
             node,
