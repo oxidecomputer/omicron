@@ -128,9 +128,27 @@ declare_saga_actions! {
         - sis_v2p_ensure_undo
     }
 
+    // This node is essentially the undo action of the `ensure_registered` node,
+    // but factored out into a separate node that's pushed *before*
+    // `sis_ensure_registered`. This is necessary because we want to ensure that
+    // an unwinding saga always attempts to unregister the VMM it may have
+    // created on a sled, regardless of whether the `sis_ensure_registered` node
+    // completes or fails. If that action sends a VMM ensure request to the sled
+    // but then encounters an error and begins unwinding before the node
+    // *completes*, we may have still created a VMM and must attempt to tear it
+    // down. Because undo actions are only performed for *completed* nodes, we
+    // must push a node immediately *before* `sis_ensure_registered` with a
+    // no-op forwards action and `sis_ensure_unregistered` as its undo action.
+    // That way, if we have reached the point where we were going to attempt to
+    // ensure a VMM, we ensure it does not exist while unwinding regardless of
+    // whether we made it past that node.
+    ENSURE_UNREGISTERED_IF_UNWINDING -> "ensure_unregistered_if_unwinding" {
+        + sis_noop
+        - sis_ensure_unregistered
+    }
+
     ENSURE_REGISTERED -> "ensure_registered" {
         + sis_ensure_registered
-        - sis_ensure_registered_undo
     }
 
     UPDATE_MULTICAST_SLED_ID -> "multicast_sled_id" {
@@ -200,6 +218,7 @@ impl NexusSaga for SagaInstanceStart {
 
         builder.append(dpd_ensure_action());
         builder.append(v2p_ensure_action());
+        builder.append(ensure_unregistered_if_unwinding_action());
         builder.append(ensure_registered_action());
         builder.append(update_multicast_sled_id_action());
         builder.append(add_virtual_resources_action());
@@ -925,7 +944,11 @@ async fn sis_ensure_registered(
         })
 }
 
-async fn sis_ensure_registered_undo(
+async fn sis_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
+    Ok(())
+}
+
+async fn sis_ensure_unregistered(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
