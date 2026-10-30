@@ -263,6 +263,12 @@ pub mod multicast {
     pub use crate::impls::multicast::validate_source_ip;
 }
 
+pub mod multirack {
+    pub use crate::v2026_11_04_00::multirack::SledAgentStartState;
+    pub use crate::v2026_11_04_00::multirack::UnadoptedRack;
+    pub use crate::v2026_11_04_00::multirack::UnadoptedSled;
+}
+
 pub mod networking {
     pub use crate::v2025_11_20_00::networking::Address;
     pub use crate::v2025_11_20_00::networking::AddressConfig;

@@ -89,6 +89,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_11_04_00, UNADOPTED_RACK_LIST),
     (2026_11_02_00, LAST_CERTIFICATE_DOCS),
     (2026_10_29_00, SLED_ADD_PRECHECK_OVERRIDES),
     (2026_10_21_00, BYTE_WRAPPER_0_2_BUMP),
