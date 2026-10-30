@@ -1416,7 +1416,7 @@ impl super::Nexus {
                         // instances. But there's no source VMM to migrate from.
                         InstanceStateChangeRequest::Migrate(_) => {
                             return Err(Error::invalid_request(
-                                "cannot migrate instance that was stopped \
+                                "cannot migrate instance that is rebooting \
                                  due to sled evacuation",
                             ));
                         }
