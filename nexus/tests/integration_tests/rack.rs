@@ -5,7 +5,6 @@
 use dropshot::ResultsPage;
 use http::Method;
 use http::StatusCode;
-use nexus_db_model::Generation;
 use nexus_db_model::SledBaseboard;
 use nexus_db_model::SledUpdate;
 use nexus_db_queries::db::pub_test_utils::helpers::SledSystemHardwareBuilder;
@@ -17,6 +16,7 @@ use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::hardware::UninitializedSled;
 use nexus_types::external_api::rack::Rack;
+use omicron_generation_kinds::SledRegistrationGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::time::Duration;
@@ -134,7 +134,7 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
         },
         SledSystemHardwareBuilder::new().build(),
         nexus.rack_id(),
-        Generation::new(),
+        SledRegistrationGeneration::new(),
     );
     let (_, was_modified) = nexus
         .datastore()

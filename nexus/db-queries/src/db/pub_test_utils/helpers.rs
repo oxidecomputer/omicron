@@ -42,6 +42,7 @@ use nexus_types::identity::Resource;
 use nexus_types::tuf_repo::TufRepoDescription;
 use omicron_common::api::external;
 use omicron_generation_kinds::InstanceStateGeneration;
+use omicron_generation_kinds::SledRegistrationGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -215,7 +216,7 @@ impl SledUpdateBuilder {
             sled_baseboard_for_test(),
             self.sled_hardware.build(),
             self.rack_id,
-            Generation::new(),
+            SledRegistrationGeneration::new(),
         )
     }
 }

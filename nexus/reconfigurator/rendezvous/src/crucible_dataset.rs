@@ -125,7 +125,6 @@ mod tests {
     use crate::tests::usize_to_id;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
-    use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledCpuFamily;
     use nexus_db_model::SledSystemHardware;
@@ -135,6 +134,7 @@ mod tests {
     use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_types::inventory::ZpoolName;
     use omicron_common::api::external::ByteCount;
+    use omicron_generation_kinds::SledRegistrationGeneration;
     use omicron_test_utils::dev;
     use sled_agent_types::disk::CompressionAlgorithm;
 
@@ -202,7 +202,7 @@ mod tests {
                         cpu_family: SledCpuFamily::Unknown,
                     },
                     RackUuid::new_v4(),
-                    Generation::new(),
+                    SledRegistrationGeneration::new(),
                 ))
                 .await
                 .expect("should have inserted sled");

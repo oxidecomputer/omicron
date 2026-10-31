@@ -294,12 +294,12 @@ impl DataStore {
 mod test {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
-    use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledCpuFamily;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
     use omicron_common::api::external::ByteCount;
+    use omicron_generation_kinds::SledRegistrationGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -330,7 +330,7 @@ mod test {
                 cpu_family: SledCpuFamily::AmdMilan,
             },
             RackUuid::new_v4(),
-            Generation::new(),
+            SledRegistrationGeneration::new(),
         );
         datastore.sled_upsert(sled).await.expect("failed to upsert sled");
 
