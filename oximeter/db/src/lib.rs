@@ -5,7 +5,6 @@
 //! Tools for interacting with the control plane telemetry database.
 
 use crate::query::StringFieldSelector;
-use anyhow::Context as _;
 use chrono::DateTime;
 use chrono::Utc;
 pub use oximeter::DatumType;
@@ -21,10 +20,8 @@ pub use oximeter::schema::TimeseriesSchema;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use slog::Logger;
 use std::collections::BTreeMap;
 use std::io;
-use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -51,6 +48,7 @@ pub use client::TestDbWrite;
 #[cfg(any(feature = "oxql", test))]
 pub use client::oxql::OxqlResult;
 pub use model::OXIMETER_VERSION;
+pub use native::connection::User;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -223,21 +221,6 @@ pub struct TimeseriesPageSelector {
     pub offset: NonZeroU32,
 }
 
-/// Create a client to the timeseries database, and ensure the database exists.
-pub async fn make_client(
-    address: IpAddr,
-    port: u16,
-    log: &Logger,
-) -> Result<Client, anyhow::Error> {
-    let client = Client::new(SocketAddr::new(address, port), &log);
-    // TODO https://github.com/oxidecomputer/omicron/issues/7488: There is a db being initialised here as well.
-    client
-        .init_single_node_db()
-        .await
-        .context("Failed to initialize timeseries database")?;
-    Ok(client)
-}
-
 // TODO-cleanup: Add the timeseries version in to the computation of the key.
 // This will require a full drop of the database, since we're changing the
 // sorting key and the timeseries key on each past sample. See
@@ -289,6 +272,35 @@ fn timeseries_key_for(
 
 // Timestamp format in the database
 const DATABASE_TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.9f";
+
+/// Format `s` as a single-quoted ClickHouse string literal. Any user-provided
+/// string interpolated into a query must go through this function, or it could
+/// be used to inject arbitrary SQL.
+///
+/// Backslash and single quote are the only two bytes the ClickHouse lexer
+/// treats specially when finding the end of a single-quoted literal, so each
+/// is prefixed with a backslash and nothing else is touched. See `quotedString`
+/// in the lexer of the ClickHouse version pinned in `tools/clickhouse_version`:
+/// <https://github.com/ClickHouse/ClickHouse/blob/812b95e/src/Parsers/Lexer.cpp#L13-L45>
+///
+/// A backslash must be escaped even when no quote follows it, because
+/// ClickHouse decodes C-style escapes inside literals: `\n` becomes a newline,
+/// `\x41` becomes `A`, and `\N` becomes the empty string. The proptest
+/// `test_quoted_string_literal_against_clickhouse` checks the output of this
+/// function against a running ClickHouse.
+pub(crate) fn quoted_string_literal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\'' => out.push_str("\\'"),
+            _ => out.push(c),
+        }
+    }
+    out.push('\'');
+    out
+}
 
 // The name of the database storing all metric information.
 const DATABASE_NAME: &str = "oximeter";

@@ -100,6 +100,7 @@ use super::tasks::blueprint_load::LoadedTargetBlueprint;
 use super::tasks::blueprint_planner;
 use super::tasks::blueprint_pruner;
 use super::tasks::blueprint_rendezvous;
+use super::tasks::capacity_metrics;
 use super::tasks::crdb_node_id_collector;
 use super::tasks::decommissioned_disk_cleaner;
 use super::tasks::dns_config;
@@ -143,10 +144,12 @@ use super::tasks::trust_quorum;
 use super::tasks::tuf_artifact_replication;
 use super::tasks::tuf_repo_pruner;
 use super::tasks::v2p_mappings::V2PManager;
+use super::tasks::vmm_mark_stop_for_update::VmmMarkStopForUpdate;
 use super::tasks::vpc_routes;
 use super::tasks::webhook_deliverator;
 use crate::Nexus;
 use crate::app::background::tasks::populate_switch_ports;
+use crate::app::background::tasks::vmm_stop_for_update;
 use crate::app::external_client::ExternalHttpClient;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::quiesce::NexusQuiesceHandle;
@@ -161,6 +164,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::PendingMgsUpdates;
 
 use nexus_types::inventory::Collection;
+use nexus_types::support_bundle::SupportBundleSizeLimit;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::RackUuid;
 use oximeter::types::ProducerRegistry;
@@ -249,10 +253,12 @@ impl BackgroundTasksInitializer {
             task_region_replacement: Activator::new(),
             task_region_replacement_driver: Activator::new(),
             task_instance_watcher: Activator::new(),
+            task_capacity_metrics: Activator::new(),
             task_instance_updater: Activator::new(),
             task_instance_reincarnation: Activator::new(),
             task_service_firewall_propagation: Activator::new(),
             task_abandoned_vmm_reaper: Activator::new(),
+            task_vmm_stop_for_update: Activator::new(),
             task_audit_log_cleanup: Activator::new(),
             task_audit_log_timeout_incomplete: Activator::new(),
             task_vpc_route_manager: Activator::new(),
@@ -282,6 +288,7 @@ impl BackgroundTasksInitializer {
             task_attached_subnet_manager: Activator::new(),
             task_session_cleanup: Activator::new(),
             task_populate_switch_ports: Activator::new(),
+            task_vmm_mark_stop_for_update: Activator::new(),
 
             // Handles to activate background tasks that do not get used by Nexus
             // at-large.  These background tasks are implementation details as far as
@@ -348,9 +355,11 @@ impl BackgroundTasksInitializer {
             task_region_replacement_driver,
             task_instance_watcher,
             task_instance_updater,
+            task_capacity_metrics,
             task_instance_reincarnation,
             task_service_firewall_propagation,
             task_abandoned_vmm_reaper,
+            task_vmm_stop_for_update,
             task_vpc_route_manager,
             task_saga_recovery,
             task_lookup_region_port,
@@ -379,6 +388,7 @@ impl BackgroundTasksInitializer {
             task_audit_log_timeout_incomplete,
             task_audit_log_cleanup,
             task_populate_switch_ports,
+            task_vmm_mark_stop_for_update,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -639,6 +649,7 @@ impl BackgroundTasksInitializer {
                     resolver.clone(),
                     config.support_bundle_collector.disable,
                     nexus_id,
+                    SupportBundleSizeLimit::DEFAULT,
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),
@@ -664,6 +675,12 @@ impl BackgroundTasksInitializer {
             activator: task_physical_disk_adoption,
         });
 
+        let bp_rendezvous = blueprint_rendezvous::BlueprintRendezvous::new(
+            datastore.clone(),
+            rx_blueprint.clone(),
+            inventory_load_watcher.clone(),
+        );
+        let bp_rendezvous_watcher = bp_rendezvous.watcher();
         driver.register(TaskDefinition {
             name: "blueprint_rendezvous",
             description:
@@ -672,14 +689,16 @@ impl BackgroundTasksInitializer {
                  consume",
             period: config.blueprints.period_secs_rendezvous,
             task_impl: Box::new(
-                blueprint_rendezvous::BlueprintRendezvous::new(
-                    datastore.clone(),
-                    rx_blueprint.clone(),
-                    inventory_load_watcher.clone(),
-                ),
+                bp_rendezvous
             ),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![Box::new(inventory_load_watcher.clone())],
+            // A new target blueprint must reach the sled availability table
+            // promptly, even if inventory is stalled for whatever reason, so
+            // watch both channels.
+            watchers: vec![
+                Box::new(rx_blueprint.clone()),
+                Box::new(inventory_load_watcher.clone()),
+            ],
             activator: task_blueprint_rendezvous,
         });
 
@@ -783,7 +802,7 @@ impl BackgroundTasksInitializer {
                 producer_registry,
                 resolver.clone(),
                 inventory_load_watcher.clone(),
-                instance_watcher::WatcherIdentity { nexus_id, rack_id },
+                nexus_id,
             );
             driver.register(TaskDefinition {
                 name: "instance_watcher",
@@ -795,6 +814,23 @@ impl BackgroundTasksInitializer {
                 activator: task_instance_watcher,
             })
         };
+
+        {
+            let capacity_metrics = capacity_metrics::CapacityMetrics::new(
+                datastore.clone(),
+                producer_registry,
+                nexus_id,
+            );
+            driver.register(TaskDefinition {
+                name: "capacity_metrics",
+                description: "periodically emits quota capacity metrics",
+                period: config.capacity_metrics.period_secs,
+                task_impl: Box::new(capacity_metrics),
+                opctx: opctx.child(BTreeMap::new()),
+                watchers: vec![],
+                activator: task_capacity_metrics,
+            });
+        }
 
         // Background task: schedule update sagas for instances in need of
         // state updates.
@@ -1106,7 +1142,6 @@ impl BackgroundTasksInitializer {
                 datastore.clone(),
                 resolver.clone(),
                 nexus_id,
-                rack_id,
                 task_fm_analysis.clone(),
                 config.sp_ereport_ingester.disable,
             )),
@@ -1330,6 +1365,42 @@ impl BackgroundTasksInitializer {
             activator: task_populate_switch_ports,
         });
 
+        let vmm_mark_stop_for_update =
+            VmmMarkStopForUpdate::new(datastore.clone());
+        let vmm_mark_stop_for_update_watcher =
+            vmm_mark_stop_for_update.watcher();
+        driver.register(TaskDefinition {
+            name: "vmm_mark_stop_for_update",
+            description: "marks VMMs on evacuating sleds as needing to be \
+            stopped for an update",
+            period: config.vmm_mark_stop_for_update.period_secs,
+            task_impl: Box::new(vmm_mark_stop_for_update),
+            opctx: opctx.child(BTreeMap::new()),
+            // We activate this task any time the blueprint_rendezvous task runs.
+            // We want to err on the side of running this task more often than
+            // not, so even if the blueprint rendezvous task reports no changes,
+            // this task is triggered anyway.
+            watchers: vec![Box::new(bp_rendezvous_watcher)],
+            activator: task_vmm_mark_stop_for_update,
+        });
+
+        driver.register(TaskDefinition {
+            name: "vmm_stop_for_update",
+            description: "stops VMMs that are marked to be stopped for a sled \
+                update",
+            period: config.vmm_stop_for_update.period_secs,
+            task_impl: Box::new(vmm_stop_for_update::VmmStopForUpdate::new(
+                datastore,
+                sagas.clone(),
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            // Like the vmm_mark_stop_for_update task, this task will be
+            // activated each time that task runs regardless of the outcome.
+            // We do this in the spirit of futureproofing.
+            watchers: vec![Box::new(vmm_mark_stop_for_update_watcher)],
+            activator: task_vmm_stop_for_update,
+        });
+
         driver
     }
 }
@@ -1477,7 +1548,6 @@ pub mod test {
     use std::sync::atomic::AtomicU64;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
-    use uuid::Uuid;
 
     /// Used by various tests of tasks that kick off sagas
     pub(crate) struct NoopStartSaga {
@@ -1504,7 +1574,7 @@ pub mod test {
             async {
                 // We've not actually started a real saga, so just make
                 // something up.
-                Ok(steno::SagaId(Uuid::new_v4()))
+                Ok(steno::SagaId::new_v4())
             }
             .boxed()
         }
@@ -1518,7 +1588,7 @@ pub mod test {
         > {
             let _ = self.count.fetch_add(1, Ordering::SeqCst);
             async {
-                let id = steno::SagaId(Uuid::new_v4());
+                let id = steno::SagaId::new_v4();
                 // No-op sagas complete immediately.
                 let completed = async { Ok(()) }.boxed();
                 Ok((id, completed))

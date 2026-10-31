@@ -9,6 +9,7 @@
 
 mod component;
 mod component_details;
+pub(crate) mod component_vpd;
 mod host;
 mod ignition;
 mod rot;

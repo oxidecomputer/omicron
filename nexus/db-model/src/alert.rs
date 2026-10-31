@@ -135,7 +135,7 @@ impl From<Alert> for external_api::alert::Alert {
             identity: _, // we already converted this above
             class,
             version,
-            payload: alert,
+            payload,
             // internal dispatch data is not included in the API model
             num_dispatched: _,
             time_dispatched: _,
@@ -146,7 +146,7 @@ impl From<Alert> for external_api::alert::Alert {
             identity,
             class: class.to_string(),
             version: version.into(),
-            alert,
+            payload,
         }
     }
 }

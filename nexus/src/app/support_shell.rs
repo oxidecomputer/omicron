@@ -30,13 +30,17 @@ use slog::{Logger, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::protocol::{Role, WebSocketConfig};
 use tokio_tungstenite::tungstenite::{Bytes, Message};
 
 /// How long to wait for a switch's proxy to answer a connect.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long a preferred proxy has to answer before the next one is
+/// tried as well.
+const HEAD_START: Duration = Duration::from_millis(500);
 
 /// The client's pipe sends 8 KiB frames; anything much bigger is not
 /// our client, and the default cap is a 64 MiB allocation.
@@ -83,8 +87,14 @@ impl super::Nexus {
         })
     }
 
-    /// Authorize the tunnel and connect to a sush proxy, on whichever
-    /// switch answers first.
+    /// Authorize the tunnel and connect to a sush proxy.
+    ///
+    /// Each proxy keeps its own logins, so a client's login challenge
+    /// and its answer must reach the same proxy, even when they travel
+    /// over different tunnels through different Nexus instances. Every
+    /// Nexus therefore tries the proxies in the same order, by address,
+    /// starting each one `HEAD_START` after the one before it, and
+    /// takes the first to connect.
     ///
     /// The proxies have no directory entry of their own; like lldpd,
     /// they answer on the switch zone addresses dendrite advertises.
@@ -100,7 +110,7 @@ impl super::Nexus {
         // single rack is ours (omicron#1276).
         self.rack_lookup(opctx, rack_id).await?;
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        let proxy_addrs = self
+        let mut proxy_addrs = self
             .internal_resolver
             .lookup_all_ipv6(ServiceName::Dendrite)
             .await
@@ -110,9 +120,12 @@ impl super::Nexus {
                 SocketAddr::V6(SocketAddrV6::new(ip, SUSH_PROXY_PORT, 0, 0))
             })
             .collect::<Vec<_>>();
+        proxy_addrs.sort();
         let mut connects = proxy_addrs
-            .iter()
-            .map(|&addr| async move {
+            .into_iter()
+            .enumerate()
+            .map(|(i, addr)| async move {
+                sleep(HEAD_START * i as u32).await;
                 (addr, timeout(CONNECT_TIMEOUT, TcpStream::connect(addr)).await)
             })
             .collect::<FuturesUnordered<_>>();

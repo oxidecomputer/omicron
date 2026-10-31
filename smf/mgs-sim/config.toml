@@ -37,8 +37,8 @@ per_attempt_timeout_millis = 2000
 # `SpIdentifier` for the sled on which this MGS is running. (The
 # `SpIdentifier::typ` value is implicitly `SpType::Sled`.)
 #
-# `allow_local_sled_sp_reset` determines whether MGS will accept a request to
-# perform an SP reset on its own local sled. This is dangerous during SP
+# `allow_local_sp_reset` determines whether MGS will accept a request to
+# perform an SP reset on its own local sled/switch. This is dangerous during SP
 # updates, because the "reset" operation involves a watchdog that requires MGS
 # to send a "disarm the watchdog" message _after_ the reset, which it can't do
 # if it just powered itself off. In production, we set this to `false` for both
@@ -48,12 +48,12 @@ per_attempt_timeout_millis = 2000
 [[switch.location.description]]
 name = "switch0"
 local_sled = 0
-allow_local_sled_sp_reset = true
+allow_local_sp_reset = true
 
 [[switch.location.description]]
 name = "switch1"
 local_sled = 1
-allow_local_sled_sp_reset = true
+allow_local_sp_reset = true
 
 # `[[switch.location.determination]]` is a list of switch ports we should
 # contact in order to determine our location; each port defines a subset of
@@ -66,7 +66,7 @@ allow_local_sled_sp_reset = true
 # if there is a miscabling that results in an unsolvable system (e.g.,
 # determination 0 reports "switch0" and determination 1 reports "switch1").
 [[switch.location.determination]]
-interfaces = ["fake-sled0", "fake-sled1"]
+interfaces = ["fake-sled0", "fake-sled1", "fake-psc0"]
 sp_port_1 = ["switch0"]
 sp_port_2 = ["switch1"]
 
@@ -97,6 +97,14 @@ addr = "[::1]:33320"
 ereport-addr = "[::1]:44420"
 ignition-target = 3
 location = { switch0 = ["sled", 1], switch1 = ["sled", 1] }
+
+[[switch.port]]
+kind = "simulated"
+fake-interface = "fake-psc0"
+addr = "[::1]:33330"
+ereport-addr = "[::1]:44430"
+ignition-target = 4
+location = { switch0 = ["power", 0], switch1 = ["power", 0] }
 
 [log]
 # Show log messages of this level and more severe

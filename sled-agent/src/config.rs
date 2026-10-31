@@ -14,20 +14,239 @@ use illumos_utils::dladm::PhysicalLink;
 use omicron_common::vlan::VlanID;
 use serde::Deserialize;
 use sled_hardware::DataLinks;
+use sled_hardware::DendriteAsic;
 use sled_hardware::ExternalDisks;
+use sled_hardware::SledMode;
+use slog::Logger;
 use sprockets_tls::keys::SprocketsConfig;
 
-#[derive(Clone, Debug, Deserialize)]
+use crate::bootstrap::server::StartError;
+
+/// The role a deployment asks of this sled; `auto` lets detection decide.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum SledMode {
+pub enum SledRole {
     Auto,
     #[serde(alias = "gimlet")]
     Sled,
     Scrimlet,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
+/// Switch backend of a deployment, with the parameters it needs.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
+pub enum Switch {
+    TofinoAsic {
+        #[serde(default = "default_sidecar_revision")]
+        sidecar_revision: String,
+    },
+    TofinoStub {
+        #[serde(default = "default_sidecar_revision")]
+        sidecar_revision: String,
+    },
+    SoftNpuPropolisDevice {
+        front_port_count: u8,
+        rear_port_count: u8,
+    },
+    SoftNpuZone {
+        front_port_count: u8,
+        rear_port_count: u8,
+    },
+}
+
+impl Switch {
+    pub fn asic(&self) -> DendriteAsic {
+        match self {
+            Switch::TofinoAsic { .. } => DendriteAsic::TofinoAsic,
+            Switch::TofinoStub { .. } => DendriteAsic::TofinoStub,
+            Switch::SoftNpuPropolisDevice { .. } => {
+                DendriteAsic::SoftNpuPropolisDevice
+            }
+            Switch::SoftNpuZone { .. } => DendriteAsic::SoftNpuZone,
+        }
+    }
+
+    fn sidecar_revision(&self) -> SidecarRevision {
+        match self {
+            Switch::TofinoAsic { sidecar_revision }
+            | Switch::TofinoStub { sidecar_revision } => {
+                SidecarRevision::Physical(sidecar_revision.clone())
+            }
+            Switch::SoftNpuPropolisDevice {
+                front_port_count,
+                rear_port_count,
+            } => SidecarRevision::SoftPropolis(SoftPortConfig {
+                front_port_count: *front_port_count,
+                rear_port_count: *rear_port_count,
+            }),
+            Switch::SoftNpuZone { front_port_count, rear_port_count } => {
+                SidecarRevision::SoftZone(SoftPortConfig {
+                    front_port_count: *front_port_count,
+                    rear_port_count: *rear_port_count,
+                })
+            }
+        }
+    }
+}
+
+/// How this sled is deployed. Parsed from a [`DeploymentConfig`], which
+/// rejects combinations that cannot be resolved at startup.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(try_from = "DeploymentConfig")]
+pub struct Deployment {
+    /// The switch backend. Whether the sled becomes a scrimlet follows from
+    /// it: the detected backends decide at runtime, the fixed ones always do.
+    switch: Switch,
+    /// `sled_mode = "sled"`: run as a compute sled whatever the switch says.
+    /// The switch then only decides `has_physical_asic`.
+    sled: bool,
+}
+
+/// The `deployment` table as written in the sled-agent config. The named
+/// kinds fix the role and switch; `custom` spells both out.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
+enum DeploymentConfig {
+    /// Oxide rack. The hardware monitor detects the Tofino ASIC.
+    Production {
+        /// Sidecar board revision
+        #[serde(default = "default_sidecar_revision")]
+        sidecar_revision: String,
+    },
+    /// Propolis-hosted lab. A SoftNPU device makes the sled a scrimlet.
+    Virtual { front_port_count: u8, rear_port_count: u8 },
+    /// One host running a SoftNPU zone. Always a scrimlet.
+    Standalone { front_port_count: u8, rear_port_count: u8 },
+    /// Explicit role and switch backend.
+    Custom { sled_mode: SledRole, switch: Switch },
+}
+
+fn default_sidecar_revision() -> String {
+    "b".to_string()
+}
+
+impl TryFrom<DeploymentConfig> for Deployment {
+    type Error = String;
+
+    fn try_from(config: DeploymentConfig) -> Result<Self, Self::Error> {
+        let (sled, switch) = match config {
+            DeploymentConfig::Production { sidecar_revision } => {
+                (false, Switch::TofinoAsic { sidecar_revision })
+            }
+            DeploymentConfig::Virtual { front_port_count, rear_port_count } => {
+                (
+                    false,
+                    Switch::SoftNpuPropolisDevice {
+                        front_port_count,
+                        rear_port_count,
+                    },
+                )
+            }
+            DeploymentConfig::Standalone {
+                front_port_count,
+                rear_port_count,
+            } => (
+                false,
+                Switch::SoftNpuZone { front_port_count, rear_port_count },
+            ),
+            DeploymentConfig::Custom { sled_mode, switch } => {
+                match (sled_mode, &switch) {
+                    // "sled" ignores whatever is attached. The switch still
+                    // says whether this is a rack sled with a physical ASIC.
+                    (SledRole::Sled, _) => (),
+                    // The detected backends decide the role themselves:
+                    // the Tofino ASIC through the hardware monitor, the
+                    // propolis SoftNPU device at startup. Forcing "scrimlet"
+                    // would either wait on the same detection or fail.
+                    (
+                        SledRole::Auto,
+                        Switch::TofinoAsic { .. }
+                        | Switch::SoftNpuPropolisDevice { .. },
+                    ) => (),
+                    (
+                        SledRole::Scrimlet,
+                        Switch::TofinoAsic { .. }
+                        | Switch::SoftNpuPropolisDevice { .. },
+                    ) => {
+                        return Err(format!(
+                            "switch {:?} is detected; sled_mode must be \
+                             \"auto\" or \"sled\"",
+                            switch.asic()
+                        ));
+                    }
+                    // The stub and zone backends have nothing to detect.
+                    (
+                        SledRole::Scrimlet,
+                        Switch::TofinoStub { .. } | Switch::SoftNpuZone { .. },
+                    ) => (),
+                    (
+                        SledRole::Auto,
+                        Switch::TofinoStub { .. } | Switch::SoftNpuZone { .. },
+                    ) => {
+                        return Err(format!(
+                            "switch {:?} has no hardware to detect; sled_mode \
+                             must be \"sled\" or \"scrimlet\"",
+                            switch.asic()
+                        ));
+                    }
+                }
+                (sled_mode == SledRole::Sled, switch)
+            }
+        };
+        Ok(Self { switch, sled })
+    }
+}
+
+impl Deployment {
+    /// Resolve the sled mode. Only the propolis SoftNPU device is probed
+    /// here; the Tofino ASIC is the hardware monitor's job.
+    pub async fn sled_mode(
+        &self,
+        log: &Logger,
+    ) -> Result<SledMode, StartError> {
+        if self.sled {
+            return Ok(SledMode::Sled);
+        }
+        match &self.switch {
+            Switch::TofinoAsic { .. } => Ok(SledMode::Auto),
+            Switch::SoftNpuPropolisDevice { .. } => {
+                let log = log.clone();
+                // The probe touches devinfo and device nodes, so it may block.
+                let found = tokio::task::spawn_blocking(move || {
+                    sled_hardware::find_softnpu_device(&log)
+                })
+                .await
+                .expect("switch detection panicked")
+                .map_err(StartError::DetectSwitch)?;
+                Ok(if found {
+                    SledMode::Scrimlet {
+                        asic: DendriteAsic::SoftNpuPropolisDevice,
+                    }
+                } else {
+                    SledMode::Sled
+                })
+            }
+            switch @ (Switch::TofinoStub { .. }
+            | Switch::SoftNpuZone { .. }) => {
+                Ok(SledMode::Scrimlet { asic: switch.asic() })
+            }
+        }
+    }
+
+    /// Whether this deployment drives a physical sidecar ASIC, and so wants
+    /// the services that only ship with those builds.
+    pub fn has_physical_asic(&self) -> bool {
+        matches!(self.switch, Switch::TofinoAsic { .. })
+    }
+
+    /// Sidecar parameters for the switch zone services.
+    pub fn sidecar_revision(&self) -> SidecarRevision {
+        self.switch.sidecar_revision()
+    }
+}
+
+/// Sidecar parameters derived from the deployment.
+#[derive(Debug, Clone)]
 pub enum SidecarRevision {
     Physical(String),
     SoftZone(SoftPortConfig),
@@ -43,7 +262,7 @@ impl SidecarRevision {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SoftPortConfig {
     /// Number of front ports
     pub front_port_count: u8,
@@ -62,10 +281,8 @@ pub struct Config {
     pub dropshot: ConfigDropshot,
     /// Configuration for the sled agent debug log
     pub log: ConfigLogging,
-    /// The sled's mode of operation (auto detect or force gimlet/scrimlet).
-    pub sled_mode: SledMode,
-    // TODO: Remove once this can be auto-detected.
-    pub sidecar_revision: SidecarRevision,
+    /// How this sled is deployed, which selects the switch backend.
+    pub deployment: Deployment,
     /// Optional percentage of otherwise-unbudgeted DRAM to reserve for guest
     /// memory, after accounting for expected host OS memory consumption and, if
     /// set, `vmm_reservoir_size_mb`.
@@ -132,14 +349,22 @@ pub struct Config {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SushConfig {
-    /// One or more PEM files holding the trusted root certificates for job
-    /// requests, one certificate per file. Job signatures must have one of
-    /// these certificates as their root cert to be accepted.
-    ///
-    /// This list must not be empty, as at least one root cert is required in
-    /// order to be able to run sush jobs.
-    #[serde(deserialize_with = "SushConfig::nonempty_roots")]
-    pub roots: Vec<Utf8PathBuf>,
+    /// A PEM file containing the production platform identity root
+    /// certificate.
+    pub production_platform_root: Utf8PathBuf,
+
+    /// A PEM file containing the staging platform identity root
+    /// certificate.
+    pub staging_platform_root: Utf8PathBuf,
+
+    /// PEM files holding the certificates that *every* sled trusts
+    /// to sign jobs, one certificate per file, in root-to-leaf order.
+    pub production_trust_anchors: Vec<Utf8PathBuf>,
+
+    /// PEM files holding the certificates that *only staging-signed* sleds
+    /// (i.e., Oxide lab systems) trust to sign jobs, in root-to-leaf order.
+    #[serde(default)]
+    pub staging_trust_anchors: Vec<Utf8PathBuf>,
 
     /// Where to record job output before an encrypted dataset is available.
     /// Must be on a ramdisk so that it is never persisted unencrypted.
@@ -175,18 +400,6 @@ impl SushConfig {
     fn default_max_output_mb() -> u32 {
         10 * 1024
     }
-
-    fn nonempty_roots<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Vec<Utf8PathBuf>, D::Error> {
-        let roots = Vec::deserialize(deserializer)?;
-        if roots.is_empty() {
-            return Err(serde::de::Error::custom(
-                "sush needs at least one root certificate to run",
-            ));
-        }
-        Ok(roots)
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -216,7 +429,7 @@ impl Config {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(&path)
             .map_err(|err| ConfigError::Io { path: path.into(), err })?;
-        let config = toml::from_str(&contents).map_err(|err| {
+        let config: Self = toml::from_str(&contents).map_err(|err| {
             ConfigError::Parse { path: path.into(), err: err.into() }
         })?;
         Ok(config)
@@ -248,15 +461,117 @@ impl Config {
 #[cfg(test)]
 mod test {
     use super::*;
-    use slog_error_chain::InlineErrorChain;
+
+    fn parse(table: &str) -> Result<Deployment, String> {
+        toml::from_str::<Deployment>(table).map_err(|e| e.to_string())
+    }
+
+    fn custom(sled_mode: &str, switch: &str) -> Result<Deployment, String> {
+        let switch = match switch {
+            "tofino_asic" | "tofino_stub" => format!("kind = \"{switch}\""),
+            _ => format!(
+                "kind = \"{switch}\", front_port_count = 1, rear_port_count = 1"
+            ),
+        };
+        parse(&format!(
+            "kind = \"custom\"\nsled_mode = \"{sled_mode}\"\nswitch = {{ {switch} }}"
+        ))
+    }
 
     #[test]
-    fn test_smf_configs() {
+    fn named_kinds_normalize() {
+        let d = parse("kind = \"production\"").unwrap();
+        assert!(!d.sled);
+        assert!(d.has_physical_asic());
+        assert!(matches!(
+            d.sidecar_revision(),
+            SidecarRevision::Physical(rev) if rev == "b"
+        ));
+
+        let d = parse(
+            "kind = \"virtual\"\nfront_port_count = 2\nrear_port_count = 4",
+        )
+        .unwrap();
+        assert!(!d.sled);
+        assert!(!d.has_physical_asic());
+        assert!(matches!(
+            d.sidecar_revision(),
+            SidecarRevision::SoftPropolis(p)
+                if p.front_port_count == 2 && p.rear_port_count == 4
+        ));
+
+        let d = parse(
+            "kind = \"standalone\"\nfront_port_count = 1\nrear_port_count = 1",
+        )
+        .unwrap();
+        assert!(!d.sled);
+        assert!(matches!(d.sidecar_revision(), SidecarRevision::SoftZone(_)));
+    }
+
+    #[test]
+    fn custom_role_and_switch_combinations() {
+        // "sled" ignores hardware, any switch is fine.
+        for switch in [
+            "tofino_asic",
+            "tofino_stub",
+            "soft_npu_propolis_device",
+            "soft_npu_zone",
+        ] {
+            assert!(custom("sled", switch).unwrap().sled, "sled + {switch}");
+        }
+        // Detected backends take "auto", never "scrimlet".
+        for switch in ["tofino_asic", "soft_npu_propolis_device"] {
+            assert!(custom("auto", switch).is_ok(), "auto + {switch}");
+            assert!(custom("scrimlet", switch).is_err(), "scrimlet + {switch}");
+        }
+        // Fixed backends take "scrimlet", never "auto".
+        for switch in ["tofino_stub", "soft_npu_zone"] {
+            assert!(custom("scrimlet", switch).is_ok(), "scrimlet + {switch}");
+            assert!(custom("auto", switch).is_err(), "auto + {switch}");
+        }
+        // The old "gimlet" spelling of "sled" still parses.
+        assert!(custom("gimlet", "tofino_asic").is_ok());
+        // Stray keys are rejected rather than ignored.
+        assert!(parse("kind = \"production\"\nfront_port_count = 1").is_err());
+        assert!(
+            parse(
+                "kind = \"custom\"\nsled_mode = \"scrimlet\"\n\
+                 switch = { kind = \"tofino_stub\", rear_port_count = 1 }"
+            )
+            .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn sled_mode_without_hardware() {
+        let log = slog::Logger::root(slog::Discard, slog::o!());
+        let mode = |d: Result<Deployment, String>| async {
+            d.unwrap().sled_mode(&log).await.unwrap()
+        };
+        assert_eq!(mode(parse("kind = \"production\"")).await, SledMode::Auto);
+        assert_eq!(mode(custom("sled", "tofino_asic")).await, SledMode::Sled);
+        assert_eq!(
+            mode(custom("scrimlet", "tofino_stub")).await,
+            SledMode::Scrimlet { asic: DendriteAsic::TofinoStub }
+        );
+        assert_eq!(
+            mode(parse(
+                "kind = \"standalone\"\nfront_port_count = 1\nrear_port_count = 1"
+            ))
+            .await,
+            SledMode::Scrimlet { asic: DendriteAsic::SoftNpuZone }
+        );
+    }
+
+    use slog_error_chain::InlineErrorChain;
+
+    /// Parse every sled-agent config we ship.
+    fn smf_configs() -> Vec<(Utf8PathBuf, Config)> {
         let manifest = std::env::var("CARGO_MANIFEST_DIR")
             .expect("Cannot access manifest directory");
         let smf = Utf8PathBuf::from(manifest).join("../smf/sled-agent");
 
-        let mut configs_seen = 0;
+        let mut configs = Vec::new();
         for variant in smf.read_dir_utf8().unwrap() {
             let variant = variant.unwrap();
             if variant.file_type().unwrap().is_dir() {
@@ -264,50 +579,117 @@ mod test {
                     let entry = entry.unwrap();
                     if entry.file_name() == "config.toml" {
                         let path = entry.path();
-                        Config::from_file(&path).unwrap_or_else(|e| {
-                            panic!(
-                                "Failed to parse config {path}: {}",
-                                InlineErrorChain::new(&e)
-                            )
-                        });
-                        configs_seen += 1;
+                        let config =
+                            Config::from_file(&path).unwrap_or_else(|e| {
+                                panic!(
+                                    "Failed to parse config {path}: {}",
+                                    InlineErrorChain::new(&e)
+                                )
+                            });
+                        configs.push((path.to_owned(), config));
                     }
                 }
             }
         }
-        assert!(configs_seen > 0, "No sled-agent configs found");
+        configs
+    }
+
+    #[test]
+    fn test_smf_configs() {
+        assert!(!smf_configs().is_empty(), "No sled-agent configs found");
     }
 
     #[test]
     fn test_sush_config() {
-        // Only `roots` is required. The rest have defaults.
-        let sush: SushConfig =
-            toml::from_str(r#"roots = ["/pkg/sush-root.pem"]"#).unwrap();
-        assert_eq!(sush.roots, vec![Utf8PathBuf::from("/pkg/sush-root.pem")]);
-        assert_eq!(sush.ramdisk_dir, SushConfig::default_ramdisk_dir());
+        // Only the platform roots and the production trust anchors are
+        // required. The rest have defaults.
+        const REQUIRED: &str = r#"
+            production_platform_root = "/idcerts/production.pem"
+            staging_platform_root = "/idcerts/staging.pem"
+            production_trust_anchors = ["/pkg/sush-root.pem"]
+        "#;
+        let SushConfig {
+            production_platform_root,
+            staging_platform_root,
+            production_trust_anchors,
+            staging_trust_anchors,
+            ramdisk_dir,
+            ramdisk_max_output_mb,
+            max_output_mb,
+        } = toml::from_str(REQUIRED).unwrap();
+        assert_eq!(production_platform_root, "/idcerts/production.pem");
+        assert_eq!(staging_platform_root, "/idcerts/staging.pem");
         assert_eq!(
-            sush.ramdisk_max_output_mb,
+            production_trust_anchors,
+            vec![Utf8PathBuf::from("/pkg/sush-root.pem")]
+        );
+        assert!(staging_trust_anchors.is_empty());
+        assert_eq!(ramdisk_dir, SushConfig::default_ramdisk_dir());
+        assert_eq!(
+            ramdisk_max_output_mb,
             SushConfig::default_ramdisk_max_output_mb()
         );
-        assert_eq!(sush.max_output_mb, SushConfig::default_max_output_mb());
+        assert_eq!(max_output_mb, SushConfig::default_max_output_mb());
 
-        let sush: SushConfig = toml::from_str(
-            r#"
-            roots = ["/pkg/sush-root.pem"]
+        let SushConfig {
+            production_platform_root: _,
+            staging_platform_root: _,
+            production_trust_anchors: _,
+            staging_trust_anchors,
+            ramdisk_dir,
+            ramdisk_max_output_mb,
+            max_output_mb,
+        } = toml::from_str(&format!(
+            r#"{REQUIRED}
+            staging_trust_anchors = ["/pkg/sush-staging.pem"]
             ramdisk_dir = "/var/run/sush"
             ramdisk_max_output_mb = 8
             max_output_mb = 128
             "#,
+        ))
+        .unwrap();
+        assert_eq!(
+            staging_trust_anchors,
+            vec![Utf8PathBuf::from("/pkg/sush-staging.pem")]
+        );
+        assert_eq!(ramdisk_dir, "/var/run/sush");
+        assert_eq!(ramdisk_max_output_mb, 8);
+        assert_eq!(max_output_mb, 128);
+
+        // No anchors means no jobs, but is allowed.
+        let SushConfig {
+            production_platform_root: _,
+            staging_platform_root: _,
+            production_trust_anchors,
+            ..
+        } = toml::from_str(
+            r#"
+            production_platform_root = "/idcerts/production.pem"
+            staging_platform_root = "/idcerts/staging.pem"
+            production_trust_anchors = []
+            "#,
         )
         .unwrap();
-        assert_eq!(sush.ramdisk_dir, "/var/run/sush");
-        assert_eq!(sush.ramdisk_max_output_mb, 8);
-        assert_eq!(sush.max_output_mb, 128);
+        assert!(production_trust_anchors.is_empty());
 
-        // No roots would mean no jobs can ever run, so reject at parse time.
-        let err = toml::from_str::<SushConfig>("roots = []").unwrap_err();
-        assert!(
-            err.to_string().contains("needs at least one root certificate")
-        );
+        // A staging anchor listed as a production one would let
+        // staging-signed jobs run on production sleds.
+        for (path, config) in smf_configs() {
+            let Some(SushConfig {
+                production_trust_anchors,
+                staging_trust_anchors,
+                ..
+            }) = config.sush
+            else {
+                continue;
+            };
+            for anchor in &staging_trust_anchors {
+                assert!(
+                    !production_trust_anchors.contains(anchor),
+                    "{path}: {anchor} is both a production and a staging \
+                     sush trust anchor",
+                );
+            }
+        }
     }
 }

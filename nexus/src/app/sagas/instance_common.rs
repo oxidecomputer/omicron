@@ -239,7 +239,9 @@ pub(super) async fn networking_resource_instance_state(
     // - starting: see below.
     match (found_instance_state, found_vmm_state) {
         // If there's no VMM, the instance is definitely not on any sled.
-        (InstanceState::NoVmm, _) | (_, Some(VmmState::SagaUnwound)) => {
+        (InstanceState::NoVmm, _)
+        | (InstanceState::SledEvacuating, _)
+        | (_, Some(VmmState::SagaUnwound)) => {
             propolis_and_sled_id = None;
         }
 
@@ -414,10 +416,10 @@ pub(super) async fn send_subnet_attachment_to_opte(
     if !do_saga {
         return Ok(());
     }
-    let request = sled_agent_client::types::AttachedSubnet {
+    let request = sled_agent_types::attached_subnet::AttachedSubnet {
         // TODO-completeness: Expand this code to handle VPC subnets too. See
         // https://github.com/oxidecomputer/omicron/issues/9580.
-        kind: sled_agent_client::types::AttachedSubnetKind::External,
+        kind: sled_agent_types::attached_subnet::AttachedSubnetKind::External,
         subnet: subnet.subnet.into(),
     };
     let result = osagactx

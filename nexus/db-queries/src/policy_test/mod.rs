@@ -87,7 +87,6 @@ async fn test_iam_prep(
                     description: "".into(),
                 },
                 quotas: silo_types::SiloQuotasCreate::empty(),
-                discoverable: true,
                 identity_mode: silo_types::SiloIdentityMode::LocalOnly,
                 admin_group_name: None,
                 tls_certificates: vec![],

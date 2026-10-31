@@ -30,11 +30,23 @@ impl_enum_type!(
     Vmm => b"vmm"
     Failed => b"failed"
     Destroyed => b"destroyed"
+    SledEvacuating => b"sled_evacuating"
 );
 
 impl InstanceState {
     /// Instance states where there is not currently a VMM incarnating this
     /// instance, but might be in the future.
+    //
+    // This constant is used to specify the states in which an instance is
+    // allowed to have changes applied to it (e.g. updating cpu/memory). So, at
+    // first glance, it would seem that `InstanceState::SledEvacuating` also
+    // belongs here, as an instance in this state does not have a VMM either.
+    // The caveat here is that when the instance is in this state, the instance
+    // is being restarted. There is a high chance of a race between the user
+    // applying an update to the instance and the system starting a saga to
+    // start this instance again. For now, we play it safe and do not allow
+    // changes to an instance while in this state. In the future, if we feel
+    // safe, we may want to change this.
     pub const NOT_INCARNATED_STATES: &'static [InstanceState] =
         &[InstanceState::NoVmm, InstanceState::Creating, InstanceState::Failed];
 
@@ -49,6 +61,7 @@ impl InstanceState {
             InstanceState::Vmm => "VMM",
             InstanceState::Failed => "failed",
             InstanceState::Destroyed => "destroyed",
+            InstanceState::SledEvacuating => "sled_evacuating",
         }
     }
 
@@ -71,6 +84,7 @@ impl From<InstanceState> for instance::InstanceState {
             InstanceState::Vmm => Output::Running,
             InstanceState::Failed => Output::Failed,
             InstanceState::Destroyed => Output::Destroyed,
+            InstanceState::SledEvacuating => Output::Rebooting,
         }
     }
 }

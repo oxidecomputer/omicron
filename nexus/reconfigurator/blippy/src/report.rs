@@ -33,17 +33,13 @@ impl<'a> BlippyReport<'a> {
     pub fn sort_notes_by_key(&mut self, key: BlippyReportSortKey) {
         match key {
             BlippyReportSortKey::Kind => {
-                self.notes.sort_unstable_by(|a, b| {
-                    let a = (&a.kind, &a.severity);
-                    let b = (&b.kind, &b.severity);
-                    a.cmp(&b)
+                self.notes.sort_unstable_by_key(|note| {
+                    (note.kind.as_ord(), note.severity)
                 });
             }
             BlippyReportSortKey::Severity => {
-                self.notes.sort_unstable_by(|a, b| {
-                    let a = (&a.severity, &a.kind);
-                    let b = (&b.severity, &b.kind);
-                    a.cmp(&b)
+                self.notes.sort_unstable_by_key(|note| {
+                    (note.severity, note.kind.as_ord())
                 });
             }
         }

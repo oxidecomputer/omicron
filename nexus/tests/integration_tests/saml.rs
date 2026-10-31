@@ -42,8 +42,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
     let silo: Silo = NexusRequest::object_get(
         &client,
         &format!("/v1/system/silos/{}", SILO_NAME,),
@@ -163,8 +162,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_truncated(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
 
     let saml_idp_descriptor = {
         let mut saml_idp_descriptor = SAML_IDP_DESCRIPTOR.to_string();
@@ -223,8 +221,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
 
     let saml_idp_descriptor = {
         let saml_idp_descriptor = SAML_IDP_DESCRIPTOR.to_string();
@@ -297,8 +294,7 @@ async fn test_create_a_saml_idp_metadata_only_encryption_keys(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
 
     let saml_idp_descriptor =
         SAML_IDP_DESCRIPTOR_ENCRYPTION_KEY_ONLY.to_string();
@@ -354,8 +350,7 @@ async fn test_create_a_saml_idp_metadata_no_keys(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
 
     let saml_idp_descriptor = SAML_IDP_DESCRIPTOR_NO_KEYS.to_string();
 
@@ -409,8 +404,7 @@ async fn test_create_a_hidden_silo_saml_idp(
 ) {
     let client = &cptestctx.external_client;
 
-    create_silo(&client, "hidden", false, silo::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, "hidden", silo::SiloIdentityMode::SamlJit).await;
 
     // Valid IdP descriptor
     let saml_idp_descriptor = SAML_IDP_DESCRIPTOR.to_string();
@@ -479,8 +473,7 @@ async fn test_saml_idp_metadata_url_404(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
 
     let server = Server::run();
     server.expect(
@@ -533,8 +526,7 @@ async fn test_saml_idp_metadata_url_invalid(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
 
     NexusRequest::new(
         RequestBuilder::new(
@@ -594,8 +586,7 @@ async fn test_saml_idp_reject_keypair(cptestctx: &ControlPlaneTestContext) {
     );
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
 
     let test_cases = vec![
         // Reject signing keypair if the certificate or key is not base64
@@ -695,8 +686,7 @@ async fn test_saml_idp_rsa_keypair_ok(cptestctx: &ControlPlaneTestContext) {
     );
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
 
     NexusRequest::new(
         RequestBuilder::new(
@@ -751,6 +741,8 @@ pub const SAML_RESPONSE_UNSIGNED: &str =
     include_str!("data/saml_response_unsigned.xml");
 pub const SAML_RESPONSE_WITH_COMMENT: &str =
     include_str!("data/saml_response_with_comment.xml");
+pub const SAML_RESPONSE_SIGNED_WITH_SHA1: &str =
+    include_str!("data/saml_response_signed_with_sha1.xml");
 pub const SAML_RESPONSE_WITH_GROUPS: &str =
     include_str!("data/saml_response_with_groups.xml");
 
@@ -968,33 +960,22 @@ fn test_reject_unsigned_saml_response() {
     assert!(result.is_err());
 }
 
-// Test accepting a correct SAML response that contains a XML comment in
-// saml:NameID, and ensuring that the full text node is extracted (and not a
-// substring).
+// Test rejecting a correct SAML response that contains a XML comment in
+// saml:NameID.
 //
-// This used to be a test that _rejected_ such responses, but a change to an
-// upstream dependency (quick-xml) caused the behavior around text nodes with
-// embedded comments to change. Specifically, consider:
+// This used to be a test that _accepted_ such responses, but a change to samael
+// caused it to reject this test's response document. An example of an embedded
+// comment is:
 //
 // <saml:NameId>user@example.com<!--comment-->.evil.com</saml:NameId>
 //
-// What should the text node for this element be?
+// Outright rejecting documents with comments will protect us from the
+// vulnerability.
 //
-// * Some XML parsing libraries just return "user@example.com". That leads to a
-//   vulnerability, where an attacker can get a response signed with a
-//   different email address than intended.
-// * Some XML libraries return "user@example.com.evil.com". This is safe,
-//   because the text after the comment hasn't been dropped. This is the behavior
-//   with quick-xml 0.30, and the one that we're testing here.
-// * Some XML libraries are unable to deserialize the document. This is also
-//   safe (and not particularly problematic because typically SAML responses
-//   aren't going to contain comments), and was the behavior with quick-xml
-//   0.23.
-//
-// See:
+// See also:
 // https://duo.com/blog/duo-finds-saml-vulnerabilities-affecting-multiple-implementations
 #[test]
-fn test_handle_saml_response_with_xml_comment() {
+fn test_reject_saml_response_with_xml_comment() {
     let silo_saml_identity_provider = SamlIdentityProvider {
         idp_metadata_document_string: SAML_RESPONSE_IDP_DESCRIPTOR.to_string(),
 
@@ -1029,9 +1010,46 @@ fn test_handle_saml_response_with_xml_comment() {
         ),
     );
 
-    let (authenticated_subject, _) =
-        result.expect("expected validation to succeed");
-    assert_eq!(authenticated_subject.external_id, "some@customer.com");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_reject_saml_response_with_insecure_signature_algo() {
+    let silo_saml_identity_provider = SamlIdentityProvider {
+        idp_metadata_document_string: SAML_RESPONSE_IDP_DESCRIPTOR.to_string(),
+
+        idp_entity_id: "https://some.idp.test/oxide_rack/".to_string(),
+        sp_client_id: "https://customer.site/oxide_rack/saml".to_string(),
+        acs_url: "https://customer.site/oxide_rack/saml".to_string(),
+        slo_url: "http://slo".to_string(),
+        technical_contact_email: "technical@fake".to_string(),
+
+        public_cert: None,
+        private_key: None,
+
+        group_attribute_name: None,
+    };
+
+    let body_bytes = serde_urlencoded::to_string(SamlLoginPost {
+        saml_response: base64::engine::general_purpose::STANDARD
+            .encode(&SAML_RESPONSE_SIGNED_WITH_SHA1),
+        relay_state: None,
+    })
+    .unwrap();
+
+    let result = silo_saml_identity_provider.authenticated_subject(
+        &body_bytes,
+        // Set max_issue_delay so that SAMLResponse is valid
+        Some(
+            chrono::Utc::now()
+                - "2022-05-04T15:36:12.631Z"
+                    .parse::<chrono::DateTime<chrono::Utc>>()
+                    .unwrap()
+                + chrono::Duration::seconds(60),
+        ),
+    );
+
+    assert!(result.is_err());
 }
 
 // Test receiving a correct SAML response that has group attributes
@@ -1138,8 +1156,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
 
     let _silo_saml_idp: identity_provider::SamlIdentityProvider =
         object_create(
@@ -1272,8 +1289,7 @@ async fn test_post_saml_response_with_relay_state(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
 
     let _silo_saml_idp: identity_provider::SamlIdentityProvider =
         object_create(

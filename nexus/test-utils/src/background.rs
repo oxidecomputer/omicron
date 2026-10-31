@@ -639,7 +639,9 @@ pub async fn run_blueprint_executor(lockstep_client: &ClientTestContext) {
 }
 
 /// Run the blueprint_rendezvous background task
-pub async fn run_blueprint_rendezvous(lockstep_client: &ClientTestContext) {
+pub async fn run_blueprint_rendezvous(
+    lockstep_client: &ClientTestContext,
+) -> BlueprintRendezvousStatus {
     let last_background_task =
         activate_background_task(&lockstep_client, "blueprint_rendezvous")
             .await;
@@ -653,8 +655,27 @@ pub async fn run_blueprint_rendezvous(lockstep_client: &ClientTestContext) {
         );
     };
 
-    let _status = serde_json::from_value::<BlueprintRendezvousStatus>(
+    let status = serde_json::from_value::<BlueprintRendezvousStatus>(
         last_result_completed.details,
     )
-    .unwrap();
+    .expect("parsed blueprint_rendezvous task status");
+
+    match &status.sled_blueprint_availability {
+        SledBlueprintAvailabilityRendezvousOutcome::Reconciled(_) => (),
+        SledBlueprintAvailabilityRendezvousOutcome::Error(error) => {
+            panic!("blueprint_rendezvous sled availability failed: {error}")
+        }
+    }
+    match &status.datasets {
+        DatasetRendezvousOutcome::NoInventoryCollection
+        | DatasetRendezvousOutcome::Reconciled { .. } => (),
+        DatasetRendezvousOutcome::Error { inventory_collection_id, error } => {
+            panic!(
+                "blueprint_rendezvous dataset reconciliation against \
+                 inventory collection {inventory_collection_id} failed: {error}"
+            )
+        }
+    }
+
+    status
 }

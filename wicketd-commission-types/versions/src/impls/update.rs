@@ -2,12 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, time::Duration};
 
 use gateway_types_versions::v1::component::SpIdentifier;
 
 use crate::latest::update::{
-    UpdateProgress, UpdateStep, UpdateStepStatus, UpdateTargets,
+    UpdateProgress, UpdateState, UpdateStep, UpdateStepStatus, UpdateTargets,
 };
 
 impl UpdateTargets {
@@ -48,6 +48,22 @@ impl<'a> IntoIterator for &'a UpdateTargets {
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter()
+    }
+}
+
+impl UpdateState {
+    /// Returns the time elapsed since the start of the update.
+    ///
+    /// This is `None` if the status is `Waiting`, or when a terminal
+    /// state was inferred rather than reported.
+    pub fn elapsed(&self) -> Option<Duration> {
+        match self {
+            UpdateState::Waiting => None,
+            UpdateState::Running { elapsed } => Some(*elapsed),
+            UpdateState::Completed { elapsed }
+            | UpdateState::Failed { message: _, elapsed }
+            | UpdateState::Aborted { message: _, elapsed } => *elapsed,
+        }
     }
 }
 

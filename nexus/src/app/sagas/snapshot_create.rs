@@ -106,9 +106,11 @@ use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_types::external_api::{disk, snapshot};
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
+use omicron_common::http_client::internal_http_client;
 use omicron_common::{
     api::external, backoff::backon_retry_policy_internal_service,
 };
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::{GenericUuid, PropolisUuid, VolumeUuid};
 use progenitor_extras::retry::GoneCheckResult;
 use progenitor_extras::retry::IndefiniteRetryOperationWhileError;
@@ -137,7 +139,7 @@ type ReplaceSocketsMap = BTreeMap<SocketAddrV6, SocketAddrV6>;
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub silo_id: Uuid,
-    pub project_id: Uuid,
+    pub project_id: ProjectUuid,
     pub disk: db::datastore::CrucibleDisk,
     pub attach_instance_id: Option<Uuid>,
     pub use_the_pantry: bool,
@@ -676,7 +678,7 @@ async fn ssc_create_snapshot_record(
             params.create_params.identity.clone(),
         ),
 
-        project_id: params.project_id,
+        project_id: params.project_id.into(),
         disk_id: disk.id(),
         volume_id: volume_id.into(),
         destination_volume_id: destination_volume_id.into(),
@@ -1225,7 +1227,10 @@ async fn ssc_call_pantry_snapshot_for_disk(
         endpoint,
     );
 
-    let client = crucible_pantry_client::Client::new(&endpoint);
+    let client = crucible_pantry_client::Client::new_with_client(
+        &endpoint,
+        internal_http_client(),
+    );
 
     let snapshot_operation = || async {
         client
@@ -2018,7 +2023,7 @@ mod test {
     fn new_test_params(
         opctx: &OpContext,
         silo_id: Uuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         db_disk: db::datastore::CrucibleDisk,
         disk: NameOrId,
         attach_instance_id: Option<Uuid>,
@@ -2100,7 +2105,7 @@ mod test {
                 "finalized_snapshot",
             )
             .unwrap();
-        assert_eq!(snapshot.project_id, project_id);
+        assert_eq!(snapshot.project_id(), project_id);
     }
 
     async fn no_snapshot_records_exist(datastore: &DataStore) -> bool {

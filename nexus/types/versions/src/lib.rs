@@ -105,3 +105,9 @@ pub mod v2026_08_14_00;
 pub mod v2026_08_14_01;
 #[path = "project_and_vpc_create_defaults/mod.rs"]
 pub mod v2026_09_08_00;
+#[path = "alert_payload/mod.rs"]
+pub mod v2026_09_11_00;
+#[path = "remove_silo_discoverable/mod.rs"]
+pub mod v2026_09_15_00;
+#[path = "artifact_hash_schema/mod.rs"]
+pub mod v2026_10_13_00;

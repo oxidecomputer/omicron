@@ -16,6 +16,7 @@ pub(crate) use api_status::ReconcilerInertReason;
 pub(crate) use api_status::ReconciliationCompletedStatus;
 pub(crate) use api_status::ScrimletStatus;
 
+use api_status::ddmd::DdmdReconcilerStatus;
 use api_status::dpd::DpdReconcilerStatus;
 use api_status::lldpd::LldpdReconcilerStatus;
 use api_status::mgd::MgdReconcilerStatus;
@@ -115,6 +116,7 @@ pub(crate) enum ScrimletReconcilersStatus {
         lldpd_reconciler: ReconcilerStatus<LldpdReconcilerStatus>,
         mgd_reconciler: ReconcilerStatus<MgdReconcilerStatus>,
         uplinkd_reconciler: ReconcilerStatus<UplinkdReconcilerStatus>,
+        ddmd_reconciler: ReconcilerStatus<DdmdReconcilerStatus>,
     },
 }
 
@@ -132,11 +134,13 @@ impl From<ScrimletReconcilersStatus> for api_status::ScrimletReconcilersStatus {
                 lldpd_reconciler,
                 mgd_reconciler,
                 uplinkd_reconciler,
+                ddmd_reconciler,
             } => Self::Running {
                 dpd_reconciler: dpd_reconciler.into(),
                 lldpd_reconciler: lldpd_reconciler.into(),
                 mgd_reconciler: mgd_reconciler.into(),
                 uplinkd_reconciler: uplinkd_reconciler.into(),
+                ddmd_reconciler: ddmd_reconciler.into(),
             },
         }
     }

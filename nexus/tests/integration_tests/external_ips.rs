@@ -431,13 +431,9 @@ async fn test_floating_ip_create_fails_in_other_silo_pool(
     let project = create_project(client, PROJECT_NAME).await;
 
     // Create other silo and pool linked to that silo
-    let other_silo = create_silo(
-        &client,
-        "not-my-silo",
-        true,
-        silo::SiloIdentityMode::SamlJit,
-    )
-    .await;
+    let other_silo =
+        create_silo(&client, "not-my-silo", silo::SiloIdentityMode::SamlJit)
+            .await;
     let other_pool_range = IpRange::V4(
         Ipv4Range::new(Ipv4Addr::new(10, 2, 0, 1), Ipv4Addr::new(10, 2, 0, 5))
             .unwrap(),

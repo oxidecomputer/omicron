@@ -28,6 +28,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::SubnetPoolUuid;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
@@ -178,9 +180,7 @@ pub fn insert_subnet_pool_member_query(
         .sql("), \
             updated_pool AS (\
                 UPDATE subnet_pool \
-                SET \
-                    time_modified = NOW(), \
-                    rcgen = rcgen + 1 \
+                SET rcgen = rcgen + 1 \
                 WHERE \
                     id = "
         )
@@ -269,9 +269,7 @@ pub fn link_subnet_pool_to_silo_query(
         AND time_deleted IS NULL), \
     updated_pool AS (\
         UPDATE subnet_pool
-        SET \
-            time_modified = NOW(), \
-            rcgen = rcgen + 1 \
+        SET rcgen = rcgen + 1 \
         WHERE \
             id = "
     )
@@ -436,7 +434,7 @@ pub fn decode_unlink_subnet_pool_from_silo_result(
 /// will be very helpful to actually inspect and understand the query.
 pub fn insert_external_subnet_query(
     silo_id: &Uuid,
-    project_id: &Uuid,
+    project_id: &ProjectUuid,
     identity: ExternalSubnetIdentity,
     subnet_selector: &ExternalSubnetAllocator,
 ) -> TypedSqlQuery<SelectableSql<ExternalSubnet>> {
@@ -474,7 +472,7 @@ pub fn insert_external_subnet_query(
             pool_selector: PoolSelector::Auto { ip_version },
             prefix_length,
         } => {
-            // THis is the same as the above, but we're taking the pool by
+            // This is the same as the above, but we're taking the pool by
             // looking up the default pool linked to the current silo for the
             // current version.
             //
@@ -494,7 +492,10 @@ pub fn insert_external_subnet_query(
         }
     }
     builder.sql(", ");
-    push_cte_to_check_for_deleted_project(&mut builder, project_id);
+    push_cte_to_check_for_deleted_project_and_update_rcgen(
+        &mut builder,
+        project_id,
+    );
     builder.sql(", ");
     push_cte_to_check_for_deleted_silo(&mut builder, silo_id);
     builder.sql(", ");
@@ -622,25 +623,30 @@ fn push_cte_to_select_pool_from_explicit_subnet(
         .sql("') AS BOOL))");
 }
 
-// Add a CTE that fails with a bool-parse error if the Project we're trying to
-// create the External Subnet in is deleted.
-fn push_cte_to_check_for_deleted_project(
+// Add CTEs that bump the rcgen of the Project we're trying to create the
+// External Subnet in, and fail with a bool-parse error if that Project is
+// deleted. Bumping the rcgen of the project is used for OCC, to detect
+// concurrent creations of a new subnet and deletions of the project itself.
+fn push_cte_to_check_for_deleted_project_and_update_rcgen(
     builder: &mut QueryBuilder,
-    project_id: &Uuid,
+    project_id: &ProjectUuid,
 ) {
     builder
         .sql(
-            "project_is_not_deleted AS MATERIALIZED(\
-        SELECT CAST(\
-            IF(EXISTS(\
-                SELECT 1 \
-                FROM project \
-                WHERE id = ",
+            "updated_project AS (\
+        UPDATE project \
+        SET rcgen = rcgen + 1 \
+        WHERE id = ",
         )
         .param()
-        .bind::<sql_types::Uuid, _>(*project_id)
+        .bind::<sql_types::Uuid, _>(project_id.into_untyped_uuid())
         .sql(
-            " AND time_deleted IS NULL LIMIT 1), \
+            " AND time_deleted IS NULL \
+        RETURNING 1\
+    ), \
+    project_is_not_deleted AS MATERIALIZED(\
+        SELECT CAST(\
+            IF(EXISTS(SELECT 1 FROM updated_project), \
             'true', \
             '",
         )
@@ -680,9 +686,7 @@ fn push_cte_to_update_subnet_pool_rcgen(builder: &mut QueryBuilder) {
     builder.sql(
         "updated_pool AS (\
         UPDATE subnet_pool \
-        SET \
-            time_modified = NOW(), \
-            rcgen = rcgen + 1 \
+        SET rcgen = rcgen + 1 \
         WHERE id = (SELECT subnet_pool_id FROM subnet_pool_and_member) \
           AND time_deleted IS NULL \
         RETURNING 1\
@@ -696,9 +700,7 @@ fn push_cte_to_update_subnet_pool_member_rcgen(builder: &mut QueryBuilder) {
     builder.sql(
         "updated_pool_member AS (\
         UPDATE subnet_pool_member \
-        SET \
-            time_modified = NOW(), \
-            rcgen = rcgen + 1 \
+        SET rcgen = rcgen + 1 \
         WHERE id = (SELECT subnet_pool_member_id FROM subnet_pool_and_member) \
           AND time_deleted IS NULL \
         RETURNING 1\
@@ -710,7 +712,7 @@ fn push_cte_to_update_subnet_pool_member_rcgen(builder: &mut QueryBuilder) {
 // records we've selected in earlier CTEs.
 fn push_cte_to_insert_actual_ip_subnet(
     builder: &mut QueryBuilder,
-    project_id: &Uuid,
+    project_id: &ProjectUuid,
     identity: ExternalSubnetIdentity,
 ) {
     builder
@@ -753,7 +755,7 @@ fn push_cte_to_insert_actual_ip_subnet(
             subnet_pool_member_id, ",
         )
         .param()
-        .bind::<sql_types::Uuid, _>(*project_id)
+        .bind::<sql_types::Uuid, _>(project_id.into_untyped_uuid())
         .sql(
             " AS project_id, \
             subnet AS subnet, \
@@ -1367,13 +1369,14 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ExternalSubnetUuid;
     use omicron_uuid_kinds::GenericUuid as _;
+    use omicron_uuid_kinds::ProjectUuid;
     use omicron_uuid_kinds::SubnetPoolMemberUuid;
     use omicron_uuid_kinds::SubnetPoolUuid;
     use uuid::Uuid;
 
     const SILO_ID: Uuid = uuid::uuid!("1a597381-b5a1-43da-bd72-bb1ac0786c21");
-    const PROJECT_ID: Uuid =
-        uuid::uuid!("e9c2d699-c60d-4486-81c6-63de6897a4ed");
+    const PROJECT_ID: ProjectUuid =
+        ProjectUuid::from_u128(0xe9c2d699_c60d_4486_81c6_63de6897a4ed);
     const SUBNET_ID: Uuid = uuid::uuid!("56ba77dc-6116-4537-a858-d3d56e34a222");
     const SUBNET_MEMBER_ID: Uuid =
         uuid::uuid!("b694e771-a21d-4022-9acf-1e1f5169945e");

@@ -14,6 +14,7 @@ use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ReconcilerRunningStatu
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ReconcilerStatus;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ReconciliationCompletedStatus;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus;
+use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ddmd::DdmdReconcilerStatus;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::dpd::DpdNatReconcilerStatus;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::dpd::DpdNatReconcilerStatusNatEntry;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::dpd::DpdNatReconcilerStatusNatEntryFailure;
@@ -41,35 +42,66 @@ pub(super) async fn cmd_network_config_reconciler_status(
         .await
         .context("failed to fetch reconciler status")?
         .into_inner();
-    println!("{}", ScrimletReconcilersStatusDisplay(&status));
+    let mut out = String::new();
+    write_block(&mut out, ScrimletReconcilersStatusDisplay(&status))
+        .expect("writing to a String always succeeds");
+    print!("{out}");
     Ok(())
 }
 
 // Indentation level for each sub-section.
 const INDENT: &str = "    ";
 
-// Helper for writing a sequence of lines where the last item does _not_ end in
-// a newline. This is used in many `Display` impls below to avoid extra blank
-// lines between sections.
-//
-// `write_one` should print each item without a trailing newline; this function
-// will add one for all items except the last.
+/// A `Write` wrapper which remembers whether the writer is at the start of a
+/// line.
+struct NewlineTerminated<W> {
+    inner: W,
+    at_line_start: bool,
+}
+
+impl<W: fmt::Write> NewlineTerminated<W> {
+    /// Create a new wrapper assuming the writer is already at a line start.
+    fn new(inner: W) -> Self {
+        Self { inner, at_line_start: true }
+    }
+
+    fn finish_line(&mut self) -> fmt::Result {
+        if self.at_line_start { Ok(()) } else { self.write_char('\n') }
+    }
+}
+
+impl<W: fmt::Write> fmt::Write for NewlineTerminated<W> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.inner.write_str(s)?;
+        if !s.is_empty() {
+            self.at_line_start = s.ends_with('\n');
+        }
+        Ok(())
+    }
+}
+
+/// Write a nested `Display` adapter and leave exactly one newline after it,
+/// whether or not the adapter ended a line itself.
+fn write_block<W: fmt::Write>(f: W, block: impl fmt::Display) -> fmt::Result {
+    let mut f = NewlineTerminated::new(f);
+    write!(f, "{block}")?;
+    f.finish_line()
+}
+
+/// Write a sequence of items, each ending in exactly one newline.
 fn write_lines<W: fmt::Write, I, T, F>(
-    f: &mut W,
+    f: W,
     items: I,
     mut write_one: F,
 ) -> fmt::Result
 where
     I: IntoIterator<Item = T>,
-    F: FnMut(&mut W, T) -> fmt::Result,
+    F: FnMut(&mut NewlineTerminated<W>, T) -> fmt::Result,
 {
-    let mut first = true;
+    let mut f = NewlineTerminated::new(f);
     for item in items {
-        if !first {
-            writeln!(f)?;
-        }
-        first = false;
-        write_one(f, item)?;
+        write_one(&mut f, item)?;
+        f.finish_line()?;
     }
     Ok(())
 }
@@ -129,6 +161,7 @@ impl fmt::Display for ScrimletReconcilersStatusDisplay<'_> {
                 lldpd_reconciler,
                 mgd_reconciler,
                 uplinkd_reconciler,
+                ddmd_reconciler,
             } => {
                 let reconcilers = [
                     (
@@ -139,10 +172,17 @@ impl fmt::Display for ScrimletReconcilersStatusDisplay<'_> {
                     ("mgd", &ReconcilerStatusDisplay(&mgd_reconciler)),
                     ("lldpd", &ReconcilerStatusDisplay(&lldpd_reconciler)),
                     ("uplinkd", &ReconcilerStatusDisplay(&uplinkd_reconciler)),
+                    ("ddmd", &ReconcilerStatusDisplay(&ddmd_reconciler)),
                 ];
                 write_lines(f, reconcilers, |f, (name, displayable)| {
                     writeln!(f, "{name} reconciler:")?;
-                    write!(IndentWriter::new(INDENT, f), "{displayable}")
+                    write_block(
+                        IndentWriter::new(INDENT, &mut *f),
+                        displayable,
+                    )?;
+                    // Add a blank line between the top-level sections,
+                    // including after the last one.
+                    writeln!(f)
                 })
             }
         }
@@ -166,18 +206,16 @@ where
     fn fmt(&self, mut f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ReconcilerStatus { current_status, last_completion } = self.0;
         writeln!(f, "current status:")?;
-        writeln!(
+        write_block(
             IndentWriter::new(INDENT, &mut f),
-            "{}",
             ReconcilerCurrentStatusDisplay(&current_status),
         )?;
 
         if let Some(last_completion) = last_completion {
             writeln!(f, "last completion:")?;
-            writeln!(
+            write_block(
                 IndentWriter::new(INDENT, f),
-                "{}",
-                ReconciliationCompletedStatusDisplay(&last_completion)
+                ReconciliationCompletedStatusDisplay(&last_completion),
             )?;
         } else {
             writeln!(f, "last completion: none")?;
@@ -265,7 +303,7 @@ where
             "completed at: {}",
             datetime_rfc3339_concise(completed_at_time)
         )?;
-        writeln!(f, "ran for {ran_for:?}")?;
+        writeln!(f, "ran for: {ran_for:?}")?;
         writeln!(f, "detailed status:")?;
         write!(IndentWriter::new(INDENT, f), "{}", status.display())
     }
@@ -363,6 +401,54 @@ impl fmt::Display for UplinkdReconcilerStatusDisplay<'_> {
     }
 }
 
+impl DisplayableStatus for DdmdReconcilerStatus {
+    type DisplayAdapter<'a>
+        = DdmdReconcilerStatusDisplay<'a>
+    where
+        Self: 'a;
+
+    /// Get a `fmt::Display`-able version of this status (e.g., for `omdb`).
+    fn display(&self) -> DdmdReconcilerStatusDisplay<'_> {
+        DdmdReconcilerStatusDisplay(self)
+    }
+}
+
+struct DdmdReconcilerStatusDisplay<'a>(&'a DdmdReconcilerStatus);
+
+impl fmt::Display for DdmdReconcilerStatusDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            DdmdReconcilerStatus::Failed(reason) => {
+                write!(f, "reconciliation failed: {reason}")
+            }
+            DdmdReconcilerStatus::Reconciled {
+                external_peers_address_objects,
+            } => {
+                let plural = if external_peers_address_objects.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                };
+                write!(
+                    f,
+                    "successfully reconciled {} external peer address object{plural}",
+                    external_peers_address_objects.len()
+                )?;
+
+                if !external_peers_address_objects.is_empty() {
+                    writeln!(f, ":")?;
+                    write_lines(
+                        &mut IndentWriter::new(INDENT, f),
+                        external_peers_address_objects,
+                        |f, addrobj| write!(f, "* {addrobj}"),
+                    )?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 impl DisplayableStatus for DpdReconcilerStatus {
     type DisplayAdapter<'a>
         = DpdReconcilerStatusDisplay<'a>
@@ -380,9 +466,8 @@ impl fmt::Display for DpdReconcilerStatusDisplay<'_> {
     fn fmt(&self, mut f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let DpdReconcilerStatus { port_settings_status, nat_status } = self.0;
         writeln!(f, "port settings:")?;
-        writeln!(
+        write_block(
             IndentWriter::new(INDENT, &mut f),
-            "{}",
             DpdPortReconcilerStatusDisplay(&port_settings_status),
         )?;
         writeln!(f, "NAT:")?;
@@ -443,12 +528,13 @@ impl fmt::Display for DpdPortReconcilerStatusDisplay<'_> {
                     writeln!(f, "clear failures: none")?;
                 } else {
                     writeln!(f, "clear failures:")?;
-                    let mut f = IndentWriter::new(INDENT, &mut f);
-                    for DpdPortOperationFailure { port_id, error } in
-                        clear_failures
-                    {
-                        writeln!(f, "* {port_id}: {error}")?;
-                    }
+                    write_lines(
+                        &mut IndentWriter::new(INDENT, &mut f),
+                        clear_failures,
+                        |f, DpdPortOperationFailure { port_id, error }| {
+                            write!(f, "* {port_id}: {error}")
+                        },
+                    )?;
                 }
                 if apply_failures.is_empty() {
                     write!(f, "apply failures: none")?;
@@ -519,7 +605,7 @@ impl fmt::Display for DpdNatReconcilerStatusDisplay<'_> {
                 if removed.is_empty() {
                     writeln!(f, "NAT entries removed: none")?;
                 } else {
-                    writeln!(f, "NAT entries removed")?;
+                    writeln!(f, "NAT entries removed:")?;
                     write_lines(
                         &mut IndentWriter::new(INDENT, &mut f),
                         removed,
@@ -533,7 +619,7 @@ impl fmt::Display for DpdNatReconcilerStatusDisplay<'_> {
                 if created.is_empty() {
                     writeln!(f, "NAT entries created: none")?;
                 } else {
-                    writeln!(f, "NAT entries created")?;
+                    writeln!(f, "NAT entries created:")?;
                     write_lines(
                         &mut IndentWriter::new(INDENT, &mut f),
                         created,
@@ -609,16 +695,14 @@ impl fmt::Display for MgdReconcilerStatusDisplay<'_> {
             static_routes_status,
         } = self.0;
         writeln!(f, "static routes:")?;
-        writeln!(
+        write_block(
             IndentWriter::new(INDENT, &mut f),
-            "{}",
-            MgdStaticRouteReconcilerStatusDisplay(&static_routes_status)
+            MgdStaticRouteReconcilerStatusDisplay(&static_routes_status),
         )?;
         writeln!(f, "BGP:")?;
-        writeln!(
+        write_block(
             IndentWriter::new(INDENT, &mut f),
-            "{}",
-            MgdBgpReconcilerStatusDisplay(&bgp_status)
+            MgdBgpReconcilerStatusDisplay(&bgp_status),
         )?;
         writeln!(f, "BFD:")?;
         write!(
@@ -683,11 +767,13 @@ impl fmt::Display for MgdBfdReconcilerStatusDisplay<'_> {
                     writeln!(f, "remove failures: none")?;
                 } else {
                     writeln!(f, "remove failures:")?;
-                    let mut f = IndentWriter::new(INDENT, &mut f);
-                    for MgdBfdOperationFailure { peer, error } in remove_failure
-                    {
-                        writeln!(f, "* {peer}: {error}")?;
-                    }
+                    write_lines(
+                        &mut IndentWriter::new(INDENT, &mut f),
+                        remove_failure,
+                        |f, MgdBfdOperationFailure { peer, error }| {
+                            write!(f, "* {peer}: {error}")
+                        },
+                    )?;
                 }
                 if add_failure.is_empty() {
                     write!(f, "add failures: none")?;
@@ -788,10 +874,9 @@ impl fmt::Display for MgdBgpReconcilerStatusDisplay<'_> {
                 writeln!(f, "reconciliation completed")?;
                 let mut f = IndentWriter::new(INDENT, f);
                 writeln!(f, "did change max paths: {did_change_max_paths}")?;
-                writeln!(
-                    f,
-                    "{}",
-                    MgdBgpReconcilerStatusOpCountDisplay(&counts)
+                write_block(
+                    &mut f,
+                    MgdBgpReconcilerStatusOpCountDisplay(&counts),
                 )?;
                 if errors.is_empty() {
                     write!(f, "errors: none")?;
@@ -897,5 +982,318 @@ impl fmt::Display for MgdStaticRouteReconcilerStatusDisplay<'_> {
                 Ok(())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::DateTime;
+    use omicron_test_utils::dev::test_cmds::OutputSnapshot;
+    use omicron_uuid_kinds::OmicronZoneUuid;
+    use sled_agent_types::early_networking::LldpAdminStatus;
+    use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
+    use std::net::IpAddr;
+    use std::net::Ipv4Addr;
+    use std::time::Duration;
+
+    fn nat_entry(last_octet: u8) -> DpdNatReconcilerStatusNatEntry {
+        DpdNatReconcilerStatusNatEntry {
+            external_ip: IpAddr::V4(Ipv4Addr::new(192, 0, 2, last_octet)),
+            first_port: 0,
+            last_port: 16383,
+        }
+    }
+
+    #[test]
+    fn test_reconciliation_completed_status_display() {
+        let status = ReconciliationCompletedStatus {
+            activation_reason: ReconcilerActivationReason::Startup,
+            completed_at_time: chrono::DateTime::from_timestamp(0, 0)
+                .expect("the epoch is a valid timestamp"),
+            ran_for: Duration::from_millis(1500),
+            activation_count: 3,
+            status: LldpdReconcilerStatus::SkippedConfigUpToDate,
+        };
+        expectorate::assert_contents(
+            "tests/output/reconciliation-completed-status.txt",
+            &ReconciliationCompletedStatusDisplay(&status).to_string(),
+        );
+    }
+
+    #[test]
+    fn test_dpd_nat_reconciler_status_display() {
+        let status = DpdNatReconcilerStatus::Complete {
+            unchanged: BTreeSet::from([OmicronZoneUuid::nil()]),
+            removed: vec![nat_entry(1), nat_entry(3)],
+            remove_failures: Vec::new(),
+            created: BTreeMap::from([(OmicronZoneUuid::nil(), nat_entry(2))]),
+            create_failures: BTreeMap::new(),
+        };
+        expectorate::assert_contents(
+            "tests/output/dpd-nat-reconciler-status.txt",
+            &DpdNatReconcilerStatusDisplay(&status).to_string(),
+        );
+    }
+
+    fn peer_ip(last_octet: u8) -> IpAddr {
+        IpAddr::V4(Ipv4Addr::new(198, 51, 100, last_octet))
+    }
+
+    fn port_failure(port_id: &str, error: &str) -> DpdPortOperationFailure {
+        DpdPortOperationFailure {
+            port_id: port_id.to_string(),
+            error: error.to_string(),
+        }
+    }
+
+    fn nat_failure(
+        last_octet: u8,
+        error: &str,
+    ) -> DpdNatReconcilerStatusNatEntryFailure {
+        DpdNatReconcilerStatusNatEntryFailure {
+            entry: nat_entry(last_octet),
+            error: error.to_string(),
+        }
+    }
+
+    fn bfd_failure(last_octet: u8, error: &str) -> MgdBfdOperationFailure {
+        MgdBfdOperationFailure {
+            peer: peer_ip(last_octet),
+            error: error.to_string(),
+        }
+    }
+
+    fn completed<T>(
+        status: T,
+    ) -> Option<Box<ReconciliationCompletedStatus<T>>> {
+        Some(Box::new(ReconciliationCompletedStatus {
+            activation_reason: ReconcilerActivationReason::Startup,
+            completed_at_time: DateTime::from_timestamp(0, 0)
+                .expect("the epoch is a valid timestamp"),
+            ran_for: Duration::from_millis(1500),
+            activation_count: 1,
+            status,
+        }))
+    }
+
+    fn populated_status() -> ScrimletReconcilersStatus {
+        ScrimletReconcilersStatus::Running {
+            dpd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Running(
+                    ReconcilerRunningStatus {
+                        activation_reason:
+                            ReconcilerActivationReason::PeriodicTimer,
+                        started_at_time: DateTime::from_timestamp(60, 0)
+                            .expect("one minute after the epoch is valid"),
+                        running_for: Duration::from_millis(250),
+                    },
+                ),
+                last_completion: completed(DpdReconcilerStatus {
+                    port_settings_status: DpdPortReconcilerStatus::Complete {
+                        unchanged: BTreeSet::from([
+                            "qsfp0".to_string(),
+                            "qsfp1".to_string(),
+                        ]),
+                        cleared: BTreeSet::from(["qsfp2".to_string()]),
+                        clear_failures: vec![
+                            port_failure("qsfp3", "clear failed"),
+                            port_failure("qsfp4", "clear failed again"),
+                        ],
+                        applied: BTreeSet::from(["qsfp5".to_string()]),
+                        apply_failures: vec![
+                            port_failure("qsfp6", "no"),
+                            port_failure("qsfp7", "nope"),
+                        ],
+                    },
+                    nat_status: DpdNatReconcilerStatus::Complete {
+                        unchanged: BTreeSet::from([
+                            OmicronZoneUuid::from_u128(1),
+                            OmicronZoneUuid::from_u128(2),
+                        ]),
+                        removed: vec![nat_entry(1), nat_entry(3)],
+                        remove_failures: vec![
+                            nat_failure(4, "remove failed"),
+                            nat_failure(5, "remove failed again"),
+                        ],
+                        created: BTreeMap::from([(
+                            OmicronZoneUuid::from_u128(3),
+                            nat_entry(2),
+                        )]),
+                        create_failures: BTreeMap::from([
+                            (
+                                OmicronZoneUuid::from_u128(4),
+                                nat_failure(6, "create failed"),
+                            ),
+                            (
+                                OmicronZoneUuid::from_u128(5),
+                                nat_failure(7, "create failed again"),
+                            ),
+                        ]),
+                    },
+                }),
+            },
+            mgd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: completed(MgdReconcilerStatus {
+                    static_routes_status:
+                        MgdStaticRouteReconcilerStatus::Complete {
+                            unchanged: 4,
+                            delete_v4_result: Err("delete failed".to_string()),
+                            add_v4_result: Ok(2),
+                            delete_v6_result: Ok(3),
+                            add_v6_result: Ok(5),
+                        },
+                    bgp_status: MgdBgpReconcilerStatus::Complete {
+                        counts: MgdBgpReconcilerStatusOpCount {
+                            routers_created: 1,
+                            numbered_peers_updated: 2,
+                            numbered_peers_deleted: 1,
+                            ..Default::default()
+                        },
+                        did_change_max_paths: true,
+                        errors: vec![
+                            "bgp failed".to_string(),
+                            "bgp failed again".to_string(),
+                        ],
+                    },
+                    bfd_status: MgdBfdReconcilerStatus::Complete {
+                        unchanged: BTreeSet::from([peer_ip(1), peer_ip(2)]),
+                        remove_success: vec![peer_ip(3)],
+                        remove_failure: vec![
+                            bfd_failure(4, "remove failed"),
+                            bfd_failure(5, "remove failed again"),
+                        ],
+                        add_success: vec![peer_ip(6)],
+                        add_failure: vec![
+                            bfd_failure(7, "add failed"),
+                            bfd_failure(8, "add failed again"),
+                        ],
+                    },
+                }),
+            },
+            uplinkd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: completed(
+                    UplinkdReconcilerStatus::Reconciled {
+                        ports: BTreeMap::from([
+                            (
+                                "qsfp0".to_string(),
+                                vec![
+                                    "192.0.2.10/24".to_string(),
+                                    "2001:db8::10/64".to_string(),
+                                ],
+                            ),
+                            (
+                                "qsfp1".to_string(),
+                                vec!["192.0.2.11/24".to_string()],
+                            ),
+                        ]),
+                    },
+                ),
+            },
+            lldpd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: completed(LldpdReconcilerStatus::Reconciled {
+                    ports: BTreeMap::from([
+                        ("qsfp0".to_string(), LldpAdminStatus::Enabled),
+                        ("qsfp1".to_string(), LldpAdminStatus::Disabled),
+                    ]),
+                }),
+            },
+            ddmd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: completed(DdmdReconcilerStatus::Reconciled {
+                    external_peers_address_objects: BTreeSet::from([
+                        "tfportqsfp0_0/ll".to_string(),
+                        "tfportqsfp1_0/ll".to_string(),
+                    ]),
+                }),
+            },
+        }
+    }
+
+    fn empty_status() -> ScrimletReconcilersStatus {
+        ScrimletReconcilersStatus::Running {
+            dpd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: completed(DpdReconcilerStatus {
+                    port_settings_status: DpdPortReconcilerStatus::Complete {
+                        unchanged: BTreeSet::new(),
+                        cleared: BTreeSet::new(),
+                        clear_failures: Vec::new(),
+                        applied: BTreeSet::new(),
+                        apply_failures: Vec::new(),
+                    },
+                    nat_status: DpdNatReconcilerStatus::Complete {
+                        unchanged: BTreeSet::new(),
+                        removed: Vec::new(),
+                        remove_failures: Vec::new(),
+                        created: BTreeMap::new(),
+                        create_failures: BTreeMap::new(),
+                    },
+                }),
+            },
+            mgd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: completed(MgdReconcilerStatus {
+                    static_routes_status:
+                        MgdStaticRouteReconcilerStatus::Complete {
+                            unchanged: 0,
+                            delete_v4_result: Ok(0),
+                            add_v4_result: Ok(0),
+                            delete_v6_result: Ok(0),
+                            add_v6_result: Ok(0),
+                        },
+                    bgp_status: MgdBgpReconcilerStatus::Complete {
+                        counts: MgdBgpReconcilerStatusOpCount::default(),
+                        did_change_max_paths: false,
+                        errors: Vec::new(),
+                    },
+                    bfd_status: MgdBfdReconcilerStatus::Complete {
+                        unchanged: BTreeSet::new(),
+                        remove_success: Vec::new(),
+                        remove_failure: Vec::new(),
+                        add_success: Vec::new(),
+                        add_failure: Vec::new(),
+                    },
+                }),
+            },
+            uplinkd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: None,
+            },
+            lldpd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: completed(LldpdReconcilerStatus::Reconciled {
+                    ports: BTreeMap::new(),
+                }),
+            },
+            ddmd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: completed(DdmdReconcilerStatus::Reconciled {
+                    external_peers_address_objects: BTreeSet::new(),
+                }),
+            },
+        }
+    }
+
+    #[test]
+    fn test_scrimlet_reconcilers_status_display() {
+        let cases = [
+            ("all fields populated", populated_status()),
+            ("all fields empty", empty_status()),
+        ];
+        let mut snapshot = OutputSnapshot::new();
+        for (name, status) in cases {
+            snapshot.push(
+                format_args!("CASE: {name}"),
+                ScrimletReconcilersStatusDisplay(&status),
+                "",
+            );
+        }
+        snapshot
+            .assert_contents("tests/output/scrimlet-reconcilers-status.txt");
     }
 }

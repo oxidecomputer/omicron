@@ -53,6 +53,7 @@ mod schema;
 mod scim;
 mod silo_users;
 mod silos;
+mod sled_bp_availability;
 mod sleds;
 mod snapshots;
 mod ssh_keys;

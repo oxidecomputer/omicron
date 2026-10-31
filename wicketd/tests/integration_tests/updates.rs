@@ -4,7 +4,9 @@
 
 //! Tests for wicketd updates.
 
-use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeSet, process::ExitCode, sync::Arc, time::Duration,
+};
 
 use super::setup::{
     WicketdTestContext, assert_client_error_message, wait_for_sled0_progress,
@@ -15,6 +17,7 @@ use clap::Parser;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
 use http::StatusCode;
+use iddqd::{IdOrdMap, id_ord_map};
 use installinator::HOST_PHASE_2_FILE_NAME;
 use maplit::btreeset;
 use omicron_common::update::{
@@ -34,11 +37,10 @@ use tokio::sync::oneshot;
 use tufaceous::{Repository, edit::RepositoryEditor};
 use tufaceous_artifact::KnownArtifactTags;
 use wicket::OutputKind;
+use wicket_cli_types::rack_update::{RackUpdateStateRollup, RackUpdateStatus};
 use wicket_common::{
     inventory::{SpIdentifier, SpType},
-    rack_update::{
-        ExitMessage, RackUpdateStatus, StartUpdateOptions, UpdateState,
-    },
+    rack_update::StartUpdateOptions,
     update_events::{StepEventKind, UpdateComponent},
 };
 use wicketd::{RunningUpdateState, StartUpdateError};
@@ -49,6 +51,7 @@ use wicketd_commission_types_versions::latest::update::{
     self, ClearUpdateStateParams, ClearUpdateStateResponse, StepOutcome,
     UpdateStepStatus, UpdateTargets,
 };
+use wicketd_commission_types_versions::{v1, v4};
 
 /// The list of zone file names defined in Tufaceous's `FAKE_ZONES`.
 static FAKE_NON_SEMVER_ZONE_FILE_NAMES: &[&str] = &[
@@ -89,18 +92,6 @@ async fn test_updates() {
         .await
         .expect("bytes read and archived");
 
-    // List out the artifacts in the repository.
-    let expected_artifact_ids = {
-        let mut response = wicketd_testctx
-            .wicketd_client
-            .get_artifacts_and_event_reports()
-            .await
-            .expect("get_artifacts_and_event_reports succeeded")
-            .into_inner();
-        response.artifacts.sort_unstable();
-        response.artifacts
-    };
-
     let target_sp = SpIdentifier { typ: SpType::Sled, slot: 0 };
 
     // Ensure wicketd knows our target_sp (which is simulated) is online and
@@ -136,23 +127,28 @@ async fn test_updates() {
         }
     }
 
+    let expected_repository = v1::update::RepositoryDescription {
+        system_version: Some(Version::new(1, 0, 0)),
+    };
+
     {
-        // Before starting, all artifacts should be present, no components should be present,
-        // and the state should be NotStarted.
-        let mut status = get_rack_update_status(&wicketd_testctx, &[]).await;
-        status.artifacts.sort_unstable();
+        // Before starting, the repository should be present, no SP should
+        // have progress, and the state should be NotStarted.
+        let status = get_rack_update_status(&wicketd_testctx, &[])
+            .await
+            .expect_exit_code(EXIT_CODE_NOT_STARTED);
         assert_eq!(
-            expected_artifact_ids, status.artifacts,
-            "all uploaded artifacts appear in status"
+            status.update_progress.repository, expected_repository,
+            "the uploaded repository's system version appears in status"
         );
         assert_eq!(
-            status.state,
-            UpdateState::NotStarted,
+            status.rollup(),
+            RackUpdateStateRollup::NotStarted,
             "no update started yet"
         );
         assert!(
-            status.components.is_empty(),
-            "no component events before update starts"
+            status.update_progress.sps.is_empty(),
+            "no SP progress before update starts"
         );
     }
 
@@ -168,17 +164,29 @@ async fn test_updates() {
         .await
         .expect("update started successfully");
 
+    const POLL_INTERVAL: Duration = Duration::from_millis(100);
+
     let terminal_event = 'outer: loop {
-        // This loop tests the failure path, so expect either InProgress or Failed.
-        let status = get_rack_update_status(&wicketd_testctx, &[]).await;
-        assert!(
-            matches!(
-                status.state,
-                UpdateState::InProgress | UpdateState::Failed
-            ),
-            "unexpected state during update: {:?}",
-            status.state,
-        );
+        let output = get_rack_update_status(&wicketd_testctx, &[]).await;
+        let rollup = output.status.rollup();
+        let expected_exit_code = match rollup {
+            // wicketd puts an empty event buffer in place before
+            // post_start_update returns, so an early poll can legitimately
+            // report `NotStarted`. This is a transient state.
+            RackUpdateStateRollup::NotStarted => EXIT_CODE_NOT_STARTED,
+            RackUpdateStateRollup::InProgress => EXIT_CODE_IN_PROGRESS,
+            RackUpdateStateRollup::Failed => EXIT_CODE_FAILED,
+            RackUpdateStateRollup::Completed
+            | RackUpdateStateRollup::Aborted => {
+                panic!("unexpected rollup during update: {rollup:?}")
+            }
+        };
+        output.expect_exit_code(expected_exit_code);
+
+        if rollup == RackUpdateStateRollup::NotStarted {
+            tokio::time::sleep(POLL_INTERVAL).await;
+            continue;
+        }
 
         let event_report = wicketd_testctx
             .wicketd_client
@@ -195,7 +203,7 @@ async fn test_updates() {
             }
         }
 
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(POLL_INTERVAL).await;
     };
 
     match terminal_event.kind {
@@ -211,31 +219,92 @@ async fn test_updates() {
 
     {
         // After the failure, status should reflect Failed for sled 0.
-        let status = get_rack_update_status(&wicketd_testctx, &[]).await;
-        assert_eq!(status.state, UpdateState::Failed);
+        let status = get_rack_update_status(&wicketd_testctx, &[])
+            .await
+            .expect_exit_code(EXIT_CODE_FAILED);
+        assert_eq!(status.rollup(), RackUpdateStateRollup::Failed);
         let sled0 = status
-            .components
-            .iter()
-            .find(|c| c.id == target_sp)
-            .expect("sled 0 should appear in components");
-        assert_eq!(sled0.state, UpdateState::Failed);
+            .update_progress
+            .sps
+            .get(&target_sp)
+            .expect("sled 0 should appear in update progress");
+        let v4::update::UpdateState::Failed { message, elapsed } =
+            &sled0.progress.state
+        else {
+            panic!("sled 0 should be Failed: {:?}", sled0.progress.state);
+        };
+        assert_eq!(
+            message, "Get host type: Unknown host type i86pc",
+            "the failed SP carries the folded operator-facing message",
+        );
         assert!(
-            matches!(&sled0.exit_message, Some(ExitMessage { message, .. }) if !message.is_empty()),
-            "failed component should have a non-empty exit message",
+            elapsed.is_some(),
+            "a failure reported by the engine (not inferred) records elapsed time",
+        );
+
+        let (description, step_message, step_causes) = sled0
+            .progress
+            .steps
+            .iter()
+            .find_map(|step| match &step.status {
+                v1::update::UpdateStepStatus::Failed { message, causes } => {
+                    Some((&step.description, message, causes))
+                }
+                v1::update::UpdateStepStatus::NotStarted
+                | v1::update::UpdateStepStatus::Running { progress: _ }
+                | v1::update::UpdateStepStatus::Completed { outcome: _ }
+                | v1::update::UpdateStepStatus::Aborted { message: _ }
+                | v1::update::UpdateStepStatus::WillNotBeRun { reason: _ } => {
+                    None
+                }
+            })
+            .expect("a failed SP has a failed top-level step");
+        assert_eq!(
+            description, "Get host type",
+            "the failed step is the one named in the rollup message",
+        );
+        assert_eq!(
+            step_message, "Unknown host type i86pc",
+            "the failed step carries the error on its own",
+        );
+        assert_eq!(
+            step_causes,
+            &Vec::<String>::new(),
+            "this failure has no causes below the message",
         );
 
         // If we filter to sled 0 only, still show Failed.
         let filtered =
-            get_rack_update_status(&wicketd_testctx, &["--sled", "0"]).await;
-        assert_eq!(filtered.state, UpdateState::Failed);
-        assert_eq!(filtered.components.len(), 1);
-        assert_eq!(filtered.components[0].state, UpdateState::Failed);
+            get_rack_update_status(&wicketd_testctx, &["--sled", "0"])
+                .await
+                .expect_exit_code(EXIT_CODE_FAILED);
+        assert_eq!(
+            filtered.rollup(),
+            RackUpdateStateRollup::Failed,
+            "selecting the failed sled still reports a failed rack update",
+        );
+        assert_eq!(
+            filtered.update_progress.sps,
+            id_ord_map! { sled0.clone() },
+            "selecting sled 0 leaves exactly sled 0's (terminal, so unchanged) \
+             progress",
+        );
 
-        // If we filter to sled 1 (not part of the update), show NotStarted and no components.
+        // If we filter to sled 1 (not part of the update), show NotStarted and
+        // no SP progress.
         let filtered =
-            get_rack_update_status(&wicketd_testctx, &["--sled", "1"]).await;
-        assert_eq!(filtered.state, UpdateState::NotStarted);
-        assert!(filtered.components.is_empty());
+            get_rack_update_status(&wicketd_testctx, &["--sled", "1"])
+                .await
+                .expect_exit_code(EXIT_CODE_NOT_STARTED);
+        assert_eq!(
+            filtered.rollup(),
+            RackUpdateStateRollup::NotStarted,
+            "a sled with no update of its own rolls up to not started",
+        );
+        assert!(
+            filtered.update_progress.sps.is_empty(),
+            "sled 1 was never updated, so no progress survives the selection",
+        );
     }
 
     // The commission API will report this as a Failed progress entry carrying a
@@ -252,12 +321,18 @@ async fn test_updates() {
     // * The step fails because the simulated gimlet reports model
     //   "i86pc" (`FAKE_GIMLET_MODEL`), which is not a known Oxide host
     //   type.
+    let update::UpdateState::Failed { message, elapsed } =
+        &entry.progress.state
+    else {
+        panic!("sled 0 reached Failed: {:?}", entry.progress.state);
+    };
     assert_eq!(
-        entry.progress.state,
-        update::UpdateState::Failed {
-            message: "Get host type: Unknown host type i86pc".to_string(),
-        },
+        message, "Get host type: Unknown host type i86pc",
         "the failed update carries the expected operator-facing message",
+    );
+    assert!(
+        elapsed.is_some(),
+        "a failure reported by the engine (not inferred) records elapsed time",
     );
 
     // Try starting the update again -- this should fail because we require that
@@ -318,22 +393,23 @@ async fn test_updates() {
     }
 
     {
-        // After clearing, status should show NotStarted and no components.
-        // Uploaded artifacts should be unaffected by the clear.
-        let mut status = get_rack_update_status(&wicketd_testctx, &[]).await;
+        // After clearing, status should show NotStarted and no SP progress. The
+        // uploaded repository should be unaffected by the clear.
+        let status = get_rack_update_status(&wicketd_testctx, &[])
+            .await
+            .expect_exit_code(EXIT_CODE_NOT_STARTED);
         assert_eq!(
-            status.state,
-            UpdateState::NotStarted,
+            status.rollup(),
+            RackUpdateStateRollup::NotStarted,
             "update state cleared"
         );
         assert!(
-            status.components.is_empty(),
-            "no components should be present"
+            status.update_progress.sps.is_empty(),
+            "no SP progress should be present"
         );
-        status.artifacts.sort_unstable();
         assert_eq!(
-            expected_artifact_ids, status.artifacts,
-            "artifacts should be unaffected by clear"
+            status.update_progress.repository, expected_repository,
+            "the repository should be unaffected by the clear"
         );
     }
 
@@ -353,10 +429,33 @@ async fn test_updates() {
     wicketd_testctx.teardown().await;
 }
 
+// Expected exit codes for `rack-update status`.
+const EXIT_CODE_COMPLETED: u8 = 0;
+const EXIT_CODE_NOT_STARTED: u8 = 4;
+const EXIT_CODE_IN_PROGRESS: u8 = 5;
+const EXIT_CODE_FAILED: u8 = 6;
+
+struct RackUpdateStatusOutput {
+    exit_code: ExitCode,
+    status: RackUpdateStatus,
+}
+
+impl RackUpdateStatusOutput {
+    #[track_caller]
+    fn expect_exit_code(self, expected: u8) -> RackUpdateStatus {
+        assert_eq!(
+            self.exit_code,
+            ExitCode::from(expected),
+            "rack-update status should exit with code {expected}"
+        );
+        self.status
+    }
+}
+
 async fn get_rack_update_status(
     wicketd_testctx: &WicketdTestContext,
     extra_args: &[&str],
-) -> RackUpdateStatus {
+) -> RackUpdateStatusOutput {
     let args: Vec<&str> = ["rack-update", "status", "--json"]
         .into_iter()
         .chain(extra_args.iter().copied())
@@ -368,11 +467,15 @@ async fn get_rack_update_status(
         stdout: &mut stdout,
         stderr: &mut stderr,
     };
-    wicket::exec_with_args(wicketd_testctx.wicketd_addrs, args, output)
-        .await
-        .expect("wicket rack-update status failed to run");
-    serde_json::from_slice(&stdout)
-        .expect("rack-update status --json output is valid JSON")
+    let exit_code =
+        wicket::exec_with_args(wicketd_testctx.wicketd_addrs, args, output)
+            .await
+            .expect("wicket rack-update status ran");
+    let status =
+        oxide_versioned_envelope::read_json::<RackUpdateStatus>(&stdout)
+            .expect("rack-update status --json output is a rack-update status")
+            .into_value();
+    RackUpdateStatusOutput { exit_code, status }
 }
 
 #[tokio::test]
@@ -719,7 +822,21 @@ async fn test_update_races() {
         .await
         .expect("get_update_progress succeeded")
         .into_inner();
-    assert!(progress.sps.is_empty(), "no updates in progress yet");
+    assert_eq!(
+        progress,
+        update::GetUpdateProgressResponse {
+            repository: update::RepositoryDescription {
+                system_version: Some(Version::new(1, 0, 0)),
+            },
+            sps: IdOrdMap::new(),
+        },
+        "progress reports the system version from the fake manifest and no \
+         updates yet",
+    );
+    assert_eq!(
+        progress.repository, repo,
+        "GET /update-progress and GET /repository agree on the repository",
+    );
 
     // Now start an update.
     let sp = SpIdentifier { slot: 0, typ: SpType::Sled };
@@ -784,16 +901,16 @@ async fn test_update_races() {
         &wicketd_testctx,
         "sled 0 reached Running with its single step running",
         |p| {
-            p.progress.state == update::UpdateState::Running
+            matches!(p.progress.state, update::UpdateState::Running { .. })
                 && p.progress.innermost_running_steps().count() == 1
         },
     )
     .await;
-    assert_eq!(
-        entry.progress.state,
-        update::UpdateState::Running,
-        "sled 0 rolls up to Running",
-    );
+    let update::UpdateState::Running { elapsed: first_elapsed } =
+        entry.progress.state
+    else {
+        panic!("sled 0 rolls up to Running: {:?}", entry.progress.state);
+    };
     assert_eq!(
         entry.progress.steps.len(),
         1,
@@ -810,6 +927,24 @@ async fn test_update_races() {
         running[0].description.contains("Fake step"),
         "running step is the fake step: {}",
         running[0].description,
+    );
+
+    // The elapsed time must monotonically increase while the update stays
+    // blocked.
+    let later = wait_for_sled0_progress(
+        &wicketd_testctx,
+        "sled 0 still Running",
+        |p| matches!(p.progress.state, update::UpdateState::Running { .. }),
+    )
+    .await;
+    let update::UpdateState::Running { elapsed: later_elapsed } =
+        later.progress.state
+    else {
+        panic!("sled 0 still rolls up to Running: {:?}", later.progress.state);
+    };
+    assert!(
+        later_elapsed >= first_elapsed,
+        "elapsed monotonically increases: {later_elapsed:?} >= {first_elapsed:?}",
     );
 
     // Unblock the update, letting it run to completion.
@@ -834,24 +969,43 @@ async fn test_update_races() {
     let entry = wait_for_sled0_progress(
         &wicketd_testctx,
         "sled 0 reached Completed",
-        |p| p.progress.state == update::UpdateState::Completed,
+        |p| matches!(p.progress.state, update::UpdateState::Completed { .. }),
     )
     .await;
-    assert_eq!(
-        entry.progress,
-        update::UpdateProgress {
-            state: update::UpdateState::Completed,
-            steps: vec![update::UpdateStep {
-                description: "Fake step that waits for receiver to resolve"
-                    .to_string(),
-                status: UpdateStepStatus::Completed {
-                    outcome: StepOutcome::Success { message: None },
-                },
-                children: Vec::new(),
-            }],
-        },
-        "the fake update rolls up to Completed with its single clean step",
+    let update::UpdateState::Completed { elapsed } = entry.progress.state
+    else {
+        panic!("sled 0 reached Completed: {:?}", entry.progress.state);
+    };
+    assert!(
+        elapsed.is_some_and(|elapsed| elapsed >= later_elapsed),
+        "a reported completion records elapsed time at least as large as \
+         the last running observation ({later_elapsed:?}): {elapsed:?}",
     );
+    assert_eq!(
+        entry.progress.steps,
+        vec![update::UpdateStep {
+            description: "Fake step that waits for receiver to resolve"
+                .to_string(),
+            status: UpdateStepStatus::Completed {
+                outcome: StepOutcome::Success { message: None },
+            },
+            children: Vec::new(),
+        }],
+        "the fake update completes with its single clean step",
+    );
+
+    // The update has already run to completion above, so this returns the
+    // completed state without any further waiting.
+    {
+        let status = get_rack_update_status(&wicketd_testctx, &[])
+            .await
+            .expect_exit_code(EXIT_CODE_COMPLETED);
+        assert_eq!(
+            status.rollup(),
+            RackUpdateStateRollup::Completed,
+            "the completed fake update rolls up to completed",
+        );
+    }
 
     // sled 0's update completed, so it reports as cleared and no_update_data is
     // empty.
@@ -899,7 +1053,16 @@ async fn test_update_races() {
         .await
         .expect("get_update_progress succeeded")
         .into_inner();
-    assert!(progress.sps.is_empty(), "update progress cleared for sled 0");
+    assert_eq!(
+        progress,
+        update::GetUpdateProgressResponse {
+            repository: update::RepositoryDescription {
+                system_version: Some(Version::new(1, 0, 0)),
+            },
+            sps: IdOrdMap::new(),
+        },
+        "update progress cleared for sled 0, and the repository left in place",
+    );
 
     let event_buffer = wicketd_testctx
         .wicketd_client
@@ -954,6 +1117,23 @@ async fn test_update_races() {
     assert!(
         event_buffer.step_events.is_empty(),
         "event buffer is empty: {event_buffer:#?}"
+    );
+
+    let progress = wicketd_testctx
+        .commission_client
+        .get_update_progress()
+        .await
+        .expect("get_update_progress succeeded")
+        .into_inner();
+    assert_eq!(
+        progress,
+        update::GetUpdateProgressResponse {
+            repository: update::RepositoryDescription {
+                system_version: Some(Version::new(1, 0, 0)),
+            },
+            sps: IdOrdMap::new(),
+        },
+        "uploading a repository clears update progress",
     );
 
     wicketd_testctx.teardown().await;

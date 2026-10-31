@@ -30,6 +30,7 @@ use ref_cast::RefCast;
 use uuid::Uuid;
 
 use super::DataStore;
+use crate::db::model::to_db_typed_uuid;
 
 impl DataStore {
     pub async fn project_image_list(
@@ -54,7 +55,9 @@ impl DataStore {
             ),
         }
         .filter(project_dsl::time_deleted.is_null())
-        .filter(project_dsl::project_id.eq(authz_project.id()))
+        .filter(
+            project_dsl::project_id.eq(to_db_typed_uuid(authz_project.id())),
+        )
         .select(ProjectImage::as_select())
         .load_async::<ProjectImage>(
             &*self.pool_connection_authorized(opctx).await?,
@@ -237,7 +240,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_silo_image.id()))
             .set((
-                dsl::project_id.eq(Some(authz_project.id())),
+                dsl::project_id.eq(Some(to_db_typed_uuid(authz_project.id()))),
                 dsl::time_modified.eq(Utc::now()),
             ))
             .returning(Image::as_returning())

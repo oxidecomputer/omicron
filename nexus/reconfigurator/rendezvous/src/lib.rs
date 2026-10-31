@@ -13,7 +13,8 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::model::SledBlueprintAvailabilityInput;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetDisposition;
-use nexus_types::internal_api::background::BlueprintRendezvousStats;
+use nexus_types::internal_api::background::DatasetRendezvousStats;
+use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousStats;
 use nexus_types::inventory::Collection;
 
 mod crucible_dataset;
@@ -22,12 +23,37 @@ mod local_storage_dataset;
 mod local_storage_unencrypted_dataset;
 mod sled_blueprint_availability;
 
-pub async fn reconcile_blueprint_rendezvous_tables(
+/// Reconcile the `rendezvous_sled_bp_availability` table for the given
+/// blueprint.
+///
+/// This is a pure projection of the target blueprint and does not depend on
+/// inventory.
+pub async fn reconcile_sled_blueprint_availability(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    blueprint: &Blueprint,
+) -> anyhow::Result<SledBlueprintAvailabilityRendezvousStats> {
+    let sled_inputs =
+        SledBlueprintAvailabilityInput::all_from_blueprint(blueprint);
+    sled_blueprint_availability::reconcile(
+        opctx,
+        datastore,
+        blueprint.id,
+        sled_inputs,
+    )
+    .await
+}
+
+/// Reconcile the dataset rendezvous tables for the given blueprint.
+///
+/// These need inventory to confirm that a dataset exists before other
+/// subsystems may use it.
+pub async fn reconcile_dataset_rendezvous_tables(
     opctx: &OpContext,
     datastore: &DataStore,
     blueprint: &Blueprint,
     inventory: &Collection,
-) -> anyhow::Result<BlueprintRendezvousStats> {
+) -> anyhow::Result<DatasetRendezvousStats> {
     let inventory_dataset_ids = inventory
         .sled_agents
         .iter()
@@ -79,23 +105,11 @@ pub async fn reconcile_blueprint_rendezvous_tables(
         )
         .await?;
 
-    let sled_inputs =
-        SledBlueprintAvailabilityInput::all_from_blueprint(blueprint);
-    let sled_blueprint_availability =
-        sled_blueprint_availability::reconcile_sled_blueprint_availability(
-            opctx,
-            datastore,
-            blueprint.id,
-            sled_inputs,
-        )
-        .await?;
-
-    Ok(BlueprintRendezvousStats {
+    Ok(DatasetRendezvousStats {
         debug_dataset,
         crucible_dataset,
         local_storage_dataset,
         local_storage_unencrypted_dataset,
-        sled_blueprint_availability,
     })
 }
 

@@ -498,7 +498,7 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
         recovery: &SagaRecoveryInProgress,
     ) -> Result<BoxFuture<'static, Result<(), Error>>, Error> {
         let datastore = &self.datastore;
-        let saga_id: SagaId = saga.id.into();
+        let saga_id = saga.id;
 
         let log_events = datastore
             .saga_fetch_log_batched(&self.saga_recovery_opctx, saga.id)
@@ -564,7 +564,7 @@ async fn list_sagas_in_progress(
         .internal_context("listing in-progress sagas for saga recovery")
         .map(|list| {
             list.into_iter()
-                .map(|saga| (saga.id.into(), saga))
+                .map(|saga| (saga.id, saga))
                 .collect::<BTreeMap<SagaId, nexus_db_model::Saga>>()
         });
     match &result {
@@ -638,7 +638,6 @@ mod test {
         SagaDag, SagaId, SagaName, SagaResult, SagaType, SecClient,
         new_action_noop_undo,
     };
-    use uuid::Uuid;
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
@@ -764,7 +763,7 @@ mod test {
         uctx: &Arc<TestContext>,
         sec_client: &SecClient,
     ) -> (SagaId, SagaResult) {
-        let saga_id = SagaId(Uuid::new_v4());
+        let saga_id = SagaId::new_v4();
         let future = sec_client
             .saga_create(
                 saga_id,
@@ -985,7 +984,7 @@ mod test {
         datastore: &DataStore,
         sec_id: db::SecId,
     ) -> SagaId {
-        let saga_id = SagaId(Uuid::new_v4());
+        let saga_id = SagaId::new_v4();
         let params = steno::SagaCreateParams {
             id: saga_id,
             name: SagaName::new("test-saga"),

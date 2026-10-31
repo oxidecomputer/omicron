@@ -24,7 +24,7 @@ use omicron_common::backoff::BackoffError;
 use oximeter::Sample;
 use oximeter::types::ProducerResultsItem;
 use oximeter_db::Client;
-use oximeter_db::DbWrite;
+use oximeter_db::User;
 use oximeter_types::producer::ProducerDetails;
 use qorb::claim::Handle;
 use qorb::policy::Policy;
@@ -86,7 +86,6 @@ impl OximeterAgent {
         // cluster as well as a single-node installation.
         cluster_resolver: BoxedResolver,
         log: &Logger,
-        replicated: bool,
     ) -> Result<Self, Error> {
         let collection_task_wrapper = CollectionTaskWrapper::new();
 
@@ -99,40 +98,26 @@ impl OximeterAgent {
         let insertion_log_cluster =
             log.new(o!("component" => "results-sink-cluster"));
 
-        // Determine the version of the database.
+        // Check that the database is present and at the expected version.
         //
-        // There are three cases
-        //
-        // - The database exists and is at the expected version. Continue in
-        // this case.
-        //
-        // - The database exists and is at a lower-than-expected version. We
-        // fail back to the caller here, which will retry indefinitely until the
-        // DB has been updated.
-        //
-        // - The DB doesn't exist at all. This reports a version number of 0. We
-        // need to create the DB here, at the latest version. This is used in
-        // fresh installations and tests.
+        // The `writer` user here doesn't have permission to create the
+        // database, so this will always require that someone else do that.
+        // That's the `clickhouse-admin` server in production. The standalone
+        // constructor _will_ do the initialization.
         let client = Client::new_with_resolver(
+            User::Writer,
             native_resolver,
             "clickhouse-inserter",
             &log,
         );
-        match client.check_db_is_at_expected_version().await {
-            Ok(_) => {}
-            Err(oximeter_db::Error::DatabaseVersionMismatch {
-                found: 0,
-                ..
-            }) => {
-                debug!(log, "oximeter database does not exist, creating");
-                client
-                    .initialize_db_with_version(
-                        replicated,
-                        oximeter_db::OXIMETER_VERSION,
-                    )
-                    .await?;
-            }
-            Err(e) => return Err(Error::from(e)),
+        if let Err(err) = client.check_db_is_at_expected_version().await {
+            warn!(
+                log,
+                "oximeter database is not present or not at the \
+                expected version";
+                "error" => InlineErrorChain::new(&err),
+            );
+            return Err(Error::from(err));
         }
 
         // Set up tracking of statistics about ourselves.
@@ -185,6 +170,7 @@ impl OximeterAgent {
         };
 
         let cluster_client = Client::new_with_pool_policy(
+            User::Writer,
             cluster_resolver,
             "replicated-clickhouse-inserter",
             claim_policy,
@@ -277,13 +263,24 @@ impl OximeterAgent {
                     "Must provide explicit IP address in standalone mode"
                 )));
             };
-            let client = Client::new(address, &log);
-            let replicated = client.is_oximeter_cluster().await?;
-            if !replicated {
-                client.init_single_node_db().await?;
-            } else {
-                client.init_replicated_db().await?;
-            }
+            // Standalone bootstraps its own schema. The `writer` user is
+            // insert-only, so create and version the database as the admin user.
+            // This relies on standalone running against a local ClickHouse, since
+            // the admin user is restricted to loopback in the server config. We
+            // use `initialize_db_with_version` (rather than `init_*_db`) so the
+            // database records its version, matching how clickhouse-admin
+            // initializes it in production.
+            let admin = Client::new(User::Admin, address, &log);
+            let replicated = admin.is_oximeter_cluster().await?;
+            admin
+                .initialize_db_with_version(
+                    replicated,
+                    oximeter_db::OXIMETER_VERSION,
+                )
+                .await?;
+
+            // Insert data as the (insert-only) writer, matching production.
+            let client = Client::new(User::Writer, address, &log);
 
             let sink_stats = Arc::new(self_stats::CollectorSinkStats::new(
                 "standalone".into(),
@@ -741,6 +738,7 @@ async fn claim_nexus_with_backoff(
 mod tests {
     use super::OximeterAgent;
     use super::ProducerEndpoint;
+    use crate::DbConfig;
     use crate::self_stats::FailureReason;
     use chrono::Utc;
     use dropshot::HttpError;
@@ -749,6 +747,7 @@ mod tests {
     use dropshot::RequestContext;
     use dropshot::ServerBuilder;
     use omicron_common::api::internal::nexus::ProducerKind;
+    use omicron_test_utils::dev::clickhouse::ClickHouseDeployment;
     use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::poll::wait_for_condition;
     use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
@@ -756,7 +755,10 @@ mod tests {
     use oximeter::Sample;
     use oximeter::types::ProducerResults;
     use oximeter::types::ProducerResultsItem;
+    use oximeter_db::Client;
+    use oximeter_db::User;
     use oximeter_types::producer::ProducerDetails;
+    use qorb::resolvers::fixed::FixedResolver;
     use reqwest::StatusCode;
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;
@@ -1448,6 +1450,108 @@ mod tests {
         .await
         .expect("collector collected >0 samples");
 
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_with_id_requires_external_db_init() {
+        let logctx = test_setup_log("test_with_id_requires_external_db_init");
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
+            .await
+            .expect("Failed to start ClickHouse");
+        let native: SocketAddr = db.native_address().into();
+        let db_config = DbConfig {
+            address: Some(native),
+            batch_size: 1000,
+            batch_interval: 1,
+        };
+
+        // The database has not been created yet.
+        //
+        // In production, the agent is the `writer` user, which means it can't
+        // create the DB. Assert that we fail here.
+        OximeterAgent::with_id(
+            Uuid::new_v4(),
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+            crate::default_refresh_interval(),
+            db_config,
+            Box::new(FixedResolver::new([native])),
+            Box::new(FixedResolver::new([native])),
+            &logctx.log,
+        )
+        .await
+        .expect_err("agent should refuse to start before the DB is created");
+
+        // The failed construction must not have created the database itself.
+        let admin = Client::new(User::Admin, native, &logctx.log);
+        admin
+            .check_db_is_at_expected_version()
+            .await
+            .expect_err("the collector must not create the database itself");
+
+        // clickhouse-admin normally does this, so pretend to be it for the
+        // test. Now the agent should build fine.
+        admin
+            .initialize_db_with_version(false, oximeter_db::OXIMETER_VERSION)
+            .await
+            .expect("admin should be able to initialize the database");
+        OximeterAgent::with_id(
+            Uuid::new_v4(),
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+            crate::default_refresh_interval(),
+            db_config,
+            Box::new(FixedResolver::new([native])),
+            Box::new(FixedResolver::new([native])),
+            &logctx.log,
+        )
+        .await
+        .expect("agent should start once the DB has been initialized");
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_standalone_initializes_db_on_startup() {
+        let logctx =
+            test_setup_log("test_standalone_initializes_db_on_startup");
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
+            .await
+            .expect("Failed to start ClickHouse");
+        let native: SocketAddr = db.native_address().into();
+
+        // The database does not exist yet.
+        let admin = Client::new(User::Admin, native, &logctx.log);
+        admin
+            .check_db_is_at_expected_version()
+            .await
+            .expect_err("database should not exist before standalone starts");
+
+        // Starting the standalone collector with a database configuration
+        // initializes the database right away, since it uses the `admin` user
+        // for that part.
+        let db_config = DbConfig {
+            address: Some(native),
+            batch_size: 1000,
+            batch_interval: 1,
+        };
+        let _collector = OximeterAgent::new_standalone(
+            Uuid::new_v4(),
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+            crate::default_refresh_interval(),
+            Some(db_config),
+            &logctx.log,
+        )
+        .await
+        .expect("standalone collector should start");
+
+        // The database is now present at the expected version.
+        admin
+            .check_db_is_at_expected_version()
+            .await
+            .expect("standalone should have initialized the database");
+
+        db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
 }
