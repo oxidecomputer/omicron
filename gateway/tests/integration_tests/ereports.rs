@@ -300,7 +300,6 @@ async fn ereports_basic() {
 }
 
 #[tokio::test]
-#[ignore = "sp-sim's UDP task exits on a malformed ereport datagram"]
 async fn ereports_survive_malformed_requests() {
     let testctx =
         setup::test_setup("ereports_survive_malformed_requests", SpPort::One)
