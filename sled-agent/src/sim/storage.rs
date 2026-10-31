@@ -40,6 +40,7 @@ use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::ZpoolHealth;
 use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
+use sled_storage::disk::synthetic_disk_location;
 use sled_storage::nested_dataset::NestedDatasetConfig;
 use sled_storage::nested_dataset::NestedDatasetListOptions;
 use sled_storage::nested_dataset::NestedDatasetLocation;
@@ -775,6 +776,47 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    // Simulated disks are labelled per variant, like a real sled's U.2 bays
+    // and M.2 sockets, with fallback labels past the real counts.
+    #[test]
+    fn physical_disk_locations() {
+        let logctx = test_setup_log("physical_disk_locations");
+        let mut storage = StorageInner::new(
+            Uuid::new_v4(),
+            0,
+            std::net::Ipv4Addr::LOCALHOST.into(),
+            logctx.log.clone(),
+        );
+
+        let variants = [
+            DiskVariant::M2,
+            DiskVariant::U2,
+            DiskVariant::M2,
+            DiskVariant::U2,
+            DiskVariant::M2,
+        ];
+        let mut ids = Vec::new();
+        for (i, variant) in variants.into_iter().enumerate() {
+            let id = PhysicalDiskUuid::new_v4();
+            let identity = DiskIdentity {
+                vendor: "vendor".to_string(),
+                model: "model".to_string(),
+                serial: format!("serial-{i}"),
+            };
+            storage.insert_physical_disk(id, identity, variant);
+            ids.push(id);
+        }
+
+        let disks = storage.physical_disks();
+        let locations: Vec<_> =
+            ids.iter().map(|id| disks[id].location.as_str()).collect();
+        assert_eq!(locations, ["M.2 East", "N0", "M.2 West", "N1", "M.2 2"],);
+        let slots: Vec<_> = ids.iter().map(|id| disks[id].slot).collect();
+        assert_eq!(slots, [0, 1, 2, 3, 4]);
+
+        logctx.cleanup_successful();
+    }
+
     #[test]
     fn nested_dataset() {
         let logctx = test_setup_log("nested_dataset");
@@ -1129,6 +1171,7 @@ pub(crate) struct PhysicalDisk {
     pub(crate) identity: DiskIdentity,
     pub(crate) variant: DiskVariant,
     pub(crate) slot: i64,
+    pub(crate) location: String,
 }
 
 /// Describes data being simulated within a dataset.
@@ -1347,6 +1390,9 @@ pub(crate) struct StorageInner {
     nested_datasets: HashMap<DatasetName, NestedDatasetStorage>,
     physical_disks: HashMap<PhysicalDiskUuid, PhysicalDisk>,
     next_disk_slot: i64,
+    /// Disks of each variant inserted so far, which picks the next disk's
+    /// bay the way a real sled's U.2 bays and M.2 sockets are labelled.
+    disks_per_variant: HashMap<DiskVariant, i64>,
     zpools: HashMap<ZpoolUuid, Zpool>,
     crucible_ip: IpAddr,
     start_crucible_port: u16,
@@ -1368,6 +1414,7 @@ impl StorageInner {
             nested_datasets: HashMap::new(),
             physical_disks: HashMap::new(),
             next_disk_slot: 0,
+            disks_per_variant: HashMap::new(),
             zpools: HashMap::new(),
             crucible_ip,
             start_crucible_port: (sled_index + 1) * 1000,
@@ -1709,8 +1756,11 @@ impl StorageInner {
     ) {
         let slot = self.next_disk_slot;
         self.next_disk_slot += 1;
+        let ordinal = self.disks_per_variant.entry(variant).or_default();
+        let location = synthetic_disk_location(variant, *ordinal);
+        *ordinal += 1;
         self.physical_disks
-            .insert(id, PhysicalDisk { identity, variant, slot });
+            .insert(id, PhysicalDisk { identity, variant, slot, location });
     }
 
     /// Adds a Zpool to the sled's simulated storage.

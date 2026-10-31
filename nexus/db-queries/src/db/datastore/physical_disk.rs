@@ -1157,7 +1157,7 @@ mod test {
             },
             variant: DiskVariant::U2,
             pcie_slot: slot,
-            location: None,
+            location: format!("N{slot}"),
             active_firmware_slot: 1,
             next_active_firmware_slot: None,
             number_of_firmware_slots: 1,
@@ -1186,7 +1186,10 @@ mod test {
             },
             variant: inv_phys_disk.variant.into(),
             pcie_slot: inv_phys_disk.pcie_slot,
-            location: inv_phys_disk.location.clone(),
+            location: inv_phys_disk
+                .location
+                .clone()
+                .expect("disk has a location"),
             firmware: PhysicalDiskFirmware::Nvme(NvmeFirmware {
                 active_slot: inv_disk.active_firmware_slot,
                 next_active_slot: inv_disk.next_active_firmware_slot,

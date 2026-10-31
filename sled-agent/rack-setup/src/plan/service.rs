@@ -1544,7 +1544,7 @@ mod tests {
                 },
                 variant: DiskVariant::U2,
                 pcie_slot: i as i64,
-                location: None,
+                location: format!("N{i}"),
                 active_firmware_slot: 0,
                 next_active_firmware_slot: None,
                 number_of_firmware_slots: 8,

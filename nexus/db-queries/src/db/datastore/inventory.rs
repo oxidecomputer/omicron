@@ -3380,6 +3380,7 @@ impl DataStore {
                 SledUuid,
                 Vec<nexus_types::inventory::PhysicalDisk>,
             >::new();
+            let mut nskipped = 0;
             let mut paginator = Paginator::new(
                 batch_size,
                 dropshot::PaginationOrder::Ascending,
@@ -3401,6 +3402,13 @@ impl DataStore {
                     p.found_batch(&batch, &|row| (row.sled_id, row.pcie_slot));
                 for disk in batch {
                     let sled_id = disk.sled_id.into();
+                    // Rows written by Nexus versions that predate the
+                    // `location` column are NULL. These disks are left out
+                    // of the collection.
+                    let Some(location) = disk.location else {
+                        nskipped += 1;
+                        continue;
+                    };
                     let firmware = disk_firmware
                         .get(&sled_id)
                         .and_then(|lookup| lookup.get(&disk.pcie_slot))
@@ -3415,11 +3423,19 @@ impl DataStore {
                             },
                             variant: disk.variant.into(),
                             pcie_slot: disk.pcie_slot,
-                            location: disk.location,
+                            location,
                             firmware: firmware.clone(),
                         },
                     );
                 }
+            }
+            if nskipped > 0 {
+                warn!(
+                    &opctx.log,
+                    "skipped inventory disks without a location";
+                    "collection_id" => %id,
+                    "nskipped" => nskipped,
+                );
             }
             disks
         };
@@ -6646,6 +6662,58 @@ mod test {
             "second external IP survived the round trip: {ips:?}",
         );
         assert_eq!(ips.len(), 2, "expected two external IPs, got {ips:?}");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // A disk row written before sled-agent always reported a location has a
+    // NULL location. Reading its collection leaves that disk out and keeps
+    // the rest.
+    #[tokio::test]
+    async fn test_disk_without_location_is_skipped() {
+        let logctx =
+            dev::test_setup_log("test_disk_without_location_is_skipped");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let Representative { builder, .. } = representative();
+        let collection = builder.build();
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("failed to insert collection");
+
+        let sled = collection
+            .sled_agents
+            .iter()
+            .find(|sa| sa.disks.len() > 1)
+            .expect("a sled agent with more than one disk");
+        let dropped = &sled.disks[0];
+
+        {
+            use nexus_db_schema::schema::inv_physical_disk::dsl;
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            let updated = diesel::update(dsl::inv_physical_disk)
+                .filter(
+                    dsl::inv_collection_id.eq(to_db_typed_uuid(collection.id)),
+                )
+                .filter(dsl::sled_id.eq(to_db_typed_uuid(sled.sled_id)))
+                .filter(dsl::slot.eq(dropped.pcie_slot))
+                .set(dsl::location.eq(None::<String>))
+                .execute_async(&*conn)
+                .await
+                .unwrap();
+            assert_eq!(updated, 1);
+        }
+
+        let read = datastore
+            .inventory_collection_read(&opctx, collection.id)
+            .await
+            .expect("collection with a NULL disk location reads back");
+        let read_disks = &read.sled_agents.get(&sled.sled_id).unwrap().disks;
+        let expected: Vec<_> = sled.disks[1..].to_vec();
+        assert_eq!(*read_disks, expected);
 
         db.terminate().await;
         logctx.cleanup_successful();

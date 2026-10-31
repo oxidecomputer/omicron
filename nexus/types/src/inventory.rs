@@ -983,13 +983,9 @@ pub struct PhysicalDisk {
     /// hardware topology: "N5" for a U.2 bay, "M.2 East" for a boot device.
     ///
     /// This is the operator-facing position, matching what is printed on the
-    /// sled. It is best-effort: `None` means the sled's topology had no label
-    /// for the disk or could not be read.
-    //
-    // Older serialized state had no such field; treating its absence as
-    // `None` accurately represents that nothing recorded a location.
-    #[serde(default)]
-    pub location: Option<String>,
+    /// sled. Sled-agent finds disks through the topology, so every disk has
+    /// one.
+    pub location: String,
     pub firmware: PhysicalDiskFirmware,
 }
 
@@ -1163,10 +1159,10 @@ impl IdOrdItem for InternalDnsGenerationStatus {
 mod tests {
     use super::*;
 
-    // Reconfigurator state files written before `PhysicalDisk` gained
-    // `location` (and renamed `slot` to `pcie_slot`) must still deserialize.
+    // Reconfigurator state files that call `pcie_slot` by its old name,
+    // `slot`, still deserialize. Ones from before `location` existed do not.
     #[test]
-    fn physical_disk_loads_older_serialized_form() {
+    fn physical_disk_older_serialized_forms() {
         let disk = PhysicalDisk {
             identity: DiskIdentity {
                 vendor: "vendor".to_string(),
@@ -1175,11 +1171,10 @@ mod tests {
             },
             variant: PhysicalDiskKind::U2,
             pcie_slot: 5,
-            location: Some("N5".to_string()),
+            location: "N5".to_string(),
             firmware: PhysicalDiskFirmware::Unknown,
         };
 
-        // The current form round-trips and uses the new field name.
         let mut current = serde_json::to_value(&disk).unwrap();
         assert_eq!(current["pcie_slot"], 5);
         assert_eq!(current["location"], "N5");
@@ -1188,15 +1183,17 @@ mod tests {
             disk
         );
 
-        // Rewrite it into the older form: `slot` instead of `pcie_slot`, and
-        // no `location` at all.
         let object = current.as_object_mut().unwrap();
         let slot = object.remove("pcie_slot").unwrap();
         object.insert("slot".to_string(), slot);
-        object.remove("location").unwrap();
+        assert_eq!(
+            serde_json::from_value::<PhysicalDisk>(current.clone()).unwrap(),
+            disk
+        );
 
-        let loaded: PhysicalDisk = serde_json::from_value(current).unwrap();
-        assert_eq!(loaded, PhysicalDisk { location: None, ..disk });
+        current.as_object_mut().unwrap().remove("location").unwrap();
+        serde_json::from_value::<PhysicalDisk>(current)
+            .expect_err("a disk without a location should not load");
     }
 
     #[test]

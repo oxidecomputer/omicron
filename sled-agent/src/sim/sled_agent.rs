@@ -1076,7 +1076,7 @@ impl SledAgent {
                     identity: info.identity.clone(),
                     variant: info.variant,
                     pcie_slot: info.slot,
-                    location: None,
+                    location: info.location.clone(),
                     active_firmware_slot: 1,
                     next_active_firmware_slot: None,
                     number_of_firmware_slots: 1,

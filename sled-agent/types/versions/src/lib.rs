@@ -125,6 +125,8 @@ pub mod v6;
 pub mod v60;
 #[path = "add_disk_location_to_inventory/mod.rs"]
 pub mod v61;
+#[path = "make_disk_location_required/mod.rs"]
+pub mod v62;
 #[path = "multicast_support/mod.rs"]
 pub mod v7;
 #[path = "delegate_zvol_to_propolis/mod.rs"]
