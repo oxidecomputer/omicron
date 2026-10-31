@@ -62,7 +62,8 @@ pub async fn start_server(server_config: Config) -> Result<Server, StartError> {
         dropshot::ClientSpecifiesVersionInHeader::new(
             omicron_common::api::VERSION_HEADER,
             ntp_admin_api::latest_version(),
-        ),
+        )
+        .min_version(ntp_admin_api::oldest_version()),
     )))
     .start()
     .map_err(StartError::InitializeHttpServer)
