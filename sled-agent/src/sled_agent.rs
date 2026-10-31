@@ -1373,7 +1373,7 @@ impl SledAgent {
             rack_id,
             usable_hardware_threads,
             usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
-            cpu_family,
+            cpu_family: cpu_family.into(),
             reservoir_size,
             disks,
             zpools,
