@@ -4,6 +4,9 @@
 
 //! Facilities for managing a local database for development
 
+#[cfg(test)]
+mod keepalive;
+
 use crate::dev::poll;
 use anyhow::Context;
 use anyhow::anyhow;
