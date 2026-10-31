@@ -725,14 +725,21 @@ fn classify_vmm_state_publish_error(
     err: nexus_client::Error<nexus_client::types::Error>,
 ) -> BackoffError<Error> {
     match &err {
-        nexus_client::Error::CommunicationError(_) => {
+        // A connection failure while reading an error response body would
+        // surface as ResponseBodyError. Treating it as permanent would drop
+        // this VMM state update (possibly the final Destroyed), so retry it
+        // like CommunicationError.
+        //
+        // Note that ResponseBodyError doesn't carry a status, so a 4xx whose
+        // body read fails is also retried. (This is harmless.)
+        nexus_client::Error::CommunicationError(_)
+        | nexus_client::Error::ResponseBodyError(_) => {
             BackoffError::transient(Error::Notification(err))
         }
         nexus_client::Error::InvalidRequest(_)
         | nexus_client::Error::InvalidResponsePayload(..)
         | nexus_client::Error::UnexpectedResponse(_)
         | nexus_client::Error::InvalidUpgrade(_)
-        | nexus_client::Error::ResponseBodyError(_)
         | nexus_client::Error::Custom(_) => {
             BackoffError::permanent(Error::Notification(err))
         }
@@ -5263,14 +5270,14 @@ mod tests {
         .expect_err("request to the truncating server failed");
         server.await.expect("truncating server task completed");
 
-        // BUG: a 500 + body read fail is classified as permanent, so VMM state
-        // update is dropped. This should be a transient error instead.
         match classify_vmm_state_publish_error(err) {
-            BackoffError::Permanent(Error::Notification(
-                nexus_client::Error::ResponseBodyError(_),
-            )) => {}
+            BackoffError::Transient {
+                err:
+                    Error::Notification(nexus_client::Error::ResponseBodyError(_)),
+                retry_after: None,
+            } => {}
             other => {
-                panic!("expected a permanent ResponseBodyError, got {other:?}")
+                panic!("expected a transient ResponseBodyError, got {other:?}")
             }
         }
 
