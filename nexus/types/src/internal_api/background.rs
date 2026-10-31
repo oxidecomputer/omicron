@@ -39,11 +39,13 @@ use swrite::swriteln;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
-/// The status of a successful `capacity_metrics` background task activation.
+/// The status of a `capacity_metrics` background task activation.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CapacityMetricsStatus {
-    /// Number of new samples retained in the producer queue.
-    pub samples_queued: usize,
+    /// Number of silo quota samples retrieved.
+    pub silo_samples: usize,
+    /// Number of project quota samples retrieved.
+    pub project_samples: usize,
 }
 
 /// The status of a `region_replacement` background task activation

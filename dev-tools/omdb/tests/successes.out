@@ -793,7 +793,8 @@ task: "capacity_metrics"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    samples queued: 0
+    silo samples: 0
+    project samples: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -1556,7 +1557,8 @@ task: "capacity_metrics"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    samples queued: 0
+    silo samples: 0
+    project samples: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
