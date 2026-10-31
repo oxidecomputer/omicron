@@ -1915,7 +1915,6 @@ mod tests {
         opctx: &OpContext,
         pool_count: usize,
     ) {
-        use nexus_db_model::Generation;
         use nexus_db_model::RendezvousDebugDataset;
         use nexus_db_model::SledBaseboard;
         use nexus_db_model::SledCpuFamily;
@@ -1923,6 +1922,7 @@ mod tests {
         use nexus_db_model::SledUpdate;
         use nexus_db_model::Zpool;
         use omicron_common::api::external::ByteCount;
+        use omicron_generation_kinds::SledRegistrationGeneration;
         use omicron_uuid_kinds::BlueprintUuid;
         use omicron_uuid_kinds::DatasetUuid;
         use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -1948,7 +1948,7 @@ mod tests {
                 cpu_family: SledCpuFamily::AmdMilan,
             },
             RackUuid::new_v4(),
-            Generation::new(),
+            SledRegistrationGeneration::new(),
         );
         datastore.sled_upsert(sled).await.unwrap();
 

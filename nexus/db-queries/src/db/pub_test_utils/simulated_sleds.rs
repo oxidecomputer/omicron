@@ -11,7 +11,6 @@ use crate::db::datastore::SledBpAvailabilityUpsertOutcome;
 use crate::db::datastore::SledBpAvailabilityWrite;
 use crate::db::datastore::SledBpAvailabilityWriteOutcome;
 use iddqd::IdOrdMap;
-use nexus_db_model::Generation;
 use nexus_db_model::Sled;
 use nexus_db_model::SledBaseboard;
 use nexus_db_model::SledBlueprintAvailabilityInput;
@@ -22,6 +21,7 @@ use nexus_reconfigurator_planning::system::Sled as SimulatedSled;
 use nexus_reconfigurator_planning::system::SystemDescription;
 use nexus_types::deployment::Blueprint;
 use omicron_common::api::external::ByteCount;
+use omicron_generation_kinds::SledRegistrationGeneration;
 use omicron_uuid_kinds::RackUuid;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
@@ -71,7 +71,7 @@ pub fn sled_update_from_simulated_sled(
             cpu_family: inventory.cpu_family.into(),
         },
         rack_id,
-        Generation::new(),
+        SledRegistrationGeneration::new(),
     )
 }
 

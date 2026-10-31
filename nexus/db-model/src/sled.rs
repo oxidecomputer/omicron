@@ -8,6 +8,7 @@ use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
 use crate::sled_cpu_family::SledCpuFamily;
 use crate::sled_policy::DbSledPolicy;
+use crate::typed_generation::DbTypedGeneration;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_db_schema::schema::{physical_disk, sled, zpool};
@@ -17,6 +18,9 @@ use nexus_types::{
     identity::Asset,
     internal_api::params,
     inventory,
+};
+use omicron_generation_kinds::{
+    SledRegistrationGeneration, SledRegistrationGenerationKind,
 };
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackKind;
@@ -87,9 +91,13 @@ pub struct Sled {
 
     /// A generation number owned and incremented by sled-agent
     ///
-    /// This is specifically distinct from `rcgen`, which is incremented by
-    /// child resources as part of `DatastoreCollectionConfig`.
-    pub sled_agent_gen: Generation,
+    /// This is specifically distinct from:
+    ///
+    /// * `rcgen`, which is incremented by child resources as part of
+    ///   `DatastoreCollectionConfig`.
+    /// * The blueprint's `sled_agent_generation`, which is a
+    ///   `SledConfigGeneration`.
+    pub sled_agent_gen: DbTypedGeneration<SledRegistrationGenerationKind>,
 
     // ServiceAddress (Repo Depot API). Uses `ip`.
     pub repo_depot_port: SqlU16,
@@ -288,7 +296,7 @@ pub struct SledUpdate {
     pub cpu_family: SledCpuFamily,
 
     // Generation number - owned and incremented by sled-agent.
-    pub sled_agent_gen: Generation,
+    pub sled_agent_gen: SledRegistrationGeneration,
 }
 
 impl SledUpdate {
@@ -299,7 +307,7 @@ impl SledUpdate {
         baseboard: SledBaseboard,
         hardware: SledSystemHardware,
         rack_id: RackUuid,
-        sled_agent_gen: Generation,
+        sled_agent_gen: SledRegistrationGeneration,
     ) -> Self {
         Self {
             id,
@@ -354,7 +362,7 @@ impl SledUpdate {
             port: self.port,
             repo_depot_port: self.repo_depot_port,
             last_used_address,
-            sled_agent_gen: self.sled_agent_gen,
+            sled_agent_gen: self.sled_agent_gen.into(),
             cpu_family: self.cpu_family,
         }
     }

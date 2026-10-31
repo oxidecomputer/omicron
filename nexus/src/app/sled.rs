@@ -84,7 +84,7 @@ impl super::Nexus {
                 cpu_family: info.cpu_family.into(),
             },
             self.rack_id,
-            info.generation.into(),
+            info.generation,
         );
         let (_, was_modified) = self.db_datastore.sled_upsert(sled).await?;
 

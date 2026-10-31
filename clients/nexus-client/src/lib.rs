@@ -13,6 +13,7 @@ progenitor::generate_api!(
     hooks = Expected,
     crates = {
         "iddqd" = "*",
+        "omicron-generation-kinds" = "*",
         "omicron-uuid-kinds" = "*",
         "oxnet" = "0.1.0",
     },
