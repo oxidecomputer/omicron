@@ -4,6 +4,7 @@
 
 use crate::v1::inventory::InventoryDataset;
 use crate::v1::inventory::InventoryDisk;
+use crate::v1::inventory::SledCpuFamily;
 use crate::v1::inventory::SledRole;
 use crate::v16::inventory::SingleMeasurementInventory;
 use crate::v24::inventory::InventoryZpool;
@@ -25,7 +26,6 @@ use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware_types::BaseboardId;
-use sled_hardware_types::SledCpuFamily;
 use std::net::SocketAddrV6;
 
 /// Identity and basic status information about this sled agent
