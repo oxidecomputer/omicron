@@ -73,7 +73,8 @@ pub async fn start_server_admin_server(
         dropshot::ClientSpecifiesVersionInHeader::new(
             omicron_common::api::VERSION_HEADER,
             clickhouse_admin_api::latest_version(),
-        ),
+        )
+        .min_version(clickhouse_admin_api::oldest_version()),
     )))
     .start()
     .map_err(StartError::InitializeHttpServer)
@@ -116,7 +117,8 @@ pub async fn start_keeper_admin_server(
         dropshot::ClientSpecifiesVersionInHeader::new(
             omicron_common::api::VERSION_HEADER,
             clickhouse_admin_api::latest_version(),
-        ),
+        )
+        .min_version(clickhouse_admin_api::oldest_version()),
     )))
     .start()
     .map_err(StartError::InitializeHttpServer)
@@ -160,7 +162,8 @@ pub async fn start_single_admin_server(
         dropshot::ClientSpecifiesVersionInHeader::new(
             omicron_common::api::VERSION_HEADER,
             clickhouse_admin_api::latest_version(),
-        ),
+        )
+        .min_version(clickhouse_admin_api::oldest_version()),
     )))
     .start()
     .map_err(StartError::InitializeHttpServer)

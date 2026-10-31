@@ -124,7 +124,8 @@ impl InternalServer {
             dropshot::ClientSpecifiesVersionInHeader::new(
                 omicron_common::api::VERSION_HEADER,
                 nexus_internal_api::latest_version(),
-            ),
+            )
+            .min_version(nexus_internal_api::oldest_version()),
         )))
         .start()
         .map_err(|error| format!("initializing internal server: {}", error))
