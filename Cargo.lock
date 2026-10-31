@@ -9240,6 +9240,7 @@ dependencies = [
  "futures",
  "gateway-api",
  "gateway-client",
+ "gateway-ereport-messages",
  "gateway-messages",
  "gateway-sp-comms",
  "gateway-test-utils",
@@ -9277,6 +9278,7 @@ dependencies = [
  "toml 0.8.23",
  "tufaceous-artifact 0.2.0",
  "uuid",
+ "zerocopy 0.8.55",
  "zip 4.6.1",
 ]
 
