@@ -118,7 +118,8 @@ impl RepoDepotStandalone {
                 dropshot::ClientSpecifiesVersionInHeader::new(
                     omicron_common::api::VERSION_HEADER,
                     repo_depot_api::latest_version(),
-                ),
+                )
+                .min_version(repo_depot_api::oldest_version()),
             )))
             .start()
             .context("failed to create server")?;
