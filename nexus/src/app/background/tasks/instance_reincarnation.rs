@@ -104,6 +104,26 @@ impl BackgroundTask for InstanceReincarnation {
                 ));
             }
 
+            if let Err(error) = self
+                .reincarnate_all(
+                    &opctx,
+                    ReincarnationReason::SledEvacuation,
+                    &mut status,
+                    &mut running_sagas,
+                )
+                .await
+            {
+                error!(
+                    opctx.log,
+                    "failed to find all instances from a sled evacuation \
+                     in need of reincarnation";
+                    "error" => %error,
+                );
+                status.errors.push(format!(
+                    "finding instances from a sled evacuation: {error}"
+                ));
+            }
+
             if status.total_errors() > 0 {
                 warn!(
                     &opctx.log,
@@ -321,8 +341,12 @@ impl InstanceReincarnation {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::app::background::tasks::vmm_stop_for_update::VmmStopForUpdate;
     use crate::app::sagas::test_helpers;
+    use async_bb8_diesel::AsyncRunQueryDsl;
     use chrono::Utc;
+    use diesel::ExpressionMethods;
+    use nexus_db_lookup::AsyncConnection;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::Generation;
     use nexus_db_model::InstanceIntendedState;
@@ -331,7 +355,9 @@ mod test {
     use nexus_db_model::Vmm;
     use nexus_db_model::VmmCpuPlatform;
     use nexus_db_model::VmmState;
+    use nexus_db_model::to_db_typed_generation;
     use nexus_db_queries::authz;
+    use nexus_test_utils::ControlPlaneBuilder;
     use nexus_test_utils::resource_helpers::{
         create_default_ip_pools, create_project, object_create,
     };
@@ -342,6 +368,7 @@ mod test {
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_generation_kinds::InstanceStateGeneration;
+    use omicron_generation_kinds::UpdateDispositionGeneration;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::ProjectUuid;
@@ -399,7 +426,7 @@ mod test {
                 // `instance-update` saga do so). Therefore, make our
                 // resource requests as small as possible.
                 ncpus: 1i64.try_into().unwrap(),
-                memory: ByteCount::from_gibibytes_u32(2),
+                memory: ByteCount::from_gibibytes_u32(1),
                 hostname: "myhostname".try_into().unwrap(),
                 user_data: Vec::new(),
                 network_interfaces:
@@ -587,6 +614,25 @@ mod test {
         authz_instance
     }
 
+    async fn mark_vmm_stopped_for_update(
+        conn: &AsyncConnection,
+        vmm_id: Uuid,
+        generation: UpdateDispositionGeneration,
+    ) {
+        use nexus_db_schema::schema::vmm::dsl;
+
+        let updated = diesel::update(dsl::vmm)
+            .filter(dsl::id.eq(vmm_id))
+            .set(
+                dsl::stop_for_update_disposition_generation
+                    .eq(Some(to_db_typed_generation(generation))),
+            )
+            .execute_async(conn)
+            .await
+            .expect("VMM should be marked");
+        assert_eq!(updated, 1, "exactly one VMM should be marked");
+    }
+
     // Boilerplate reducer.
     //
     // This is a macro so that the `dbg!` has the line number of the place where
@@ -770,6 +816,42 @@ mod test {
             });
         }
 
+        // Create instances in the `SledEvacuating` state that are eligible to
+        // be reincarnated. When an instance is reincarnated due to its sled
+        // evacuating, the task ignores the auto-restart policy and always
+        // restarts the instance, so we include instances with both policies
+        let num_sled_evacuating = 4;
+        for i in 0..num_sled_evacuating / 2 {
+            let instance = create_instance(
+                &cptestctx,
+                &opctx,
+                &format!("kolankola-{i}"),
+                InstanceAutoRestartPolicy::BestEffort,
+                InstanceState::SledEvacuating,
+                InstanceIntendedState::Running,
+            )
+            .await;
+            will_reincarnate.insert(ReincarnatableInstance {
+                instance_id: instance.id(),
+                reason: ReincarnationReason::SledEvacuation,
+            });
+        }
+        for i in 0..num_sled_evacuating / 2 {
+            let instance = create_instance(
+                &cptestctx,
+                &opctx,
+                &format!("ekabijin-{i}"),
+                InstanceAutoRestartPolicy::Never,
+                InstanceState::SledEvacuating,
+                InstanceIntendedState::Running,
+            )
+            .await;
+            will_reincarnate.insert(ReincarnatableInstance {
+                instance_id: instance.id(),
+                reason: ReincarnationReason::SledEvacuation,
+            });
+        }
+
         // Create some instances that will not reincarnate.
         let mut will_not_reincarnate = std::collections::BTreeSet::new();
         // Some instances which are `Failed` but don't have policies permitting
@@ -847,6 +929,16 @@ mod test {
         .await;
         attach_saga_unwound_vmm(&cptestctx, &opctx, &unwound_stopped).await;
         will_not_reincarnate.insert(unwound_stopped.id());
+        let evacuating_stopped = create_instance(
+            &cptestctx,
+            &opctx,
+            "anagami-6",
+            InstanceAutoRestartPolicy::BestEffort,
+            InstanceState::SledEvacuating,
+            InstanceIntendedState::Stopped,
+        )
+        .await;
+        will_not_reincarnate.insert(evacuating_stopped.id());
 
         // Activate the task again, and check that our instance had an
         // instance-start saga started.
@@ -859,6 +951,10 @@ mod test {
         assert_eq!(
             status.instances_found.get(&ReincarnationReason::SagaUnwound),
             Some(&num_saga_unwound)
+        );
+        assert_eq!(
+            status.instances_found.get(&ReincarnationReason::SledEvacuation),
+            Some(&num_sled_evacuating)
         );
         assert_eq!(status.instances_reincarnated.len(), will_reincarnate.len());
         assert_eq!(status.changed_state, Vec::new());
@@ -1008,5 +1104,181 @@ mod test {
             InstanceState::Vmm,
         )
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_reincarnates_instances_in_sled_evacuating() {
+        // Test setup
+        let cptestctx = ControlPlaneBuilder::new(
+            "test_reincarnates_instances_in_sled_evacuating",
+        )
+        .customize_nexus_config(&|config| {
+            let one_day = Duration::from_secs(86_400);
+            let tasks = &mut config.pkg.background_tasks;
+            // The `instance-update` saga activates the real
+            // `instance_reincarnation` background task when an instance's state
+            // changes to `SledEvacuating`. Disable that task, so that only the
+            // task created by this test reincarnates instances.
+            tasks.instance_reincarnation.disable = true;
+            // Increase the intervals for background tasks that could modify
+            // VMM records while this test is running.
+            tasks.instance_watcher.period_secs = one_day;
+            tasks.abandoned_vmm_reaper.period_secs = one_day;
+            tasks.vmm_mark_stop_for_update.period_secs = one_day;
+            tasks.vmm_stop_for_update.period_secs = one_day;
+        })
+        .start::<crate::Server>()
+        .await;
+
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        setup_test_project(&cptestctx, &opctx).await;
+
+        let mut task = InstanceReincarnation::new(
+            datastore.clone(),
+            nexus.sagas.clone(),
+            false,
+            Activator::new(),
+        );
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let generation = UpdateDispositionGeneration::from(1);
+        let mut will_reincarnate = std::collections::BTreeSet::new();
+
+        // Create running instances with different auto-restart policies, and
+        // mark their VMMs to be stopped for an update.
+        for (i, policy) in [
+            InstanceAutoRestartPolicy::BestEffort,
+            InstanceAutoRestartPolicy::Never,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let instance = create_instance(
+                &cptestctx,
+                &opctx,
+                &format!("sattakkhattuparama-{i}"),
+                policy,
+                InstanceState::Vmm,
+                InstanceIntendedState::Running,
+            )
+            .await;
+            let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
+            test_helpers::instance_simulate(&cptestctx, &instance_id).await;
+
+            let vmm = test_helpers::instance_fetch(&cptestctx, instance_id)
+                .await
+                .vmm()
+                .clone()
+                .expect("instance should have an active VMM");
+            // To avoid complexity, the VMMs are marked directly in the db
+            // instead of running the `vmm_mark_stop_for_update` task
+            mark_vmm_stopped_for_update(&conn, vmm.id, generation).await;
+            will_reincarnate.insert(ReincarnatableInstance {
+                instance_id: instance.id(),
+                reason: ReincarnationReason::SledEvacuation,
+            });
+        }
+
+        // The VMMs are marked, but they have not been stopped yet; there is
+        // nothing to reincarnate.
+        let status = assert_activation_ok!(task.activate(&opctx).await);
+        assert_eq!(
+            status.total_instances_found(),
+            0,
+            "unexpected instances found: {:?}",
+            status.instances_found
+        );
+        assert_eq!(
+            status.instances_reincarnated.len(),
+            0,
+            "unexpected instances reincarnated: {:?}",
+            status.instances_reincarnated
+        );
+        assert_eq!(
+            status.changed_state.len(),
+            0,
+            "unexpected instances changed state: {:?}",
+            status.changed_state
+        );
+
+        // Run the `vmm_stop_for_update` task to actually stop the marked VMMs.
+        let mut stop_task =
+            VmmStopForUpdate::new(datastore.clone(), nexus.sagas.clone());
+        let stop_status = stop_task.actually_activate(&opctx).await;
+        assert_eq!(
+            stop_status.error_messages.len(),
+            0,
+            "unexpected errors: {:?}",
+            stop_status.error_messages
+        );
+        assert!(
+            stop_status.vmms_failed_to_stop_by_sled.is_empty(),
+            "unexpected vmms failed to stop: {:?}",
+            stop_status.vmms_failed_to_stop_by_sled
+        );
+        // Make sure the amount of VMMs that stopped is the same as the
+        // instances we expect will be reincarnated
+        let stopped_count: usize = stop_status
+            .vmms_stopped_by_sled
+            .iter()
+            .map(|sled| sled.vmm_ids.len())
+            .sum();
+        assert_eq!(stopped_count, will_reincarnate.len());
+
+        // Poke each instance, so sled agent reports the stopped VMM to Nexus.
+        // The `instance-update` saga should change the instance state to
+        // `SledEvacuating`.
+        for instance in &will_reincarnate {
+            let instance_id =
+                InstanceUuid::from_untyped_uuid(instance.instance_id);
+            test_helpers::instance_simulate(&cptestctx, &instance_id).await;
+            test_helpers::instance_wait_for_state(
+                &cptestctx,
+                instance_id,
+                InstanceState::SledEvacuating,
+            )
+            .await;
+        }
+        test_helpers::wait_for_running_sagas(&cptestctx).await;
+
+        // Activate the reincarnation task again. Check that every instance had
+        // an instance-start saga started, regardless of its auto-restart policy
+        let status = assert_activation_ok!(task.activate(&opctx).await);
+        assert_eq!(
+            status.instances_found.get(&ReincarnationReason::SledEvacuation),
+            Some(&will_reincarnate.len())
+        );
+        assert_eq!(
+            status
+                .instances_reincarnated
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>(),
+            will_reincarnate
+        );
+        assert_eq!(
+            status.changed_state.len(),
+            0,
+            "unexpected instances changed state: {:?}",
+            status.changed_state
+        );
+
+        // Instances reincarnate!
+        for instance in will_reincarnate {
+            test_helpers::instance_wait_for_state(
+                &cptestctx,
+                InstanceUuid::from_untyped_uuid(instance.instance_id),
+                InstanceState::Vmm,
+            )
+            .await;
+        }
+
+        cptestctx.teardown().await;
     }
 }
