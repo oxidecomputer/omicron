@@ -141,7 +141,7 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseOk<VmmUnregisterResponse>, HttpError> {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
-        Ok(HttpResponseOk(sa.instance_unregister(id).await?))
+        Ok(HttpResponseOk(sa.handle_vmm_unregister_request(id).await?))
     }
 
     async fn vmm_put_state(

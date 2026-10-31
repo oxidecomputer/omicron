@@ -24,7 +24,7 @@ pub use config::{
 };
 pub use server::{NexusRegistration, RssArgs, Server, run_standalone_server};
 pub use sled_agent::{
-    NextVmmRegistrationRequest, PausedVmmRegistration, SimLogEntry, SledAgent,
+    NextVmmRequest, PausedVmmRequest, SimLogEntry, SledAgent,
 };
 pub use storage::PantryServer;
 pub(crate) use storage::Storage;
