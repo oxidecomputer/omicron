@@ -15,7 +15,7 @@ use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
 use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::api::internal::shared::AllowedSourceIps;
-use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::SledRegistrationGeneration;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -64,7 +64,7 @@ pub struct SledAgentInfo {
     pub cpu_family: sled_agent_types_versions::v1::inventory::SledCpuFamily,
 
     /// The generation number of this request from sled-agent
-    pub generation: Generation,
+    pub generation: SledRegistrationGeneration,
 
     /// Whether the sled-agent has been decommissioned by nexus
     ///

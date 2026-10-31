@@ -48,6 +48,7 @@ impl_typed_generation_kinds! {
         SitrepAlert = {},
         SitrepSupportBundle = {},
         SledConfig = {},
+        SledRegistration = {},
         TargetRelease = {},
         UpdateDisposition = {},
     },
