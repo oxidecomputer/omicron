@@ -5,6 +5,10 @@
 use dropshot::ResultsPage;
 use http::Method;
 use http::StatusCode;
+use nexus_db_model::Generation;
+use nexus_db_model::SledBaseboard;
+use nexus_db_model::SledUpdate;
+use nexus_db_queries::db::pub_test_utils::helpers::SledSystemHardwareBuilder;
 use nexus_test_utils::TEST_SUITE_PASSWORD;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -13,11 +17,8 @@ use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::hardware::UninitializedSled;
 use nexus_types::external_api::rack::Rack;
-use omicron_common::api::external::ByteCount;
-use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
-use sled_agent_types::inventory::SledRole;
 use std::time::Duration;
 
 type ControlPlaneTestContext =
@@ -100,7 +101,6 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
         .wait_for_at_least_one_inventory_collection(Duration::from_secs(60))
         .await;
 
-    let internal_client = cptestctx.internal_client();
     let external_client = &cptestctx.external_client;
     let list_url = "/v1/system/hardware/sleds-uninitialized";
     let mut uninitialized_sleds =
@@ -122,19 +122,29 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
     // Just pick some random fields other than `baseboard`
     let baseboard = uninitialized_sleds.pop().unwrap().baseboard;
     let sled_uuid = SledUuid::new_v4();
-    let sa = nexus_client::types::SledAgentInfo {
-        sa_address: "[fd00:1122:3344:0100::1]:8080".parse().unwrap(),
-        repo_depot_port: 8081,
-        role: SledRole::Gimlet,
-        baseboard: baseboard.into(),
-        usable_hardware_threads: 32,
-        usable_physical_ram: ByteCount::from_gibibytes_u32(100).into(),
-        reservoir_size: ByteCount::from_mebibytes_u32(100).into(),
-        cpu_family: nexus_client::types::SledCpuFamily::Unknown,
-        generation: Generation::new(),
-        decommissioned: false,
-    };
-    internal_client.sled_agent_put(&sled_uuid, &sa).await.unwrap();
+    let nexus = &cptestctx.server.server_context().nexus;
+    let sled_update = SledUpdate::new(
+        sled_uuid,
+        "[fd00:1122:3344:0100::1]:8080".parse().unwrap(),
+        8081,
+        SledBaseboard {
+            serial_number: baseboard.serial,
+            part_number: baseboard.part,
+            revision: baseboard.revision,
+        },
+        SledSystemHardwareBuilder::new().build(),
+        nexus.rack_id(),
+        Generation::new(),
+    );
+    let (_, was_modified) = nexus
+        .datastore()
+        .sled_upsert(sled_update)
+        .await
+        .expect("sled row for the uninitialized baseboard was upserted");
+    assert!(
+        was_modified,
+        "sled upsert should be a fresh insert since sled {sled_uuid} is new"
+    );
 
     // Ensure there's only one unintialized sled remaining, and it's not
     // the one that was just added into the `sled` table
