@@ -8,6 +8,16 @@
 //! current version of each type. Business logic should use these re-exports
 //! rather than versioned identifiers.
 
+pub mod active_problem {
+    pub use crate::v2026_10_22_00::active_problem::ActiveProblem;
+    pub use crate::v2026_10_22_00::active_problem::ActiveProblemImpact;
+    pub use crate::v2026_10_22_00::active_problem::ActiveProblemListParams;
+    pub use crate::v2026_10_22_00::active_problem::ActiveProblemSelector;
+    pub use crate::v2026_10_22_00::active_problem::ActiveProblemState;
+    pub use crate::v2026_10_22_00::active_problem::ImpactedResource;
+    pub use crate::v2026_10_22_00::active_problem::RelatedActiveProblem;
+}
+
 pub mod affinity {
     pub use crate::v2025_11_20_00::affinity::AffinityGroup;
     pub use crate::v2025_11_20_00::affinity::AffinityGroupCreate;

@@ -117,6 +117,7 @@ extern crate diesel;
 #[macro_use]
 extern crate newtype_derive;
 
+mod active_problem;
 mod address_lot;
 mod affinity;
 mod alert;
@@ -273,6 +274,7 @@ mod db {
 
 pub use self::macaddr::*;
 pub use self::unsigned::*;
+pub use active_problem::*;
 pub use address_lot::*;
 pub use affinity::*;
 pub use alert::*;

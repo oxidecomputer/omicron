@@ -7,6 +7,7 @@
 //! Types are organized by semantic domain. Each module re-exports the latest
 //! versions of types from `nexus_types_versions::latest`.
 
+pub mod active_problem;
 pub mod affinity;
 pub mod alert;
 pub mod asset;
