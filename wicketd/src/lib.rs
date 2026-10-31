@@ -271,7 +271,8 @@ impl Server {
                 dropshot::ClientSpecifiesVersionInHeader::new(
                     omicron_common::api::VERSION_HEADER,
                     wicketd_commission_api::latest_version(),
-                ),
+                )
+                .min_version(wicketd_commission_api::oldest_version()),
             )))
             .start()
             .map_err(|err| {
@@ -302,7 +303,8 @@ impl Server {
                 dropshot::ClientSpecifiesVersionInHeader::new(
                     omicron_common::api::VERSION_HEADER,
                     installinator_api::latest_version(),
-                ),
+                )
+                .min_version(installinator_api::oldest_version()),
             )))
             .start()
             .map_err(|err| {
