@@ -5,7 +5,6 @@
 //! Params define the request bodies of API endpoints for creating or updating resources.
 
 use crate::deployment::Blueprint;
-use crate::external_api::hardware::Baseboard;
 use crate::external_api::physical_disk::PhysicalDiskKind;
 use bootstrap_agent_lockstep_types::RecoverySiloConfig;
 pub use bootstrap_agent_lockstep_types::ServiceIpPoolConfig;
@@ -24,8 +23,6 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::RackNetworkConfig;
-use sled_agent_types::inventory::SledCpuFamily;
-use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
@@ -36,6 +33,8 @@ use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 /// Sent by a sled agent to Nexus to inform about resources
+// NOTE: The fields in this struct use fixed identifiers, not `latest` floating
+// ones, because the Nexus internal API is client-side versioned.
 #[derive(Serialize, Deserialize, Debug, JsonSchema)]
 pub struct SledAgentInfo {
     /// The address of the sled agent's API endpoint
@@ -45,10 +44,10 @@ pub struct SledAgentInfo {
     pub repo_depot_port: u16,
 
     /// Describes the responsibilities of the sled
-    pub role: SledRole,
+    pub role: sled_agent_types_versions::v1::inventory::SledRole,
 
     /// Describes the sled's identity
-    pub baseboard: Baseboard,
+    pub baseboard: nexus_types_versions::v2025_11_20_00::hardware::Baseboard,
 
     /// The number of hardware threads which can execute on this sled
     pub usable_hardware_threads: u32,
@@ -62,7 +61,7 @@ pub struct SledAgentInfo {
     pub reservoir_size: ByteCount,
 
     /// The family of the sled's CPU.
-    pub cpu_family: SledCpuFamily,
+    pub cpu_family: sled_agent_types_versions::v1::inventory::SledCpuFamily,
 
     /// The generation number of this request from sled-agent
     pub generation: Generation,
@@ -74,9 +73,11 @@ pub struct SledAgentInfo {
     pub decommissioned: bool,
 }
 
+// NOTE: The fields in this struct use fixed identifiers, not `latest` floating
+// ones, because the Nexus internal API is client-side versioned.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SwitchPutRequest {
-    pub baseboard: Baseboard,
+    pub baseboard: nexus_types_versions::v2025_11_20_00::hardware::Baseboard,
     pub rack_id: Uuid,
 }
 
