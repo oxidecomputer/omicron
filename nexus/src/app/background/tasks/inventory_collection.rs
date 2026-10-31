@@ -264,7 +264,6 @@ mod test {
     use super::InventoryCollector;
     use crate::app::authz;
     use crate::app::background::BackgroundTask;
-    use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledCpuFamily;
     use nexus_db_model::SledSystemHardware;
@@ -276,6 +275,7 @@ mod test {
     use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::LookupType;
+    use omicron_generation_kinds::SledRegistrationGeneration;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
@@ -451,7 +451,7 @@ mod test {
                     cpu_family: SledCpuFamily::AmdMilan,
                 },
                 rack_id,
-                Generation::new(),
+                SledRegistrationGeneration::new(),
             );
             let (sled, _) = datastore.sled_upsert(sled).await.unwrap();
             sleds.push(sled);

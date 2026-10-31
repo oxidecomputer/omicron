@@ -1524,7 +1524,6 @@ mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledSystemHardwareBuilder;
-    use nexus_db_model::Generation;
     use nexus_db_model::HwBaseboardId;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledState;
@@ -1533,6 +1532,7 @@ mod tests {
     use nexus_types::trust_quorum::{
         IsLrtqUpgrade, TrustQuorumConfigState, TrustQuorumMemberState,
     };
+    use omicron_generation_kinds::SledRegistrationGeneration;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
@@ -1593,7 +1593,7 @@ mod tests {
             },
             SledSystemHardwareBuilder::new().build(),
             rack_id,
-            Generation::new(),
+            SledRegistrationGeneration::new(),
         );
         datastore.sled_upsert(update).await.unwrap();
         sled_id

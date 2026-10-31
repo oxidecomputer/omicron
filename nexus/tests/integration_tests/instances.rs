@@ -1587,7 +1587,7 @@ async fn test_instance_migration_compatible_cpu_platforms(
         .add_sled(
             new_sled_id,
             omicron_sled_agent::sim::SimMode::Explicit,
-            sled_agent_types::inventory::SledCpuFamily::AmdTurin,
+            omicron_sled_agent::sim::SledCpuFamily::AmdTurin,
         )
         .await;
 
@@ -1771,7 +1771,7 @@ async fn test_instance_migration_incompatible_cpu_platforms(
         .add_sled(
             turin_sled_id,
             omicron_sled_agent::sim::SimMode::Explicit,
-            sled_agent_types::inventory::SledCpuFamily::AmdTurin,
+            omicron_sled_agent::sim::SledCpuFamily::AmdTurin,
         )
         .await;
 
@@ -1860,7 +1860,7 @@ async fn test_instance_migration_unknown_sled_type(
         .add_sled(
             new_sled_id,
             omicron_sled_agent::sim::SimMode::Explicit,
-            sled_agent_types::inventory::SledCpuFamily::Unknown,
+            omicron_sled_agent::sim::SledCpuFamily::Unknown,
         )
         .await;
 
@@ -7959,7 +7959,7 @@ async fn test_can_start_instance_with_cpu_platform(
         .add_sled(
             new_sled_id,
             omicron_sled_agent::sim::SimMode::Explicit,
-            sled_agent_types::inventory::SledCpuFamily::AmdTurin,
+            omicron_sled_agent::sim::SledCpuFamily::AmdTurin,
         )
         .await;
 

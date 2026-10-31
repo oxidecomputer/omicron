@@ -609,12 +609,12 @@ mod test {
     use crate::db::datastore::RegionAllocationParameters;
     use crate::db::explain::ExplainableAsync;
     use crate::db::model::ByteCount;
-    use crate::db::model::Generation;
     use crate::db::model::to_db_typed_uuid;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use chrono::Utc;
+    use omicron_generation_kinds::SledRegistrationGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::CollectionUuid;
@@ -1087,7 +1087,7 @@ mod test {
                     cpu_family: db::model::SledCpuFamily::AmdMilan,
                 },
                 RackUuid::new_v4(),
-                Generation::new(),
+                SledRegistrationGeneration::new(),
             );
 
             datastore.sled_upsert(sled).await.expect("failed to upsert sled");

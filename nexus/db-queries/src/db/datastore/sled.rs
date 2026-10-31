@@ -20,6 +20,7 @@ use crate::db::model::SledResourceVmmState;
 use crate::db::model::SledState;
 use crate::db::model::SledUpdate;
 use crate::db::model::to_db_sled_policy;
+use crate::db::model::to_db_typed_generation;
 use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
@@ -1127,9 +1128,13 @@ impl DataStore {
                 dsl::usable_physical_ram.eq(sled_update.usable_physical_ram),
                 dsl::reservoir_size.eq(sled_update.reservoir_size),
                 dsl::cpu_family.eq(sled_update.cpu_family),
-                dsl::sled_agent_gen.eq(sled_update.sled_agent_gen),
+                dsl::sled_agent_gen
+                    .eq(to_db_typed_generation(sled_update.sled_agent_gen)),
             ))
-            .filter(dsl::sled_agent_gen.lt(sled_update.sled_agent_gen))
+            .filter(
+                dsl::sled_agent_gen
+                    .lt(to_db_typed_generation(sled_update.sled_agent_gen)),
+            )
             .filter(dsl::sled_state.ne(SledState::Decommissioned))
             .returning(Sled::as_returning())
             .get_result_async(&*self.pool_connection_unauthorized().await?)
@@ -2459,7 +2464,6 @@ pub(in crate::db::datastore) mod test {
     use async_bb8_diesel::AsyncSimpleConnection;
     use itertools::Itertools;
     use nexus_db_lookup::LookupPath;
-    use nexus_db_model::Generation;
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::PhysicalDiskPolicy;
     use nexus_db_model::PhysicalDiskState;
@@ -2480,6 +2484,7 @@ pub(in crate::db::datastore) mod test {
     use nexus_types::identity::Resource;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external;
+    use omicron_generation_kinds::SledRegistrationGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::AffinityGroupUuid;
     use omicron_uuid_kinds::AntiAffinityGroupUuid;
@@ -2523,7 +2528,7 @@ pub(in crate::db::datastore) mod test {
         assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
 
         // Bump the generation number so the next insert succeeds.
-        sled_update.sled_agent_gen.0 = sled_update.sled_agent_gen.0.next();
+        sled_update.sled_agent_gen = sled_update.sled_agent_gen.next();
 
         // Test that upserting the sled propagates those changes to the DB.
         let (observed_sled, _) = datastore
@@ -2535,7 +2540,7 @@ pub(in crate::db::datastore) mod test {
         // Now reset the generation to a lower value and try again.
         // This should fail.
         let current_gen = sled_update.sled_agent_gen;
-        sled_update.sled_agent_gen = Generation::new();
+        sled_update.sled_agent_gen = SledRegistrationGeneration::new();
         assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
 
         // Now bump the generation from the saved `current_gen`
@@ -2546,14 +2551,17 @@ pub(in crate::db::datastore) mod test {
             )
             .unwrap(),
         );
-        sled_update.sled_agent_gen.0 = current_gen.0.next();
+        sled_update.sled_agent_gen = current_gen.next();
         // Test that upserting the sled propagates those changes to the DB.
         let (observed_sled, _) = datastore
             .sled_upsert(sled_update.clone())
             .await
             .expect("Could not upsert sled during test prep");
         assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
-        assert_eq!(observed_sled.sled_agent_gen, sled_update.sled_agent_gen);
+        assert_eq!(
+            SledRegistrationGeneration::from(observed_sled.sled_agent_gen),
+            sled_update.sled_agent_gen
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -5343,7 +5351,7 @@ pub(in crate::db::datastore) mod test {
                     cpu_family: db::model::SledCpuFamily::AmdMilan,
                 },
                 RackUuid::new_v4(),
-                Generation::new(),
+                SledRegistrationGeneration::new(),
             );
 
             datastore.sled_upsert(sled).await.expect("failed to upsert sled");

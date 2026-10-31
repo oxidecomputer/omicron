@@ -18,11 +18,11 @@ use nexus_types::external_api::physical_disk::PhysicalDisk;
 use nexus_types::external_api::sled::Sled;
 use nexus_types::external_api::sled::SledInstance;
 use omicron_sled_agent::sim;
+use omicron_sled_agent::sim::SledCpuFamily;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
-use sled_agent_types::inventory::SledCpuFamily;
 use std::str::FromStr;
 use uuid::Uuid;
 

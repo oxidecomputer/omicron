@@ -254,7 +254,7 @@ mod test {
     use omicron_common::zpool_name::ZpoolName;
     use omicron_generation_kinds::{
         Generation, NexusGeneration, SledConfigGeneration,
-        TargetReleaseGeneration,
+        SledRegistrationGeneration, TargetReleaseGeneration,
     };
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
@@ -428,7 +428,7 @@ mod test {
                     cpu_family: SledCpuFamily::AmdMilan,
                 },
                 rack_id,
-                nexus_db_model::Generation::new(),
+                SledRegistrationGeneration::new(),
             );
             datastore
                 .sled_upsert(update)

@@ -130,7 +130,8 @@ impl HostPhase2TestContext {
                 dropshot::ClientSpecifiesVersionInHeader::new(
                     omicron_common::api::VERSION_HEADER,
                     sled_agent_api::latest_version(),
-                ),
+                )
+                .min_version(sled_agent_api::oldest_version()),
             )))
             .start()
             .context("failed to create dropshot server")?
