@@ -1077,7 +1077,6 @@ mod test {
     use sled_agent_types::inventory::OmicronZoneConfig;
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::OmicronZoneType;
-    use sled_agent_types::inventory::SledCpuFamily;
     use slog::o;
     use std::collections::BTreeSet;
     use std::net::Ipv6Addr;
@@ -1398,7 +1397,7 @@ mod test {
             sim::SimMode::Auto,
             None,
             sim::ZpoolConfig::None,
-            SledCpuFamily::AmdMilan,
+            sim::SledCpuFamily::AmdMilan,
         );
 
         let agent = sim::Server::start(

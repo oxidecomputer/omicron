@@ -11,12 +11,12 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_hardware_types::SledCpuFamily;
 use std::net::SocketAddrV6;
 
 use crate::v1;
 use crate::v1::inventory::InventoryDataset;
 use crate::v1::inventory::InventoryDisk;
+use crate::v1::inventory::SledCpuFamily;
 use crate::v1::inventory::SledRole;
 use crate::v12::inventory::SvcsInMaintenanceResult;
 use crate::v14::inventory::ConfigReconcilerInventoryStatus;

@@ -88,6 +88,7 @@ use omicron_generation_kinds::{
     Generation, NexusGeneration, SledConfigGeneration, TargetReleaseGeneration,
 };
 use omicron_sled_agent::sim;
+use omicron_sled_agent::sim::SledCpuFamily;
 use omicron_test_utils::dev;
 use omicron_test_utils::dev::TestTempDir;
 use omicron_uuid_kinds::BlueprintUuid;
@@ -116,7 +117,6 @@ use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::OmicronZoneDataset;
-use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
