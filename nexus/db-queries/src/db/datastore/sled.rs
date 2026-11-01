@@ -1097,14 +1097,12 @@ pub struct MigrateSuccessUpdate {
 impl DataStore {
     /// Stores a new sled in the database.
     ///
-    /// Returns the sled, and whether or not it was updated on success.
-    ///
     /// Returns an error if `sled_agent_gen` is stale, or the sled is
     /// decommissioned.
     pub async fn sled_upsert(
         &self,
         sled_update: SledUpdate,
-    ) -> CreateResult<(Sled, bool)> {
+    ) -> CreateResult<Sled> {
         use nexus_db_schema::schema::sled::dsl;
         // required for conditional upsert
         use diesel::query_dsl::methods::FilterDsl;
@@ -1112,7 +1110,7 @@ impl DataStore {
         let insertable_sled = sled_update.clone().into_insertable();
         let now = insertable_sled.time_modified();
 
-        let sled = diesel::insert_into(dsl::sled)
+        diesel::insert_into(dsl::sled)
             .values(insertable_sled)
             .on_conflict(dsl::id)
             .do_update()
@@ -1147,12 +1145,7 @@ impl DataStore {
                         &sled_update.id().to_string(),
                     ),
                 )
-            })?;
-
-        // We compare only seconds since the epoch, because writing to and
-        // reading from the database causes us to lose precision.
-        let was_modified = now.timestamp() == sled.time_modified().timestamp();
-        Ok((sled, was_modified))
+            })
     }
 
     /// Returns true if a sled exists and is in-service, false if not.
