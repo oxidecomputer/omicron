@@ -270,6 +270,7 @@ mod test {
     use nexus_db_model::SledUpdate;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::datastore::DataStoreInventoryTest;
+    use nexus_db_queries::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use nexus_inventory::SledAgentEnumerator;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Asset;
@@ -453,7 +454,7 @@ mod test {
                 rack_id,
                 SledRegistrationGeneration::new(),
             );
-            let (sled, _) = datastore.sled_upsert(sled).await.unwrap();
+            let sled = sled_upsert_expect_written(datastore, sled).await;
             sleds.push(sled);
         }
 

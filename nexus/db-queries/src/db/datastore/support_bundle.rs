@@ -996,6 +996,7 @@ mod test {
 
     use crate::db::datastore::test::bp_insert_and_make_target;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledCpuFamily;
     use nexus_db_model::SledSystemHardware;
@@ -1110,7 +1111,7 @@ mod test {
                 rack_id,
                 SledRegistrationGeneration::new(),
             );
-            datastore.sled_upsert(sled).await.expect("failed to upsert sled");
+            sled_upsert_expect_written(datastore, sled).await;
 
             // Create fake zpools that back our fake datasets.
             for pool in &self.pools {
