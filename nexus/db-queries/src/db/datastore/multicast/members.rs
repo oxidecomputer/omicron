@@ -871,6 +871,7 @@ mod tests {
     use crate::db::pub_test_utils::helpers::{
         SledUpdateBuilder, attach_instance_to_vmm, create_instance_with_vmm,
         create_stopped_instance_record, create_vmm_for_instance,
+        sled_upsert_expect_written,
     };
     use crate::db::pub_test_utils::multicast::NO_SOURCE_IPS;
     use crate::db::pub_test_utils::{TestDatabase, multicast};
@@ -1511,11 +1512,11 @@ mod tests {
         // Create additional test sleds for migration testing
         let sled1_id = SledUuid::new_v4();
         let sled1_update = SledUpdateBuilder::new().sled_id(sled1_id).build();
-        datastore.sled_upsert(sled1_update).await.unwrap();
+        sled_upsert_expect_written(datastore, sled1_update).await;
 
         let sled2_id = SledUuid::new_v4();
         let sled2_update = SledUpdateBuilder::new().sled_id(sled2_id).build();
-        datastore.sled_upsert(sled2_update).await.unwrap();
+        sled_upsert_expect_written(datastore, sled2_update).await;
 
         // Create test instance
         let instance_id = create_stopped_instance_record(
@@ -2134,14 +2135,16 @@ mod tests {
         let new_sled = SledUuid::new_v4();
 
         // Create sled records
-        datastore
-            .sled_upsert(SledUpdateBuilder::new().sled_id(initial_sled).build())
-            .await
-            .unwrap();
-        datastore
-            .sled_upsert(SledUpdateBuilder::new().sled_id(new_sled).build())
-            .await
-            .unwrap();
+        sled_upsert_expect_written(
+            datastore,
+            SledUpdateBuilder::new().sled_id(initial_sled).build(),
+        )
+        .await;
+        sled_upsert_expect_written(
+            datastore,
+            SledUpdateBuilder::new().sled_id(new_sled).build(),
+        )
+        .await;
 
         // Create test instance
         let instance_record = create_stopped_instance_record(
