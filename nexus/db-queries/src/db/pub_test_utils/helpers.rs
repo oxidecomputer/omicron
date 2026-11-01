@@ -234,12 +234,10 @@ pub async fn sled_upsert_expect_written(
     sled_update: SledUpdate,
 ) -> Sled {
     let sled_id = sled_update.id();
-    let (sled, was_modified) = datastore
+    datastore
         .sled_upsert(sled_update)
         .await
-        .unwrap_or_else(|e| panic!("upserted sled {sled_id}: {e}"));
-    assert!(was_modified, "expected sled {sled_id} to be written");
-    sled
+        .unwrap_or_else(|e| panic!("upserted sled {sled_id}: {e}"))
 }
 
 /// Asserts that a sled upsert was rejected by one or more of the ON
@@ -260,9 +258,6 @@ pub async fn sled_upsert_expect_filtered(
         });
 
     match datastore.sled_upsert(sled_update).await {
-        // XXX: Currently, value is a pair of (Sled, was_modified). But
-        // was_modified is always true because the sled_upsert call returns
-        // an empty set.
         Ok(value) => panic!(
             "upsert of sled {sled_id} at registration generation \
              {sled_agent_gen} should have been filtered out and returned \
