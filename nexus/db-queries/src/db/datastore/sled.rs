@@ -2448,6 +2448,7 @@ pub(in crate::db::datastore) mod test {
     use crate::db::pub_test_utils::helpers::create_affinity_group;
     use crate::db::pub_test_utils::helpers::create_anti_affinity_group;
     use crate::db::pub_test_utils::helpers::create_project;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_filtered;
     use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use crate::db::pub_test_utils::helpers::small_resource_request;
     use crate::db::pub_test_utils::simulated_sleds::apply_sled_bp_availability;
@@ -2507,7 +2508,7 @@ pub(in crate::db::datastore) mod test {
     async fn upsert_sled_updates_hardware() {
         let logctx = dev::test_setup_log("upsert_sled_updates_hardware");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let datastore = db.datastore();
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let mut sled_update = test_new_sled_update();
         let observed_sled =
@@ -2526,7 +2527,8 @@ pub(in crate::db::datastore) mod test {
         );
 
         // Fail the update, since the generation number didn't change.
-        assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
+        sled_upsert_expect_filtered(opctx, datastore, sled_update.clone())
+            .await;
 
         // Bump the generation number so the next insert succeeds.
         sled_update.sled_agent_gen = sled_update.sled_agent_gen.next();
@@ -2540,7 +2542,8 @@ pub(in crate::db::datastore) mod test {
         // This should fail.
         let current_gen = sled_update.sled_agent_gen;
         sled_update.sled_agent_gen = SledRegistrationGeneration::new();
-        assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
+        sled_upsert_expect_filtered(opctx, datastore, sled_update.clone())
+            .await;
 
         // Now bump the generation from the saved `current_gen`
         // Change the reservoir value again. This should succeed.
@@ -2614,29 +2617,15 @@ pub(in crate::db::datastore) mod test {
             .unwrap(),
         );
 
-        // Upserting the sled should produce an error, because it is decommissioend.
-        assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
+        // This upsert call is rejected by both the decommissioned and the sled
+        // agent generation filters.
+        sled_upsert_expect_filtered(opctx, datastore, sled_update.clone())
+            .await;
 
-        // The sled should not have been updated.
-        let (_, observed_sled_2) = LookupPath::new(&opctx, datastore)
-            .sled_id(observed_sled.id())
-            .fetch_for(authz::Action::Modify)
-            .await
-            .unwrap();
-        assert_eq!(
-            observed_sled_2.usable_hardware_threads,
-            observed_sled.usable_hardware_threads,
-            "usable_hardware_threads should not have changed"
-        );
-        assert_eq!(
-            observed_sled_2.usable_physical_ram,
-            observed_sled.usable_physical_ram,
-            "usable_physical_ram should not have changed"
-        );
-        assert_eq!(
-            observed_sled_2.reservoir_size, observed_sled.reservoir_size,
-            "reservoir_size should not have changed"
-        );
+        // This upsert call, even though at a newer generation, is rejected by
+        // the decommissioned filter.
+        sled_update.sled_agent_gen = sled_update.sled_agent_gen.next();
+        sled_upsert_expect_filtered(opctx, datastore, sled_update).await;
 
         db.terminate().await;
         logctx.cleanup_successful();
