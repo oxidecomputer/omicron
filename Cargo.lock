@@ -15280,6 +15280,7 @@ dependencies = [
  "nexus-types",
  "nix 0.31.2",
  "omicron-common",
+ "omicron-test-utils",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
  "serde",
