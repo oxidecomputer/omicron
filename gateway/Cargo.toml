@@ -54,14 +54,12 @@ zip.workspace = true
 [dev-dependencies]
 expectorate.workspace = true
 gateway-client.workspace = true
-gateway-ereport-messages.workspace = true
 gateway-test-utils.workspace = true
 omicron-test-utils.workspace = true
 serde_json.workspace = true
 sp-sim.workspace = true
 subprocess.workspace = true
 pretty_assertions.workspace = true
-zerocopy.workspace = true
 
 [[bin]]
 name = "mgs"

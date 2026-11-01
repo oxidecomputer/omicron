@@ -107,22 +107,6 @@ struct EreportListEntry {
     bytes: Vec<u8>,
 }
 
-enum MalformedReason {
-    WrongSize,
-    UnknownVersion(u8),
-}
-
-impl std::fmt::Display for MalformedReason {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::WrongSize => f.write_str("wrong size"),
-            Self::UnknownVersion(version) => {
-                write!(f, "unknown version byte {version:#04x}")
-            }
-        }
-    }
-}
-
 /// Enough leading bytes so callers can hopefully identify the source of a
 /// malformed datagram without dumping all of it.
 const MALFORMED_PREFIX_LEN: usize = 32;
@@ -235,30 +219,39 @@ impl EreportState {
         loop {
             let local_addr = sock.local_addr();
             let (packet, addr) = sock.recv_from().await?;
-            let reason = match Request::try_read_from_bytes(packet) {
+            match Request::try_read_from_bytes(packet) {
                 Ok(request) => return Ok((request, addr, sock)),
                 Err(ConvertError::Alignment(never)) => match never {},
                 // Drop undecodable datagrams, matching the behavior of the real
                 // SP.
-                Err(ConvertError::Size(_)) => MalformedReason::WrongSize,
+                Err(ConvertError::Size(_)) => {
+                    slog::warn!(
+                        self.log,
+                        "dropping ereport request with wrong size";
+                        "src_addr" => %addr,
+                        "local_addr" => %local_addr,
+                        "packet_len" => packet.len(),
+                        "expected_len" => std::mem::size_of::<Request>(),
+                        "packet_prefix" => hex::encode(
+                            &packet[..packet.len().min(MALFORMED_PREFIX_LEN)]
+                        ),
+                    );
+                }
                 Err(ConvertError::Validity(_)) => {
                     // zerocopy reports Validity only after the size matched, so
                     // packet is non-empty here and packet[0] will not panic.
-                    MalformedReason::UnknownVersion(packet[0])
+                    slog::warn!(
+                        self.log,
+                        "dropping ereport request with unknown version";
+                        "src_addr" => %addr,
+                        "local_addr" => %local_addr,
+                        "version" => format!("{:#04x}", packet[0]),
+                        "packet_prefix" => hex::encode(
+                            &packet[..packet.len().min(MALFORMED_PREFIX_LEN)]
+                        ),
+                    );
                 }
-            };
-            slog::warn!(
-                self.log,
-                "dropping malformed ereport request";
-                "src_addr" => %addr,
-                "local_addr" => %local_addr,
-                "reason" => %reason,
-                "packet_len" => packet.len(),
-                "expected_len" => std::mem::size_of::<Request>(),
-                "packet_prefix" => hex::encode(
-                    &packet[..packet.len().min(MALFORMED_PREFIX_LEN)]
-                ),
-            );
+            }
         }
     }
 
