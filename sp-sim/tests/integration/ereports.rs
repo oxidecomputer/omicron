@@ -122,7 +122,7 @@ async fn ereports_survive_malformed_requests() {
             .unwrap_or_else(|e| panic!("sent {description} packet: {e}"));
     }
 
-    // Lastly, send out the probe (valid packet).
+    // Lastly, send out probes (valid datagrams).
     //
     // Normally, UDP datagrams aren't guaranteed to be delivered in order, but
     // on a loopback address it would be strange not to do that. Therefore, if
