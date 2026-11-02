@@ -34,11 +34,13 @@ impl super::Nexus {
     ) -> Result<(), Error> {
         let target_release =
             self.datastore().target_release_get_current(opctx).await?;
-        let release_source = target_release.release_source().map_err(|e| {
-            Error::internal_error(&format!(
-                "loading current target release: {e:#}"
-            ))
-        })?;
+        let release_source =
+            target_release.release_source().map_err(|err| {
+                Error::internal_error(&format!(
+                    "loading current target release: {}",
+                    InlineErrorChain::new(&*err),
+                ))
+            })?;
         let tuf_repo_id = match release_source {
             TargetReleaseSource::Unspecified => {
                 // It's uncommon for no target release to be specified.  This
