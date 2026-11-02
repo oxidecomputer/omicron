@@ -85,7 +85,8 @@ impl Server {
                     dropshot::ClientSpecifiesVersionInHeader::new(
                         omicron_common::api::VERSION_HEADER,
                         sled_agent_api::latest_version(),
-                    ),
+                    )
+                    .min_version(sled_agent_api::oldest_version()),
                 )))
                 .start()
                 .map_err(|error| format!("initializing server: {}", error))?;

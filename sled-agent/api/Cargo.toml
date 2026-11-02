@@ -27,5 +27,6 @@ sled-hardware-types.workspace = true
 slog-error-chain.workspace = true
 static_assertions.workspace = true
 trust-quorum-types.workspace = true
+trust-quorum-types-versions.workspace = true
 uuid.workspace = true
 x509-cert.workspace = true

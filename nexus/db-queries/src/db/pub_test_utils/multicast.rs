@@ -28,7 +28,9 @@ use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid, SledUuid};
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::DataStore;
-use crate::db::pub_test_utils::helpers::{SledUpdateBuilder, create_project};
+use crate::db::pub_test_utils::helpers::{
+    SledUpdateBuilder, create_project, sled_upsert_expect_written,
+};
 use omicron_uuid_kinds::ProjectUuid;
 
 /// Common test setup for multicast datastore tests.
@@ -160,7 +162,7 @@ pub async fn create_test_setup_with_range(
     // Create sled
     let sled_id = SledUuid::new_v4();
     let sled_update = SledUpdateBuilder::new().sled_id(sled_id).build();
-    datastore.sled_upsert(sled_update).await.unwrap();
+    sled_upsert_expect_written(datastore, sled_update).await;
 
     TestSetup {
         authz_project,

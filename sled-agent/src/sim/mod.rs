@@ -20,7 +20,7 @@ mod upstairs;
 
 pub use config::{
     Baseboard, Config, ConfigHardware, ConfigStorage, ConfigZpool, SimMode,
-    TEST_HARDWARE_THREADS, TEST_RESERVOIR_RAM, ZpoolConfig,
+    SledCpuFamily, TEST_HARDWARE_THREADS, TEST_RESERVOIR_RAM, ZpoolConfig,
 };
 pub use server::{NexusRegistration, RssArgs, Server, run_standalone_server};
 pub use sled_agent::{

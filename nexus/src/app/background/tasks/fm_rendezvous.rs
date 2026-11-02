@@ -634,6 +634,7 @@ mod tests {
     use diesel::prelude::*;
     use nexus_db_queries::db;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
+    use nexus_db_queries::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use nexus_db_schema::schema::alert::dsl as alert_dsl;
     use nexus_types::alert::AlertClass;
     use nexus_types::fm;
@@ -1915,7 +1916,6 @@ mod tests {
         opctx: &OpContext,
         pool_count: usize,
     ) {
-        use nexus_db_model::Generation;
         use nexus_db_model::RendezvousDebugDataset;
         use nexus_db_model::SledBaseboard;
         use nexus_db_model::SledCpuFamily;
@@ -1923,6 +1923,7 @@ mod tests {
         use nexus_db_model::SledUpdate;
         use nexus_db_model::Zpool;
         use omicron_common::api::external::ByteCount;
+        use omicron_generation_kinds::SledRegistrationGeneration;
         use omicron_uuid_kinds::BlueprintUuid;
         use omicron_uuid_kinds::DatasetUuid;
         use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -1948,9 +1949,9 @@ mod tests {
                 cpu_family: SledCpuFamily::AmdMilan,
             },
             RackUuid::new_v4(),
-            Generation::new(),
+            SledRegistrationGeneration::new(),
         );
-        datastore.sled_upsert(sled).await.unwrap();
+        sled_upsert_expect_written(datastore, sled).await;
 
         let blueprint_id = BlueprintUuid::new_v4();
         for _ in 0..pool_count {

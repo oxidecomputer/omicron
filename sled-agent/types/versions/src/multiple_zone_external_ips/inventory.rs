@@ -26,14 +26,14 @@ use omicron_ledger::Ledgerable;
 use omicron_uuid_kinds::{
     DatasetUuid, MupdateOverrideUuid, PhysicalDiskUuid, SledUuid,
 };
-use sled_hardware_types::{BaseboardId, SledCpuFamily};
+use sled_hardware_types::BaseboardId;
 
 use crate::v1::disk::{DatasetConfig, OmicronPhysicalDiskConfig};
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk,
     OmicronZoneDataset, OmicronZoneImageSource, OrphanedDataset,
-    RemoveMupdateOverrideInventory, SledRole,
+    RemoveMupdateOverrideInventory, SledCpuFamily, SledRole,
 };
 use crate::v10::inventory::NetworkInterface;
 use crate::v11;

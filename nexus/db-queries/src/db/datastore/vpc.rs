@@ -2967,6 +2967,7 @@ mod tests {
     use crate::db::model::Project;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use crate::db::queries::vpc::MAX_VNI_SEARCH_RANGE_SIZE;
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
@@ -3286,7 +3287,7 @@ mod tests {
                 .sled_id(sled_id)
                 .rack_id(rack_id)
                 .build();
-            datastore.sled_upsert(sled_update).await.expect("upserting sled");
+            sled_upsert_expect_written(datastore, sled_update).await;
         }
         sled_ids.sort_unstable();
 
