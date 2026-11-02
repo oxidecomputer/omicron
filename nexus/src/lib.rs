@@ -124,7 +124,8 @@ impl InternalServer {
             dropshot::ClientSpecifiesVersionInHeader::new(
                 omicron_common::api::VERSION_HEADER,
                 nexus_internal_api::latest_version(),
-            ),
+            )
+            .min_version(nexus_internal_api::oldest_version()),
         )))
         .start()
         .map_err(|error| format!("initializing internal server: {}", error))
@@ -243,6 +244,9 @@ impl Server {
                     omicron_common::api::VERSION_HEADER,
                     nexus_external_api::latest_version(),
                 )
+                // Reject requests for versions older than the oldest one that
+                // this server still supports.
+                .min_version(nexus_external_api::oldest_version())
                 // Since we don't have control over all clients to the external
                 // API, we allow the api-version header to not be specified
                 // (picking the latest version in that case). However, all

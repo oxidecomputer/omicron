@@ -6774,12 +6774,20 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn sled_add(
         rqctx: RequestContext<ApiContext>,
-        sled: TypedBody<hardware::UninitializedSledId>,
+        _sled: TypedBody<hardware::UninitializedSledId>,
     ) -> Result<HttpResponseCreated<sled::SledId>, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
-            let sled = sled.into_inner();
-            let id = nexus.sled_add(&opctx, sled).await?;
-            Ok(HttpResponseCreated(sled::SledId { id }))
+        // This implementation existed for compatibility, but it's not the right
+        // way to add sleds any more.  We should remove this altogether, but
+        // that's a bit more work.  See oxidecomputer/omicron#11641.
+        audit_and_time(&rqctx, |_opctx, _nexus| async move {
+            Err(HttpError::for_client_error(
+                None,
+                dropshot::ClientErrorStatusCode::GONE,
+                String::from(
+                    "this endpoint has been removed; add sleds with \
+                     POST /v1/system/hardware/racks/{rack_id}/membership/add",
+                ),
+            ))
         })
         .await
     }

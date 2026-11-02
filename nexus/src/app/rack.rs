@@ -17,19 +17,17 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
-use nexus_db_queries::db::datastore::SledUnderlayAllocationResult;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::certificate;
 use nexus_types::external_api::hardware;
 use nexus_types::external_api::networking;
 use nexus_types::external_api::policy;
-use nexus_types::external_api::rack::SledAddPrecheckOverrides;
 use nexus_types::external_api::silo;
 use nexus_types::inventory::SpType;
 use nexus_types::silo::silo_dns_name;
 use omicron_common::address::{
-    Ipv6Subnet, RACK_PREFIX_LENGTH, UnderlaySubnets, get_64_subnet,
+    Ipv6Subnet, RACK_PREFIX_LENGTH, UnderlaySubnets,
 };
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -39,19 +37,11 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
-use omicron_common::api::external::ResourceType;
-use omicron_common::http_client::internal_http_client_builder;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
-use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
-use sled_agent_client::types::AddSledRequest;
-use sled_agent_client::types::StartSledAgentRequest;
-use sled_agent_client::types::StartSledAgentRequestBody;
 use sled_agent_types::early_networking::LldpAdminStatus;
-use sled_hardware_types::BaseboardId;
 
-use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -818,126 +808,6 @@ impl super::Nexus {
         // Retain all sleds that exist but are not in the sled table
         uninitialized_sleds.retain(|s| !sled_baseboards.contains(&s.baseboard));
         Ok(uninitialized_sleds)
-    }
-
-    /// Add a sled to an intialized rack
-    pub(crate) async fn sled_add(
-        &self,
-        opctx: &OpContext,
-        sled: hardware::UninitializedSledId,
-    ) -> Result<SledUuid, Error> {
-        let baseboard_id: BaseboardId = sled.clone().into();
-        let hw_baseboard_id = self
-            .db_datastore
-            .find_hw_baseboard_id(opctx, &baseboard_id)
-            .await?;
-
-        // Check the sled's software before allowing it to be added to the
-        // system.  This endpoint was removed from the API before overrides
-        // were added, so its callers cannot skip any checks.
-        self.sled_check_versions(
-            opctx,
-            [&baseboard_id],
-            &SledAddPrecheckOverrides::default(),
-        )
-        .await?;
-
-        let subnet = self.db_datastore.rack_subnet(opctx, self.rack_id).await?;
-        let rack_subnet =
-            Ipv6Subnet::<RACK_PREFIX_LENGTH>::from(rack_subnet(Some(subnet))?);
-
-        let allocation = match self
-            .db_datastore
-            .allocate_sled_underlay_subnet_octets(
-                opctx,
-                self.rack_id,
-                hw_baseboard_id,
-            )
-            .await?
-        {
-            SledUnderlayAllocationResult::New(allocation) => allocation,
-            SledUnderlayAllocationResult::CommissionedSled(allocation) => {
-                return Err(Error::ObjectAlreadyExists {
-                    type_name: ResourceType::Sled,
-                    object_name: format!(
-                        "{} ({}): {}",
-                        sled.serial, sled.part, allocation.sled_id
-                    ),
-                });
-            }
-        };
-
-        // Make the call to sled-agent
-        let req = AddSledRequest {
-            sled_id: baseboard_id,
-            start_request: StartSledAgentRequest {
-                generation: 0,
-                schema_version: 1,
-                body: StartSledAgentRequestBody {
-                    id: allocation.sled_id.into(),
-                    rack_id: allocation.rack_id.into(),
-                    use_trust_quorum: true,
-                    is_lrtq_learner: true,
-                    subnet: sled_agent_client::types::Ipv6Subnet {
-                        net: get_64_subnet(
-                            rack_subnet,
-                            allocation.subnet_octet.try_into().unwrap(),
-                        )
-                        .net(),
-                    },
-                },
-            },
-        };
-
-        // This timeout value is fairly arbitrary (as they usually are).  As of
-        // this writing, this operation is known to take close to two minutes on
-        // production hardware.
-        let dur = std::time::Duration::from_secs(300);
-        let sa_url = self.get_any_sled_agent_url(opctx).await?;
-        let reqwest_client = internal_http_client_builder()
-            .connect_timeout(dur)
-            .timeout(dur)
-            .build()
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "failed to create reqwest client for sled agent: {}",
-                    InlineErrorChain::new(&e)
-                ))
-            })?;
-        let sa = sled_agent_client::Client::new_with_client(
-            &sa_url,
-            reqwest_client,
-            self.log.new(o!("sled_agent_url" => sa_url.clone())),
-        );
-        sa.sled_add(&req).await.map_err(|e| {
-            Error::internal_error(&format!(
-                "failed to add sled with baseboard {:?} to rack {}: {}",
-                sled,
-                allocation.rack_id,
-                InlineErrorChain::new(&e)
-            ))
-        })?;
-        Ok(allocation.sled_id.into())
-    }
-
-    async fn get_any_sled_agent_url(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<String, Error> {
-        let addr = self
-            .db_datastore
-            .sled_list(
-                opctx,
-                &DataPageParams::max_page(),
-                SledFilter::InService,
-            )
-            .await?
-            .get(0)
-            .ok_or(Error::InternalError {
-                internal_message: "no sled agents available".into(),
-            })?
-            .address();
-        Ok(format!("http://{}", addr))
     }
 }
 

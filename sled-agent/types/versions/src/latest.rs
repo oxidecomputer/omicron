@@ -294,6 +294,9 @@ pub mod trust_quorum {
     pub use crate::v13::trust_quorum::ProxyPrepareAndCommitRequest;
 
     pub use crate::v15::trust_quorum::TrustQuorumNetworkConfig;
+
+    pub use crate::v61::trust_quorum::TrustQuorumCoordinatorStatusResponse;
+    pub use crate::v61::trust_quorum::TrustQuorumNetworkConfigResponse;
 }
 
 pub mod uplink {

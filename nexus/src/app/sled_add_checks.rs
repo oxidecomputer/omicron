@@ -43,11 +43,13 @@ impl super::Nexus {
         let log = opctx.log.new(o!("overrides" => format!("{overrides:?}")));
         let target_release =
             self.datastore().target_release_get_current(opctx).await?;
-        let release_source = target_release.release_source().map_err(|e| {
-            Error::internal_error(&format!(
-                "loading current target release: {e:#}"
-            ))
-        })?;
+        let release_source =
+            target_release.release_source().map_err(|err| {
+                Error::internal_error(&format!(
+                    "loading current target release: {}",
+                    InlineErrorChain::new(&*err),
+                ))
+            })?;
         let tuf_repo_id = match release_source {
             TargetReleaseSource::Unspecified => {
                 // It's uncommon for no target release to be specified.  This
@@ -166,8 +168,8 @@ fn check_system_settled(
     target_release_generation: TargetReleaseGeneration,
     repo: &TufRepoDescription,
 ) -> Result<(), SystemNotSettledError> {
-    if blueprint.updates_suspended(target_release_generation) {
-        return Err(SystemNotSettledError::UpdateSuspended {
+    if target_release_generation < blueprint.target_release_minimum_generation {
+        return Err(SystemNotSettledError::WaitingForMupdateRecoveryAttempt {
             current: target_release_generation,
             minimum: blueprint.target_release_minimum_generation,
         });
@@ -179,9 +181,11 @@ fn check_system_settled(
             how: _,
             sled_id,
         } => {
-            return Err(SystemNotSettledError::WaitingForMupdateToBeCleared {
-                sled_id,
-            });
+            return Err(
+                SystemNotSettledError::WaitingForMupdateArtifactResolution {
+                    sled_id,
+                },
+            );
         }
         BlueprintTargetReleaseStatus::FoundDifferentVersion {
             sled_id,
@@ -234,19 +238,22 @@ enum SledAddPrecheckError {
 #[derive(Debug, thiserror::Error)]
 enum SystemNotSettledError {
     #[error(
-        "updates are suspended because the current target release has \
-         generation {current}, but the blueprint requires at least \
-         generation {minimum}"
+        "a support-driven recovery (mupdate) has occurred and must be \
+         resolved before adding sleds (current target release generation \
+         is {current}, but the blueprint requires at least {minimum})"
     )]
-    UpdateSuspended {
+    WaitingForMupdateRecoveryAttempt {
         current: TargetReleaseGeneration,
         minimum: TargetReleaseGeneration,
     },
     #[error(
-        "a support-driven recovery (mupdate) has occurred on sled {sled_id} \
-         and must be cleared first"
+        "a support-driven recovery (mupdate) has occurred and sled {sled_id} \
+         is still running unknown artifacts (if this error persists, you \
+         may have attempted MUPdate recovery with a different system \
+         release repository than the one that was used to recover sled \
+         {sled_id})"
     )]
-    WaitingForMupdateToBeCleared { sled_id: SledUuid },
+    WaitingForMupdateArtifactResolution { sled_id: SledUuid },
     #[error(
         "an update to target release {target_release_version} is in \
          progress (sled {sled_id} has components on {version_found})"
@@ -427,7 +434,7 @@ mod tests {
         assert!(
             matches!(
                 error,
-                SystemNotSettledError::UpdateSuspended { current, minimum }
+                SystemNotSettledError::WaitingForMupdateRecoveryAttempt { current, minimum }
                     if current == generation && minimum == generation.next()
             ),
             "unexpected error: {error:?}"

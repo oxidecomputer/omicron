@@ -264,18 +264,19 @@ mod test {
     use super::InventoryCollector;
     use crate::app::authz;
     use crate::app::background::BackgroundTask;
-    use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledCpuFamily;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::datastore::DataStoreInventoryTest;
+    use nexus_db_queries::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use nexus_inventory::SledAgentEnumerator;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::LookupType;
+    use omicron_generation_kinds::SledRegistrationGeneration;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
@@ -451,9 +452,9 @@ mod test {
                     cpu_family: SledCpuFamily::AmdMilan,
                 },
                 rack_id,
-                Generation::new(),
+                SledRegistrationGeneration::new(),
             );
-            let (sled, _) = datastore.sled_upsert(sled).await.unwrap();
+            let sled = sled_upsert_expect_written(datastore, sled).await;
             sleds.push(sled);
         }
 
