@@ -24,8 +24,11 @@ PACKAGES=(
 )
 
 CRATES=(
+  "bhyve_api"
+  "propolis-api-types-versions"
+  "propolis_api_types"
   "propolis-client"
-  "propolis-server"
+  "propolis-mock-server"
 )
 
 REPO="oxidecomputer/propolis"
