@@ -214,14 +214,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let silo: NameOrId = opctx
-                .authn
-                .silo_required()
-                .internal_context("loading current silo")?
-                .id()
-                .into();
-
-            let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
+            let silo_lookup = nexus.current_silo_lookup(&opctx)?;
             let policy = nexus.silo_fetch_policy(&opctx, &silo_lookup).await?;
             Ok(HttpResponseOk(policy))
         };
@@ -242,13 +235,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nasgns = new_policy.role_assignments.len();
             // This should have been validated during parsing.
             bail_unless!(nasgns <= policy::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
-            let silo: NameOrId = opctx
-                .authn
-                .silo_required()
-                .internal_context("loading current silo")?
-                .id()
-                .into();
-            let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
+            let silo_lookup = nexus.current_silo_lookup(&opctx)?;
             let policy = nexus
                 .silo_update_policy(&opctx, &silo_lookup, &new_policy)
                 .await?;
@@ -265,14 +252,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let silo: NameOrId = opctx
-                .authn
-                .silo_required()
-                .internal_context("loading current silo")?
-                .id()
-                .into();
-
-            let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
+            let silo_lookup = nexus.current_silo_lookup(&opctx)?;
             let settings =
                 nexus.silo_fetch_auth_settings(&opctx, &silo_lookup).await?;
             Ok(HttpResponseOk(settings.into()))
@@ -290,13 +270,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<HttpResponseOk<silo::SiloAuthSettings>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let new_settings = new_settings.into_inner();
-            let silo: NameOrId = opctx
-                .authn
-                .silo_required()
-                .internal_context("loading current silo")?
-                .id()
-                .into();
-            let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
+            let silo_lookup = nexus.current_silo_lookup(&opctx)?;
             let settings = nexus
                 .silo_update_auth_settings(&opctx, &silo_lookup, &new_settings)
                 .await?;

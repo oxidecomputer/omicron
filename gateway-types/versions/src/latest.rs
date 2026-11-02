@@ -102,7 +102,6 @@ pub mod task_dump {
 
 pub mod update {
     pub use crate::v1::update::ComponentUpdateIdSlot;
-    pub use crate::v1::update::SpComponentResetError;
     pub use crate::v1::update::SpUpdateStatus;
     pub use crate::v1::update::UpdateAbortBody;
     pub use crate::v1::update::UpdatePreparationProgress;
@@ -110,6 +109,8 @@ pub mod update {
     pub use crate::v6::update::HostPhase2Progress;
     pub use crate::v6::update::HostPhase2RecoveryImageId;
     pub use crate::v6::update::InstallinatorImageId;
+
+    pub use crate::v8::update::SpComponentResetError;
 }
 
 pub mod local {

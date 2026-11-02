@@ -7,6 +7,7 @@ use nexus_db_model as model;
 use nexus_types::identity::Asset;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::api::external::ResourceType;
+use omicron_uuid_kinds::GenericUuid;
 use std::sync::LazyLock;
 
 /// Test user that's granted all privileges, used for automated testing and
@@ -39,7 +40,7 @@ pub static ROLE_ASSIGNMENTS_PRIVILEGED: LazyLock<Vec<model::RoleAssignment>> =
             model::RoleAssignment::new_for_silo_user(
                 USER_TEST_PRIVILEGED.id(),
                 ResourceType::Silo,
-                DEFAULT_SILO_ID,
+                DEFAULT_SILO_ID.into_untyped_uuid(),
                 "admin",
             ),
         ]

@@ -20,9 +20,9 @@ use nexus_types::external_api::policy;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::SiloUuid;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
-use uuid::Uuid;
 
 /// Manages the construction of the resource hierarchy used in the test, plus
 /// associated users and role assignments
@@ -35,7 +35,7 @@ pub struct ResourceBuilder<'a> {
     /// used to verify test coverage of all authz resources
     coverage: &'a mut Coverage,
     /// id of the "main" silo -- this is the one that users are created in
-    main_silo_id: Uuid,
+    main_silo_id: SiloUuid,
 
     // Outputs
     /// list of resources created so far
@@ -55,7 +55,7 @@ impl<'a> ResourceBuilder<'a> {
         opctx: &'a OpContext,
         datastore: &'a db::DataStore,
         coverage: &'a mut Coverage,
-        main_silo_id: Uuid,
+        main_silo_id: SiloUuid,
     ) -> ResourceBuilder<'a> {
         ResourceBuilder {
             opctx,
@@ -121,7 +121,7 @@ impl<'a> ResourceBuilder<'a> {
             let authz_silo = authz::Silo::new(
                 authz::FLEET,
                 silo_id,
-                LookupType::ById(silo_id),
+                LookupType::by_id(silo_id),
             );
             let silo_user = SiloUserApiOnly::new(silo_id, user_id, username);
             datastore

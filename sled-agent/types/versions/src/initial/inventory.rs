@@ -32,9 +32,6 @@ use oxnet::IpNet;
 use schemars::schema::{Schema, SchemaObject};
 use schemars::{JsonSchema, r#gen::SchemaGenerator};
 use serde::{Deserialize, Serialize};
-// Export this type for convenience -- this way, dependents don't have to
-// depend on sled-hardware-types.
-pub use sled_hardware_types::SledCpuFamily;
 use strum::EnumIter;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
@@ -156,6 +153,52 @@ pub enum SledRole {
     /// The sled is attached to the network switch, and has additional
     /// responsibilities.
     Scrimlet,
+}
+
+/// Identifies the kind of CPU present on a sled, determined by reading CPUID.
+///
+/// This is intended to broadly support the control plane answering the question
+/// "can I run this instance on that sled?" given an instance with either no or
+/// some CPU platform requirement. It is not enough information for more precise
+/// placement questions - for example, is a CPU a high-frequency part or
+/// many-core part? We don't include Genoa here, but in that CPU family there
+/// are high frequency parts, many-core parts, and large-cache parts. To support
+/// those questions (or satisfactorily answer #8730) we would need to collect
+/// additional information and send it along.
+#[derive(
+    Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SledCpuFamily {
+    /// The CPU vendor or its family number don't correspond to any of the
+    /// known family variants.
+    Unknown,
+
+    /// AMD Milan processors (or very close). Could be an actual Milan in a
+    /// Gimlet, a close-to-Milan client Zen 3 part, or Zen 4 (for which Milan is
+    /// the greatest common denominator).
+    AmdMilan,
+
+    /// AMD Turin processors (or very close). Could be an actual Turin in a
+    /// Cosmo, or a close-to-Turin client Zen 5 part.
+    AmdTurin,
+
+    /// AMD Turin Dense processors. There are no "Turin Dense-like" CPUs unlike
+    /// other cases, so this means a bona fide Zen 5c Turin Dense part.
+    AmdTurinDense,
+}
+
+impl From<sled_hardware_types::SledCpuFamily> for SledCpuFamily {
+    fn from(value: sled_hardware_types::SledCpuFamily) -> Self {
+        match value {
+            sled_hardware_types::SledCpuFamily::Unknown => Self::Unknown,
+            sled_hardware_types::SledCpuFamily::AmdMilan => Self::AmdMilan,
+            sled_hardware_types::SledCpuFamily::AmdTurin => Self::AmdTurin,
+            sled_hardware_types::SledCpuFamily::AmdTurinDense => {
+                Self::AmdTurinDense
+            }
+        }
+    }
 }
 
 /// Describes the desired contents of a host phase 2 slot (i.e., the boot

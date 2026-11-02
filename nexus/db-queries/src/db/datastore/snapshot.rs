@@ -131,7 +131,7 @@ impl DataStore {
                         AsyncInsertError::CollectionNotFound => {
                             err.bail(Error::ObjectNotFound {
                                 type_name: ResourceType::Project,
-                                lookup_type: LookupType::ById(project_id),
+                                lookup_type: LookupType::by_id(project_id),
                             })
                         }
                         AsyncInsertError::DatabaseError(e) => e,
@@ -210,7 +210,7 @@ impl DataStore {
             ),
         }
         .filter(dsl::time_deleted.is_null())
-        .filter(dsl::project_id.eq(authz_project.id()))
+        .filter(dsl::project_id.eq(to_db_typed_uuid(authz_project.id())))
         .select(Snapshot::as_select())
         .load_async::<Snapshot>(&*self.pool_connection_authorized(opctx).await?)
         .await

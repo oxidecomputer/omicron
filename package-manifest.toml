@@ -690,10 +690,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "389016069197dc8ca611f4b1dc63dfafbe634b7c"
+source.commit = "6fee306970763d27025c408cbbf690d6e30a9593"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "00750eed18c1cf3f358fcf440fc3ace285169b754b5985d021eb0a52003b607a"
+source.sha256 = "7dec555d753add4abb41cea463a2e3bdb111816fe697a5205e574e23c6db2944"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -706,10 +706,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "389016069197dc8ca611f4b1dc63dfafbe634b7c"
+source.commit = "6fee306970763d27025c408cbbf690d6e30a9593"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "cf1885787185126c42bc05cc7e81fdee5f607098fc60373694526e313432af33"
+source.sha256 = "f15eb1cc83c370a6134f1be9f96ce6330d93718e4058d87e2ddf5e55a4a35324"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -721,10 +721,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "389016069197dc8ca611f4b1dc63dfafbe634b7c"
+source.commit = "6fee306970763d27025c408cbbf690d6e30a9593"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
-source.sha256 = "a050afaf62683569b7d9b1b308f43f4954b0b7a59e04918f65bb98051ba4ac39"
+source.sha256 = "171ecee65fd26f2b3721efa081b9bce0e6b48c3bd1fd2d8e4f1127a332b91763"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -741,8 +741,8 @@ output.intermediate_only = true
 service_name = "pumpkind"
 source.type = "prebuilt"
 source.repo = "pumpkind"
-source.commit = "a9564ed157edcc34ee1edfad7287660db398a6c7"
-source.sha256 = "d4acf7facaec9b2e6b15b68c382040a0faa86e1a31036123aa8314e38ac23e60"
+source.commit = "bfbe14a69c2716c18685b499ab5b2ea3f4c07136"
+source.sha256 = "7563e7ea10d35ea34b8f2efbdeb86741dff17d26d3e17c9a54abbc4ae4a6183d"
 output.type = "zone"
 output.intermediate_only = true
 only_for_targets.image = "standard"
@@ -752,8 +752,8 @@ only_for_targets.switch = "asic"
 service_name = "pumpkind"
 source.type = "prebuilt"
 source.repo = "pumpkind"
-source.commit = "a9564ed157edcc34ee1edfad7287660db398a6c7"
-source.sha256 = "b7b356d7fce91de1f71948741ee92e673d26731327716bf645909e0515367f21"
+source.commit = "bfbe14a69c2716c18685b499ab5b2ea3f4c07136"
+source.sha256 = "3acd99c949a993e4969fe51ef632f47b28a1f58a5843c17b85ff1419db8d6c36"
 output.type = "tarball"
 only_for_targets.image = "standard"
 

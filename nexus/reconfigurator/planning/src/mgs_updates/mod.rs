@@ -965,10 +965,14 @@ mod test {
     use nexus_types::deployment::planning_report::FailedSpUpdateReason;
     use nexus_types::deployment::planning_report::WaitingOnSledEvacuationDetails;
     use nexus_types::deployment::planning_report::ZoneUnsafeToShutdown;
+    use nexus_types::inventory::Caboose;
+    use nexus_types::inventory::CabooseVersionError;
     use nexus_types::inventory::CabooseWhich;
+    use nexus_types::inventory::Collection;
     use nexus_types::inventory::SpType;
     use omicron_generation_kinds::SledConfigGeneration;
     use omicron_test_utils::dev::LogContext;
+    use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
     use sled_hardware_types::BaseboardId;
@@ -1139,8 +1143,10 @@ mod test {
             expected_blocked_updates.push(BlockedMgsUpdate {
                 baseboard_id: baseboard_id.clone(),
                 reason: FailedMgsUpdateReason::Sp(
-                    FailedSpUpdateReason::CabooseNotInInventory(
-                        CabooseWhich::SpSlot0,
+                    FailedSpUpdateReason::Caboose(
+                        CabooseVersionError::NotInInventory(
+                            CabooseWhich::SpSlot0,
+                        ),
                     ),
                 ),
             });
@@ -1198,6 +1204,132 @@ mod test {
         }
         assert_eq!(blocked_mgs_updates, expected_blocked_updates);
         assert!(updates.is_empty());
+    }
+
+    // Replaces the version in caboose `which` on every board in `collection`.
+    fn set_caboose_version(
+        collection: &mut Collection,
+        which: CabooseWhich,
+        version: &str,
+    ) {
+        let cabooses = collection
+            .cabooses_found
+            .get_mut(&which)
+            .expect("test collection contains requested cabooses");
+        for found in cabooses.values_mut() {
+            let mut caboose = Caboose::clone(&found.caboose);
+            caboose.version = version.to_string();
+            found.caboose = Arc::new(caboose);
+        }
+    }
+
+    // Confirm that the planner reports caboose versions that cannot be parsed,
+    // both for the active slot (needed to decide whether an update is needed)
+    // and for the inactive slot (needed to configure the update).
+    #[test]
+    fn test_unparseable_caboose_version() {
+        let test_name = "planning_mgs_updates_unparseable_caboose_version";
+        let logctx = test_setup_log(test_name);
+        let log = &logctx.log;
+        let test_boards = TestBoards::new(test_name);
+        let planner_config = PlannerConfig::default();
+        let repo = test_boards.tuf_repo();
+        let current_updates = PendingMgsUpdates::new();
+        let plan = |collection: &Collection| {
+            MgsUpdatePlanner {
+                log,
+                planner_config: &planner_config,
+                inventory: collection,
+                current_boards: &UpdateableBoard::all_from_collection(
+                    collection,
+                ),
+                zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &EvacuatingSleds::empty(),
+                current_updates: &current_updates,
+                current_artifacts: &TargetReleaseDescription::TufRepo(
+                    repo.clone(),
+                ),
+                nmax_updates: 1,
+                impossible_update_policy: ImpossibleUpdatePolicy::Reevaluate,
+            }
+            .plan()
+        };
+
+        // `ArtifactVersion` does not accept an empty string, so we use that as
+        // a version that cannot be parsed.
+        let bad_version_str = "";
+
+        // An unparseable active SP version blocks an SP update on every board.
+        let mut collection = test_boards.collection_builder().build();
+        set_caboose_version(
+            &mut collection,
+            CabooseWhich::SpSlot0,
+            bad_version_str,
+        );
+        let PlannedMgsUpdates {
+            pending_updates: updates,
+            blocked_mgs_updates,
+            ..
+        } = plan(&collection);
+        assert!(updates.is_empty());
+        assert_eq!(blocked_mgs_updates.len(), collection.baseboards.len());
+        for blocked in &blocked_mgs_updates {
+            assert!(
+                matches!(
+                    &blocked.reason,
+                    FailedMgsUpdateReason::Sp(FailedSpUpdateReason::Caboose(
+                        CabooseVersionError::Parse {
+                            caboose: CabooseWhich::SpSlot0,
+                            ..
+                        }
+                    ))
+                ),
+                "unexpected reason: {:?}",
+                blocked.reason
+            );
+        }
+
+        // Test an unparseable inactive SP version.  This has no impact unless a
+        // board needs an SP update.  Here, we set up sled 0 to need an update.
+        // Then we verify that a problem is reported because its inactive
+        // version cannot be parsed and that no problem is reported for any
+        // other board.  By default, test boards have no inactive SP caboose,
+        // so we create one first.
+        let mut collection = test_boards
+            .collection_builder()
+            .sp_versions(
+                ARTIFACT_VERSION_2,
+                ExpectedVersion::Version(ARTIFACT_VERSION_1),
+            )
+            .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .build();
+        set_caboose_version(
+            &mut collection,
+            CabooseWhich::SpSlot1,
+            bad_version_str,
+        );
+        let PlannedMgsUpdates {
+            pending_updates: updates,
+            blocked_mgs_updates,
+            ..
+        } = plan(&collection);
+        assert!(updates.is_empty());
+        assert_eq!(blocked_mgs_updates.len(), 1, "{blocked_mgs_updates:?}");
+        assert!(
+            matches!(
+                &blocked_mgs_updates[0].reason,
+                FailedMgsUpdateReason::Sp(FailedSpUpdateReason::Caboose(
+                    CabooseVersionError::Parse {
+                        caboose: CabooseWhich::SpSlot1,
+                        ..
+                    }
+                ))
+            ),
+            "unexpected reason: {:?}",
+            blocked_mgs_updates[0].reason
+        );
+
+        logctx.cleanup_successful();
     }
 
     // Confirm our behavior for impossible updates

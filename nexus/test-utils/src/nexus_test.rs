@@ -34,6 +34,7 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::UserId;
 use omicron_common::api::internal::nexus::Certificate;
 use omicron_sled_agent::sim;
+use omicron_sled_agent::sim::SledCpuFamily;
 use omicron_test_utils::dev;
 use omicron_test_utils::dev::TestTempDir;
 use omicron_test_utils::dev::poll;
@@ -45,7 +46,6 @@ use omicron_uuid_kinds::SledUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
 use sled_agent_types::early_networking::SwitchSlot;
-use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
 use slog::debug;
 use slog::info;
@@ -265,7 +265,10 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
     }
 
     /// Find a sled agent that doesn't match the provided ID
-    pub fn find_sled_agent(&self, exclude_sled: SledUuid) -> Option<SledUuid> {
+    pub fn find_sled_id_other_than(
+        &self,
+        exclude_sled: SledUuid,
+    ) -> Option<SledUuid> {
         self.all_sled_agents()
             .find(|sa| sa.sled_agent.id != exclude_sled)
             .map(|sa| sa.sled_agent.id)
