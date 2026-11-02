@@ -26,11 +26,14 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::ApplySledFilterExt;
+use nexus_db_model::Instance;
 use nexus_db_schema::enums::SledBpAvailabilityEnum;
 use nexus_db_schema::enums::VmmStateEnum;
 use nexus_db_schema::schema::vmm;
 use nexus_db_schema::schema::vmm::dsl;
 use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::instance::InstanceShutdownPolicy;
+use nexus_types::identity::Resource;
 use nexus_types::instance::Migrations;
 use nexus_types::instance::VmmRuntimeState;
 use omicron_common::api::external::CreateResult;
@@ -582,19 +585,51 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, (Uuid, Uuid)>,
-    ) -> ListResultVec<Vmm> {
+    ) -> ListResultVec<(Vmm, InstanceShutdownPolicy)> {
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
         use nexus_db_schema::schema::sled::dsl as sled_dsl;
 
-        paginated_multicolumn(dsl::vmm, (dsl::sled_id, dsl::id), pagparams)
-            .inner_join(sled_dsl::sled.on(sled_dsl::id.eq(dsl::sled_id)))
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::stop_for_update_disposition_generation.is_not_null())
-            .filter(dsl::state.eq_any(DbVmmState::SHOULD_STOP_FOR_EVACUATION))
-            .sled_filter(SledFilter::InService)
-            .select(Vmm::as_select())
-            .load_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        let vmms_and_instances =
+            paginated_multicolumn(dsl::vmm, (dsl::sled_id, dsl::id), pagparams)
+                .inner_join(sled_dsl::sled.on(sled_dsl::id.eq(dsl::sled_id)))
+                .inner_join(
+                    instance_dsl::instance
+                        .on(instance_dsl::id.eq(dsl::instance_id)),
+                )
+                .filter(dsl::time_deleted.is_null())
+                .filter(
+                    dsl::stop_for_update_disposition_generation.is_not_null(),
+                )
+                .filter(
+                    dsl::state.eq_any(DbVmmState::SHOULD_STOP_FOR_EVACUATION),
+                )
+                .sled_filter(SledFilter::InService)
+                // TODO-1 fetching the whole `Instance` here is kind of
+                // annoying, but it lets us call `shutdown_policy()` so maybe is
+                // fine?
+                .select((Vmm::as_select(), Instance::as_select()))
+                .load_async(&*self.pool_connection_authorized(opctx).await?)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+        vmms_and_instances
+            .into_iter()
+            .map(|(vmm, instance)| {
+                let shutdown_policy =
+                    // TODO-2 should `shutdown_policy()` return a result itself?
+                    // It only returns `None` if a db constraint is violated
+                    instance.shutdown_policy().ok_or_else(|| {
+                        Error::internal_error(format!(
+                            "invalid shutdown policy for instance {}",
+                            instance.id()
+                        ))
+                    })?;
+                // TODO-3 struct instead of tuple?
+                Ok((vmm, shutdown_policy))
+            })
+            .collect()
     }
 }
 
@@ -1472,7 +1507,7 @@ mod tests {
             .expect("marked VMMs should be listed");
         assert_eq!(listed.len(), expected_ids.len());
         let listed_ids: BTreeSet<Uuid> =
-            listed.iter().map(|vmm| vmm.id).collect();
+            listed.iter().map(|(vmm, _)| vmm.id).collect();
         assert_eq!(listed_ids, expected_ids);
 
         // Clean up.

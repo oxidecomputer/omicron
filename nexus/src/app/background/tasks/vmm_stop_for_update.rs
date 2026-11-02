@@ -16,6 +16,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
+use nexus_types::external_api::instance::InstanceShutdownPolicy;
 use nexus_types::instance::SledVmmState;
 use nexus_types::instance::VmmFailureReason;
 use nexus_types::instance::VmmRuntimeState;
@@ -166,7 +167,7 @@ impl VmmStopForUpdate {
                     break;
                 }
             };
-            paginator = p.found_batch(&vmms, &|vmm| {
+            paginator = p.found_batch(&vmms, &|(vmm, _)| {
                 (vmm.sled_id().into_untyped_uuid(), vmm.id)
             });
 
@@ -190,17 +191,19 @@ impl VmmStopForUpdate {
     /// Stops a batch of VMMs
     async fn stop_batch(
         &self,
-        vmms: &[Vmm],
+        vmms: &[(Vmm, InstanceShutdownPolicy)],
         reqwest_client: &ReqwestClient,
         opctx: &Arc<OpContext>,
         tasks: &mut ParallelTaskSet<VmmStopForUpdateResult>,
         result: &mut VmmStopForUpdateResult,
     ) {
-        for vmms_per_sled in vmms.chunk_by(|a, b| a.sled_id() == b.sled_id()) {
+        for vmms_per_sled in
+            vmms.chunk_by(|(a, _), (b, _)| a.sled_id() == b.sled_id())
+        {
             // We only retrieve the first VMM in order to get the sled id.
             // The slice is constructed by VMMs with the same sled id, so it's
             // fine to just check the first one
-            let Some(first_vmm) = vmms_per_sled.first() else {
+            let Some((first_vmm, _)) = vmms_per_sled.first() else {
                 // `chunk_by` never returns an empty slice, so this should never
                 // be `None`. We handle the case regardless
                 continue;
@@ -209,7 +212,7 @@ impl VmmStopForUpdate {
 
             let vmm_ids: Vec<PropolisUuid> = vmms_per_sled
                 .iter()
-                .map(|vmm| PropolisUuid::from_untyped_uuid(vmm.id))
+                .map(|(vmm, _)| PropolisUuid::from_untyped_uuid(vmm.id))
                 .collect();
 
             slog::info!(
@@ -246,9 +249,13 @@ impl VmmStopForUpdate {
                 }
             };
 
-            for vmm in vmms_per_sled {
-                let stop =
-                    self.stop_vmm(opctx, sled_client.clone(), vmm.clone());
+            for (vmm, shutdown_policy) in vmms_per_sled {
+                let stop = self.stop_vmm(
+                    opctx,
+                    sled_client.clone(),
+                    vmm.clone(),
+                    *shutdown_policy,
+                );
                 if let Some(vmm_result) = tasks.spawn(stop).await {
                     result.merge(vmm_result);
                 }
@@ -262,6 +269,7 @@ impl VmmStopForUpdate {
         opctx: &Arc<OpContext>,
         sled_client: sled_agent_client::Client,
         vmm: Vmm,
+        shutdown_policy: InstanceShutdownPolicy,
     ) -> impl Future<Output = VmmStopForUpdateResult> + Send + 'static + use<>
     {
         let datastore = self.datastore.clone();
@@ -279,7 +287,14 @@ impl VmmStopForUpdate {
                     &VmmPutStateBody {
                         state: VmmStateRequested::Stopped,
                         // FIXME(lif) before undraft PR: add shutdown policy data!
-                        acpi_timeout_secs: None,
+                        // TODO should this take the shutdown policy instead of
+                        // an option?
+                        acpi_timeout_secs: match shutdown_policy {
+                            InstanceShutdownPolicy::HardOff => None,
+                            InstanceShutdownPolicy::PowerButton {
+                                timeout_secs,
+                            } => Some(timeout_secs),
+                        },
                     },
                 )
                 .await
