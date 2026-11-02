@@ -1518,12 +1518,9 @@ impl super::Nexus {
                         .map_err(Into::into)
                         // Here, we don't actually care if the VMM generation
                         // number we attempted to write to the DB was stale or
-                        // not. `notify_vmm_updated` will spawn any update saga
-                        // needed for *whatever the current state in the
-                        // database is*, and if that's newer than the state we
-                        // were trying to write, that just means someone else
-                        // wrote that state first, which is all well and good
-                        // here.
+                        // not. If it was out of date, that's fine, something
+                        // else has already advanced the state past the one we
+                        // observed, and we can just move on.
                         .map(|_| ()),
                     Ok(None) => Ok(()),
                     Err(e) => Err(InstanceStateChangeError::SledAgent(e)),
