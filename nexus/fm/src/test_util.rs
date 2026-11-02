@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::analysis_input::{Builder, Input, InvalidInputs};
+use crate::analysis_input::{Builder, Input, InventoryStale};
 use crate::builder::{SitrepBuilder, SitrepBuilderRng};
 use chrono::DateTime;
 use chrono::Utc;
@@ -89,7 +89,7 @@ impl FmTest {
         observed_sagas: Arc<IdOrdMap<ObservedSaga>>,
         observed_silo_certificates: Arc<IdOrdMap<ObservedSiloCertificates>>,
         config: FmConfig,
-    ) -> Result<Builder, InvalidInputs> {
+    ) -> Result<Builder, InventoryStale> {
         let mut builder = Input::builder(parent_sitrep, inv)?
             .in_service_disks(in_service_disks)
             .observed_sagas(observed_sagas)

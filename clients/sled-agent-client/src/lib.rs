@@ -124,6 +124,7 @@ progenitor::generate_api!(
         SwitchSlot = sled_agent_types_versions::latest::early_networking::SwitchSlot,
         SystemNetworkingConfig = sled_agent_types_versions::latest::system_networking::SystemNetworkingConfig,
         Threshold = trust_quorum_types::types::Threshold,
+        TrustQuorumCoordinatorStatusResponse = sled_agent_types_versions::latest::trust_quorum::TrustQuorumCoordinatorStatusResponse,
         TxEqConfig = sled_agent_types_versions::latest::early_networking::TxEqConfig,
         UplinkAddressConfig = sled_agent_types_versions::latest::early_networking::UplinkAddressConfig,
         VmmRuntimeState = sled_agent_types_versions::latest::instance::VmmRuntimeState,

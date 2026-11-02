@@ -21,14 +21,21 @@ use nexus_types::internal_api::background::VmmMarkStopForUpdateStatus;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
+use tokio::sync::watch;
 
 pub struct VmmMarkStopForUpdate {
     datastore: Arc<DataStore>,
+    tx: watch::Sender<usize>,
 }
 
 impl VmmMarkStopForUpdate {
     pub fn new(datastore: Arc<DataStore>) -> Self {
-        Self { datastore }
+        let (tx, _rx) = watch::channel(0);
+        Self { datastore, tx }
+    }
+
+    pub fn watcher(&self) -> watch::Receiver<usize> {
+        self.tx.subscribe()
     }
 
     pub(crate) async fn actually_activate(
@@ -67,6 +74,9 @@ impl VmmMarkStopForUpdate {
                 "no VMMs need to be marked to stop for a sled update";
             );
         }
+
+        // Trigger anything waiting on this task to run.
+        self.tx.send_modify(|count| *count = *count + 1);
 
         VmmMarkStopForUpdateStatus {
             vmms_marked,

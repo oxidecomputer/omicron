@@ -102,7 +102,7 @@ impl super::Nexus {
 
                 // Return an error if the snapshot does not belong to our
                 // project.
-                if db_snapshot.project_id != authz_project.id() {
+                if db_snapshot.project_id() != authz_project.id() {
                     return Err(Error::invalid_request(
                         "snapshot does not belong to this project",
                     ));
@@ -142,7 +142,7 @@ impl super::Nexus {
 
                 // The image either needs to belong to our project or be
                 // promoted to our silo. If not, return an error.
-                if let Some(project) = db_image.project_id {
+                if let Some(project) = db_image.project_id() {
                     if project != authz_project.id() {
                         return Err(Error::invalid_request(
                             "image does not belong to this project",

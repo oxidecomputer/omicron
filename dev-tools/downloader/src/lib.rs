@@ -34,6 +34,8 @@ const BUILDOMAT_URL: &'static str =
 const CARGO_HACK_URL: &'static str =
     "https://github.com/taiki-e/cargo-hack/releases/download";
 const MACOS_AARCH64_SERIES: &'static str = "macos-aarch64";
+const TLA2TOOLS_URL: &'static str =
+    "https://github.com/tlaplus/tlaplus/releases/download";
 
 const RETRY_ATTEMPTS: usize = 3;
 
@@ -77,6 +79,9 @@ enum Target {
 
     /// SoftNPU, an admin program (scadm) and a pre-compiled P4 program.
     Softnpu,
+
+    /// TLA+ tools jar (`tla2tools.jar`), used by `trust-quorum/tla/check.sh`.
+    Tla2tools,
 
     /// Transceiver Control binary
     TransceiverControl,
@@ -145,6 +150,7 @@ pub async fn run_cmd(args: DownloadArgs) -> Result<()> {
                     Target::MaghemiteMgd => downloader.download_maghemite_mgd().await,
                     Target::MaghemiteDdmd => downloader.download_maghemite_ddmd().await,
                     Target::Softnpu => downloader.download_softnpu().await,
+                    Target::Tla2tools => downloader.download_tla2tools().await,
                     Target::TransceiverControl => {
                         downloader.download_transceiver_control().await
                     }
@@ -1042,6 +1048,32 @@ impl Downloader<'_> {
         let path = destination_dir.join(npuzone.filename);
         self.download_oxide_buildomat_file(&npuzone, &path).await?;
         set_permissions(&path, 0o755).await?;
+
+        Ok(())
+    }
+
+    async fn download_tla2tools(&self) -> Result<()> {
+        let download_dir = self.output_dir.join("downloads");
+        let destination_dir = self.output_dir.join("tla2tools");
+
+        let checksums =
+            KvFile::read(self.versions_dir.join("tla2tools_checksums")).await?;
+        let checksum = checksums.get_sha256_value("CIDL_SHA256")?;
+
+        let version = self.read_version_file("tla2tools_version").await?;
+        let jar_url = format!("{TLA2TOOLS_URL}/v{version}/tla2tools.jar");
+
+        tokio::fs::create_dir_all(&download_dir).await?;
+        tokio::fs::create_dir_all(&destination_dir).await?;
+
+        let download_path = download_dir.join("tla2tools.jar");
+        download_file_and_verify(&self.log, &download_path, &jar_url, checksum)
+            .await?;
+
+        let dest = destination_dir.join("tla2tools.jar");
+        tokio::fs::copy(&download_path, &dest).await.with_context(|| {
+            format!("Failed to copy {download_path} to {dest}")
+        })?;
 
         Ok(())
     }

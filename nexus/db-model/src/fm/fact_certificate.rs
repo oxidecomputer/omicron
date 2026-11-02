@@ -18,6 +18,8 @@ use nexus_types::fm::case::FactMetadata;
 use nexus_types::fm::{
     CertificateExpiryFactPayload, CertificateFact, FactPayload,
 };
+use omicron_uuid_kinds::SiloKind;
+use omicron_uuid_kinds::SiloUuid;
 use omicron_uuid_kinds::{CaseKind, FactKind, SitrepKind};
 use uuid::Uuid;
 
@@ -49,7 +51,7 @@ pub struct FmFactCertificate {
     pub comment: String,
 
     /// The silo this fact is about.
-    pub silo_id: Uuid,
+    pub silo_id: DbTypedUuid<SiloKind>,
     pub kind: FmFactCertificateKind,
 
     pub certificate_id: Uuid,
@@ -57,6 +59,10 @@ pub struct FmFactCertificate {
 }
 
 impl FmFactCertificate {
+    pub fn silo_id(&self) -> SiloUuid {
+        self.silo_id.into()
+    }
+
     /// Build a row from a fact's shared metadata (`metadata`) and its
     /// already-dispatched certificate payload (`cert_fact`).
     pub fn from_sitrep(
@@ -81,7 +87,7 @@ impl FmFactCertificate {
             case_id: case_id.into(),
             created_sitrep_id: (*created_sitrep_id).into(),
             comment: comment.clone(),
-            silo_id: payload.silo_id,
+            silo_id: payload.silo_id.into(),
             kind,
             certificate_id: payload.certificate_id,
             not_after: payload.not_after,
@@ -91,7 +97,7 @@ impl FmFactCertificate {
     /// Reconstruct an in-memory fact from a row.
     pub fn into_fact(self) -> fm::case::Fact {
         let payload = CertificateExpiryFactPayload {
-            silo_id: self.silo_id,
+            silo_id: self.silo_id.into(),
             certificate_id: self.certificate_id,
             not_after: self.not_after,
         };

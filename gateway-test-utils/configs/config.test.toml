@@ -42,8 +42,8 @@ per_attempt_timeout_millis = 1000
 # `SpIdentifier` for the sled on which this MGS is running. (The
 # `SpIdentifier::typ` value is implicitly `SpType::Sled`.)
 #
-# `allow_local_sled_sp_reset` determines whether MGS will accept a request to
-# perform an SP reset on its own local sled. This is dangerous during SP
+# `allow_local_sp_reset` determines whether MGS will accept a request to
+# perform an SP reset on its own local sled/switch. This is dangerous during SP
 # updates, because the "reset" operation involves a watchdog that requires MGS
 # to send a "disarm the watchdog" message _after_ the reset, which it can't do
 # if it just powered itself off. In production, we set this to `false` for both
@@ -53,12 +53,12 @@ per_attempt_timeout_millis = 1000
 [[switch.location.description]]
 name = "switch0"
 local_sled = 0
-allow_local_sled_sp_reset = true
+allow_local_sp_reset = true
 
 [[switch.location.description]]
 name = "switch1"
 local_sled = 1
-allow_local_sled_sp_reset = true
+allow_local_sp_reset = true
 
 # `[[switch.location.determination]]` is a list of switch ports we should
 # contact in order to determine our location; each port defines a subset of

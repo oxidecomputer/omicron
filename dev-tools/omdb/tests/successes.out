@@ -605,6 +605,10 @@ task: "vmm_mark_stop_for_update"
     marks VMMs on evacuating sleds as needing to be stopped for an update
 
 
+task: "vmm_stop_for_update"
+    stops VMMs that are marked to be stopped for a sled update
+
+
 task: "vpc_route_manager"
     propagates updated VPC routes to all OPTE ports
 
@@ -832,6 +836,14 @@ task: "fm_analysis"
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
+    input preparation took <REDACTED DURATION>ms
+      alert_markers:          <REDACTED DURATION>ms
+      ereporter_restarts:     <REDACTED DURATION>ms
+      ereports:               <REDACTED DURATION>ms
+      in_service_disks:       <REDACTED DURATION>ms
+      observed_sagas:         <REDACTED DURATION>ms
+      silo_certificates:      <REDACTED DURATION>ms
+      support_bundle_markers: <REDACTED DURATION>ms
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_config_loader"
@@ -1224,6 +1236,12 @@ task: "vmm_mark_stop_for_update"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     batch size:                              1000
     VMMs marked to be stopped for an update: 0
+
+task: "vmm_stop_for_update"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    VMMs stopped for sled evacuation: 0 total
 
 task: "vpc_route_manager"
   configured period: every <REDACTED_DURATION>s
@@ -1581,6 +1599,14 @@ task: "fm_analysis"
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
+    input preparation took <REDACTED DURATION>ms
+      alert_markers:          <REDACTED DURATION>ms
+      ereporter_restarts:     <REDACTED DURATION>ms
+      ereports:               <REDACTED DURATION>ms
+      in_service_disks:       <REDACTED DURATION>ms
+      observed_sagas:         <REDACTED DURATION>ms
+      silo_certificates:      <REDACTED DURATION>ms
+      support_bundle_markers: <REDACTED DURATION>ms
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_config_loader"
@@ -1973,6 +1999,12 @@ task: "vmm_mark_stop_for_update"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     batch size:                              1000
     VMMs marked to be stopped for an update: 0
+
+task: "vmm_stop_for_update"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    VMMs stopped for sled evacuation: 0 total
 
 task: "vpc_route_manager"
   configured period: every <REDACTED_DURATION>s

@@ -20,6 +20,7 @@ use crate::db::model::SledResourceVmmState;
 use crate::db::model::SledState;
 use crate::db::model::SledUpdate;
 use crate::db::model::to_db_sled_policy;
+use crate::db::model::to_db_typed_generation;
 use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
@@ -215,6 +216,7 @@ struct SledTargetSets {
 fn classify_sled_targets(
     rows: Vec<SledFindTargetsRow>,
     must_use_sleds: Option<&HashSet<SledUuid>>,
+    must_not_use_sleds: Option<&HashSet<SledUuid>>,
 ) -> SledTargetSets {
     let mut sets = SledTargetSets::default();
 
@@ -234,6 +236,28 @@ fn classify_sled_targets(
 
                 None => {
                     sets.targets.insert(sled_id);
+                }
+            }
+
+            // If there is `Some(_)` list of sleds we must not use, _remove_
+            // this target if it's in that list.
+            //
+            // We remove from `sets.targets` instead of adding to `sets.banned`
+            // here because `banned` is specifically for anti-affinity rules
+            // (and produces error messages as such). If we have a "must not use
+            // sled", we silently skip it. (One use of this is to pick a VMM
+            // migration destination sled that must not be the same as its
+            // current source sled.)
+            //
+            // The order of this check relative to the `must_use_sleds` above is
+            // intentional - if a sled is in both sets, we let
+            // `must_not_use_sleds` take precedence. If we only have
+            // `must_not_use_sleds`, this must be second in order to remove the
+            // sled we unconditionally added as a target in the `None` branch
+            // above.
+            if let Some(must_not_use_sleds) = must_not_use_sleds {
+                if must_not_use_sleds.contains(&sled_id) {
+                    sets.targets.remove(&sled_id);
                 }
             }
         }
@@ -665,6 +689,7 @@ mod local_storage_pairing_test {
     use nexus_types::external_api::disk;
     use omicron_uuid_kinds::ExternalZpoolUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::ProjectUuid;
     use proptest::prelude::*;
 
     fn request(disk_id: u128, size: i64) -> LocalStorageRequest {
@@ -880,7 +905,7 @@ mod local_storage_pairing_test {
         LocalStorageDisk::new(
             db::model::Disk::new(
                 disk_id,
-                Uuid::new_v4(),
+                ProjectUuid::new_v4(),
                 &params,
                 db::model::BlockSize::AdvancedFormat,
                 db::model::DiskRuntimeState::new(),
@@ -1072,14 +1097,12 @@ pub struct MigrateSuccessUpdate {
 impl DataStore {
     /// Stores a new sled in the database.
     ///
-    /// Returns the sled, and whether or not it was updated on success.
-    ///
     /// Returns an error if `sled_agent_gen` is stale, or the sled is
     /// decommissioned.
     pub async fn sled_upsert(
         &self,
         sled_update: SledUpdate,
-    ) -> CreateResult<(Sled, bool)> {
+    ) -> CreateResult<Sled> {
         use nexus_db_schema::schema::sled::dsl;
         // required for conditional upsert
         use diesel::query_dsl::methods::FilterDsl;
@@ -1087,7 +1110,7 @@ impl DataStore {
         let insertable_sled = sled_update.clone().into_insertable();
         let now = insertable_sled.time_modified();
 
-        let sled = diesel::insert_into(dsl::sled)
+        diesel::insert_into(dsl::sled)
             .values(insertable_sled)
             .on_conflict(dsl::id)
             .do_update()
@@ -1103,9 +1126,13 @@ impl DataStore {
                 dsl::usable_physical_ram.eq(sled_update.usable_physical_ram),
                 dsl::reservoir_size.eq(sled_update.reservoir_size),
                 dsl::cpu_family.eq(sled_update.cpu_family),
-                dsl::sled_agent_gen.eq(sled_update.sled_agent_gen),
+                dsl::sled_agent_gen
+                    .eq(to_db_typed_generation(sled_update.sled_agent_gen)),
             ))
-            .filter(dsl::sled_agent_gen.lt(sled_update.sled_agent_gen))
+            .filter(
+                dsl::sled_agent_gen
+                    .lt(to_db_typed_generation(sled_update.sled_agent_gen)),
+            )
             .filter(dsl::sled_state.ne(SledState::Decommissioned))
             .returning(Sled::as_returning())
             .get_result_async(&*self.pool_connection_unauthorized().await?)
@@ -1118,12 +1145,7 @@ impl DataStore {
                         &sled_update.id().to_string(),
                     ),
                 )
-            })?;
-
-        // We compare only seconds since the epoch, because writing to and
-        // reading from the database causes us to lose precision.
-        let was_modified = now.timestamp() == sled.time_modified().timestamp();
-        Ok((sled, was_modified))
+            })
     }
 
     /// Returns true if a sled exists and is in-service, false if not.
@@ -1356,12 +1378,13 @@ impl DataStore {
         // arguments to this function.
         let maybe_must_use_sleds: Option<HashSet<SledUuid>> =
             if let Some(must_select_from) = constraints.must_select_from() {
-                let set = must_select_from.into_iter().cloned().collect();
+                let set = must_select_from.clone();
                 info!(&log, "reservation constrained to sleds {set:?}");
                 Some(set)
             } else {
                 None
             };
+        let maybe_must_not_use_sleds = constraints.must_not_select_from();
 
         // If any local storage disks have been allocated already, then this
         // constrains VMM placement and where other unallocated local storage
@@ -1484,6 +1507,7 @@ impl DataStore {
         } = classify_sled_targets(
             possible_sleds,
             maybe_must_use_sleds.as_ref(),
+            maybe_must_not_use_sleds,
         );
 
         // Prior to R18, all Disks using the encrypted local storage dataset
@@ -2417,6 +2441,8 @@ pub(in crate::db::datastore) mod test {
     use crate::db::pub_test_utils::helpers::create_affinity_group;
     use crate::db::pub_test_utils::helpers::create_anti_affinity_group;
     use crate::db::pub_test_utils::helpers::create_project;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_filtered;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use crate::db::pub_test_utils::helpers::small_resource_request;
     use crate::db::pub_test_utils::simulated_sleds::apply_sled_bp_availability;
     use crate::db::pub_test_utils::simulated_sleds::initialize_sled_bp_availability;
@@ -2433,7 +2459,6 @@ pub(in crate::db::datastore) mod test {
     use async_bb8_diesel::AsyncSimpleConnection;
     use itertools::Itertools;
     use nexus_db_lookup::LookupPath;
-    use nexus_db_model::Generation;
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::PhysicalDiskPolicy;
     use nexus_db_model::PhysicalDiskState;
@@ -2454,6 +2479,7 @@ pub(in crate::db::datastore) mod test {
     use nexus_types::identity::Resource;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external;
+    use omicron_generation_kinds::SledRegistrationGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::AffinityGroupUuid;
     use omicron_uuid_kinds::AntiAffinityGroupUuid;
@@ -2475,11 +2501,11 @@ pub(in crate::db::datastore) mod test {
     async fn upsert_sled_updates_hardware() {
         let logctx = dev::test_setup_log("upsert_sled_updates_hardware");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let datastore = db.datastore();
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let mut sled_update = test_new_sled_update();
-        let (observed_sled, _) =
-            datastore.sled_upsert(sled_update.clone()).await.unwrap();
+        let observed_sled =
+            sled_upsert_expect_written(datastore, sled_update.clone()).await;
 
         assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
 
@@ -2494,23 +2520,23 @@ pub(in crate::db::datastore) mod test {
         );
 
         // Fail the update, since the generation number didn't change.
-        assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
+        sled_upsert_expect_filtered(opctx, datastore, sled_update.clone())
+            .await;
 
         // Bump the generation number so the next insert succeeds.
-        sled_update.sled_agent_gen.0 = sled_update.sled_agent_gen.0.next();
+        sled_update.sled_agent_gen = sled_update.sled_agent_gen.next();
 
         // Test that upserting the sled propagates those changes to the DB.
-        let (observed_sled, _) = datastore
-            .sled_upsert(sled_update.clone())
-            .await
-            .expect("Could not upsert sled during test prep");
+        let observed_sled =
+            sled_upsert_expect_written(datastore, sled_update.clone()).await;
         assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
 
         // Now reset the generation to a lower value and try again.
         // This should fail.
         let current_gen = sled_update.sled_agent_gen;
-        sled_update.sled_agent_gen = Generation::new();
-        assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
+        sled_update.sled_agent_gen = SledRegistrationGeneration::new();
+        sled_upsert_expect_filtered(opctx, datastore, sled_update.clone())
+            .await;
 
         // Now bump the generation from the saved `current_gen`
         // Change the reservoir value again. This should succeed.
@@ -2520,14 +2546,15 @@ pub(in crate::db::datastore) mod test {
             )
             .unwrap(),
         );
-        sled_update.sled_agent_gen.0 = current_gen.0.next();
+        sled_update.sled_agent_gen = current_gen.next();
         // Test that upserting the sled propagates those changes to the DB.
-        let (observed_sled, _) = datastore
-            .sled_upsert(sled_update.clone())
-            .await
-            .expect("Could not upsert sled during test prep");
+        let observed_sled =
+            sled_upsert_expect_written(datastore, sled_update.clone()).await;
         assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
-        assert_eq!(observed_sled.sled_agent_gen, sled_update.sled_agent_gen);
+        assert_eq!(
+            SledRegistrationGeneration::from(observed_sled.sled_agent_gen),
+            sled_update.sled_agent_gen
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2541,8 +2568,8 @@ pub(in crate::db::datastore) mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let mut sled_update = test_new_sled_update();
-        let (observed_sled, _) =
-            datastore.sled_upsert(sled_update.clone()).await.unwrap();
+        let observed_sled =
+            sled_upsert_expect_written(datastore, sled_update.clone()).await;
         assert_eq!(
             observed_sled.usable_hardware_threads,
             sled_update.usable_hardware_threads
@@ -2583,29 +2610,15 @@ pub(in crate::db::datastore) mod test {
             .unwrap(),
         );
 
-        // Upserting the sled should produce an error, because it is decommissioend.
-        assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
+        // This upsert call is rejected by both the decommissioned and the sled
+        // agent generation filters.
+        sled_upsert_expect_filtered(opctx, datastore, sled_update.clone())
+            .await;
 
-        // The sled should not have been updated.
-        let (_, observed_sled_2) = LookupPath::new(&opctx, datastore)
-            .sled_id(observed_sled.id())
-            .fetch_for(authz::Action::Modify)
-            .await
-            .unwrap();
-        assert_eq!(
-            observed_sled_2.usable_hardware_threads,
-            observed_sled.usable_hardware_threads,
-            "usable_hardware_threads should not have changed"
-        );
-        assert_eq!(
-            observed_sled_2.usable_physical_ram,
-            observed_sled.usable_physical_ram,
-            "usable_physical_ram should not have changed"
-        );
-        assert_eq!(
-            observed_sled_2.reservoir_size, observed_sled.reservoir_size,
-            "reservoir_size should not have changed"
-        );
+        // This upsert call, even though at a newer generation, is rejected by
+        // the decommissioned filter.
+        sled_update.sled_agent_gen = sled_update.sled_agent_gen.next();
+        sled_upsert_expect_filtered(opctx, datastore, sled_update).await;
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2638,14 +2651,18 @@ pub(in crate::db::datastore) mod test {
         .expect("simulated system has exactly five sleds");
 
         // Define some sleds that resources cannot be provisioned on.
-        let (non_provisionable_sled, _) =
-            datastore.sled_upsert(non_provisionable_update).await.unwrap();
-        let (expunged_sled, _) =
-            datastore.sled_upsert(expunged_update).await.unwrap();
-        let (decommissioned_sled, _) =
-            datastore.sled_upsert(decommissioned_update).await.unwrap();
-        let (illegal_decommissioned_sled, _) =
-            datastore.sled_upsert(illegal_decommissioned_update).await.unwrap();
+        let non_provisionable_sled =
+            sled_upsert_expect_written(datastore, non_provisionable_update)
+                .await;
+        let expunged_sled =
+            sled_upsert_expect_written(datastore, expunged_update).await;
+        let decommissioned_sled =
+            sled_upsert_expect_written(datastore, decommissioned_update).await;
+        let illegal_decommissioned_sled = sled_upsert_expect_written(
+            datastore,
+            illegal_decommissioned_update,
+        )
+        .await;
 
         let ineligible_sleds = IneligibleSleds {
             non_provisionable: non_provisionable_sled.id(),
@@ -2677,8 +2694,8 @@ pub(in crate::db::datastore) mod test {
         assert!(matches!(error, external::Error::InsufficientCapacity { .. }));
 
         // Now add a provisionable sled and try again.
-        let (provisionable_sled, _) =
-            datastore.sled_upsert(provisionable_update).await.unwrap();
+        let provisionable_sled =
+            sled_upsert_expect_written(datastore, provisionable_update).await;
 
         // Try a few times to ensure that resources never get allocated to the
         // non-provisionable sled.
@@ -2753,8 +2770,8 @@ pub(in crate::db::datastore) mod test {
 
         // * new_sled is not in any blueprint at all, simulating a
         //   newly added sled before the planner has picked it up.
-        let (new_sled, _) =
-            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        let new_sled =
+            sled_upsert_expect_written(datastore, test_new_sled_update()).await;
 
         let resources = small_resource_request();
 
@@ -2922,8 +2939,8 @@ pub(in crate::db::datastore) mod test {
             .await
             .try_into()
             .expect("simulated system has exactly two sleds");
-        let (new_sled, _) =
-            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        let new_sled =
+            sled_upsert_expect_written(datastore, test_new_sled_update()).await;
 
         // The first half of a reservation: the search sees both sleds present
         // in the blueprint.
@@ -3209,8 +3226,10 @@ pub(in crate::db::datastore) mod test {
         id: InstanceUuid,
         groups: Vec<GroupName>,
         force_onto_sled: Option<SledUuid>,
+        avoid_sleds: Vec<SledUuid>,
         resources: db::model::Resources,
         cpu_platform: Option<db::model::InstanceCpuPlatform>,
+        reservation_reason: SledReservationReason,
     }
 
     /// The result of [`Instance::insert_resource`].
@@ -3239,8 +3258,10 @@ pub(in crate::db::datastore) mod test {
                 id,
                 groups: vec![],
                 force_onto_sled: None,
+                avoid_sleds: vec![],
                 resources: small_resource_request(),
                 cpu_platform: None,
+                reservation_reason: SledReservationReason::Start,
             }
         }
 
@@ -3251,12 +3272,14 @@ pub(in crate::db::datastore) mod test {
                 id: local_storage_test_instance.id,
                 groups: vec![],
                 force_onto_sled: None,
+                avoid_sleds: vec![],
                 resources: db::model::Resources::new(
                     local_storage_test_instance.ncpus.into(),
                     local_storage_test_instance.memory.into(),
                     local_storage_test_instance.memory.into(),
                 ),
                 cpu_platform: None,
+                reservation_reason: SledReservationReason::Start,
             }
         }
 
@@ -3271,6 +3294,7 @@ pub(in crate::db::datastore) mod test {
             datastore: &DataStore,
         ) -> Vec<SledFindTargetsRow> {
             assert!(self.force_onto_sled.is_none());
+            assert!(self.avoid_sleds.is_empty());
 
             let families =
                 self.cpu_platform.map(|p| p.compatible_sled_cpu_families());
@@ -3293,6 +3317,7 @@ pub(in crate::db::datastore) mod test {
             reservation_reason: SledReservationReason,
         ) -> InsertResourceOutcome {
             assert!(self.force_onto_sled.is_none());
+            assert!(self.avoid_sleds.is_empty());
 
             let resource = SledResourceVmm::new(
                 propolis_id,
@@ -3345,6 +3370,19 @@ pub(in crate::db::datastore) mod test {
             self
         }
 
+        // Forbid this instance from being placed on a specific sled. Can be
+        // called multiple times.
+        fn avoid_sled(mut self, sled: SledUuid) -> Self {
+            self.avoid_sleds.push(sled);
+            self
+        }
+
+        // Set the reason for this instance's reservation (defaults to `Start`).
+        fn reservation_reason(mut self, reason: SledReservationReason) -> Self {
+            self.reservation_reason = reason;
+            self
+        }
+
         async fn add_to_groups_and_reserve(
             &self,
             opctx: &OpContext,
@@ -3394,8 +3432,11 @@ pub(in crate::db::datastore) mod test {
         instance: &Instance,
     ) -> Result<db::model::SledResourceVmm, SledReservationTransactionError>
     {
+        // Avoid specific sleds, if requested
+        let constraints = db::model::SledReservationConstraintBuilder::new()
+            .must_not_select_from(&instance.avoid_sleds);
+
         // Pick a specific sled, if requested
-        let constraints = db::model::SledReservationConstraintBuilder::new();
         let constraints = if let Some(sled_target) = instance.force_onto_sled {
             constraints.must_select_from(&[sled_target])
         } else {
@@ -3411,7 +3452,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources.clone(),
                 constraints.build(),
-                SledReservationReason::Start,
+                instance.reservation_reason.clone(),
                 &mut StdRng::from_os_rng(),
             )
             .await?;
@@ -3419,6 +3460,10 @@ pub(in crate::db::datastore) mod test {
         if let Some(sled_target) = instance.force_onto_sled {
             assert_eq!(SledUuid::from(result.sled_id), sled_target);
         }
+        assert!(
+            !instance.avoid_sleds.contains(&SledUuid::from(result.sled_id)),
+            "reservation landed on a sled it was told to avoid"
+        );
 
         Ok(result)
     }
@@ -4146,6 +4191,293 @@ pub(in crate::db::datastore) mod test {
         logctx.cleanup_successful();
     }
 
+    // "must not select from" constraint: avoided sleds are never chosen, and
+    // avoiding every sled yields an insufficient-capacity error.
+    #[tokio::test]
+    async fn must_not_select_from_excludes_sled() {
+        let logctx = dev::test_setup_log("must_not_select_from_excludes_sled");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (_authz_project, _project) =
+            create_project(&opctx, &datastore, "project").await;
+
+        const SLED_COUNT: usize = 2;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
+
+        let test_instance = Instance::new().avoid_sled(sleds[0].id());
+        let resource =
+            create_instance_reservation(&datastore, &opctx, &test_instance)
+                .await
+                .expect("Should have placed instance");
+        assert_eq!(resource.sled_id(), sleds[1].id());
+
+        let test_instance =
+            Instance::new().avoid_sled(sleds[0].id()).avoid_sled(sleds[1].id());
+        let err =
+            create_instance_reservation(&datastore, &opctx, &test_instance)
+                .await
+                .expect_err("Should have failed to place instance");
+        let SledReservationTransactionError::Reservation(
+            SledReservationError::NotFound,
+        ) = err
+        else {
+            panic!("Unexpected error: {err:?}");
+        };
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // "must not select from" takes precedence over "must select from" when a
+    // sled appears in both sets.
+    #[tokio::test]
+    async fn must_not_select_from_overrides_must_select_from() {
+        let logctx = dev::test_setup_log(
+            "must_not_select_from_overrides_must_select_from",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (_authz_project, _project) =
+            create_project(&opctx, &datastore, "project").await;
+
+        const SLED_COUNT: usize = 2;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
+
+        let test_instance =
+            Instance::new().sled(sleds[0].id()).avoid_sled(sleds[0].id());
+        let err =
+            create_instance_reservation(&datastore, &opctx, &test_instance)
+                .await
+                .expect_err("Should have failed to place instance");
+        let SledReservationTransactionError::Reservation(
+            SledReservationError::NotFound,
+        ) = err
+        else {
+            panic!("Unexpected error: {err:?}");
+        };
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Affinity, Policy = Fail, combined with "must not select from".
+    #[tokio::test]
+    async fn must_not_select_from_affinity_policy_fail() {
+        let logctx =
+            dev::test_setup_log("must_not_select_from_affinity_policy_fail");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore, "project").await;
+
+        const SLED_COUNT: usize = 2;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
+
+        let groups = [Group {
+            affinity: Affinity::Positive,
+            name: "affinity",
+            policy: affinity::AffinityPolicy::Fail,
+        }];
+        let all_groups =
+            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
+                .await;
+        let instances = [Instance::new().group("affinity").sled(sleds[0].id())];
+        for instance in instances {
+            instance
+                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .await
+                .expect("Failed to set up instances");
+        }
+
+        let test_instance =
+            Instance::new().group("affinity").avoid_sled(sleds[0].id());
+        let err = test_instance
+            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .await
+            .expect_err("Should have failed to place instance");
+        let SledReservationTransactionError::Reservation(
+            SledReservationError::RequiredAffinitySledNotValid,
+        ) = err
+        else {
+            panic!("Unexpected error: {err:?}");
+        };
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Affinity, Policy = Allow, combined with "must not select from"
+    #[tokio::test]
+    async fn must_not_select_from_affinity_policy_allow() {
+        let logctx =
+            dev::test_setup_log("must_not_select_from_affinity_policy_allow");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore, "project").await;
+
+        const SLED_COUNT: usize = 2;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
+
+        let groups = [Group {
+            affinity: Affinity::Positive,
+            name: "affinity",
+            policy: affinity::AffinityPolicy::Allow,
+        }];
+        let all_groups =
+            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
+                .await;
+        let instances = [Instance::new().group("affinity").sled(sleds[0].id())];
+        for instance in instances {
+            instance
+                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .await
+                .expect("Failed to set up instances");
+        }
+
+        let test_instance =
+            Instance::new().group("affinity").avoid_sled(sleds[0].id());
+        let resource = test_instance
+            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .await
+            .expect("Should have placed instance");
+        assert_eq!(resource.sled_id(), sleds[1].id());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Anti-Affinity, Policy = Fail, combined with "must not select from".
+    #[tokio::test]
+    async fn must_not_select_from_anti_affinity_policy_fail() {
+        let logctx = dev::test_setup_log(
+            "must_not_select_from_anti_affinity_policy_fail",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore, "project").await;
+
+        const SLED_COUNT: usize = 3;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
+
+        let groups = [Group {
+            affinity: Affinity::Negative,
+            name: "anti-affinity",
+            policy: affinity::AffinityPolicy::Fail,
+        }];
+        let all_groups =
+            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
+                .await;
+        let instances =
+            [Instance::new().group("anti-affinity").sled(sleds[1].id())];
+        for instance in instances {
+            instance
+                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .await
+                .expect("Failed to set up instances");
+        }
+
+        // sleds[1] is banned by anti-affinity; avoiding sleds[0] and sleds[2]
+        // leaves nothing.
+        let test_instance = Instance::new()
+            .group("anti-affinity")
+            .avoid_sled(sleds[0].id())
+            .avoid_sled(sleds[2].id());
+        let err = test_instance
+            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .await
+            .expect_err("Should have failed to place instance");
+        let SledReservationTransactionError::Reservation(
+            SledReservationError::NotFound,
+        ) = err
+        else {
+            panic!("Unexpected error: {err:?}");
+        };
+
+        // Avoiding only sleds[0] leaves sleds[2].
+        let test_instance =
+            Instance::new().group("anti-affinity").avoid_sled(sleds[0].id());
+        let resource = test_instance
+            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .await
+            .expect("Should have placed instance");
+        assert_eq!(resource.sled_id(), sleds[2].id());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test the typical behavior of a "must not select from" constraint; i.e.,
+    // that we're trying to autoselect a destination sled for VMM migration (and
+    // that auto selection "must not select from" the sled where the VMM is
+    // currently placed).
+    //
+    // We should successfully find an alternative sled, and both the source and
+    // destination reservations should exist with their expected
+    // `SledReservationReason`s.
+    #[tokio::test]
+    async fn must_not_select_from_migration_target_reservation() {
+        let logctx = dev::test_setup_log(
+            "must_not_select_from_migration_target_reservation",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (_authz_project, _project) =
+            create_project(&opctx, &datastore, "project").await;
+
+        const SLED_COUNT: usize = 2;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
+
+        let instance_id = InstanceUuid::new_v4();
+        let start_instance = Instance::new_with_id(instance_id);
+        let start_resource =
+            create_instance_reservation(&datastore, &opctx, &start_instance)
+                .await
+                .expect("Should have placed instance");
+        let src_sled_id = start_resource.sled_id();
+        let expected_dst_sled_id = sleds
+            .iter()
+            .map(|s| s.id())
+            .find(|id| *id != src_sled_id)
+            .expect("two sleds exist");
+
+        let migrate_instance = Instance::new_with_id(instance_id)
+            .reservation_reason(SledReservationReason::MigrationTarget)
+            .avoid_sled(src_sled_id);
+        let target_resource =
+            create_instance_reservation(&datastore, &opctx, &migrate_instance)
+                .await
+                .expect("Should have placed migration target");
+        assert_eq!(target_resource.sled_id(), expected_dst_sled_id);
+        assert_ne!(target_resource.id(), start_resource.id());
+
+        // Both reservations exist for this instance.
+        {
+            use nexus_db_schema::schema::sled_resource_vmm::dsl;
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            let rows = dsl::sled_resource_vmm
+                .filter(dsl::instance_id.eq(to_db_typed_uuid(instance_id)))
+                .select(SledResourceVmm::as_select())
+                .get_results_async(&*conn)
+                .await
+                .unwrap();
+            assert_eq!(rows.len(), 2, "unexpected rows: {rows:?}");
+            let states: Vec<_> = rows.iter().map(|r| r.state).collect();
+            assert!(
+                states.contains(&SledResourceVmmState::Active),
+                "unexpected rows: {rows:?}"
+            );
+            assert!(
+                states.contains(&SledResourceVmmState::Target),
+                "unexpected rows: {rows:?}"
+            );
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     // Test that concurrent provisioning of an affinity group can cause
     // the INSERT of a sled_resource_vmm to fail.
     #[tokio::test]
@@ -4525,8 +4857,8 @@ pub(in crate::db::datastore) mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Set up a sled to test against.
-        let (sled, _) =
-            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        let sled =
+            sled_upsert_expect_written(datastore, test_new_sled_update()).await;
         let sled_id = sled.id();
 
         // Add a couple disks to this sled.
@@ -4717,8 +5049,8 @@ pub(in crate::db::datastore) mod test {
             .enumerate();
 
         // Set up a sled to test against.
-        let (sled, _) =
-            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        let sled =
+            sled_upsert_expect_written(datastore, test_new_sled_update()).await;
         let sled_id = sled.id();
 
         for (i, ((policy, state), after)) in all_transitions {
@@ -5002,10 +5334,10 @@ pub(in crate::db::datastore) mod test {
                     cpu_family: db::model::SledCpuFamily::AmdMilan,
                 },
                 RackUuid::new_v4(),
-                Generation::new(),
+                SledRegistrationGeneration::new(),
             );
 
-            datastore.sled_upsert(sled).await.expect("failed to upsert sled");
+            sled_upsert_expect_written(datastore, sled).await;
 
             for u2 in &sled_config.u2s {
                 let physical_disk = db::model::PhysicalDisk::from_parts(
@@ -5077,7 +5409,7 @@ pub(in crate::db::datastore) mod test {
                                 description: String::from("desc"),
                             },
                         ),
-                        project_id: authz_project.id(),
+                        project_id: authz_project.id().into(),
                         policy: group.policy.into(),
                         failure_domain: group.failure_domain.into(),
                     },
@@ -5099,7 +5431,7 @@ pub(in crate::db::datastore) mod test {
                                 description: String::from("desc"),
                             },
                         ),
-                        project_id: authz_project.id(),
+                        project_id: authz_project.id().into(),
                         policy: group.policy.into(),
                         failure_domain: group.failure_domain.into(),
                     },

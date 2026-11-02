@@ -996,7 +996,7 @@ mod test {
 
     use crate::db::datastore::test::bp_insert_and_make_target;
     use crate::db::pub_test_utils::TestDatabase;
-    use nexus_db_model::Generation;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledCpuFamily;
     use nexus_db_model::SledSystemHardware;
@@ -1011,7 +1011,7 @@ mod test {
     use omicron_common::api::external::LookupType;
     use omicron_common::api::internal::shared::DatasetKind::Debug as DebugDatasetKind;
     use omicron_generation_kinds::{
-        SitrepAlertGeneration, SledConfigGeneration,
+        SitrepAlertGeneration, SledConfigGeneration, SledRegistrationGeneration,
     };
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
@@ -1109,9 +1109,9 @@ mod test {
                     cpu_family: SledCpuFamily::AmdMilan,
                 },
                 rack_id,
-                Generation::new(),
+                SledRegistrationGeneration::new(),
             );
-            datastore.sled_upsert(sled).await.expect("failed to upsert sled");
+            sled_upsert_expect_written(datastore, sled).await;
 
             // Create fake zpools that back our fake datasets.
             for pool in &self.pools {

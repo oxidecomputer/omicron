@@ -83,7 +83,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type Project, identified by its id
-    pub fn project_id(self, id: Uuid) -> Project<'a> {
+    pub fn project_id(self, id: ProjectUuid) -> Project<'a> {
         Project::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -215,7 +215,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type Silo, identified by its id
-    pub fn silo_id(self, id: Uuid) -> Silo<'a> {
+    pub fn silo_id(self, id: SiloUuid) -> Silo<'a> {
         Silo::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -547,7 +547,7 @@ lookup_resource! {
     ancestors = [],
     lookup_by_name = true,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = SiloKind } ]
 }
 
 lookup_resource! {
@@ -618,7 +618,7 @@ lookup_resource! {
     ancestors = [ "Silo" ],
     lookup_by_name = true,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = ProjectKind } ]
 }
 
 lookup_resource! {

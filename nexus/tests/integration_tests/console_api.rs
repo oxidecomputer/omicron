@@ -30,6 +30,7 @@ use nexus_types::external_api::silo::SiloIdentityMode;
 use nexus_types::external_api::user;
 use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
+use omicron_uuid_kinds::GenericUuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -440,7 +441,7 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         priv_user.user.display_name,
         USER_TEST_PRIVILEGED.external_id.clone().unwrap()
     );
-    assert_eq!(priv_user.user.silo_id, DEFAULT_SILO.id());
+    assert_eq!(priv_user.user.silo_id, DEFAULT_SILO.id().into_untyped_uuid());
     assert_eq!(priv_user.silo_name, DEFAULT_SILO.name().clone());
     assert!(priv_user.fleet_viewer);
     assert!(priv_user.silo_admin);
@@ -457,7 +458,7 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         unpriv_user.user.display_name,
         USER_TEST_UNPRIVILEGED.external_id.clone().unwrap()
     );
-    assert_eq!(unpriv_user.user.silo_id, DEFAULT_SILO.id());
+    assert_eq!(unpriv_user.user.silo_id, DEFAULT_SILO.id().into_untyped_uuid());
     assert_eq!(unpriv_user.silo_name, DEFAULT_SILO.name().clone());
     assert!(!unpriv_user.fleet_viewer);
     assert!(!unpriv_user.silo_admin);

@@ -10,10 +10,10 @@ use omicron_common::snake_case_result::{self, SnakeCaseResult};
 use omicron_uuid_kinds::{RackUuid, SledUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_hardware_types::{BaseboardId, SledCpuFamily};
+use sled_hardware_types::BaseboardId;
 
 use crate::v1::disk::{DiskIdentity, DiskVariant};
-use crate::v1::inventory::{InventoryDataset, SledRole};
+use crate::v1::inventory::{InventoryDataset, SledCpuFamily, SledRole};
 use crate::v16::inventory::SingleMeasurementInventory;
 use crate::v24::inventory::InventoryZpool;
 use crate::v40::inventory::{FmdInventory, FmdInventoryError};
@@ -23,7 +23,7 @@ use crate::v55::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
     OmicronFileSourceResolverInventory, OmicronSledConfig,
 };
-use crate::v61;
+use crate::v62;
 
 /// Identifies information about disks which may be attached to Sleds.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -57,7 +57,7 @@ pub struct InventoryDisk {
     pub slot_firmware_versions: Vec<Option<String>>,
 }
 
-impl From<InventoryDisk> for v61::inventory::InventoryDisk {
+impl From<InventoryDisk> for v62::inventory::InventoryDisk {
     fn from(new: InventoryDisk) -> Self {
         let InventoryDisk {
             identity,
@@ -113,7 +113,7 @@ pub struct Inventory {
     pub fmd: Result<FmdInventory, FmdInventoryError>,
 }
 
-impl From<Inventory> for v61::inventory::Inventory {
+impl From<Inventory> for v62::inventory::Inventory {
     fn from(new: Inventory) -> Self {
         let Inventory {
             sled_id,

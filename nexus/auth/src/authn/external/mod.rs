@@ -11,9 +11,9 @@ use crate::probes;
 use async_trait::async_trait;
 use authn::Reason;
 use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::SiloUuid;
 use slog::trace;
 use std::borrow::Borrow;
-use uuid::Uuid;
 
 pub mod scim;
 pub mod session_cookie;
@@ -158,7 +158,7 @@ pub trait SiloUserSilo {
     async fn silo_user_silo(
         &self,
         silo_user_id: SiloUserUuid,
-    ) -> Result<Uuid, Reason>;
+    ) -> Result<SiloUuid, Reason>;
 }
 
 #[cfg(test)]

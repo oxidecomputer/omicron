@@ -10,6 +10,7 @@ use crate::context::OpContext;
 use crate::db::model::Certificate;
 use crate::db::model::Name;
 use crate::db::model::ServiceKind;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -35,7 +36,7 @@ impl DataStore {
     ) -> CreateResult<Certificate> {
         use nexus_db_schema::schema::certificate::dsl;
 
-        if certificate.silo_id != authz_silo.id() {
+        if certificate.silo_id() != authz_silo.id() {
             return Err(Error::internal_error(&format!(
                 "certificate silo {} does not match authorized silo {}",
                 certificate.silo_id,
@@ -111,7 +112,7 @@ impl DataStore {
         };
 
         let query = if let Some(silo_id) = silo {
-            query.filter(dsl::silo_id.eq(silo_id))
+            query.filter(dsl::silo_id.eq(to_db_typed_uuid(silo_id)))
         } else {
             query
         };

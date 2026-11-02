@@ -524,13 +524,8 @@ impl GatewayApi for GatewayImpl {
             // in the SP (erroneously) rolling back the update. (In production
             // we always disallow this; it's a config option to support dev/test
             // environments that don't need this.)
-            if component == SpComponent::SP_ITSELF
-                && !apictx
-                    .mgmt_switch
-                    .allowed_to_reset_sp(sp_id)
-                    .map_err(HttpError::from)?
-            {
-                return Err(SpComponentResetError::ResetSpOfLocalSled);
+            if component == SpComponent::SP_ITSELF {
+                apictx.mgmt_switch.validate_sp_reset_is_allowed(sp_id)?;
             }
 
             sp.reset_component_prepare(component)
