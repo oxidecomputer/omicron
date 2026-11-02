@@ -103,9 +103,8 @@ pub(super) fn read_disk_bays(
 /// A topology node's identity within one snapshot: the names and instances
 /// of the node and all its ancestors, such as `chassis[0]/bay[9]/board[0]`.
 ///
-/// Name and instance alone do not identify a node: every bay's controller is
-/// `nvme[0]`, and `board[0]/ic[0]` placeholders appear under bays and under
-/// sharkfin slots alike.
+/// Name and instance alone do not identify a node: every bay's controller
+/// is `nvme[0]`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct NodeKey(String);
 
