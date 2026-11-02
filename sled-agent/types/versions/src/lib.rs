@@ -123,8 +123,10 @@ pub mod v59;
 pub mod v6;
 #[path = "add_multirack_join_service_status/mod.rs"]
 pub mod v60;
-#[path = "add_disk_location_to_inventory/mod.rs"]
+#[path = "trust_quorum_nullable_responses/mod.rs"]
 pub mod v61;
+#[path = "add_disk_location_to_inventory/mod.rs"]
+pub mod v62;
 #[path = "multicast_support/mod.rs"]
 pub mod v7;
 #[path = "delegate_zvol_to_propolis/mod.rs"]

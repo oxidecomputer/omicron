@@ -106,6 +106,7 @@ members = [
     "nexus/defaults",
     "nexus/external-api",
     "nexus/fm",
+    "nexus/fm/preparation",
     "nexus/fm/slippy",
     "nexus/internal-api",
     "nexus/inventory",
@@ -306,6 +307,7 @@ default-members = [
     "nexus/defaults",
     "nexus/external-api",
     "nexus/fm",
+    "nexus/fm/preparation",
     "nexus/fm/slippy",
     "nexus/internal-api",
     "nexus/inventory",
@@ -529,9 +531,9 @@ dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "e577a94678bf0a8d64d719acd3e19edd965f66a3" }
-dropshot = { version = "0.17.1", features = [ "usdt-probes" ] }
-dropshot-api-manager = "0.8.0"
-dropshot-api-manager-types = "0.8.0"
+dropshot = { version = "0.18.0", features = [ "usdt-probes" ] }
+dropshot-api-manager = "0.9.0"
+dropshot-api-manager-types = "0.9.0"
 dyn-clone = "1.0.20"
 either = "1.15.0"
 erebor = { git = "https://github.com/oxidecomputer/erebor", rev = "48512bf970474ff0fd0868c833fd504c8d169064" }
@@ -642,10 +644,10 @@ ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "389016069197dc8ca611f4b1dc63dfafbe634b7c" }
-mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "389016069197dc8ca611f4b1dc63dfafbe634b7c" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "389016069197dc8ca611f4b1dc63dfafbe634b7c" }
-ddm-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "389016069197dc8ca611f4b1dc63dfafbe634b7c" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "6fee306970763d27025c408cbbf690d6e30a9593" }
+mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "6fee306970763d27025c408cbbf690d6e30a9593" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "6fee306970763d27025c408cbbf690d6e30a9593" }
+ddm-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "6fee306970763d27025c408cbbf690d6e30a9593" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -663,6 +665,7 @@ nexus-defaults = { path = "nexus/defaults" }
 nexus-external-api = { path = "nexus/external-api" }
 nexus-fm = { path = "nexus/fm" }
 nexus-fm-slippy = { path = "nexus/fm/slippy" }
+nexus-fm-preparation = { path = "nexus/fm/preparation" }
 nexus-inventory = { path = "nexus/inventory" }
 nexus-internal-api = { path = "nexus/internal-api" }
 nexus-lockstep-api = { path = "nexus/lockstep-api" }
@@ -717,7 +720,7 @@ oxide-update-engine = "0.1.2"
 oxide-update-engine-types = { version = "0.1.2", features = ["schemars08"] }
 oxide-update-engine-display = "0.1.2"
 oxide-versioned-envelope = { version = "0.1.1", features = ["schemars08"] }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "fd2d6ad625cef6fb903660e57dcd4729ff66a6fe", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "44052786cb63ad9ff32ec47bd8d65edb6a184e21", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.7"
 once_cell = "1.21.3"
@@ -726,7 +729,7 @@ openapiv3 = "2.2.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "fd2d6ad625cef6fb903660e57dcd4729ff66a6fe" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "44052786cb63ad9ff32ec47bd8d65edb6a184e21" }
 oso = "0.27"
 owo-colors = "4.2.2"
 oximeter = { path = "oximeter/oximeter" }
@@ -949,8 +952,8 @@ oxide-generation = { version = "0.1.3", default-features = false }
 oxide-generation-macros = "0.2.0"
 omicron-generation-kinds = { path = "generation-kinds", features = ["serde", "schemars08", "slog2"] }
 
-scim2-rs = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "a024c0918bea9133bd545bc06c42a4a0e14c7915" }
-scim2-test-client = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "a024c0918bea9133bd545bc06c42a4a0e14c7915" }
+scim2-rs = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "d217d08c6664a97cb8a16bb537c507dfff52b1b4" }
+scim2-test-client = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "d217d08c6664a97cb8a16bb537c507dfff52b1b4" }
 
 # NOTE: The test profile inherits from the dev profile, so settings under
 # profile.dev get inherited. AVOID setting anything under profile.test: that
@@ -1192,4 +1195,3 @@ path = "workspace-hack"
 omicron-common = { path = "common" }
 omicron-generation-kinds = { path = "generation-kinds" }
 omicron-uuid-kinds = { path = "uuid-kinds" }
-

@@ -2285,6 +2285,7 @@ mod tests {
     use crate::db::model::Generation;
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::InstanceState;
     use nexus_db_model::Project;
@@ -3633,11 +3634,11 @@ mod tests {
         // Make some sleds, and put some instances and VMMs on those sleds.
         let mut sled_ids = Vec::new();
         for s in 0..2 {
-            let (sled, updated) = datastore
-                .sled_upsert(sled::test::test_new_sled_update())
-                .await
-                .unwrap();
-            assert!(updated);
+            let sled = sled_upsert_expect_written(
+                datastore,
+                sled::test::test_new_sled_update(),
+            )
+            .await;
             let sled_id = sled.id();
             sled_ids.push(sled_id);
             for i in 0..INSTANCES_PER_SLED {

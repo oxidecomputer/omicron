@@ -8,6 +8,7 @@ use nexus_db_schema::schema::certificate;
 use nexus_types::external_api::certificate as certificate_types;
 use nexus_types::identity::Resource;
 use omicron_certificates::CertificateValidator;
+use omicron_certificates::TlsCertificate;
 use omicron_common::api::external::Error;
 use uuid::Uuid;
 
@@ -96,5 +97,17 @@ impl TryFrom<Certificate> for certificate_types::Certificate {
                 Error::internal_error("Certificate is not valid UTF-8")
             })?,
         })
+    }
+}
+
+impl TryFrom<Certificate> for TlsCertificate {
+    type Error = anyhow::Error;
+
+    fn try_from(cert: Certificate) -> Result<Self, anyhow::Error> {
+        let raw = omicron_certificates::RawCertKey {
+            certs: &cert.cert,
+            private_key: &cert.key,
+        };
+        Self::new(cert.id(), raw)
     }
 }

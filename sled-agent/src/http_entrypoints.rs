@@ -63,7 +63,9 @@ use sled_agent_types::support_bundle::{
     SupportBundleTransferQueryParams,
 };
 use sled_agent_types::trust_quorum::{
-    ProxyCommitRequest, ProxyPrepareAndCommitRequest, TrustQuorumNetworkConfig,
+    ProxyCommitRequest, ProxyPrepareAndCommitRequest,
+    TrustQuorumCoordinatorStatusResponse, TrustQuorumNetworkConfig,
+    TrustQuorumNetworkConfigResponse,
 };
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
@@ -72,10 +74,11 @@ use sled_agent_types::zone_bundle::{
 };
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
+use trust_quorum::CoordinatorStatusSnapshot;
 use trust_quorum_types::messages::{
     CommitRequest, LrtqUpgradeMsg, PrepareAndCommitRequest, ReconfigureMsg,
 };
-use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
+use trust_quorum_types::status::{CommitStatus, NodeStatus};
 
 // Fixed identifiers for prior versions only
 use sled_agent_types_versions::{v20, v25, v26, v30, v33, v39, v42, v47, v48};
@@ -1550,19 +1553,35 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn trust_quorum_coordinator_status(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Option<CoordinatorStatus>>, HttpError> {
+    ) -> Result<HttpResponseOk<TrustQuorumCoordinatorStatusResponse>, HttpError>
+    {
         let sa = request_context.context();
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
-                let status =
-                    sa.trust_quorum().coordinator_status().await.map_err(
-                        |e| {
-                            HttpError::for_internal_error(
-                                InlineErrorChain::new(&e).to_string(),
-                            )
-                        },
-                    )?;
-                Ok(HttpResponseOk(status))
+                let snapshot = sa
+                    .trust_quorum()
+                    .coordinator_status_snapshot()
+                    .await
+                    .map_err(|e| {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    })?;
+                let response = match snapshot {
+                    CoordinatorStatusSnapshot::Coordinating { status } => {
+                        TrustQuorumCoordinatorStatusResponse::Coordinating {
+                            status,
+                        }
+                    }
+                    CoordinatorStatusSnapshot::NotCoordinating {
+                        latest_config_epoch,
+                    } => {
+                        TrustQuorumCoordinatorStatusResponse::NotCoordinating {
+                            latest_config_epoch,
+                        }
+                    }
+                };
+                Ok(HttpResponseOk(response))
             })
             .await
     }
@@ -1689,7 +1708,7 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn trust_quorum_network_config_get(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Option<TrustQuorumNetworkConfig>>, HttpError>
+    ) -> Result<HttpResponseOk<TrustQuorumNetworkConfigResponse>, HttpError>
     {
         let sa = request_context.context();
         sa.latencies()
@@ -1700,7 +1719,9 @@ impl SledAgentApi for SledAgentImpl {
                             InlineErrorChain::new(&e).to_string(),
                         )
                     })?;
-                Ok(HttpResponseOk(config.map(TrustQuorumNetworkConfig::from)))
+                Ok(HttpResponseOk(TrustQuorumNetworkConfigResponse {
+                    config: config.map(TrustQuorumNetworkConfig::from),
+                }))
             })
             .await
     }

@@ -27,7 +27,6 @@
 //! [`rustls::server::ResolvesServerCert`].  See [`NexusCertResolver`].
 
 use crate::context::ApiContext;
-use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
 use nexus_db_model::AuthenticationMode;
@@ -45,26 +44,21 @@ use nexus_types::observed_certificate::CertificateCandidate;
 use nexus_types::observed_certificate::best_certificate;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use nexus_types::silo::silo_dns_name;
-use omicron_certificates::CertificateValidity;
+use omicron_certificates::CertifiedKey;
+use omicron_certificates::TlsCertificate;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloUuid;
-use openssl::pkey::PKey;
-use rustls::pki_types::PrivateKeyDer;
-use rustls::pki_types::pem::PemObject;
-use rustls::sign::CertifiedKey;
 use serde::Serialize;
 use serde_with::SerializeDisplay;
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
-use std::fmt;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::watch;
-use uuid::Uuid;
 
 /// Describes the set of external endpoints, organized by DNS name
 ///
@@ -325,12 +319,12 @@ impl ExternalEndpoint {
             .tls_certs
             .iter()
             .map(|t| CertificateCandidate {
-                id: t.id,
+                id: t.id(),
                 not_after: t.validity().not_after,
             })
             .collect();
         best_certificate(&candidates)
-            .and_then(|id| self.tls_certs.iter().find(|t| t.id == id))
+            .and_then(|id| self.tls_certs.iter().find(|t| t.id() == id))
             .ok_or_else(|| {
                 anyhow!("silo {} has no usable certificates", self.silo_id)
             })
@@ -374,117 +368,6 @@ impl Eq for ExternalEndpointError {}
 impl PartialEq for ExternalEndpointError {
     fn eq(&self, other: &Self) -> bool {
         self.to_string() == other.to_string()
-    }
-}
-
-/// A parsed, validated TLS certificate ready to use with an external TLS server
-///
-/// Constructing one of these (via `TryFrom<Certificate>`) is the acceptance
-/// check for whether Nexus can serve a stored certificate at all. Anything
-/// else that needs to reason about the certificates Nexus actually presents,
-/// like the fault management certificate diagnosis engine, must go through the
-/// same conversion so that it sees the same set of certificates.
-#[derive(Serialize)]
-#[serde(transparent)]
-pub(crate) struct TlsCertificate {
-    /// This is what we need to provide to the TLS stack when we decide to use
-    /// this certificate for an incoming TLS connection
-    // NOTE: It's important that we do not serialize the private key!
-    #[serde(skip)]
-    certified_key: Arc<CertifiedKey>,
-
-    /// ID of the `certificate` row this was built from
-    #[serde(skip)]
-    id: Uuid,
-
-    /// Validity window of the leaf certificate
-    #[serde(skip)]
-    validity: CertificateValidity,
-
-    /// certificate digest (historically sometimes called a "fingerprint")
-    // This is the only field that appears in the serialized output or debug
-    // output.
-    digest: String,
-}
-
-impl fmt::Debug for TlsCertificate {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // It's important that only the digest appear in the debug output.  We
-        // definitely don't want to leak the private key this way.  Really,
-        // we don't want even the public parts adding noise to debug output.
-        f.debug_struct("TlsCertificate").field("digest", &self.digest).finish()
-    }
-}
-
-impl Eq for TlsCertificate {}
-impl PartialEq for TlsCertificate {
-    fn eq(&self, other: &Self) -> bool {
-        self.digest == other.digest
-    }
-}
-
-impl TryFrom<Certificate> for TlsCertificate {
-    type Error = anyhow::Error;
-
-    fn try_from(db_cert: Certificate) -> Result<TlsCertificate, anyhow::Error> {
-        // Parse and validate what we've got.
-        let certs_pem = openssl::x509::X509::stack_from_pem(&db_cert.cert)
-            .context("parsing PEM stack")?;
-        let private_key = PKey::private_key_from_pem(&db_cert.key)
-            .context("parsing private key PEM")?;
-
-        // Assemble a rustls CertifiedKey with both the certificate and the key.
-        let certified_key = {
-            let rustls_private_key =
-                PrivateKeyDer::from_pem_slice(&db_cert.key)
-                    .context("parsing private key PEM for rustls")?;
-            let rustls_signing_key =
-                rustls::crypto::aws_lc_rs::sign::any_supported_type(
-                    &rustls_private_key,
-                )
-                .context("parsing DER private key")?;
-            let rustls_certs = certs_pem
-                .iter()
-                .map(|x509| {
-                    x509.to_der()
-                        .context("serializing cert to DER")
-                        .map(rustls::pki_types::CertificateDer::from)
-                })
-                .collect::<Result<_, _>>()?;
-            Arc::new(CertifiedKey::new(rustls_certs, rustls_signing_key))
-        };
-
-        let end_cert = certs_pem
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow!("no certificates in PEM stack"))?;
-        anyhow::ensure!(
-            end_cert
-                .public_key()
-                .context("certificate publickey")?
-                .public_eq(&private_key),
-            "certificate public key does not match stored private key"
-        );
-
-        // Compute a digest (fingerprint) that we can use for debugging.
-        let digest = {
-            let digest_bytes = end_cert
-                .digest(openssl::hash::MessageDigest::sha256())
-                .context("computing fingerprint")?;
-            hex::encode(&digest_bytes)
-        };
-
-        let validity = omicron_certificates::validity(&end_cert)
-            .context("reading leaf certificate validity")?;
-
-        Ok(TlsCertificate { id: db_cert.id(), certified_key, digest, validity })
-    }
-}
-
-impl TlsCertificate {
-    /// Returns the validity window of the leaf certificate
-    pub(crate) fn validity(&self) -> CertificateValidity {
-        self.validity
     }
 }
 
@@ -633,7 +516,7 @@ impl NexusCertResolver {
                     "silo_id" => silo_id.to_string(),
                     "certificate" => ?certificate
                 );
-                Some(certificate.certified_key.clone())
+                Some(certificate.certified_key().clone())
             }
             Err(error) => {
                 // TODO-security There is a (limited) DoS risk here, in that the
@@ -895,7 +778,7 @@ mod test {
         let parse_right = openssl::x509::X509::from_pem(&cert.cert).unwrap();
         let digest_right =
             parse_right.digest(openssl::hash::MessageDigest::sha256()).unwrap();
-        tls_cert.digest == hex::encode(&digest_right)
+        tls_cert.digest() == hex::encode(&digest_right)
     }
 
     #[test]
@@ -1125,7 +1008,7 @@ mod test {
             );
             let endpoint = &ee.by_dns_name["silo1.sys.oxide1.test"];
             let best = endpoint.best_certificate().unwrap();
-            assert_eq!(best.id, high_id);
+            assert_eq!(best.id(), high_id);
             assert!(cert_matches(best, &high));
         }
     }
@@ -1346,17 +1229,17 @@ mod test {
         watch_tx.send(Some(ee.clone())).unwrap();
         let resolved_c1 =
             cert_resolver.do_resolve(Some("silo1.sys.oxide1.test")).unwrap();
-        assert_eq!(resolved_c1.cert, c1.certified_key.cert);
+        assert_eq!(resolved_c1.cert, c1.certified_key().cert);
         let resolved_c2 =
             cert_resolver.do_resolve(Some("silo2.sys.oxide1.test")).unwrap();
-        assert_eq!(resolved_c2.cert, c2.certified_key.cert);
+        assert_eq!(resolved_c2.cert, c2.certified_key().cert);
         assert!(
             cert_resolver.do_resolve(Some("silo3.sys.oxide1.test")).is_none()
         );
         // We should get an expired cert if it's the only option.
         let resolved_c4 =
             cert_resolver.do_resolve(Some("silo4.sys.oxide1.test")).unwrap();
-        assert_eq!(resolved_c4.cert, c4.certified_key.cert);
+        assert_eq!(resolved_c4.cert, c4.certified_key().cert);
 
         logctx.cleanup_successful();
     }

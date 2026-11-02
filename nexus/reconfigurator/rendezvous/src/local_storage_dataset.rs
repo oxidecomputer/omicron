@@ -159,16 +159,17 @@ mod tests {
     use crate::tests::usize_to_id;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
-    use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledCpuFamily;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
     use nexus_db_model::Zpool;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
+    use nexus_db_queries::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_types::inventory::ZpoolName;
     use omicron_common::api::external::ByteCount;
+    use omicron_generation_kinds::SledRegistrationGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::RackUuid;
@@ -218,8 +219,9 @@ mod tests {
 
             // Ensure the sled and zpool this dataset claim to be on exist in
             // the DB.
-            datastore
-                .sled_upsert(SledUpdate::new(
+            sled_upsert_expect_written(
+                datastore,
+                SledUpdate::new(
                     sled_id,
                     "[::1]:0".parse().unwrap(),
                     0,
@@ -236,10 +238,10 @@ mod tests {
                         cpu_family: SledCpuFamily::Unknown,
                     },
                     RackUuid::new_v4(),
-                    Generation::new(),
-                ))
-                .await
-                .expect("should have inserted sled");
+                    SledRegistrationGeneration::new(),
+                ),
+            )
+            .await;
             datastore
                 .zpool_insert(
                     opctx,
