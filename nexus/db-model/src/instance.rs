@@ -535,7 +535,8 @@ impl InstanceAutoRestart {
     }
 
     /// Filters a database query to include only instances whose auto-restart
-    /// configs permit them to reincarnate.
+    /// configs permit them to reincarnate, or are being evacuated from their
+    /// sled.
     ///
     /// Yes, this should probably be in `nexus-db-queries`, but it seemed nice
     /// for it to be defined on the same struct as the in-memory logic
@@ -554,27 +555,23 @@ impl InstanceAutoRestart {
 
         let now = diesel::dsl::now.into_sql::<pg::sql_types::Timestamptz>();
 
+        // Query fragment for selecting *failed* instances that are eligible to
+        // restart.
+        //
         // The instance's auto-restart policy must allow the control plane
         // to restart it automatically.
         //
         // N.B. that this may become more complex in the future if we grow
         // additional auto-restart policies that require additional logic
         // (such as restart limits...)
-        (dsl::auto_restart_policy
+        let can_restart_from_failure = (dsl::auto_restart_policy
             .eq(InstanceAutoRestartPolicy::BestEffort)
             // If the auto-restart policy is null, then it should
             // default to "best effort".
-            .or(dsl::auto_restart_policy.is_null())
-            // When an instance is rebooting due to its sled evacuating, it
-            // should be reincarnatable
-            .or(dsl::state.eq(InstanceState::SledEvacuating)))
-        // An instance should only be automatically restarted if it is intended
-        // to be in the `Running` state. Instances which were requested to stop
-        // should not be automatically restarted, even if they have failed.
-        .and(dsl::intended_state.eq(IntendedState::Running))
-        // instance whose last reincarnation was within the cooldown interval
-        // from now must remain in _bardo_ --- the liminal state between death
-        // and rebirth --- before its next reincarnation.
+            .or(dsl::auto_restart_policy.is_null()))
+        // An instance whose last reincarnation was within the cooldown from now
+        // must remain in _bardo_ --- the liminal state between death and
+        // rebirth --- before its next reincarnation.
         .and(
             // If the instance has never previously been reincarnated, then
             // it's allowed to reincarnate.
@@ -591,13 +588,28 @@ impl InstanceAutoRestart {
                     dsl::time_last_auto_restarted
                         .le((now - Self::DEFAULT_COOLDOWN).nullable()),
                 )),
-        )
-        // Deleted instances may not be reincarnated.
-        .and(dsl::time_deleted.is_null())
-        // If the instance is currently in the process of being updated,
-        // let's not mess with it for now and try to restart it on another
-        // pass.
-        .and(dsl::updater_id.is_null())
+        );
+
+        // An instance should only be automatically restarted if it is intended
+        // to be in the `Running` state. Instances which were requested to stop
+        // should not be automatically restarted, even if they have failed.
+        dsl::intended_state
+            .eq(IntendedState::Running)
+            // Either the failed-instance preduicate from above matches, *or*
+            // the instance is rebooting due to its sled evacuating. When an
+            // instance had to stop for sled evacuation, can always be
+            // reincarnated, regardless of its auto-restart policy and when it
+            // last reincarnated.
+            .and(
+                can_restart_from_failure
+                    .or(dsl::state.eq(InstanceState::SledEvacuating)),
+            )
+            // Deleted instances may not be reincarnated.
+            .and(dsl::time_deleted.is_null())
+            // If the instance is currently in the process of being updated,
+            // let's not mess with it for now and try to restart it on another
+            // pass.
+            .and(dsl::updater_id.is_null())
     }
 }
 /// The parts of an Instance that can be directly updated after creation.
