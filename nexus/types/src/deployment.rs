@@ -343,15 +343,6 @@ impl Blueprint {
         }
     }
 
-    /// Returns whether updates are suspended due to having detected a MUPdate
-    /// since the last time the target release was set
-    pub fn updates_suspended(
-        &self,
-        current_generation: TargetReleaseGeneration,
-    ) -> bool {
-        current_generation < self.target_release_minimum_generation
-    }
-
     /// Construct a [`ServiceZoneNatEntries`] containing all NAT entries for
     /// relevant in-service zones in this blueprint.
     ///
