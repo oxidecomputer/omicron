@@ -1524,6 +1524,7 @@ mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledSystemHardwareBuilder;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use nexus_db_model::HwBaseboardId;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledState;
@@ -1595,7 +1596,7 @@ mod tests {
             rack_id,
             SledRegistrationGeneration::new(),
         );
-        datastore.sled_upsert(update).await.unwrap();
+        sled_upsert_expect_written(datastore, update).await;
         sled_id
     }
 

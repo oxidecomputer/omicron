@@ -1159,6 +1159,7 @@ mod test {
     use crate::db::model::Sled;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use async_bb8_diesel::AsyncSimpleConnection;
     use iddqd::id_ord_map;
     use internal_dns_types::names::DNS_ZONE;
@@ -1464,11 +1465,7 @@ mod test {
             .sled_id(sled_id)
             .rack_id(nexus_test_utils::RACK_UUID)
             .build();
-        let (sled, _) = db
-            .sled_upsert(sled_update)
-            .await
-            .expect("Could not upsert sled during test prep");
-        sled
+        sled_upsert_expect_written(db, sled_update).await
     }
 
     // Build a single service IP pool config from a built-in pool name and a set

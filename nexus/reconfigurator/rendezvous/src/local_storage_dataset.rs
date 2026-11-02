@@ -165,6 +165,7 @@ mod tests {
     use nexus_db_model::SledUpdate;
     use nexus_db_model::Zpool;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
+    use nexus_db_queries::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_types::inventory::ZpoolName;
     use omicron_common::api::external::ByteCount;
@@ -218,8 +219,9 @@ mod tests {
 
             // Ensure the sled and zpool this dataset claim to be on exist in
             // the DB.
-            datastore
-                .sled_upsert(SledUpdate::new(
+            sled_upsert_expect_written(
+                datastore,
+                SledUpdate::new(
                     sled_id,
                     "[::1]:0".parse().unwrap(),
                     0,
@@ -237,9 +239,9 @@ mod tests {
                     },
                     RackUuid::new_v4(),
                     SledRegistrationGeneration::new(),
-                ))
-                .await
-                .expect("should have inserted sled");
+                ),
+            )
+            .await;
             datastore
                 .zpool_insert(
                     opctx,

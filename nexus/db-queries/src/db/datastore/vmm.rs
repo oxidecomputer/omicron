@@ -608,6 +608,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use crate::db::pub_test_utils::helpers::create_vmm_for_instance;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use iddqd::IdOrdMap;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::ActiveSledBpAvailability;
@@ -1388,10 +1389,11 @@ mod tests {
         for sled_id in [sled_a, sled_b, sled_expunged] {
             // The query only returns VMMs on in-service sleds. We store the
             // three sleds in the db.
-            datastore
-                .sled_upsert(SledUpdateBuilder::new().sled_id(sled_id).build())
-                .await
-                .expect("sled should be upserted successfully");
+            sled_upsert_expect_written(
+                datastore,
+                SledUpdateBuilder::new().sled_id(sled_id).build(),
+            )
+            .await;
 
             // New sleds are in-service by default. We expunge one of them to
             // test that no VMMs from that sled are returned.

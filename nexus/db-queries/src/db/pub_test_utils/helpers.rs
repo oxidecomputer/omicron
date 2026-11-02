@@ -27,6 +27,7 @@ use nexus_db_model::Project;
 use nexus_db_model::ProjectImage;
 use nexus_db_model::ProjectImageIdentity;
 use nexus_db_model::Resources;
+use nexus_db_model::Sled;
 use nexus_db_model::SledBaseboard;
 use nexus_db_model::SledCpuFamily;
 use nexus_db_model::SledSystemHardware;
@@ -219,6 +220,26 @@ impl SledUpdateBuilder {
             SledRegistrationGeneration::new(),
         )
     }
+}
+
+/// Upsert a sled and ensure that a row was written.
+///
+/// A row is written when:
+///
+/// * The sled is new.
+/// * The sled is existing, not decommissioned, and at a newer
+///   `SledRegistrationGeneration`.
+pub async fn sled_upsert_expect_written(
+    datastore: &DataStore,
+    sled_update: SledUpdate,
+) -> Sled {
+    let sled_id = sled_update.id();
+    let (sled, was_modified) = datastore
+        .sled_upsert(sled_update)
+        .await
+        .unwrap_or_else(|e| panic!("upserted sled {sled_id}: {e}"));
+    assert!(was_modified, "expected sled {sled_id} to be written");
+    sled
 }
 
 pub fn small_resource_request() -> Resources {
