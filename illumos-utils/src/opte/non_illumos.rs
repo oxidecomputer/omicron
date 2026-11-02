@@ -29,6 +29,7 @@ use std::collections::hash_map::Entry;
 use std::net::IpAddr;
 use std::sync::Mutex;
 use std::sync::OnceLock;
+use uuid::Uuid;
 
 // The real OPTE error type comes from `opte_ioctl` and is only defined on
 // illumos; define our own for non-illumos systems (dev / test).
@@ -52,9 +53,6 @@ pub enum Error {
     #[error("Invalid IP configuration for port: {0}")]
     InvalidPortIpConfig(String),
 
-    #[error("Tried to release non-existent port ({0}, {1:?})")]
-    ReleaseMissingPort(uuid::Uuid, NetworkInterfaceKind),
-
     #[error("Tried to update external IPs on non-existent port ({0}, {1:?})")]
     ExternalIpUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
 
@@ -76,6 +74,9 @@ pub enum Error {
         "Tried to update attached subnets on non-existent port ({0}, {1:?})"
     )]
     AttachedSubnetUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
+
+    #[error("Duplicate OPTE port: id={id}, kind={kind:?}")]
+    DuplicateOptePort { id: Uuid, kind: NetworkInterfaceKind },
 }
 
 pub fn initialize_xde_driver(

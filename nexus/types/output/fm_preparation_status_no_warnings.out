@@ -1,0 +1,4 @@
+    input preparation took 42ms
+      ereports:          5ms
+      in_service_disks:  5ms
+      silo_certificates: 5ms

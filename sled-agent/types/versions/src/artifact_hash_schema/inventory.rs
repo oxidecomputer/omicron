@@ -34,7 +34,6 @@ use schemars::schema::SchemaObject;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_hardware_types::BaseboardId;
-use sled_hardware_types::SledCpuFamily;
 use tufaceous_artifact::ArtifactHash;
 
 use crate::v1;
@@ -49,6 +48,7 @@ use crate::v1::inventory::ManifestNonBootInventory;
 use crate::v1::inventory::MupdateOverrideInventory;
 use crate::v1::inventory::OrphanedDataset;
 use crate::v1::inventory::RemoveMupdateOverrideInventory;
+use crate::v1::inventory::SledCpuFamily;
 use crate::v1::inventory::SledRole;
 use crate::v14;
 use crate::v16::inventory::SingleMeasurementInventory;

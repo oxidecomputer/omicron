@@ -213,8 +213,8 @@ pub mod inventory {
     pub use crate::v55::inventory::OmicronZonesConfig;
     pub use crate::v55::inventory::ZoneArtifactInventory;
 
-    pub use crate::v61::inventory::Inventory;
-    pub use crate::v61::inventory::InventoryDisk;
+    pub use crate::v62::inventory::Inventory;
+    pub use crate::v62::inventory::InventoryDisk;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;
@@ -294,6 +294,9 @@ pub mod trust_quorum {
     pub use crate::v13::trust_quorum::ProxyPrepareAndCommitRequest;
 
     pub use crate::v15::trust_quorum::TrustQuorumNetworkConfig;
+
+    pub use crate::v61::trust_quorum::TrustQuorumCoordinatorStatusResponse;
+    pub use crate::v61::trust_quorum::TrustQuorumNetworkConfigResponse;
 }
 
 pub mod uplink {

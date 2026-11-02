@@ -525,6 +525,14 @@ pub struct InputReport {
     pub closed_cases_copied_forward: BTreeMap<CaseUuid, ClosedCaseReport>,
     /// Number of entries in the ereporter restart table.
     pub num_ereporter_restarts: usize,
+    /// Unmarked ereports whose restart ID was not found in the ereporter
+    /// restart table.
+    ///
+    /// Every ereport's reporter restart is expected to be recorded when the
+    /// ereport is ingested, so a non-empty set indicates a bug or database
+    /// inconsistency. The ereports are still input to analysis.
+    #[serde(default)]
+    pub unknown_restart_ereport_ids: BTreeSet<EreportId>,
     /// All control-plane-managed physical disks visible to the diagnosis
     /// engines for this analysis pass.
     #[serde(default)]
@@ -657,6 +665,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     open_cases,
                     closed_cases_copied_forward,
                     num_ereporter_restarts,
+                    unknown_restart_ereport_ids,
                     in_service_disks,
                     observed_sagas,
                     observed_silo_certificates,
@@ -751,6 +760,24 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
             "",
             heading.style("total known ereport restart IDs"),
         )?;
+
+        if !unknown_restart_ereport_ids.is_empty() {
+            writeln!(
+                f,
+                "{:indent$}{} {}",
+                "",
+                styles.warning().style("/!\\ WEIRD:"),
+                styles.warning_text().style(format_args!(
+                    "{} ereports have restart IDs not in the \
+                     ereporter restart table:",
+                    unknown_restart_ereport_ids.len()
+                )),
+            )?;
+            let indent = indent + 2;
+            for ereport_id in unknown_restart_ereport_ids {
+                writeln!(f, "{:indent$}* ereport {ereport_id}", "")?;
+            }
+        }
 
         if !new_ereport_ids.is_empty() {
             writeln!(
@@ -1168,6 +1195,13 @@ mod tests {
             inv_id,
             reference_time: Some("2024-01-01T00:00:00Z".parse().unwrap()),
             num_ereporter_restarts: 420,
+            unknown_restart_ereport_ids: BTreeSet::from([EreportId {
+                restart_id: EreporterRestartUuid::from_str(
+                    "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+                )
+                .unwrap(),
+                ena: Ena(0x1),
+            }]),
             new_ereport_ids,
             open_cases,
             closed_cases_copied_forward,
@@ -1244,6 +1278,7 @@ mod tests {
             inv_id,
             reference_time: None,
             num_ereporter_restarts: 0,
+            unknown_restart_ereport_ids: BTreeSet::new(),
             new_ereport_ids: BTreeSet::new(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
@@ -1268,6 +1303,7 @@ mod tests {
             inv_id,
             reference_time: Some("2024-01-01T00:00:00Z".parse().unwrap()),
             num_ereporter_restarts: 420,
+            unknown_restart_ereport_ids: BTreeSet::new(),
             new_ereport_ids: BTreeSet::new(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
