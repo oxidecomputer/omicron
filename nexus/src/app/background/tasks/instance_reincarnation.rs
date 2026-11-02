@@ -929,6 +929,8 @@ mod test {
         .await;
         attach_saga_unwound_vmm(&cptestctx, &opctx, &unwound_stopped).await;
         will_not_reincarnate.insert(unwound_stopped.id());
+        // TODO-K: check this case. The instance's external state would
+        // permanently be "rebooting", which is wrong
         let evacuating_stopped = create_instance(
             &cptestctx,
             &opctx,

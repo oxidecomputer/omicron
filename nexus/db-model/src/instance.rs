@@ -263,7 +263,7 @@ impl Instance {
                 ) => {
                     debug_assert!(
                         _vmm.is_none(),
-                        "an instance in a {} state will never have an active \
+                        "an instance in the {} state will never have an active \
                         VMM!",
                         self.nexus_state
                     );

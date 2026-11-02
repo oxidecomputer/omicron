@@ -1622,12 +1622,6 @@ async fn siu_chain_successor_saga(
 }
 
 fn reincarnate_if_needed(osagactx: &SagaContext, state: &InstanceGestalt) {
-    // Check if the instance has transitioned to one of `Failed` or
-    // `SledEvacuating` states, and no additional update saga is required.
-    // Unless the instance is in the `SledEvacuating` state, check if the
-    // instance's auto-restart policy allows it to be automatically restarted.
-    // If these conditions are true, activate the instance-reincarnation
-    // background task to automatically restart it.
     let karmic_state =
         state.instance.auto_restart_status(state.active_vmm.as_ref());
     if karmic_state.should_reincarnate() {
