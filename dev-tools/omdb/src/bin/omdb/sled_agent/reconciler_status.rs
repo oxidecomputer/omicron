@@ -423,6 +423,7 @@ impl fmt::Display for DdmdReconcilerStatusDisplay<'_> {
             }
             DdmdReconcilerStatus::Reconciled {
                 external_peers_address_objects,
+                rack_prefix,
             } => {
                 let plural = if external_peers_address_objects.len() == 1 {
                     ""
@@ -438,12 +439,14 @@ impl fmt::Display for DdmdReconcilerStatusDisplay<'_> {
                 if !external_peers_address_objects.is_empty() {
                     writeln!(f, ":")?;
                     write_lines(
-                        &mut IndentWriter::new(INDENT, f),
+                        &mut IndentWriter::new(INDENT, &mut *f),
                         external_peers_address_objects,
                         |f, addrobj| write!(f, "* {addrobj}"),
                     )?;
+                } else {
+                    writeln!(f)?;
                 }
-                Ok(())
+                write!(f, "announced rack prefix: {rack_prefix}")
             }
         }
     }
@@ -1209,6 +1212,7 @@ mod tests {
                         "tfportqsfp0_0/ll".to_string(),
                         "tfportqsfp1_0/ll".to_string(),
                     ]),
+                    rack_prefix: "fd00:1122:3344:100::/56".parse().unwrap(),
                 }),
             },
         }
@@ -1274,6 +1278,7 @@ mod tests {
                 current_status: ReconcilerCurrentStatus::Idle,
                 last_completion: completed(DdmdReconcilerStatus::Reconciled {
                     external_peers_address_objects: BTreeSet::new(),
+                    rack_prefix: "fd00:1122:3344:100::/56".parse().unwrap(),
                 }),
             },
         }
