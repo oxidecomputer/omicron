@@ -39,6 +39,7 @@ members = [
     "dev-tools/corpus-adjust",
     "dev-tools/crdb-seed",
     "dev-tools/db-dev",
+    "dev-tools/diskinfo",
     "dev-tools/downloader",
     "dev-tools/dropshot-apis",
     "dev-tools/ls-apis",
@@ -238,6 +239,7 @@ default-members = [
     "dev-tools/corpus-adjust",
     "dev-tools/crdb-seed",
     "dev-tools/db-dev",
+    "dev-tools/diskinfo",
     "dev-tools/downloader",
     "dev-tools/dropshot-apis",
     "dev-tools/ls-apis",
@@ -629,7 +631,7 @@ kstat-rs = "0.2.5"
 libc = "0.2.174"
 linkme = "0.3"
 libipcc = { git = "https://github.com/oxidecomputer/ipcc-rs", rev = "524eb8f125003dff50b9703900c6b323f00f9e1b" }
-libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
+libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "5c0e22bad60557c6d45700fd074e4942e07a0a8c" }
 linear-map = "1.2.0"
 live-tests-macros = { path = "live-tests/macros" }
 lldpd_client = { git = "https://github.com/oxidecomputer/lldp", rev = "54b266174d4de9628bca9c97b0db176e16f12154", package = "lldpd-client" }
