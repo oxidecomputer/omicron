@@ -269,10 +269,8 @@ pub enum ReincarnationReason {
     Failed,
     /// A previous instance-start saga for this instance has failed.
     SagaUnwound,
-    // TODO-K: In a follow up PR add a StoppedForUpdate reason, so the instances
-    // we stopped during sled evacuation actually get restarted
-    //
-    // Tracking issue: https://github.com/oxidecomputer/omicron/issues/11169
+    /// A sled has been evacuated and its instances need to be started again.
+    SledEvacuation,
 }
 
 impl std::fmt::Display for ReincarnationReason {
@@ -280,6 +278,7 @@ impl std::fmt::Display for ReincarnationReason {
         f.write_str(match self {
             Self::Failed => "instance failed",
             Self::SagaUnwound => "start saga failed",
+            Self::SledEvacuation => "sled evacuated",
         })
     }
 }
