@@ -28482,20 +28482,22 @@
         ]
       },
       "SledAddPrecheckOverrides": {
-        "description": "Instructs the system to override safety checks when adding this sled",
+        "description": "Instructs the system to override safety checks when adding a sled",
         "type": "object",
         "properties": {
           "allow_unverified_sled_software": {
-            "description": "Add the requested sleds even if their software does not match the current target release\n\nThis allows sleds to be added even when their SP, RoT, RoT bootloader, or host OS phase 1 images cannot be confirmed to match those expected by the control plane.  Adding sleds with mismatched software is not supported since the control plane needs compatible versions in order to communicate with the sled.\n\nThis override is provided for working around bugs and only in emergency situations.  It should not generally be used.",
-            "default": false,
+            "description": "Add the requested sleds even if their software does not match the current target release\n\nThis allows sleds to be added even when their SP, RoT, RoT bootloader, or host OS phase 1 images cannot be confirmed to match those expected by the control plane. Adding sleds with mismatched software is not supported since the control plane needs compatible versions in order to communicate with the sled.\n\nThis override is provided for working around bugs and only in emergency situations. It should not generally be used.",
             "type": "boolean"
           },
           "allow_without_settled_target_release": {
-            "description": "Add the requested sleds even if the system has not settled on its current target release\n\nThis allows sleds to be added when the system is in the middle of a software update or if it has recently been MUPdated and that MUPdate hasn't been resolved.  This is not generally supported because in order for adding a sled to work, the versions of software on that sled must match the rest of the control plane, but that's not well-defined in these two cases\n\nThis override is provided for working around bugs and only in emergency situations.  It should not generally be used.",
-            "default": false,
+            "description": "Add the requested sleds even if the system has not settled on its current target release\n\nThis allows sleds to be added when the system is in the middle of a software update or if it has recently been MUPdated and that MUPdate hasn't been resolved. This is not generally supported because in order for adding a sled to work, the versions of software on that sled must match the rest of the control plane, but that's not well-defined in these two cases.\n\nThis override is provided for working around bugs and only in emergency situations. It should not generally be used.",
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "allow_unverified_sled_software",
+          "allow_without_settled_target_release"
+        ]
       },
       "SledInstance": {
         "description": "An operator's view of an instance running on a given sled",

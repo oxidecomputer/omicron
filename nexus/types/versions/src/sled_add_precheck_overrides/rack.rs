@@ -27,7 +27,7 @@ pub struct RackMembershipAddSledsRequest {
     ///
     /// Overriding checks is dangerous and should only be done at the direction
     /// of Oxide support.
-    #[serde(default)]
+    #[serde(default = "SledAddPrecheckOverrides::no_overrides_enabled")]
     pub override_prechecks: SledAddPrecheckOverrides,
 }
 
@@ -39,16 +39,15 @@ impl From<v2026_01_21_00::rack::RackMembershipAddSledsRequest>
             old;
         RackMembershipAddSledsRequest {
             sled_ids,
-            override_prechecks: SledAddPrecheckOverrides::default(),
+            override_prechecks: SledAddPrecheckOverrides::no_overrides_enabled(),
         }
     }
 }
 
-/// Instructs the system to override safety checks when adding this sled
+/// Instructs the system to override safety checks when adding a sled
 #[derive(
     Clone,
     Debug,
-    Default,
     Serialize,
     Deserialize,
     JsonSchema,
@@ -63,14 +62,13 @@ pub struct SledAddPrecheckOverrides {
     ///
     /// This allows sleds to be added when the system is in the middle of a
     /// software update or if it has recently been MUPdated and that MUPdate
-    /// hasn't been resolved.  This is not generally supported because in order
+    /// hasn't been resolved. This is not generally supported because in order
     /// for adding a sled to work, the versions of software on that sled must
     /// match the rest of the control plane, but that's not well-defined in
-    /// these two cases
+    /// these two cases.
     ///
     /// This override is provided for working around bugs and only in emergency
-    /// situations.  It should not generally be used.
-    #[serde(default)]
+    /// situations. It should not generally be used.
     pub allow_without_settled_target_release: bool,
 
     /// Add the requested sleds even if their software does not match the
@@ -78,12 +76,20 @@ pub struct SledAddPrecheckOverrides {
     ///
     /// This allows sleds to be added even when their SP, RoT, RoT bootloader,
     /// or host OS phase 1 images cannot be confirmed to match those expected by
-    /// the control plane.  Adding sleds with mismatched software is not
+    /// the control plane. Adding sleds with mismatched software is not
     /// supported since the control plane needs compatible versions in order to
     /// communicate with the sled.
     ///
     /// This override is provided for working around bugs and only in emergency
-    /// situations.  It should not generally be used.
-    #[serde(default)]
+    /// situations. It should not generally be used.
     pub allow_unverified_sled_software: bool,
+}
+
+impl SledAddPrecheckOverrides {
+    pub fn no_overrides_enabled() -> Self {
+        Self {
+            allow_without_settled_target_release: false,
+            allow_unverified_sled_software: false,
+        }
+    }
 }
