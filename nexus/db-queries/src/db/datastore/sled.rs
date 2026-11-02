@@ -1097,14 +1097,12 @@ pub struct MigrateSuccessUpdate {
 impl DataStore {
     /// Stores a new sled in the database.
     ///
-    /// Returns the sled, and whether or not it was updated on success.
-    ///
     /// Returns an error if `sled_agent_gen` is stale, or the sled is
     /// decommissioned.
     pub async fn sled_upsert(
         &self,
         sled_update: SledUpdate,
-    ) -> CreateResult<(Sled, bool)> {
+    ) -> CreateResult<Sled> {
         use nexus_db_schema::schema::sled::dsl;
         // required for conditional upsert
         use diesel::query_dsl::methods::FilterDsl;
@@ -1112,7 +1110,7 @@ impl DataStore {
         let insertable_sled = sled_update.clone().into_insertable();
         let now = insertable_sled.time_modified();
 
-        let sled = diesel::insert_into(dsl::sled)
+        diesel::insert_into(dsl::sled)
             .values(insertable_sled)
             .on_conflict(dsl::id)
             .do_update()
@@ -1147,12 +1145,7 @@ impl DataStore {
                         &sled_update.id().to_string(),
                     ),
                 )
-            })?;
-
-        // We compare only seconds since the epoch, because writing to and
-        // reading from the database causes us to lose precision.
-        let was_modified = now.timestamp() == sled.time_modified().timestamp();
-        Ok((sled, was_modified))
+            })
     }
 
     /// Returns true if a sled exists and is in-service, false if not.
@@ -2448,6 +2441,8 @@ pub(in crate::db::datastore) mod test {
     use crate::db::pub_test_utils::helpers::create_affinity_group;
     use crate::db::pub_test_utils::helpers::create_anti_affinity_group;
     use crate::db::pub_test_utils::helpers::create_project;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_filtered;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use crate::db::pub_test_utils::helpers::small_resource_request;
     use crate::db::pub_test_utils::simulated_sleds::apply_sled_bp_availability;
     use crate::db::pub_test_utils::simulated_sleds::initialize_sled_bp_availability;
@@ -2506,11 +2501,11 @@ pub(in crate::db::datastore) mod test {
     async fn upsert_sled_updates_hardware() {
         let logctx = dev::test_setup_log("upsert_sled_updates_hardware");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let datastore = db.datastore();
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let mut sled_update = test_new_sled_update();
-        let (observed_sled, _) =
-            datastore.sled_upsert(sled_update.clone()).await.unwrap();
+        let observed_sled =
+            sled_upsert_expect_written(datastore, sled_update.clone()).await;
 
         assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
 
@@ -2525,23 +2520,23 @@ pub(in crate::db::datastore) mod test {
         );
 
         // Fail the update, since the generation number didn't change.
-        assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
+        sled_upsert_expect_filtered(opctx, datastore, sled_update.clone())
+            .await;
 
         // Bump the generation number so the next insert succeeds.
         sled_update.sled_agent_gen = sled_update.sled_agent_gen.next();
 
         // Test that upserting the sled propagates those changes to the DB.
-        let (observed_sled, _) = datastore
-            .sled_upsert(sled_update.clone())
-            .await
-            .expect("Could not upsert sled during test prep");
+        let observed_sled =
+            sled_upsert_expect_written(datastore, sled_update.clone()).await;
         assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
 
         // Now reset the generation to a lower value and try again.
         // This should fail.
         let current_gen = sled_update.sled_agent_gen;
         sled_update.sled_agent_gen = SledRegistrationGeneration::new();
-        assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
+        sled_upsert_expect_filtered(opctx, datastore, sled_update.clone())
+            .await;
 
         // Now bump the generation from the saved `current_gen`
         // Change the reservoir value again. This should succeed.
@@ -2553,10 +2548,8 @@ pub(in crate::db::datastore) mod test {
         );
         sled_update.sled_agent_gen = current_gen.next();
         // Test that upserting the sled propagates those changes to the DB.
-        let (observed_sled, _) = datastore
-            .sled_upsert(sled_update.clone())
-            .await
-            .expect("Could not upsert sled during test prep");
+        let observed_sled =
+            sled_upsert_expect_written(datastore, sled_update.clone()).await;
         assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
         assert_eq!(
             SledRegistrationGeneration::from(observed_sled.sled_agent_gen),
@@ -2575,8 +2568,8 @@ pub(in crate::db::datastore) mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let mut sled_update = test_new_sled_update();
-        let (observed_sled, _) =
-            datastore.sled_upsert(sled_update.clone()).await.unwrap();
+        let observed_sled =
+            sled_upsert_expect_written(datastore, sled_update.clone()).await;
         assert_eq!(
             observed_sled.usable_hardware_threads,
             sled_update.usable_hardware_threads
@@ -2617,29 +2610,15 @@ pub(in crate::db::datastore) mod test {
             .unwrap(),
         );
 
-        // Upserting the sled should produce an error, because it is decommissioend.
-        assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
+        // This upsert call is rejected by both the decommissioned and the sled
+        // agent generation filters.
+        sled_upsert_expect_filtered(opctx, datastore, sled_update.clone())
+            .await;
 
-        // The sled should not have been updated.
-        let (_, observed_sled_2) = LookupPath::new(&opctx, datastore)
-            .sled_id(observed_sled.id())
-            .fetch_for(authz::Action::Modify)
-            .await
-            .unwrap();
-        assert_eq!(
-            observed_sled_2.usable_hardware_threads,
-            observed_sled.usable_hardware_threads,
-            "usable_hardware_threads should not have changed"
-        );
-        assert_eq!(
-            observed_sled_2.usable_physical_ram,
-            observed_sled.usable_physical_ram,
-            "usable_physical_ram should not have changed"
-        );
-        assert_eq!(
-            observed_sled_2.reservoir_size, observed_sled.reservoir_size,
-            "reservoir_size should not have changed"
-        );
+        // This upsert call, even though at a newer generation, is rejected by
+        // the decommissioned filter.
+        sled_update.sled_agent_gen = sled_update.sled_agent_gen.next();
+        sled_upsert_expect_filtered(opctx, datastore, sled_update).await;
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2672,14 +2651,18 @@ pub(in crate::db::datastore) mod test {
         .expect("simulated system has exactly five sleds");
 
         // Define some sleds that resources cannot be provisioned on.
-        let (non_provisionable_sled, _) =
-            datastore.sled_upsert(non_provisionable_update).await.unwrap();
-        let (expunged_sled, _) =
-            datastore.sled_upsert(expunged_update).await.unwrap();
-        let (decommissioned_sled, _) =
-            datastore.sled_upsert(decommissioned_update).await.unwrap();
-        let (illegal_decommissioned_sled, _) =
-            datastore.sled_upsert(illegal_decommissioned_update).await.unwrap();
+        let non_provisionable_sled =
+            sled_upsert_expect_written(datastore, non_provisionable_update)
+                .await;
+        let expunged_sled =
+            sled_upsert_expect_written(datastore, expunged_update).await;
+        let decommissioned_sled =
+            sled_upsert_expect_written(datastore, decommissioned_update).await;
+        let illegal_decommissioned_sled = sled_upsert_expect_written(
+            datastore,
+            illegal_decommissioned_update,
+        )
+        .await;
 
         let ineligible_sleds = IneligibleSleds {
             non_provisionable: non_provisionable_sled.id(),
@@ -2711,8 +2694,8 @@ pub(in crate::db::datastore) mod test {
         assert!(matches!(error, external::Error::InsufficientCapacity { .. }));
 
         // Now add a provisionable sled and try again.
-        let (provisionable_sled, _) =
-            datastore.sled_upsert(provisionable_update).await.unwrap();
+        let provisionable_sled =
+            sled_upsert_expect_written(datastore, provisionable_update).await;
 
         // Try a few times to ensure that resources never get allocated to the
         // non-provisionable sled.
@@ -2787,8 +2770,8 @@ pub(in crate::db::datastore) mod test {
 
         // * new_sled is not in any blueprint at all, simulating a
         //   newly added sled before the planner has picked it up.
-        let (new_sled, _) =
-            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        let new_sled =
+            sled_upsert_expect_written(datastore, test_new_sled_update()).await;
 
         let resources = small_resource_request();
 
@@ -2956,8 +2939,8 @@ pub(in crate::db::datastore) mod test {
             .await
             .try_into()
             .expect("simulated system has exactly two sleds");
-        let (new_sled, _) =
-            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        let new_sled =
+            sled_upsert_expect_written(datastore, test_new_sled_update()).await;
 
         // The first half of a reservation: the search sees both sleds present
         // in the blueprint.
@@ -4874,8 +4857,8 @@ pub(in crate::db::datastore) mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Set up a sled to test against.
-        let (sled, _) =
-            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        let sled =
+            sled_upsert_expect_written(datastore, test_new_sled_update()).await;
         let sled_id = sled.id();
 
         // Add a couple disks to this sled.
@@ -5066,8 +5049,8 @@ pub(in crate::db::datastore) mod test {
             .enumerate();
 
         // Set up a sled to test against.
-        let (sled, _) =
-            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        let sled =
+            sled_upsert_expect_written(datastore, test_new_sled_update()).await;
         let sled_id = sled.id();
 
         for (i, ((policy, state), after)) in all_transitions {
@@ -5354,7 +5337,7 @@ pub(in crate::db::datastore) mod test {
                 SledRegistrationGeneration::new(),
             );
 
-            datastore.sled_upsert(sled).await.expect("failed to upsert sled");
+            sled_upsert_expect_written(datastore, sled).await;
 
             for u2 in &sled_config.u2s {
                 let physical_disk = db::model::PhysicalDisk::from_parts(

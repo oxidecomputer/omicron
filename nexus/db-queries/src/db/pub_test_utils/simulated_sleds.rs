@@ -10,6 +10,7 @@ use crate::db::datastore::SledBpAvailabilityDecommissionOutcome;
 use crate::db::datastore::SledBpAvailabilityUpsertOutcome;
 use crate::db::datastore::SledBpAvailabilityWrite;
 use crate::db::datastore::SledBpAvailabilityWriteOutcome;
+use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
 use iddqd::IdOrdMap;
 use nexus_db_model::Sled;
 use nexus_db_model::SledBaseboard;
@@ -96,11 +97,7 @@ pub async fn upsert_sleds_from_system(
     let sled_updates = sled_updates_from_system(system, rack_id);
     let mut sleds = Vec::with_capacity(sled_updates.len());
     for sled_update in sled_updates {
-        let sled_id = sled_update.id();
-        let (sled, _) = datastore
-            .sled_upsert(sled_update)
-            .await
-            .unwrap_or_else(|e| panic!("registered sled {sled_id}: {e}"));
+        let sled = sled_upsert_expect_written(datastore, sled_update).await;
         sleds.push(sled);
     }
     sleds

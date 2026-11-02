@@ -294,6 +294,7 @@ impl DataStore {
 mod test {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledCpuFamily;
     use nexus_db_model::SledSystemHardware;
@@ -332,7 +333,7 @@ mod test {
             RackUuid::new_v4(),
             SledRegistrationGeneration::new(),
         );
-        datastore.sled_upsert(sled).await.expect("failed to upsert sled");
+        sled_upsert_expect_written(datastore, sled).await;
 
         // Create a fake zpool that backs our fake datasets.
         let zpool_id = ZpoolUuid::new_v4();

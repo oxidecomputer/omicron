@@ -56,7 +56,7 @@ pub struct SledSystemHardware {
 }
 
 /// Database representation of a Sled.
-#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[derive(Queryable, Insertable, Debug, Clone, PartialEq, Selectable, Asset)]
 #[diesel(table_name = sled)]
 #[asset(uuid_kind = SledKind)]
 pub struct Sled {

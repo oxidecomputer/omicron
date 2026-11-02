@@ -726,6 +726,7 @@ mod test {
     };
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use crate::db::queries::vpc_subnet::InsertVpcSubnetQuery;
     use chrono::{Duration, Utc};
     use futures::StreamExt;
@@ -1036,7 +1037,7 @@ mod test {
     async fn create_test_sled(datastore: &DataStore) -> SledUuid {
         let sled_id = SledUuid::new_v4();
         let sled_update = SledUpdateBuilder::new().sled_id(sled_id).build();
-        datastore.sled_upsert(sled_update).await.unwrap();
+        sled_upsert_expect_written(datastore, sled_update).await;
         sled_id
     }
 
@@ -2022,7 +2023,7 @@ mod test {
             .repo_depot_port(REPO_DEPOT_PORT)
             .rack_id(rack_id)
             .build();
-        datastore.sled_upsert(sled1).await.unwrap();
+        sled_upsert_expect_written(datastore, sled1).await;
 
         let addr2 = "[fd00:1df::1]:12345".parse().unwrap();
         let sled2_id = "66285c18-0c79-43e0-e54f-95271f271314".parse().unwrap();
@@ -2032,7 +2033,7 @@ mod test {
             .repo_depot_port(REPO_DEPOT_PORT)
             .rack_id(rack_id)
             .build();
-        datastore.sled_upsert(sled2).await.unwrap();
+        sled_upsert_expect_written(datastore, sled2).await;
 
         let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();
         let expected_ip = Ipv6Addr::new(0xfd00, 0x1de, 0, 0, 0, 0, 1, 0);

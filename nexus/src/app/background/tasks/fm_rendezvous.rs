@@ -634,6 +634,7 @@ mod tests {
     use diesel::prelude::*;
     use nexus_db_queries::db;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
+    use nexus_db_queries::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use nexus_db_schema::schema::alert::dsl as alert_dsl;
     use nexus_types::alert::AlertClass;
     use nexus_types::fm;
@@ -1950,7 +1951,7 @@ mod tests {
             RackUuid::new_v4(),
             SledRegistrationGeneration::new(),
         );
-        datastore.sled_upsert(sled).await.unwrap();
+        sled_upsert_expect_written(datastore, sled).await;
 
         let blueprint_id = BlueprintUuid::new_v4();
         for _ in 0..pool_count {

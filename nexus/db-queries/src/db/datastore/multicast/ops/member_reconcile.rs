@@ -239,7 +239,7 @@ mod tests {
     };
 
     use crate::db::pub_test_utils::helpers::{
-        SledUpdateBuilder, create_instance_with_vmm,
+        SledUpdateBuilder, create_instance_with_vmm, sled_upsert_expect_written,
     };
     use crate::db::pub_test_utils::multicast::NO_SOURCE_IPS;
     use crate::db::pub_test_utils::{TestDatabase, multicast};
@@ -342,10 +342,7 @@ mod tests {
         let sled_id_new = SledUuid::new_v4();
         let sled_update2 =
             SledUpdateBuilder::default().sled_id(sled_id_new).build();
-        datastore
-            .sled_upsert(sled_update2)
-            .await
-            .expect("Should insert second sled");
+        sled_upsert_expect_written(datastore, sled_update2).await;
 
         let group = multicast::create_test_group_with_state(
             &opctx,
@@ -678,10 +675,7 @@ mod tests {
         let sled_id_b = SledUuid::new_v4();
         let sled_update_b =
             SledUpdateBuilder::default().sled_id(sled_id_b).build();
-        datastore
-            .sled_upsert(sled_update_b)
-            .await
-            .expect("Should insert sled B");
+        sled_upsert_expect_written(datastore, sled_update_b).await;
 
         let group = multicast::create_test_group_with_state(
             &opctx,
