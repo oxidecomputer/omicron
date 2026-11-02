@@ -1647,7 +1647,7 @@ mod tests {
             )
             .await
             .expect("failed VMM should be updated to Destroyed");
-        assert_eq!(result.vmm.state, db::model::VmmState::Failed);
+        assert_eq!(result.vmm.state, db::model::VmmState::Destroyed);
         assert!(
             result.vmm_updated,
             "VMM should have been updated to Destroyed"
