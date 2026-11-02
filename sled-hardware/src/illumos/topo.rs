@@ -7,8 +7,7 @@
 //! libtopo describes the platform as a tree of nodes with labels and
 //! properties, built from platform topology maps, devinfo, libnvme, and
 //! other sources. This module reads the part of that tree that describes
-//! disk bays: on Oxide boards, ten `bay` nodes under the chassis for the
-//! U.2s and two M.2 `slot` nodes under the system board.
+//! disk bays: `bay` nodes for U.2s and M.2 `slot` nodes.
 //!
 //! The `oxhc` enumerator fills each of those in from the PCIe bridge behind
 //! it. An empty bay has no children. A bay holding an NVMe device gets
