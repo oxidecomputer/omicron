@@ -4,8 +4,8 @@
 
 //! Mechanisms for interacting with the sled's RoT.
 
-use dice_verifier::{Attest, AttestError, ipcc, mock};
 use dropshot::HttpError;
+use oxide_rot::{OxideRot, OxideRotError, ipcc, mock};
 use sled_agent_types::rot as SaRotTypes;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
@@ -14,10 +14,10 @@ use thiserror::Error;
 use tokio::sync::{Mutex, MutexGuard, Semaphore, SemaphorePermit};
 use x509_cert::der::{EncodePem, pem::LineEnding};
 
-pub struct MeasurementLog(dice_verifier::Log);
+pub struct MeasurementLog(oxide_rot::Log);
 
-impl From<dice_verifier::Log> for MeasurementLog {
-    fn from(log: dice_verifier::Log) -> Self {
+impl From<oxide_rot::Log> for MeasurementLog {
+    fn from(log: oxide_rot::Log) -> Self {
         MeasurementLog(log)
     }
 }
@@ -29,7 +29,7 @@ impl From<MeasurementLog> for SaRotTypes::MeasurementLog {
             .iter()
             .copied()
             .map(|m| match m {
-                dice_verifier::Measurement::Sha3_256(d) => {
+                oxide_rot::Measurement::Sha3_256(d) => {
                     SaRotTypes::Measurement::Sha3_256(
                         SaRotTypes::Sha3_256Digest(d.0),
                     )
@@ -58,22 +58,22 @@ impl From<CertificateChain> for SaRotTypes::CertificateChain {
     }
 }
 
-pub struct Nonce(dice_verifier::Nonce);
+pub struct QualifyingData(oxide_rot::QualifyingData);
 
-impl From<SaRotTypes::Nonce> for Nonce {
+impl From<SaRotTypes::Nonce> for QualifyingData {
     fn from(nonce: SaRotTypes::Nonce) -> Self {
         match nonce {
             SaRotTypes::Nonce::N32(n32) => {
-                Nonce(dice_verifier::Nonce::N32(n32.into()))
+                QualifyingData(oxide_rot::QualifyingData::Q32(n32.into()))
             }
         }
     }
 }
 
-pub struct Attestation(dice_verifier::Attestation);
+pub struct Attestation(oxide_rot::Attestation);
 
-impl From<dice_verifier::Attestation> for Attestation {
-    fn from(att: dice_verifier::Attestation) -> Self {
+impl From<oxide_rot::Attestation> for Attestation {
+    fn from(att: oxide_rot::Attestation) -> Self {
         Attestation(att)
     }
 }
@@ -81,7 +81,7 @@ impl From<dice_verifier::Attestation> for Attestation {
 impl From<Attestation> for SaRotTypes::Attestation {
     fn from(att: Attestation) -> Self {
         match att.0 {
-            dice_verifier::Attestation::Ed25519(sig) => {
+            oxide_rot::Attestation::Ed25519(sig) => {
                 SaRotTypes::Attestation::Ed25519(SaRotTypes::Ed25519Signature(
                     sig.0,
                 ))
@@ -93,10 +93,10 @@ impl From<Attestation> for SaRotTypes::Attestation {
 #[derive(Debug, Error)]
 pub enum RotError {
     #[error("failed to create mock attestor: {0}")]
-    AttestMock(#[from] mock::AttestMockError),
+    AttestMock(#[from] mock::OxideRotMockError),
 
     #[error("attestation request failed: {0}")]
-    Attest(#[from] AttestError),
+    Attest(#[from] OxideRotError),
 
     #[error("RoT attestation queue full")]
     Busy,
@@ -130,7 +130,7 @@ const QUEUE_SIZE: usize = 256;
 pub struct RotAttestor {
     log: Logger,
     queue: Semaphore,
-    attest: Mutex<Box<dyn Attest + Send + Sync>>,
+    attest: Mutex<Box<dyn OxideRot + Send + Sync>>,
 }
 
 impl RotAttestor {
@@ -146,14 +146,14 @@ impl RotAttestor {
             }
         ));
 
-        let attest: Box<dyn Attest + Send + Sync> = match attest_config {
-            AttestConfig::Ipcc => Box::new(ipcc::AttestIpcc::new()),
+        let attest: Box<dyn OxideRot + Send + Sync> = match attest_config {
+            AttestConfig::Ipcc => Box::new(ipcc::OxideRotIpcc::new()),
             AttestConfig::Local {
                 priv_key,
                 cert_chain,
                 log,
                 test_corpus: _,
-            } => Box::new(mock::AttestMock::load(cert_chain, log, priv_key)?),
+            } => Box::new(mock::OxideRotMock::load(cert_chain, log, priv_key)?),
         };
 
         Ok(RotAttestor {
@@ -186,20 +186,23 @@ impl RotAttestor {
         let guard = self.acquire().await?;
         debug!(self.log, "getting certificate chain");
         let chain = guard.attest.get_certificates().await?;
-        Ok(CertificateChain::try_from(chain).map_err(AttestError::from)?)
+        Ok(CertificateChain::try_from(chain).map_err(OxideRotError::from)?)
     }
 
-    pub async fn attest(&self, nonce: Nonce) -> Result<Attestation, RotError> {
+    pub async fn attest(
+        &self,
+        qdata: QualifyingData,
+    ) -> Result<Attestation, RotError> {
         let guard = self.acquire().await?;
         debug!(self.log, "getting attestation");
-        Ok(guard.attest.attest(&nonce.0).await?.into())
+        Ok(guard.attest.attest(&qdata.0).await?.into())
     }
 }
 
 /// `AttestGuard` represents exclusive access to the attestor
 struct AttestGuard<'a> {
     _permit: SemaphorePermit<'a>,
-    attest: MutexGuard<'a, Box<dyn Attest + Send + Sync>>,
+    attest: MutexGuard<'a, Box<dyn OxideRot + Send + Sync>>,
 }
 
 #[cfg(test)]
@@ -208,7 +211,7 @@ mod tests {
     use attest_mock::MockData;
     use camino::Utf8Path;
     use camino_tempfile::Utf8TempDir;
-    use dice_verifier::verify_attestation;
+    use dice_verifier::oxide_rot::verify_attestation;
     use omicron_test_utils::dev::test_setup_log;
     use sprockets_tls_test_utils::{
         OutputFileExistsBehavior, alias_prefix, certlist_path, private_key_path,
@@ -270,13 +273,14 @@ mod tests {
 
         let log = attestor.get_measurement_log().await.unwrap();
         let chain = attestor.get_certificate_chain().await.unwrap();
-        let nonce: Nonce = SaRotTypes::Nonce::N32([7u8; 32]).into();
-        let attestation = attestor.attest(Nonce(nonce.0)).await.unwrap();
+        let qdata: QualifyingData = SaRotTypes::Nonce::N32([7u8; 32]).into();
+        let attestation =
+            attestor.attest(QualifyingData(qdata.0)).await.unwrap();
 
         // The first cert in the chain is the leaf. This cert holds the public
         // part of the key used to sign the attestation.
         let alias = Certificate::from_pem(&chain.0[0]).unwrap();
-        verify_attestation(&alias, &attestation.0, &log.0, &nonce.0)
+        verify_attestation(&alias, &attestation.0, &log.0, &qdata.0)
             .expect("attestation should verify against the alias cert");
 
         let log: SaRotTypes::MeasurementLog = log.into();
@@ -320,8 +324,8 @@ mod tests {
             attestor.get_certificate_chain().await,
             Err(RotError::Busy)
         ));
-        let nonce: Nonce = SaRotTypes::Nonce::N32([7u8; 32]).into();
-        assert!(matches!(attestor.attest(nonce).await, Err(RotError::Busy)));
+        let qdata: QualifyingData = SaRotTypes::Nonce::N32([7u8; 32]).into();
+        assert!(matches!(attestor.attest(qdata).await, Err(RotError::Busy)));
 
         // RotError::Busy is reported to clients as 503 / Service Unavailable
         let err: HttpError = RotError::Busy.into();

@@ -455,17 +455,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "attest-data"
+version = "0.5.0"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=994c3fcdb7e3897283f5082a892b67db397c0738#994c3fcdb7e3897283f5082a892b67db397c0738"
+dependencies = [
+ "const-oid 0.9.6",
+ "der 0.7.10",
+ "getrandom 0.4.3",
+ "hex",
+ "hubpack",
+ "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim?rev=1493d7f58e189125641d81f03f2dfb5941567c82)",
+ "salty",
+ "serde",
+ "serde_with 3.21.0",
+ "sha3 0.10.8",
+ "static_assertions",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "attest-mock"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d#4a39ef08d81e5177edee0bddb1146032aa21074d"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=994c3fcdb7e3897283f5082a892b67db397c0738#994c3fcdb7e3897283f5082a892b67db397c0738"
 dependencies = [
  "anyhow",
- "attest-data",
+ "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=994c3fcdb7e3897283f5082a892b67db397c0738)",
  "clap",
  "hex",
  "hubpack",
  "knus",
- "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
+ "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim?rev=1493d7f58e189125641d81f03f2dfb5941567c82)",
  "slog",
  "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?rev=15f69041f45774602108e47fb25e705dc23acfb2)",
  "thiserror 2.0.18",
@@ -2960,7 +2979,7 @@ source = "git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177ede
 dependencies = [
  "anyhow",
  "async-trait",
- "attest-data",
+ "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d)",
  "camino",
  "const-oid 0.9.6",
  "ed25519-dalek 2.2.0",
@@ -2977,6 +2996,32 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "x509-cert",
+]
+
+[[package]]
+name = "dice-verifier"
+version = "0.3.0-pre0"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=994c3fcdb7e3897283f5082a892b67db397c0738#994c3fcdb7e3897283f5082a892b67db397c0738"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=994c3fcdb7e3897283f5082a892b67db397c0738)",
+ "cfg-if",
+ "const-oid 0.9.6",
+ "der 0.7.10",
+ "ed25519-dalek 2.2.0",
+ "helios-rot",
+ "hex",
+ "hubpack",
+ "p384 0.13.1",
+ "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim?rev=1493d7f58e189125641d81f03f2dfb5941567c82)",
+ "rsa 0.9.10",
+ "serde",
+ "serde_with 3.21.0",
+ "sha2 0.10.9",
+ "sha3 0.10.8",
+ "thiserror 2.0.18",
  "x509-cert",
 ]
 
@@ -4927,6 +4972,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "helios-rot"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/helios-rot?rev=020eb50ba6ddc92cf059b35e989da7bd19769749#020eb50ba6ddc92cf059b35e989da7bd19769749"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "cfg-if",
+ "der 0.7.10",
+ "getrandom 0.4.3",
+ "os-rot",
+ "p384 0.13.1",
+ "serde",
+ "serde_with 3.21.0",
+ "thiserror 2.0.18",
+ "tokio",
+ "x509-cert",
+]
+
+[[package]]
 name = "hermit-abi"
 version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6515,6 +6579,16 @@ dependencies = [
 name = "libipcc"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/ipcc-rs?rev=7cdf2ab9c8d9e9267a8b366aa780c6c26f9a5ecf#7cdf2ab9c8d9e9267a8b366aa780c6c26f9a5ecf"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "libipcc"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/ipcc-rs?rev=91f8c989f1cdc29c56720ab7663afdcaf5a96b72#91f8c989f1cdc29c56720ab7663afdcaf5a96b72"
 dependencies = [
  "cfg-if",
  "libc",
@@ -9897,7 +9971,7 @@ dependencies = [
  "crucible-agent-client",
  "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=f85cf0dc3631e2f0c13384787efb0efc1b642162)",
  "derive_more 0.99.20",
- "dice-verifier",
+ "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?rev=994c3fcdb7e3897283f5082a892b67db397c0738)",
  "display-error-chain",
  "dropshot 0.18.0",
  "expectorate",
@@ -9939,6 +10013,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "opte-ioctl",
+ "oxide-rot",
  "oxide-tokio-rt",
  "oximeter",
  "oximeter-instruments",
@@ -10434,6 +10509,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "os-rot"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/helios-rot?rev=020eb50ba6ddc92cf059b35e989da7bd19769749#020eb50ba6ddc92cf059b35e989da7bd19769749"
+dependencies = [
+ "rustix 1.1.4",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "oso"
 version = "0.27.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10521,6 +10605,30 @@ dependencies = [
  "serde",
  "serde_tokenstream 0.3.0",
  "syn 3.0.3",
+]
+
+[[package]]
+name = "oxide-rot"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=994c3fcdb7e3897283f5082a892b67db397c0738#994c3fcdb7e3897283f5082a892b67db397c0738"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=994c3fcdb7e3897283f5082a892b67db397c0738)",
+ "cfg-if",
+ "der 0.7.10",
+ "ed25519-dalek 2.2.0",
+ "hubpack",
+ "libipcc 0.1.0 (git+https://github.com/oxidecomputer/ipcc-rs?rev=91f8c989f1cdc29c56720ab7663afdcaf5a96b72)",
+ "p384 0.13.1",
+ "serde",
+ "serde_with 3.21.0",
+ "sha3 0.10.8",
+ "slog",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "x509-cert",
 ]
 
 [[package]]
@@ -12693,6 +12801,21 @@ dependencies = [
  "unicode-segmentation",
  "unicode-truncate",
  "unicode-width 0.2.0",
+]
+
+[[package]]
+name = "rats-corim"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/rats-corim?rev=1493d7f58e189125641d81f03f2dfb5941567c82#1493d7f58e189125641d81f03f2dfb5941567c82"
+dependencies = [
+ "ciborium",
+ "ciborium-io",
+ "clap",
+ "hex",
+ "serde",
+ "serde_with 3.21.0",
+ "strum 0.26.3",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -15298,12 +15421,12 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/sprockets.git?rev=02c7e5414d97c0c85d629cb76d1f6beab73d960e#02c7e5414d97c0c85d629cb76d1f6beab73d960e"
 dependencies = [
  "anyhow",
- "attest-data",
+ "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d)",
  "camino",
  "cfg-if",
  "clap",
  "dice-mfg-msgs",
- "dice-verifier",
+ "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d)",
  "ed25519-dalek 2.2.0",
  "hubpack",
  "libipcc 0.1.0 (git+https://github.com/oxidecomputer/ipcc-rs?rev=524eb8f125003dff50b9703900c6b323f00f9e1b)",

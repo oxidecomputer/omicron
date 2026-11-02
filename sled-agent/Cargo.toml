@@ -29,7 +29,6 @@ chrono.workspace = true
 clap.workspace = true
 clickhouse-admin-types.workspace = true
 derive_more.workspace = true
-dice-verifier = { workspace = true, features = ["ipcc", "mock"] }
 display-error-chain.workspace = true
 dropshot.workspace = true
 flate2.workspace = true
@@ -63,6 +62,7 @@ omicron-ledger.workspace = true
 omicron-ddm-admin-client.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
+oxide-rot = { workspace = true, features = ["ipcc", "mock"] }
 oxide-tokio-rt.workspace = true
 oximeter.workspace = true
 oximeter-instruments.workspace = true
