@@ -1901,6 +1901,32 @@ table! {
 }
 
 table! {
+    inv_discovered_rack (inv_collection_id, rack_id) {
+        inv_collection_id -> Uuid,
+        rack_id -> Uuid,
+
+        rack_subnet -> Inet,
+        join_service_ip -> Inet,
+    }
+}
+
+table! {
+    inv_discovered_sled (inv_collection_id, sled_id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+
+        rack_id -> Uuid,
+
+        part_number -> Text,
+        serial_number -> Text,
+
+        sled_subnet -> Inet,
+        sled_agent_started -> Bool,
+        last_start_error_seen -> Nullable<Text>,
+    }
+}
+
+table! {
     inv_sled_agent (inv_collection_id, sled_id) {
         inv_collection_id -> Uuid,
         time_collected -> Timestamptz,
