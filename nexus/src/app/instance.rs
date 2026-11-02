@@ -1860,26 +1860,38 @@ impl super::Nexus {
         let db_runtime = db_vmm.runtime();
         let sled_runtime = sled_state.vmm_state;
 
-        // Check whether we have successfully advanced the VMM to `Starting` or
-        // `Migrating` (depending on why the VMM is being registered). First,
-        // did the sled-agent agree that it was starting? Note that we perform
-        // this check only *after* calling `notify_vmm_updated`. because we _do_
-        // want to ensure that whatever state the sled-agent gave us makes it to
-        // the database.
+        // We're about to check whether we have successfully advanced the VMM to
+        // `Starting` or `Migrating` (depending on why the VMM is being
+        // registered). We will check whether the sled-agent actually returned
+        // the requested state, and then whether the VMM state in the database
+        // is consistent with what we received from the sled-agent.
         let state_requested = VmmState::from(state_requested);
+        let mk_error = || {
+            Error::conflict(match operation {
+                InstanceRegisterReason::Start { .. } => {
+                    "instance changed state before it could be started"
+                }
+                InstanceRegisterReason::Migrate { .. } => {
+                    "instance changed state before it could migrate"
+                }
+            })
+        };
+        // First, did the request to the sled-agent return the requested state,
+        // or a different one? This would mean that something else has acted
+        // upon the VMM already. That *really shouldn't* happen, as the VMM is
+        // exclusively owned by the instance-start or instance-migrate saga at
+        // this point in time, but it could have been acted upon by some outside
+        // force.
+        //
+        // Note that we perform this check only *after* calling
+        // `notify_vmm_updated`. because we _do_ want to ensure that whatever
+        // state the sled-agent gave us makes it to the database.
         if sled_runtime.state != state_requested {
-            return Err(InstanceStateChangeError::Other(
-                // Return a 503 here, becase this error will potentially bubble
-                // up to a caller of `instance_start` when the start saga
-                // unwinds. We want to indicate that the error is retryable,
-                // because the instance can hopefully be started somewhere else.
-                Error::ServiceUnavailable {
-                    internal_message: format!(
-                        "expected sled-agent to return a `{state_requested:?}` \
-                         VMM, but received {sled_runtime:?}"
-                    ),
-                },
+            let error = mk_error().internal_context(format!(
+                "expected sled-agent to return a {state_requested:?} VMM, but \
+                 received {sled_runtime:?} instead",
             ));
+            return Err(InstanceStateChangeError::Other(error));
         }
 
         // Next, check if the state in the *database* is also in the requested
@@ -1896,15 +1908,7 @@ impl super::Nexus {
         // something else (probably an attempt to stop the instance) and should
         // unwind.
         if db_runtime.state != state_requested {
-            let error = Error::conflict(match operation {
-                InstanceRegisterReason::Start { .. } => {
-                    "instance changed state before it could be started"
-                }
-                InstanceRegisterReason::Migrate { .. } => {
-                    "instance changed state before it could migrate"
-                }
-            })
-            .internal_context(format!(
+            let error = mk_error().internal_context(format!(
                 "after registering {propolis_id}, we received VMM state \
                 {sled_runtime:?} from the sled-agent, but the VMM's state in \
                 the database has changed to {db_runtime:?}",
