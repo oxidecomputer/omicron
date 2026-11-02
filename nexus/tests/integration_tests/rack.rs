@@ -8,6 +8,7 @@ use http::StatusCode;
 use nexus_db_model::SledBaseboard;
 use nexus_db_model::SledUpdate;
 use nexus_db_queries::db::pub_test_utils::helpers::SledSystemHardwareBuilder;
+use nexus_db_queries::db::pub_test_utils::helpers::sled_upsert_expect_written;
 use nexus_test_utils::TEST_SUITE_PASSWORD;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -136,15 +137,7 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
         nexus.rack_id(),
         SledRegistrationGeneration::new(),
     );
-    let (_, was_modified) = nexus
-        .datastore()
-        .sled_upsert(sled_update)
-        .await
-        .expect("sled row for the uninitialized baseboard was upserted");
-    assert!(
-        was_modified,
-        "sled upsert should be a fresh insert since sled {sled_uuid} is new"
-    );
+    sled_upsert_expect_written(nexus.datastore(), sled_update).await;
 
     // Ensure there's only one unintialized sled remaining, and it's not
     // the one that was just added into the `sled` table

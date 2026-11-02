@@ -234,6 +234,7 @@ mod test {
     use nexus_db_queries::authn;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
+    use nexus_db_queries::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::LastAllocatedSubnetIpOffset;
     use nexus_types::deployment::execution::{
@@ -430,10 +431,7 @@ mod test {
                 rack_id,
                 SledRegistrationGeneration::new(),
             );
-            datastore
-                .sled_upsert(update)
-                .await
-                .expect("Failed to insert sled to db");
+            sled_upsert_expect_written(datastore, update).await;
         }
 
         let (blueprint_tx, blueprint_rx) = watch::channel(None);

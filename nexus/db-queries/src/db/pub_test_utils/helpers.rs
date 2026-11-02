@@ -27,6 +27,7 @@ use nexus_db_model::Project;
 use nexus_db_model::ProjectImage;
 use nexus_db_model::ProjectImageIdentity;
 use nexus_db_model::Resources;
+use nexus_db_model::Sled;
 use nexus_db_model::SledBaseboard;
 use nexus_db_model::SledCpuFamily;
 use nexus_db_model::SledSystemHardware;
@@ -219,6 +220,75 @@ impl SledUpdateBuilder {
             SledRegistrationGeneration::new(),
         )
     }
+}
+
+/// Upsert a sled and ensure that a row was written.
+///
+/// A row is written when:
+///
+/// * The sled is new.
+/// * The sled is existing, not decommissioned, and at a newer
+///   `SledRegistrationGeneration`.
+pub async fn sled_upsert_expect_written(
+    datastore: &DataStore,
+    sled_update: SledUpdate,
+) -> Sled {
+    let sled_id = sled_update.id();
+    datastore
+        .sled_upsert(sled_update)
+        .await
+        .unwrap_or_else(|e| panic!("upserted sled {sled_id}: {e}"))
+}
+
+/// Asserts that a sled upsert was rejected by one or more of the ON
+/// CONFLICT filters.
+pub async fn sled_upsert_expect_filtered(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    sled_update: SledUpdate,
+) {
+    let sled_id = sled_update.id();
+    let sled_agent_gen = sled_update.sled_agent_gen;
+    let (_, before) = LookupPath::new(opctx, datastore)
+        .sled_id(sled_id)
+        .fetch_for(authz::Action::Modify)
+        .await
+        .unwrap_or_else(|e| {
+            panic!("fetched sled {sled_id} before the upsert: {e}")
+        });
+
+    match datastore.sled_upsert(sled_update).await {
+        Ok(value) => panic!(
+            "upsert of sled {sled_id} at registration generation \
+             {sled_agent_gen} should have been filtered out and returned \
+             an error, but it returned Ok: {value:?}"
+        ),
+        Err(error) => assert_eq!(
+            error,
+            external::Error::InternalError {
+                internal_message: format!(
+                    "Unknown diesel error creating Sled called \
+                     \"{sled_id}\": Record not found"
+                ),
+            },
+            "filtered upsert of sled {sled_id} at registration \
+             generation {sled_agent_gen} should surface as diesel \
+             NotFound through public_error_from_diesel with \
+             ErrorHandler::Conflict"
+        ),
+    }
+
+    let (_, after) = LookupPath::new(opctx, datastore)
+        .sled_id(sled_id)
+        .fetch_for(authz::Action::Modify)
+        .await
+        .unwrap_or_else(|e| {
+            panic!("fetched sled {sled_id} after the upsert: {e}")
+        });
+    assert_eq!(
+        after, before,
+        "filtered upsert of sled {sled_id} should not change the sled row"
+    );
 }
 
 pub fn small_resource_request() -> Resources {
