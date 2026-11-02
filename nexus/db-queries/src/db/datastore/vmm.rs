@@ -55,8 +55,9 @@ use uuid::Uuid;
 pub struct VmmStateUpdateResult {
     /// The VMM record that the update query found and possibly updated.
     ///
-    /// NOTE: This is the record prior to the update!
-    pub found_vmm: Vmm,
+    /// If the VMM record was updated, this is its state *after* the update was
+    /// applied.
+    pub vmm: Vmm,
 
     /// `true` if the VMM record was updated, `false` otherwise.
     pub vmm_updated: bool,
@@ -244,23 +245,29 @@ impl DataStore {
         opctx: &OpContext,
         vmm_id: &PropolisUuid,
     ) -> LookupResult<Vmm> {
-        let vmm = dsl::vmm
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.vmm_fetch_on_conn(&conn, vmm_id).await.map_err(|e| {
+            public_error_from_diesel(
+                e,
+                ErrorHandler::NotFoundByLookup(
+                    ResourceType::Vmm,
+                    LookupType::ById(vmm_id.into_untyped_uuid()),
+                ),
+            )
+        })
+    }
+
+    async fn vmm_fetch_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        vmm_id: &PropolisUuid,
+    ) -> Result<Vmm, diesel::result::Error> {
+        dsl::vmm
             .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
             .filter(dsl::time_deleted.is_null())
             .select(Vmm::as_select())
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .get_result_async(conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Vmm,
-                        LookupType::ById(vmm_id.into_untyped_uuid()),
-                    ),
-                )
-            })?;
-
-        Ok(vmm)
     }
 
     pub async fn vmm_update_runtime(
@@ -424,8 +431,21 @@ impl DataStore {
                     },
                     None => false,
                 };
+
+                let vmm = if vmm_updated {
+                    // If the VMM record *was* updated, re-fetch it in order to
+                    // return the post-update state, since `check_if_exists`
+                    // will return the *pre-update* in its `found` value. It's
+                    // fine to do this in a separate query since we are in a
+                    // transaction.
+                    self.vmm_fetch_on_conn(&conn, &vmm_id).await?
+                } else {
+                    // If we *didn't* update the VMM state, we can just return
+                    // the value that `check_if_exists` gave us.
+                    found_vmm
+                };
                 Ok(VmmStateUpdateResult {
-                    found_vmm,
+                    vmm,
                     vmm_updated,
                     migration_in_updated,
                     migration_out_updated,
@@ -1627,7 +1647,7 @@ mod tests {
             )
             .await
             .expect("failed VMM should be updated to Destroyed");
-        assert_eq!(result.found_vmm.state, db::model::VmmState::Failed);
+        assert_eq!(result.vmm.state, db::model::VmmState::Failed);
         assert!(
             result.vmm_updated,
             "VMM should have been updated to Destroyed"
