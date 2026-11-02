@@ -5,6 +5,7 @@
 //! Types for the status and results of the scrimlet reconciler responsible for
 //! syncing configuration from the bootstore to ddmd in the switch zone.
 
+use oxnet::Ipv6Net;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -14,7 +15,10 @@ use std::collections::BTreeSet;
 #[serde(rename_all = "snake_case", tag = "status", content = "value")]
 pub enum DdmdReconcilerStatus {
     Failed(String),
-    Reconciled { external_peers_address_objects: BTreeSet<String> },
+    Reconciled {
+        external_peers_address_objects: BTreeSet<String>,
+        rack_prefix: Ipv6Net,
+    },
 }
 
 impl slog::KV for DdmdReconcilerStatus {
@@ -29,10 +33,17 @@ impl slog::KV for DdmdReconcilerStatus {
             }
             DdmdReconcilerStatus::Reconciled {
                 external_peers_address_objects,
-            } => serializer.emit_usize(
-                "ddmd-reconciled-external-peers".into(),
-                external_peers_address_objects.len(),
-            ),
+                rack_prefix,
+            } => {
+                serializer.emit_usize(
+                    "ddmd-reconciled-external-peers".into(),
+                    external_peers_address_objects.len(),
+                )?;
+                serializer.emit_str(
+                    "ddmd-reconciled-rack-prefix".into(),
+                    &rack_prefix.to_string(),
+                )
+            }
         }
     }
 }

@@ -67,10 +67,16 @@ fn networking_config(config: RackNetworkConfig) -> SystemNetworkingConfig {
 }
 
 #[tokio::test]
-async fn posts_external_peers() {
-    let logctx = dev::test_setup_log("posts_external_peers");
+async fn posts_external_peers_and_rack_prefix() {
+    let logctx = dev::test_setup_log("posts_external_peers_and_rack_prefix");
+    let config = networking_config(rack_network_config(vec![
+        port("qsfp0", SwitchSlot::Switch0, true),
+        port("qsfp1", SwitchSlot::Switch0, false),
+    ]));
+    let rack_subnet = config.rack_network_config.rack_subnet;
+
     let server = MockServer::start();
-    let mock = server.mock(|when, then| {
+    let external_peers_mock = server.mock(|when, then| {
         when.method(httpmock::Method::PUT).path("/external_peers").json_body(
             serde_json::json!({
                 "address_objects": ["tfportqsfp0_0/ll"],
@@ -78,24 +84,32 @@ async fn posts_external_peers() {
         );
         then.status(204);
     });
+    let rack_prefixes_mock = server.mock(|when, then| {
+        when.method(httpmock::Method::PUT)
+            .path("/originated_rack_prefixes")
+            .json_body(
+                serde_json::to_value(HashMap::from([(
+                    rack_subnet.to_string(),
+                    RackPrefixInfo { multi_rack_join_addr: None },
+                )]))
+                .unwrap(),
+            );
+        then.status(204);
+    });
 
     let mut reconciler = test_reconciler(&server, &logctx.log);
-    let status = reconciler
-        .do_reconciliation(
-            &networking_config(rack_network_config(vec![
-                port("qsfp0", SwitchSlot::Switch0, true),
-                port("qsfp1", SwitchSlot::Switch0, false),
-            ])),
-            &logctx.log,
-        )
-        .await;
+    let status = reconciler.do_reconciliation(&config, &logctx.log).await;
 
-    mock.assert();
+    external_peers_mock.assert();
+    rack_prefixes_mock.assert();
     assert_matches!(
         status,
-        DdmdReconcilerStatus::Reconciled { external_peers_address_objects }
-            if external_peers_address_objects
+        DdmdReconcilerStatus::Reconciled {
+            external_peers_address_objects,
+            rack_prefix,
+        } if external_peers_address_objects
                 == BTreeSet::from(["tfportqsfp0_0/ll".to_string()])
+            && rack_prefix == rack_subnet
     );
 
     logctx.cleanup_successful();
@@ -128,6 +142,45 @@ async fn server_error_reports_failed() {
         .await;
 
     assert_matches!(status, DdmdReconcilerStatus::Failed(_));
+
+    logctx.cleanup_successful();
+}
+
+#[tokio::test]
+async fn rack_prefix_error_reports_failed() {
+    let logctx = dev::test_setup_log("rack_prefix_error_reports_failed");
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(httpmock::Method::PUT).path("/external_peers");
+        then.status(204);
+    });
+    server.mock(|when, then| {
+        when.method(httpmock::Method::PUT).path("/originated_rack_prefixes");
+        then.status(500).header("content-type", "application/json").body(
+            serde_json::json!({
+                "request_id": "test",
+                "message": "boom",
+            })
+            .to_string(),
+        );
+    });
+
+    let mut reconciler = test_reconciler(&server, &logctx.log);
+    let status = reconciler
+        .do_reconciliation(
+            &networking_config(rack_network_config(vec![port(
+                "qsfp0",
+                SwitchSlot::Switch0,
+                true,
+            )])),
+            &logctx.log,
+        )
+        .await;
+
+    assert_matches!(
+        status,
+        DdmdReconcilerStatus::Failed(msg) if msg.contains("rack prefix")
+    );
 
     logctx.cleanup_successful();
 }

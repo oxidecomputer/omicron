@@ -714,10 +714,14 @@
                       "type": "string"
                     },
                     "uniqueItems": true
+                  },
+                  "rack_prefix": {
+                    "$ref": "#/components/schemas/Ipv6Net"
                   }
                 },
                 "required": [
-                  "external_peers_address_objects"
+                  "external_peers_address_objects",
+                  "rack_prefix"
                 ]
               }
             },

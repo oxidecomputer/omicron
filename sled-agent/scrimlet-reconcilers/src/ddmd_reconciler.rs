@@ -3,7 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Reconciler responsible for informing ddmd in the scrimlet's switch zone
-//! about which external front ports should run DDM.
+//! about which external front ports should run DDM, and for announcing the
+//! rack prefix so other racks can learn it.
 //!
 //! Rear ports always carry DDM traffic. This reconciler only syncs front port
 //! information based on user configuration.
@@ -14,6 +15,7 @@ use crate::switch_zone_slot::ThisSledSwitchSlot;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ddmd::DdmdReconcilerStatus;
 use ddm_admin_client::Client;
 use ddm_api_types::external_peers::ExternalPeers;
+use ddm_api_types::net::RackPrefixInfo;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::ParseError;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
@@ -22,6 +24,7 @@ use slog::error;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::time::Duration;
 
 #[derive(Debug)]
@@ -83,12 +86,34 @@ impl Reconciler for DdmdReconciler {
                     log, "set external peers for DDM interfaces";
                     "external_peers" => ?request,
                 );
+            }
+            Err(err) => {
+                return DdmdReconcilerStatus::Failed(format!(
+                    "failed to apply DDM interfaces to ddmd: {}",
+                    InlineErrorChain::new(&err)
+                ));
+            }
+        }
+
+        let rack_prefix =
+            system_networking_config.rack_network_config.rack_subnet;
+        let rack_prefixes = HashMap::from([(
+            rack_prefix.to_string(),
+            RackPrefixInfo { multi_rack_join_addr: None },
+        )]);
+        match self.client.advertise_rack_prefixes(&rack_prefixes).await {
+            Ok(_) => {
+                info!(
+                    log, "advertised rack prefix to ddmd";
+                    "rack_prefix" => %rack_prefix,
+                );
                 DdmdReconcilerStatus::Reconciled {
                     external_peers_address_objects: request.address_objects,
+                    rack_prefix,
                 }
             }
             Err(err) => DdmdReconcilerStatus::Failed(format!(
-                "failed to apply DDM interfaces to ddmd: {}",
+                "failed to advertise rack prefix to ddmd: {}",
                 InlineErrorChain::new(&err)
             )),
         }

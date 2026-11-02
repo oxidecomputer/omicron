@@ -127,6 +127,7 @@ ddmd reconciler:
             successfully reconciled 2 external peer address objects:
                 * tfportqsfp0_0/ll
                 * tfportqsfp1_0/ll
+            announced rack prefix: fd00:1122:3344:100::/56
 
 ---------------------------------------------
 stderr:
@@ -211,6 +212,7 @@ ddmd reconciler:
         ran for: 1.5s
         detailed status:
             successfully reconciled 0 external peer address objects
+            announced rack prefix: fd00:1122:3344:100::/56
 
 ---------------------------------------------
 stderr:
