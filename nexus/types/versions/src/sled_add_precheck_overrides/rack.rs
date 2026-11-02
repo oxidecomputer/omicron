@@ -27,7 +27,7 @@ pub struct RackMembershipAddSledsRequest {
     ///
     /// Overriding checks is dangerous and should only be done at the direction
     /// of Oxide support.
-    #[serde(default = "SledAddPrecheckOverrides::no_overrides_enabled")]
+    #[serde(default)]
     pub override_prechecks: SledAddPrecheckOverrides,
 }
 
@@ -39,7 +39,7 @@ impl From<v2026_01_21_00::rack::RackMembershipAddSledsRequest>
             old;
         RackMembershipAddSledsRequest {
             sled_ids,
-            override_prechecks: SledAddPrecheckOverrides::no_overrides_enabled(),
+            override_prechecks: SledAddPrecheckOverrides::default(),
         }
     }
 }
@@ -48,6 +48,7 @@ impl From<v2026_01_21_00::rack::RackMembershipAddSledsRequest>
 #[derive(
     Clone,
     Debug,
+    Default,
     Serialize,
     Deserialize,
     JsonSchema,
@@ -69,6 +70,7 @@ pub struct SledAddPrecheckOverrides {
     ///
     /// This override is provided for working around bugs and only in emergency
     /// situations. It should not generally be used.
+    #[serde(default)]
     pub allow_without_settled_target_release: bool,
 
     /// Add the requested sleds even if their software does not match the
@@ -82,6 +84,7 @@ pub struct SledAddPrecheckOverrides {
     ///
     /// This override is provided for working around bugs and only in emergency
     /// situations. It should not generally be used.
+    #[serde(default)]
     pub allow_unverified_sled_software: bool,
 }
 
