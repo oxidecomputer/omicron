@@ -22,6 +22,9 @@ pub use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use newtype_uuid::GenericUuid;
+use nexus_types_versions::latest::multirack::UnadoptedRack;
+use nexus_types_versions::latest::multirack::UnadoptedSled;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::{RACK_PREFIX_LENGTH, SLED_PREFIX_LENGTH};
 use omicron_common::api::external::ByteCount;
@@ -1311,6 +1314,21 @@ impl IdOrdItem for DiscoveredRack {
     id_upcast!();
 }
 
+impl From<DiscoveredRack> for UnadoptedRack {
+    fn from(value: DiscoveredRack) -> Self {
+        Self {
+            rack_id: value.rack_id.into_untyped_uuid(),
+            rack_subnet: value.rack_subnet.net(),
+            join_service_ip: value.join_service_ip,
+            unadopted_sleds: value
+                .discovered_sleds
+                .into_iter()
+                .map(UnadoptedSled::from)
+                .collect(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DiscoveredSled {
     /// ID of the sled, which will be the same ID used by the sled-agent to
@@ -1331,6 +1349,19 @@ impl IdOrdItem for DiscoveredSled {
         self.sled_id
     }
     id_upcast!();
+}
+
+impl From<DiscoveredSled> for UnadoptedSled {
+    fn from(value: DiscoveredSled) -> Self {
+        let BaseboardId { part_number, serial_number } = value.baseboard_id;
+        Self {
+            sled_id: value.sled_id.into_untyped_uuid(),
+            part_number,
+            serial_number,
+            sled_subnet: value.sled_subnet.net(),
+            sled_agent_start_state: value.sled_agent_start_state,
+        }
+    }
 }
 
 #[cfg(test)]
