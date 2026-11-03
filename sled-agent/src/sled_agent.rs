@@ -1346,7 +1346,7 @@ impl SledAgent {
     ///
     /// 2. The data returned here MUST be immutable. This is to avoid a tricky
     ///    ABA race, as documented at
-    ///    https://claude.ai/artifact/AZNUEPEDh4R8wKpWFh1n5Q.
+    ///    <https://claude.ai/artifact/AZNUEPEDh4R8wKpWFh1n5Q>.
     ///
     /// This is understandably quite restrictive! In the long term, consider
     /// completely reworking this:
