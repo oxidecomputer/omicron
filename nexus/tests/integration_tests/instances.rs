@@ -6232,13 +6232,10 @@ fn instance_compute_update(
 ) -> instance::InstanceUpdate {
     // Construct an update which if used to reconfigure `Instance` would result
     // in no changes.
-    let unchanged_boot_disk =
-        instance.boot_disk_id.map(|id| NameOrId::Id(id.clone()));
+    let unchanged_boot_disk = instance.boot_disk_id.map(|id| NameOrId::Id(id));
     let mut update = instance::InstanceUpdate {
         boot_disk: Nullable(unchanged_boot_disk),
-        auto_restart_policy: Nullable(
-            instance.auto_restart_status.policy.clone(),
-        ),
+        auto_restart_policy: Nullable(instance.auto_restart_status.policy),
         cpu_platform: Nullable(instance.cpu_platform),
         ncpus: instance.ncpus,
         memory: instance.memory,
