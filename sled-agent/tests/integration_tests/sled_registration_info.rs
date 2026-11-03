@@ -30,7 +30,7 @@ async fn sim_sled_registration_info_returns_configured_ids() {
     let server = sim::Server::start(
         &config,
         log,
-        sim::NexusRegistration::Background,
+        sim::NexusRegistration::Manual,
         &simulated_upstairs,
         0,
     )

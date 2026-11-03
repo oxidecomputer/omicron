@@ -85,8 +85,9 @@ const SERVICE_POOL_IPV6_NAME: &str = "oxide-service-pool-v6";
 
 /// How [`Server::start`] handles the sled agent's registration with Nexus.
 ///
-/// A simulated sled agent announces itself to Nexus with `sled_agent_put`,
-/// retrying until Nexus accepts it.
+/// Unless registration is [`NexusRegistration::Manual`], a simulated sled
+/// agent announces itself to Nexus with `sled_agent_put`, retrying until Nexus
+/// accepts it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NexusRegistration {
     /// Wait until Nexus has accepted the registration, so that the sled exists
@@ -102,6 +103,10 @@ pub enum NexusRegistration {
     /// Use this in cases where Nexus might not be reachable (for example, a
     /// sled agent started against a placeholder Nexus address).
     Background,
+    /// Do not automatically register with Nexus. The caller must register with
+    /// Nexus manually; see [`Server::sled_agent_info`] for a body that can be
+    /// used to register with.
+    Manual,
 }
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
@@ -193,6 +198,7 @@ impl Server {
                     sled_agent_info,
                 ));
             }
+            NexusRegistration::Manual => {}
         }
 
         let mut datasets = vec![];
@@ -245,6 +251,20 @@ impl Server {
             pantry_server: None,
             repo_depot_address,
         })
+    }
+
+    /// Return the `SledAgentInfo` that [`Server::start`] uses to register with
+    /// Nexus.
+    ///
+    /// If this simulated Sled Agent was configured with
+    /// [`NexusRegistration::Manual`], callers must register with this or a
+    /// similar body.
+    pub fn sled_agent_info(&self) -> NexusTypes::SledAgentInfo {
+        sled_agent_info(
+            &self.config,
+            self.http_server.local_addr(),
+            self.repo_depot_address.port(),
+        )
     }
 
     /// Starts the pantry service
