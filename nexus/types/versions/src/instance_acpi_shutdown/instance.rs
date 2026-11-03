@@ -105,20 +105,11 @@ impl From<v2026_06_08_00::instance::Instance> for Instance {
     }
 }
 
-impl TryFrom<Instance> for v2026_06_08_00::instance::Instance {
-    type Error = dropshot::HttpError;
-
-    fn try_from(value: Instance) -> Result<Self, Self::Error> {
-        if let Some(policy) = value.shutdown_policy
-            && policy != InstanceShutdownPolicy::HardOff
-        {
-            return Err(dropshot::HttpError::for_internal_error(
-                "Instance with shutdown_policy cannot be represented in \
-                API version prior to shutdown_policy support"
-                    .to_string(),
-            ));
-        }
-        Ok(v2026_06_08_00::instance::Instance {
+impl From<Instance> for v2026_06_08_00::instance::Instance {
+    fn from(value: Instance) -> Self {
+        // TODO-cleanup destructure `value` and comment explaining why we're
+        // dropping `shutdown_policy`
+        v2026_06_08_00::instance::Instance {
             identity: value.identity,
             project_id: value.project_id,
             ncpus: value.ncpus,
@@ -129,7 +120,7 @@ impl TryFrom<Instance> for v2026_06_08_00::instance::Instance {
             auto_restart_status: value.auto_restart_status,
             cpu_platform: value.cpu_platform,
             enable_jumbo_frames: value.enable_jumbo_frames,
-        })
+        }
     }
 }
 
