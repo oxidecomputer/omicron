@@ -84,7 +84,9 @@ use sled_agent_types::instance::{
     SledVmmState, VmmPutStateResponse, VmmStateRequested,
     VmmUnregisterResponse,
 };
-use sled_agent_types::inventory::{Inventory, OmicronSledConfig, SledRole};
+use sled_agent_types::inventory::{
+    Inventory, OmicronSledConfig, SledRegistrationInfo, SledRole,
+};
 use sled_agent_types::multirack::MultirackJoinServiceStatus;
 use sled_agent_types::probes::ProbeCreate;
 use sled_agent_types::resolvable_files::{
@@ -1327,6 +1329,36 @@ impl SledAgent {
             model: baseboard.model().to_string(),
             revision: baseboard.revision(),
             serial: baseboard.identifier().to_string(),
+        }
+    }
+
+    /// Return sled registration info.
+    ///
+    /// IMPORTANT!
+    /// ----------
+    ///
+    /// There are several restrictions associated with this method! Pay close
+    /// attention!
+    ///
+    /// 1. This method MUST NOT be async or take any locks. That is because this
+    ///    is a synchronous callback from Nexus's `upsert_sled`. Any kind of
+    ///    blocking here can lead to deadlocks.
+    ///
+    /// 2. The data returned here MUST be immutable. This is to avoid a tricky
+    ///    ABA race, as documented at
+    ///    https://claude.ai/artifact/AZNUEPEDh4R8wKpWFh1n5Q.
+    ///
+    /// This is understandably quite restrictive! In the long term, consider
+    /// completely reworking this:
+    ///
+    /// * Have RSS and the multirack join service populate immutable data,
+    ///   once.
+    /// * Return mutable data through inventory.
+    /// * Remove the `sled_upsert` upcall.
+    pub(crate) fn sled_registration_info(&self) -> SledRegistrationInfo {
+        SledRegistrationInfo {
+            sled_id: self.inner.id,
+            rack_id: self.inner.start_request.body.rack_id,
         }
     }
 
