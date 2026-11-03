@@ -294,7 +294,32 @@ pub fn check_trust_quorum_allows_expunge(
         )));
     }
 
-    Ok(())
+    match state {
+        TrustQuorumConfigState::Preparing
+        | TrustQuorumConfigState::PreparingLrtqUpgrade => {
+            // Trust quorum reconfiguration can still be aborted at this point,
+            // so it's not safe to expunge the sled at this point.
+            Err(Error::conflict(format!(
+                "Cannot expunge sled {sled_id}: the latest trust quorum \
+                configuration for rack {rack_id} (epoch {epoch}, state \
+                {state:?}) does not include baseboard {baseboard_id}, but it \
+                has not started committing and can still be aborted. Wait for \
+                the configuration at epoch {epoch} to start committing, then \
+                retry. If it is stuck, abort the rack membership change and \
+                propose a new configuration that removes this sled."
+            )))
+        }
+        TrustQuorumConfigState::Committing
+        | TrustQuorumConfigState::Committed
+        | TrustQuorumConfigState::CommittedPartially => Ok(()),
+        TrustQuorumConfigState::Aborted => {
+            Err(Error::internal_error(&format!(
+                "Cannot expunge sled {sled_id}: the trust quorum \
+                configuration for rack {rack_id} at epoch {epoch}, loaded as \
+                the latest possibly committed configuration, is aborted"
+            )))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -311,6 +336,8 @@ mod tests {
     enum Expected {
         Allowed,
         MemberConflict,
+        PreparingConflict,
+        AbortedInternalError,
     }
 
     #[test]
@@ -335,9 +362,9 @@ mod tests {
 
         let cases = [
             (S::Preparing, Member, MemberConflict),
-            (S::Preparing, NonMember, Allowed),
+            (S::Preparing, NonMember, PreparingConflict),
             (S::PreparingLrtqUpgrade, Member, MemberConflict),
-            (S::PreparingLrtqUpgrade, NonMember, Allowed),
+            (S::PreparingLrtqUpgrade, NonMember, PreparingConflict),
             (S::Committing, Member, MemberConflict),
             (S::Committing, NonMember, Allowed),
             (S::Committed, Member, MemberConflict),
@@ -345,7 +372,7 @@ mod tests {
             (S::CommittedPartially, Member, MemberConflict),
             (S::CommittedPartially, NonMember, Allowed),
             (S::Aborted, Member, MemberConflict),
-            (S::Aborted, NonMember, Allowed),
+            (S::Aborted, NonMember, AbortedInternalError),
         ];
 
         for (state, membership, expected) in cases {
@@ -386,12 +413,41 @@ mod tests {
                          (epoch 7, state {state:?})"
                     )],
                 ),
+                PreparingConflict => (
+                    result.expect_err(&description),
+                    vec![
+                        format!(
+                            "for rack {rack_id} (epoch 7, state {state:?}) \
+                             does not include baseboard {sled_baseboard}"
+                        ),
+                        "has not started committing and can still be aborted"
+                            .to_string(),
+                        "Wait for the configuration at epoch 7 to start \
+                         committing, then retry."
+                            .to_string(),
+                        "If it is stuck, abort the rack membership change and \
+                         propose a new configuration that removes this sled."
+                            .to_string(),
+                    ],
+                ),
+                AbortedInternalError => (
+                    result.expect_err(&description),
+                    vec![format!(
+                        "for rack {rack_id} at epoch 7, loaded as the latest \
+                         possibly committed configuration, is aborted"
+                    )],
+                ),
             };
 
             let message = match (&expected, &error) {
-                (MemberConflict, Error::Conflict { message }) => {
-                    message.external_message().to_string()
-                }
+                (
+                    MemberConflict | PreparingConflict,
+                    Error::Conflict { message },
+                ) => message.external_message().to_string(),
+                (
+                    AbortedInternalError,
+                    Error::InternalError { internal_message },
+                ) => internal_message.clone(),
                 (expected, error) => panic!(
                     "{description}: expected {expected:?}, got {error:?}"
                 ),
