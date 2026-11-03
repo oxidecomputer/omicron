@@ -49,6 +49,8 @@ slog-error-chain.workspace = true
 [dev-dependencies]
 chrono.workspace = true
 gethostname.workspace = true
+quick-xml.workspace = true
+socket2.workspace = true
 
 [features]
 seed-gen = ["dep:filetime"]

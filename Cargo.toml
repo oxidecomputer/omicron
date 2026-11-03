@@ -781,6 +781,7 @@ propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev 
 # NOTE: see above!
 proptest = "1.11.0"
 qorb = "0.4.1"
+quick-xml = "0.41.0"
 quote = "1.0"
 # Some dependencies still require rand 0.8.x.
 rand08 = { package = "rand", version = "0.8.6" }
