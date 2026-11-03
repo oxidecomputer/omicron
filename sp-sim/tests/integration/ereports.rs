@@ -60,7 +60,6 @@ async fn send_probe_and_check_response(
 }
 
 #[tokio::test]
-#[ignore = "sp-sim's UDP task exits on a malformed ereport datagram"]
 async fn ereports_survive_malformed_requests() {
     let logctx = test_setup_log("ereports_survive_malformed_requests");
     let config = sp_sim::Config::from_file(SP_SIM_CONFIG_PATH)
