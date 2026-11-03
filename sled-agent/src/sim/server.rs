@@ -52,6 +52,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
 use rand::seq::IndexedRandom;
@@ -167,81 +168,31 @@ impl Server {
         .start()
         .map_err(|error| anyhow!("initializing server: {}", error))?;
 
-        // Notify the control plane that we're up, and continue trying this
-        // until it succeeds. We retry with an randomized, capped exponential
-        // backoff.
-        //
-        // TODO-robustness if this returns a 400 error, we probably want to
-        // return a permanent error from the `notify_nexus` closure.
-        let sa_address = http_server.local_addr();
         let repo_depot_address = sled_agent.repo_depot.local_addr();
-        let repo_depot_port = repo_depot_address.port();
-        let config_clone = config.clone();
-        let log_clone = log.clone();
-        let task = tokio::spawn(async move {
-            let config = config_clone;
-            let log = log_clone;
-            let nexus_client = nexus_client.clone();
-            let notify_nexus = || async {
-                debug!(log, "contacting server nexus");
-                nexus_client
-                    .sled_agent_put(
-                        &config.id,
-                        &NexusTypes::SledAgentInfo {
-                            sa_address: sa_address.to_string(),
-                            repo_depot_port,
-                            role: config.sled_role,
-                            baseboard: NexusTypes::Baseboard {
-                                serial: config
-                                    .hardware
-                                    .baseboard
-                                    .identifier()
-                                    .to_string(),
-                                part: config
-                                    .hardware
-                                    .baseboard
-                                    .model()
-                                    .to_string(),
-                                revision: config.hardware.baseboard.revision(),
-                            },
-                            usable_hardware_threads: config
-                                .hardware
-                                .hardware_threads,
-                            usable_physical_ram:
-                                NexusTypes::ByteCount::try_from(
-                                    config.hardware.physical_ram,
-                                )
-                                .unwrap(),
-                            reservoir_size: NexusTypes::ByteCount::try_from(
-                                config.hardware.reservoir_ram,
-                            )
-                            .unwrap(),
-                            cpu_family: config.hardware.cpu_family.convert(),
-                            generation: Generation::new(),
-                            decommissioned: false,
-                        },
-                    )
-                    .await
-                    .map_err(BackoffError::transient)
-            };
-            let log_notification_failure = |error, delay| {
-                warn!(log, "failed to contact nexus, will retry in {:?}", delay;
-                    "error" => ?error);
-            };
-            retry_notify(
-                retry_policy_internal_service_aggressive(),
-                notify_nexus,
-                log_notification_failure,
-            )
-            .await
-            .expect("Expected an infinite retry loop contacting Nexus");
-        });
-
+        let sled_agent_info = sled_agent_info(
+            config,
+            http_server.local_addr(),
+            repo_depot_address.port(),
+        );
         match nexus_registration {
             NexusRegistration::WaitForCompletion => {
-                task.await.context("registering with Nexus")?;
+                tokio::spawn(register_with_nexus(
+                    log.clone(),
+                    nexus_client,
+                    config.id,
+                    sled_agent_info,
+                ))
+                .await
+                .context("registering with Nexus")?;
             }
-            NexusRegistration::Background => {}
+            NexusRegistration::Background => {
+                tokio::spawn(register_with_nexus(
+                    log.clone(),
+                    nexus_client,
+                    config.id,
+                    sled_agent_info,
+                ));
+            }
         }
 
         let mut datasets = vec![];
@@ -316,6 +267,66 @@ impl Server {
     pub async fn wait_for_finish(self) -> Result<(), anyhow::Error> {
         self.http_server.await.map_err(|err| anyhow!(err))
     }
+}
+
+fn sled_agent_info(
+    config: &Config,
+    sa_address: SocketAddr,
+    repo_depot_port: u16,
+) -> NexusTypes::SledAgentInfo {
+    NexusTypes::SledAgentInfo {
+        sa_address: sa_address.to_string(),
+        repo_depot_port,
+        role: config.sled_role,
+        baseboard: NexusTypes::Baseboard {
+            serial: config.hardware.baseboard.identifier().to_string(),
+            part: config.hardware.baseboard.model().to_string(),
+            revision: config.hardware.baseboard.revision(),
+        },
+        usable_hardware_threads: config.hardware.hardware_threads,
+        usable_physical_ram: NexusTypes::ByteCount::try_from(
+            config.hardware.physical_ram,
+        )
+        .unwrap(),
+        reservoir_size: NexusTypes::ByteCount::try_from(
+            config.hardware.reservoir_ram,
+        )
+        .unwrap(),
+        cpu_family: config.hardware.cpu_family.convert(),
+        generation: Generation::new(),
+        decommissioned: false,
+    }
+}
+
+// Notify the control plane that we're up, and continue trying this until it
+// succeeds. We retry with an randomized, capped exponential backoff.
+//
+// TODO-robustness if this returns a 400 error, we probably want to return a
+// permanent error in the caller.
+async fn register_with_nexus(
+    log: Logger,
+    nexus_client: Arc<NexusClient>,
+    sled_id: SledUuid,
+    sled_agent_info: NexusTypes::SledAgentInfo,
+) {
+    let notify_nexus = || async {
+        debug!(log, "contacting server nexus");
+        nexus_client
+            .sled_agent_put(&sled_id, &sled_agent_info)
+            .await
+            .map_err(BackoffError::transient)
+    };
+    let log_notification_failure = |error, delay| {
+        warn!(log, "failed to contact nexus, will retry in {:?}", delay;
+            "error" => ?error);
+    };
+    retry_notify(
+        retry_policy_internal_service_aggressive(),
+        notify_nexus,
+        log_notification_failure,
+    )
+    .await
+    .expect("Expected an infinite retry loop contacting Nexus");
 }
 
 async fn handoff_to_nexus(
