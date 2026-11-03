@@ -1263,11 +1263,11 @@ impl super::Nexus {
             }
             // The VMM record not only exists, but has actually been ensured on
             // the sled, so the request must be directed to the sled-agent.
-            Some(vmm) if vmm.state.exists_on_sled() => {
+            Some(vmm) => {
                 (vmm.sled_id(), PropolisUuid::from_untyped_uuid(vmm.id))
             }
             // The instance hath no active VMM.
-            _ => match effective_state {
+            None => match effective_state {
                 // If there's no active sled because the instance is stopped,
                 // allow requests to stop to succeed silently for idempotency,
                 // but reject requests to do anything else.
