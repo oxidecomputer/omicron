@@ -2644,6 +2644,23 @@ async fn expect_instance_reboot_ok(
         .expect("expected instance reboot to succeed");
 }
 
+/// Assert that the provided `instance_id` refers to a running instance, and
+/// that that instance is on the sled Nexus knows as `sled_id`.
+async fn expect_instance_on_sled(
+    nexus: &Arc<Nexus>,
+    instance_id: &InstanceUuid,
+    sled_id: &SledUuid,
+) {
+    let instance_sled = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled")
+        .sled_id;
+
+    assert_eq!(&instance_sled, sled_id);
+}
+
 /// Assert values for fleet, silo, and project using both system and silo
 /// metrics endpoints
 async fn assert_metrics(
@@ -5832,15 +5849,9 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
     let instance = expect_instance_reconfigure_ok(
         &client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            boot_disk: Nullable(None),
-            auto_restart_policy: Nullable(None),
-            cpu_platform: Nullable(None),
-            ncpus: InstanceCpuCount::try_from(2).unwrap(),
-            memory: ByteCount::from_gibibytes_u32(4),
-            multicast_groups: None,
-            enable_jumbo_frames: false,
-        },
+        instance_compute_update(&instance, |update| {
+            update.boot_disk = Nullable(None);
+        }),
     )
     .await;
     assert_eq!(instance.boot_disk_id, None);
@@ -5942,15 +5953,9 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
     let error = expect_instance_reconfigure_err(
         &client,
         &instance_id.into_untyped_uuid(),
-        instance::InstanceUpdate {
-            boot_disk: Nullable(Some(alsodata.clone().into())),
-            auto_restart_policy: Nullable(None),
-            cpu_platform: Nullable(None),
-            ncpus: InstanceCpuCount::try_from(2).unwrap(),
-            memory: ByteCount::from_gibibytes_u32(4),
-            multicast_groups: None,
-            enable_jumbo_frames: false,
-        },
+        instance_compute_update(&instance, |update| {
+            update.boot_disk = Nullable(Some(alsodata.clone().into()));
+        }),
         http::StatusCode::CONFLICT,
     )
     .await;
@@ -5961,19 +5966,18 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
     expect_instance_reconfigure_ok(
         &client,
         &instance_id.into_untyped_uuid(),
-        instance::InstanceUpdate {
-            // Leave the boot disk the same as the one with which the instance
-            // was created.
-            boot_disk: Nullable(Some(probablydata.clone().into())),
-            auto_restart_policy: Nullable(Some(
-                InstanceAutoRestartPolicy::BestEffort,
-            )),
-            cpu_platform: Nullable(None),
-            ncpus: InstanceCpuCount::try_from(2).unwrap(),
-            memory: ByteCount::from_gibibytes_u32(4),
-            multicast_groups: None,
-            enable_jumbo_frames: false,
-        },
+        instance_compute_update(&instance, |update| {
+            // The instance's boot disk should not have actually changed from
+            // the one with which it was created.
+            let current_boot_disk = instance.boot_disk_id.unwrap();
+            assert_eq!(
+                update.boot_disk,
+                Nullable(Some(NameOrId::Id(current_boot_disk))),
+            );
+
+            update.auto_restart_policy =
+                Nullable(Some(InstanceAutoRestartPolicy::BestEffort));
+        }),
     )
     .await;
 }
@@ -6006,6 +6010,30 @@ async fn test_updating_missing_instance_is_not_found(
         error.message,
         format!("not found: instance with id \"{}\"", UUID_THAT_DOESNT_EXIST)
     );
+}
+
+fn instance_compute_update(
+    instance: &Instance,
+    edit_update: impl Fn(&mut instance::InstanceUpdate),
+) -> instance::InstanceUpdate {
+    // Construct an update which, if used to reconfigure `Instance`, would result
+    // in no changes.
+    let unchanged_boot_disk = instance.boot_disk_id.map(|id| NameOrId::Id(id));
+    let mut update = instance::InstanceUpdate {
+        boot_disk: Nullable(unchanged_boot_disk),
+        auto_restart_policy: Nullable(instance.auto_restart_status.policy),
+        cpu_platform: Nullable(instance.cpu_platform),
+        ncpus: instance.ncpus,
+        memory: instance.memory,
+        // "If not provided, the instance's multicast group membership will not
+        // be changed."
+        multicast_groups: None,
+        enable_jumbo_frames: instance.enable_jumbo_frames,
+    };
+
+    edit_update(&mut update);
+
+    update
 }
 
 async fn expect_instance_reconfigure_ok(
@@ -6089,7 +6117,6 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         cpu_platform: None,
         disks: Vec::new(),
         start: true,
-        // Start out with None
         auto_restart_policy: None,
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
@@ -6107,33 +6134,18 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         .expect("Expected instance creation to work!");
 
     let instance = response.parsed_body::<Instance>().unwrap();
-    let boot_disk_nameorid: Option<NameOrId> =
-        instance.boot_disk_id.map(|x| x.into());
-    let auto_restart_policy = instance.auto_restart_status.policy;
 
     let new_ncpus = InstanceCpuCount::try_from(4).unwrap();
     let new_memory = ByteCount::from_gibibytes_u32(8);
-
-    let base_update = instance::InstanceUpdate {
-        auto_restart_policy: Nullable(auto_restart_policy),
-        boot_disk: Nullable(boot_disk_nameorid.clone()),
-        cpu_platform: Nullable(None),
-        ncpus: initial_ncpus,
-        memory: initial_memory,
-        multicast_groups: None,
-        enable_jumbo_frames: false,
-    };
 
     // Resizing the instance immediately will error; the instance is running.
     let err = expect_instance_reconfigure_err(
         client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            ncpus: new_ncpus,
-            memory: new_memory,
-            multicast_groups: None,
-            ..base_update.clone()
-        },
+        instance_compute_update(&instance, |update| {
+            update.ncpus = new_ncpus;
+            update.memory = new_memory;
+        }),
         StatusCode::CONFLICT,
     )
     .await;
@@ -6150,12 +6162,10 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let instance = expect_instance_reconfigure_ok(
         client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            ncpus: new_ncpus,
-            memory: new_memory,
-            multicast_groups: None,
-            ..base_update.clone()
-        },
+        instance_compute_update(&instance, |update| {
+            update.ncpus = new_ncpus;
+            update.memory = new_memory;
+        }),
     )
     .await;
     assert_eq!(instance.ncpus.0, new_ncpus.0);
@@ -6165,12 +6175,10 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let instance = expect_instance_reconfigure_ok(
         client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            ncpus: initial_ncpus,
-            memory: new_memory,
-            multicast_groups: None,
-            ..base_update.clone()
-        },
+        instance_compute_update(&instance, |update| {
+            update.ncpus = initial_ncpus;
+            update.memory = new_memory;
+        }),
     )
     .await;
     assert_eq!(instance.ncpus.0, initial_ncpus.0);
@@ -6179,12 +6187,10 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let instance = expect_instance_reconfigure_ok(
         client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            ncpus: initial_ncpus,
-            memory: initial_memory,
-            multicast_groups: None,
-            ..base_update.clone()
-        },
+        instance_compute_update(&instance, |update| {
+            update.ncpus = initial_ncpus;
+            update.memory = initial_memory;
+        }),
     )
     .await;
     assert_eq!(instance.ncpus.0, initial_ncpus.0);
@@ -6197,12 +6203,9 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let err = expect_instance_reconfigure_err(
         client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            ncpus: InstanceCpuCount(MAX_VCPU_PER_INSTANCE + 1),
-            memory: instance.memory,
-            multicast_groups: None,
-            ..base_update.clone()
-        },
+        instance_compute_update(&instance, |update| {
+            update.ncpus = InstanceCpuCount(MAX_VCPU_PER_INSTANCE + 1);
+        }),
         StatusCode::BAD_REQUEST,
     )
     .await;
@@ -6218,12 +6221,9 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let err = expect_instance_reconfigure_err(
         client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            ncpus: instance.ncpus,
-            memory: ByteCount::from_mebibytes_u32(0),
-            multicast_groups: None,
-            ..base_update.clone()
-        },
+        instance_compute_update(&instance, |update| {
+            update.memory = ByteCount::from_mebibytes_u32(0);
+        }),
         StatusCode::BAD_REQUEST,
     )
     .await;
@@ -6233,13 +6233,10 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let err = expect_instance_reconfigure_err(
         client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            ncpus: instance.ncpus,
-            memory: ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE - 1)
-                .unwrap(),
-            multicast_groups: None,
-            ..base_update.clone()
-        },
+        instance_compute_update(&instance, |update| {
+            update.memory =
+                ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE - 1).unwrap();
+        }),
         StatusCode::BAD_REQUEST,
     )
     .await;
@@ -6250,14 +6247,11 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let err = expect_instance_reconfigure_err(
         client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            ncpus: instance.ncpus,
-            memory: ByteCount::from_mebibytes_u32(
+        instance_compute_update(&instance, |update| {
+            update.memory = ByteCount::from_mebibytes_u32(
                 (max_mib + 1024).try_into().unwrap(),
-            ),
-            multicast_groups: None,
-            ..base_update.clone()
-        },
+            );
+        }),
         StatusCode::BAD_REQUEST,
     )
     .await;
@@ -6272,12 +6266,10 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     expect_instance_reconfigure_err(
         client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            ncpus: new_ncpus,
-            memory: new_memory,
-            multicast_groups: None,
-            ..base_update.clone()
-        },
+        instance_compute_update(&instance, |update| {
+            update.ncpus = new_ncpus;
+            update.memory = new_memory;
+        }),
         StatusCode::NOT_FOUND,
     )
     .await;
@@ -6328,27 +6320,22 @@ async fn test_auto_restart_policy_can_be_changed(
         .expect("Expected instance creation to work!");
 
     let instance = response.parsed_body::<Instance>().unwrap();
+    let instance_ref: &Instance = &instance;
 
     // Starts out as None.
     assert_eq!(instance.auto_restart_status.policy, None);
 
     let assert_reconfigured = |auto_restart_policy| async move {
-        let instance = expect_instance_reconfigure_ok(
+        let reconfigured = expect_instance_reconfigure_ok(
             client,
-            &instance.identity.id,
-            dbg!(instance::InstanceUpdate {
-                auto_restart_policy: Nullable(auto_restart_policy),
-                boot_disk: Nullable(None),
-                cpu_platform: Nullable(None),
-                ncpus: InstanceCpuCount::try_from(2).unwrap(),
-                memory: ByteCount::from_gibibytes_u32(4),
-                multicast_groups: None,
-                enable_jumbo_frames: false,
-            }),
+            &instance_ref.identity.id,
+            dbg!(instance_compute_update(instance_ref, |update| {
+                update.auto_restart_policy = Nullable(auto_restart_policy);
+            })),
         )
         .await;
         assert_eq!(
-            dbg!(instance).auto_restart_status.policy,
+            dbg!(reconfigured).auto_restart_status.policy,
             auto_restart_policy,
         );
     };
@@ -6385,7 +6372,6 @@ async fn test_cpu_platform_can_be_changed(cptestctx: &ControlPlaneTestContext) {
             instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         boot_disk: None,
-        // Start out with None
         cpu_platform: None,
         disks: Vec::new(),
         start: false,
@@ -6406,26 +6392,21 @@ async fn test_cpu_platform_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         .expect("Expected instance creation to work!");
 
     let instance = response.parsed_body::<Instance>().unwrap();
+    let instance_ref: &Instance = &instance;
 
     // Starts out as None.
     assert_eq!(instance.cpu_platform, None);
 
     let assert_reconfigured = |cpu_platform| async move {
-        let instance = expect_instance_reconfigure_ok(
+        let reconfigured = expect_instance_reconfigure_ok(
             client,
-            &instance.identity.id,
-            dbg!(instance::InstanceUpdate {
-                auto_restart_policy: Nullable(None),
-                boot_disk: Nullable(None),
-                cpu_platform: Nullable(cpu_platform),
-                ncpus: InstanceCpuCount::try_from(2).unwrap(),
-                memory: ByteCount::from_gibibytes_u32(4),
-                multicast_groups: None,
-                enable_jumbo_frames: false,
-            }),
+            &instance_ref.identity.id,
+            dbg!(instance_compute_update(instance_ref, |update| {
+                update.cpu_platform = Nullable(cpu_platform);
+            })),
         )
         .await;
-        assert_eq!(dbg!(instance).cpu_platform, cpu_platform,);
+        assert_eq!(dbg!(reconfigured).cpu_platform, cpu_platform,);
     };
 
     // Reconfigure to Milan.
@@ -6487,22 +6468,14 @@ async fn test_enable_jumbo_frames_can_be_changed(
     let instance = response.parsed_body::<Instance>().unwrap();
     assert!(!instance.enable_jumbo_frames);
 
-    let base_update = || instance::InstanceUpdate {
-        boot_disk: Nullable(None),
-        auto_restart_policy: Nullable(None),
-        cpu_platform: Nullable(None),
-        ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(4),
-        multicast_groups: None,
-        enable_jumbo_frames: false,
-    };
-
     // Without the fleet-wide opt-in, requesting `enable_jumbo_frames: true` is
     // rejected.
     let err = expect_instance_reconfigure_err(
         &client,
         &instance.identity.id,
-        instance::InstanceUpdate { enable_jumbo_frames: true, ..base_update() },
+        instance_compute_update(&instance, |update| {
+            update.enable_jumbo_frames = true;
+        }),
         http::StatusCode::BAD_REQUEST,
     )
     .await;
@@ -6517,7 +6490,9 @@ async fn test_enable_jumbo_frames_can_be_changed(
     let reconfigured = expect_instance_reconfigure_ok(
         client,
         &instance.identity.id,
-        base_update(),
+        instance_compute_update(&instance, |update| {
+            update.enable_jumbo_frames = false;
+        }),
     )
     .await;
     assert!(!reconfigured.enable_jumbo_frames);
@@ -6538,7 +6513,9 @@ async fn test_enable_jumbo_frames_can_be_changed(
     let reconfigured = expect_instance_reconfigure_ok(
         client,
         &instance.identity.id,
-        instance::InstanceUpdate { enable_jumbo_frames: true, ..base_update() },
+        instance_compute_update(&instance, |update| {
+            update.enable_jumbo_frames = true;
+        }),
     )
     .await;
     assert!(reconfigured.enable_jumbo_frames);
@@ -6553,7 +6530,9 @@ async fn test_enable_jumbo_frames_can_be_changed(
     let reconfigured = expect_instance_reconfigure_ok(
         client,
         &instance.identity.id,
-        base_update(),
+        instance_compute_update(&reconfigured, |update| {
+            update.enable_jumbo_frames = false;
+        }),
     )
     .await;
     assert!(!reconfigured.enable_jumbo_frames);
@@ -6630,20 +6609,14 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(instance.boot_disk_id, Some(disks[0].identity.id));
 
-    // Change the instance's boot disk.ity.id);
+    // Change the instance's boot disk.
 
     let instance = expect_instance_reconfigure_ok(
         &client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            boot_disk: Nullable(Some(disks[1].identity.id.into())),
-            auto_restart_policy: Nullable(None),
-            cpu_platform: Nullable(None),
-            ncpus: InstanceCpuCount::try_from(2).unwrap(),
-            memory: ByteCount::from_gibibytes_u32(4),
-            multicast_groups: None,
-            enable_jumbo_frames: false,
-        },
+        instance_compute_update(&instance, |update| {
+            update.boot_disk = Nullable(Some(disks[1].identity.id.into()));
+        }),
     )
     .await;
     assert_eq!(instance.boot_disk_id, Some(disks[1].identity.id));
@@ -6709,15 +6682,9 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
     let error = expect_instance_reconfigure_err(
         &client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            boot_disk: Nullable(Some(disks[0].identity.id.into())),
-            auto_restart_policy: Nullable(None),
-            cpu_platform: Nullable(None),
-            ncpus: InstanceCpuCount::try_from(2).unwrap(),
-            memory: ByteCount::from_gibibytes_u32(4),
-            multicast_groups: None,
-            enable_jumbo_frames: false,
-        },
+        instance_compute_update(&instance, |update| {
+            update.boot_disk = Nullable(Some(disks[0].identity.id.into()));
+        }),
         http::StatusCode::CONFLICT,
     )
     .await;
@@ -6745,15 +6712,9 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
     let instance = expect_instance_reconfigure_ok(
         &client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            boot_disk: Nullable(Some(disks[0].identity.id.into())),
-            auto_restart_policy: Nullable(None),
-            cpu_platform: Nullable(None),
-            ncpus: InstanceCpuCount::try_from(2).unwrap(),
-            memory: ByteCount::from_gibibytes_u32(4),
-            multicast_groups: None,
-            enable_jumbo_frames: false,
-        },
+        instance_compute_update(&instance, |update| {
+            update.boot_disk = Nullable(Some(disks[0].identity.id.into()));
+        }),
     )
     .await;
     assert_eq!(instance.boot_disk_id, Some(disks[0].identity.id));
@@ -7716,15 +7677,9 @@ async fn test_can_start_instance_with_cpu_platform(
     let instance = expect_instance_reconfigure_ok(
         &client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            boot_disk: Nullable(None),
-            auto_restart_policy: Nullable(None),
-            cpu_platform: Nullable(Some(InstanceCpuPlatform::AmdTurin)),
-            ncpus: InstanceCpuCount::try_from(1).unwrap(),
-            memory: ByteCount::from_gibibytes_u32(4),
-            multicast_groups: None,
-            enable_jumbo_frames: false,
-        },
+        instance_compute_update(&instance, |update| {
+            update.cpu_platform = Nullable(Some(InstanceCpuPlatform::AmdTurin));
+        }),
     )
     .await;
 
@@ -7752,14 +7707,7 @@ async fn test_can_start_instance_with_cpu_platform(
     expect_instance_start_ok(client, instance.identity.name.as_str()).await;
 
     // The VMM should specifically be on our new fake Turin sled.
-    let instance_sled = nexus
-        .active_instance_info(&instance_id, None)
-        .await
-        .unwrap()
-        .expect("running instance should have a sled")
-        .sled_id;
-
-    assert_eq!(instance_sled, new_sled_id);
+    expect_instance_on_sled(nexus, &instance_id, &new_sled_id).await;
 
     // We're free to switch this instance from the initial AmdTurin to AmdTurinV2, which has
     // identical placement constraints and should land on the same simulated Turin sled.
@@ -7770,29 +7718,136 @@ async fn test_can_start_instance_with_cpu_platform(
     let instance = expect_instance_reconfigure_ok(
         &client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            boot_disk: Nullable(None),
-            auto_restart_policy: Nullable(None),
-            cpu_platform: Nullable(Some(InstanceCpuPlatform::AmdTurinV2)),
-            ncpus: InstanceCpuCount::try_from(1).unwrap(),
-            memory: ByteCount::from_gibibytes_u32(4),
-            multicast_groups: None,
-            enable_jumbo_frames: false,
-        },
+        instance_compute_update(&instance, |update| {
+            update.cpu_platform =
+                Nullable(Some(InstanceCpuPlatform::AmdTurinV2));
+        }),
     )
     .await;
 
     expect_instance_start_ok(client, instance.identity.name.as_str()).await;
 
     // The VMM should still be on our new fake Turin sled.
-    let instance_sled = nexus
-        .active_instance_info(&instance_id, None)
-        .await
-        .unwrap()
-        .expect("running instance should have a sled")
-        .sled_id;
+    expect_instance_on_sled(nexus, &instance_id, &new_sled_id).await;
+}
 
-    assert_eq!(instance_sled, new_sled_id);
+#[nexus_test]
+async fn test_can_start_turin_dense_instance_with_cpu_platform(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_project_and_pool(client).await;
+
+    let name1 = Name::try_from(String::from("test")).unwrap();
+    let instance_params = instance::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: name1.clone(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(1).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: "test".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces:
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips: vec![],
+        disks: vec![],
+        boot_disk: None,
+        // Note that we're actually setting cpu_platform this time!
+        cpu_platform: Some(InstanceCpuPlatform::AmdMilan),
+        start: false,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+        multicast_groups: vec![],
+        enable_jumbo_frames: false,
+    };
+    let url_instances = get_instances_url();
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &url_instances)
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to succeed.");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    // Now that the instance is created, lets try to start it.
+
+    let nexus = &cptestctx.server.server_context().nexus;
+
+    expect_instance_start_ok(client, instance.identity.name.as_str()).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+
+    // Great, now let's update the instance to require Turin and start it again.
+    // This will fail because there is no Turin in our simulated environment
+    // (yet!)
+    expect_instance_stop_ok(client, instance.identity.name.as_str()).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
+    let instance = expect_instance_reconfigure_ok(
+        &client,
+        &instance.identity.id,
+        instance_compute_update(&instance, |update| {
+            update.cpu_platform =
+                Nullable(Some(InstanceCpuPlatform::AmdTurinV2));
+        }),
+    )
+    .await;
+
+    expect_instance_start_fail_507(client, instance.identity.name.as_str())
+        .await;
+
+    // We'd like to see the instance actually start, so add a Turin sled and try again.
+
+    // There should be one sled from `#[nexus_test]`, check that first.
+    assert_eq!(
+        objects_list_page_authz::<Sled>(&client, SLEDS_URL).await.items.len(),
+        1
+    );
+
+    let new_sled_id = SledUuid::new_v4();
+    let _turin_sled = cptestctx
+        .add_sled(
+            new_sled_id,
+            omicron_sled_agent::sim::SimMode::Explicit,
+            sled_agent_types::inventory::SledCpuFamily::AmdTurinDense,
+        )
+        .await;
+
+    // Finally, start the Turin-requiring instance for real!
+    expect_instance_start_ok(client, instance.identity.name.as_str()).await;
+
+    // The VMM should specifically be on our new fake Turin sled.
+    expect_instance_on_sled(nexus, &instance_id, &new_sled_id).await;
+
+    // We're free to switch this instance from the initial AmdTurin to AmdTurinV2, which has
+    // identical placement constraints and should land on the same simulated Turin sled.
+    expect_instance_stop_ok(client, instance.identity.name.as_str()).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
+    let instance = expect_instance_reconfigure_ok(
+        &client,
+        &instance.identity.id,
+        instance_compute_update(&instance, |update| {
+            update.cpu_platform =
+                Nullable(Some(InstanceCpuPlatform::AmdTurinV2));
+        }),
+    )
+    .await;
+
+    expect_instance_start_ok(client, instance.identity.name.as_str()).await;
+
+    // The VMM should still be on our new fake Turin sled.
+    expect_instance_on_sled(nexus, &instance_id, &new_sled_id).await;
 }
 
 #[nexus_test]
