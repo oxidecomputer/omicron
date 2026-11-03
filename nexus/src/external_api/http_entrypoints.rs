@@ -6,7 +6,6 @@
 
 use super::console_api;
 use crate::app::SetTargetReleaseIntent;
-
 use crate::app::external_endpoints::authority_for_request;
 use crate::app::support_bundles::SupportBundleQueryType;
 use crate::context::{ApiContext, audit_and_time};
@@ -82,10 +81,8 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InternalContext;
-
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Probe;
-
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::ServiceIcmpConfig;
