@@ -453,13 +453,6 @@ async fn sis_move_to_starting(
     let new_runtime = {
         // If we are performing an automated restart of a Failed instance,
         // remember to update the timestamp.
-
-        //let time_last_auto_restarted = if params.reason == Reason::AutoRestart {
-        //    Some(Utc::now())
-        //} else {
-        //    db_instance.runtime().time_last_auto_restarted
-        //};
-
         let time_last_auto_restarted = match params.reason {
             Reason::AutoRestart => Some(Utc::now()),
             Reason::SledEvacuation | Reason::User | Reason::AutoStart => {
