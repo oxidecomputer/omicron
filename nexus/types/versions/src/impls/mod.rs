@@ -41,7 +41,6 @@ macro_rules! id_path_param {
 pub(crate) use id_path_param;
 pub(crate) use path_param;
 
-mod active_problem;
 mod affinity;
 mod alert;
 mod hardware;
@@ -50,6 +49,7 @@ pub(crate) mod multicast;
 mod networking;
 mod physical_disk;
 mod policy;
+mod problem;
 mod saml;
 mod silo;
 mod sled;

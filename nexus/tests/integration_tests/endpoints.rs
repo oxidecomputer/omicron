@@ -1532,20 +1532,20 @@ pub static DEMO_TARGET_RELEASE: LazyLock<update::SetTargetReleaseParams> =
         system_version: Version::new(0, 0, 0),
     });
 
-// Active Problems
-pub static ACTIVE_PROBLEMS_URL: &'static str = "/v1/system/active-problems";
-pub static DEMO_ACTIVE_PROBLEM_URL: &'static str =
-    "/v1/system/active-problems/001de000-7768-4000-8000-000000000001";
-pub static DEMO_ACTIVE_PROBLEM_CAUSES_URL: LazyLock<String> =
-    LazyLock::new(|| format!("{DEMO_ACTIVE_PROBLEM_URL}/causes"));
-pub static DEMO_ACTIVE_PROBLEM_CONSEQUENCES_URL: LazyLock<String> =
-    LazyLock::new(|| format!("{DEMO_ACTIVE_PROBLEM_URL}/consequences"));
-pub static DEMO_ACTIVE_PROBLEM_IMPACTS_URL: LazyLock<String> =
-    LazyLock::new(|| format!("{DEMO_ACTIVE_PROBLEM_URL}/impacts"));
-pub static DEMO_ACTIVE_PROBLEM_SUPPORT_BUNDLES_URL: LazyLock<String> =
-    LazyLock::new(|| format!("{DEMO_ACTIVE_PROBLEM_URL}/support-bundles"));
-pub static DEMO_ACTIVE_PROBLEM_ALERTS_URL: LazyLock<String> =
-    LazyLock::new(|| format!("{DEMO_ACTIVE_PROBLEM_URL}/alerts"));
+// Problems
+pub static PROBLEMS_URL: &'static str = "/v1/system/problems";
+pub static DEMO_PROBLEM_URL: &'static str =
+    "/v1/system/problems/001de000-7768-4000-8000-000000000001";
+pub static DEMO_PROBLEM_CAUSES_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_PROBLEM_URL}/causes"));
+pub static DEMO_PROBLEM_CONSEQUENCES_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_PROBLEM_URL}/consequences"));
+pub static DEMO_PROBLEM_IMPACTS_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_PROBLEM_URL}/impacts"));
+pub static DEMO_PROBLEM_SUPPORT_BUNDLES_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_PROBLEM_URL}/support-bundles"));
+pub static DEMO_PROBLEM_ALERTS_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_PROBLEM_URL}/alerts"));
 
 // Alerts
 pub static ALERTS_URL: &'static str = "/v1/alerts";
@@ -3628,45 +3628,45 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     ),
                 ],
             },
-            // Active Problems
+            // Problems
             VerifyEndpoint {
-                url: &ACTIVE_PROBLEMS_URL,
+                url: &PROBLEMS_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
-                url: &DEMO_ACTIVE_PROBLEM_URL,
+                url: &DEMO_PROBLEM_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetNonexistent],
             },
             VerifyEndpoint {
-                url: &DEMO_ACTIVE_PROBLEM_CAUSES_URL,
+                url: &DEMO_PROBLEM_CAUSES_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetNonexistent],
             },
             VerifyEndpoint {
-                url: &DEMO_ACTIVE_PROBLEM_CONSEQUENCES_URL,
+                url: &DEMO_PROBLEM_CONSEQUENCES_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetNonexistent],
             },
             VerifyEndpoint {
-                url: &DEMO_ACTIVE_PROBLEM_IMPACTS_URL,
+                url: &DEMO_PROBLEM_IMPACTS_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetNonexistent],
             },
             VerifyEndpoint {
-                url: &DEMO_ACTIVE_PROBLEM_SUPPORT_BUNDLES_URL,
+                url: &DEMO_PROBLEM_SUPPORT_BUNDLES_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetNonexistent],
             },
             VerifyEndpoint {
-                url: &DEMO_ACTIVE_PROBLEM_ALERTS_URL,
+                url: &DEMO_PROBLEM_ALERTS_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetNonexistent],

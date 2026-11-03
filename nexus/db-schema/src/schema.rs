@@ -3618,7 +3618,7 @@ table! {
 }
 
 table! {
-    active_problem (id) {
+    problem (id) {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
@@ -3628,7 +3628,7 @@ table! {
 }
 
 table! {
-    active_problem_revision (problem_id, revision) {
+    problem_revision (problem_id, revision) {
         problem_id -> Uuid,
         revision -> Int8,
         time_created -> Timestamptz,
@@ -3640,8 +3640,8 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(active_problem, active_problem_revision);
-joinable!(active_problem_revision -> active_problem (problem_id));
+allow_tables_to_appear_in_same_query!(problem, problem_revision);
+joinable!(problem_revision -> problem (problem_id));
 
 table! {
     trust_quorum_configuration (rack_id, epoch) {

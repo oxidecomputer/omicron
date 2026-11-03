@@ -182,7 +182,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         TufArtifact::init(),
         TufTrustRoot::init(),
         Alert::init(),
-        ActiveProblem::init(),
+        Problem::init(),
         AlertReceiver::init(),
         WebhookSecret::init(),
         Zpool::init(),

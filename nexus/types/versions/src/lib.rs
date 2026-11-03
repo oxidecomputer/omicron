@@ -115,5 +115,5 @@ pub mod v2026_10_13_00;
 pub mod v2026_10_29_00;
 #[path = "unadopted_rack_list/mod.rs"]
 pub mod v2026_11_04_00;
-#[path = "active_problems/mod.rs"]
+#[path = "problems/mod.rs"]
 pub mod v2026_11_05_00;

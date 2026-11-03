@@ -39,7 +39,6 @@ impl_typed_uuid_kinds! {
     },
     kinds = {
         AccessToken = {},
-        ActiveProblem = {},
         AffinityGroup = {},
         Alert = {},
         AlertReceiver = {},
@@ -87,6 +86,7 @@ impl_typed_uuid_kinds! {
         PhysicalDisk = {},
         PhysicalDiskAdoptionRequest = {},
         Probe = {},
+        Problem = {},
         Project = {},
         Propolis = {},
         Rack = {},

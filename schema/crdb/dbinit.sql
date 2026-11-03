@@ -9916,67 +9916,66 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_unadopted_sled_by_id ON omicron.public.
     id
 ) WHERE time_deleted IS NULL;
 
--- An Active Problem (see RFD 699).
+-- A problem detected by the fault management subsystem (see RFD 699).
 --
 -- This table contains relatively little data, because most of the data
--- associated with an Active Problem exists at a given revision. In order to
--- allow exporting the historical revisions of an Active Problem, we store all
--- revisions of the problem since it was created. Therefore, this table
--- basically just stores the unique ID of the Active Problem and the latest
--- revision number, and can be JOINed with `active_problem_revision` and other
--- tables to fetch the latest revision.
+-- associated with a problem exists at a given revision. In order to allow
+-- exporting the historical revisions of a problem, we store all revisions of
+-- the problem since it was created. Therefore, this table basically just stores
+-- the unique ID of the problem and the latest revision number, and can be
+-- JOINed with `problem_revision` and other tables to fetch the latest revision.
 --
 -- Everything which may be changed across revisions lives instead in the
--- `active_problem_revision` table and its friends.
-CREATE TABLE IF NOT EXISTS omicron.public.active_problem (
+-- `problem_revision` table and its friends.
+CREATE TABLE IF NOT EXISTS omicron.public.problem (
     id UUID PRIMARY KEY,
 
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
-    -- The latest revision number of this Active Problem. This can be used to
-    -- select the current revision from the `active_problem_revision` table.
+    -- The latest revision number of this problem. This can be used to
+    -- select the current revision from the `problem_revision` table.
     current_revision INT8 NOT NULL,
 
     CONSTRAINT revision_is_non_negative CHECK (current_revision >= 0)
 );
 
 CREATE INDEX IF NOT EXISTS
-    lookup_active_problem_by_time_created
+    lookup_problem_by_time_created
 ON
-    omicron.public.active_problem (time_created)
+    omicron.public.problem (time_created)
 WHERE
     time_deleted IS NULL;
 
--- A revision of an Active Problem (see RFD 699). This table allows us to store
--- the revision history of a given Active Problem, along with the current
--- revision. Querying the current version is done by looking up the Active
--- Problem from the `active_problem` table and then selecting the entry from
--- *this* table as of the `current_revision` revision.
-CREATE TABLE IF NOT EXISTS omicron.public.active_problem_revision (
+-- A revision of a problem (see RFD 699). This table allows us to store the
+-- revision history of a given problem, along with the current revision.
+-- Querying the current version is done by looking up the problem from the
+-- `problem` table and then selecting the entry from *this* table as of the
+-- `current_revision` revision.
+CREATE TABLE IF NOT EXISTS omicron.public.problem_revision (
     problem_id UUID NOT NULL,
     -- The revision number of this revision.
     --
     -- This is referenced by the `current_revision` field in the
-    -- `active_problem` table.
+    -- `problem` table.
     revision INT8 NOT NULL,
 
     -- The time at which *this revision* was created. This is **not** the time
-    -- the Active Problem itself was created, and will correspond to the
-    -- `time_modified` at which this revision was made current.
+    -- the problem itself was created, and will correspond to the `time_modified`
+    -- at which this revision was made current.
     --
     -- This column is used primarily when exporting the complete revision
-    -- history of an Active Problem.
+    -- history of a problem.
     time_created TIMESTAMPTZ NOT NULL,
 
-    -- If this is NULL, the Active Problem is Active, and if it is non-NULL, the
-    -- problem has been Resolved.
+    -- If this is NULL, the problem is in the "active" state, and if it is
+    -- non-NULL, the problem is in the "resolved" state.
     time_resolved TIMESTAMPTZ,
 
-    -- The Active Problem's problem code as of this revision.
+    -- The problem's problem code as of this revision.
     --
-    -- This determines the problem class as well as the Active Problem's
+    -- This determines the problem class, as well as the problem's
     -- documentation.
     code INT8 NOT NULL,
 

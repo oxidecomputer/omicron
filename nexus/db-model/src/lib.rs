@@ -117,7 +117,6 @@ extern crate diesel;
 #[macro_use]
 extern crate newtype_derive;
 
-mod active_problem;
 mod address_lot;
 mod affinity;
 mod alert;
@@ -188,6 +187,7 @@ mod physical_disk_kind;
 mod physical_disk_policy;
 mod physical_disk_state;
 mod probe;
+mod problem;
 mod producer_endpoint;
 mod project;
 mod reconfigurator_config;
@@ -274,7 +274,6 @@ mod db {
 
 pub use self::macaddr::*;
 pub use self::unsigned::*;
-pub use active_problem::*;
 pub use address_lot::*;
 pub use affinity::*;
 pub use alert::*;
@@ -346,6 +345,7 @@ pub use physical_disk_kind::*;
 pub use physical_disk_policy::*;
 pub use physical_disk_state::*;
 pub use probe::*;
+pub use problem::*;
 pub use producer_endpoint::*;
 pub use project::*;
 pub use quota::*;

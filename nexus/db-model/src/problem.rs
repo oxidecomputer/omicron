@@ -2,13 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Database representations of Active Problems (see [RFD 699]).
+//! Database representations of problems (see [RFD 699]).
 //!
-//! An Active Problem is stored as an [`ActiveProblem`] record, which holds
-//! only the problem's identity and its current revision number, and a series
-//! of [`ActiveProblemRevision`] records, one per revision. Everything that
-//! may change over the life of the problem lives in the revision records, so
-//! that the full revision history of the problem is retained. The current
+//! A problem is stored as a [`Problem`] record, which holds only the problem's
+//! identity and its current revision number, and a series of
+//! [`ProblemRevision`] records, one per revision. Everything that may change
+//! over the life of the problem lives in the revision records, so that the
+//! full revision history of the problem is retained. The current
 //! state of a problem is the revision whose `revision` number equals the
 //! problem's `current_revision`.
 //!
@@ -19,79 +19,78 @@ use crate::DbTypedUuid;
 use crate::SqlU32;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
-use nexus_db_schema::schema::{active_problem, active_problem_revision};
-use nexus_types::external_api::active_problem as api;
-use nexus_types::fm::active_problem::ProblemCode;
+use nexus_db_schema::schema::{problem, problem_revision};
+use nexus_types::external_api::problem as api;
+use nexus_types::fm::problem::ProblemCode;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::Error;
-use omicron_generation_kinds::ActiveProblemGeneration;
-use omicron_generation_kinds::ActiveProblemGenerationKind;
-use omicron_uuid_kinds::ActiveProblemKind;
-use omicron_uuid_kinds::ActiveProblemUuid;
+use omicron_generation_kinds::ProblemGeneration;
+use omicron_generation_kinds::ProblemGenerationKind;
+use omicron_uuid_kinds::ProblemKind;
+use omicron_uuid_kinds::ProblemUuid;
 
-/// An Active Problem.
+/// A problem.
 ///
-/// This corresponds to a record in the `active_problem` table.
+/// This corresponds to a record in the `problem` table.
 #[derive(Clone, Debug, PartialEq, Queryable, Insertable, Selectable, Asset)]
-#[diesel(table_name = active_problem)]
-#[asset(uuid_kind = ActiveProblemKind)]
-pub struct ActiveProblem {
+#[diesel(table_name = problem)]
+#[asset(uuid_kind = ProblemKind)]
+pub struct Problem {
     #[diesel(embed)]
-    pub identity: ActiveProblemIdentity,
+    pub identity: ProblemIdentity,
     pub time_deleted: Option<DateTime<Utc>>,
-    /// The revision number of this Active Problem's current revision.
+    /// The revision number of this problem's current revision.
     ///
-    /// This selects the current revision from the `active_problem_revision`
+    /// This selects the current revision from the `problem_revision`
     /// table.
-    pub current_revision: DbTypedGeneration<ActiveProblemGenerationKind>,
+    pub current_revision: DbTypedGeneration<ProblemGenerationKind>,
 }
 
-/// A revision of an Active Problem.
+/// A revision of a problem.
 ///
-/// This corresponds to a record in the `active_problem_revision` table.
+/// This corresponds to a record in the `problem_revision` table.
 #[derive(Clone, Debug, PartialEq, Queryable, Insertable, Selectable)]
-#[diesel(table_name = active_problem_revision)]
-pub struct ActiveProblemRevision {
-    pub problem_id: DbTypedUuid<ActiveProblemKind>,
-    pub revision: DbTypedGeneration<ActiveProblemGenerationKind>,
+#[diesel(table_name = problem_revision)]
+pub struct ProblemRevision {
+    pub problem_id: DbTypedUuid<ProblemKind>,
+    pub revision: DbTypedGeneration<ProblemGenerationKind>,
     /// The time at which this revision was created.
     ///
-    /// This is *not* the time at which the Active Problem itself was created.
+    /// This is *not* the time at which the problem itself was created.
     pub time_created: DateTime<Utc>,
-    /// The time at which the Active Problem was resolved, if it is resolved
+    /// The time at which the problem was resolved, if it is resolved
     /// as of this revision.
     ///
-    /// If this is `None`, the Active Problem was active as of this revision.
+    /// If this is `None`, the problem was active as of this revision.
     pub time_resolved: Option<DateTime<Utc>>,
-    /// The Active Problem's problem code, as of this revision.
+    /// The problem's problem code, as of this revision.
     pub code: SqlU32,
     pub summary: String,
     pub description: String,
     pub action_required: String,
 }
 
-/// A view of an Active Problem at its current revision.
+/// A view of a problem at its current revision.
 #[derive(Debug, Clone)]
-pub struct ActiveProblemView {
-    pub identity: ActiveProblemIdentity,
+pub struct ProblemView {
+    pub identity: ProblemIdentity,
     pub time_deleted: Option<DateTime<Utc>>,
     pub time_resolved: Option<DateTime<Utc>>,
-    pub revision: ActiveProblemGeneration,
+    pub revision: ProblemGeneration,
     pub code: ProblemCode,
     pub summary: String,
     pub description: String,
     pub action_required: String,
 }
 
-impl TryFrom<(ActiveProblem, ActiveProblemRevision)> for ActiveProblemView {
+impl TryFrom<(Problem, ProblemRevision)> for ProblemView {
     type Error = Error;
 
     fn try_from(
-        (metadata, rev): (ActiveProblem, ActiveProblemRevision),
+        (metadata, rev): (Problem, ProblemRevision),
     ) -> Result<Self, Self::Error> {
-        let ActiveProblem { identity, current_revision, time_deleted } =
-            metadata;
-        let ActiveProblemRevision {
+        let Problem { identity, current_revision, time_deleted } = metadata;
+        let ProblemRevision {
             problem_id,
             revision,
             time_created: _, // we don't care when the revision was created here.
@@ -110,8 +109,8 @@ impl TryFrom<(ActiveProblem, ActiveProblemRevision)> for ActiveProblemView {
         if identity.id != problem_id {
             return Err(Error::InternalError {
                 internal_message: format!(
-                    "expected a revision of Active Problem {id}, but found a \
-                    revision of Active Problem {problem_id}",
+                    "expected a revision of problem {id}, but found a \
+                    revision of problem {problem_id}",
                 ),
             });
         }
@@ -120,7 +119,7 @@ impl TryFrom<(ActiveProblem, ActiveProblemRevision)> for ActiveProblemView {
         if revision != current_revision {
             return Err(Error::InternalError {
                 internal_message: format!(
-                    "revision {} is not the current revision of Active Problem \
+                    "revision {} is not the current revision of problem \
                      {id} (expected revision {})",
                     revision.0, current_revision.0,
                 ),
@@ -140,8 +139,8 @@ impl TryFrom<(ActiveProblem, ActiveProblemRevision)> for ActiveProblemView {
     }
 }
 
-impl Asset for ActiveProblemView {
-    type IdType = ActiveProblemUuid;
+impl Asset for ProblemView {
+    type IdType = ProblemUuid;
 
     fn id(&self) -> Self::IdType {
         self.identity.id.into()
@@ -156,14 +155,14 @@ impl Asset for ActiveProblemView {
     }
 }
 
-impl From<ActiveProblemView> for api::ActiveProblem {
-    fn from(view: ActiveProblemView) -> Self {
+impl From<ProblemView> for api::Problem {
+    fn from(view: ProblemView) -> Self {
         let identity = view.identity();
-        let ActiveProblemView {
+        let ProblemView {
             identity: _identity,
             revision,
             time_resolved,
-            // We shouldn't be attempting to convert a deleted active problem
+            // We shouldn't be attempting to convert a deleted problem
             // into an API response, since any queries should exclude deleted
             // records...,
             time_deleted: _,
@@ -173,8 +172,8 @@ impl From<ActiveProblemView> for api::ActiveProblem {
             action_required,
         } = view;
         let state = match time_resolved {
-            Some(_) => api::ActiveProblemState::Resolved,
-            None => api::ActiveProblemState::Active,
+            Some(_) => api::ProblemState::Resolved,
+            None => api::ProblemState::Active,
         };
         Self {
             identity,
