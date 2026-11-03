@@ -6184,9 +6184,10 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
         instance_compute_update(&instance, |update| {
             // The instance's boot disk should not have actually changed from
             // the one with which it was created.
+            let current_boot_disk = instance.boot_disk_id.unwrap();
             assert_eq!(
                 update.boot_disk,
-                Nullable(Some(probablydata.clone().into()))
+                Nullable(Some(NameOrId::Id(current_boot_disk))),
             );
 
             update.auto_restart_policy =
