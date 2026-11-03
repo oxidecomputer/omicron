@@ -58,6 +58,8 @@ impl From<gateway_messages::ignition::SystemType> for SpIgnitionSystemType {
             SystemType::Psc => Self::Psc,
             SystemType::Unknown(id) => Self::Unknown { id },
             SystemType::Cosmo => Self::Cosmo,
+            SystemType::Metro => Self::Unknown { id: 0b0000_0000_0000_0101 },
+            SystemType::Observer => Self::Unknown { id: 0b0000_0000_0000_0110 },
         }
     }
 }

@@ -602,7 +602,7 @@ output.type = "zone"
 # Packages not built within Omicron, but which must be imported.
 
 [package.omicron-faux-mgs]
-# This package bundles a `faux-mgs` binary into `/usr/bin` in the switch zone,
+# This package bundles a `faux-mgs` binary into `/opt/oxide/faux-mgs/bin` in the switch zone,
 # allowing `pilot sp ...` to work without needing to manually scp a `faux-mgs`
 # binary in during support operations. (On rare occasions a support operator may
 # still need to do that to get a more recent faux-mgs.)
