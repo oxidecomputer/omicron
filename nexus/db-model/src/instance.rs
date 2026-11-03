@@ -583,9 +583,9 @@ impl InstanceAutoRestart {
             // evacuated. The instance should be restarted automatically
             // regardless of the auto-restart policy.
             //
-            // In addition, we ignore the cooling down period. Any given
-            // instance will be reincarnated due to evacuation multiple times
-            // during an update.
+            // In addition, we ignore the cooldown period. Any given instance
+            // will be reincarnated due to evacuation multiple times during an
+            // update.
             InstanceState::SledEvacuating => Reincarnatability::WillReincarnate,
         };
 

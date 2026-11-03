@@ -77,6 +77,9 @@ pub(crate) enum Reason {
     /// The instance has failed and is being automatically restarted by the
     /// control plane.
     AutoRestart,
+    /// The instance's VMM was stopped because its sled is being evacuated. The
+    /// instance is being restarted by the control plane.
+    SledEvacuation,
 }
 
 declare_saga_actions! {
@@ -450,10 +453,18 @@ async fn sis_move_to_starting(
     let new_runtime = {
         // If we are performing an automated restart of a Failed instance,
         // remember to update the timestamp.
-        let time_last_auto_restarted = if params.reason == Reason::AutoRestart {
-            Some(Utc::now())
-        } else {
-            db_instance.runtime().time_last_auto_restarted
+
+        //let time_last_auto_restarted = if params.reason == Reason::AutoRestart {
+        //    Some(Utc::now())
+        //} else {
+        //    db_instance.runtime().time_last_auto_restarted
+        //};
+
+        let time_last_auto_restarted = match params.reason {
+            Reason::AutoRestart => Some(Utc::now()),
+            Reason::SledEvacuation | Reason::User | Reason::AutoStart => {
+                db_instance.runtime().time_last_auto_restarted
+            }
         };
         db::model::InstanceRuntimeState {
             nexus_state: db::model::InstanceState::Vmm,

@@ -224,11 +224,23 @@ impl InstanceReincarnation {
                 );
 
                 let running_saga = async {
+                    let start_reason = match reason {
+                        // We are starting due to a failure
+                        ReincarnationReason::Failed
+                        | ReincarnationReason::SagaUnwound => {
+                            instance_start::Reason::AutoRestart
+                        }
+                        // Nothing bad happened here, the sled is just being
+                        // evacuated
+                        ReincarnationReason::SledEvacuation => {
+                            instance_start::Reason::SledEvacuation
+                        }
+                    };
                     let dag = instance_start::SagaInstanceStart::prepare(
                         &instance_start::Params {
                             db_instance,
                             serialized_authn: serialized_authn.clone(),
-                            reason: instance_start::Reason::AutoRestart,
+                            reason: start_reason,
                         },
                     )?;
                     self.sagas.saga_run(dag).await
@@ -634,6 +646,22 @@ mod test {
         assert_eq!(updated, 1, "exactly one VMM should be marked");
     }
 
+    async fn set_time_last_auto_restarted(
+        conn: &AsyncConnection,
+        instance_id: Uuid,
+        time: chrono::DateTime<Utc>,
+    ) {
+        use nexus_db_schema::schema::instance::dsl;
+
+        let updated = diesel::update(dsl::instance)
+            .filter(dsl::id.eq(instance_id))
+            .set(dsl::time_last_auto_restarted.eq(Some(time)))
+            .execute_async(conn)
+            .await
+            .expect("instance should be updated");
+        assert_eq!(updated, 1, "exactly one instance should be updated");
+    }
+
     // Boilerplate reducer.
     //
     // This is a macro so that the `dbg!` has the line number of the place where
@@ -821,32 +849,46 @@ mod test {
         // be reincarnated. When an instance is reincarnated due to its sled
         // evacuating, the task ignores the auto-restart policy and always
         // restarts the instance, so we include instances with both policies
-        let num_sled_evacuating = 4;
-        for i in 0..num_sled_evacuating / 2 {
-            let instance = create_instance(
-                &cptestctx,
-                &opctx,
-                &format!("kolankola-{i}"),
+        //
+        // The task should also ignore the cooldown period for these instances,
+        // and their auto-restart timestamp should not change when they are
+        // reincarnated.
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let recent_auto_restart = omicron_common::now_db_precision();
+        // For each policy, include an instance that has never been automatically
+        // restarted, and one that is still within the cooldown period.
+        let sled_evacuating_instances = [
+            ("kolankola-0", InstanceAutoRestartPolicy::BestEffort, None),
+            (
+                "kolankola-1",
                 InstanceAutoRestartPolicy::BestEffort,
-                InstanceState::SledEvacuating,
-                InstanceIntendedState::Running,
-            )
-            .await;
-            will_reincarnate.insert(ReincarnatableInstance {
-                instance_id: instance.id(),
-                reason: ReincarnationReason::SledEvacuation,
-            });
-        }
-        for i in 0..num_sled_evacuating / 2 {
+                Some(recent_auto_restart),
+            ),
+            ("ekabijin-0", InstanceAutoRestartPolicy::Never, None),
+            (
+                "ekabijin-1",
+                InstanceAutoRestartPolicy::Never,
+                Some(recent_auto_restart),
+            ),
+        ];
+        let num_sled_evacuating = sled_evacuating_instances.len();
+        let mut evacuated_last_auto_restarted =
+            std::collections::BTreeMap::new();
+        for (name, policy, last_auto_restarted) in sled_evacuating_instances {
             let instance = create_instance(
                 &cptestctx,
                 &opctx,
-                &format!("ekabijin-{i}"),
-                InstanceAutoRestartPolicy::Never,
+                name,
+                policy,
                 InstanceState::SledEvacuating,
                 InstanceIntendedState::Running,
             )
             .await;
+            if let Some(time) = last_auto_restarted {
+                set_time_last_auto_restarted(&conn, instance.id(), time).await;
+            }
+            evacuated_last_auto_restarted
+                .insert(instance.id(), last_auto_restarted);
             will_reincarnate.insert(ReincarnatableInstance {
                 instance_id: instance.id(),
                 reason: ReincarnationReason::SledEvacuation,
@@ -981,12 +1023,35 @@ mod test {
                 status.instances_reincarnated
             );
 
-            test_helpers::instance_wait_for_state(
+            let state = test_helpers::instance_wait_for_state(
                 &cptestctx,
                 InstanceUuid::from_untyped_uuid(instance.instance_id),
                 InstanceState::Vmm,
             )
             .await;
+
+            let time_last_auto_restarted =
+                state.instance().time_last_auto_restarted;
+            match instance.reason {
+                ReincarnationReason::Failed
+                | ReincarnationReason::SagaUnwound => {
+                    assert!(
+                        time_last_auto_restarted.is_some(),
+                        "expected {instance} to have an auto-restart timestamp",
+                    );
+                }
+                ReincarnationReason::SledEvacuation => {
+                    let found_time_auto_restarted =
+                        evacuated_last_auto_restarted
+                            .get(&instance.instance_id)
+                            .unwrap();
+                    assert_eq!(
+                        time_last_auto_restarted, *found_time_auto_restarted,
+                        "expected the auto-restart timestamp of {instance} to \
+                         be unchanged",
+                    );
+                }
+            }
         }
     }
 
