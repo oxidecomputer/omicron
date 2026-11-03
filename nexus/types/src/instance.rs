@@ -99,6 +99,11 @@ pub enum VmmState {
     /// The start saga which created this VMM has failed and unwound before the
     /// instance was able to start.
     SagaUnwound,
+    /// The instance was stopped *before* the VMM was registered with the
+    /// sled-agent (i.e. when the VMM record was [`Self::Creating`]). In this
+    /// case, the start saga will unwind, transitioning the instance back to
+    /// stopped.
+    Cancelling,
 }
 
 impl VmmState {
@@ -115,6 +120,7 @@ impl VmmState {
             VmmState::Failed(_) => "failed",
             VmmState::Destroyed => "destroyed",
             VmmState::SagaUnwound => "saga_unwound",
+            VmmState::Cancelling => "cancelling",
         }
     }
 
@@ -146,7 +152,10 @@ impl VmmState {
     pub fn exists_on_sled(&self) -> bool {
         !matches!(
             self,
-            VmmState::Creating | VmmState::SagaUnwound | VmmState::Destroyed
+            VmmState::Creating
+                | VmmState::Cancelling
+                | VmmState::SagaUnwound
+                | VmmState::Destroyed
         )
     }
 }

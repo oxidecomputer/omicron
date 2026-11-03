@@ -1367,7 +1367,14 @@ CREATE TYPE IF NOT EXISTS omicron.public.vmm_state AS ENUM (
     'migrating',
     'failed',
     'destroyed',
-    'saga_unwound'
+    'saga_unwound',
+
+    /*
+     * The instance was stopped *before* the VMM was registered with the
+     * sled-agent (i.e. when the VMM record was 'creating'). In this case, the
+     * start saga will unwind, transitioning the instance back to stopped.
+     */
+    'cancelling'
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart AS ENUM (
