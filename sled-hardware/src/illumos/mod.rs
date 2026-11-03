@@ -14,6 +14,7 @@ use crate::disk_bay::{
 use crate::nvme_instance::NvmeInstance;
 use crate::{DendriteAsic, DiskBay, DiskBayOccupant, SledMode, UnparsedDisk};
 use gethostname::gethostname;
+use iddqd::IdOrdMap;
 use illumos_devinfo::{DevInfo, Node, Property};
 use libnvme::namespace::NamespaceDiscoveryLevel;
 use libnvme::{Nvme, controller::Controller};
@@ -27,7 +28,7 @@ use slog::info;
 use slog::o;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use tokio::sync::watch;
 use uuid::Uuid;
 
@@ -190,7 +191,7 @@ impl HardwareSnapshot {
                 .iter()
                 .map(|disk| PolledBay::Described {
                     bay: DiskBay {
-                        location: disk.location().to_string(),
+                        location: disk.location().clone(),
                         kind: disk.variant(),
                         occupant: DiskBayOccupant::Disk {
                             identity: disk.identity().clone(),
@@ -219,7 +220,7 @@ impl HardwareView {
         Ok(Self {
             tofino,
             disks: HashMap::new(),
-            disk_bays: BTreeMap::new(),
+            disk_bays: IdOrdMap::new(),
             baseboard,
             online_processor_count: sysconf::online_processor_count()?,
             usable_physical_pages: sysconf::usable_physical_pages()?,
@@ -368,7 +369,7 @@ fn poll_bay(
                     log,
                     "NVMe controller has more than one namespace; \
                      only the first is used";
-                    "location" => &bay.location,
+                    "location" => %bay.location,
                     "nvme_instance" => %instance,
                     "namespaces" => namespaces.len(),
                 );
@@ -379,7 +380,7 @@ fn poll_bay(
                     warn!(
                         log,
                         "Failed to query NVMe controller";
-                        "location" => &bay.location,
+                        "location" => %bay.location,
                         "nvme_instance" => %instance,
                         InlineErrorChain::new(&err),
                     );
@@ -403,7 +404,7 @@ fn poll_bay(
             warn!(
                 log,
                 "Could not describe disk bay";
-                "location" => &bay.location,
+                "location" => %bay.location,
                 InlineErrorChain::new(&err),
             );
             unreadable(InlineErrorChain::new(&err).to_string())
@@ -879,7 +880,7 @@ impl HardwareManager {
         self.hardware_view_rx.borrow().disks()
     }
 
-    pub fn disk_bays(&self) -> BTreeMap<String, DiskBay> {
+    pub fn disk_bays(&self) -> IdOrdMap<DiskBay> {
         self.hardware_view_rx.borrow().disk_bays().clone()
     }
 

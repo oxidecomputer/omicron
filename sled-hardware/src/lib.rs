@@ -2,8 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
+use iddqd::IdOrdMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::disk::DiskIdentity;
@@ -401,7 +402,7 @@ enum TofinoView {
 pub struct HardwareView {
     tofino: TofinoView,
     disks: HashMap<DiskIdentity, UnparsedDisk>,
-    disk_bays: BTreeMap<String, DiskBay>,
+    disk_bays: IdOrdMap<DiskBay>,
     baseboard: Baseboard,
     online_processor_count: u32,
     usable_physical_pages: u64,
@@ -431,10 +432,7 @@ impl HardwareView {
 
     /// Every U.2 bay and M.2 socket of the chassis, by location, and what the
     /// latest poll found in it.
-    ///
-    /// Empty on hosts that are not Oxide sleds, where there is no chassis
-    /// topology to read.
-    pub fn disk_bays(&self) -> &BTreeMap<String, DiskBay> {
+    pub fn disk_bays(&self) -> &IdOrdMap<DiskBay> {
         &self.disk_bays
     }
 

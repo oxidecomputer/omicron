@@ -64,6 +64,7 @@ mod tests {
     use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::disk::DiskVariant;
     use sled_hardware::DiskFirmware;
+    use sled_hardware::DiskLocation;
     use sled_hardware::DiskPaths;
     use sled_hardware::PooledDisk;
     use sled_hardware::UnparsedDisk;
@@ -89,7 +90,7 @@ mod tests {
             pcie_slot: 0,
             identity: identity.clone(),
             is_boot_disk: false,
-            location: "N2".to_string(),
+            location: DiskLocation::new("N2"),
             partitions: vec![],
             zpool_name: ZpoolName::External(ExternalZpoolUuid::new_v4()),
             firmware: firmware.clone(),
@@ -105,14 +106,14 @@ mod tests {
             identity,
             false,
             firmware,
-            "N3".to_string(),
+            DiskLocation::new("N3"),
         ));
 
         let updated = assert_matches!(
             update_properties_from_raw_disk(&adopted, &raw_disk, &logctx.log),
             MaybeUpdatedDisk::Updated(disk) => disk
         );
-        assert_eq!(updated.location(), "N3");
+        assert_eq!(updated.location().as_str(), "N3");
         assert_eq!(RawDisk::from(updated.clone()), raw_disk);
 
         // A second pass sees nothing left to update.

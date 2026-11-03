@@ -16,6 +16,7 @@
 //! namespace the nvme driver does not ignore. A bay holding anything else
 //! gets a `board` child with an `ic` under it as a placeholder.
 
+use crate::DiskLocation;
 use crate::disk_bay::{
     BayContents, BayProblem, ObservedBay, ObservedNamespace, ObservedOccupant,
 };
@@ -48,9 +49,10 @@ pub(super) enum TopoError {
     },
 
     #[error(
-        "topology node {node} has location {location:?}, as does another bay"
+        "topology node {node} has location \"{location}\", as does another \
+         bay"
     )]
-    DuplicateLocation { node: String, location: String },
+    DuplicateLocation { node: String, location: DiskLocation },
 
     #[error("could not read the slot type of topology node {node}")]
     SlotType {
@@ -229,7 +231,7 @@ impl<'a> BayWalker<'a> {
     ) -> Result<(), TopoError> {
         let key = NodeKey::of(node);
         let location = match node.label() {
-            Ok(label) if !label.is_empty() => label,
+            Ok(label) if !label.is_empty() => DiskLocation::new(label),
             Ok(_) => {
                 return Err(TopoError::UnlabelledBay {
                     node: key.to_string(),

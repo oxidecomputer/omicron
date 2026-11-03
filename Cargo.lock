@@ -14943,6 +14943,7 @@ dependencies = [
  "cfg-if",
  "futures",
  "gethostname",
+ "iddqd",
  "illumos-devinfo",
  "illumos-utils",
  "libc",

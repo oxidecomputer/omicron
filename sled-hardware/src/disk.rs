@@ -201,6 +201,33 @@ impl DiskFirmware {
     }
 }
 
+/// Where a disk sits in the chassis, as labelled by the platform's hardware
+/// topology: "N5" for a U.2 bay, "M.2 East" for an M.2 socket.
+///
+/// This is the operator-facing position, matching what is printed on the
+/// sled, and is the value to show someone who has to find the drive.
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct DiskLocation(String);
+
+impl DiskLocation {
+    pub fn new(label: impl Into<String>) -> Self {
+        Self(label.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for DiskLocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// A disk which has been observed by monitoring hardware.
 ///
 /// No guarantees are made about the partitions which exist within this disk.
@@ -217,7 +244,7 @@ pub struct UnparsedDisk {
     identity: DiskIdentity,
     is_boot_disk: bool,
     firmware: DiskFirmware,
-    location: String,
+    location: DiskLocation,
 }
 
 impl UnparsedDisk {
@@ -230,7 +257,7 @@ impl UnparsedDisk {
         identity: DiskIdentity,
         is_boot_disk: bool,
         firmware: DiskFirmware,
-        location: String,
+        location: DiskLocation,
     ) -> Self {
         Self {
             paths: DiskPaths { devfs_path, dev_path },
@@ -280,14 +307,9 @@ impl UnparsedDisk {
         self.pcie_slot
     }
 
-    /// Where this disk sits in the chassis, as labelled by the platform's
-    /// hardware topology: "N5" for a U.2 bay, "M.2 East" for a boot device.
-    ///
-    /// This is the operator-facing position, matching what is printed on the
-    /// sled, and is the value to show someone who has to find the drive. The
-    /// topology is where sled-hardware finds disks in the first place, so
-    /// every disk has one.
-    pub fn location(&self) -> &str {
+    /// Where this disk sits in the chassis. The topology is where
+    /// sled-hardware finds disks in the first place, so every disk has one.
+    pub fn location(&self) -> &DiskLocation {
         &self.location
     }
 
@@ -323,7 +345,7 @@ pub struct PooledDisk {
     pub zpool_name: ZpoolName,
     pub firmware: DiskFirmware,
     /// See [`UnparsedDisk::location`].
-    pub location: String,
+    pub location: DiskLocation,
 }
 
 impl PooledDisk {
