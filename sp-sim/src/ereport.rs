@@ -21,6 +21,7 @@ use std::io::Cursor;
 use std::net::SocketAddrV6;
 use tokio::sync::oneshot;
 use zerocopy::IntoBytes;
+use zerocopy::TryFromBytes;
 
 pub(crate) struct EreportState {
     ereports: VecDeque<EreportListEntry>,
@@ -103,24 +104,6 @@ struct EreportListEntry {
     ena: Ena,
     ereport: Ereport,
     bytes: Vec<u8>,
-}
-
-pub(crate) async fn recv_request(
-    sock: Option<&mut UdpServer>,
-) -> anyhow::Result<(Request, SocketAddrV6, &mut UdpServer)> {
-    use zerocopy::TryFromBytes;
-    match sock {
-        Some(sock) => {
-            let (packet, addr) = sock.recv_from().await?;
-            let req = Request::try_read_from_bytes(packet).map_err(|e| {
-                anyhow::anyhow!(
-                    "couldn't understand ereport header from {addr}: {e:?}"
-                )
-            })?;
-            Ok((req, addr, sock))
-        }
-        None => futures::future::pending().await,
-    }
 }
 
 impl EreportState {
@@ -219,6 +202,22 @@ impl EreportState {
         self.ereports.push_back(ereport.to_entry(ena));
         self.next_ena.0 += 1;
         ena
+    }
+
+    pub(crate) async fn recv_request<'sock>(
+        &self,
+        sock: Option<&'sock mut UdpServer>,
+    ) -> anyhow::Result<(Request, SocketAddrV6, &'sock mut UdpServer)> {
+        let Some(sock) = sock else {
+            return futures::future::pending().await;
+        };
+        let (packet, addr) = sock.recv_from().await?;
+        let req = Request::try_read_from_bytes(packet).map_err(|e| {
+            anyhow::anyhow!(
+                "couldn't understand ereport header from {addr}: {e:?}"
+            )
+        })?;
+        Ok((req, addr, sock))
     }
 
     pub(crate) fn handle_request<'buf>(
