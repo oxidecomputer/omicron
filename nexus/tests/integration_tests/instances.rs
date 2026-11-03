@@ -6230,7 +6230,7 @@ fn instance_compute_update(
     instance: &Instance,
     edit_update: impl Fn(&mut instance::InstanceUpdate),
 ) -> instance::InstanceUpdate {
-    // Construct an update which if used to reconfigure `Instance` would result
+    // Construct an update which, if used to reconfigure `Instance`, would result
     // in no changes.
     let unchanged_boot_disk = instance.boot_disk_id.map(|id| NameOrId::Id(id));
     let mut update = instance::InstanceUpdate {
