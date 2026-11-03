@@ -363,7 +363,9 @@ fn poll_bay(
             ..
         }) => {
             if namespaces.len() > 1 {
-                // Only the first namespace becomes a disk. See
+                // Every namespace on a controller shares its DiskIdentity,
+                // so only one can become a disk; we use the first (lowest
+                // NSID). See
                 // https://github.com/oxidecomputer/omicron/issues/5241.
                 warn!(
                     log,
