@@ -89,6 +89,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_11_02_00, LAST_CERTIFICATE_DOCS),
     (2026_10_29_00, SLED_ADD_PRECHECK_OVERRIDES),
     (2026_10_21_00, BYTE_WRAPPER_0_2_BUMP),
     (2026_10_15_00, SYSTEM_CERTIFICATES),
@@ -5122,6 +5123,9 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseOk<latest::certificate::Certificate>, HttpError>;
 
     /// Delete TLS certificate in current silo
+    ///
+    /// The silo's last certificate cannot be deleted. Create another
+    /// certificate first.
     #[endpoint {
         method = DELETE,
         path = "/v1/certificates/{certificate}",
@@ -5183,6 +5187,9 @@ pub trait NexusExternalApi {
     ///
     /// The silo must be specified if the certificate is specified by name, and
     /// must not be specified if the certificate is specified by ID.
+    ///
+    /// The silo's last certificate cannot be deleted. Create another
+    /// certificate first.
     #[endpoint {
         method = DELETE,
         path = "/v1/system/certificates/{certificate}",
