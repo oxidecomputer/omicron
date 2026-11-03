@@ -14,6 +14,7 @@ use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::ProjectUuid;
+use omicron_uuid_kinds::SiloUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
@@ -31,7 +32,7 @@ pub(crate) enum ImageType {
 }
 
 impl ImageType {
-    fn silo_id(&self) -> Uuid {
+    fn silo_id(&self) -> SiloUuid {
         match self {
             ImageType::Project { authz_silo, .. }
             | ImageType::Silo { authz_silo } => authz_silo.id(),
@@ -203,7 +204,7 @@ async fn simc_create_image_record(
                     image_id,
                     params.create_params.identity.clone(),
                 ),
-                silo_id: params.image_type.silo_id(),
+                silo_id: params.image_type.silo_id().into(),
                 project_id: params.image_type.project_id().map(Into::into),
                 volume_id: source_volume.volume_id.into(),
                 url: None,

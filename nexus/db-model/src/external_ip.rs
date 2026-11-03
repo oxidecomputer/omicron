@@ -31,6 +31,8 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ProjectKind;
 use omicron_uuid_kinds::ProjectUuid;
+use omicron_uuid_kinds::SiloKind;
+use omicron_uuid_kinds::SiloUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -251,7 +253,7 @@ pub enum IpAllocationTarget {
     /// A silo-owned external IP: instance SNAT / ephemeral, probe ephemeral, or
     /// a floating IP. Allocation verifies the pool is still linked to this silo
     /// and assigned to silos.
-    Silo { silo_id: Uuid },
+    Silo { silo_id: DbTypedUuid<SiloKind> },
     /// A system-service external IP, i.e., an Omicron zone. Allocation verifies
     /// the pool is still assigned to system services.
     SystemService,
@@ -283,7 +285,7 @@ impl IncompleteExternalIp {
         id: Uuid,
         instance_id: Uuid,
         pool_id: Uuid,
-        silo_id: Uuid,
+        silo_id: SiloUuid,
     ) -> Self {
         let kind = IpKind::SNat;
         Self {
@@ -292,7 +294,7 @@ impl IncompleteExternalIp {
             description: None,
             time_created: Utc::now(),
             kind,
-            target: IpAllocationTarget::Silo { silo_id },
+            target: IpAllocationTarget::Silo { silo_id: silo_id.into() },
             is_probe: false,
             parent_id: Some(instance_id),
             pool_id,
@@ -303,7 +305,7 @@ impl IncompleteExternalIp {
         }
     }
 
-    pub fn for_ephemeral(id: Uuid, pool_id: Uuid, silo_id: Uuid) -> Self {
+    pub fn for_ephemeral(id: Uuid, pool_id: Uuid, silo_id: SiloUuid) -> Self {
         let kind = IpKind::Ephemeral;
         Self {
             id,
@@ -311,7 +313,7 @@ impl IncompleteExternalIp {
             description: None,
             time_created: Utc::now(),
             kind,
-            target: IpAllocationTarget::Silo { silo_id },
+            target: IpAllocationTarget::Silo { silo_id: silo_id.into() },
             parent_id: None,
             is_probe: false,
             pool_id,
@@ -326,7 +328,7 @@ impl IncompleteExternalIp {
         id: Uuid,
         instance_id: Uuid,
         pool_id: Uuid,
-        silo_id: Uuid,
+        silo_id: SiloUuid,
     ) -> Self {
         let kind = IpKind::Ephemeral;
         Self {
@@ -335,7 +337,7 @@ impl IncompleteExternalIp {
             description: None,
             time_created: Utc::now(),
             kind: IpKind::Ephemeral,
-            target: IpAllocationTarget::Silo { silo_id },
+            target: IpAllocationTarget::Silo { silo_id: silo_id.into() },
             is_probe: true,
             parent_id: Some(instance_id),
             pool_id,
@@ -352,7 +354,7 @@ impl IncompleteExternalIp {
         description: &str,
         project_id: ProjectUuid,
         pool_id: Uuid,
-        silo_id: Uuid,
+        silo_id: SiloUuid,
     ) -> Self {
         let kind = IpKind::Floating;
         Self {
@@ -361,7 +363,7 @@ impl IncompleteExternalIp {
             description: Some(description.to_string()),
             time_created: Utc::now(),
             kind,
-            target: IpAllocationTarget::Silo { silo_id },
+            target: IpAllocationTarget::Silo { silo_id: silo_id.into() },
             is_probe: false,
             parent_id: None,
             pool_id,
@@ -379,7 +381,7 @@ impl IncompleteExternalIp {
         project_id: ProjectUuid,
         explicit_ip: IpAddr,
         pool_id: Uuid,
-        silo_id: Uuid,
+        silo_id: SiloUuid,
     ) -> Self {
         let kind = IpKind::Floating;
         Self {
@@ -388,7 +390,7 @@ impl IncompleteExternalIp {
             description: Some(description.to_string()),
             time_created: Utc::now(),
             kind,
-            target: IpAllocationTarget::Silo { silo_id },
+            target: IpAllocationTarget::Silo { silo_id: silo_id.into() },
             is_probe: false,
             parent_id: None,
             pool_id,
@@ -480,7 +482,7 @@ impl IncompleteExternalIp {
     /// The silo that owns this external IP, if it is a silo-owned IP.
     ///
     /// Returns `None` for system-service IPs.
-    pub fn silo_id(&self) -> Option<&Uuid> {
+    pub fn silo_id(&self) -> Option<&DbTypedUuid<SiloKind>> {
         match &self.target {
             IpAllocationTarget::Silo { silo_id } => Some(silo_id),
             IpAllocationTarget::SystemService => None,

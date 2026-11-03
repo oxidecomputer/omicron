@@ -19,9 +19,10 @@ use nexus_types::external_api::project as project_types;
 use nexus_types::identity::Resource;
 use omicron_uuid_kinds::ProjectKind;
 use omicron_uuid_kinds::ProjectUuid;
+use omicron_uuid_kinds::SiloKind;
+use omicron_uuid_kinds::SiloUuid;
 use serde::Deserialize;
 use serde::Serialize;
-use uuid::Uuid;
 
 /// Describes a project within the database.
 #[derive(
@@ -42,25 +43,32 @@ pub struct Project {
 
     /// child resource generation number, per RFD 192
     pub rcgen: Generation,
-    pub silo_id: Uuid,
+    pub silo_id: DbTypedUuid<SiloKind>,
 }
 
 impl Project {
+    pub fn silo_id(&self) -> SiloUuid {
+        self.silo_id.into()
+    }
+
     /// Creates a new database Project object.
-    pub fn new(silo_id: Uuid, params: project_types::ProjectCreate) -> Self {
+    pub fn new(
+        silo_id: SiloUuid,
+        params: project_types::ProjectCreate,
+    ) -> Self {
         Self::new_with_id(ProjectUuid::new_v4(), silo_id, params)
     }
 
     /// Creates a new database Project object with a specific ID.
     pub fn new_with_id(
         id: ProjectUuid,
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         params: project_types::ProjectCreate,
     ) -> Self {
         Self {
             identity: ProjectIdentity::new(id, params.identity),
             rcgen: Generation::new(),
-            silo_id,
+            silo_id: silo_id.into(),
         }
     }
 }

@@ -1710,7 +1710,7 @@ mod tests {
                 IncompleteIpPoolResource {
                     ip_pool_id: multicast_pool.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -1782,7 +1782,7 @@ mod tests {
                 IncompleteIpPoolResource {
                     ip_pool_id: unicast_pool.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -1967,7 +1967,7 @@ mod tests {
                 IncompleteIpPoolResource {
                     ip_pool_id: multicast_pool.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -2039,7 +2039,7 @@ mod tests {
                 IncompleteIpPoolResource {
                     ip_pool_id: unicast_pool.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: true,
                 },
             )

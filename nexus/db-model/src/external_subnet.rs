@@ -31,13 +31,14 @@ use omicron_uuid_kinds::GenericUuid as _;
 use omicron_uuid_kinds::InstanceKind;
 use omicron_uuid_kinds::ProjectKind;
 use omicron_uuid_kinds::ProjectUuid;
+use omicron_uuid_kinds::SiloKind;
+use omicron_uuid_kinds::SiloUuid;
 use omicron_uuid_kinds::SubnetPoolKind;
 use omicron_uuid_kinds::SubnetPoolMemberKind;
 use omicron_uuid_kinds::SubnetPoolMemberUuid;
 use omicron_uuid_kinds::SubnetPoolUuid;
 use serde::Deserialize;
 use serde::Serialize;
-use uuid::Uuid;
 
 /// A pool of subnets that can be attached to instances.
 #[derive(
@@ -285,9 +286,15 @@ impl From<external_subnet_types::ExternalSubnetUpdate>
 #[diesel(table_name = subnet_pool_silo_link)]
 pub struct SubnetPoolSiloLink {
     pub subnet_pool_id: DbTypedUuid<SubnetPoolKind>,
-    pub silo_id: Uuid,
+    pub silo_id: DbTypedUuid<SiloKind>,
     pub ip_version: IpVersion,
     pub is_default: bool,
+}
+
+impl SubnetPoolSiloLink {
+    pub fn silo_id(&self) -> SiloUuid {
+        self.silo_id.into()
+    }
 }
 
 impl From<SubnetPoolSiloLink> for subnet_pool_types::SubnetPoolSiloLink {

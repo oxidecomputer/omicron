@@ -339,6 +339,7 @@ mod test {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::ProjectUuid;
+    use omicron_uuid_kinds::SiloUuid;
     use uuid::Uuid;
 
     async fn verify_collection_usage(
@@ -367,14 +368,18 @@ mod test {
 
     struct TestData {
         project_id: ProjectUuid,
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         fleet_id: Uuid,
         authz_project: crate::authz::Project,
     }
 
     impl TestData {
         fn ids(&self) -> [Uuid; 3] {
-            [self.project_id.into_untyped_uuid(), self.silo_id, self.fleet_id]
+            [
+                self.project_id.into_untyped_uuid(),
+                self.silo_id.into_untyped_uuid(),
+                self.fleet_id,
+            ]
         }
     }
 

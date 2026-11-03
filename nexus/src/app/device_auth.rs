@@ -267,7 +267,7 @@ impl super::Nexus {
                 }
                 e => Reason::UnknownError { source: e },
             })?;
-        let silo_id = db_silo_user.silo_id;
+        let silo_id = db_silo_user.silo_id();
 
         let expiration = db_access_token.time_expires;
         let token_id = db_access_token.id().into_untyped_uuid();

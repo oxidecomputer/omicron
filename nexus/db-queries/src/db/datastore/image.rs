@@ -91,7 +91,7 @@ impl DataStore {
             ),
         }
         .filter(dsl::time_deleted.is_null())
-        .filter(dsl::silo_id.eq(authz_silo.id()))
+        .filter(dsl::silo_id.eq(to_db_typed_uuid(authz_silo.id())))
         .select(SiloImage::as_select())
         .load_async::<SiloImage>(
             &*self.pool_connection_authorized(opctx).await?,

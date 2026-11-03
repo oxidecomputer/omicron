@@ -82,6 +82,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SiloUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SubnetPoolUuid;
 use ref_cast::RefCast as _;
@@ -331,7 +332,10 @@ impl DataStore {
                 DatabaseErrorKind::NotNullViolation,
                 ref info,
             ) if info.message().contains("\"silo_id\"") => {
-                Error::not_found_by_id(ResourceType::Silo, &authz_silo.id())
+                Error::not_found_by_id(
+                    ResourceType::Silo,
+                    &authz_silo.id().into_untyped_uuid(),
+                )
             }
             DieselError::DatabaseError(
                 DatabaseErrorKind::NotNullViolation,
@@ -367,7 +371,9 @@ impl DataStore {
                     dsl::external_subnet
                         .on(dsl::project_id.eq(project_dsl::id)),
                 )
-                .filter(project_dsl::silo_id.eq(authz_silo.id()))
+                .filter(
+                    project_dsl::silo_id.eq(to_db_typed_uuid(authz_silo.id())),
+                )
                 .filter(project_dsl::time_deleted.is_null())
                 .filter(
                     dsl::subnet_pool_id.eq(to_db_typed_uuid(authz_pool.id())),
@@ -421,7 +427,7 @@ impl DataStore {
             return diesel::update(
                 dsl::subnet_pool_silo_link
                     .filter(dsl::subnet_pool_id.eq(pool_id))
-                    .filter(dsl::silo_id.eq(silo_id))
+                    .filter(dsl::silo_id.eq(to_db_typed_uuid(silo_id)))
                     .filter(exists(
                         pool_dsl::subnet_pool
                             .filter(pool_dsl::id.eq(pool_id))
@@ -460,7 +466,7 @@ impl DataStore {
                                 .on(pool_dsl::id.eq(dsl::subnet_pool_id)),
                         )
                         .filter(dsl::subnet_pool_id.eq(pool_id))
-                        .filter(dsl::silo_id.eq(silo_id))
+                        .filter(dsl::silo_id.eq(to_db_typed_uuid(silo_id)))
                         .filter(pool_dsl::time_deleted.is_null())
                         .select(SubnetPoolSiloLink::as_select())
                         .get_result_async(&conn)
@@ -474,7 +480,7 @@ impl DataStore {
                     // Demote any existing default for same (silo, version).
                     diesel::update(
                         dsl::subnet_pool_silo_link
-                            .filter(dsl::silo_id.eq(silo_id))
+                            .filter(dsl::silo_id.eq(to_db_typed_uuid(silo_id)))
                             .filter(dsl::ip_version.eq(link.ip_version))
                             .filter(dsl::is_default.eq(true)),
                     )
@@ -486,7 +492,7 @@ impl DataStore {
                     diesel::update(
                         dsl::subnet_pool_silo_link
                             .filter(dsl::subnet_pool_id.eq(pool_id))
-                            .filter(dsl::silo_id.eq(silo_id)),
+                            .filter(dsl::silo_id.eq(to_db_typed_uuid(silo_id))),
                     )
                     .set(dsl::is_default.eq(true))
                     .returning(SubnetPoolSiloLink::as_returning())
@@ -560,7 +566,10 @@ impl DataStore {
             ),
         }
         .inner_join(subnet_pool_silo_link::table)
-        .filter(subnet_pool_silo_link::silo_id.eq(authz_silo.id()))
+        .filter(
+            subnet_pool_silo_link::silo_id
+                .eq(to_db_typed_uuid(authz_silo.id())),
+        )
         .filter(subnet_pool::time_deleted.is_null())
         .select(<(SubnetPool, SubnetPoolSiloLink)>::as_select())
         .load_async(&*self.pool_connection_authorized(opctx).await?)
@@ -582,7 +591,10 @@ impl DataStore {
 
         let mut query = subnet_pool::table
             .inner_join(subnet_pool_silo_link::table)
-            .filter(subnet_pool_silo_link::silo_id.eq(authz_silo.id()))
+            .filter(
+                subnet_pool_silo_link::silo_id
+                    .eq(to_db_typed_uuid(authz_silo.id())),
+            )
             .filter(subnet_pool::time_deleted.is_null())
             .select(<(SubnetPool, SubnetPoolSiloLink)>::as_select())
             .into_boxed();
@@ -832,7 +844,7 @@ impl DataStore {
     pub async fn create_external_subnet(
         &self,
         opctx: &OpContext,
-        silo_id: &Uuid,
+        silo_id: &SiloUuid,
         authz_project: &authz::Project,
         params: ExternalSubnetCreate,
     ) -> CreateResult<ExternalSubnet> {
@@ -1897,7 +1909,7 @@ mod tests {
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             DEFAULT_SILO_ID,
-            LookupType::ById(DEFAULT_SILO_ID),
+            LookupType::by_id(DEFAULT_SILO_ID),
         );
         datastore
             .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, false)
@@ -2036,7 +2048,7 @@ mod tests {
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             DEFAULT_SILO_ID,
-            LookupType::ById(DEFAULT_SILO_ID),
+            LookupType::by_id(DEFAULT_SILO_ID),
         );
 
         let _link = datastore
@@ -2172,22 +2184,21 @@ mod tests {
         // infrastructure.
         {
             use nexus_db_schema::schema::silo::dsl;
-            diesel::update(dsl::silo.filter(dsl::id.eq(DEFAULT_SILO_ID)))
-                .set(dsl::time_deleted.eq(Utc::now()))
-                .execute_async(
-                    &*datastore
-                        .pool_connection_authorized(opctx)
-                        .await
-                        .unwrap(),
-                )
-                .await
-                .unwrap();
+            diesel::update(
+                dsl::silo.filter(dsl::id.eq(to_db_typed_uuid(DEFAULT_SILO_ID))),
+            )
+            .set(dsl::time_deleted.eq(Utc::now()))
+            .execute_async(
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+            )
+            .await
+            .unwrap();
         }
 
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             DEFAULT_SILO_ID,
-            LookupType::ById(DEFAULT_SILO_ID),
+            LookupType::by_id(DEFAULT_SILO_ID),
         );
         let err = datastore
             .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
@@ -2245,7 +2256,7 @@ mod tests {
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             DEFAULT_SILO_ID,
-            LookupType::ById(DEFAULT_SILO_ID),
+            LookupType::by_id(DEFAULT_SILO_ID),
         );
         let err = datastore
             .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
@@ -2291,7 +2302,7 @@ mod tests {
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             DEFAULT_SILO_ID,
-            LookupType::ById(DEFAULT_SILO_ID),
+            LookupType::by_id(DEFAULT_SILO_ID),
         );
 
         datastore
@@ -2313,13 +2324,15 @@ mod tests {
             .expect("able to list silos for pool before silo delete");
         assert_eq!(links.len(), 1);
 
-        let c = diesel::update(silo_dsl::silo.find(DEFAULT_SILO_ID))
-            .set(silo_dsl::time_deleted.eq(Utc::now()))
-            .execute_async(
-                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
-            )
-            .await
-            .expect("should be able to soft-delete silo");
+        let c = diesel::update(
+            silo_dsl::silo.find(to_db_typed_uuid(DEFAULT_SILO_ID)),
+        )
+        .set(silo_dsl::time_deleted.eq(Utc::now()))
+        .execute_async(
+            &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+        )
+        .await
+        .expect("should be able to soft-delete silo");
         assert_eq!(c, 1, "should have deleted something");
 
         let links = datastore
@@ -2378,7 +2391,7 @@ mod tests {
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             DEFAULT_SILO_ID,
-            LookupType::ById(DEFAULT_SILO_ID),
+            LookupType::by_id(DEFAULT_SILO_ID),
         );
         datastore
             .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
@@ -4176,7 +4189,7 @@ mod tests {
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             DEFAULT_SILO_ID,
-            LookupType::ById(DEFAULT_SILO_ID),
+            LookupType::by_id(DEFAULT_SILO_ID),
         );
         datastore
             .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
@@ -4384,7 +4397,7 @@ mod tests {
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             DEFAULT_SILO_ID,
-            LookupType::ById(DEFAULT_SILO_ID),
+            LookupType::by_id(DEFAULT_SILO_ID),
         );
 
         // Try to update it.
@@ -4440,7 +4453,7 @@ mod tests {
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             DEFAULT_SILO_ID,
-            LookupType::ById(DEFAULT_SILO_ID),
+            LookupType::by_id(DEFAULT_SILO_ID),
         );
 
         datastore
@@ -4513,7 +4526,7 @@ mod tests {
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             DEFAULT_SILO_ID,
-            LookupType::ById(DEFAULT_SILO_ID),
+            LookupType::by_id(DEFAULT_SILO_ID),
         );
 
         datastore
@@ -4589,7 +4602,7 @@ mod tests {
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             DEFAULT_SILO_ID,
-            LookupType::ById(DEFAULT_SILO_ID),
+            LookupType::by_id(DEFAULT_SILO_ID),
         );
 
         // Try to unlink it.
@@ -4645,7 +4658,7 @@ mod tests {
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             DEFAULT_SILO_ID,
-            LookupType::ById(DEFAULT_SILO_ID),
+            LookupType::by_id(DEFAULT_SILO_ID),
         );
         let _link = datastore
             .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
@@ -4672,7 +4685,7 @@ mod tests {
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             DEFAULT_SILO_ID,
-            LookupType::ById(DEFAULT_SILO_ID),
+            LookupType::by_id(DEFAULT_SILO_ID),
         );
         let (authz_project, _db_project) = datastore
             .project_create(
@@ -4798,7 +4811,7 @@ mod tests {
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             DEFAULT_SILO_ID,
-            LookupType::ById(DEFAULT_SILO_ID),
+            LookupType::by_id(DEFAULT_SILO_ID),
         );
         let (authz_project, _db_project) = datastore
             .project_create(

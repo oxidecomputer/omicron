@@ -93,6 +93,7 @@ impl_typed_uuid_kinds! {
         ReconfiguratorSimOp = {},
         ReconfiguratorSimState = {},
         Region = {},
+        Silo = {},
         SiloGroup = {},
         SiloUser = {},
         Sitrep = {},

@@ -34,7 +34,7 @@ impl super::Nexus {
                 // Make sure silo exists and current user can read it
                 let (.., authz_silo) =
                     silo_lookup.lookup_for(authz::Action::Read).await?;
-                authz_silo.id()
+                authz_silo.id().into_untyped_uuid()
             }
             // if no project specified, scope to entire fleet, i.e., all silos
             _ => *FLEET_ID,
@@ -78,7 +78,7 @@ impl super::Nexus {
                 authz_project.id().into_untyped_uuid()
             }
             // if no project specified, scope to current silo
-            _ => authz_silo.id(),
+            _ => authz_silo.id().into_untyped_uuid(),
         };
 
         let timeseries = match metric_name {
@@ -149,7 +149,7 @@ impl super::Nexus {
             .oxql_query(
                 query,
                 QueryAuthzScope::Project {
-                    silo_id: authz_silo.id(),
+                    silo_id: authz_silo.id().into_untyped_uuid(),
                     project_id: authz_project.id().into_untyped_uuid(),
                 },
             )

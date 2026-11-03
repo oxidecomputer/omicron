@@ -2967,6 +2967,7 @@ mod tests {
     use crate::db::model::Project;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use crate::db::queries::vpc::MAX_VNI_SEARCH_RANGE_SIZE;
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
@@ -2996,6 +2997,7 @@ mod tests {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::RackUuid;
+    use omicron_uuid_kinds::SiloUuid;
     use oxnet::IpNet;
     use oxnet::Ipv4Net;
     use slog::info;
@@ -3026,7 +3028,7 @@ mod tests {
             },
             defaults: None,
         };
-        let project = Project::new(Uuid::new_v4(), project_params);
+        let project = Project::new(SiloUuid::new_v4(), project_params);
         let (authz_project, _) = datastore
             .project_create(&opctx, project)
             .await
@@ -3134,7 +3136,7 @@ mod tests {
             },
             defaults: None,
         };
-        let project = Project::new(Uuid::new_v4(), project_params);
+        let project = Project::new(SiloUuid::new_v4(), project_params);
         let (authz_project, _) = datastore
             .project_create(&opctx, project)
             .await
@@ -3285,7 +3287,7 @@ mod tests {
                 .sled_id(sled_id)
                 .rack_id(rack_id)
                 .build();
-            datastore.sled_upsert(sled_update).await.expect("upserting sled");
+            sled_upsert_expect_written(datastore, sled_update).await;
         }
         sled_ids.sort_unstable();
 

@@ -559,7 +559,8 @@ fn build_server(
             dropshot::ClientSpecifiesVersionInHeader::new(
                 omicron_common::api::VERSION_HEADER,
                 oximeter_api::latest_version(),
-            ),
+            )
+            .min_version(oximeter_api::oldest_version()),
         )))
         .start()
         .map_err(|e| Error::Server(e.to_string()))

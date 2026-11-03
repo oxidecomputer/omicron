@@ -27,7 +27,6 @@
 //! [`rustls::server::ResolvesServerCert`].  See [`NexusCertResolver`].
 
 use crate::context::ApiContext;
-use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
 use nexus_db_model::AuthenticationMode;
@@ -45,24 +44,21 @@ use nexus_types::observed_certificate::CertificateCandidate;
 use nexus_types::observed_certificate::best_certificate;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use nexus_types::silo::silo_dns_name;
-use omicron_certificates::CertificateValidity;
+use omicron_certificates::CertifiedKey;
+use omicron_certificates::TlsCertificate;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::bail_unless;
-use openssl::pkey::PKey;
-use rustls::pki_types::PrivateKeyDer;
-use rustls::pki_types::pem::PemObject;
-use rustls::sign::CertifiedKey;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloUuid;
 use serde::Serialize;
 use serde_with::SerializeDisplay;
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
-use std::fmt;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::watch;
-use uuid::Uuid;
 
 /// Describes the set of external endpoints, organized by DNS name
 ///
@@ -103,11 +99,11 @@ impl ExternalEndpoints {
         // be any duplicates since the DNS names are constructed from the
         // (unique) Silo names.  Even if we support aliases in the future, they
         // will presumably need to be unique, too.
-        let silos_by_id: BTreeMap<Uuid, Arc<nexus_db_model::Silo>> = silos
+        let silos_by_id: BTreeMap<SiloUuid, Arc<nexus_db_model::Silo>> = silos
             .into_iter()
             .map(|db_silo| (db_silo.id(), Arc::new(db_silo)))
             .collect();
-        let mut dns_names: BTreeMap<String, Uuid> = BTreeMap::new();
+        let mut dns_names: BTreeMap<String, SiloUuid> = BTreeMap::new();
         for z in external_dns_zones {
             for (_, db_silo) in &silos_by_id {
                 let dns_name = format!(
@@ -147,7 +143,7 @@ impl ExternalEndpoints {
         // (see best_certificate()).  And in the end it'll be better to provide
         // an expired certificate than none at all.
         let parsed_certificates = certs.into_iter().map(|db_cert| {
-            let silo_id = db_cert.silo_id;
+            let silo_id = db_cert.silo_id();
             let tls_cert = TlsCertificate::try_from(db_cert).map_err(|e| {
                 ExternalEndpointError::BadCert { silo_id, reason: Arc::new(e) }
             })?;
@@ -267,7 +263,7 @@ pub struct ExternalEndpoint {
     /// the id of the Silo associated with this endpoint
     // This is redundant with `db_silo`, but it's convenient to put it here and
     // it shows up in the serialized form this way.
-    silo_id: Uuid,
+    silo_id: SiloUuid,
     /// the silo associated with this endpoint
     #[serde(skip)]
     db_silo: Arc<nexus_db_model::Silo>,
@@ -323,12 +319,12 @@ impl ExternalEndpoint {
             .tls_certs
             .iter()
             .map(|t| CertificateCandidate {
-                id: t.id,
+                id: t.id(),
                 not_after: t.validity().not_after,
             })
             .collect();
         best_certificate(&candidates)
-            .and_then(|id| self.tls_certs.iter().find(|t| t.id == id))
+            .and_then(|id| self.tls_certs.iter().find(|t| t.id() == id))
             .ok_or_else(|| {
                 anyhow!("silo {} has no usable certificates", self.silo_id)
             })
@@ -345,16 +341,16 @@ enum ExternalEndpointError {
         ({first_silo_name:?})"
     )]
     DupDnsName {
-        dup_silo_id: Uuid,
+        dup_silo_id: SiloUuid,
         dup_silo_name: String,
-        first_silo_id: Uuid,
+        first_silo_id: SiloUuid,
         first_silo_name: String,
         dns_name: String,
     },
 
     #[error("ignoring certificate for silo {silo_id}: {reason:#}")]
     BadCert {
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         #[source]
         reason: Arc<anyhow::Error>,
     },
@@ -362,7 +358,7 @@ enum ExternalEndpointError {
     #[error(
         "silo {silo_id} with DNS name {dns_name:?} has no usable certificates"
     )]
-    NoSiloCerts { silo_id: Uuid, dns_name: String },
+    NoSiloCerts { silo_id: SiloUuid, dns_name: String },
 
     #[error("no external endpoints were found")]
     NoEndpoints,
@@ -372,117 +368,6 @@ impl Eq for ExternalEndpointError {}
 impl PartialEq for ExternalEndpointError {
     fn eq(&self, other: &Self) -> bool {
         self.to_string() == other.to_string()
-    }
-}
-
-/// A parsed, validated TLS certificate ready to use with an external TLS server
-///
-/// Constructing one of these (via `TryFrom<Certificate>`) is the acceptance
-/// check for whether Nexus can serve a stored certificate at all. Anything
-/// else that needs to reason about the certificates Nexus actually presents,
-/// like the fault management certificate diagnosis engine, must go through the
-/// same conversion so that it sees the same set of certificates.
-#[derive(Serialize)]
-#[serde(transparent)]
-pub(crate) struct TlsCertificate {
-    /// This is what we need to provide to the TLS stack when we decide to use
-    /// this certificate for an incoming TLS connection
-    // NOTE: It's important that we do not serialize the private key!
-    #[serde(skip)]
-    certified_key: Arc<CertifiedKey>,
-
-    /// ID of the `certificate` row this was built from
-    #[serde(skip)]
-    id: Uuid,
-
-    /// Validity window of the leaf certificate
-    #[serde(skip)]
-    validity: CertificateValidity,
-
-    /// certificate digest (historically sometimes called a "fingerprint")
-    // This is the only field that appears in the serialized output or debug
-    // output.
-    digest: String,
-}
-
-impl fmt::Debug for TlsCertificate {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // It's important that only the digest appear in the debug output.  We
-        // definitely don't want to leak the private key this way.  Really,
-        // we don't want even the public parts adding noise to debug output.
-        f.debug_struct("TlsCertificate").field("digest", &self.digest).finish()
-    }
-}
-
-impl Eq for TlsCertificate {}
-impl PartialEq for TlsCertificate {
-    fn eq(&self, other: &Self) -> bool {
-        self.digest == other.digest
-    }
-}
-
-impl TryFrom<Certificate> for TlsCertificate {
-    type Error = anyhow::Error;
-
-    fn try_from(db_cert: Certificate) -> Result<TlsCertificate, anyhow::Error> {
-        // Parse and validate what we've got.
-        let certs_pem = openssl::x509::X509::stack_from_pem(&db_cert.cert)
-            .context("parsing PEM stack")?;
-        let private_key = PKey::private_key_from_pem(&db_cert.key)
-            .context("parsing private key PEM")?;
-
-        // Assemble a rustls CertifiedKey with both the certificate and the key.
-        let certified_key = {
-            let rustls_private_key =
-                PrivateKeyDer::from_pem_slice(&db_cert.key)
-                    .context("parsing private key PEM for rustls")?;
-            let rustls_signing_key =
-                rustls::crypto::aws_lc_rs::sign::any_supported_type(
-                    &rustls_private_key,
-                )
-                .context("parsing DER private key")?;
-            let rustls_certs = certs_pem
-                .iter()
-                .map(|x509| {
-                    x509.to_der()
-                        .context("serializing cert to DER")
-                        .map(rustls::pki_types::CertificateDer::from)
-                })
-                .collect::<Result<_, _>>()?;
-            Arc::new(CertifiedKey::new(rustls_certs, rustls_signing_key))
-        };
-
-        let end_cert = certs_pem
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow!("no certificates in PEM stack"))?;
-        anyhow::ensure!(
-            end_cert
-                .public_key()
-                .context("certificate publickey")?
-                .public_eq(&private_key),
-            "certificate public key does not match stored private key"
-        );
-
-        // Compute a digest (fingerprint) that we can use for debugging.
-        let digest = {
-            let digest_bytes = end_cert
-                .digest(openssl::hash::MessageDigest::sha256())
-                .context("computing fingerprint")?;
-            hex::encode(&digest_bytes)
-        };
-
-        let validity = omicron_certificates::validity(&end_cert)
-            .context("reading leaf certificate validity")?;
-
-        Ok(TlsCertificate { id: db_cert.id(), certified_key, digest, validity })
-    }
-}
-
-impl TlsCertificate {
-    /// Returns the validity window of the leaf certificate
-    pub(crate) fn validity(&self) -> CertificateValidity {
-        self.validity
     }
 }
 
@@ -523,7 +408,8 @@ pub(crate) async fn read_all_endpoints(
                 Discoverability::All,
             )
             .await?;
-        paginator = p.found_batch(&batch, &|s: &Silo| s.id());
+        paginator =
+            p.found_batch(&batch, &|s: &Silo| s.id().into_untyped_uuid());
         silos.extend(batch);
     }
 
@@ -630,7 +516,7 @@ impl NexusCertResolver {
                     "silo_id" => silo_id.to_string(),
                     "certificate" => ?certificate
                 );
-                Some(certificate.certified_key.clone())
+                Some(certificate.certified_key().clone())
             }
             Err(error) => {
                 // TODO-security There is a (limited) DoS risk here, in that the
@@ -821,13 +707,14 @@ mod test {
     use nexus_types::identity::Resource;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_uuid_kinds::SiloUuid;
     use schemars::JsonSchema;
     use serde::Deserialize;
     use serde::Serialize;
     use std::net::SocketAddr;
     use uuid::Uuid;
 
-    fn create_silo(silo_id: Option<Uuid>, name: &str, saml: bool) -> Silo {
+    fn create_silo(silo_id: Option<SiloUuid>, name: &str, saml: bool) -> Silo {
         let identity_mode = if saml {
             silo::SiloIdentityMode::SamlJit
         } else {
@@ -891,7 +778,7 @@ mod test {
         let parse_right = openssl::x509::X509::from_pem(&cert.cert).unwrap();
         let digest_right =
             parse_right.digest(openssl::hash::MessageDigest::sha256()).unwrap();
-        tls_cert.digest == hex::encode(&digest_right)
+        tls_cert.digest() == hex::encode(&digest_right)
     }
 
     #[test]
@@ -908,7 +795,7 @@ mod test {
 
         // There are also no endpoints if there's a Silo but no external DNS
         // zones.
-        let silo_id: Uuid =
+        let silo_id: SiloUuid =
             "6bcbd3bb-f93b-e8b3-d41c-dce6d98281d3".parse().unwrap();
         let silo = create_silo(Some(silo_id), "dummy", false);
         let ee2 = ExternalEndpoints::new(vec![silo], vec![], vec![]);
@@ -966,7 +853,7 @@ mod test {
         let ee1 = ExternalEndpoints::new(vec![], vec![], vec![]);
 
         // Sample data
-        let silo_id: Uuid =
+        let silo_id: SiloUuid =
             "6bcbd3bb-f93b-e8b3-d41c-dce6d98281d3".parse().unwrap();
         let silo = create_silo(Some(silo_id), "dummy", false);
         let dns_zone1 = create_dns_zone("oxide1");
@@ -1099,13 +986,13 @@ mod test {
         let low_id = Uuid::from_u128(1);
         let high_id = Uuid::from_u128(2);
         let low = Certificate::new_unvalidated(
-            silo.identity().id,
+            silo.id(),
             low_id,
             ServiceKind::Nexus,
             create_certificate("silo1.sys.oxide1.test", false),
         );
         let high = Certificate::new_unvalidated(
-            silo.identity().id,
+            silo.id(),
             high_id,
             ServiceKind::Nexus,
             create_certificate("silo1.sys.oxide1.test", false),
@@ -1121,7 +1008,7 @@ mod test {
             );
             let endpoint = &ee.by_dns_name["silo1.sys.oxide1.test"];
             let best = endpoint.best_certificate().unwrap();
-            assert_eq!(best.id, high_id);
+            assert_eq!(best.id(), high_id);
             assert!(cert_matches(best, &high));
         }
     }
@@ -1146,7 +1033,7 @@ mod test {
         let silo1_cert1_params =
             create_certificate("silo1.sys.oxide1.test", false);
         let silo1_cert1 = Certificate::new(
-            silo1.identity().id,
+            silo1.id(),
             Uuid::new_v4(),
             ServiceKind::Nexus,
             silo1_cert1_params,
@@ -1156,7 +1043,7 @@ mod test {
         let silo1_cert2_params =
             create_certificate("silo1.sys.oxide1.test", true);
         let silo1_cert2 = Certificate::new_unvalidated(
-            silo1.identity().id,
+            silo1.id(),
             Uuid::new_v4(),
             ServiceKind::Nexus,
             silo1_cert2_params,
@@ -1164,7 +1051,7 @@ mod test {
         let silo2_cert1_params =
             create_certificate("silo2.sys.oxide1.test", true);
         let silo2_cert1 = Certificate::new_unvalidated(
-            silo2.identity().id,
+            silo2.id(),
             Uuid::new_v4(),
             ServiceKind::Nexus,
             silo2_cert1_params,
@@ -1172,7 +1059,7 @@ mod test {
         let silo2_cert2_params =
             create_certificate("silo2.sys.oxide1.test", false);
         let silo2_cert2 = Certificate::new(
-            silo2.identity().id,
+            silo2.id(),
             Uuid::new_v4(),
             ServiceKind::Nexus,
             silo2_cert2_params,
@@ -1182,7 +1069,7 @@ mod test {
         let silo3_cert_params =
             create_certificate("silo3.sys.oxide1.test", false);
         let mut silo3_cert = Certificate::new(
-            silo3.identity().id,
+            silo3.id(),
             Uuid::new_v4(),
             ServiceKind::Nexus,
             silo3_cert_params,
@@ -1195,7 +1082,7 @@ mod test {
         let silo4_cert_params =
             create_certificate("silo4.sys.oxide1.test", true);
         let silo4_cert = Certificate::new_unvalidated(
-            silo4.identity().id,
+            silo4.id(),
             Uuid::new_v4(),
             ServiceKind::Nexus,
             silo4_cert_params,
@@ -1255,10 +1142,7 @@ mod test {
             ee.by_dns_name["silo4.sys.oxide1.test"],
             ee.by_dns_name["silo4.sys.oxide2.test"]
         );
-        assert_eq!(
-            ee.default_endpoint.as_ref().unwrap().silo_id,
-            silo3.identity().id
-        );
+        assert_eq!(ee.default_endpoint.as_ref().unwrap().silo_id, silo3.id());
 
         let e1 = &ee.by_dns_name["silo1.sys.oxide1.test"];
         assert_eq!(e1.silo_id, silo1.id());
@@ -1345,17 +1229,17 @@ mod test {
         watch_tx.send(Some(ee.clone())).unwrap();
         let resolved_c1 =
             cert_resolver.do_resolve(Some("silo1.sys.oxide1.test")).unwrap();
-        assert_eq!(resolved_c1.cert, c1.certified_key.cert);
+        assert_eq!(resolved_c1.cert, c1.certified_key().cert);
         let resolved_c2 =
             cert_resolver.do_resolve(Some("silo2.sys.oxide1.test")).unwrap();
-        assert_eq!(resolved_c2.cert, c2.certified_key.cert);
+        assert_eq!(resolved_c2.cert, c2.certified_key().cert);
         assert!(
             cert_resolver.do_resolve(Some("silo3.sys.oxide1.test")).is_none()
         );
         // We should get an expired cert if it's the only option.
         let resolved_c4 =
             cert_resolver.do_resolve(Some("silo4.sys.oxide1.test")).unwrap();
-        assert_eq!(resolved_c4.cert, c4.certified_key.cert);
+        assert_eq!(resolved_c4.cert, c4.certified_key().cert);
 
         logctx.cleanup_successful();
     }

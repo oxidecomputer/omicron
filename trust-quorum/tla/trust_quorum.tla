@@ -23,7 +23,7 @@
       the state space.
 *)
 
-EXTENDS Integers, FiniteSets, TLC, TLCExt
+EXTENDS Integers, FiniteSets, TLC
 
 CONSTANTS
     (* The set of trust quorum nodes *)
@@ -249,7 +249,7 @@ Msgs ==
    care which message they receive first, but whether they have received enough
    messages. In any case, even if there were a few concurrency bugs that could
    possibly be exposed via use of `\E \in msgs`, it would still be too expensive
-   to use. 
+   to use.
 
    Therefore, we instead filter down the set of valid messages, and choose one
    one from the set. The `valid(_)` operator must ensure that the same message
@@ -302,7 +302,7 @@ UpAndUnlocked(id) ==
        \/ nodeOp[id] = "Idle"
        \/ nodeOp[id] = "CoordinatePrepare"
        \/ nodeOp[id] = "CoordinateCollectShares"
-       \/ nodeOp[id] = "ComputeShare" 
+       \/ nodeOp[id] = "ComputeShare"
 
 ChooseCoordinator(members) ==
     IF nexus.last_committed_config = NONE THEN
@@ -411,7 +411,14 @@ CommittedNodesHaveShares ==
 
 -----------------------------------------------------------------------------
 (* Temporal properties *)
-AllNodesUnlock == <>[](\A id \in nexus.config.members: nodeOp[id] # "Unlock") 
+AllNodesUnlock == <>[](\A id \in nexus.config.members: nodeOp[id] # "Unlock")
+
+\* This is currently expected to FAIL under trust_quorum_nocrash.cfg, because
+\* RecvCommit never fires for the coordinator (it stays in CoordinatePrepare),
+\* so NexusRecvCommitAck never reaches Idle and epoch 2 never starts.
+\* trust_quorum.cfg only gets there because n1 is in CRASHSET and commits after
+\* restarting.
+ReconfigurationStarts == <>(nexus.config.epoch = 2)
 
 -----------------------------------------------------------------------------
 (* The initial state predicate that sets the initial state of the system. *)
@@ -664,7 +671,7 @@ RecvPrepare(id) ==
                      all the other nodes transiently reboot, we'd mask the retries
                      that we get for free by keeping all the messages ever sent
                      in `msgs`.
-   
+
                     This is one of the few places where explict retries would be
                     handy, but the whole spec would have to change again to support
                     that. *)
@@ -774,7 +781,7 @@ RecvGetConfig(id) ==
                    /\ \/ nodes[m.from] = NONE
                       \/ /\ nodes[m.from] # NONE
                          /\ nodes[m.from].config.epoch # m.epoch
-   
+
       m == Recv(valid)
   IN
     /\ m # NONE
@@ -797,7 +804,7 @@ RecvGetShare(id) ==
                      \* Commit occurred, but this node hasn't learned of it yet.
                      \* It must return the share so a crashed node that did learn
                      \* can unlock.
-                     \/ /\ m.epoch = nodes[id].config.epoch 
+                     \/ /\ m.epoch = nodes[id].config.epoch
                         /\ m.from \in nodes[id].config.members
       m == Recv(valid)
   IN

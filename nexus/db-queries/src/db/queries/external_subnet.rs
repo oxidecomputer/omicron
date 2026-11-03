@@ -30,6 +30,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::ProjectUuid;
+use omicron_uuid_kinds::SiloUuid;
 use omicron_uuid_kinds::SubnetPoolUuid;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
@@ -244,7 +245,7 @@ fn network_edges(subnet: IpNet) -> (IpNet, IpNet) {
 /// query is executed.
 pub fn link_subnet_pool_to_silo_query(
     pool_id: SubnetPoolUuid,
-    silo_id: Uuid,
+    silo_id: SiloUuid,
     is_default: bool,
 ) -> TypedSqlQuery<SelectableSql<SubnetPoolSiloLink>> {
     let mut builder = QueryBuilder::new();
@@ -264,7 +265,7 @@ pub fn link_subnet_pool_to_silo_query(
         WHERE id = "
     )
         .param()
-        .bind::<sql_types::Uuid, _>(silo_id)
+        .bind::<sql_types::Uuid, _>(silo_id.into_untyped_uuid())
     .sql("\
         AND time_deleted IS NULL), \
     updated_pool AS (\
@@ -306,7 +307,7 @@ pub fn link_subnet_pool_to_silo_query(
 /// either a new pool member or a new External Subnet in the given Pool.
 pub fn unlink_subnet_pool_from_silo_query(
     pool_id: SubnetPoolUuid,
-    silo_id: Uuid,
+    silo_id: SiloUuid,
     rcgen: Generation,
 ) -> TypedSqlQuery<()> {
     let mut builder = QueryBuilder::new();
@@ -337,7 +338,7 @@ pub fn unlink_subnet_pool_from_silo_query(
         .bind::<sql_types::Uuid, _>(pool_id)
         .sql(" AND silo_id = ")
         .param()
-        .bind::<sql_types::Uuid, _>(silo_id);
+        .bind::<sql_types::Uuid, _>(silo_id.into_untyped_uuid());
     builder.query()
 }
 
@@ -433,7 +434,7 @@ pub fn decode_unlink_subnet_pool_from_silo_result(
 /// `nexus/db-queries/tests/output/insert_external_subnet_from_explicit_pool.sql`
 /// will be very helpful to actually inspect and understand the query.
 pub fn insert_external_subnet_query(
-    silo_id: &Uuid,
+    silo_id: &SiloUuid,
     project_id: &ProjectUuid,
     identity: ExternalSubnetIdentity,
     subnet_selector: &ExternalSubnetAllocator,
@@ -515,7 +516,7 @@ pub fn insert_external_subnet_query(
 // Subnet Pool, Subnet Pool Member, and the IP subnet itself.
 fn push_cte_to_select_pool_from_explicit_subnet(
     builder: &mut QueryBuilder,
-    silo_id: Uuid,
+    silo_id: SiloUuid,
     subnet: oxnet::IpNet,
 ) {
     let prefix_len = i32::from(subnet.width());
@@ -545,7 +546,7 @@ fn push_cte_to_select_pool_from_explicit_subnet(
             WHERE l.silo_id = "
     )
         .param()
-        .bind::<sql_types::Uuid, _>(silo_id)
+        .bind::<sql_types::Uuid, _>(silo_id.into_untyped_uuid())
         .sql(" AND l.ip_version = ")
         .param()
         .bind::<IpVersionEnum, _>(ip_version)
@@ -658,7 +659,7 @@ fn push_cte_to_check_for_deleted_project_and_update_rcgen(
 // create the External Subnet in is deleted.
 fn push_cte_to_check_for_deleted_silo(
     builder: &mut QueryBuilder,
-    silo_id: &Uuid,
+    silo_id: &SiloUuid,
 ) {
     builder
         .sql(
@@ -670,7 +671,7 @@ fn push_cte_to_check_for_deleted_silo(
                 WHERE id = ",
         )
         .param()
-        .bind::<sql_types::Uuid, _>(*silo_id)
+        .bind::<sql_types::Uuid, _>(silo_id.into_untyped_uuid())
         .sql(
             " AND time_deleted IS NULL LIMIT 1), \
             'true', \
@@ -812,7 +813,7 @@ fn push_cte_to_select_pool_id(builder: &mut QueryBuilder, pool: &NameOrId) {
 // would show up as `$N`, which `is_bool_parse_error` wouldn't match.
 fn push_cte_to_ensure_pool_is_linked_to_silo(
     builder: &mut QueryBuilder,
-    silo_id: &Uuid,
+    silo_id: &SiloUuid,
 ) {
     builder
         .sql(
@@ -824,7 +825,7 @@ fn push_cte_to_ensure_pool_is_linked_to_silo(
             AND l.silo_id = ",
         )
         .param()
-        .bind::<sql_types::Uuid, _>(*silo_id)
+        .bind::<sql_types::Uuid, _>(silo_id.into_untyped_uuid())
         .sql(")), 'true', '")
         .sql(REQUESTED_POOL_NOT_LINKED_TO_SILO_SENTINEL)
         .sql("') AS BOOL))");
@@ -836,7 +837,7 @@ fn push_cte_to_ensure_pool_is_linked_to_silo(
 // the two.
 fn push_cte_to_select_default_pool_by_version(
     builder: &mut QueryBuilder,
-    silo_id: &Uuid,
+    silo_id: &SiloUuid,
     maybe_ip_version: Option<IpVersion>,
 ) {
     builder
@@ -849,7 +850,7 @@ fn push_cte_to_select_default_pool_by_version(
         WHERE l.silo_id = ",
         )
         .param()
-        .bind::<sql_types::Uuid, _>(*silo_id);
+        .bind::<sql_types::Uuid, _>(silo_id.into_untyped_uuid());
 
     // Add the version filter if it's provided.
     if let Some(ip_version) = &maybe_ip_version {
@@ -1092,7 +1093,7 @@ fn push_cte_to_select_next_subnet_from_pool(
 /// Decode the errors emitted by `insert_external_subnet_query()`.
 pub fn decode_insert_external_subnet_error(
     e: DieselError,
-    silo_id: &Uuid,
+    silo_id: &SiloUuid,
     authz_project: &authz::Project,
     subnet: &ExternalSubnetAllocator,
     subnet_name: &str,
@@ -1370,11 +1371,13 @@ mod tests {
     use omicron_uuid_kinds::ExternalSubnetUuid;
     use omicron_uuid_kinds::GenericUuid as _;
     use omicron_uuid_kinds::ProjectUuid;
+    use omicron_uuid_kinds::SiloUuid;
     use omicron_uuid_kinds::SubnetPoolMemberUuid;
     use omicron_uuid_kinds::SubnetPoolUuid;
     use uuid::Uuid;
 
-    const SILO_ID: Uuid = uuid::uuid!("1a597381-b5a1-43da-bd72-bb1ac0786c21");
+    const SILO_ID: SiloUuid =
+        SiloUuid::from_u128(0x1a597381_b5a1_43da_bd72_bb1ac0786c21);
     const PROJECT_ID: ProjectUuid =
         ProjectUuid::from_u128(0xe9c2d699_c60d_4486_81c6_63de6897a4ed);
     const SUBNET_ID: Uuid = uuid::uuid!("56ba77dc-6116-4537-a858-d3d56e34a222");
