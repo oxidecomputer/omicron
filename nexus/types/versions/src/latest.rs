@@ -8,16 +8,6 @@
 //! current version of each type. Business logic should use these re-exports
 //! rather than versioned identifiers.
 
-pub mod active_problem {
-    pub use crate::v2026_11_05_00::active_problem::ActiveProblem;
-    pub use crate::v2026_11_05_00::active_problem::ActiveProblemImpact;
-    pub use crate::v2026_11_05_00::active_problem::ActiveProblemListParams;
-    pub use crate::v2026_11_05_00::active_problem::ActiveProblemSelector;
-    pub use crate::v2026_11_05_00::active_problem::ActiveProblemState;
-    pub use crate::v2026_11_05_00::active_problem::ImpactedResource;
-    pub use crate::v2026_11_05_00::active_problem::RelatedActiveProblem;
-}
-
 pub mod affinity {
     pub use crate::v2025_11_20_00::affinity::AffinityGroup;
     pub use crate::v2025_11_20_00::affinity::AffinityGroupCreate;
@@ -381,6 +371,16 @@ pub mod probe {
     pub use crate::v2026_01_03_00::probe::ProbeInfo;
 
     pub use crate::v2026_01_05_00::probe::ProbeCreate;
+}
+
+pub mod problem {
+    pub use crate::v2026_11_05_00::problem::ImpactedResource;
+    pub use crate::v2026_11_05_00::problem::Problem;
+    pub use crate::v2026_11_05_00::problem::ProblemImpact;
+    pub use crate::v2026_11_05_00::problem::ProblemListParams;
+    pub use crate::v2026_11_05_00::problem::ProblemSelector;
+    pub use crate::v2026_11_05_00::problem::ProblemState;
+    pub use crate::v2026_11_05_00::problem::RelatedProblem;
 }
 
 pub mod project {

@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS omicron.public.active_problem_revision (
+CREATE TABLE IF NOT EXISTS omicron.public.problem_revision (
     problem_id UUID NOT NULL,
     revision INT8 NOT NULL,
 

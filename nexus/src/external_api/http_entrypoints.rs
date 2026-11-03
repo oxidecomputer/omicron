@@ -42,11 +42,11 @@ use nexus_db_queries::db::model::Name;
 use nexus_external_api::*;
 use nexus_types::authn::cookies::Cookies;
 use nexus_types::external_api::{
-    active_problem, affinity, alert, audit, certificate, console, device, disk,
-    external_ip, external_subnet, floating_ip, hardware, identity_provider,
-    image, instance, internet_gateway, ip_pool, metrics, multicast, multirack,
-    networking, oxql, path_params, policy, probe, project, rack, scim, silo,
-    sled, snapshot, ssh_key, subnet_pool, support_bundle, switch, system,
+    affinity, alert, audit, certificate, console, device, disk, external_ip,
+    external_subnet, floating_ip, hardware, identity_provider, image, instance,
+    internet_gateway, ip_pool, metrics, multicast, multirack, networking, oxql,
+    path_params, policy, probe, problem, project, rack, scim, silo, sled,
+    snapshot, ssh_key, subnet_pool, support_bundle, switch, system,
     system_networking, timeseries, update, user, vpc,
 };
 // Type imports for API implementations (per RFD 619)
@@ -9043,15 +9043,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn active_problem_list(
+    async fn problem_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<
-            PaginatedByTimeAndId<active_problem::ActiveProblemListParams>,
-        >,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<active_problem::ActiveProblem>>,
-        HttpError,
-    > {
+        query_params: Query<PaginatedByTimeAndId<problem::ProblemListParams>>,
+    ) -> Result<HttpResponseOk<ResultsPage<problem::Problem>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -9061,15 +9056,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let scan_params = ScanByTimeAndId::from_query(&query)?;
             let pag_params = data_page_params_for(&rqctx, &query)?;
             let problems = nexus
-                .active_problem_list(&opctx, &scan_params.selector, &pag_params)
+                .problem_list(&opctx, &scan_params.selector, &pag_params)
                 .await?
                 .into_iter()
-                .map(active_problem::ActiveProblem::from)
+                .map(problem::Problem::from)
                 .collect();
             Ok(HttpResponseOk(ScanByTimeAndId::results_page(
                 &query,
                 problems,
-                &|_, problem: &active_problem::ActiveProblem| {
+                &|_, problem: &problem::Problem| {
                     (problem.identity.time_created, problem.identity.id)
                 },
             )?))
@@ -9081,20 +9076,18 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn active_problem_view(
+    async fn problem_view(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<active_problem::ActiveProblemSelector>,
-    ) -> Result<HttpResponseOk<active_problem::ActiveProblem>, HttpError> {
+        path_params: Path<problem::ProblemSelector>,
+    ) -> Result<HttpResponseOk<problem::Problem>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let selector = path_params.into_inner();
-            let problem_lookup =
-                nexus.active_problem_lookup(&opctx, selector)?;
-            let problem =
-                nexus.active_problem_view(&opctx, &problem_lookup).await?;
+            let problem_lookup = nexus.problem_lookup(&opctx, selector)?;
+            let problem = nexus.problem_view(&opctx, &problem_lookup).await?;
             Ok(HttpResponseOk(problem.into()))
         };
         apictx
@@ -9104,14 +9097,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn active_problem_causes_list(
+    async fn problem_causes_list(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<active_problem::ActiveProblemSelector>,
+        path_params: Path<problem::ProblemSelector>,
         query_params: Query<PaginatedById>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<active_problem::RelatedActiveProblem>>,
-        HttpError,
-    > {
+    ) -> Result<HttpResponseOk<ResultsPage<problem::RelatedProblem>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -9119,15 +9110,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let query = query_params.into_inner();
             let pag_params = data_page_params_for(&rqctx, &query)?;
-            let problem_lookup = nexus
-                .active_problem_lookup(&opctx, path_params.into_inner())?;
-            let causes = nexus
-                .active_problem_causes_list(&problem_lookup, &pag_params)
-                .await?;
+            let problem_lookup =
+                nexus.problem_lookup(&opctx, path_params.into_inner())?;
+            let causes =
+                nexus.problem_causes_list(&problem_lookup, &pag_params).await?;
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 causes,
-                &|_, related: &active_problem::RelatedActiveProblem| {
+                &|_, related: &problem::RelatedProblem| {
                     related.id.into_untyped_uuid()
                 },
             )?))
@@ -9139,14 +9129,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn active_problem_consequences_list(
+    async fn problem_consequences_list(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<active_problem::ActiveProblemSelector>,
+        path_params: Path<problem::ProblemSelector>,
         query_params: Query<PaginatedById>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<active_problem::RelatedActiveProblem>>,
-        HttpError,
-    > {
+    ) -> Result<HttpResponseOk<ResultsPage<problem::RelatedProblem>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -9154,15 +9142,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let query = query_params.into_inner();
             let pag_params = data_page_params_for(&rqctx, &query)?;
-            let problem_lookup = nexus
-                .active_problem_lookup(&opctx, path_params.into_inner())?;
+            let problem_lookup =
+                nexus.problem_lookup(&opctx, path_params.into_inner())?;
             let consequences = nexus
-                .active_problem_consequences_list(&problem_lookup, &pag_params)
+                .problem_consequences_list(&problem_lookup, &pag_params)
                 .await?;
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 consequences,
-                &|_, related: &active_problem::RelatedActiveProblem| {
+                &|_, related: &problem::RelatedProblem| {
                     related.id.into_untyped_uuid()
                 },
             )?))
@@ -9174,14 +9162,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn active_problem_impact_list(
+    async fn problem_impact_list(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<active_problem::ActiveProblemSelector>,
+        path_params: Path<problem::ProblemSelector>,
         query_params: Query<PaginatedById>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<active_problem::ActiveProblemImpact>>,
-        HttpError,
-    > {
+    ) -> Result<HttpResponseOk<ResultsPage<problem::ProblemImpact>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -9189,17 +9175,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let query = query_params.into_inner();
             let pag_params = data_page_params_for(&rqctx, &query)?;
-            let problem_lookup = nexus
-                .active_problem_lookup(&opctx, path_params.into_inner())?;
-            let impacts = nexus
-                .active_problem_impact_list(&problem_lookup, &pag_params)
-                .await?;
+            let problem_lookup =
+                nexus.problem_lookup(&opctx, path_params.into_inner())?;
+            let impacts =
+                nexus.problem_impact_list(&problem_lookup, &pag_params).await?;
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 impacts,
-                &|_, impact: &active_problem::ActiveProblemImpact| {
-                    impact.resource.id()
-                },
+                &|_, impact: &problem::ProblemImpact| impact.resource.id(),
             )?))
         };
         apictx
@@ -9209,9 +9192,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn active_problem_support_bundles_list(
+    async fn problem_support_bundles_list(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<active_problem::ActiveProblemSelector>,
+        path_params: Path<problem::ProblemSelector>,
         query_params: Query<PaginatedByTimeAndId>,
     ) -> Result<
         HttpResponseOk<ResultsPage<support_bundle::SupportBundleInfo>>,
@@ -9224,13 +9207,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let query = query_params.into_inner();
             let pag_params = data_page_params_for(&rqctx, &query)?;
-            let problem_lookup = nexus
-                .active_problem_lookup(&opctx, path_params.into_inner())?;
+            let problem_lookup =
+                nexus.problem_lookup(&opctx, path_params.into_inner())?;
             let bundles = nexus
-                .active_problem_support_bundles_list(
-                    &problem_lookup,
-                    &pag_params,
-                )
+                .problem_support_bundles_list(&problem_lookup, &pag_params)
                 .await?;
             Ok(HttpResponseOk(ScanByTimeAndId::results_page(
                 &query,
@@ -9247,9 +9227,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn active_problem_alert_list(
+    async fn problem_alert_list(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<active_problem::ActiveProblemSelector>,
+        path_params: Path<problem::ProblemSelector>,
         pag_params: Query<PaginatedByTimeAndId<alert::AlertListParams>>,
     ) -> Result<HttpResponseOk<ResultsPage<alert::Alert>>, HttpError> {
         let apictx = rqctx.context();
@@ -9260,10 +9240,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let query = pag_params.into_inner();
             let scan_params = ScanByTimeAndId::from_query(&query)?;
             let pag_params = data_page_params_for(&rqctx, &query)?;
-            let problem_lookup = nexus
-                .active_problem_lookup(&opctx, path_params.into_inner())?;
+            let problem_lookup =
+                nexus.problem_lookup(&opctx, path_params.into_inner())?;
             let alerts = nexus
-                .active_problem_alert_list(
+                .problem_alert_list(
                     &problem_lookup,
                     &scan_params.selector,
                     &pag_params,

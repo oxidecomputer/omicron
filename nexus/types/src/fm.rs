@@ -7,9 +7,9 @@
 //! Of particular importance is the [`Sitrep`], which is the top-level data
 //! structure containing fault management state.
 
-pub mod active_problem;
 pub mod analysis_reports;
 pub mod ereport;
+pub mod problem;
 pub use ereport::{Ereport, EreportId};
 pub mod case;
 pub use case::Case;

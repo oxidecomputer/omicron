@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS omicron.public.active_problem (
+CREATE TABLE IF NOT EXISTS omicron.public.problem (
     id UUID PRIMARY KEY,
 
     time_created TIMESTAMPTZ NOT NULL,

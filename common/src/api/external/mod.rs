@@ -959,7 +959,6 @@ impl JsonSchema for Hostname {
 )]
 #[display(style = "kebab-case")]
 pub enum ResourceType {
-    ActiveProblem,
     AddressLot,
     AddressLotBlock,
     AffinityGroup,
@@ -1002,6 +1001,7 @@ pub enum ResourceType {
     PhysicalDisk,
     Probe,
     ProbeNetworkInterface,
+    Problem,
     Project,
     ProjectImage,
     Rack,

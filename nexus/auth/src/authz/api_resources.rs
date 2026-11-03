@@ -1925,9 +1925,9 @@ authz_resource! {
 }
 
 authz_resource! {
-    name = "ActiveProblem",
+    name = "Problem",
     parent = "Fleet",
-    primary_key = { uuid_kind = ActiveProblemKind },
+    primary_key = { uuid_kind = ProblemKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }

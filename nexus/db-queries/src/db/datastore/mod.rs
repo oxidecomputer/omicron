@@ -72,7 +72,6 @@ use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-mod active_problem;
 mod address_lot;
 mod affinity;
 mod alert;
@@ -117,6 +116,7 @@ mod oximeter;
 mod oximeter_read_policy;
 mod physical_disk;
 mod probe;
+mod problem;
 mod project;
 mod quota;
 mod rack;

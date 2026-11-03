@@ -2,47 +2,48 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Active Problem types for version `ACTIVE_PROBLEMS`.
+//! Problem types for version `PROBLEMS`.
 
 use chrono::{DateTime, Utc};
-use omicron_uuid_kinds::ActiveProblemUuid;
+use omicron_uuid_kinds::ProblemUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::v2025_11_20_00::asset::AssetIdentityMetadata;
 
-/// An Active Problem.
+/// A problem detected by the fault management subsystem.
 ///
-/// Active Problems describe conditions detected by the fault management
-/// subsystem in which some aspect of the system's operation is degraded. This
-/// includes both ongoing problems and historical data describing resolved
-/// problems.
+/// Problems describe conditions in which some aspect of the system's operation
+/// is degraded. A problem is either *active*, if the condition still exists, or
+/// *resolved*, if the system has determined that it no longer does. Resolved
+/// problems are retained as historical data. The `state` field indicates which
+/// of these states the problem is in.
 ///
 /// The `time_created` field records when the problem was detected, and the
 /// `time_modified` field records the time of its most recent revision.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct ActiveProblem {
+pub struct Problem {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
-    /// If this Active Problem is in the "resolved" state, the time at which the
+    /// If this problem is in the "resolved" state, the time at which the
     /// problem was resolved.
     ///
     /// This field is non-null if, and only if, the `state` field is "resolved".
     pub time_resolved: Option<DateTime<Utc>>,
-    /// The current state of this Active Problem.
-    pub state: ActiveProblemState,
-    /// The current revision number of this Active Problem.
+    /// The current state of this problem.
+    pub state: ProblemState,
+    /// The current revision number of this problem.
     ///
-    /// The revision number is incremented each time the Active Problem is
-    /// updated. Changes to an Active Problem's impact list, description, and
-    /// relationships with other Active Problems all increment the revision
+    /// The revision number is incremented each time the problem is
+    /// updated. Changes to a problem's impact list, description, and
+    /// relationships with other problems all increment the revision
     /// number.
     pub revision: u64,
-    /// The problem code describing this Active Problem.
+    /// The problem code describing this problem.
     ///
     /// Problem codes are opaque numeric identifiers that indicate the nature of
-    /// the issue an Active Problem represents. They may be used to reference
+    /// the issue a problem represents. They may be used to reference
     /// documentation and service instructions for that particular kind of
     /// problem, and to communicate with Oxide support. The problem code may
     /// change if the diagnosis of the problem is refined, which creates a new
@@ -65,73 +66,73 @@ pub struct ActiveProblem {
     /// This may change as the problem progresses.
     pub description: String,
     /// A description of any actions an operator should take in response to this
-    /// Active Problem.
+    /// problem.
     ///
     /// This may change as the problem progresses.
     pub action_required: String,
 }
 
-/// The state of an Active Problem.
+/// The state of a problem.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum ActiveProblemState {
-    /// The condition represented by the Active Problem still exists.
+pub enum ProblemState {
+    /// The condition represented by the problem still exists.
     Active,
     /// The system has determined that the problem no longer exists.
     ///
-    /// A resolved Active Problem never becomes active again. If the same
-    /// condition is detected again, a new Active Problem with a new ID is
+    /// A resolved problem never becomes active again. If the same
+    /// condition is detected again, a new problem with a new ID is
     /// created.
     Resolved,
 }
 
-/// Query parameters for listing Active Problems
+/// Query parameters for listing problems
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct ActiveProblemListParams {
-    /// Optional state used to filter Active Problems.
+pub struct ProblemListParams {
+    /// Optional state used to filter problems.
     ///
-    /// If this is included, only Active Problems in the specified state will
-    /// be returned. Otherwise, Active Problems in all states will be returned.
-    pub state: Option<ActiveProblemState>,
+    /// If this is included, only problems in the specified state will
+    /// be returned. Otherwise, problems in all states will be returned.
+    pub state: Option<ProblemState>,
 }
 
-/// An Active Problem that is a cause or consequence of another Active Problem
+/// A problem that is a cause or consequence of another problem
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RelatedActiveProblem {
-    /// ID of the related Active Problem
+pub struct RelatedProblem {
+    /// ID of the related problem
     #[schemars(with = "Uuid")]
-    pub id: ActiveProblemUuid,
+    pub id: ProblemUuid,
     /// A human-readable summary of why the problems are related.
     pub reason: String,
-    /// The revision of the requested Active Problem in which this
+    /// The revision of the requested problem in which this
     /// relationship was added.
     pub revision_added: u64,
 }
 
-/// Path parameters to look up an Active Problem by its ID.
+/// Path parameters to look up a problem by its ID.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct ActiveProblemSelector {
-    /// ID of the Active Problem
+pub struct ProblemSelector {
+    /// ID of the problem
     #[schemars(with = "Uuid")]
-    pub problem_id: ActiveProblemUuid,
+    pub problem_id: ProblemUuid,
 }
 
-/// A resource impacted by an Active Problem.
+/// A resource impacted by a problem.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct ActiveProblemImpact {
-    /// ID of the Active Problem impacting this resource.
+pub struct ProblemImpact {
+    /// ID of the problem impacting this resource.
     #[schemars(with = "Uuid")]
-    pub problem_id: ActiveProblemUuid,
+    pub problem_id: ProblemUuid,
     /// The impacted resource.
     pub resource: ImpactedResource,
-    /// The revision of the Active Problem in which this impact was added.
+    /// The revision of the problem in which this impact was added.
     pub revision_added: u64,
     /// A human-readable summary of how this resource is impacted by the
     /// problem.
     pub reason: String,
 }
 
-/// API resource types which may be impacted by an Active Problem.
+/// API resource types which may be impacted by a problem.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "resource_type", rename_all = "snake_case")]
 pub enum ImpactedResource {
