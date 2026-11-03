@@ -138,6 +138,7 @@ impl super::Nexus {
         // for now given that the user already has to confirm a bunch of prompts
         // before kicking off the operation.
         let (tq_latest_committed_config, _) = self
+            .db_datastore
             .tq_load_latest_possible_committed_config(opctx, authz_tq)
             .await?;
         let baseboard_id = BaseboardId {
