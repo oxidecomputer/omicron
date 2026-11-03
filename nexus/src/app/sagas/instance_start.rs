@@ -1662,20 +1662,24 @@ mod test {
         // Inject failure at the simulated sled agent level. This allows the
         // ensure-running node to attempt to change the instance's state, but
         // forces this operation to fail and produce whatever side effects
-        // result from that failure.
-        let sled_agent = cptestctx.first_sled_agent();
-        sled_agent
-            .set_instance_ensure_state_error(Some(Error::internal_error(
-                "injected by test_ensure_running_unwind",
-            )))
-            .await;
+        // result from that failure. The ensure-running node's request to run
+        // the VMM is the first `vmm_put_state` request the saga sends.
+        let next_put_state =
+            cptestctx.first_sled_agent().pause_next_vmm_put_state();
 
-        let runnable_saga = nexus.sagas.saga_prepare(dag).await.unwrap();
-        let saga_result = runnable_saga
-            .run_to_completion()
+        let running_saga = nexus
+            .sagas
+            .saga_prepare(dag)
             .await
-            .expect("saga execution should have started")
-            .into_raw_result();
+            .expect("saga should be prepared")
+            .start()
+            .await
+            .expect("saga should start");
+        next_put_state.wait_for_request(Duration::from_secs(60)).await.fail(
+            Error::internal_error("injected by test_ensure_running_unwind"),
+        );
+        let saga_result =
+            running_saga.wait_until_stopped().await.into_raw_result();
         let saga_error = saga_result
             .kind
             .expect_err("saga should fail due to injected error");
