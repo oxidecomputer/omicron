@@ -552,46 +552,44 @@ impl InstanceAutoRestart {
         // new state is introduced. This forces the person introducing the new
         // state to decide whether this is a state where we are going to honour
         // the auto-restart policy or we are forced to override it.
-        match state.nexus_state {
+        let reincarnability = match state.nexus_state {
             InstanceState::Failed
             | InstanceState::Creating
             | InstanceState::Destroyed
             | InstanceState::NoVmm
             | InstanceState::Vmm => {
-                // Check if the instance's configured auto-restart policy permits the
-                // control plane to automatically restart it.
+                // Check if the instance's configured auto-restart policy
+                // permits the control plane to automatically restart it.
                 let policy = self.policy.unwrap_or(Self::DEFAULT_POLICY);
-                if policy == InstanceAutoRestartPolicy::Never {
-                    return Reincarnatability::Nirvana;
+                match policy {
+                    InstanceAutoRestartPolicy::Never => {
+                        Reincarnatability::Nirvana
+                    }
+                    InstanceAutoRestartPolicy::BestEffort => {
+                        // If the instance is permitted to reincarnate, ensure
+                        // that its last reincarnation was at least one cooldown
+                        // period ago.
+                        if let Some(until) = self.cooldown_expiry_time(state) {
+                            Reincarnatability::CoolingDown { until }
+                        } else {
+                            Reincarnatability::WillReincarnate
+                        }
+                    }
                 }
             }
             // An instance that is in the `SledEvacuating` state will always be
-            // reincarnatable. This is because the instance has not actually failed,
-            // but rather its VMM has been stopped due to its sled being evacuated.
-            // The instance should be restarted automatically regardless of the
-            // auto-restart policy.
-            InstanceState::SledEvacuating => {}
-        }
+            // reincarnatable. This is because the instance has not actually
+            // failed, but rather its VMM has been stopped due to its sled being
+            // evacuated. The instance should be restarted automatically
+            // regardless of the auto-restart policy.
+            //
+            // In addition, we ignore the cooling down period. Any given
+            // instance will be reincarnated due to evacuation multiple times
+            // during an update.
+            InstanceState::SledEvacuating => Reincarnatability::WillReincarnate,
+        };
 
-        // If the instance is permitted to reincarnate, ensure that its last
-        // reincarnation was at least one cooldown period ago.
-        if let Some(last) = state.time_last_auto_restarted {
-            // If no explicit cooldown is present, use the default.
-            // Eventually, we may also allow a project-level default, so we will
-            // need to consider that as well.
-            let cooldown = self.cooldown.unwrap_or(Self::DEFAULT_COOLDOWN);
-            // The instance is eligible to reincarnate if the current time is
-            // greater than or equal to the last restart time plus the cooldown
-            // duration.
-            let until = last + cooldown;
-            if Utc::now() >= until {
-                return Reincarnatability::WillReincarnate;
-            } else {
-                return Reincarnatability::CoolingDown { until };
-            }
-        }
-
-        Reincarnatability::WillReincarnate
+        reincarnability
     }
 
     /// Filters a database query to include only instances whose auto-restart
@@ -659,6 +657,33 @@ impl InstanceAutoRestart {
         // pass.
         .and(dsl::updater_id.is_null())
     }
+
+    /// The wall-clock time at which the cooldown period will expire and the
+    /// instance will once again be eligible to reincarnate, if the instance
+    /// is still cooling down.
+    fn cooldown_expiry_time(
+        &self,
+        state: &InstanceRuntimeState,
+    ) -> Option<DateTime<Utc>> {
+        let Some(last) = state.time_last_auto_restarted else {
+            // The instance has never restarted due to a failure. There is no
+            // cooldown expiry time.
+            return None;
+        };
+
+        // If no explicit cooldown is present, use the default. Eventually, we
+        // may also allow a project-level default, so we will need to consider
+        // that as well.
+        let until = last + self.cooldown.unwrap_or(Self::DEFAULT_COOLDOWN);
+        if Utc::now() >= until {
+            // If the current time is greater than or equal to the last restart
+            // time plus the cooldown duration, the instance is no longer
+            // cooling down. There is no cooldown expiry time.
+            None
+        } else {
+            Some(until)
+        }
+    }
 }
 
 crate::impl_enum_type!(
@@ -716,4 +741,122 @@ pub struct InstanceUpdate {
     #[diesel(treat_none_as_null = false)]
     pub shutdown_policy_action: Option<InstanceShutdownAction>,
     pub shutdown_policy_timeout: Option<TimeDelta>,
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[derive(Clone, Copy, Debug)]
+    enum LastAutoRestart {
+        NeverRestarted,
+        WithinCooldown,
+        CooldownElapsed,
+    }
+
+    impl LastAutoRestart {
+        const ALL: [Self; 3] =
+            [Self::NeverRestarted, Self::WithinCooldown, Self::CooldownElapsed];
+
+        fn time(self) -> Option<DateTime<Utc>> {
+            let now = Utc::now();
+            match self {
+                Self::NeverRestarted => None,
+                Self::WithinCooldown => Some(now),
+                Self::CooldownElapsed => Some(
+                    now - InstanceAutoRestart::DEFAULT_COOLDOWN
+                        - TimeDelta::hours(1),
+                ),
+            }
+        }
+    }
+
+    fn is_expected_reincarnatability(
+        found_reincarnability: Reincarnatability,
+        found_state: InstanceState,
+        found_policy: InstanceAutoRestartPolicy,
+        found_last_auto_restart: LastAutoRestart,
+    ) -> bool {
+        match found_state {
+            InstanceState::Creating
+            | InstanceState::NoVmm
+            | InstanceState::Vmm
+            | InstanceState::Failed
+            | InstanceState::Destroyed => {
+                match (found_policy, found_last_auto_restart) {
+                    (InstanceAutoRestartPolicy::Never, _) => {
+                        matches!(
+                            found_reincarnability,
+                            Reincarnatability::Nirvana
+                        )
+                    }
+                    (
+                        InstanceAutoRestartPolicy::BestEffort,
+                        LastAutoRestart::WithinCooldown,
+                    ) => matches!(
+                        found_reincarnability,
+                        Reincarnatability::CoolingDown { .. }
+                    ),
+                    (
+                        InstanceAutoRestartPolicy::BestEffort,
+                        LastAutoRestart::NeverRestarted
+                        | LastAutoRestart::CooldownElapsed,
+                    ) => matches!(
+                        found_reincarnability,
+                        Reincarnatability::WillReincarnate
+                    ),
+                }
+            }
+            // An instance whose sled is being evacuated always reincarnates,
+            // regardless of its auto-restart policy and cooldown period.
+            InstanceState::SledEvacuating => {
+                matches!(
+                    found_reincarnability,
+                    Reincarnatability::WillReincarnate
+                )
+            }
+        }
+    }
+
+    #[test]
+    fn test_can_reincarnate() {
+        // Loop through every combination of `InstanceState`,
+        // `InstanceAutoRestartPolicy` and `LastAutoRestart` and verify the
+        // `Reincarnatability` is the one we expect.
+        for &state in InstanceState::ALL_STATES {
+            for policy in [
+                InstanceAutoRestartPolicy::Never,
+                InstanceAutoRestartPolicy::BestEffort,
+            ] {
+                for last_auto_restart in LastAutoRestart::ALL {
+                    let auto_restart = InstanceAutoRestart {
+                        policy: Some(policy),
+                        cooldown: None,
+                    };
+                    let runtime = InstanceRuntimeState {
+                        time_updated: Utc::now(),
+                        generation: InstanceStateGeneration::new().into(),
+                        propolis_id: None,
+                        dst_propolis_id: None,
+                        migration_id: None,
+                        nexus_state: state,
+                        time_last_auto_restarted: last_auto_restart.time(),
+                    };
+
+                    let found_reincarnability =
+                        auto_restart.can_reincarnate(&runtime);
+                    assert!(
+                        is_expected_reincarnatability(
+                            found_reincarnability,
+                            state,
+                            policy,
+                            last_auto_restart,
+                        ),
+                        "unexpected reincarnability: {found_reincarnability:?} for instance state: {state:?}, restart policy: \
+                         {policy:?}, last auto-restart time: {last_auto_restart:?}",
+                    );
+                }
+            }
+        }
+    }
 }
