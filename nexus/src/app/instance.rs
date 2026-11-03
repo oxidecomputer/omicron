@@ -38,6 +38,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
+use nexus_db_queries::db::datastore::VmmStateUpdateResult;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::model::InstanceStateComputer;
 use nexus_types::external_api::disk;
@@ -53,6 +54,7 @@ use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::multicast;
 use nexus_types::external_api::project;
 use nexus_types::instance::SledVmmState;
+use nexus_types::instance::VmmState;
 use omicron_common::address::ConcreteIp;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
@@ -1513,7 +1515,13 @@ impl super::Nexus {
                     Ok(Some(ref state)) => self
                         .notify_vmm_updated(opctx, propolis_id, state)
                         .await
-                        .map_err(Into::into),
+                        .map_err(Into::into)
+                        // Here, we don't actually care if the VMM generation
+                        // number we attempted to write to the DB was stale or
+                        // not. If it was out of date, that's fine, something
+                        // else has already advanced the state past the one we
+                        // observed, and we can just move on.
+                        .map(|_| ()),
                     Ok(None) => Ok(()),
                     Err(e) => Err(InstanceStateChangeError::SledAgent(e)),
                 }
@@ -1787,17 +1795,18 @@ impl super::Nexus {
         // the sled-agent to create the VMM in. Once sled-agent acknowledges our
         // registration request, we will advance the database record to the new
         // state.
+        let state_requested = match operation {
+            InstanceRegisterReason::Migrate { .. } => {
+                sled_agent::VmmState::Migrating
+            }
+            InstanceRegisterReason::Start { .. } => {
+                sled_agent::VmmState::Starting
+            }
+        };
         let vmm_runtime = sled_agent::VmmRuntimeState {
             time_updated: chrono::Utc::now(),
             generation: initial_vmm.generation.next(),
-            state: match operation {
-                InstanceRegisterReason::Migrate { .. } => {
-                    sled_agent::VmmState::Migrating
-                }
-                InstanceRegisterReason::Start { .. } => {
-                    sled_agent::VmmState::Starting
-                }
-            },
+            state: state_requested,
         };
         let instance_register_result = sa
             .vmm_register(
@@ -1820,20 +1829,8 @@ impl super::Nexus {
             .map(|res| res.into_inner().into())
             .map_err(|e| SledAgentInstanceError(e));
 
-        match instance_register_result {
-            Ok(state) => {
-                self.notify_vmm_updated(opctx, *propolis_id, &state).await?;
-                let runtime = state.vmm_state;
-                Ok(db::model::Vmm {
-                    time_state_updated: runtime.time_updated,
-                    generation: runtime.generation.into(),
-                    state: DbVmmState::from(runtime.state),
-                    failure_reason: db::model::VmmFailureReason::from_vmm_state(
-                        runtime.state,
-                    ),
-                    ..initial_vmm.clone()
-                })
-            }
+        let sled_state = match instance_register_result {
+            Ok(state) => state,
             Err(e) => {
                 // If this error indicates that the VMM should be marked as
                 // `Failed`, do that now.
@@ -1848,9 +1845,75 @@ impl super::Nexus {
                         )
                         .await;
                 }
-                Err(InstanceStateChangeError::SledAgent(e))
+                return Err(InstanceStateChangeError::SledAgent(e));
             }
+        };
+
+        // Attempt to write the state received from the sled-agent to the
+        // database.
+        let update_result =
+            self.notify_vmm_updated(opctx, *propolis_id, &sled_state).await?;
+        let db_vmm = update_result.vmm;
+        let db_runtime = db_vmm.runtime();
+        let sled_runtime = sled_state.vmm_state;
+
+        // We're about to check whether we have successfully advanced the VMM to
+        // `Starting` or `Migrating` (depending on why the VMM is being
+        // registered). We will check whether the sled-agent actually returned
+        // the requested state, and then whether the VMM state in the database
+        // is consistent with what we received from the sled-agent.
+        let state_requested = VmmState::from(state_requested);
+        let mk_error = || {
+            Error::conflict(match operation {
+                InstanceRegisterReason::Start { .. } => {
+                    "instance changed state before it could be started"
+                }
+                InstanceRegisterReason::Migrate { .. } => {
+                    "instance changed state before it could migrate"
+                }
+            })
+        };
+        // First, did the request to the sled-agent return the requested state,
+        // or a different one? This would mean that something else has acted
+        // upon the VMM already. That *really shouldn't* happen, as the VMM is
+        // exclusively owned by the instance-start or instance-migrate saga at
+        // this point in time, but it could have been acted upon by some outside
+        // force.
+        //
+        // Note that we perform this check only *after* calling
+        // `notify_vmm_updated`. because we _do_ want to ensure that whatever
+        // state the sled-agent gave us makes it to the database.
+        if sled_runtime.state != state_requested {
+            let error = mk_error().internal_context(format!(
+                "expected sled-agent to return a {state_requested:?} VMM, but \
+                 received {sled_runtime:?} instead",
+            ));
+            return Err(InstanceStateChangeError::Other(error));
         }
+
+        // Next, check if the state in the *database* is also in the requested
+        // state.
+        //
+        // Note: What we actually care about here is that the VMM is in the
+        // requested state. If our write was not the one that advanced it to
+        // `Starting`, that is acceptable: because this function is called in a
+        // saga action, it must be idempotent, and if a previous execution was
+        // the one that had actually registered the VMM and written back the
+        // state, and then it died before it recorded that the saga node
+        // succeeded, we want to succeed idempotently rather than failing. On
+        // the other hand, if the state has changed on us, we have raced with
+        // something else (probably an attempt to stop the instance) and should
+        // unwind.
+        if db_runtime.state != state_requested {
+            let error = mk_error().internal_context(format!(
+                "after registering {propolis_id}, we received VMM state \
+                {sled_runtime:?} from the sled-agent, but the VMM's state in \
+                the database has changed to {db_runtime:?}",
+            ));
+            return Err(InstanceStateChangeError::Other(error));
+        }
+
+        Ok(db_vmm)
     }
 
     /// Attempts to transition an instance to to the `Failed` state in
@@ -2096,15 +2159,20 @@ impl super::Nexus {
         opctx: &OpContext,
         propolis_id: PropolisUuid,
         new_runtime_state: &SledVmmState,
-    ) -> Result<(), Error> {
-        if let Some((instance_id, saga)) = process_vmm_update(
+    ) -> Result<VmmStateUpdateResult, Error> {
+        let ProcessedVmmUpdate {
+            instance_id,
+            update_saga,
+            db_update_result,
+            ..
+        } = process_vmm_update(
             &self.db_datastore,
             opctx,
             propolis_id,
             new_runtime_state,
         )
-        .await?
-        {
+        .await?;
+        if let Some(saga) = update_saga {
             // We don't need to wait for the instance update saga to run to
             // completion to return OK to the sled-agent --- all it needs to care
             // about is that the VMM/migration state in the database was updated.
@@ -2122,7 +2190,7 @@ impl super::Nexus {
             tokio::spawn(self.update_instance(&opctx.log, saga, instance_id));
         }
 
-        Ok(())
+        Ok(db_update_result)
     }
 
     /// Returns the requested range of serial console output bytes,
@@ -2875,23 +2943,55 @@ where
     Ok(ExternalIps { source_nat, ephemeral_ip, floating_ips })
 }
 
+/// The result of a call to [`process_vmm_update`]. This includes any
+/// [instance-update saga](Self::update_saga) that should be started as a result
+/// of this update, and [the results of updating the VMM state in the
+/// database](Self::db_update_result).
+#[must_use = "callers of `process_vmm_update` should check if an `update_saga` \
+    was returned, and start the saga so that VMM state changes are propagated \
+    to the VMM's instance record in a timely manner"]
+pub struct ProcessedVmmUpdate {
+    /// The ID of the instance corresponding to the VMM whose state change has
+    /// been processed.
+    pub instance_id: InstanceUuid,
+    /// If this is `Some`, the VMM state change requires an `instance_update`
+    /// saga to be reflected by the instance record. The contained
+    /// [`steno::SagaDag`] will perform the required update, and should be
+    /// started to ensure that the instance record is updated in a timely
+    /// manner. Callers who need to ensure that the state update is reflected
+    /// synchronously (i.e. endpoints that request the instance's state change)
+    /// should wait for the saga to complete, while those which do not require
+    /// the instance record to be updated may spawn it to run in the background.
+    ///
+    /// If the saga is dropped, the instance record will *eventually* be updated
+    /// by a background task, so running it is only necessary for correctness if
+    /// the caller depends on the result of the update. But, all callers
+    /// *should* try to start the saga to improve the latency with which updates
+    /// are propagated to the instance record.
+    pub update_saga: Option<steno::SagaDag>,
+    /// The return value from [`DataStore::vmm_and_migration_update_runtime`].
+    pub db_update_result: db::datastore::VmmStateUpdateResult,
+}
+
 /// Writes the VMM and migration state supplied in `new_runtime_state` to the
 /// database (provided that it's newer than what's already there).
 ///
 /// # Return value
 ///
-/// - `Ok(Some(instance_id, saga))` if the new VMM state obsoletes the current
-///   instance state. The caller should execute the returned instance update
-///   saga to reconcile the instance to the new VMM state.
-/// - `Ok(None)` if the new state was successfully published but does not
-///   require an instance update.
-/// - `Err` if an error occurred.
+/// - [`Ok`]`(`[`ProcessedVmmUpdate`]`)` if the changes to the VMM and
+///   migration state were processed successfully (i.e., they were either
+///   written to the database successfully or were stale).
+///
+///   If an `instance_update` saga must be started in order to update the
+///   instance record, it is included in the returned [`ProcessedVmmUpdate`].
+///   See that type's documentation for more details.
+/// - [`Err`] if an error occurred.
 pub(crate) async fn process_vmm_update(
     datastore: &DataStore,
     opctx: &OpContext,
     propolis_id: PropolisUuid,
     new_runtime_state: &SledVmmState,
-) -> Result<Option<(InstanceUuid, steno::SagaDag)>, Error> {
+) -> Result<ProcessedVmmUpdate, Error> {
     let migrations = new_runtime_state.migrations();
     info!(opctx.log, "received new VMM runtime state from sled agent";
         "propolis_id" => %propolis_id,
@@ -2909,41 +3009,44 @@ pub(crate) async fn process_vmm_update(
         )
         .await?;
 
+    let instance_id = InstanceUuid::from_untyped_uuid(result.vmm.instance_id);
+
     // If an instance-update saga must be executed as a result of this update,
     // prepare and return it.
-    if instance_update::update_saga_needed(
+    let update_saga = if instance_update::update_saga_needed(
         &opctx.log,
         propolis_id,
         new_runtime_state,
         &result,
     ) {
-        let instance_id =
-            InstanceUuid::from_untyped_uuid(result.found_vmm.instance_id);
-
         let (.., authz_instance) = LookupPath::new(&opctx, datastore)
             .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await?;
 
-        match instance_update::SagaInstanceUpdate::prepare(
+        let saga = instance_update::SagaInstanceUpdate::prepare(
             &instance_update::Params {
                 serialized_authn: authn::saga::Serialized::for_opctx(opctx),
                 authz_instance,
             },
-        ) {
-            Ok(saga) => Ok(Some((instance_id, saga))),
-            Err(e) => {
-                error!(opctx.log, "failed to prepare instance update saga";
-                       "error" => ?e,
-                       "instance_id" => %instance_id,
-                       "propolis_id" => %propolis_id);
-
-                Err(e)
-            }
-        }
+        )
+        .map_err(|e| {
+            error!(opctx.log, "failed to prepare instance update saga";
+                    "error" => ?e,
+                    "instance_id" => %instance_id,
+                    "propolis_id" => %propolis_id);
+            e
+        })?;
+        Some(saga)
     } else {
-        Ok(None)
-    }
+        None
+    };
+
+    Ok(ProcessedVmmUpdate {
+        instance_id,
+        update_saga,
+        db_update_result: result,
+    })
 }
 
 /// Determines whether the supplied instance sizes (CPU count and memory size)

@@ -5,6 +5,7 @@
 //! Background task for pulling instance state from sled-agents.
 
 use crate::app::background::BackgroundTask;
+use crate::app::instance::ProcessedVmmUpdate;
 use crate::app::instance::SledAgentInstanceError;
 use crate::app::saga::StartSaga;
 use futures::{FutureExt, future::BoxFuture};
@@ -166,29 +167,31 @@ impl InstanceWatcher {
                         _ => Err(Incomplete::UpdateFailed),
                     };
                 }
-                Ok(Some((_, saga))) => match sagas.saga_run(saga).await {
-                    Ok((saga_id, completed)) => {
-                        check.update_saga_queued = true;
-                        if let Err(e) = completed.await {
+                Ok(ProcessedVmmUpdate { update_saga: Some(saga), .. }) => {
+                    match sagas.saga_run(saga).await {
+                        Ok((saga_id, completed)) => {
+                            check.update_saga_queued = true;
+                            if let Err(e) = completed.await {
+                                warn!(
+                                    opctx.log,
+                                    "update saga failed";
+                                    "saga_id" => %saga_id,
+                                    "error" => e,
+                                );
+                                check.result = Err(Incomplete::UpdateFailed);
+                            }
+                        }
+                        Err(e) => {
                             warn!(
                                 opctx.log,
-                                "update saga failed";
-                                "saga_id" => %saga_id,
+                                "update saga could not be started";
                                 "error" => e,
                             );
                             check.result = Err(Incomplete::UpdateFailed);
                         }
                     }
-                    Err(e) => {
-                        warn!(
-                            opctx.log,
-                            "update saga could not be started";
-                            "error" => e,
-                        );
-                        check.result = Err(Incomplete::UpdateFailed);
-                    }
-                },
-                Ok(None) => {}
+                }
+                Ok(ProcessedVmmUpdate { update_saga: None, .. }) => {}
             };
 
             check
