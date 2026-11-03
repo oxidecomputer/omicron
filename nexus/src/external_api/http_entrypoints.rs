@@ -6616,13 +6616,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
         req: TypedBody<rack::RackMembershipAddSledsRequest>,
     ) -> Result<HttpResponseOk<RackMembershipStatus>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
-            let req = req.into_inner();
+            let rack::RackMembershipAddSledsRequest {
+                sled_ids,
+                override_prechecks,
+            } = req.into_inner();
             let rack_id = path_params.into_inner().rack_id;
             let authz_tq = authz::TrustQuorumConfig::for_rack_id(
                 RackUuid::from_untyped_uuid(rack_id),
             );
-            let status =
-                nexus.tq_add_sleds(&opctx, authz_tq, req.sled_ids).await?;
+            let status = nexus
+                .tq_add_sleds(&opctx, authz_tq, sled_ids, &override_prechecks)
+                .await?;
             Ok(HttpResponseOk(status.into()))
         })
         .await
