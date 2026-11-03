@@ -2886,6 +2886,23 @@ async fn expect_instance_reboot_ok(
         .expect("expected instance reboot to succeed");
 }
 
+/// Assert that the provided `instance_id` refers to a running instance, and
+/// that that instance is on the sled Nexus knows as `sled_id`.
+async fn expect_instance_on_sled(
+    nexus: &Arc<Nexus>,
+    instance_id: &InstanceUuid,
+    sled_id: &SledUuid,
+) {
+    let instance_sled = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled")
+        .sled_id;
+
+    assert_eq!(&instance_sled, sled_id);
+}
+
 /// Assert values for fleet, silo, and project using both system and silo
 /// metrics endpoints
 async fn assert_metrics(
@@ -7907,14 +7924,7 @@ async fn test_can_start_instance_with_cpu_platform(
     expect_instance_start_ok(client, instance.identity.name.as_str()).await;
 
     // The VMM should specifically be on our new fake Turin sled.
-    let instance_sled = nexus
-        .active_instance_info(&instance_id, None)
-        .await
-        .unwrap()
-        .expect("running instance should have a sled")
-        .sled_id;
-
-    assert_eq!(instance_sled, new_sled_id);
+    expect_instance_on_sled(nexus, &instance_id, &new_sled_id).await;
 
     // We're free to switch this instance from the initial AmdTurin to AmdTurinV2, which has
     // identical placement constraints and should land on the same simulated Turin sled.
@@ -7935,14 +7945,7 @@ async fn test_can_start_instance_with_cpu_platform(
     expect_instance_start_ok(client, instance.identity.name.as_str()).await;
 
     // The VMM should still be on our new fake Turin sled.
-    let instance_sled = nexus
-        .active_instance_info(&instance_id, None)
-        .await
-        .unwrap()
-        .expect("running instance should have a sled")
-        .sled_id;
-
-    assert_eq!(instance_sled, new_sled_id);
+    expect_instance_on_sled(nexus, &instance_id, &new_sled_id).await;
 }
 
 #[nexus_test]
@@ -8040,14 +8043,7 @@ async fn test_can_start_turin_dense_instance_with_cpu_platform(
     expect_instance_start_ok(client, instance.identity.name.as_str()).await;
 
     // The VMM should specifically be on our new fake Turin sled.
-    let instance_sled = nexus
-        .active_instance_info(&instance_id, None)
-        .await
-        .unwrap()
-        .expect("running instance should have a sled")
-        .sled_id;
-
-    assert_eq!(instance_sled, new_sled_id);
+    expect_instance_on_sled(nexus, &instance_id, &new_sled_id).await;
 
     // We're free to switch this instance from the initial AmdTurin to AmdTurinV2, which has
     // identical placement constraints and should land on the same simulated Turin sled.
@@ -8068,14 +8064,7 @@ async fn test_can_start_turin_dense_instance_with_cpu_platform(
     expect_instance_start_ok(client, instance.identity.name.as_str()).await;
 
     // The VMM should still be on our new fake Turin sled.
-    let instance_sled = nexus
-        .active_instance_info(&instance_id, None)
-        .await
-        .unwrap()
-        .expect("running instance should have a sled")
-        .sled_id;
-
-    assert_eq!(instance_sled, new_sled_id);
+    expect_instance_on_sled(nexus, &instance_id, &new_sled_id).await;
 }
 
 #[nexus_test]
