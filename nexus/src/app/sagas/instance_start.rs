@@ -1883,21 +1883,23 @@ mod test {
     }
 
     /// Tests that stopping an instance while its start saga's VMM is still
-    /// `Creating` cancels the start, leaving the instance `Stopped` rather than
-    /// `Failed`.
+    /// `Creating` cancels the start saga, leaving the instance `Stopped` rather
+    /// than `Failed`.
     ///
-    /// In omicron#11560, a stop request arrived after the start saga had linked
-    /// its VMM to the instance, but before the VMM was registered with the
-    /// sled-agent. Forwarding that stop to the sled-agent produced a
-    /// `NO_SUCH_INSTANCE` error, which moved the instance to `Failed`. Instead,
-    /// the stop request should move the VMM to `Cancelling`, and the start saga
-    /// (which still owns the VMM) should find that it could not advance the VMM
-    /// to `Starting` after registering it, and unwind.
+    /// It should be permitted to cancel an instance via the external API while
+    /// it is in the `Starting` external state. Unfortunately, this becomes
+    /// rather complex, as the correct stopping behavior depends on whether the
+    /// VMM has been registered with the sled-agent or not.
     ///
-    /// While registration is paused, this test also checks the two actors that
-    /// would fail a `Cancelling` VMM if they believed it was resident on the
-    /// sled: a second stop request (clients retry stops that time out), and
-    /// the instance-watcher background task.
+    /// This test exercises the case where the stop request occurs *before* the
+    /// start saga has recorded that the VMM has been registered with the
+    /// sled-agent and transitioned to the `Starting` state. We do this by
+    /// pausing the simulated sled-agent's handling of the `vmm_register`
+    /// request sent by the saga, and then trying to stop the instance.
+    /// While registration is paused, this test also checks the two
+    /// actors that would fail a `Cancelling` VMM if they believed it was
+    /// resident on the sled: a second stop request (such as a client retrying
+    /// a request that timed out), and the instance-watcher background task.
     #[tokio::test]
     async fn test_stop_before_registration_cancels_start() {
         use crate::app::instance::SledAgentInstanceError;
@@ -1963,9 +1965,12 @@ mod test {
             )
             .expect("instance lookup should succeed");
 
-        // Stop the instance twice. The second stop is a client retrying a stop
-        // that it gave up waiting on. Neither may be forwarded to the
-        // sled-agent, which has never heard of this VMM.
+        // Try to stop the instance from the external API, twice. The second
+        // stop simulates what might happen if a client retries a stop request
+        // that timed out. Neither stop request should be forwarded to the
+        // sled-agent, because the VMM is not yet registered with the sled and
+        // the resulting sled-agent 404 NO_SUCH_INSTANCE response would
+        // transition it to `Failed`.
         for attempt in 1..=2 {
             let state = nexus
                 .instance_stop(&opctx, &instance_lookup)
@@ -1980,8 +1985,9 @@ mod test {
             assert_eq!(
                 state.effective_state(),
                 instance_types::InstanceState::Stopping,
-                "after stop attempt {attempt}, the instance should appear \
-                 to be stopping: {state:?}",
+                "after stop attempt {attempt}, the instance's external API \
+                 state should appear to be `Stopping`, but it returned
+                 {state:#?}",
             );
             let vmm = test_helpers::vmm_fetch_including_deleted(
                 &cptestctx,
@@ -1991,14 +1997,16 @@ mod test {
             assert_eq!(
                 vmm.state,
                 nexus_db_model::VmmState::Cancelling,
-                "after stop attempt {attempt}, VMM {propolis_id} should be \
-                 cancelling: {vmm:?}",
+                "after stop attempt {attempt}, VMM record for {propolis_id} \
+                 should be in the `Cancelling` state: {vmm:#?}",
             );
         }
 
-        // The instance-watcher must not ask the sled-agent about a `Cancelling`
-        // VMM: the sled-agent would report `NO_SUCH_INSTANCE`, and the watcher
-        // would mark the VMM `Failed`.
+        // The instance-watcher must not perform a health-check for a
+        // `Cancelling` VMM. If it did, the sled-agent would report
+        // `NO_SUCH_INSTANCE`, and the watcher would mark the VMM as `Failed`,
+        // rather than allowing the start saga to unwind and leave the instance
+        // `Stopped`.
         nexus_test_utils::background::activate_background_task(
             &cptestctx.lockstep_client,
             "instance_watcher",
@@ -2010,8 +2018,9 @@ mod test {
         assert_eq!(
             vmm.state,
             nexus_db_model::VmmState::Cancelling,
-            "the instance-watcher should not have touched VMM {propolis_id}, \
-             which is not registered with the sled-agent: {vmm:?}",
+            "VMM {propolis_id}'s state must not have been changed by the \
+             instance-watcher task activation (as it is not registered with the
+             sled-agent): {vmm:#?}",
         );
 
         paused_registration.resume();
@@ -2021,7 +2030,7 @@ mod test {
             Ok(output) => panic!(
                 "the start saga succeeded ({output:?}), even though the \
                  instance was stopped before its VMM {propolis_id} was \
-                 registered; the saga should have unwound",
+                 registered. the saga should have unwound!",
             ),
             Err(saga_err) => {
                 if let Some((node, error)) = &saga_err.undo_failure {
@@ -2033,14 +2042,14 @@ mod test {
         }
 
         // The instance should be stopped, not failed, and should stay that
-        // way: its intended state is `Stopped`, so it won't be reincarnated.
+        // way. Its intended state is `Stopped`, so it won't be reincarnated.
         let final_state =
             test_helpers::instance_fetch(&cptestctx, instance_id).await;
         assert_eq!(
             final_state.effective_state(),
             instance_types::InstanceState::Stopped,
-            "the instance should be stopped once the start saga has unwound: \
-             {final_state:?}",
+            "the instance should be `Stopped` once the start saga has unwound: \
+             {final_state:#?}",
         );
         assert_eq!(
             final_state.instance().intended_state,
@@ -2059,7 +2068,8 @@ mod test {
             Err(e) if e.vmm_gone() => {}
             Ok(state) => panic!(
                 "the start saga unwound, but did not unregister VMM \
-                {propolis_id} from the sled-agent! (vmm was in state {state:?})",
+                {propolis_id} from the sled-agent! (sled vmm was in state \
+                {state:#?})",
             ),
             Err(e) => panic!(
                 "unexpected error asking sled-agent about VMM {propolis_id}: \
