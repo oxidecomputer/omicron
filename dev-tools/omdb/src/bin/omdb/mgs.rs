@@ -257,6 +257,10 @@ fn show_sps_from_ignition(
                         SpIgnitionSystemType::Cosmo => "Cosmo".to_string(),
                         SpIgnitionSystemType::Sidecar => "Sidecar".to_string(),
                         SpIgnitionSystemType::Psc => "PSC".to_string(),
+                        SpIgnitionSystemType::Metro => "Metro".to_string(),
+                        SpIgnitionSystemType::Observer => {
+                            "Observer".to_string()
+                        }
                         SpIgnitionSystemType::Unknown { id } => {
                             format!("unknown: type {id}")
                         }

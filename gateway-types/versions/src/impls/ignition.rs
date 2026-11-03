@@ -56,10 +56,10 @@ impl From<gateway_messages::ignition::SystemType> for SpIgnitionSystemType {
             SystemType::Gimlet => Self::Gimlet,
             SystemType::Sidecar => Self::Sidecar,
             SystemType::Psc => Self::Psc,
-            SystemType::Unknown(id) => Self::Unknown { id },
             SystemType::Cosmo => Self::Cosmo,
-            SystemType::Metro => Self::Unknown { id: 0b0000_0000_0000_0101 },
-            SystemType::Observer => Self::Unknown { id: 0b0000_0000_0000_0110 },
+            SystemType::Metro => Self::Metro,
+            SystemType::Observer => Self::Observer,
+            SystemType::Unknown(id) => Self::Unknown { id },
         }
     }
 }
