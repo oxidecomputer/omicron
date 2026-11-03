@@ -316,7 +316,9 @@ pub fn check_trust_quorum_allows_expunge(
             Err(Error::internal_error(&format!(
                 "Cannot expunge sled {sled_id}: the trust quorum \
                 configuration for rack {rack_id} at epoch {epoch}, loaded as \
-                the latest possibly committed configuration, is aborted"
+                the latest possibly committed configuration, is aborted \
+                (this is a programming error because we expect the provided config \
+                to be non-aborted)"
             )))
         }
     }
