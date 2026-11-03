@@ -57,13 +57,11 @@ pub enum DiskBayOccupant {
     /// An NVMe disk that sled-agent manages. It appears in the sled's disk
     /// list under this identity.
     Disk { identity: DiskIdentity },
-    /// A device is attached but there is no disk sled-agent can manage: an
-    /// NVMe controller with no usable namespace, or something that is not
-    /// NVMe at all.
-    Device {
-        /// The driver bound to the device, if one is.
-        driver: Option<String>,
-        /// The device's path under `/devices`, if the topology recorded one.
+    /// A device is present, but sled-agent does not use it as a disk.
+    UnusableDevice {
+        reason: UnusableReason,
+        /// The device's devfs path, relative to `/devices`, if the topology
+        /// recorded one.
         devfs_path: Option<String>,
     },
     /// The topology or libnvme could not describe the bay on the latest
@@ -73,6 +71,22 @@ pub enum DiskBayOccupant {
         driver: Option<String>,
         error: String,
     },
+}
+
+/// Why sled-agent does not use the device in a bay as a disk.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum UnusableReason {
+    /// The topology records no driver attached to the device. An NVMe drive
+    /// whose controller failed to attach looks like this.
+    NoDriver,
+    /// A driver other than `nvme` is attached to the device.
+    NotNvme { driver: String },
+    /// An NVMe controller with no namespace the driver can use.
+    NoUsableNamespace,
+    /// The disk here has the same identity as the disk in another bay, which
+    /// is the one in the sled's disk list.
+    DuplicateIdentity { identity: DiskIdentity, kept_in: DiskLocation },
 }
 
 /// One bay as the hardware topology reports it, before sled-hardware has
@@ -213,19 +227,25 @@ pub(crate) fn classify_bay(
         }
     };
 
-    let (instance, driver, devfs_path, namespaces) = match &contents.occupant {
+    let (instance, devfs_path, namespaces) = match &contents.occupant {
         ObservedOccupant::Empty => {
             return Ok((describe(DiskBayOccupant::Empty), None));
         }
         ObservedOccupant::Other { driver, devfs_path } => {
-            let device = DiskBayOccupant::Device {
-                driver: driver.clone(),
+            let reason = match driver {
+                Some(driver) => {
+                    UnusableReason::NotNvme { driver: driver.clone() }
+                }
+                None => UnusableReason::NoDriver,
+            };
+            let device = DiskBayOccupant::UnusableDevice {
+                reason,
                 devfs_path: devfs_path.clone(),
             };
             return Ok((describe(device), None));
         }
-        ObservedOccupant::Nvme { instance, driver, devfs_path, namespaces } => {
-            (*instance, driver, devfs_path, namespaces)
+        ObservedOccupant::Nvme { instance, devfs_path, namespaces, .. } => {
+            (*instance, devfs_path, namespaces)
         }
     };
 
@@ -240,8 +260,8 @@ pub(crate) fn classify_bay(
     // enumeration failed silently.
     let Some(namespace) = namespaces.first() else {
         if nvme.usable_namespaces == 0 {
-            let device = DiskBayOccupant::Device {
-                driver: driver.clone(),
+            let device = DiskBayOccupant::UnusableDevice {
+                reason: UnusableReason::NoUsableNamespace,
                 devfs_path: devfs_path.clone(),
             };
             return Ok((describe(device), None));
@@ -397,8 +417,11 @@ pub(crate) fn resolve_bays(
                 );
                 // An unreadable bay already reports that it is unreadable.
                 if !*carried {
-                    bay.occupant = DiskBayOccupant::Device {
-                        driver: None,
+                    bay.occupant = DiskBayOccupant::UnusableDevice {
+                        reason: UnusableReason::DuplicateIdentity {
+                            identity,
+                            kept_in: winner.clone(),
+                        },
                         devfs_path: None,
                     };
                 }
@@ -505,11 +528,28 @@ mod tests {
         let (described, disk) = classify_bay(&observed, None, false).unwrap();
         assert_eq!(
             described.occupant,
-            DiskBayOccupant::Device {
-                driver: Some("pciex8086,1234".to_string()),
+            DiskBayOccupant::UnusableDevice {
+                reason: UnusableReason::NotNvme {
+                    driver: "pciex8086,1234".to_string()
+                },
                 devfs_path: Some(
                     "/pci@0,0/pci1de,fff9@1,1/pci8086,1234@0".to_string()
                 ),
+            }
+        );
+        assert!(disk.is_none());
+    }
+
+    #[test]
+    fn device_without_driver() {
+        let observed =
+            bay(ObservedOccupant::Other { driver: None, devfs_path: None });
+        let (described, disk) = classify_bay(&observed, None, false).unwrap();
+        assert_eq!(
+            described.occupant,
+            DiskBayOccupant::UnusableDevice {
+                reason: UnusableReason::NoDriver,
+                devfs_path: None,
             }
         );
         assert!(disk.is_none());
@@ -568,13 +608,13 @@ mod tests {
     }
 
     #[test]
-    fn controller_without_namespace_is_a_device() {
+    fn controller_without_namespace_is_unusable() {
         let (described, disk) =
             classify_bay(&nvme_bay(vec![]), Some(&facts(0)), false).unwrap();
         assert_eq!(
             described.occupant,
-            DiskBayOccupant::Device {
-                driver: Some("nvme".to_string()),
+            DiskBayOccupant::UnusableDevice {
+                reason: UnusableReason::NoUsableNamespace,
                 devfs_path: Some(
                     "/pci@0,0/pci1de,fff9@1,1/pci1344,3100@0".to_string()
                 ),
@@ -877,7 +917,13 @@ mod tests {
         ));
         assert_eq!(
             at(&bays, "N4").occupant,
-            DiskBayOccupant::Device { driver: None, devfs_path: None }
+            DiskBayOccupant::UnusableDevice {
+                reason: UnusableReason::DuplicateIdentity {
+                    identity: disks.values().next().unwrap().identity().clone(),
+                    kept_in: loc("N3"),
+                },
+                devfs_path: None,
+            }
         );
     }
 
