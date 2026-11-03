@@ -2057,26 +2057,45 @@ impl DataStore {
             let err = err.clone();
 
             async move {
-                async {
-                    let (config, _) =
-                        Self::tq_load_latest_possible_committed_config_conn(
-                            &conn, rack_id,
-                        )
-                        .await?;
-                    check_trust_quorum_allows_expunge(
-                        sled_id,
-                        baseboard_id,
-                        &config,
-                    )?;
-                    Ok::<_, TransactionError<Error>>(())
-                }
-                .await
-                .map_err(|error| match error {
-                    TransactionError::Database(error) => error,
-                    TransactionError::CustomError(error) => {
-                        err.bail(TransitionError::External(error))
+                let current = {
+                    use nexus_db_schema::schema::sled::dsl;
+                    dsl::sled
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(to_db_typed_uuid(sled_id)))
+                        .select(Sled::as_select())
+                        .get_result_async(&conn)
+                        .await
+                        .optional()?
+                };
+                // If the sled is already expunged, skip the trust quorum check.
+                // This way, expungement is idempotent.
+                let already_expunged = match current.as_ref().map(Sled::policy)
+                {
+                    Some(SledPolicy::Expunged) => true,
+                    Some(SledPolicy::InService { .. }) | None => false,
+                };
+                if !already_expunged {
+                    async {
+                        let (config, _) =
+                            Self::tq_load_latest_possible_committed_config_conn(
+                                &conn, rack_id,
+                            )
+                            .await?;
+                        check_trust_quorum_allows_expunge(
+                            sled_id,
+                            baseboard_id,
+                            &config,
+                        )?;
+                        Ok::<_, TransactionError<Error>>(())
                     }
-                })?;
+                    .await
+                    .map_err(|error| match error {
+                        TransactionError::Database(error) => error,
+                        TransactionError::CustomError(error) => {
+                            err.bail(TransitionError::External(error))
+                        }
+                    })?;
+                }
 
                 Self::sled_set_policy_conn(
                     &conn,

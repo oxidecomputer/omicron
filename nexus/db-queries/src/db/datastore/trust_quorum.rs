@@ -2967,4 +2967,79 @@ mod tests {
         db.terminate().await;
         logctx.cleanup_successful();
     }
+
+    #[tokio::test]
+    async fn test_re_expunge_skips_trust_quorum_check() {
+        let logctx = test_setup_log("test_re_expunge_skips_trust_quorum_check");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let hw_ids = insert_hw_baseboard_ids(&db).await;
+        let rack_id = RackUuid::new_v4();
+        let sled_hw = &hw_ids[0];
+        let others: BTreeSet<_> =
+            hw_ids[1..].iter().cloned().map(BaseboardId::from).collect();
+        let sled_id =
+            insert_sled_for_baseboard(datastore, rack_id, sled_hw).await;
+
+        DataStore::tq_insert_rss_config_after_handoff(
+            opctx,
+            &conn,
+            make_authz_tq(rack_id),
+            others.clone(),
+            others.first().unwrap().clone(),
+        )
+        .await
+        .unwrap();
+
+        let (authz_sled, _) = LookupPath::new(opctx, datastore)
+            .sled_id(sled_id)
+            .fetch_for(authz::Action::Modify)
+            .await
+            .expect("looked up sled");
+        let authz_tq = make_authz_tq(rack_id);
+        let sled_baseboard = BaseboardId::from(sled_hw.clone());
+        let expunge = || {
+            datastore.sled_set_policy_to_expunged_if_trust_quorum_allows(
+                opctx,
+                &authz_sled,
+                &authz_tq,
+                &sled_baseboard,
+            )
+        };
+
+        assert_eq!(
+            expunge().await,
+            Ok(SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::Provisionable,
+            }),
+        );
+
+        // Simulate the situation where re-adoption adds the expunged sled's
+        // baseboard back, so the latest trust quorum config now contains it.
+        // Ensure that expunge() returns Ok(SledPolicy::Expunged) (and not an
+        // error or something else that's weird).
+        let with_sled: BTreeSet<_> =
+            hw_ids.iter().cloned().map(BaseboardId::from).collect();
+        datastore
+            .tq_insert_latest_config(
+                opctx,
+                ProposedTrustQuorumConfig {
+                    rack_id,
+                    epoch: Epoch(2),
+                    is_lrtq_upgrade: IsLrtqUpgrade::No {
+                        last_committed_epoch: Epoch(1),
+                    },
+                    members: with_sled,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(expunge().await, Ok(SledPolicy::Expunged));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 }
