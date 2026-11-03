@@ -8011,6 +8011,149 @@ async fn test_can_start_instance_with_cpu_platform(
 }
 
 #[nexus_test]
+async fn test_can_start_turin_dense_instance_with_cpu_platform(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_project_and_pool(client).await;
+
+    let name1 = Name::try_from(String::from("test")).unwrap();
+    let instance_params = instance::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: name1.clone(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(1).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: "test".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces:
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips: vec![],
+        disks: vec![],
+        boot_disk: None,
+        // Note that we're actually setting cpu_platform this time!
+        cpu_platform: Some(InstanceCpuPlatform::AmdMilan),
+        start: false,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+        multicast_groups: vec![],
+        enable_jumbo_frames: false,
+    };
+    let url_instances = get_instances_url();
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &url_instances)
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to succeed.");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    // Now that the instance is created, lets try to start it.
+
+    let nexus = &cptestctx.server.server_context().nexus;
+
+    expect_instance_start_ok(client, instance.identity.name.as_str()).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+
+    // Great, now let's update the instance to require Turin and start it again.
+    // This will fail because there is no Turin in our simulated environment
+    // (yet!)
+    expect_instance_stop_ok(client, instance.identity.name.as_str()).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
+    let instance = expect_instance_reconfigure_ok(
+        &client,
+        &instance.identity.id,
+        instance::InstanceUpdate {
+            boot_disk: Nullable(None),
+            auto_restart_policy: Nullable(None),
+            cpu_platform: Nullable(Some(InstanceCpuPlatform::AmdTurinV2)),
+            ncpus: InstanceCpuCount::try_from(1).unwrap(),
+            memory: ByteCount::from_gibibytes_u32(4),
+            multicast_groups: None,
+            enable_jumbo_frames: false,
+        },
+    )
+    .await;
+
+    expect_instance_start_fail_507(client, instance.identity.name.as_str())
+        .await;
+
+    // We'd like to see the instance actually start, so add a Turin sled and try again.
+
+    // There should be one sled from `#[nexus_test]`, check that first.
+    assert_eq!(
+        objects_list_page_authz::<Sled>(&client, SLEDS_URL).await.items.len(),
+        1
+    );
+
+    let new_sled_id = SledUuid::new_v4();
+    let _turin_sled = cptestctx
+        .add_sled(
+            new_sled_id,
+            omicron_sled_agent::sim::SimMode::Explicit,
+            omicron_sled_agent::sim::SledCpuFamily::AmdTurinDense,
+        )
+        .await;
+
+    // Finally, start the Turin-requiring instance for real!
+    expect_instance_start_ok(client, instance.identity.name.as_str()).await;
+
+    // The VMM should specifically be on our new fake Turin sled.
+    let instance_sled = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled")
+        .sled_id;
+
+    assert_eq!(instance_sled, new_sled_id);
+
+    // We're free to switch this instance from the initial AmdTurin to AmdTurinV2, which has
+    // identical placement constraints and should land on the same simulated Turin sled.
+    expect_instance_stop_ok(client, instance.identity.name.as_str()).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
+    let instance = expect_instance_reconfigure_ok(
+        &client,
+        &instance.identity.id,
+        instance::InstanceUpdate {
+            boot_disk: Nullable(None),
+            auto_restart_policy: Nullable(None),
+            cpu_platform: Nullable(Some(InstanceCpuPlatform::AmdTurinV2)),
+            ncpus: InstanceCpuCount::try_from(1).unwrap(),
+            memory: ByteCount::from_gibibytes_u32(4),
+            multicast_groups: None,
+            enable_jumbo_frames: false,
+        },
+    )
+    .await;
+
+    expect_instance_start_ok(client, instance.identity.name.as_str()).await;
+
+    // The VMM should still be on our new fake Turin sled.
+    let instance_sled = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled")
+        .sled_id;
+
+    assert_eq!(instance_sled, new_sled_id);
+}
+
+#[nexus_test]
 async fn test_cannot_start_instance_with_unsatisfiable_cpu_platform(
     cptestctx: &ControlPlaneTestContext,
 ) {
