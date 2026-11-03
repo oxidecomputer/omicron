@@ -8,7 +8,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::bail;
 use chrono::{DateTime, Utc};
+use omicron_common::api::external::Error;
 use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
@@ -267,6 +269,138 @@ impl ProposedTrustQuorumConfig {
             IsLrtqUpgrade::Yes => None,
             IsLrtqUpgrade::No { last_committed_epoch } => {
                 Some(last_committed_epoch)
+            }
+        }
+    }
+}
+
+/// Given the current trust quorum config returned by
+/// `tq_load_latest_possible_committed_config`, determine whether th provided
+/// sled can be expunged.
+pub fn check_trust_quorum_allows_expunge(
+    sled_id: SledUuid,
+    baseboard_id: &BaseboardId,
+    config: &TrustQuorumConfig,
+) -> Result<(), Error> {
+    let rack_id = config.rack_id;
+    let epoch = config.epoch;
+    let state = config.state;
+
+    if config.members.contains_key(baseboard_id) {
+        return Err(Error::conflict(format!(
+            "Cannot expunge sled {sled_id}, as its baseboard {baseboard_id} \
+            is still a member of the latest trust quorum configuration for \
+            rack {rack_id} (epoch {epoch}, state {state:?})"
+        )));
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug)]
+    enum Membership {
+        Member,
+        NonMember,
+    }
+
+    #[derive(Debug)]
+    enum Expected {
+        Allowed,
+        MemberConflict,
+    }
+
+    #[test]
+    fn test_check_trust_quorum_allows_expunge() {
+        use Expected::*;
+        use Membership::*;
+        use TrustQuorumConfigState as S;
+
+        let sled_id = SledUuid::new_v4();
+        let rack_id = RackUuid::new_v4();
+        let epoch = Epoch(7);
+        let sled_baseboard = BaseboardId {
+            part_number: "test-part".to_string(),
+            serial_number: "expunged".to_string(),
+        };
+        let other_members: Vec<BaseboardId> = (0..3)
+            .map(|i| BaseboardId {
+                part_number: "test-part".to_string(),
+                serial_number: format!("other-{i}"),
+            })
+            .collect();
+
+        let cases = [
+            (S::Preparing, Member, MemberConflict),
+            (S::Preparing, NonMember, Allowed),
+            (S::PreparingLrtqUpgrade, Member, MemberConflict),
+            (S::PreparingLrtqUpgrade, NonMember, Allowed),
+            (S::Committing, Member, MemberConflict),
+            (S::Committing, NonMember, Allowed),
+            (S::Committed, Member, MemberConflict),
+            (S::Committed, NonMember, Allowed),
+            (S::CommittedPartially, Member, MemberConflict),
+            (S::CommittedPartially, NonMember, Allowed),
+            (S::Aborted, Member, MemberConflict),
+            (S::Aborted, NonMember, Allowed),
+        ];
+
+        for (state, membership, expected) in cases {
+            let description = format!("{state:?}, {membership:?}");
+            let mut members: BTreeSet<BaseboardId> =
+                other_members.iter().cloned().collect();
+            match membership {
+                Member => {
+                    members.insert(sled_baseboard.clone());
+                }
+                NonMember => {}
+            }
+            let mut config = TrustQuorumConfig::new_rss_committed_config(
+                rack_id,
+                members,
+                other_members[0].clone(),
+            );
+            config.epoch = epoch;
+            config.state = state;
+
+            let result = check_trust_quorum_allows_expunge(
+                sled_id,
+                &sled_baseboard,
+                &config,
+            );
+
+            let (error, expected_parts) = match expected {
+                Allowed => {
+                    assert_eq!(result, Ok(()), "{description}");
+                    continue;
+                }
+                MemberConflict => (
+                    result.expect_err(&description),
+                    vec![format!(
+                        "Cannot expunge sled {sled_id}, as its baseboard \
+                         {sled_baseboard} is still a member of the latest \
+                         trust quorum configuration for rack {rack_id} \
+                         (epoch 7, state {state:?})"
+                    )],
+                ),
+            };
+
+            let message = match (&expected, &error) {
+                (MemberConflict, Error::Conflict { message }) => {
+                    message.external_message().to_string()
+                }
+                (expected, error) => panic!(
+                    "{description}: expected {expected:?}, got {error:?}"
+                ),
+            };
+            for part in expected_parts {
+                assert!(
+                    message.contains(&part),
+                    "{description}: message {message:?} contains {part:?}"
+                );
             }
         }
     }
