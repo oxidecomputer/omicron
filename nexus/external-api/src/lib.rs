@@ -7988,6 +7988,33 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
+    // Multirack
+
+    /// List racks we've discovered that have joined the underlay network but
+    /// haven't yet been adopted into the regional multirack cluster.
+    ///
+    /// Note that this API is sourced from the inventory system, so it may take
+    /// some time between when a new rack joins the underlay network and when
+    /// that rack appears in this API output, since we won't be able to see it
+    /// here until the inventory collection is refreshed. However, the results
+    /// returned by this API *are* filtered so that racks which have joined the
+    /// cluster do not appear in the response, hence the "unadopted" naming
+    /// scheme instead of the "discovered" naming scheme used in the
+    /// corresponding inventory data.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/multirack/racks-unadopted",
+        tags = ["system/hardware"],
+        versions = VERSION_UNADOPTED_RACK_LIST..
+    }]
+    async fn rack_list_unadopted(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::multirack::UnadoptedRack>>,
+        HttpError,
+    >;
+
     // Metrics
 
     /// View metrics

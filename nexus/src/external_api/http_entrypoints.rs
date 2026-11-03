@@ -43,7 +43,7 @@ use nexus_types::authn::cookies::Cookies;
 use nexus_types::external_api::{
     affinity, alert, audit, certificate, console, device, disk, external_ip,
     external_subnet, floating_ip, hardware, identity_provider, image, instance,
-    internet_gateway, ip_pool, metrics, multicast, networking, oxql,
+    internet_gateway, ip_pool, metrics, multicast, multirack, networking, oxql,
     path_params, policy, probe, project, rack, scim, silo, sled, snapshot,
     ssh_key, subnet_pool, support_bundle, switch, system, system_networking,
     timeseries, update, user, vpc,
@@ -7150,6 +7150,37 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 &query,
                 disks,
                 &|_, disk: &PhysicalDisk| disk.identity.id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    // Multirack
+
+    async fn rack_list_unadopted(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<multirack::UnadoptedRack>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let pagparams = data_page_params_for(&rqctx, &query)?;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let result_list =
+                nexus.rack_list_unadopted(&opctx, &pagparams).await?;
+
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                result_list,
+                &|_, rack: &multirack::UnadoptedRack| rack.rack_id,
             )?))
         };
         apictx
