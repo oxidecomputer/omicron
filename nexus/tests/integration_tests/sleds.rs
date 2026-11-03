@@ -389,7 +389,7 @@ async fn test_sled_agent_put_checks_fetched_identity(
         .await
         .unwrap_or_else(|e| panic!("inserted rack {other_rack_id}: {e}"));
 
-    // Retry this, now that the rack is adopted.
+    // Retry this, now that the rack is adopted. This is the happy path.
     internal_client
         .sled_agent_put(&sled_id, &body)
         .await
