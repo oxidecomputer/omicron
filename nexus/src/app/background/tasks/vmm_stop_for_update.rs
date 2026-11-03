@@ -468,7 +468,10 @@ impl VmmStopForUpdate {
                         | VmmState::Starting
                         | VmmState::Running
                         | VmmState::Creating
-                        | VmmState::SagaUnwound => {
+                        // We should not see Cancelling or SagaUnwound from the
+                        // sled-agent, as those are internal-only states.
+                        | VmmState::SagaUnwound
+                        | VmmState::Cancelling => {
                             slog::warn!(
                                 opctx.log,
                                 "Failed to mark VMM as Stopped, \

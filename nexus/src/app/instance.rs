@@ -2328,10 +2328,13 @@ impl super::Nexus {
                 | DbVmmState::Stopping
                 | DbVmmState::Stopped
                 | DbVmmState::Failed
-                | DbVmmState::Creating => Err(Error::invalid_request(format!(
-                    "cannot connect to serial console of instance in state \"{}\"",
-                    state.effective_state(),
-                ))),
+                | DbVmmState::Creating
+                | DbVmmState::Cancelling => {
+                    Err(Error::invalid_request(format!(
+                        "cannot connect to serial console of instance in state \"{}\"",
+                        state.effective_state(),
+                    )))
+                }
 
                 DbVmmState::Destroyed | DbVmmState::SagaUnwound => {
                     Err(Error::invalid_request(

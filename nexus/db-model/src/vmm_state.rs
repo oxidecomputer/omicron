@@ -38,6 +38,7 @@ impl_enum_type!(
     Failed => b"failed"
     Destroyed => b"destroyed"
     SagaUnwound => b"saga_unwound"
+    Cancelling => b"cancelling"
 );
 
 impl VmmState {
@@ -65,6 +66,7 @@ impl VmmState {
             }
             Self::Destroyed => NexusVmmState::Destroyed,
             Self::SagaUnwound => NexusVmmState::SagaUnwound,
+            Self::Cancelling => NexusVmmState::Cancelling,
         }
     }
 
@@ -89,7 +91,7 @@ impl VmmState {
     /// by an unwound update saga and will never exist, or has already been
     /// destroyed.
     pub const NONEXISTENT_STATES: &'static [Self] =
-        &[Self::Creating, Self::SagaUnwound, Self::Destroyed];
+        &[Self::Creating, Self::Cancelling, Self::SagaUnwound, Self::Destroyed];
 
     pub fn is_terminal(&self) -> bool {
         self.to_nexus_state().is_terminal()
@@ -153,6 +155,7 @@ impl From<nexus_types::instance::VmmState> for VmmState {
             Input::Failed(_) => Self::Failed,
             Input::Destroyed => Self::Destroyed,
             Input::SagaUnwound => Self::SagaUnwound,
+            Input::Cancelling => Self::Cancelling,
         }
     }
 }
@@ -348,6 +351,15 @@ impl<'s> InstanceStateComputer<'s> {
                 InstanceState::Vmm,
                 Some(VmmState::Creating | VmmState::Starting),
             ) => instance::InstanceState::Starting,
+            // - The instance is linked with an active VMM created by an ongoing
+            //   start saga, but the instance was asked to stop *before* the VMM
+            //   was registered with the sled-agent, so the start saga is being
+            //   cancelled. To the external API, this instance should appear to
+            //   be "stopping". It is not yet "stopped", because the VMM has not
+            //   yet been unlinked.
+            (InstanceState::Vmm, Some(VmmState::Cancelling)) => {
+                instance::InstanceState::Stopping
+            }
             (InstanceState::Vmm, Some(VmmState::Running)) => {
                 instance::InstanceState::Running
             }
@@ -506,7 +518,8 @@ mod tests {
                 | VmmState::Stopped
                 | VmmState::Migrating
                 | VmmState::Destroyed
-                | VmmState::SagaUnwound => {
+                | VmmState::SagaUnwound
+                | VmmState::Cancelling => {
                     assert!(
                         !VmmState::SHOULD_MARK_TO_STOP_FOR_EVACUATION
                             .contains(state)
@@ -545,7 +558,8 @@ mod tests {
                 | VmmState::Stopped
                 | VmmState::Migrating
                 | VmmState::Destroyed
-                | VmmState::SagaUnwound => {
+                | VmmState::SagaUnwound
+                | VmmState::Cancelling => {
                     assert!(
                         !VmmState::SHOULD_STOP_FOR_EVACUATION.contains(state)
                     );

@@ -462,7 +462,8 @@ async fn notify_potential_propolis_upstairs(
         | VmmState::Failed
         | VmmState::Destroyed
         | VmmState::SagaUnwound
-        | VmmState::Creating => {
+        | VmmState::Creating
+        | VmmState::Cancelling => {
             // Propolis server is not ok to receive volume replacement requests
             // - unwind so that this saga can run again.
             return Err(saga_action_failed(Error::internal_error(&format!(

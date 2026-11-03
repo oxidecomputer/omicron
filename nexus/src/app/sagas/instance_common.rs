@@ -286,7 +286,8 @@ pub(super) async fn networking_resource_instance_state(
             | Some(state @ VmmState::Migrating)
             | Some(state @ VmmState::Stopping)
             | Some(state @ VmmState::Stopped)
-            | Some(state @ VmmState::Creating),
+            | Some(state @ VmmState::Creating)
+            | Some(state @ VmmState::Cancelling),
         ) => {
             return Err(saga_action_failed(Error::unavail(&format!(
                 "can't {verb} in transient state {state}"
