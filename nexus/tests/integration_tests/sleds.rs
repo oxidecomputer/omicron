@@ -5,8 +5,11 @@
 //! Tests for APIs against sled-based endpoints.
 
 use dropshot::test_util::ClientTestContext;
+use http::StatusCode;
 use nexus_db_model::PhysicalDisk as DbPhysicalDisk;
 use nexus_db_model::PhysicalDiskKind as DbPhysicalDiskKind;
+use nexus_db_model::Sled as DbSled;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
@@ -17,11 +20,16 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::physical_disk::PhysicalDisk;
 use nexus_types::external_api::sled::Sled;
 use nexus_types::external_api::sled::SledInstance;
+use omicron_common::api::external::LookupType;
+use omicron_common::api::external::ResourceType;
+use omicron_generation_kinds::GenericGeneration;
+use omicron_generation_kinds::SledRegistrationGeneration;
 use omicron_sled_agent::sim;
 use omicron_sled_agent::sim::SledCpuFamily;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -213,4 +221,186 @@ async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(project.identity.name, sled_instances[0].project_name);
     assert_eq!(instance.identity.name, sled_instances[0].name);
+}
+
+fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone())
+}
+
+async fn fetch_sled(
+    cptestctx: &ControlPlaneTestContext,
+    opctx: &OpContext,
+    sled_id: SledUuid,
+) -> DbSled {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let (.., sled) = nexus
+        .sled_lookup(opctx, &sled_id)
+        .expect("built a sled lookup")
+        .fetch()
+        .await
+        .unwrap_or_else(|error| panic!("sled {sled_id} has a row: {error}"));
+    sled
+}
+
+async fn assert_no_sled_row(
+    cptestctx: &ControlPlaneTestContext,
+    opctx: &OpContext,
+    sled_id: SledUuid,
+) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let result = nexus
+        .sled_lookup(opctx, &sled_id)
+        .expect("built a sled lookup")
+        .fetch()
+        .await;
+    match result {
+        Ok((.., sled)) => {
+            panic!("expected no row for sled {sled_id}, found {sled:?}")
+        }
+        Err(error) => assert_eq!(
+            error,
+            LookupType::ById(sled_id.into_untyped_uuid())
+                .into_not_found(ResourceType::Sled),
+        ),
+    }
+}
+
+fn expect_error_response(
+    result: Result<
+        nexus_client::ResponseValue<()>,
+        nexus_client::Error<nexus_client::types::Error>,
+    >,
+) -> (StatusCode, nexus_client::types::Error) {
+    match result {
+        Err(nexus_client::Error::ErrorResponse(response)) => {
+            let status = response.status();
+            (status, response.into_inner())
+        }
+        other => panic!("expected an error response from Nexus, got {other:?}"),
+    }
+}
+
+/// Expunge and decommission a sled that the test registered, so that Nexus
+/// background tasks stop contacting its simulated Sled Agent.
+///
+/// We do this before shutting down the simulated Sled Agent to avoid cross-test
+/// contamination where a different service starts up on the same port and makes
+/// requests.
+async fn expunge_and_decommission(
+    cptestctx: &ControlPlaneTestContext,
+    opctx: &OpContext,
+    sled_id: SledUuid,
+) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let (authz_sled,) = nexus
+        .sled_lookup(opctx, &sled_id)
+        .expect("built a sled lookup")
+        .lookup_for(authz::Action::Modify)
+        .await
+        .unwrap_or_else(|e| panic!("looked up sled {sled_id}: {e}"));
+    datastore
+        .sled_set_policy_to_expunged(opctx, &authz_sled)
+        .await
+        .unwrap_or_else(|e| panic!("expunged sled {sled_id}: {e}"));
+    datastore
+        .sled_set_state_to_decommissioned(opctx, &authz_sled)
+        .await
+        .unwrap_or_else(|e| panic!("decommissioned sled {sled_id}: {e}"));
+}
+
+#[nexus_test]
+async fn test_sled_agent_put_checks_fetched_identity(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let opctx = test_opctx(cptestctx);
+    let nexus = &cptestctx.server.server_context().nexus;
+    let internal_client = cptestctx.internal_client();
+
+    let existing_sled_id = cptestctx.first_sled_id();
+    let before = fetch_sled(cptestctx, &opctx, existing_sled_id).await;
+
+    // Simulate a Sled Agent that reports another sled's ID.
+    let impostor_sled_id = SledUuid::new_v4();
+    let impostor = cptestctx
+        .start_unregistered_sled(impostor_sled_id, nexus.rack_id())
+        .await;
+    assert_no_sled_row(cptestctx, &opctx, impostor_sled_id).await;
+    let impostor_address = impostor.http_server.local_addr();
+    let mut overwriting_body = impostor.sled_agent_info();
+    // Bump the generation to avoid this request being filtered out.
+    overwriting_body.generation =
+        SledRegistrationGeneration::from(before.sled_agent_gen)
+            .next()
+            .into_untyped_generation();
+    let (status, error) = expect_error_response(
+        internal_client
+            .sled_agent_put(&existing_sled_id, &overwriting_body)
+            .await,
+    );
+    assert_eq!(
+        (status, error.error_code.as_deref(), error.message.as_str()),
+        (
+            StatusCode::BAD_REQUEST,
+            Some("InvalidRequest"),
+            format!(
+                "sled agent at {impostor_address} reports sled ID \
+                 {impostor_sled_id}, which does not match sled ID \
+                 {existing_sled_id} in the request path; refusing to \
+                 register sled {existing_sled_id} with another sled's \
+                 information",
+            )
+            .as_str(),
+        ),
+    );
+    assert_eq!(
+        fetch_sled(cptestctx, &opctx, existing_sled_id).await,
+        before,
+        "a refused registration must not write the path sled's row",
+    );
+
+    // Simulate a sled on a second rack that hasn't joined the fleet yet.
+    let other_rack_id = RackUuid::new_v4();
+    assert_ne!(other_rack_id, nexus.rack_id());
+    let sled_id = SledUuid::new_v4();
+    let sim = cptestctx.start_unregistered_sled(sled_id, other_rack_id).await;
+    let body = sim.sled_agent_info();
+
+    // This will return a 503 until the rack has been adopted by the fleet.
+    let (status, error) = expect_error_response(
+        internal_client.sled_agent_put(&sled_id, &body).await,
+    );
+    assert_eq!(
+        (status, error.error_code.as_deref(), error.message.as_str()),
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Some("ServiceNotAvailable"),
+            "Service Unavailable",
+        ),
+        "registration of a sled on a rack with no `rack` row should be \
+         refused as retryable",
+    );
+    assert_no_sled_row(cptestctx, &opctx, sled_id).await;
+
+    nexus
+        .datastore()
+        .rack_insert(&opctx, &nexus_db_model::Rack::new(other_rack_id))
+        .await
+        .unwrap_or_else(|e| panic!("inserted rack {other_rack_id}: {e}"));
+
+    // Retry this, now that the rack is adopted.
+    internal_client
+        .sled_agent_put(&sled_id, &body)
+        .await
+        .expect("registration of a sled on an adopted rack was accepted");
+    assert_eq!(
+        fetch_sled(cptestctx, &opctx, sled_id).await.rack_id(),
+        other_rack_id,
+        "the row should hold the rack ID the sled agent reports, not this \
+         Nexus's rack ID {}",
+        nexus.rack_id(),
+    );
+
+    expunge_and_decommission(cptestctx, &opctx, sled_id).await;
 }
