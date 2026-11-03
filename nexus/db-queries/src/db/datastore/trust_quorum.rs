@@ -1416,7 +1416,7 @@ impl DataStore {
             .first_async::<DbTrustQuorumConfiguration>(conn)
             .await
             .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(TransactionError::Database)?;
 
         Ok(latest)
     }
@@ -1438,7 +1438,7 @@ impl DataStore {
             .get_result_async::<DbTrustQuorumConfiguration>(conn)
             .await
             .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(TransactionError::Database)?;
 
         Ok(latest)
     }
@@ -1467,7 +1467,7 @@ impl DataStore {
             ))
             .load_async(conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(TransactionError::Database)?;
 
         Ok(members)
     }
@@ -1507,7 +1507,7 @@ impl DataStore {
             .select((hw_dsl::part_number, hw_dsl::serial_number))
             .load_async(conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(TransactionError::Database)?;
 
         Ok(rows
             .into_iter()
@@ -1525,6 +1525,8 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledSystemHardwareBuilder;
     use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
+    use async_bb8_diesel::AsyncSimpleConnection;
+    use diesel::result::Error as DieselError;
     use nexus_db_model::HwBaseboardId;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledState;
@@ -2207,6 +2209,88 @@ mod tests {
                 )
                 .count()
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[track_caller]
+    fn assert_unconverted<T: std::fmt::Debug>(
+        helper: &str,
+        result: Result<T, TransactionError<Error>>,
+    ) {
+        match result {
+            Err(TransactionError::Database(DieselError::DatabaseError(
+                _,
+                info,
+            ))) => assert!(
+                info.message().starts_with("current transaction is aborted"),
+                "{helper}: unexpected database error {:?}",
+                info.message(),
+            ),
+            other => panic!(
+                "{helper}: expected TransactionError::Database, got {other:?}"
+            ),
+        }
+    }
+
+    async fn assert_read_helpers_unconverted(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        rack_id: RackUuid,
+    ) {
+        assert_unconverted(
+            "tq_get_latest_config_conn",
+            DataStore::tq_get_latest_config_conn(conn, rack_id).await,
+        );
+        assert_unconverted(
+            "tq_get_config_conn",
+            DataStore::tq_get_config_conn(conn, rack_id, Epoch(1)).await,
+        );
+        assert_unconverted(
+            "tq_get_members_conn",
+            DataStore::tq_get_members_conn(conn, rack_id, 1).await,
+        );
+        assert_unconverted(
+            "tq_get_committed_members_without_active_sled_conn",
+            DataStore::tq_get_committed_members_without_active_sled_conn(
+                conn, rack_id,
+            )
+            .await,
+        );
+    }
+
+    #[tokio::test]
+    async fn test_tq_read_helpers_return_database_errors_unconverted() {
+        let logctx = test_setup_log(
+            "test_tq_read_helpers_return_database_errors_unconverted",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let rack_id = RackUuid::new_v4();
+
+        // Run a transaction starting with a failed statement. This leaves the
+        // transaction in an aborted state, so that all the read methods in
+        // assert_read_helpers_unconverted fail to run. We then get to check
+        // that the return values are always `TransactionError::Database` (which
+        // is required for the retry wrapper to recognize retryable errors.)
+        //
+        // It would be ideal to test that retries actually occur, though that
+        // would require some kind of test-only fault injection that we don't
+        // currently have the setup for. So we rely on this next-best thing.
+        datastore
+            .transaction_non_retry_wrapper(
+                "test_tq_read_helpers_return_database_errors_unconverted",
+            )
+            .transaction(&conn, |conn| async move {
+                conn.batch_execute_async("SELECT 1 / 0")
+                    .await
+                    .expect_err("division by zero aborted the transaction");
+                assert_read_helpers_unconverted(&conn, rack_id).await;
+                Err::<(), _>(DieselError::RollbackTransaction)
+            })
+            .await
+            .expect_err("rolled back the aborted transaction");
 
         db.terminate().await;
         logctx.cleanup_successful();
