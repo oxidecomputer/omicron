@@ -275,7 +275,7 @@ impl ProposedTrustQuorumConfig {
 }
 
 /// Given the current trust quorum config returned by
-/// `tq_load_latest_possible_committed_config`, determine whether th provided
+/// `tq_load_latest_possible_committed_config`, determine whether the provided
 /// sled can be expunged.
 pub fn check_trust_quorum_allows_expunge(
     sled_id: SledUuid,
