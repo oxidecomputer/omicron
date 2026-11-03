@@ -351,22 +351,32 @@ impl ZoneBundler {
         zone: &RunningZone,
         cause: ZoneBundleCause,
     ) -> Result<ZoneBundleMetadata, BundleError> {
-        // NOTE: Previously (Prior to #8064),
-        // [Self::await_completion_of_prior_bundles] relied on this lock being
-        // held across this whole function.
-        //
-        // That method was unused, but the lock was left in place. The method
-        // has since been removed, but the lock was kept to avoid changing
-        // behavior in an unrelated [PR](#11476).
-        let inner = self.inner.lock().await;
-        let storage_dirs = inner.bundle_directories().await;
-        let extra_log_dirs = inner
-            .available_datasets_rx
-            .all_mounted_debug_datasets()
-            .into_iter()
-            .map(|pool_path| pool_path.into_path())
-            .collect();
-        let context = ZoneBundleContext { cause, storage_dirs, extra_log_dirs };
+        let context = {
+            // Hold the lock only long enough to create the zone bundle context,
+            // and release it as soon as we have done so. This way, the lock is
+            // not held for the duration of the (potentially quite
+            // time-consuming!) work to create the bundle, and we can start
+            // creating additional bundles if any other zones are being
+            // destroyed.
+            //
+            // As a historical note, long-time listeners may recall that there
+            // was once a `ZoneBundler::await_completion_of_prior_bundles`
+            // method, which relied on this lock being held for the duration of
+            // bundle creation. That function no longer exists, so we can now
+            // release it freely. If we were to need to add such a thing again,
+            // we consider doing it using a separate `tokio::sync::Semaphore` or
+            // something serving as a countdown latch to track the number of
+            // in-flight bundle creations.
+            let inner = self.inner.lock().await;
+            let storage_dirs = inner.bundle_directories().await;
+            let extra_log_dirs = inner
+                .available_datasets_rx
+                .all_mounted_debug_datasets()
+                .into_iter()
+                .map(|pool_path| pool_path.into_path())
+                .collect();
+            ZoneBundleContext { cause, storage_dirs, extra_log_dirs }
+        };
         info!(
             self.log,
             "creating zone bundle";
