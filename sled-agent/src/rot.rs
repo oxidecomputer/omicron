@@ -222,11 +222,16 @@ mod tests {
     const DIGEST: &str =
         "be4df4e085175f3de0c8ac4837e1c2c9a34e8983209dac6b549e94154f7cdd9c";
 
-    /// Write the keys, certs, and measurement log for the mock RoT to `dir`
-    fn write_mock_data(dir: &Utf8Path) {
+    /// Generate an `AttestConfig from `sprockets_tls::keys` w/ artifacts
+    /// required to mock the Oxide RoT
+    fn gen_mock_config(dir: &Utf8Path) -> AttestConfig {
+        // tests in this module need a single cert chain to represent the
+        // attestation signer
+        const LEAF_COUNT: usize = 1;
+
         let behavior = OutputFileExistsBehavior::Overwrite;
 
-        let doc = sprockets_tls_test_utils::generate_config(1);
+        let doc = sprockets_tls_test_utils::generate_config(LEAF_COUNT);
         doc.write_key_pairs(dir.to_owned(), behavior).unwrap();
         doc.write_certificates(dir.to_owned(), behavior).unwrap();
         doc.write_certificate_lists(dir.to_owned(), behavior).unwrap();
@@ -245,13 +250,12 @@ mod tests {
             .to_bytes()
             .unwrap();
         std::fs::write(dir.join("log.bin"), &log).unwrap();
-    }
 
-    /// Write the mock RoT's data to `dir` and return a config that uses it
-    fn mock_config(dir: &Utf8Path) -> AttestConfig {
-        write_mock_data(dir);
+        // sprockets test utils / pki-playground append a positive integer to
+        // the file name of the generated leaf. We've only created a single
+        // leaf & cert chain so this must be `1`
+        let alias = alias_prefix(LEAF_COUNT);
 
-        let alias = alias_prefix(1);
         AttestConfig::Local {
             priv_key: private_key_path(dir.to_owned(), &alias),
             cert_chain: certlist_path(dir.to_owned(), &alias),
@@ -266,7 +270,7 @@ mod tests {
     async fn rot_attestor_verify_attestation() {
         let logctx = test_setup_log("rot_attestor_mock");
         let tmp = Utf8TempDir::new().unwrap();
-        let cfg = mock_config(tmp.path());
+        let cfg = gen_mock_config(tmp.path());
 
         // Get artifacts required to verify the attestation
         let attestor = RotAttestor::new(&logctx.log, &cfg).unwrap();
@@ -309,7 +313,7 @@ mod tests {
     async fn rot_attestor_queue_full() {
         let logctx = test_setup_log("rot_attestor_busy");
         let tmp = Utf8TempDir::new().unwrap();
-        let cfg = mock_config(tmp.path());
+        let cfg = gen_mock_config(tmp.path());
         let attestor = RotAttestor::new(&logctx.log, &cfg).unwrap();
 
         // fill request queue
