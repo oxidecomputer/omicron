@@ -78,7 +78,7 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
             // Multicast groups=
             Vec::new(),
             // Shutdown policy=
-            None,
+            instance::InstanceShutdownPolicy::default(),
         )
         .await
     }

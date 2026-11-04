@@ -799,7 +799,7 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     });
 pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
     LazyLock::new(|| instance::InstanceCreate {
@@ -827,7 +827,7 @@ pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     });
 pub static DEMO_INSTANCE_UPDATE: LazyLock<instance::InstanceUpdate> =
     LazyLock::new(|| instance::InstanceUpdate {

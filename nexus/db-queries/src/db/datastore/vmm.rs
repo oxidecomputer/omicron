@@ -1461,7 +1461,8 @@ mod tests {
         let mut shutdown_policy_iter = iter::once(
             InstanceShutdownPolicy::HardOff,
         )
-        .chain((1000..).step_by(100).map(|timeout_secs| {
+        .chain((1000_u64..).step_by(100).map(|n| {
+            let timeout_secs = n.try_into().expect("these are valid timeouts");
             InstanceShutdownPolicy::PowerButton { timeout_secs }
         }));
         let mut expected_shutdown_policies =
@@ -1581,7 +1582,7 @@ mod tests {
                                 anti_affinity_groups: Vec::new(),
                                 multicast_groups: Vec::new(),
                                 enable_jumbo_frames: false,
-                                shutdown_policy: Some(shutdown_policy),
+                                shutdown_policy,
                             },
                         ),
                     )

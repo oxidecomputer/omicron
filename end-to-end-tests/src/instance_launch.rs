@@ -9,9 +9,8 @@ use anyhow::{Context as _, Result, ensure};
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use oxide_client::types::{
     ByteCount, DiskBackend, DiskCreate, DiskSource, ExternalIp,
-    ExternalIpCreate, InstanceCpuCount, InstanceCreate, InstanceDiskAttachment,
-    InstanceNetworkInterfaceAttachment, InstanceState, IpVersion, PoolSelector,
-    SshKeyCreate,
+    ExternalIpCreate, InstanceDiskAttachment, InstanceState, IpVersion,
+    PoolSelector, SshKeyCreate,
 };
 use oxide_client::{ClientCurrentUserExt, ClientDisksExt, ClientInstancesExt};
 use russh::keys::{
@@ -64,38 +63,30 @@ async fn instance_launch() -> Result<()> {
         .clone();
 
     eprintln!("create instance");
+    let instance_name = generate_name("instance")?;
     let instance = ctx
         .client
         .instance_create()
         .project(ctx.project_name.clone())
-        .body(InstanceCreate {
-            name: generate_name("instance")?,
-            description: String::new(),
-            hostname: "localshark".parse().unwrap(), // 🦈
-            memory: ByteCount(1024 * 1024 * 1024),
-            ncpus: InstanceCpuCount(2),
-            boot_disk: Some(InstanceDiskAttachment::Attach {
-                name: disk_name.clone(),
-            }),
-            disks: Vec::new(),
-            network_interfaces:
-                InstanceNetworkInterfaceAttachment::DefaultDualStack,
-            external_ips: vec![ExternalIpCreate::Ephemeral {
-                pool_selector: PoolSelector::Auto {
-                    ip_version: Some(IpVersion::V4),
-                },
-            }],
-            user_data: String::new(),
-            ssh_public_keys: Some(vec![oxide_client::types::NameOrId::Name(
-                ssh_key_name.clone(),
-            )]),
-            start: true,
-            auto_restart_policy: Default::default(),
-            anti_affinity_groups: Vec::new(),
-            cpu_platform: None,
-            multicast_groups: Vec::new(),
-            enable_jumbo_frames: false,
-            shutdown_policy: None,
+        .body_map(|builder| {
+            builder
+                .name(instance_name)
+                .description("")
+                .hostname("localshark")
+                .memory(ByteCount(1024 * 1024 * 1024))
+                .ncpus(2)
+                .boot_disk(Some(InstanceDiskAttachment::Attach {
+                    name: disk_name.clone(),
+                }))
+                .external_ips(vec![ExternalIpCreate::Ephemeral {
+                    pool_selector: PoolSelector::Auto {
+                        ip_version: Some(IpVersion::V4),
+                    },
+                }])
+                .ssh_public_keys(Some(vec![
+                    oxide_client::types::NameOrId::Name(ssh_key_name.clone()),
+                ]))
+                .start(true)
         })
         .send()
         .await?;

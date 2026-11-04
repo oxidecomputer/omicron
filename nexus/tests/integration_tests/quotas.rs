@@ -124,7 +124,7 @@ impl ResourceAllocator {
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
                 enable_jumbo_frames: false,
-            shutdown_policy: None,
+                shutdown_policy: instance::InstanceShutdownPolicy::default(),
             },
         )
         .authn_as(self.auth.clone())

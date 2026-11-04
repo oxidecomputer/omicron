@@ -371,7 +371,7 @@ async fn attach_test_impl(
                 None,
                 None,
                 vec![],
-                None,
+                Default::default(),
             )
             .await
         }
@@ -794,7 +794,7 @@ async fn cannot_delete_attached_external_subnet(
         None,
         None,
         vec![],
-        None,
+        Default::default(),
     )
     .await;
     let _ = attach_external_subnet(client, INSTANCE_NAME, EXTERNAL_SUBNET_NAME)
@@ -1065,7 +1065,7 @@ async fn test_limited_collaborator_external_subnet_lifecycle(
         None,
         None,
         vec![],
-        None,
+        Default::default(),
     )
     .await;
 

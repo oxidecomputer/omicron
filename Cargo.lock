@@ -8573,7 +8573,6 @@ dependencies = [
  "http",
  "mg-admin-client",
  "mg-api-types",
- "nexus-defaults",
  "omicron-common",
  "omicron-passwords",
  "omicron-uuid-kinds",

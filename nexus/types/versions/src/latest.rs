@@ -194,6 +194,7 @@ pub mod instance {
 
     pub use crate::v2026_06_08_00::instance::InstanceCpuPlatform;
 
+    pub use crate::v2026_11_05_00::instance::AcpiTimeoutSecs;
     pub use crate::v2026_11_05_00::instance::Instance;
     pub use crate::v2026_11_05_00::instance::InstanceCreate;
     pub use crate::v2026_11_05_00::instance::InstanceShutdownPolicy;
