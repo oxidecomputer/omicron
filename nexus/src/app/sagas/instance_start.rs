@@ -1272,7 +1272,7 @@ async fn sis_ensure_running(
         &params.serialized_authn,
     );
 
-    let db_instance =
+    let mut db_instance =
         sagactx.lookup::<db::model::Instance>("started_record")?;
     let db_vmm = sagactx.lookup::<db::model::Vmm>(REGISTERED_VMM_RECORD)?;
     let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
@@ -1293,8 +1293,8 @@ async fn sis_ensure_running(
         .instance_request_state(
             &opctx,
             &authz_instance,
-            &db_instance,
-            &Some(db_vmm),
+            &mut db_instance,
+            &mut Some(db_vmm),
             crate::app::instance::InstanceStateChangeRequest::Run,
         )
         .await
@@ -2322,7 +2322,12 @@ mod test {
         // transition it to `Failed`.
         for attempt in 1..=2 {
             let state = nexus
-                .instance_stop(&opctx, &instance_lookup)
+                .instance_stop(
+                    &opctx,
+                    &instance_lookup,
+                    // always hard stop instances for tests (ignoring shutdown policy)
+                    true,
+                )
                 .await
                 .unwrap_or_else(|e| {
                     panic!(
@@ -2504,7 +2509,15 @@ mod test {
         // The reboot should be rejected as a request that can't be satisfied in
         // the instance's current state (a 4xx), rather than reported as the
         // instance being unreachable (a 5xx).
-        match nexus.instance_reboot(&opctx, &instance_lookup).await {
+        match nexus
+            .instance_reboot(
+                &opctx,
+                &instance_lookup,
+                // always hard reboot instances for tests (ignoring shutdown policy)
+                true,
+            )
+            .await
+        {
             Ok(state) => panic!(
                 "rebooting an instance whose VMM is not yet registered \
                  should fail: {state:?}",
@@ -2635,7 +2648,12 @@ mod test {
             )
             .expect("instance lookup should succeed");
         let state = nexus
-            .instance_stop(&opctx, &instance_lookup)
+            .instance_stop(
+                &opctx,
+                &instance_lookup,
+                // always hard stop instances for tests (ignoring shutdown policy)
+                true,
+            )
             .await
             .unwrap_or_else(|e| {
                 panic!(
@@ -2830,7 +2848,12 @@ mod test {
             )
             .expect("instance lookup should succeed");
         let state = nexus
-            .instance_stop(&opctx, &instance_lookup)
+            .instance_stop(
+                &opctx,
+                &instance_lookup,
+                // always hard stop instances for tests (ignoring shutdown policy)
+                true,
+            )
             .await
             .unwrap_or_else(|e| {
                 panic!(
@@ -3015,7 +3038,12 @@ mod test {
             )
             .expect("instance lookup should succeed");
         let state = nexus
-            .instance_stop(&opctx, &instance_lookup)
+            .instance_stop(
+                &opctx,
+                &instance_lookup,
+                // always hard stop instances for tests (ignoring shutdown policy)
+                true,
+            )
             .await
             .unwrap_or_else(|e| {
                 panic!(
