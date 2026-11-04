@@ -70,6 +70,7 @@ pub enum SledExpungeRequestUpdateOutcome {
     NotInExpectedState { current: SledExpungeRequest },
 }
 
+// TODO-RAINCLAUDE: Inconsistent means the request's records contradict each other (its removal config is missing, or still preparing or aborted although the request is expunging; the trust quorum loaders failed; the gate refused its inputs or the base config it needs is missing; or its sled row is missing or doesn't match the request); nothing was written, it should not resolve by retrying, and message is internal text naming the request, not for operators.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[must_use]
 pub enum SledExpungeRequestCompleteOutcome {
@@ -77,21 +78,16 @@ pub enum SledExpungeRequestCompleteOutcome {
     NotExpunging { current: SledExpungeRequest },
     ReAddPreparing { epoch: Epoch },
     ReAdded { epoch: Epoch, state: TrustQuorumConfigState },
+    Inconsistent { message: String },
 }
 
-// TODO-RAINCLAUDE: what sled_expunge_request_check_task_gate found. Inconsistent means the rack's trust quorum records contradict the request or each other (a loader or gate error, or a missing base config); it will not resolve by retrying, unlike the Err database errors. message is internal text, not for operators.
+// TODO-RAINCLAUDE: what sled_expunge_request_check_task_gate (and, inside complete, sled_expunge_task_gate_conn) found. Inconsistent means the rack's trust quorum records contradict the request or each other (a loader error, a gate or base-epoch error, or a missing base config); it should not resolve by retrying, unlike the Err database errors. message is internal text prefixed with the request's context, not for operators.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[must_use]
 pub enum SledExpungeTaskGateOutcome {
     RemovalConfigMissing,
     Gate(SledExpungeTaskGate),
     Inconsistent { message: String },
-}
-
-// TODO-RAINCLAUDE: what sled_expunge_task_gate_conn found without bailing; inconsistent inputs bail instead.
-enum TaskGateConnOutcome {
-    RemovalConfigMissing,
-    Gate(SledExpungeTaskGate),
 }
 
 pub fn authz_sled_expunge_request_from_id(
@@ -818,9 +814,10 @@ impl DataStore {
                 &authz::TrustQuorumConfig::for_rack_id(rack_id),
             )
             .await?;
-        let tq_epoch = i64_to_epoch(request.tq_epoch)?;
-        let baseboard_id = request.baseboard_id();
         let context = sled_expunge_request_context(&request);
+        let tq_epoch = i64_to_epoch(request.tq_epoch)
+            .map_err(|error| error.internal_context(context.clone()))?;
+        let baseboard_id = request.baseboard_id();
 
         let err = OptionalError::new();
         self.transaction_retry_wrapper("sled_expunge_request_complete")
@@ -829,12 +826,10 @@ impl DataStore {
                 let baseboard_id = baseboard_id.clone();
                 let context = context.clone();
                 async move {
-                    let internal_error = |message: String| {
-                        err.bail(TransitionError::External(
-                            Error::internal_error(&format!(
-                                "{context}: {message}"
-                            )),
-                        ))
+                    let inconsistent = |message: String| {
+                        SledExpungeRequestCompleteOutcome::Inconsistent {
+                            message: in_context(&context, message),
+                        }
                     };
 
                     let Some(current) =
@@ -858,7 +853,6 @@ impl DataStore {
 
                     let gate = match Self::sled_expunge_task_gate_conn(
                         &conn,
-                        &err,
                         &context,
                         rack_id,
                         tq_epoch,
@@ -866,16 +860,23 @@ impl DataStore {
                     )
                     .await?
                     {
-                        TaskGateConnOutcome::RemovalConfigMissing => {
-                            return Err(internal_error(
+                        SledExpungeTaskGateOutcome::RemovalConfigMissing => {
+                            return Ok(inconsistent(
                                 "no trust quorum configuration exists at the \
                                  removal epoch"
                                     .to_string(),
                             ));
                         }
-                        TaskGateConnOutcome::Gate(gate) => gate,
+                        SledExpungeTaskGateOutcome::Gate(gate) => gate,
+                        SledExpungeTaskGateOutcome::Inconsistent { message } => {
+                            return Ok(
+                                SledExpungeRequestCompleteOutcome::Inconsistent {
+                                    message,
+                                },
+                            );
+                        }
                     };
-                    // TODO-RAINCLAUDE: RemovalPreparing and RemovalAborted are internal errors here: the task contract (not enforced here) is that a request only reaches expunging after the gate saw its removal past Preparing, and a config past Preparing can never go back or be aborted.
+                    // TODO-RAINCLAUDE: RemovalPreparing and RemovalAborted come back as Inconsistent here: the task contract (not enforced here) is that a request only reaches expunging after the gate saw its removal past Preparing, and a config past Preparing can never go back or be aborted.
                     match gate {
                         SledExpungeTaskGate::SledRemoved => {}
                         SledExpungeTaskGate::ReAddPreparing { epoch } => {
@@ -895,7 +896,7 @@ impl DataStore {
                         }
                         SledExpungeTaskGate::RemovalPreparing
                         | SledExpungeTaskGate::RemovalAborted => {
-                            return Err(internal_error(format!(
+                            return Ok(inconsistent(format!(
                                 "the request is expunging, but the task gate \
                                  reported {gate:?}"
                             )));
@@ -913,12 +914,12 @@ impl DataStore {
                             .optional()?
                     };
                     let Some(sled) = sled else {
-                        return Err(internal_error(format!(
+                        return Ok(inconsistent(format!(
                             "its sled {sled_id} does not exist"
                         )));
                     };
                     if sled.rack_id() != rack_id {
-                        return Err(internal_error(format!(
+                        return Ok(inconsistent(format!(
                             "its sled {sled_id} is in rack {}",
                             sled.rack_id(),
                         )));
@@ -928,7 +929,7 @@ impl DataStore {
                         serial_number: sled.serial_number().to_string(),
                     };
                     if sled_baseboard_id != baseboard_id {
-                        return Err(internal_error(format!(
+                        return Ok(inconsistent(format!(
                             "its sled {sled_id} has baseboard \
                              {sled_baseboard_id}"
                         )));
@@ -954,10 +955,13 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?;
                     if n_updated != 1 {
-                        return Err(internal_error(format!(
-                            "the request was read as {from} in this \
-                             transaction, but moving it to done updated \
-                             {n_updated} rows"
+                        return Err(err.bail(TransitionError::External(
+                            Error::internal_error(&format!(
+                                "the request was read as {from} in this \
+                                 transaction, but moving it to done updated \
+                                 {n_updated} rows"
+                            ))
+                            .internal_context(context.clone()),
                         )));
                     }
 
@@ -972,7 +976,7 @@ impl DataStore {
             })
     }
 
-    // TODO-RAINCLAUDE: the waiting_for_trust_quorum step's gate check (RFD 747), outside sled_expunge_request_complete: every gate input is read in one transaction so the gate sees one snapshot of the rack's configs, and it uses the same loader as complete so the two cannot drift. It writes nothing; acting on SledRemoved relies on check_no_new_member_being_expunged_conn refusing re-adds and on complete re-running the gate in its own transaction. Database errors stay retryable inside the transaction; loader and gate errors are internal errors naming the request.
+    // TODO-RAINCLAUDE: the waiting_for_trust_quorum step's gate check (RFD 747), outside sled_expunge_request_complete: every gate input is read in one transaction so the gate sees one snapshot of the rack's configs, and it uses the same loader as complete so the two cannot drift. It writes nothing; acting on SledRemoved relies on check_no_new_member_being_expunged_conn refusing re-adds and on complete re-running the gate in its own transaction. Database errors stay retryable inside the transaction; loader and gate errors come back as Inconsistent, naming the request.
     pub async fn sled_expunge_request_check_task_gate(
         &self,
         opctx: &OpContext,
@@ -994,17 +998,13 @@ impl DataStore {
             .map_err(|error| error.internal_context(context.clone()))?;
         let baseboard_id = request.baseboard_id();
 
-        let err = OptionalError::new();
-        let result = self
-            .transaction_retry_wrapper("sled_expunge_request_check_task_gate")
+        self.transaction_retry_wrapper("sled_expunge_request_check_task_gate")
             .transaction(&conn, |conn| {
-                let err = err.clone();
                 let baseboard_id = baseboard_id.clone();
                 let context = context.clone();
                 async move {
                     Self::sled_expunge_task_gate_conn(
                         &conn,
-                        &err,
                         &context,
                         rack_id,
                         tq_epoch,
@@ -1013,117 +1013,108 @@ impl DataStore {
                     .await
                 }
             })
-            .await;
-        match result {
-            Ok(TaskGateConnOutcome::RemovalConfigMissing) => {
-                Ok(SledExpungeTaskGateOutcome::RemovalConfigMissing)
-            }
-            Ok(TaskGateConnOutcome::Gate(gate)) => {
-                Ok(SledExpungeTaskGateOutcome::Gate(gate))
-            }
-            // TODO-RAINCLAUDE: every External error sled_expunge_task_gate_conn bails is an internal error about the trust quorum records; it becomes an outcome so the task can tell it from a retryable database error. complete instead returns it as an internal error.
-            Err(error) => match err.take() {
-                Some(TransitionError::External(error)) => {
-                    Ok(SledExpungeTaskGateOutcome::Inconsistent {
-                        message: error_text(&error),
-                    })
-                }
-                taken @ (Some(TransitionError::InvalidTransition {
-                    ..
-                })
-                | None) => {
-                    Err(sled_expunge_transaction_error(taken, error, &context))
-                }
-            },
-        }
+            .await
+            .map_err(|error| {
+                public_error_from_diesel(error, ErrorHandler::Server)
+                    .internal_context(context.clone())
+            })
     }
 
-    // TODO-RAINCLAUDE: loads the task gate's inputs (the removal config, the latest non-aborted config, and the base sled_expunge_task_gate_base_epoch names) and runs the gate, for sled_expunge_request_complete and sled_expunge_request_check_task_gate. A missing removal config is an outcome rather than bailed, so that each caller decides what it means (the task fails the request; complete reports an internal error); a missing base config, like every other inconsistent input, bails as an internal error prefixed with context.
+    // TODO-RAINCLAUDE: loads the task gate's inputs (the removal config, the latest non-aborted config, and the base sled_expunge_task_gate_base_epoch names) and runs the gate, for sled_expunge_request_complete and sled_expunge_request_check_task_gate. A missing removal config is its own outcome, so that each caller decides what it means (the task fails the request; complete reports it as Inconsistent); a missing base config, and every other inconsistent input, is Inconsistent, prefixed with context.
     async fn sled_expunge_task_gate_conn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        err: &OptionalError<TransitionError>,
         context: &str,
         rack_id: RackUuid,
         tq_epoch: Epoch,
         baseboard_id: &BaseboardId,
-    ) -> Result<TaskGateConnOutcome, DieselError> {
-        let internal_error = |message: String| {
-            err.bail(TransitionError::External(Error::internal_error(
-                &format!("{context}: {message}"),
-            )))
-        };
+    ) -> Result<SledExpungeTaskGateOutcome, DieselError> {
+        let inconsistent =
+            |message: String| SledExpungeTaskGateOutcome::Inconsistent {
+                message: in_context(context, message),
+            };
 
-        // TODO-RAINCLAUDE: the loaders' own errors (for example a rack with no trust quorum config) are internal errors here, since the request was created against these configs; database errors pass through untouched so that restarts stay retryable.
-        let Some(removal_config) =
-            Self::tq_get_config_with_members_from_epoch_conn(
+        // TODO-RAINCLAUDE: the loaders' own errors (for example a rack with no trust quorum config) are Inconsistent here, since the request was created against these configs; database errors pass through untouched so that restarts stay retryable.
+        let removal_config =
+            match Self::tq_get_config_with_members_from_epoch_conn(
                 conn, rack_id, tq_epoch,
             )
             .await
-            .map_err(|error| {
-                tq_load_error_into_diesel(
-                    err,
-                    context,
-                    "the removal trust quorum configuration",
-                    error,
-                )
-            })?
-        else {
-            return Ok(TaskGateConnOutcome::RemovalConfigMissing);
-        };
-        let (latest_non_aborted_config, _) =
-            Self::tq_load_latest_possible_committed_config_conn(conn, rack_id)
-                .await
-                .map_err(|error| {
-                    tq_load_error_into_diesel(
-                        err,
+            {
+                Ok(Some(config)) => config,
+                Ok(None) => {
+                    return Ok(
+                        SledExpungeTaskGateOutcome::RemovalConfigMissing,
+                    );
+                }
+                Err(error) => {
+                    return tq_load_error_outcome(
+                        context,
+                        "the removal trust quorum configuration",
+                        error,
+                    );
+                }
+            };
+        let latest_non_aborted_config =
+            match Self::tq_load_latest_possible_committed_config_conn(
+                conn, rack_id,
+            )
+            .await
+            {
+                Ok((config, _)) => config,
+                Err(error) => {
+                    return tq_load_error_outcome(
                         context,
                         "the latest non-aborted trust quorum configuration",
                         error,
-                    )
-                })?;
-        let base_epoch = sled_expunge_task_gate_base_epoch(
+                    );
+                }
+            };
+        let base_epoch = match sled_expunge_task_gate_base_epoch(
             &removal_config,
             &latest_non_aborted_config,
-        )
-        .map_err(|error| internal_error(error.to_string()))?;
+        ) {
+            Ok(base_epoch) => base_epoch,
+            Err(error) => return Ok(inconsistent(error.to_string())),
+        };
         // TODO-RAINCLAUDE: when the Preparing latest config builds directly on the removal, the removal config already loaded is its base.
         let loaded_base_config = match base_epoch {
             Some(base_epoch) if base_epoch != tq_epoch => {
-                let Some(base_config) =
-                    Self::tq_get_config_with_members_from_epoch_conn(
-                        conn, rack_id, base_epoch,
-                    )
-                    .await
-                    .map_err(|error| {
-                        tq_load_error_into_diesel(
-                            err,
+                match Self::tq_get_config_with_members_from_epoch_conn(
+                    conn, rack_id, base_epoch,
+                )
+                .await
+                {
+                    Ok(Some(base_config)) => Some(base_config),
+                    Ok(None) => {
+                        return Ok(inconsistent(format!(
+                            "no trust quorum configuration exists at epoch \
+                             {base_epoch}, the base of the latest \
+                             configuration (epoch {})",
+                            latest_non_aborted_config.epoch,
+                        )));
+                    }
+                    Err(error) => {
+                        return tq_load_error_outcome(
                             context,
                             "the base trust quorum configuration",
                             error,
-                        )
-                    })?
-                else {
-                    return Err(internal_error(format!(
-                        "no trust quorum configuration exists at epoch \
-                         {base_epoch}, the base of the latest configuration \
-                         (epoch {})",
-                        latest_non_aborted_config.epoch,
-                    )));
-                };
-                Some(base_config)
+                        );
+                    }
+                }
             }
             None | Some(_) => None,
         };
         let latest_base_config =
             loaded_base_config.as_ref().or(base_epoch.map(|_| &removal_config));
-        let gate = check_sled_expunge_task_gate(
+        match check_sled_expunge_task_gate(
             &removal_config,
             &latest_non_aborted_config,
             latest_base_config,
             baseboard_id,
-        )
-        .map_err(|error| internal_error(error.to_string()))?;
-        Ok(TaskGateConnOutcome::Gate(gate))
+        ) {
+            Ok(gate) => Ok(SledExpungeTaskGateOutcome::Gate(gate)),
+            Err(error) => Ok(inconsistent(error.to_string())),
+        }
     }
 
     // TODO-RAINCLAUDE: maps a conditional update's RETURNING result: the updated row, or, when the state filter matched nothing, the row as a second statement reads it now. That row may have moved on since the update missed, but it can't be back in the expected state, since states only move forward and callers pass states they read; production never deletes these rows, and the update's `.optional()` turns a missing row into None, so a 404 only ever comes from the re-read.
@@ -1185,34 +1176,39 @@ fn sled_expunge_transaction_error(
     match taken {
         Some(TransitionError::External(error)) => error,
         Some(error @ TransitionError::InvalidTransition { .. }) => {
-            Error::internal_error(&format!(
-                "{context}: {}",
-                InlineErrorChain::new(&error),
-            ))
+            Error::internal_error(&InlineErrorChain::new(&error).to_string())
+                .internal_context(context.to_string())
         }
         None => public_error_from_diesel(error, ErrorHandler::Server)
             .internal_context(context.to_string()),
     }
 }
 
-// TODO-RAINCLAUDE: maps a trust quorum loader's error inside the transaction of whichever caller runs sled_expunge_task_gate_conn (sled_expunge_request_complete or sled_expunge_request_check_task_gate): database errors are returned untouched so restarts stay retryable, and the loader's own errors roll back as internal errors carrying the request context.
-fn tq_load_error_into_diesel(
-    err: &OptionalError<TransitionError>,
+// TODO-RAINCLAUDE: maps a trust quorum loader's error inside sled_expunge_task_gate_conn: database errors are returned untouched so restarts stay retryable, and the loader's own errors become Inconsistent, carrying the request context.
+fn tq_load_error_outcome(
     context: &str,
     what: &str,
     error: TransactionError<Error>,
-) -> DieselError {
+) -> Result<SledExpungeTaskGateOutcome, DieselError> {
     match error {
-        TransactionError::Database(error) => error,
+        TransactionError::Database(error) => Err(error),
         TransactionError::CustomError(error) => {
-            err.bail(TransitionError::External(Error::internal_error(
-                &format!("{context}: loading {what}: {}", error_text(&error)),
-            )))
+            Ok(SledExpungeTaskGateOutcome::Inconsistent {
+                message: in_context(
+                    context,
+                    format!("loading {what}: {}", error_text(&error)),
+                ),
+            })
         }
     }
 }
 
-// TODO-RAINCLAUDE: an error's message without the variant's display prefix (such as "Internal Error: "), for wrapping in another internal error.
+// TODO-RAINCLAUDE: an Inconsistent message about a request, prefixed with its context the same way internal_context prefixes internal errors.
+fn in_context<M: std::fmt::Display>(context: &str, message: M) -> String {
+    format!("{context}: {message}")
+}
+
+// TODO-RAINCLAUDE: an error's message without the variant's display prefix (such as "Internal Error: "), for wrapping in another internal error or an Inconsistent message.
 fn error_text(error: &Error) -> String {
     match error {
         Error::InternalError { internal_message }
@@ -1235,19 +1231,21 @@ fn error_text(error: &Error) -> String {
 
 #[cfg(test)]
 mod test {
+    use super::super::ValidateTransition;
+    use super::super::test_utils::Expected;
+    use super::super::test_utils::sled_set_state;
     use super::SQL_BATCH_SIZE;
     use super::SledExpungeRequestCompleteOutcome;
     use super::SledExpungeRequestCreateOutcome;
     use super::SledExpungeRequestUpdateOutcome;
     use super::SledExpungeTaskGateOutcome;
     use super::TRUST_QUORUM_CONFIGURATION_PKEY;
-    use super::TransitionError;
     use super::UNFINISHED_BY_BASEBOARD_INDEX;
     use super::UNFINISHED_BY_SLED_INDEX;
     use super::authz_sled_expunge_request_from_id;
     use super::sled_expunge_request_baseboard_conflict;
     use super::sled_expunge_request_raced_conflict;
-    use super::tq_load_error_into_diesel;
+    use super::tq_load_error_outcome;
     use crate::authn;
     use crate::authz;
     use crate::context::OpContext;
@@ -1268,7 +1266,6 @@ mod test {
     use diesel::result::Error as DieselError;
     use gateway_types::component::SpState;
     use itertools::iproduct;
-    use nexus_db_errors::OptionalError;
     use nexus_db_errors::TransactionError;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::DbTypedUuid;
@@ -2224,14 +2221,6 @@ mod test {
             .await
         }
 
-        fn internal_error(
-            &self,
-            request: &SledExpungeRequest,
-            message: &str,
-        ) -> Error {
-            Error::internal_error(&self.context_message(request, message))
-        }
-
         fn context_message(
             &self,
             request: &SledExpungeRequest,
@@ -2242,6 +2231,27 @@ mod test {
                  {message}",
                 request.id, self.target, self.rack_id, request.tq_epoch,
             )
+        }
+
+        // TODO-RAINCLAUDE: deletes a trust quorum config and its members; nothing in Nexus deletes trust quorum configs, so this is the only way to reach some inconsistencies.
+        async fn delete_config(&self, db: &TestDatabase, epoch: i64) {
+            use nexus_db_schema::schema::trust_quorum_configuration::dsl as config_dsl;
+            use nexus_db_schema::schema::trust_quorum_member::dsl as member_dsl;
+            let conn =
+                db.datastore().pool_connection_for_tests().await.unwrap();
+            let rack_id = self.rack_id.into_untyped_uuid();
+            diesel::delete(member_dsl::trust_quorum_member)
+                .filter(member_dsl::rack_id.eq(rack_id))
+                .filter(member_dsl::epoch.eq(epoch))
+                .execute_async(&*conn)
+                .await
+                .expect("deleted the config's members");
+            diesel::delete(config_dsl::trust_quorum_configuration)
+                .filter(config_dsl::rack_id.eq(rack_id))
+                .filter(config_dsl::epoch.eq(epoch))
+                .execute_async(&*conn)
+                .await
+                .expect("deleted the config");
         }
 
         async fn sled_and_disk_policy(
@@ -2476,7 +2486,7 @@ mod test {
     }
 
     #[derive(Debug)]
-    enum InternalErrorCase {
+    enum InconsistentCase {
         RemovalAborted,
         MissingRemovalConfig,
         MissingSled,
@@ -2485,26 +2495,26 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_sled_expunge_request_complete_internal_errors() {
+    async fn test_sled_expunge_request_complete_inconsistent() {
         let logctx = dev::test_setup_log(
-            "test_sled_expunge_request_complete_internal_errors",
+            "test_sled_expunge_request_complete_inconsistent",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let datastore = db.datastore();
         let opctx = &opctx_as(&db, authn::Context::internal_api());
 
         for case in [
-            InternalErrorCase::RemovalAborted,
-            InternalErrorCase::MissingRemovalConfig,
-            InternalErrorCase::MissingSled,
-            InternalErrorCase::SledInOtherRack,
-            InternalErrorCase::SledWithOtherBaseboard,
+            InconsistentCase::RemovalAborted,
+            InconsistentCase::MissingRemovalConfig,
+            InconsistentCase::MissingSled,
+            InconsistentCase::SledInOtherRack,
+            InconsistentCase::SledWithOtherBaseboard,
         ] {
             let fixture = CompleteFixture::new(&db).await;
             fixture.propose_removal(&db).await;
             let other_hw = &fixture.hw_ids[1];
             let (request, other_sled_id, message) = match case {
-                InternalErrorCase::RemovalAborted => {
+                InconsistentCase::RemovalAborted => {
                     datastore
                         .tq_abort_config(
                             db.opctx(),
@@ -2529,7 +2539,7 @@ mod test {
                             .to_string(),
                     )
                 }
-                InternalErrorCase::MissingRemovalConfig => {
+                InconsistentCase::MissingRemovalConfig => {
                     fixture.start_committing(&db, 2).await;
                     let request = fixture
                         .insert_request(
@@ -2546,7 +2556,7 @@ mod test {
                             .to_string(),
                     )
                 }
-                InternalErrorCase::MissingSled => {
+                InconsistentCase::MissingSled => {
                     fixture.start_committing(&db, 2).await;
                     let missing = SledUuid::new_v4();
                     let request = fixture
@@ -2563,7 +2573,7 @@ mod test {
                         format!("its sled {missing} does not exist"),
                     )
                 }
-                InternalErrorCase::SledInOtherRack => {
+                InconsistentCase::SledInOtherRack => {
                     fixture.start_committing(&db, 2).await;
                     let other_rack = RackUuid::new_v4();
                     let other_sled_id = insert_sled_for_baseboard(
@@ -2586,7 +2596,7 @@ mod test {
                         ),
                     )
                 }
-                InternalErrorCase::SledWithOtherBaseboard => {
+                InconsistentCase::SledWithOtherBaseboard => {
                     fixture.start_committing(&db, 2).await;
                     let other_sled_id = insert_sled_for_baseboard(
                         datastore,
@@ -2617,8 +2627,12 @@ mod test {
                 datastore
                     .sled_expunge_request_complete(opctx, &authz_for(&request))
                     .await
-                    .expect_err(&format!("{case:?} is an internal error")),
-                fixture.internal_error(&request, &message),
+                    .unwrap_or_else(|error| {
+                        panic!("{case:?}: complete succeeds: {error}")
+                    }),
+                SledExpungeRequestCompleteOutcome::Inconsistent {
+                    message: fixture.context_message(&request, &message),
+                },
                 "{case:?}",
             );
             assert_eq!(read(datastore, &request).await, request, "{case:?}");
@@ -2867,24 +2881,7 @@ mod test {
             .propose(&db, 4, 3, fixture.members_without(&[&fixture.target]))
             .await;
         // TODO-RAINCLAUDE: deleting epoch 3, the base of the Preparing epoch 4, is the only way to reach this inconsistency; nothing in Nexus deletes trust quorum configs.
-        {
-            use nexus_db_schema::schema::trust_quorum_configuration::dsl as config_dsl;
-            use nexus_db_schema::schema::trust_quorum_member::dsl as member_dsl;
-            let conn = datastore.pool_connection_for_tests().await.unwrap();
-            let rack_id = fixture.rack_id.into_untyped_uuid();
-            diesel::delete(member_dsl::trust_quorum_member)
-                .filter(member_dsl::rack_id.eq(rack_id))
-                .filter(member_dsl::epoch.eq(3))
-                .execute_async(&*conn)
-                .await
-                .expect("deleted the epoch 3 members");
-            diesel::delete(config_dsl::trust_quorum_configuration)
-                .filter(config_dsl::rack_id.eq(rack_id))
-                .filter(config_dsl::epoch.eq(3))
-                .execute_async(&*conn)
-                .await
-                .expect("deleted the epoch 3 config");
-        }
+        fixture.delete_config(&db, 3).await;
         let request = fixture
             .insert_request(
                 &db,
@@ -2905,7 +2902,7 @@ mod test {
             },
         );
 
-        // TODO-RAINCLAUDE: complete loads the same inputs and reports the inconsistency as an internal error.
+        // TODO-RAINCLAUDE: complete loads the same inputs and reports the same inconsistency.
         set_sled_expunge_request_state(
             datastore,
             &request,
@@ -2917,8 +2914,10 @@ mod test {
             datastore
                 .sled_expunge_request_complete(opctx, &authz_for(&expunging))
                 .await
-                .expect_err("a missing base config is an internal error"),
-            fixture.internal_error(&expunging, message),
+                .expect("complete succeeds"),
+            SledExpungeRequestCompleteOutcome::Inconsistent {
+                message: fixture.context_message(&expunging, message),
+            },
         );
         assert_eq!(read(datastore, &request).await, expunging);
         assert_eq!(fixture.sled_and_disk_policy(&db).await, IN_SERVICE);
@@ -2927,8 +2926,56 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    // TODO-RAINCLAUDE: an invalid sled policy transition stays an error, not Inconsistent: a sled whose state no longer allows a policy change (decommissioned, though its policy says in service) makes sled_set_policy_conn refuse the expunge, which rolls back as an internal error naming the request, leaving the sled as it was.
+    #[tokio::test]
+    async fn test_sled_expunge_request_complete_invalid_transition_is_error() {
+        let logctx = dev::test_setup_log(
+            "test_sled_expunge_request_complete_invalid_transition_is_error",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let opctx = &opctx_as(&db, authn::Context::internal_api());
+        let fixture = CompleteFixture::new(&db).await;
+        fixture.propose_removal(&db).await;
+        fixture.start_committing(&db, 2).await;
+        let request = fixture
+            .insert_request(&db, 2, SledExpungeRequestState::Expunging)
+            .await;
+        sled_set_state(
+            db.opctx(),
+            datastore,
+            fixture.sled_id,
+            nexus_db_model::SledState::Decommissioned,
+            ValidateTransition::No,
+            Expected::Ok(nexus_db_model::SledState::Active),
+        )
+        .await
+        .expect("marked the sled decommissioned");
+
+        assert_eq!(
+            datastore
+                .sled_expunge_request_complete(opctx, &authz_for(&request))
+                .await
+                .expect_err("an invalid sled transition is an error"),
+            Error::internal_error(&fixture.context_message(
+                &request,
+                &format!(
+                    "sled id {} has current policy \"in service\" and state \
+                     \"decommissioned\" and the transition to policy \
+                     \"expunged\" is not permitted",
+                    fixture.sled_id,
+                ),
+            )),
+        );
+        assert_eq!(read(datastore, &request).await, request);
+        assert_eq!(fixture.sled_and_disk_policy(&db).await, IN_SERVICE);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     #[test]
-    fn test_tq_load_error_into_diesel() {
+    fn test_tq_load_error_outcome() {
         let restart = || {
             DieselError::DatabaseError(
                 DatabaseErrorKind::SerializationFailure,
@@ -2938,35 +2985,30 @@ mod test {
                 ),
             )
         };
-        let err = OptionalError::new();
-        let mapped = tq_load_error_into_diesel(
-            &err,
+        let Err(mapped) = tq_load_error_outcome(
             "context",
             "a config",
             TransactionError::Database(restart()),
-        );
+        ) else {
+            panic!("a database error stays an error");
+        };
         assert_eq!(format!("{mapped:?}"), format!("{:?}", restart()));
         assert!(
             nexus_db_errors::retryable(&mapped),
             "a restart error stays retryable",
         );
-        assert!(err.clone().take().is_none(), "a database error is not bailed",);
 
-        let mapped = tq_load_error_into_diesel(
-            &err,
+        let outcome = tq_load_error_outcome(
             "context",
             "a config",
             TransactionError::CustomError(Error::invalid_request("no configs")),
-        );
-        let DieselError::RollbackTransaction = mapped else {
-            panic!("a loader error rolls back, got {mapped:?}");
-        };
-        let Some(TransitionError::External(bailed)) = err.clone().take() else {
-            panic!("a loader error is bailed as an external error");
-        };
+        )
+        .expect("a loader error is an outcome");
         assert_eq!(
-            bailed,
-            Error::internal_error("context: loading a config: no configs"),
+            outcome,
+            SledExpungeTaskGateOutcome::Inconsistent {
+                message: "context: loading a config: no configs".to_string(),
+            },
         );
     }
 
