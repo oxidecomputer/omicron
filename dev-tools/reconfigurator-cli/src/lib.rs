@@ -38,6 +38,7 @@ use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+use nexus_types::deployment::ReflectsCollection;
 use nexus_types::deployment::SledUpdateRebootPolicy;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
@@ -2702,9 +2703,14 @@ fn cmd_blueprint_edit(
         .map(|c| c.clone())
         .unwrap_or_else(|| CollectionBuilder::new("sim").build());
 
-    let mut builder =
-        BlueprintBuilder::new_based_on(&sim.log, blueprint, creator, rng)
-            .context("creating blueprint builder")?;
+    let mut builder = BlueprintBuilder::new_based_on(
+        &sim.log,
+        blueprint,
+        ReflectsCollection::Indeterminate,
+        creator,
+        rng,
+    )
+    .context("creating blueprint builder")?;
 
     // We're acting as the planner here, so we need to update the builder for
     // any static changes in the input (e.g., new sleds, new DNS versions, ...).

@@ -1180,6 +1180,7 @@ mod test {
     use nexus_types::deployment::ExternalIpPolicy;
     use nexus_types::deployment::OperatorNexusConfig;
     use nexus_types::deployment::PendingMgsUpdates;
+    use nexus_types::deployment::ReflectsCollection;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::UpstreamNtpConfig;
     use nexus_types::deployment::{BlueprintZoneImageSource, OximeterReadMode};
@@ -1224,6 +1225,7 @@ mod test {
                     cockroachdb_setting_preserve_downgrade:
                         CockroachDbPreserveDowngrade::DoNotModify,
                     parent_blueprint_id: None,
+                    reflects_collection: ReflectsCollection::Indeterminate,
                     internal_dns_version: *Generation::new(),
                     external_dns_version: *Generation::new(),
                     target_release_minimum_generation:
@@ -1319,6 +1321,7 @@ mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             log,
             &EMPTY_BLUEPRINT,
+            ReflectsCollection::Indeterminate,
             test_name,
             PlannerRng::from_entropy(),
         )

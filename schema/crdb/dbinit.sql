@@ -5922,7 +5922,24 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
 
     -- The generation of the collective set of all external networking config
     -- described by the blueprint
-    external_networking_generation INT8 NOT NULL
+    external_networking_generation INT8 NOT NULL,
+
+    -- These columns describe the inventory collection that this blueprint
+    -- reflects.  They are currently used for debugging, but they may be used
+    -- for other purposes in the future.  They are either all NULL (if it's not
+    -- known which collection the blueprint reflects) or all non-NULL.
+    -- Like `parent_blueprint_id`, `reflects_collection_id` is not a real
+    -- foreign key: the collection may have since been deleted.
+    reflects_collection_id UUID,
+    reflects_collection_time_started TIMESTAMPTZ,
+    reflects_collection_time_done TIMESTAMPTZ,
+
+    CONSTRAINT reflects_collection_all_or_none CHECK (
+        (reflects_collection_id IS NULL) =
+            (reflects_collection_time_started IS NULL) AND
+        (reflects_collection_id IS NULL) =
+            (reflects_collection_time_done IS NULL)
+    )
 );
 
 -- table describing both the current and historical target blueprints of the
@@ -9882,7 +9899,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '312.0.0', NULL)
+    (TRUE, NOW(), NOW(), '313.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -17,6 +17,7 @@ use internal_dns_types::config::{
 };
 use internal_dns_types::names::ServiceName;
 use nexus_types::deployment::LastAllocatedSubnetIpOffset;
+use nexus_types::deployment::ReflectsCollection;
 use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
     BlueprintHostPhase2DesiredSlots, BlueprintMeasurements,
@@ -943,6 +944,7 @@ impl ServicePlan {
             sleds: blueprint_sleds,
             pending_mgs_updates: PendingMgsUpdates::new(),
             parent_blueprint_id: None,
+            reflects_collection: ReflectsCollection::Indeterminate,
             internal_dns_version: self.dns_config.generation,
             // We don't configure external DNS during RSS, so set it to an
             // initial generation of 1. Nexus will bump this up when it updates
