@@ -546,6 +546,11 @@ async fn sim_ensure_destination_propolis_undo(
 ) -> Result<(), anyhow::Error> {
     let params = sagactx.saga_params::<Params>()?;
     let osagactx = sagactx.user_data();
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
     let dst_propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
     let dst_sled_id = sagactx.lookup::<SledUuid>("dst_sled_id")?;
     let db_instance =
@@ -567,7 +572,7 @@ async fn sim_ensure_destination_propolis_undo(
         || async {
             super::instance_common::ensure_vmm_unregistered(
                 &sagactx,
-                &params.serialized_authn,
+                &opctx,
                 instance_id,
                 dst_propolis_id,
                 dst_sled_id,
