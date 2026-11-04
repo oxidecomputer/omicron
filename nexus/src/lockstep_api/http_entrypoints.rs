@@ -154,7 +154,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
             let instance = nexus
                 .instance_migrate(&opctx, path.instance_id, migrate)
                 .await?;
-            Ok(HttpResponseOk(instance.into()))
+            Ok(HttpResponseOk(instance.try_into()?))
         };
         apictx
             .internal_latencies
