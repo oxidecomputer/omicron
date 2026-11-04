@@ -190,9 +190,9 @@ pub async fn fail_sled_expunge_request(
         )
         .await
         .expect("failed the sled expunge request");
-    assert_eq!(
-        outcome,
-        SledExpungeRequestUpdateOutcome::Updated,
-        "failed the sled expunge request from {from}",
-    );
+    let SledExpungeRequestUpdateOutcome::Updated { request: failed } = outcome
+    else {
+        panic!("failed the sled expunge request from {from}: {outcome:?}");
+    };
+    assert_eq!(failed.state, SledExpungeRequestState::Failed);
 }

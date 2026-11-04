@@ -442,7 +442,7 @@ where
     F: FnOnce() -> SledExpungeRequestOutcome,
 {
     match result {
-        Ok(SledExpungeRequestUpdateOutcome::Updated) => updated(),
+        Ok(SledExpungeRequestUpdateOutcome::Updated { .. }) => updated(),
         Ok(SledExpungeRequestUpdateOutcome::NotInExpectedState { current }) => {
             info!(
                 log,

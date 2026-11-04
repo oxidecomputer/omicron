@@ -14,9 +14,6 @@ use crate::context::OpContext;
 use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
-use crate::db::update_and_check::UpdateAndCheck;
-use crate::db::update_and_check::UpdateAndQueryResult;
-use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
@@ -65,24 +62,12 @@ use slog_error_chain::InlineErrorChain;
 use trust_quorum_types::types::Epoch;
 use uuid::Uuid;
 
+// TODO-RAINCLAUDE: Updated carries the row as the update left it, so a caller that goes on to another step works from the stored row instead of rebuilding it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[must_use]
 pub enum SledExpungeRequestUpdateOutcome {
-    Updated,
+    Updated { request: SledExpungeRequest },
     NotInExpectedState { current: SledExpungeRequest },
-}
-
-impl From<UpdateAndQueryResult<SledExpungeRequest>>
-    for SledExpungeRequestUpdateOutcome
-{
-    fn from(result: UpdateAndQueryResult<SledExpungeRequest>) -> Self {
-        match result.status {
-            UpdateStatus::Updated => Self::Updated,
-            UpdateStatus::NotUpdatedButExists => {
-                Self::NotInExpectedState { current: result.found }
-            }
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -765,20 +750,16 @@ impl DataStore {
         let id = to_db_typed_uuid(authz_request.id());
         let transition = SledExpungeRequestTransition::from(transition);
         let from = transition.from_state().state();
-        diesel::update(dsl::sled_expunge_request)
+        let updated = diesel::update(dsl::sled_expunge_request)
             .filter(dsl::id.eq(id))
             .filter(dsl::state.eq(from))
             .set(transition.columns(now_db_precision()))
-            .check_if_exists::<SledExpungeRequest>(id)
-            .execute_and_check(&conn)
+            .returning(SledExpungeRequest::as_returning())
+            .get_result_async(&*conn)
             .await
-            .map(SledExpungeRequestUpdateOutcome::from)
-            .map_err(|error| {
-                public_error_from_diesel(
-                    error,
-                    ErrorHandler::NotFoundByResource(authz_request),
-                )
-            })
+            .optional();
+        Self::sled_expunge_request_update_outcome(&conn, authz_request, updated)
+            .await
     }
 
     // TODO-RAINCLAUDE: last_error is shown to operators as is, so callers must pass operator-safe text (no raw MGS or SQL errors); a finished request is never touched, because expected_state is always unfinished. Within one state this is last-writer-wins, not a compare-and-swap on the previous message.
@@ -792,23 +773,19 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, authz_request).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
         let id = to_db_typed_uuid(authz_request.id());
-        diesel::update(dsl::sled_expunge_request)
+        let updated = diesel::update(dsl::sled_expunge_request)
             .filter(dsl::id.eq(id))
             .filter(dsl::state.eq(expected_state.state()))
             .set((
                 dsl::last_error.eq(Some(last_error)),
                 dsl::time_modified.eq(now_db_precision()),
             ))
-            .check_if_exists::<SledExpungeRequest>(id)
-            .execute_and_check(&conn)
+            .returning(SledExpungeRequest::as_returning())
+            .get_result_async(&*conn)
             .await
-            .map(SledExpungeRequestUpdateOutcome::from)
-            .map_err(|error| {
-                public_error_from_diesel(
-                    error,
-                    ErrorHandler::NotFoundByResource(authz_request),
-                )
-            })
+            .optional();
+        Self::sled_expunge_request_update_outcome(&conn, authz_request, updated)
+            .await
     }
 
     // TODO-RAINCLAUDE: the expunging step's one transaction (RFD 747): require expunging, run the task gate rather than the lockstep path's strict check, expunge the sled and its disks, then compare-and-swap to done; any error rolls all of it back. Repeating it is safe because the state re-read at the start of the transaction returns NotExpunging once the request is done; the final compare-and-swap is only an assertion. A sled that is already expunged is left alone so that a sled expunged out of band (for example through the lockstep path), even one decommissioned since, still completes.
@@ -1147,6 +1124,34 @@ impl DataStore {
         )
         .map_err(|error| internal_error(error.to_string()))?;
         Ok(TaskGateConnOutcome::Gate(gate))
+    }
+
+    // TODO-RAINCLAUDE: maps a conditional update's RETURNING result: the updated row, or, when the state filter matched nothing, the row as a second statement reads it now. That row may have moved on since the update missed, but it can't be back in the expected state, since states only move forward and callers pass states they read; production never deletes these rows, and the update's `.optional()` turns a missing row into None, so a 404 only ever comes from the re-read.
+    async fn sled_expunge_request_update_outcome(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        authz_request: &authz::SledExpungeRequest,
+        updated: Result<Option<SledExpungeRequest>, DieselError>,
+    ) -> Result<SledExpungeRequestUpdateOutcome, Error> {
+        let to_public = |error| {
+            public_error_from_diesel(
+                error,
+                ErrorHandler::NotFoundByResource(authz_request),
+            )
+        };
+        match updated.map_err(to_public)? {
+            Some(request) => {
+                Ok(SledExpungeRequestUpdateOutcome::Updated { request })
+            }
+            None => {
+                let current =
+                    Self::sled_expunge_request_get_conn(conn, authz_request)
+                        .await
+                        .map_err(to_public)?;
+                Ok(SledExpungeRequestUpdateOutcome::NotInExpectedState {
+                    current,
+                })
+            }
+        }
     }
 
     async fn sled_expunge_request_get_conn(
@@ -1833,6 +1838,25 @@ mod test {
         read_back(&conn, request.id).await
     }
 
+    // TODO-RAINCLAUDE: asserts a write updated the row and returned it as stored, reading the row once, and returns it.
+    async fn assert_updated<D: std::fmt::Display>(
+        datastore: &DataStore,
+        outcome: SledExpungeRequestUpdateOutcome,
+        authz_request: &authz::SledExpungeRequest,
+        context: D,
+    ) -> SledExpungeRequest {
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let stored = read_back(&conn, authz_request.id().into()).await;
+        assert_eq!(
+            outcome,
+            SledExpungeRequestUpdateOutcome::Updated {
+                request: stored.clone()
+            },
+            "{context}",
+        );
+        stored
+    }
+
     // TODO-RAINCLAUDE: moves time_modified an hour into the past, so a following write must strictly increase it whatever the clock resolution.
     async fn backdated(
         datastore: &DataStore,
@@ -1973,7 +1997,9 @@ mod test {
             if op.from_state().state() == start {
                 assert_eq!(
                     outcome,
-                    SledExpungeRequestUpdateOutcome::Updated,
+                    SledExpungeRequestUpdateOutcome::Updated {
+                        request: after.clone(),
+                    },
                     "{op:?} from {start}",
                 );
                 assert!(
@@ -2262,7 +2288,8 @@ mod test {
             .state
             .as_unfinished()
             .expect("last_error is only set on an unfinished request");
-        assert_eq!(
+        assert_updated(
+            db.datastore(),
             db.datastore()
                 .sled_expunge_request_set_last_error(
                     opctx,
@@ -2272,9 +2299,10 @@ mod test {
                 )
                 .await
                 .expect("set last_error"),
-            SledExpungeRequestUpdateOutcome::Updated,
-        );
-        read(db.datastore(), request).await
+            &authz_for(request),
+            "set last_error",
+        )
+        .await
     }
 
     #[track_caller]
@@ -2665,7 +2693,7 @@ mod test {
                 }
                 (
                     SledExpungeRequestCompleteOutcome::NotExpunging { current },
-                    SledExpungeRequestUpdateOutcome::Updated,
+                    SledExpungeRequestUpdateOutcome::Updated { .. },
                 ) => {
                     assert_eq!(current, &after, "round {round}");
                     assert_eq!(after.state, SledExpungeRequestState::Failed);
