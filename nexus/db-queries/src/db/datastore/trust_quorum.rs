@@ -120,7 +120,7 @@ pub enum TqPrepareStatusOutcome {
     },
 }
 
-fn i64_to_epoch(val: i64) -> Result<Epoch, Error> {
+pub(super) fn i64_to_epoch(val: i64) -> Result<Epoch, Error> {
     let Ok(epoch) = val.try_into() else {
         return Err(Error::internal_error(&format!(
             "Failed to convert i64 from database: {val} \
@@ -539,7 +539,7 @@ impl DataStore {
         }))
     }
 
-    async fn tq_get_config_with_members_from_epoch_conn(
+    pub(super) async fn tq_get_config_with_members_from_epoch_conn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: RackUuid,
         epoch: Epoch,
@@ -1867,13 +1867,14 @@ impl DataStore {
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::db::datastore) mod tests {
     use super::*;
     use crate::db::datastore::sled::SledTransition;
     use crate::db::datastore::sled::TransitionError;
     use crate::db::model::to_db_typed_uuid;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::sled_upsert_for_baseboard;
+    use crate::db::pub_test_utils::sled_expunge_request::fail_sled_expunge_request;
     use crate::db::pub_test_utils::sled_expunge_request::insert_sled_expunge_request;
     use crate::db::pub_test_utils::sled_expunge_request::set_sled_expunge_request_state;
     use async_bb8_diesel::AsyncSimpleConnection;
@@ -1895,11 +1896,15 @@ mod tests {
     use omicron_uuid_kinds::SledUuid;
     use uuid::Uuid;
 
-    fn make_authz_tq(rack_id: RackUuid) -> authz::TrustQuorumConfig {
+    pub(in crate::db::datastore) fn make_authz_tq(
+        rack_id: RackUuid,
+    ) -> authz::TrustQuorumConfig {
         authz::TrustQuorumConfig::for_rack_id(rack_id)
     }
 
-    async fn insert_hw_baseboard_ids(db: &TestDatabase) -> Vec<HwBaseboardId> {
+    pub(in crate::db::datastore) async fn insert_hw_baseboard_ids(
+        db: &TestDatabase,
+    ) -> Vec<HwBaseboardId> {
         let (_, datastore) = (db.opctx(), db.datastore());
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         use nexus_db_schema::schema::hw_baseboard_id::dsl;
@@ -1929,7 +1934,7 @@ mod tests {
     }
 
     /// Insert a sled whose baseboard matches `hw`.
-    async fn insert_sled_for_baseboard(
+    pub(in crate::db::datastore) async fn insert_sled_for_baseboard(
         datastore: &DataStore,
         rack_id: RackUuid,
         hw: &HwBaseboardId,
@@ -3039,6 +3044,7 @@ mod tests {
                 DbTrustQuorumConfigurationState::Committed => {
                     (already(6, "committed"), already(5, "committed"))
                 }
+                // TODO-RAINCLAUDE: the sled_expunge task gate's safety argument (RFD 747) relies on this: CommittedPartially is only set while inserting a successor, so it is never the latest epoch, and tq_abort_config refuses it with a 409 both while that successor is in flight and after it is aborted.
                 DbTrustQuorumConfigurationState::CommittedPartially => (
                     already(6, "partially committed"),
                     already(5, "partially committed"),
@@ -3765,6 +3771,43 @@ mod tests {
         )
     }
 
+    pub(in crate::db::datastore) async fn ack_all_prepares(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        rack_id: RackUuid,
+        epoch: u64,
+    ) -> TrustQuorumConfigState {
+        let config = datastore
+            .tq_get_config(opctx, make_authz_tq(rack_id), Epoch(epoch))
+            .await
+            .expect("loaded trust quorum config")
+            .expect("trust quorum config exists");
+        let members: BTreeSet<_> = config.members.keys().cloned().collect();
+        let coordinator_config =
+            trust_quorum_types::configuration::Configuration {
+                rack_id,
+                epoch: config.epoch,
+                coordinator: config.coordinator.clone(),
+                members: members
+                    .iter()
+                    .cloned()
+                    .map(|id| (id, Sha3_256Digest([0u8; 32])))
+                    .collect(),
+                threshold: config.threshold,
+                encrypted_rack_secrets: None,
+            };
+        match datastore
+            .tq_update_prepare_status(opctx, coordinator_config, members)
+            .await
+            .expect("acked all prepares")
+        {
+            TqPrepareStatusOutcome::Committing { config } => config.state,
+            TqPrepareStatusOutcome::StillPreparing => {
+                TrustQuorumConfigState::Preparing
+            }
+        }
+    }
+
     async fn latest_config(
         datastore: &DataStore,
         opctx: &OpContext,
@@ -3838,7 +3881,22 @@ mod tests {
                 "a refused proposal ({unfinished:?}) inserts no config",
             );
 
-            set_sled_expunge_request_state(datastore, &request, finished).await;
+            match finished {
+                SledExpungeRequestState::Done => {
+                    set_sled_expunge_request_state(
+                        datastore, &request, finished,
+                    )
+                    .await;
+                }
+                SledExpungeRequestState::Failed => {
+                    fail_sled_expunge_request(opctx, datastore, &request).await;
+                }
+                SledExpungeRequestState::WaitingForTrustQuorum
+                | SledExpungeRequestState::PoweringOff
+                | SledExpungeRequestState::Expunging => {
+                    unreachable!("{finished:?} is a finished state")
+                }
+            }
             datastore
                 .tq_insert_latest_config(opctx, proposal)
                 .await
@@ -3976,12 +4034,8 @@ mod tests {
             Epoch(1)
         );
 
-        set_sled_expunge_request_state(
-            datastore,
-            &request_a_other_rack,
-            SledExpungeRequestState::Failed,
-        )
-        .await;
+        fail_sled_expunge_request(opctx, datastore, &request_a_other_rack)
+            .await;
         set_sled_expunge_request_state(
             datastore,
             &request_b,
@@ -4089,12 +4143,7 @@ mod tests {
         assert_eq!(latest.epoch, Epoch(2));
         assert_eq!(latest.state, TrustQuorumConfigState::Aborted);
 
-        set_sled_expunge_request_state(
-            datastore,
-            &added_request,
-            SledExpungeRequestState::Failed,
-        )
-        .await;
+        fail_sled_expunge_request(opctx, datastore, &added_request).await;
         datastore.tq_insert_latest_config(opctx, epoch_3).await.expect(
             "the added sled's request just failed, and keeping a member \
              of the base config is not a re-add",
