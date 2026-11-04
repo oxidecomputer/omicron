@@ -1097,38 +1097,40 @@ fn assign_ids_and_subnets(
 
     let this_nodes_sled_id = SledUuid::new_v4();
 
-    let sleds = req
-        .trust_quorum_peers
-        .into_iter()
-        .filter(|baseboard_id| baseboard_id != this_nodes_baseboard_id)
-        .enumerate()
-        .map(|(idx, baseboard_id)| {
-            let sled_id = SledUuid::new_v4();
-            // We always start numbering prefixes from 1. But we already
-            // reserved that for this node, so start at 2.
-            let idx = u8::try_from(idx + 2).expect("too many sleds");
+    let sleds = once(SledAgentInfo {
+        baseboard_id: this_nodes_baseboard_id.to_owned(),
+        sled_id: this_nodes_sled_id,
+        // Ensure that this node gets the first /64 prefix, which is
+        // why we start at index 2 in the loop below. Doing this allows
+        // us to deterministically find the sled-agent running this code.
+        // Specifically, we want to find the sled-agent hosting the multirack
+        // join service.
+        sled_subnet: get_64_subnet(rack_subnet, 1),
+        start_state: SledAgentStartState::InProgress { last_error: None },
+    })
+    .chain(
+        req.trust_quorum_peers
+            .into_iter()
+            .filter(|baseboard_id| baseboard_id != this_nodes_baseboard_id)
+            .enumerate()
+            .map(|(idx, baseboard_id)| {
+                let sled_id = SledUuid::new_v4();
+                // We always start numbering prefixes from 1. But we already
+                // reserved that for this node, so start at 2.
+                let idx =
+                    u8::try_from(idx + 2).expect("sled index should fit in u8");
 
-            SledAgentInfo {
-                baseboard_id,
-                sled_id,
-                sled_subnet: get_64_subnet(rack_subnet, idx),
-                start_state: SledAgentStartState::InProgress {
-                    last_error: None,
-                },
-            }
-        })
-        .chain(once(SledAgentInfo {
-            baseboard_id: this_nodes_baseboard_id.to_owned(),
-            sled_id: this_nodes_sled_id,
-            // Ensure that this node gets the first /64 prefix, which is
-            // why we start at index 2 in the loop above. Doing this allows
-            // us to deterministically find the sled-agent running this code.
-            // Specifically, we want to find the sled-agent hosting the multirack
-            // join service.
-            sled_subnet: get_64_subnet(rack_subnet, 1),
-            start_state: SledAgentStartState::InProgress { last_error: None },
-        }))
-        .collect();
+                SledAgentInfo {
+                    baseboard_id,
+                    sled_id,
+                    sled_subnet: get_64_subnet(rack_subnet, idx),
+                    start_state: SledAgentStartState::InProgress {
+                        last_error: None,
+                    },
+                }
+            }),
+    )
+    .collect();
 
     StartSledAgentsStatus { this_nodes_sled_id, rack_id, sleds }
 }
