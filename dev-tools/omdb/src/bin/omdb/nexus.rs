@@ -90,6 +90,8 @@ use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
 use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousOutcome;
 use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousStats;
+use nexus_types::internal_api::background::SledExpungeRequestOutcome;
+use nexus_types::internal_api::background::SledExpungeStatus;
 use nexus_types::internal_api::background::SledSubnetDetails;
 use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
@@ -1401,6 +1403,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "session_cleanup" => {
             print_task_session_cleanup(details);
+        }
+        "sled_expunge" => {
+            print_task_sled_expunge(details);
         }
         "sp_ereport_ingester" => {
             print_task_sp_ereport_ingester(details);
@@ -3128,6 +3133,122 @@ fn print_task_session_cleanup(details: &serde_json::Value) {
             }
         }
     };
+}
+
+fn print_task_sled_expunge(details: &serde_json::Value) {
+    match serde_json::from_value::<SledExpungeStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            print!("{}", SledExpungeStatusDisplay(&status));
+        }
+    }
+}
+
+struct SledExpungeStatusDisplay<'a>(&'a SledExpungeStatus);
+
+impl std::fmt::Display for SledExpungeStatusDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let requests = match self.0 {
+            SledExpungeStatus::ListError { error } => {
+                writeln!(f, "    error listing unfinished requests:")?;
+                writeln!(f, "      {error}")?;
+                return Ok(());
+            }
+            SledExpungeStatus::Listed { requests } => requests,
+        };
+        writeln!(f, "    unfinished requests: {}", requests.len())?;
+
+        const SLED: &str = "sled:";
+        const STATE: &str = "state:";
+        const OUTCOME: &str = "outcome:";
+        const LAST_ERROR: &str = "last_error:";
+        const FAILURE_REASON: &str = "failure_reason:";
+        const CURRENT_STATE: &str = "current_state:";
+        const ERROR: &str = "error:";
+        const INCONSISTENT: &str = "inconsistent records:";
+        const WIDTH: usize = const_max_len(&[
+            SLED,
+            STATE,
+            OUTCOME,
+            LAST_ERROR,
+            FAILURE_REASON,
+            CURRENT_STATE,
+            ERROR,
+            INCONSISTENT,
+        ]) + 1;
+
+        for request in requests {
+            writeln!(f, "    request {}", request.request_id)?;
+            writeln!(f, "        {SLED:<WIDTH$}{}", request.sled_id)?;
+            writeln!(f, "        {STATE:<WIDTH$}{}", request.state)?;
+            match &request.outcome {
+                SledExpungeRequestOutcome::RemovalPreparing => {
+                    writeln!(
+                        f,
+                        "        {OUTCOME:<WIDTH$}waiting for the removal to \
+                         finish preparing"
+                    )?;
+                }
+                SledExpungeRequestOutcome::LastErrorSet { last_error } => {
+                    writeln!(f, "        {OUTCOME:<WIDTH$}set last_error")?;
+                    writeln!(f, "        {LAST_ERROR:<WIDTH$}{last_error}")?;
+                }
+                SledExpungeRequestOutcome::LastErrorUnchanged {
+                    last_error,
+                } => {
+                    writeln!(
+                        f,
+                        "        {OUTCOME:<WIDTH$}last_error unchanged"
+                    )?;
+                    writeln!(f, "        {LAST_ERROR:<WIDTH$}{last_error}")?;
+                }
+                SledExpungeRequestOutcome::AdvancedToPoweringOff => {
+                    writeln!(
+                        f,
+                        "        {OUTCOME:<WIDTH$}advanced to powering_off"
+                    )?;
+                }
+                SledExpungeRequestOutcome::Failed { failure_reason } => {
+                    writeln!(f, "        {OUTCOME:<WIDTH$}failed")?;
+                    writeln!(
+                        f,
+                        "        {FAILURE_REASON:<WIDTH$}{failure_reason}"
+                    )?;
+                }
+                SledExpungeRequestOutcome::NotInExpectedState {
+                    current_state,
+                } => {
+                    writeln!(
+                        f,
+                        "        {OUTCOME:<WIDTH$}changed concurrently, left \
+                         for the next activation"
+                    )?;
+                    writeln!(
+                        f,
+                        "        {CURRENT_STATE:<WIDTH$}{current_state}"
+                    )?;
+                }
+                SledExpungeRequestOutcome::NotHandledYet => {
+                    writeln!(
+                        f,
+                        "        {OUTCOME:<WIDTH$}not handled yet in this \
+                         state"
+                    )?;
+                }
+                SledExpungeRequestOutcome::Error { error } => {
+                    writeln!(f, "        {OUTCOME:<WIDTH$}error")?;
+                    writeln!(f, "        {ERROR:<WIDTH$}{error}")?;
+                }
+            }
+            if let Some(detail) = &request.inconsistent_records {
+                writeln!(f, "        {INCONSISTENT:<WIDTH$}{detail}")?;
+            }
+        }
+        Ok(())
+    }
 }
 
 fn print_task_service_firewall_rule_propagation(details: &serde_json::Value) {
@@ -6234,10 +6355,14 @@ async fn cmd_nexus_support_bundles_inspect(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use iddqd::IdOrdMap;
     use nexus_types::external_api::alert::WebhookDeliveryAttemptResult;
+    use nexus_types::internal_api::background::SledExpungeRequestStatus;
+    use nexus_types::internal_api::background::SledExpungeTaskRequestState;
     use nexus_types::internal_api::background::WebhookDeliveryFailure;
     use omicron_uuid_kinds::AlertUuid;
     use omicron_uuid_kinds::RackUuid;
+    use omicron_uuid_kinds::SledExpungeRequestUuid;
     use omicron_uuid_kinds::WebhookDeliveryUuid;
     use sled_agent_types::early_networking::SwitchSlot;
     use std::collections::BTreeMap;
@@ -6340,6 +6465,62 @@ mod tests {
                 failed: 3,
                 errors: 2,
             },
+        );
+    }
+
+    #[test]
+    fn test_sled_expunge_status_display() {
+        let sled = SledUuid::from_u128(0x1b2b4c4f_42a5_4e3c_8b28_a1c1f2f3a0b1);
+        let request_id = |n: u128| SledExpungeRequestUuid::from_u128(n);
+        let outcomes = [
+            (
+                SledExpungeTaskRequestState::WaitingForTrustQuorum,
+                SledExpungeRequestOutcome::LastErrorUnchanged {
+                    last_error: "records are inconsistent".to_string(),
+                },
+                Some("removal epoch 1 still includes the sled".to_string()),
+            ),
+            (
+                SledExpungeTaskRequestState::WaitingForTrustQuorum,
+                SledExpungeRequestOutcome::Failed {
+                    failure_reason: "the removal was aborted".to_string(),
+                },
+                None,
+            ),
+            (
+                SledExpungeTaskRequestState::WaitingForTrustQuorum,
+                SledExpungeRequestOutcome::NotInExpectedState {
+                    current_state: SledExpungeTaskRequestState::PoweringOff,
+                },
+                None,
+            ),
+            (
+                SledExpungeTaskRequestState::WaitingForTrustQuorum,
+                SledExpungeRequestOutcome::Error {
+                    error: "checking the trust quorum gate: database \
+                            unavailable"
+                        .to_string(),
+                },
+                None,
+            ),
+        ];
+        let requests =
+            IdOrdMap::from_iter_unique(outcomes.into_iter().enumerate().map(
+                |(n, (state, outcome, inconsistent_records))| {
+                    SledExpungeRequestStatus {
+                        request_id: request_id(0x5ab0_0000 + n as u128),
+                        sled_id: sled,
+                        state,
+                        outcome,
+                        inconsistent_records,
+                    }
+                },
+            ))
+            .expect("request ids are unique");
+        expectorate::assert_contents(
+            "tests/output/sled-expunge-status.txt",
+            &SledExpungeStatusDisplay(&SledExpungeStatus::Listed { requests })
+                .to_string(),
         );
     }
 

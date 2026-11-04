@@ -19,6 +19,7 @@ use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SitrepUuid;
+use omicron_uuid_kinds::SledExpungeRequestUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::TufRepoUuid;
@@ -1837,6 +1838,72 @@ pub struct PhysicalDiskAdoptionStatus {
 
     /// Errors encountered during this activation
     pub errors: Vec<String>,
+}
+
+// TODO-RAINCLAUDE: the status of a sled_expunge activation: either listing the unfinished requests failed, or one entry per unfinished request listed.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum SledExpungeStatus {
+    ListError { error: String },
+    Listed { requests: IdOrdMap<SledExpungeRequestStatus> },
+}
+
+// TODO-RAINCLAUDE: state is the request's state as listed at the start of the activation. inconsistent_records holds the internal detail when the rack's trust quorum records contradict the request; the operator only sees a generic last_error for it.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SledExpungeRequestStatus {
+    pub request_id: SledExpungeRequestUuid,
+    pub sled_id: SledUuid,
+    pub state: SledExpungeTaskRequestState,
+    pub outcome: SledExpungeRequestOutcome,
+    pub inconsistent_records: Option<String>,
+}
+
+impl IdOrdItem for SledExpungeRequestStatus {
+    type Key<'a> = SledExpungeRequestUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.request_id
+    }
+
+    id_upcast!();
+}
+
+// TODO-RAINCLAUDE: a sled expunge request's state as the sled_expunge task reports it; mirrors the database enum, which nexus-types cannot depend on.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SledExpungeTaskRequestState {
+    WaitingForTrustQuorum,
+    PoweringOff,
+    Expunging,
+    Done,
+    Failed,
+}
+
+impl std::fmt::Display for SledExpungeTaskRequestState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            Self::WaitingForTrustQuorum => "waiting_for_trust_quorum",
+            Self::PoweringOff => "powering_off",
+            Self::Expunging => "expunging",
+            Self::Done => "done",
+            Self::Failed => "failed",
+        };
+        f.write_str(label)
+    }
+}
+
+// TODO-RAINCLAUDE: what one activation did with one request. NotInExpectedState means a compare-and-swap lost to a concurrent writer (another Nexus); it is not an error. NotHandledYet covers the powering_off and expunging states, which this task does not drive yet.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SledExpungeRequestOutcome {
+    RemovalPreparing,
+    LastErrorSet { last_error: String },
+    LastErrorUnchanged { last_error: String },
+    AdvancedToPoweringOff,
+    Failed { failure_reason: String },
+    NotInExpectedState { current_state: SledExpungeTaskRequestState },
+    NotHandledYet,
+    Error { error: String },
 }
 
 #[cfg(test)]

@@ -1,0 +1,22 @@
+    unfinished requests: 4
+    request 00000000-0000-0000-0000-00005ab00000
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                waiting_for_trust_quorum
+        outcome:              last_error unchanged
+        last_error:           records are inconsistent
+        inconsistent records: removal epoch 1 still includes the sled
+    request 00000000-0000-0000-0000-00005ab00001
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                waiting_for_trust_quorum
+        outcome:              failed
+        failure_reason:       the removal was aborted
+    request 00000000-0000-0000-0000-00005ab00002
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                waiting_for_trust_quorum
+        outcome:              changed concurrently, left for the next activation
+        current_state:        powering_off
+    request 00000000-0000-0000-0000-00005ab00003
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                waiting_for_trust_quorum
+        outcome:              error
+        error:                checking the trust quorum gate: database unavailable
