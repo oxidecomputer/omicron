@@ -1302,17 +1302,26 @@ impl super::Nexus {
                     }
 
                     // Since SagaUnwound is a a Failed-like state, we will let
-                    // you just kinda poke it into Stopped if you would prefer
-                    // for us to think it's stopped. This will result in us no
-                    // longer trying to restart it.
+                    // you move the instance to `Stopped` now by setting the
+                    // state to `NoVmm` and unlinking the `propolis_id`.
                     InstanceStateChangeRequest::Stop
                         if vmm.state == db::model::VmmState::SagaUnwound =>
                     {
                         return Ok(
                             InstanceStateChangeRequestAction::UpdateRuntime(
-                                instance_state.runtime().with_new_nexus_state(
-                                    db::model::InstanceState::NoVmm,
-                                ),
+                                db::model::InstanceRuntimeState {
+                                    // We can unlink a SagaUnwound VMM safely
+                                    // without having to do any further cleanup,
+                                    // the VMM and its virtual provisioning
+                                    // records will be cleaned up by the
+                                    // abandoned_vmm_reaper task.
+                                    propolis_id: None,
+                                    ..instance_state
+                                        .runtime()
+                                        .with_new_nexus_state(
+                                            db::model::InstanceState::NoVmm,
+                                        )
+                                },
                             ),
                         );
                     }
