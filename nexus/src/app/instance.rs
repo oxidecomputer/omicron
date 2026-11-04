@@ -1586,7 +1586,24 @@ impl super::Nexus {
         prev_vmm_state: &mut Option<db::model::Vmm>,
         requested: InstanceStateChangeRequest,
     ) -> Result<(), InstanceStateChangeError> {
-        loop {
+        // This is a bit weird: in order to implement the goofy CAS-and-retry
+        // dance necessary to stop a VMM that's in the `Creating` state, we may
+        // retry exactly one attempt to request a state change, if and only if
+        // it is necessary to attempt a dctabase compare-and-swap to cancel a
+        // start saga, and then attempt to send the requested state to the sled
+        // if the VMM process starts before we can cancel it. All other state
+        // changes will not require a second iteration, and should always return
+        // without looping, and a failed CAS should only loop once, because it
+        // will then attempt a non-CAS state change action because the VMM state
+        // will have advanced, and such actions never loop. But, infinite loops
+        // are scary, so we shall nonetheless bound the number of times we loop
+        // and return an internal error if we fall past the end of the loop.
+        let iters = if matches!(requested, InstanceStateChangeRequest::Stop) {
+            2
+        } else {
+            1
+        };
+        for _ in 0..iters {
             match Self::select_runtime_change_action(
                 &self.log,
                 prev_instance_state,
@@ -1695,6 +1712,18 @@ impl super::Nexus {
                 }
             }
         }
+
+        // As discussed above, this *really* shouldn't happen, but is better
+        // than looping forever.
+        Err(InstanceStateChangeError::Other(Error::InternalError {
+            internal_message: format!(
+                "attempting to change instance {}'s state required more than
+                 {iters} retries, this is a bug! the final instance state was: \
+                 {prev_instance_state:?} and the VMM state was: \
+                 {prev_vmm_state:?}",
+                authz_instance.id(),
+            ),
+        }))
     }
 
     /// Modifies the runtime state of the Instance as requested.  This generally
