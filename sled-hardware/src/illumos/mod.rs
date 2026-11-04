@@ -359,40 +359,24 @@ fn poll_bay(
     };
     let facts = match &bay.contents {
         Ok(BayContents {
-            occupant: ObservedOccupant::Nvme { instance, namespaces, .. },
+            occupant: ObservedOccupant::Nvme { instance, .. },
             ..
-        }) => {
-            if namespaces.len() > 1 {
-                // Every namespace on a controller shares its DiskIdentity,
-                // so only one can become a disk; we use the first (lowest
-                // NSID). See
-                // https://github.com/oxidecomputer/omicron/issues/5241.
+        }) => match nvme_facts(nvme, *instance) {
+            Ok(facts) => Some(facts),
+            Err(err) => {
                 warn!(
                     log,
-                    "NVMe controller has more than one namespace; \
-                     only the first is used";
+                    "Failed to query NVMe controller";
                     "location" => %bay.location,
                     "nvme_instance" => %instance,
-                    "namespaces" => namespaces.len(),
+                    InlineErrorChain::new(&err),
                 );
+                return unreadable(format!(
+                    "failed to query NVMe controller {instance}: {}",
+                    InlineErrorChain::new(&err),
+                ));
             }
-            match nvme_facts(nvme, *instance) {
-                Ok(facts) => Some(facts),
-                Err(err) => {
-                    warn!(
-                        log,
-                        "Failed to query NVMe controller";
-                        "location" => %bay.location,
-                        "nvme_instance" => %instance,
-                        InlineErrorChain::new(&err),
-                    );
-                    return unreadable(format!(
-                        "failed to query NVMe controller {instance}: {}",
-                        InlineErrorChain::new(&err),
-                    ));
-                }
-            }
-        }
+        },
         _ => None,
     };
     let is_boot_disk = bay.contents.as_ref().is_ok_and(|contents| {

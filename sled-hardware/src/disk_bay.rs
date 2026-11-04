@@ -84,6 +84,9 @@ pub enum UnusableReason {
     NotNvme { driver: String },
     /// An NVMe controller with no namespace the driver can use.
     NoUsableNamespace,
+    /// An NVMe controller with more than one namespace the driver can use.
+    /// sled-agent manages a drive as one disk, not per namespace.
+    MultipleNamespaces { count: usize },
     /// The disk here has the same identity as the disk in another bay, which
     /// is the one in the sled's disk list.
     DuplicateIdentity { identity: DiskIdentity, kept_in: DiskLocation },
@@ -258,18 +261,32 @@ pub(crate) fn classify_bay(
     // The topology creates one `disk` node per usable namespace. If it has
     // none but the controller says it has some, the topology's namespace
     // enumeration failed silently.
-    let Some(namespace) = namespaces.first() else {
-        if nvme.usable_namespaces == 0 {
+    let namespace = match namespaces.as_slice() {
+        [] if nvme.usable_namespaces == 0 => {
             let device = DiskBayOccupant::UnusableDevice {
                 reason: UnusableReason::NoUsableNamespace,
                 devfs_path: devfs_path.clone(),
             };
             return Ok((describe(device), None));
         }
-        return Err(ClassifyError::MissingNamespace {
-            nvme_instance: instance,
-            usable_namespaces: nvme.usable_namespaces,
-        });
+        [] => {
+            return Err(ClassifyError::MissingNamespace {
+                nvme_instance: instance,
+                usable_namespaces: nvme.usable_namespaces,
+            });
+        }
+        [namespace] => namespace,
+        // Every namespace on a controller shares its DiskIdentity. See
+        // https://github.com/oxidecomputer/omicron/issues/5241.
+        _ => {
+            let device = DiskBayOccupant::UnusableDevice {
+                reason: UnusableReason::MultipleNamespaces {
+                    count: namespaces.len(),
+                },
+                devfs_path: devfs_path.clone(),
+            };
+            return Ok((describe(device), None));
+        }
     };
 
     // libdevinfo reports this path as absolute from the kernel's point of
@@ -644,16 +661,23 @@ mod tests {
     }
 
     #[test]
-    fn first_namespace_wins() {
-        let mut second = namespace();
-        second.serial = "OTHER".to_string();
-        let (_, disk) = classify_bay(
-            &nvme_bay(vec![namespace(), second]),
+    fn multiple_namespaces_are_unusable() {
+        let (described, disk) = classify_bay(
+            &nvme_bay(vec![namespace(), namespace()]),
             Some(&facts(2)),
             false,
         )
         .unwrap();
-        assert_eq!(disk.unwrap().identity().serial, "2345ABCD");
+        assert_eq!(
+            described.occupant,
+            DiskBayOccupant::UnusableDevice {
+                reason: UnusableReason::MultipleNamespaces { count: 2 },
+                devfs_path: Some(
+                    "/pci@0,0/pci1de,fff9@1,1/pci1344,3100@0".to_string()
+                ),
+            }
+        );
+        assert!(disk.is_none());
     }
 
     #[test]
