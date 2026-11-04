@@ -20,7 +20,9 @@ use std::collections::VecDeque;
 use std::io::Cursor;
 use std::net::SocketAddrV6;
 use tokio::sync::oneshot;
+use zerocopy::ConvertError;
 use zerocopy::IntoBytes;
+use zerocopy::TryFromBytes;
 
 pub(crate) struct EreportState {
     ereports: VecDeque<EreportListEntry>,
@@ -105,23 +107,9 @@ struct EreportListEntry {
     bytes: Vec<u8>,
 }
 
-pub(crate) async fn recv_request(
-    sock: Option<&mut UdpServer>,
-) -> anyhow::Result<(Request, SocketAddrV6, &mut UdpServer)> {
-    use zerocopy::TryFromBytes;
-    match sock {
-        Some(sock) => {
-            let (packet, addr) = sock.recv_from().await?;
-            let req = Request::try_read_from_bytes(packet).map_err(|e| {
-                anyhow::anyhow!(
-                    "couldn't understand ereport header from {addr}: {e:?}"
-                )
-            })?;
-            Ok((req, addr, sock))
-        }
-        None => futures::future::pending().await,
-    }
-}
+/// Enough leading bytes so callers can hopefully identify the source of a
+/// malformed datagram without dumping all of it.
+const MALFORMED_PREFIX_LEN: usize = 32;
 
 impl EreportState {
     pub(crate) fn new(
@@ -219,6 +207,52 @@ impl EreportState {
         self.ereports.push_back(ereport.to_entry(ena));
         self.next_ena.0 += 1;
         ena
+    }
+
+    pub(crate) async fn recv_request<'sock>(
+        &self,
+        sock: Option<&'sock mut UdpServer>,
+    ) -> anyhow::Result<(Request, SocketAddrV6, &'sock mut UdpServer)> {
+        let Some(sock) = sock else {
+            return futures::future::pending().await;
+        };
+        loop {
+            let local_addr = sock.local_addr();
+            let (packet, addr) = sock.recv_from().await?;
+            match Request::try_read_from_bytes(packet) {
+                Ok(request) => return Ok((request, addr, sock)),
+                Err(ConvertError::Alignment(never)) => match never {},
+                // Drop undecodable datagrams, matching the behavior of the real
+                // SP.
+                Err(ConvertError::Size(_)) => {
+                    slog::warn!(
+                        self.log,
+                        "dropping ereport request with wrong size";
+                        "src_addr" => %addr,
+                        "local_addr" => %local_addr,
+                        "packet_len" => packet.len(),
+                        "expected_len" => std::mem::size_of::<Request>(),
+                        "packet_prefix" => hex::encode(
+                            &packet[..packet.len().min(MALFORMED_PREFIX_LEN)]
+                        ),
+                    );
+                }
+                Err(ConvertError::Validity(_)) => {
+                    // zerocopy reports Validity only after the size matched, so
+                    // packet is non-empty here and packet[0] will not panic.
+                    slog::warn!(
+                        self.log,
+                        "dropping ereport request with unknown version";
+                        "src_addr" => %addr,
+                        "local_addr" => %local_addr,
+                        "version" => format!("{:#04x}", packet[0]),
+                        "packet_prefix" => hex::encode(
+                            &packet[..packet.len().min(MALFORMED_PREFIX_LEN)]
+                        ),
+                    );
+                }
+            }
+        }
     }
 
     pub(crate) fn handle_request<'buf>(

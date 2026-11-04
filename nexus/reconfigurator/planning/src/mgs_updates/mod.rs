@@ -4,6 +4,7 @@
 
 //! Facilities for making choices about MGS-managed updates
 
+mod deployed_sled_versions;
 mod host_phase_1;
 mod rot;
 mod rot_bootloader;
@@ -44,6 +45,11 @@ use thiserror::Error;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
 
+pub use deployed_sled_versions::ActiveImageCheck;
+pub use deployed_sled_versions::DeployedSledVersions;
+pub use deployed_sled_versions::DeployedSledVersionsError;
+pub use deployed_sled_versions::ImageCheckError;
+pub use deployed_sled_versions::RotCheckError;
 pub(crate) use host_phase_1::PendingHostPhase2Changes;
 pub(crate) use sled_evacuation::EvacuatingSleds;
 pub(crate) use sled_evacuation::PendingUpdateDispositionChanges;

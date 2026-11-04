@@ -31,6 +31,7 @@ use nexus_types_versions::v2026_01_08_00;
 use nexus_types_versions::v2026_01_15_00;
 use nexus_types_versions::v2026_01_16_00;
 use nexus_types_versions::v2026_01_16_01;
+use nexus_types_versions::v2026_01_21_00;
 use nexus_types_versions::v2026_01_22_00;
 use nexus_types_versions::v2026_01_30_01;
 use nexus_types_versions::v2026_01_31_00;
@@ -88,6 +89,8 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_11_02_00, LAST_CERTIFICATE_DOCS),
+    (2026_10_29_00, SLED_ADD_PRECHECK_OVERRIDES),
     (2026_10_21_00, BYTE_WRAPPER_0_2_BUMP),
     (2026_10_15_00, SYSTEM_CERTIFICATES),
     (2026_10_13_00, ARTIFACT_HASH_SCHEMA),
@@ -5120,6 +5123,9 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseOk<latest::certificate::Certificate>, HttpError>;
 
     /// Delete TLS certificate in current silo
+    ///
+    /// The silo's last certificate cannot be deleted. Create another
+    /// certificate first.
     #[endpoint {
         method = DELETE,
         path = "/v1/certificates/{certificate}",
@@ -5181,6 +5187,9 @@ pub trait NexusExternalApi {
     ///
     /// The silo must be specified if the certificate is specified by name, and
     /// must not be specified if the certificate is specified by ID.
+    ///
+    /// The silo's last certificate cannot be deleted. Create another
+    /// certificate first.
     #[endpoint {
         method = DELETE,
         path = "/v1/system/certificates/{certificate}",
@@ -7693,13 +7702,37 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/hardware/racks/{rack_id}/membership/add",
         tags = ["experimental"],
-        versions = VERSION_TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG..
+        versions = VERSION_SLED_ADD_PRECHECK_OVERRIDES..
     }]
     async fn rack_membership_add_sleds(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::RackPath>,
         req: TypedBody<latest::rack::RackMembershipAddSledsRequest>,
     ) -> Result<HttpResponseOk<latest::rack::RackMembershipStatus>, HttpError>;
+
+    /// Add new sleds to rack membership
+    #[endpoint {
+        operation_id = "rack_membership_add_sleds",
+        method = POST,
+        path = "/v1/system/hardware/racks/{rack_id}/membership/add",
+        tags = ["experimental"],
+        versions = VERSION_TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG..VERSION_SLED_ADD_PRECHECK_OVERRIDES,
+    }]
+    async fn rack_membership_add_sleds_v2026_01_21_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::RackPath>,
+        req: TypedBody<v2026_01_21_00::rack::RackMembershipAddSledsRequest>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_21_00::rack::RackMembershipStatus>,
+        HttpError,
+    > {
+        Self::rack_membership_add_sleds(
+            rqctx,
+            path_params,
+            req.map(latest::rack::RackMembershipAddSledsRequest::from),
+        )
+        .await
+    }
 
     /// Abort the latest rack membership change
     ///

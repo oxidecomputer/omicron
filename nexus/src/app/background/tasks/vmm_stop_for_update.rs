@@ -7,6 +7,7 @@
 
 use crate::app::background::BackgroundTask;
 use crate::app::instance;
+use crate::app::instance::ProcessedVmmUpdate;
 use crate::app::instance::SledAgentInstanceError;
 use crate::app::saga::StartSaga;
 use futures::future::BoxFuture;
@@ -626,10 +627,10 @@ async fn try_instance_state_update(
         }
         // The new state would like an instance-update saga, so we'll try to
         // run it.
-        Ok(Some((_, saga))) => saga,
+        Ok(ProcessedVmmUpdate { update_saga: Some(saga), .. }) => saga,
         // The new state does not require an update saga, nothing left to do
         // here.
-        Ok(None) => return,
+        Ok(ProcessedVmmUpdate { update_saga: None, .. }) => return,
     };
     let (saga_id, completed) = match sagas.saga_run(saga).await {
         Ok(s) => s,

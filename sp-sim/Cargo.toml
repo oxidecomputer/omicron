@@ -39,5 +39,8 @@ uuid.workspace = true
 zerocopy.workspace = true
 slog-error-chain.workspace = true
 
+[dev-dependencies]
+omicron-test-utils.workspace = true
+
 [[bin]]
 name = "sp-sim"
