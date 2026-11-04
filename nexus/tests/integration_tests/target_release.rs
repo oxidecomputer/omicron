@@ -262,9 +262,8 @@ async fn mupdate_recovery_after_noop_conversion() -> Result<()> {
     let err = response.parsed_body::<HttpErrorResponseBody>().unwrap();
     for needle in [
         "mupdate recovery required",
-        "components deployed on sled",
-        "2.0.0",
-        "1.0.0",
+        "version 2.0.0 was not found",
+        "found version 1.0.0 on 1 sled",
     ] {
         assert!(
             err.message.contains(needle),
