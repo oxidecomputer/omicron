@@ -1200,7 +1200,7 @@ impl DataStore {
             .get_result_async::<DbTypedUuid<RackKind>>(conn)
             .await
             .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(TransactionError::Database)?;
 
         Ok(rack_id.map(RackUuid::from))
     }
