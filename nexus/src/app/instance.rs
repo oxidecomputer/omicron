@@ -44,6 +44,7 @@ use nexus_db_queries::db::model::InstanceStateComputer;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_ip;
 use nexus_types::external_api::instance;
+use nexus_types::instance::VmmRuntimeState;
 use nexus_types::internal_api::params::InstanceMigrateDestination;
 use omicron_common::http_client::internal_http_client;
 // We'll use `InstanceState` frequently, and the code that uses it is already
@@ -292,7 +293,7 @@ enum InstanceStateChangeRequestAction {
     /// which it is encarnated on the sled.
     DoGoofyVmmStateCasLoopDance {
         vmm_id: PropolisUuid,
-        vmm_generation: db::model::Generation,
+        next_state: VmmRuntimeState,
     },
 }
 
@@ -1070,6 +1071,7 @@ impl super::Nexus {
         if let Err(e) = self
             .instance_request_state(
                 opctx,
+                &authz_instance,
                 state.instance(),
                 state.vmm(),
                 InstanceStateChangeRequest::Reboot,
@@ -1177,6 +1179,7 @@ impl super::Nexus {
         if let Err(e) = self
             .instance_request_state(
                 opctx,
+                &authz_instance,
                 state.instance(),
                 state.vmm(),
                 InstanceStateChangeRequest::Stop,
@@ -1253,13 +1256,33 @@ impl super::Nexus {
             // VMM record in the database into a state which tells the start
             // saga that it can cancel itself, conditionally on the generation
             // number not having advanced since.
-            Some(vmm) if vmm.state == db::model::VmmState::Creating => match requested {
-                InstanceStateChangeRequest::Stop => {
-                    return Ok(InstanceStateChangeRequestAction::DoGoofyVmmStateCasLoopDance { vmm_id: PropolisUuid::from_untyped_uuid(vmm.id), vmm_generation: vmm.generation.into() })
-                },
-                InstanceStateChangeRequest::Run => return Ok(InstanceStateChangeRequestAction::AlreadyDone),
-                InstanceStateChangeRequest::Reboot => return Err(Error::invalid_request("cannot reboot an instance until it has started")),
-                InstanceStateChangeRequest::Migrate(_) => return Err(Error::invalid_request("cannot migrate an instance until it has started")),
+            Some(vmm) if vmm.state == db::model::VmmState::Creating => {
+                match requested {
+                    InstanceStateChangeRequest::Stop => {
+                        let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
+                        let next_state =
+                            vmm.runtime().transition(VmmState::Cancelling);
+                        return Ok(InstanceStateChangeRequestAction::DoGoofyVmmStateCasLoopDance {
+                            vmm_id,
+                            next_state,
+                        });
+                    }
+                    InstanceStateChangeRequest::Run => {
+                        return Ok(
+                            InstanceStateChangeRequestAction::AlreadyDone,
+                        );
+                    }
+                    InstanceStateChangeRequest::Reboot => {
+                        return Err(Error::invalid_request(
+                            "cannot reboot an instance until it has started",
+                        ));
+                    }
+                    InstanceStateChangeRequest::Migrate(_) => {
+                        return Err(Error::invalid_request(
+                            "cannot migrate an instance until it has started",
+                        ));
+                    }
+                }
             }
             // The VMM record not only exists, but has actually been ensured on
             // the sled, so the request must be directed to the sled-agent.
@@ -1486,18 +1509,21 @@ impl super::Nexus {
     pub(crate) async fn instance_request_state(
         &self,
         opctx: &OpContext,
-        mut prev_instance_state: &db::model::Instance,
-        mut prev_vmm_state: &Option<db::model::Vmm>,
+        authz_instance: &authz::Instance,
+        prev_instance_state: &db::model::Instance,
+        prev_vmm_state: &Option<db::model::Vmm>,
         requested: InstanceStateChangeRequest,
     ) -> Result<(), InstanceStateChangeError> {
+        let mut selected_action = Self::select_runtime_change_action(
+            &self.log,
+            &prev_instance_state,
+            &prev_vmm_state,
+            &requested,
+        )?;
+
+        // time for The Goofy VMM State Compare-And-Swap Loop Dance! yay!
         loop {
-            // time for The Goofy VMM State Compare-And-Swap Loop Dance! yay!
-            match Self::select_runtime_change_action(
-                &self.log,
-                prev_instance_state,
-                prev_vmm_state,
-                &requested,
-            )? {
+            match selected_action {
                 InstanceStateChangeRequestAction::AlreadyDone => return Ok(()),
 
                 InstanceStateChangeRequestAction::UpdateRuntime(new_runtime) => {
@@ -1561,9 +1587,31 @@ impl super::Nexus {
                 }
                 InstanceStateChangeRequestAction::DoGoofyVmmStateCasLoopDance {
                     vmm_id,
-                    vmm_generation,
+                    next_state,
                 } => {
-                    todo!("eliza actually do this part lol")
+                    let changed = self
+                        .datastore()
+                        .vmm_update_runtime(&vmm_id, &next_state)
+                        .await
+                        // TODO(eliza): if the VMM is NotFound, the whole thing
+                        // has gotten weird, what do we do?
+                        .map_err(InstanceStateChangeError::Other)?;
+                    if changed {
+                        // ladies and gentlemen, we got him!
+                        return Ok(());
+                    } else {
+                        // if at first you don't succeed,
+                        // `select_runtime_change_action` and try again!
+                        let current = self.datastore().instance_fetch_with_vmm(&opctx, &authz_instance).await
+                            .map_err(InstanceStateChangeError::Other)?;
+                        selected_action = Self::select_runtime_change_action(
+                            &self.log,
+                            current.instance(),
+                            current.vmm(),
+                            &requested,
+                        )?;
+
+                    }
                 }
             }
         }

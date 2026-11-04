@@ -1080,10 +1080,17 @@ async fn sis_ensure_running(
           "sled_id" => %sled_id,
           "start_reason" => ?params.reason);
 
+    let (.., authz_instance) = LookupPath::new(&opctx, osagactx.datastore())
+        .instance_id(db_instance.id())
+        .lookup_for(authz::Action::Modify)
+        .await
+        .map_err(saga_action_failed)?;
+
     match osagactx
         .nexus()
         .instance_request_state(
             &opctx,
+            &authz_instance,
             &db_instance,
             &Some(db_vmm),
             crate::app::instance::InstanceStateChangeRequest::Run,

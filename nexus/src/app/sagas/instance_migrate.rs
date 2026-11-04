@@ -619,6 +619,12 @@ async fn sim_instance_migrate(
           "dst_vmm_record" => ?dst_vmm,
           "src_propolis_id" => %src_propolis_id);
 
+    let (.., authz_instance) = LookupPath::new(&opctx, osagactx.datastore())
+        .instance_id(db_instance.id())
+        .lookup_for(authz::Action::Modify)
+        .await
+        .map_err(saga_action_failed)?;
+
     // TODO-correctness: This needs to be retried if a transient error occurs to
     // avoid a problem like the following:
     //
@@ -637,6 +643,7 @@ async fn sim_instance_migrate(
         .nexus()
         .instance_request_state(
             &opctx,
+            &authz_instance,
             &db_instance,
             &Some(dst_vmm),
             InstanceStateChangeRequest::Migrate(
