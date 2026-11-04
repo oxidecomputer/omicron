@@ -505,6 +505,68 @@ impl DataStore {
             })
     }
 
+    /// Transitions a VMM to the `Cancelling` state as part of an unwinding
+    /// saga. This is necessary to perform in the undo action that attempts to
+    /// ask the sled-agent to unregister the VMM, as it prevents any *other*
+    /// actor that might otherwise attempt to talk to the sled-agent about that
+    /// VMM (say, a stop request that comes in during the unwinding, the
+    /// `instance-watcher` background task, et cetera) from trying to send
+    /// requests for the VMM to the sled-agent and get 404ed.
+    ///
+    /// Executing this query transfers exclusive ownership of the VMM record's
+    /// state to the unwinding saga, which it kinda already had, but now it's,
+    /// like, REALLY exclusively owned by the unwinding saga.
+    ///
+    /// # Warning
+    ///
+    /// This may *only* be called by the saga that created a VMM record, as it
+    /// more or less unconditionally increments the generation number and
+    /// advances the VMM to the `Cancelling` state.
+    ///
+    /// This is necessary as it is executed in compensating actions for
+    /// unwinding saga nodes which cannot easily determine whether other
+    /// actions, which advance the VMM's generation, have executed before the
+    /// saga unwound.
+    pub async fn vmm_mark_saga_unwinding(
+        &self,
+        opctx: &OpContext,
+        vmm_id: &PropolisUuid,
+    ) -> Result<bool, Error> {
+        diesel::update(dsl::vmm)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
+            // if the VMM record is already in a non-existent state, then we
+            // need not munge it now; the entire purpose of this thingy is to
+            // make sure it is considered "nonexistent".
+            .filter(dsl::state.ne_all(DbVmmState::NONEXISTENT_STATES))
+            .set((
+                dsl::state.eq(DbVmmState::Cancelling),
+                // We deliberately do not alter or unset the failure reason here
+                // to preserve historical failed information. In the future, if
+                // we start tracking the reason a saga was unwound, we would
+                // probably want to extend the schema to store that as a
+                // separate column (or maybe some kind of history table?)
+                dsl::time_state_updated.eq(chrono::Utc::now()),
+                dsl::state_generation.eq(dsl::state_generation + 1),
+            ))
+            .check_if_exists::<Vmm>(vmm_id.into_untyped_uuid())
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map(|r| match r.status {
+                UpdateStatus::Updated => true,
+                UpdateStatus::NotUpdatedButExists => false,
+            })
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Vmm,
+                        LookupType::ById(vmm_id.into_untyped_uuid()),
+                    ),
+                )
+            })
+    }
+
     /// Forcibly overwrites the Propolis IP/Port in the supplied VMM's record with
     /// the supplied Propolis IP.
     ///

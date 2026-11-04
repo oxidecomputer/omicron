@@ -717,14 +717,12 @@ pub(super) async fn instance_ip_remove_opte(
 /// database, or if the sled-agent returns a non-retryable error..
 pub(super) async fn ensure_vmm_unregistered(
     sagactx: &NexusActionContext,
-    serialized_authn: &authn::saga::Serialized,
+    opctx: &OpContext,
     instance_id: InstanceUuid,
     propolis_id: PropolisUuid,
     sled_id: SledUuid,
 ) -> Result<(), Error> {
     let osagactx = sagactx.user_data();
-    let opctx =
-        crate::context::op_context_for_saga_action(sagactx, serialized_authn);
     let log = osagactx.log();
 
     let client = match osagactx.nexus().sled_client(&sled_id).await {
