@@ -264,8 +264,7 @@ mod tests {
         }
     }
 
-    /// Drive "normal" operation of the `RotAttestationTask` through the
-    /// `RotAttestationHandle` to get and appraise an attestation
+    /// Use the `RotAttestor` to get and appraise an attestation
     #[tokio::test]
     async fn rot_attestor_verify_attestation() {
         let logctx = test_setup_log("rot_attestor_mock");
