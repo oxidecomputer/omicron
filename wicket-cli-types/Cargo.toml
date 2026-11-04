@@ -1,0 +1,20 @@
+[package]
+name = "wicket-cli-types"
+description = "Stable JSON output and exit codes for wicket's command-line interface"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+oxide-versioned-envelope.workspace = true
+schemars.workspace = true
+serde.workspace = true
+wicketd-commission-types-versions.workspace = true
+omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+expectorate.workspace = true
+serde_json.workspace = true

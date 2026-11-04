@@ -45,7 +45,7 @@ impl ShellApp {
                 Ok(ExitCode::SUCCESS)
             }
             ShellCommand::RackUpdate(args) => {
-                args.exec(log, addrs.wicketd, self.global_opts, output).await
+                args.exec(log, addrs, self.global_opts, output).await
             }
             ShellCommand::Setup(args) => {
                 args.exec(log, addrs, self.global_opts).await?;

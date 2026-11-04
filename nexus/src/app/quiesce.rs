@@ -531,7 +531,6 @@ mod test {
     use std::time::Duration;
     use std::time::Instant;
     use tokio::sync::watch;
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -744,7 +743,9 @@ mod test {
             || async {
                 use nexus_db_schema::schema::saga::dsl;
                 let saga_state: nexus_db_model::SagaState = dsl::saga
-                    .filter(dsl::id.eq(demo_saga.saga_id))
+                    .filter(dsl::id.eq(nexus_db_model::to_db_typed_uuid(
+                        demo_saga.saga_id,
+                    )))
                     .select(dsl::saga_state)
                     .first_async(&*conn)
                     .await
@@ -960,7 +961,7 @@ mod test {
         let saga_ref = nexus_qq1
             .sagas()
             .saga_create(
-                steno::SagaId(Uuid::new_v4()),
+                steno::SagaId::new_v4(),
                 &steno::SagaName::new("test-saga"),
             )
             .expect("create saga while not quiesced");

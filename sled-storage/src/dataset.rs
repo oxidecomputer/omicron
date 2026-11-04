@@ -18,7 +18,6 @@ use omicron_common::disk::DatasetName;
 use sled_agent_types::disk::CompressionAlgorithm;
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::DiskVariant;
-use sled_agent_types::disk::GzipLevel;
 use slog::{Logger, debug, info, warn};
 use slog_error_chain::InlineErrorChain;
 use std::process::Stdio;
@@ -41,12 +40,6 @@ pub const DEBUG_DATASET_QUOTA: ByteCount =
         // should be tuned as needed.
         ByteCount::from_gibibytes_u32(100)
     };
-// TODO-correctness: This value of 100GiB is a pretty wild guess, and should be
-// tuned as needed.
-pub const DUMP_DATASET_QUOTA: ByteCount = ByteCount::from_gibibytes_u32(100);
-// passed to zfs create -o compression=
-pub const DUMP_DATASET_COMPRESSION: CompressionAlgorithm =
-    CompressionAlgorithm::GzipN { level: GzipLevel::new::<9>() };
 // TODO-correctness: This value of 40 GiB is a wild guess -- given TUF repo
 // sizes as of Sep 2025, it would be capable of storing about 16 distinct system
 // versions.
@@ -64,17 +57,6 @@ pub const LOCAL_STORAGE_UNENCRYPTED_DATASET: &'static str =
 
 // This is the root dataset for all U.2 drives. Encryption is inherited.
 pub const CRYPT_DATASET: &'static str = "crypt";
-
-pub const U2_EXPECTED_DATASET_COUNT: usize = 2;
-pub const U2_EXPECTED_DATASETS: [ExpectedDataset; U2_EXPECTED_DATASET_COUNT] = [
-    // Stores filesystems for zones
-    ExpectedDataset::new(ZONE_DATASET),
-    // For long-term storage of  miscellaneous debug data, including kernel
-    // crash dumps, process core dumps, log files, etc.  See `DebugCollector`.
-    ExpectedDataset::new(DUMP_DATASET)
-        .quota(DUMP_DATASET_QUOTA)
-        .compression(DUMP_DATASET_COMPRESSION),
-];
 
 const M2_EXPECTED_DATASET_COUNT: usize = 7;
 const M2_EXPECTED_DATASETS: [ExpectedDataset; M2_EXPECTED_DATASET_COUNT] = [
@@ -108,7 +90,7 @@ const M2_EXPECTED_DATASETS: [ExpectedDataset; M2_EXPECTED_DATASET_COUNT] = [
 
 // Helper type for describing expected datasets and their optional quota.
 #[derive(Clone, Copy, Debug)]
-pub struct ExpectedDataset {
+struct ExpectedDataset {
     // Name for the dataset
     name: &'static str,
     // Optional quota, in _bytes_
@@ -126,25 +108,8 @@ impl ExpectedDataset {
         }
     }
 
-    pub fn get_name(&self) -> &'static str {
-        self.name
-    }
-
-    pub fn get_quota(&self) -> Option<ByteCount> {
-        self.quota
-    }
-
-    pub fn get_compression(&self) -> CompressionAlgorithm {
-        self.compression
-    }
-
     const fn quota(mut self, quota: ByteCount) -> Self {
         self.quota = Some(quota);
-        self
-    }
-
-    const fn compression(mut self, compression: CompressionAlgorithm) -> Self {
-        self.compression = compression;
         self
     }
 }
@@ -205,9 +170,12 @@ pub(crate) async fn ensure_zpool_has_datasets(
     key_requester: Option<&StorageKeyRequester>,
 ) -> Result<(), DatasetError> {
     info!(log, "Ensuring zpool has datasets"; "zpool" => ?zpool_name, "disk_identity" => ?disk_identity);
+    // On U.2s, we only ensure the encrypted root dataset here. The datasets
+    // within it (and any others on the U.2) are part of the sled config, and
+    // are created and managed by the config reconciler.
     let (root, datasets) = match zpool_name.kind().into() {
-        DiskVariant::M2 => (None, M2_EXPECTED_DATASETS.iter()),
-        DiskVariant::U2 => (Some(CRYPT_DATASET), U2_EXPECTED_DATASETS.iter()),
+        DiskVariant::M2 => (None, M2_EXPECTED_DATASETS.as_slice()),
+        DiskVariant::U2 => (Some(CRYPT_DATASET), [].as_slice()),
     };
 
     let zoned = false;

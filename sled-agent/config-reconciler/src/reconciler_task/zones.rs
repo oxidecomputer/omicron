@@ -28,6 +28,7 @@ use illumos_utils::zone::OmicronZoneConfigExt;
 use illumos_utils::zone::Zones;
 use ntp_admin_client::types::TimeSync;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::http_client::internal_http_client;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::OmicronZoneConfig;
@@ -279,12 +280,12 @@ impl OmicronZones {
         for (zone_id, result) in shutdown_results {
             match result {
                 Ok(()) => {
-                    self.zones.remove(&zone_id);
+                    self.zones.remove(zone_id);
                 }
                 Err((state, err)) => {
                     nfailed += 1;
                     self.zones
-                        .get_mut(&zone_id)
+                        .get_mut(zone_id)
                         .expect("shutdown task operates on existing zone")
                         .state = ZoneState::PartiallyShutDown { state, err };
                 }
@@ -587,8 +588,9 @@ impl OmicronZones {
             return Err(TimeSyncError::MultipleRunningNtpZones);
         }
 
-        let client = ntp_admin_client::Client::new(
+        let client = ntp_admin_client::Client::new_with_client(
             &format!("http://{ntp_admin_address}"),
+            internal_http_client(),
             log.clone(),
         );
 
@@ -1288,6 +1290,7 @@ fn config_differs_only_by_image_source(
 mod tests {
     use super::*;
     use crate::InternalDisks;
+    use crate::PathInPool;
     use crate::dataset_serialization_task::DatasetEnsureError;
     use anyhow::anyhow;
     use assert_matches::assert_matches;
@@ -1298,9 +1301,7 @@ mod tests {
     use illumos_utils::dladm::EtherstubVnic;
     use illumos_utils::link::VnicAllocator;
     use illumos_utils::running_zone::ZoneBuilderFactory;
-    use illumos_utils::zpool::PathInPool;
     use illumos_utils::zpool::ZpoolName;
-    use illumos_utils::zpool::ZpoolOrRamdisk;
     use omicron_common::address::SLED_PREFIX_LENGTH;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
@@ -1366,10 +1367,7 @@ mod tests {
                 .factory
                 .builder()
                 .with_zone_type(name)
-                .with_zone_root_path(PathInPool {
-                    pool: ZpoolOrRamdisk::Ramdisk,
-                    path: "/test-zone-root".into(),
-                })
+                .with_zone_root_path("/test-zone-root".into())
                 .with_underlay_vnic_allocator(&self.vnic_alloc)
                 .with_log(log)
                 .with_opte_ports(Vec::new())

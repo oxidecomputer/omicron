@@ -13,6 +13,7 @@ use sled_agent_types::inventory::NetworkInterfaceKind;
 use slog::Logger;
 use slog::info;
 use std::net::IpAddr;
+use uuid::Uuid;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -46,9 +47,6 @@ pub enum Error {
     #[error("Invalid IP configuration for port: {0}")]
     InvalidPortIpConfig(String),
 
-    #[error("Tried to release non-existent port ({0}, {1:?})")]
-    ReleaseMissingPort(uuid::Uuid, NetworkInterfaceKind),
-
     #[error("Tried to update external IPs on non-existent port ({0}, {1:?})")]
     ExternalIpUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
 
@@ -70,6 +68,9 @@ pub enum Error {
         "Tried to update attached subnets on non-existent port ({0}, {1:?})"
     )]
     AttachedSubnetUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
+
+    #[error("Duplicate OPTE port: id={id}, kind={kind:?}")]
+    DuplicateOptePort { id: Uuid, kind: NetworkInterfaceKind },
 }
 
 /// Delete all xde devices on the system.

@@ -179,7 +179,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         blueprint_edit_current_target(
             log,
             &nexus,
-            &|builder: &mut BlueprintBuilder| {
+            |builder: &mut BlueprintBuilder| {
                 let mut external_networking_alloc =
                     ExternalNetworkingAllocator::from_current_zones(
                         builder,
@@ -279,7 +279,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         blueprint_edit_current_target(
             log,
             &nexus,
-            &|builder: &mut BlueprintBuilder| {
+            |builder: &mut BlueprintBuilder| {
                 builder.set_nexus_generation(next_generation);
                 Ok(())
             },
@@ -441,7 +441,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         blueprint_edit_current_target(
             log,
             new_nexus,
-            &|builder: &mut BlueprintBuilder| {
+            |builder: &mut BlueprintBuilder| {
                 for (id, current_zone) in &current_nexus_zones {
                     builder
                         .sled_expunge_zone(current_zone.sled_id, *id)
@@ -565,9 +565,11 @@ async fn check_external_dns(
     // what's in-service in the blueprint.
     let expected_nexus_addrs = blueprint
         .in_service_nexus_zones()
-        .filter_map(|(_sled_id, _zone_cfg, nexus_config)| {
-            (nexus_config.nexus_generation == active_generation)
-                .then_some(nexus_config.external_ip.ip)
+        .filter(|(_sled_id, _zone_cfg, nexus_config)| {
+            nexus_config.nexus_generation == active_generation
+        })
+        .flat_map(|(_sled_id, _zone_cfg, nexus_config)| {
+            nexus_config.external_ips.iter().map(|e| e.ip)
         })
         .collect::<BTreeSet<_>>();
 

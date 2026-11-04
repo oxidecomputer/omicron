@@ -62,7 +62,9 @@ use sled_agent_types::disk::DiskVariant;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::CurrentUpdateDisposition;
 use sled_agent_types::inventory::FmdInventory;
+use sled_agent_types::inventory::InstanceManagerStatus;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
@@ -577,6 +579,12 @@ impl SystemDescription {
         sled.inventory_sled_agent.ledgered_sled_config =
             Some(sled_config.clone());
 
+        // A real sled-agent's instance manager reads its update disposition
+        // from the ledgered config, so reflect the new config's disposition in
+        // the reported instance manager status too.
+        sled.inventory_sled_agent.instance_manager_status.update_disposition =
+            CurrentUpdateDisposition::Known(sled_config.update_disposition);
+
         // Present results as though the reconciler has successfully completed.
         sled.inventory_sled_agent.reconciler_status =
             ConfigReconcilerInventoryStatus::Idle {
@@ -595,6 +603,30 @@ impl SystemDescription {
             }
         };
 
+        Ok(self)
+    }
+
+    /// Get the instance manager status reported by a sled in inventory.
+    ///
+    /// Returns an error if the sled is not found.
+    pub fn sled_instance_manager_status(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<InstanceManagerStatus> {
+        let sled = self.get_sled(sled_id)?;
+        Ok(sled.inventory_sled_agent.instance_manager_status)
+    }
+
+    /// Set the number of registered VMMs as reported by this sled's instance
+    /// manager status.
+    pub fn sled_set_num_registered_vmms(
+        &mut self,
+        sled_id: SledUuid,
+        count: usize,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.get_sled_mut(sled_id)?;
+        sled.inventory_sled_agent.instance_manager_status.num_registered_vmms =
+            count;
         Ok(self)
     }
 
@@ -918,7 +950,7 @@ impl SystemDescription {
     }
 
     /// Get the planner's configuration.
-    pub fn get_planner_config(&self) -> PlannerConfig {
+    pub fn planner_config(&self) -> PlannerConfig {
         self.planner_config
     }
 
@@ -999,6 +1031,7 @@ impl SystemDescription {
                 builder
                     .found_sp_state(
                         "fake MGS 1",
+                        nexus_inventory::examples::RACK_UUID,
                         SpType::Sled,
                         *slot,
                         sp_state.clone(),
@@ -1524,6 +1557,7 @@ impl Sled {
                 sled_role,
                 sled_agent_address,
                 sled_id,
+                rack_id: nexus_inventory::examples::RACK_UUID,
                 usable_hardware_threads: resources.usable_hardware_threads,
                 usable_physical_ram: resources.usable_physical_ram,
                 cpu_family: resources.cpu_family,
@@ -1563,6 +1597,7 @@ impl Sled {
                         sled_config,
                     ),
                 ),
+                instance_manager_status: InstanceManagerStatus::available(0),
                 // XXX: return something more reasonable here?
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
@@ -1740,6 +1775,7 @@ impl Sled {
             sled_role: inv_sled_agent.sled_role,
             sled_agent_address: inv_sled_agent.sled_agent_address,
             sled_id,
+            rack_id: inv_sled_agent.rack_id,
             usable_hardware_threads: inv_sled_agent.usable_hardware_threads,
             usable_physical_ram: inv_sled_agent.usable_physical_ram,
             cpu_family: inv_sled_agent.cpu_family,
@@ -1749,6 +1785,7 @@ impl Sled {
             ledgered_sled_config: inv_sled_agent.ledgered_sled_config.clone(),
             reconciler_status: inv_sled_agent.reconciler_status.clone(),
             last_reconciliation: inv_sled_agent.last_reconciliation.clone(),
+            instance_manager_status: InstanceManagerStatus::available(0),
             file_source_resolver: inv_sled_agent.file_source_resolver.clone(),
             smf_services_enabled_not_online: inv_sled_agent
                 .smf_services_enabled_not_online

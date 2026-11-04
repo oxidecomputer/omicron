@@ -10,6 +10,7 @@ use crate::self_stats;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::http_client::internal_http_client_builder;
 use oximeter::types::ProducerResults;
 use oximeter::types::ProducerResultsItem;
 use oximeter_types::producer::FailedCollection;
@@ -231,7 +232,7 @@ async fn collection_loop(
     mut timer_collection_rx: mpsc::Receiver<CollectionStartTimes>,
     result_tx: mpsc::Sender<CollectionResponse>,
 ) {
-    let client = reqwest::Client::builder()
+    let client = internal_http_client_builder()
         .timeout(COLLECTION_TIMEOUT)
         .build()
         // Safety: `build()` only fails if TLS couldn't be initialized or the

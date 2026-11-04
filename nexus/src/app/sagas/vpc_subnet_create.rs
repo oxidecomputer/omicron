@@ -366,6 +366,8 @@ pub(crate) mod test {
     use omicron_common::api::external::{
         self, IdentityMetadataCreateParams, Ipv6NetExt,
     };
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::ProjectUuid;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -373,10 +375,10 @@ pub(crate) mod test {
 
     const PROJECT_NAME: &str = "springfield-squidport";
 
-    async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
+    async fn create_org_and_project(client: &ClientTestContext) -> ProjectUuid {
         create_default_ip_pools(&client).await;
         let project = create_project(client, PROJECT_NAME).await;
-        project.identity.id
+        ProjectUuid::from_untyped_uuid(project.identity.id)
     }
 
     // Helper for creating VPC subnet create parameters
@@ -419,7 +421,7 @@ pub(crate) mod test {
 
     async fn get_vpc_state(
         cptestctx: &ControlPlaneTestContext,
-        project_id: Uuid,
+        project_id: ProjectUuid,
     ) -> (authz::Vpc, db::model::Vpc, authz::VpcRouter) {
         let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
@@ -429,7 +431,7 @@ pub(crate) mod test {
                 &opctx,
                 VpcSelector {
                     vpc: NameOrId::Name("default".parse().unwrap()),
-                    project: Some(project_id.into()),
+                    project: Some(NameOrId::Id(project_id.into_untyped_uuid())),
                 },
             )
             .unwrap()

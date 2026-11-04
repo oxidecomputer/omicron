@@ -13,6 +13,8 @@ use clap::Subcommand;
 use clickhouse_admin_single_client::Client;
 use clickhouse_admin_single_client::types;
 use clickhouse_admin_single_client::types::DatabaseUsageResult;
+use clickhouse_admin_types::retention::DatabaseRetentionPolicy;
+use clickhouse_admin_types::retention::Days;
 use internal_dns_types::names::ServiceName;
 use slog::Logger;
 use tabled::Table;
@@ -44,8 +46,15 @@ pub struct ClickHouseAdminArgs {
 #[derive(Debug, Args)]
 struct RetentionPolicyRequest {
     /// The number of days to retain telemetry data.
-    #[arg(long)]
-    days: std::num::NonZeroU8,
+    #[arg(long, value_parser = parse_days)]
+    days: Days,
+}
+
+fn parse_days(
+    s: &str,
+) -> Result<Days, Box<dyn std::error::Error + Send + Sync>> {
+    let days: u8 = s.parse()?;
+    Ok(Days::try_from(days)?)
 }
 
 /// Subcommands that query ClickHouse admin server state
@@ -115,7 +124,7 @@ impl ClickHouseAdminArgs {
     }
 
     async fn retention_policy(&self, client: &Client) -> anyhow::Result<()> {
-        let types::DatabaseRetentionPolicy { tables } = client
+        let DatabaseRetentionPolicy { tables } = client
             .retention_policy()
             .await
             .context("fetching retention policy")?
@@ -192,9 +201,10 @@ impl ClickHouseAdminArgs {
         client: &Client,
         retention: &RetentionPolicyRequest,
     ) -> anyhow::Result<()> {
-        let days = types::Days(retention.days);
         client
-            .set_retention_policy(&types::RetentionPolicyRequest { days })
+            .set_retention_policy(&types::RetentionPolicyRequest {
+                days: retention.days,
+            })
             .await
             .context("setting retention policy")
             .map(|_| ())

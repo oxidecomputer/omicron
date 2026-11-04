@@ -37,6 +37,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use dropshot::{HttpError, HttpResponse};
+use omicron_uuid_kinds::SiloUuid;
 
 /// Indicates the kind of HTTP server.
 #[derive(Clone, Copy)]
@@ -274,6 +275,13 @@ impl ServerContext {
             }
         };
 
+        let backtrace_setting = if config.deployment.record_db_claim_backtraces
+        {
+            db::ClaimBacktraceSetting::Capture
+        } else {
+            db::ClaimBacktraceSetting::Skip
+        };
+
         // Once this database pool is created, it spawns workers which will
         // be continually attempting to access database backends.
         //
@@ -288,6 +296,7 @@ impl ServerContext {
                 db::Pool::new_single_host(
                     &log,
                     &db::Config { url: url.clone() },
+                    backtrace_setting,
                 )
             }
             nexus_config::Database::FromDns => {
@@ -295,7 +304,7 @@ impl ServerContext {
                     log, "Setting up qorb database pool from DNS";
                     "dns_addrs" => ?qorb_resolver.bootstrap_dns_ips(),
                 );
-                db::Pool::new(&log, &qorb_resolver)
+                db::Pool::new(&log, &qorb_resolver, backtrace_setting)
             }
         };
 
@@ -496,7 +505,7 @@ impl authn::external::SiloUserSilo for ServerContext {
     async fn silo_user_silo(
         &self,
         silo_user_id: SiloUserUuid,
-    ) -> Result<Uuid, authn::Reason> {
+    ) -> Result<SiloUuid, authn::Reason> {
         let opctx = self.nexus.opctx_external_authn();
         self.nexus.lookup_silo_for_authn(opctx, silo_user_id).await
     }

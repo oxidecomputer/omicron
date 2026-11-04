@@ -4,6 +4,7 @@
 
 //! Silos, Users, and SSH Keys.
 
+use crate::app::external_client::ExternalClientBuilder;
 use anyhow::Context;
 use chrono::TimeDelta;
 use nexus_db_lookup::LookupPath;
@@ -39,8 +40,10 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{DataPageParams, ResourceType};
 use omicron_common::api::external::{DeleteResult, NameOrId};
 use omicron_common::api::external::{Error, InternalContext};
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::SiloUuid;
 use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
 use std::str::FromStr;
@@ -56,8 +59,7 @@ impl super::Nexus {
             .authn
             .silo_required()
             .internal_context("looking up current silo")?;
-        let silo = self.silo_lookup(opctx, NameOrId::Id(silo.id()))?;
-        Ok(silo)
+        Ok(LookupPath::new(opctx, &self.db_datastore).silo_id(silo.id()))
     }
 
     pub fn silo_lookup<'a>(
@@ -67,8 +69,8 @@ impl super::Nexus {
     ) -> LookupResult<lookup::Silo<'a>> {
         match silo {
             NameOrId::Id(id) => {
-                let silo =
-                    LookupPath::new(opctx, &self.db_datastore).silo_id(id);
+                let silo = LookupPath::new(opctx, &self.db_datastore)
+                    .silo_id(SiloUuid::from_untyped_uuid(id));
                 Ok(silo)
             }
             NameOrId::Name(name) => {
@@ -82,10 +84,12 @@ impl super::Nexus {
     pub(crate) async fn silo_fq_dns_names(
         &self,
         opctx: &OpContext,
-        silo_id: Uuid,
+        silo_id: SiloUuid,
     ) -> ListResultVec<String> {
-        let (_, silo) =
-            self.silo_lookup(opctx, silo_id.into())?.fetch().await?;
+        let (_, silo) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_id(silo_id)
+            .fetch()
+            .await?;
         let silo_dns_name = silo_dns_name(&silo.name());
         let external_dns_zones = self
             .db_datastore
@@ -292,7 +296,7 @@ impl super::Nexus {
                 .fetch_for(action)
                 .await?;
 
-        if db_silo_user.silo_id != authz_silo.id() {
+        if db_silo_user.silo_id() != authz_silo.id() {
             return Err(authz_silo_user.not_found());
         }
 
@@ -1019,11 +1023,14 @@ impl super::Nexus {
                 // introduce attack surface to download it each time it was
                 // required.
                 let dur = std::time::Duration::from_secs(5);
-                let client = reqwest::ClientBuilder::new()
+                let builder = reqwest::ClientBuilder::new()
                     .connect_timeout(dur)
-                    .timeout(dur)
-                    .dns_resolver(self.external_resolver.clone())
-                    .build()
+                    .timeout(dur);
+                let client = ExternalClientBuilder::from(builder)
+                    .build(
+                        &self.external_http_client_config,
+                        &self.external_resolver,
+                    )
                     .map_err(|e| {
                         Error::internal_error(&format!(
                             "failed to build reqwest client: {}",
@@ -1031,15 +1038,28 @@ impl super::Nexus {
                         ))
                     })?;
 
-                let response = client.get(url).send().await.map_err(|e| {
-                    Error::invalid_value(
-                        "url",
-                        format!(
-                            "error querying url: {}",
-                            InlineErrorChain::new(&e)
-                        ),
-                    )
-                })?;
+                let response = client
+                    .get(url)
+                    .map_err(|e| {
+                        Error::invalid_value(
+                            "url",
+                            format!(
+                                "invalid URL: {}",
+                                InlineErrorChain::new(&e)
+                            ),
+                        )
+                    })?
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        Error::invalid_value(
+                            "url",
+                            format!(
+                                "error querying url: {}",
+                                InlineErrorChain::new(&e)
+                            ),
+                        )
+                    })?;
 
                 if !response.status().is_success() {
                     return Err(Error::invalid_value(
@@ -1132,7 +1152,7 @@ impl super::Nexus {
                 Uuid::new_v4(),
                 idp_params.identity,
             ),
-            silo_id: db_silo.id(),
+            silo_id: db_silo.id().into(),
 
             idp_metadata_document_string,
 

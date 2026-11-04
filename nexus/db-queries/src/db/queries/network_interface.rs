@@ -1983,6 +1983,7 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
+    use omicron_uuid_kinds::ProjectUuid;
     use oxnet::Ipv4Net;
     use oxnet::Ipv6Net;
     use std::collections::HashSet;
@@ -1996,7 +1997,7 @@ mod tests {
     // stopped to add or delete interfaces.
     async fn create_instance(
         opctx: &OpContext,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         db_datastore: &DataStore,
     ) -> Instance {
         let instance_id = InstanceUuid::new_v4();
@@ -2041,7 +2042,7 @@ mod tests {
 
     async fn create_stopped_instance(
         opctx: &OpContext,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         db_datastore: &DataStore,
     ) -> Instance {
         let instance = create_instance(opctx, project_id, db_datastore).await;
@@ -2130,7 +2131,7 @@ mod tests {
     struct TestContext {
         logctx: LogContext,
         db: TestDatabase,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         net1: Network,
         net2: Network,
     }

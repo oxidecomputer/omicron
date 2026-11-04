@@ -14,6 +14,7 @@ use nexus_db_model::{IpAttachState, NatEntry};
 use nexus_types::external_api::external_ip;
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
 use serde::Serialize;
@@ -74,7 +75,7 @@ declare_saga_actions! {
 pub struct Params {
     pub create_params: ExternalIpAttach,
     pub authz_instance: authz::Instance,
-    pub project_id: Uuid,
+    pub project_id: ProjectUuid,
     /// Authentication context to use to fetch the instance's current state from
     /// the database.
     pub serialized_authn: authn::saga::Serialized,

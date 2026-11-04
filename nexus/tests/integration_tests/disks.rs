@@ -1149,7 +1149,10 @@ async fn test_disk_virtual_provisioning_collection(
         0
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, DEFAULT_SILO_ID)
+        .virtual_provisioning_collection_get(
+            &opctx,
+            DEFAULT_SILO_ID.into_untyped_uuid(),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -1215,7 +1218,10 @@ async fn test_disk_virtual_provisioning_collection(
         0
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, DEFAULT_SILO_ID)
+        .virtual_provisioning_collection_get(
+            &opctx,
+            DEFAULT_SILO_ID.into_untyped_uuid(),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -1274,7 +1280,10 @@ async fn test_disk_virtual_provisioning_collection(
         disk_size
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, DEFAULT_SILO_ID)
+        .virtual_provisioning_collection_get(
+            &opctx,
+            DEFAULT_SILO_ID.into_untyped_uuid(),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -1312,7 +1321,10 @@ async fn test_disk_virtual_provisioning_collection(
         0
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, DEFAULT_SILO_ID)
+        .virtual_provisioning_collection_get(
+            &opctx,
+            DEFAULT_SILO_ID.into_untyped_uuid(),
+        )
         .await
         .unwrap();
     assert_eq!(

@@ -23,6 +23,8 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ProjectUuid;
 use std::sync::Arc;
 
 impl super::Nexus {
@@ -34,7 +36,7 @@ impl super::Nexus {
         let lookup_path = LookupPath::new(opctx, &self.db_datastore);
         Ok(match project_selector {
             project::ProjectSelector { project: NameOrId::Id(id) } => {
-                lookup_path.project_id(id)
+                lookup_path.project_id(ProjectUuid::from_untyped_uuid(id))
             }
             project::ProjectSelector { project: NameOrId::Name(name) } => {
                 lookup_path.project_name_owned(name.into())

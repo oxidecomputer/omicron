@@ -840,10 +840,9 @@ mod test {
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::BlueprintUuid;
     use std::sync::LazyLock;
-    use uuid::Uuid;
 
     static SAGA_ID: LazyLock<steno::SagaId> =
-        LazyLock::new(|| steno::SagaId(Uuid::new_v4()));
+        LazyLock::new(|| steno::SagaId::new_v4());
     static BLUEPRINT_ID: LazyLock<BlueprintUuid> =
         LazyLock::new(|| BlueprintUuid::new_v4());
     static SAGA_NAME: LazyLock<steno::SagaName> =

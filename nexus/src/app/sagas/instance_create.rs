@@ -28,6 +28,7 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::{Error, InternalContext};
 use omicron_generation_kinds::InstanceStateGeneration;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::{
     AntiAffinityGroupUuid, GenericUuid, InstanceUuid, MulticastGroupUuid,
 };
@@ -49,7 +50,7 @@ use uuid::Uuid;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
-    pub project_id: Uuid,
+    pub project_id: ProjectUuid,
     pub create_params: instance::InstanceCreate,
     pub boundary_switches: HashSet<SwitchSlot>,
 }
@@ -64,7 +65,7 @@ struct AntiAffinityParams {
 #[derive(Debug, Deserialize, Serialize)]
 struct DiskAttachParams {
     serialized_authn: authn::saga::Serialized,
-    project_id: Uuid,
+    project_id: ProjectUuid,
     instance_id: InstanceUuid,
     attach_params: InstanceDiskAttachment,
 }
@@ -87,7 +88,7 @@ struct NicParams {
     serialized_authn: authn::saga::Serialized,
     instance_name: Name,
     instance_id: InstanceUuid,
-    project_id: Uuid,
+    project_id: ProjectUuid,
     interface_id: Uuid,
     nic_spec: InstanceNicSpec,
 }
@@ -96,7 +97,7 @@ struct NicParams {
 struct ExternalIpParams {
     serialized_authn: authn::saga::Serialized,
     instance_id: InstanceUuid,
-    project_id: Uuid,
+    project_id: ProjectUuid,
     new_eip_id: Uuid,
     eip_spec: instance::ExternalIpCreate,
     ip_index: usize,
@@ -1507,9 +1508,10 @@ pub mod test {
         ByteCount, IdentityMetadataCreateParams,
     };
     use omicron_sled_agent::sim::SledAgent;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::ProjectUuid;
     use sled_agent_types::early_networking::SwitchSlot;
     use std::collections::HashSet;
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -1518,15 +1520,17 @@ pub mod test {
     const PROJECT_NAME: &str = "springfield-squidport";
     const DISK_NAME: &str = "my-disk";
 
-    async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
+    async fn create_org_project_and_disk(
+        client: &ClientTestContext,
+    ) -> ProjectUuid {
         create_default_ip_pools(&client).await;
         let project = create_project(client, PROJECT_NAME).await;
         create_disk(&client, PROJECT_NAME, DISK_NAME).await;
-        project.identity.id
+        ProjectUuid::from_untyped_uuid(project.identity.id)
     }
 
     // Helper for creating instance create parameters
-    fn new_test_params(opctx: &OpContext, project_id: Uuid) -> Params {
+    fn new_test_params(opctx: &OpContext, project_id: ProjectUuid) -> Params {
         Params {
             serialized_authn: Serialized::for_opctx(opctx),
             project_id,

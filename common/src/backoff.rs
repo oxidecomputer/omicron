@@ -66,10 +66,7 @@ where
 /// This policy makes attempts to retry under one second, but backs off
 /// significantly to avoid overloading critical services.
 pub fn retry_policy_internal_service() -> ::backoff::ExponentialBackoff {
-    backoff_builder()
-        .with_initial_interval(Duration::from_millis(250))
-        .with_max_interval(Duration::from_secs(60 * 3))
-        .build()
+    configure_internal_service_intervals(&mut backoff_builder()).build()
 }
 
 /// Return a backoff policy for querying internal services aggressively.
@@ -86,6 +83,21 @@ pub fn retry_policy_internal_service_aggressive()
         .with_initial_interval(Duration::from_millis(100))
         .with_multiplier(1.2)
         .with_max_interval(Duration::from_secs(60 * 3))
+        .build()
+}
+
+/// Return a backoff policy for querying internal services with a maximum
+/// elapsed time limit after which no further retries will be permitted.
+///
+/// This policy is similar to [`retry_policy_internal_service`], with one key
+/// exception: unlike every other policy in this module, this retry policy will
+/// **give up** after `timeout` has elapsed, rather than continuing to retry
+/// indefinitely.
+pub fn retry_policy_internal_service_timeout(
+    timeout: Duration,
+) -> ::backoff::ExponentialBackoff {
+    configure_internal_service_intervals(&mut backoff_builder())
+        .with_max_elapsed_time(Some(timeout))
         .build()
 }
 
@@ -125,4 +137,14 @@ fn backoff_builder() -> ::backoff::ExponentialBackoffBuilder {
     let mut builder = ::backoff::ExponentialBackoffBuilder::new();
     builder.with_multiplier(2.0).with_max_elapsed_time(None);
     builder
+}
+
+/// Configure `builder` with the initial and maximum intervals for an internal
+/// service.
+fn configure_internal_service_intervals(
+    builder: &mut ::backoff::ExponentialBackoffBuilder,
+) -> &mut ::backoff::ExponentialBackoffBuilder {
+    builder
+        .with_initial_interval(Duration::from_millis(250))
+        .with_max_interval(Duration::from_secs(60 * 3))
 }

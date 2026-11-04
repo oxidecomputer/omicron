@@ -4,40 +4,25 @@
 
 use crate::app::background::Activator;
 use crate::app::background::BackgroundTask;
-use crate::app::background::tasks::fm_sitrep_load::CurrentSitrep;
-use anyhow::Context;
 use chrono::Utc;
 use fm::analysis_input::Input;
-use fm::analysis_input::InvalidInputs;
 use fm::analysis_reports::InputReport;
 use futures::future::BoxFuture;
-use iddqd::IdOrdMap;
-use nexus_db_model::DbMetadataNexusState;
-use nexus_db_model::PhysicalDiskPolicy;
-use nexus_db_model::SagaExecState;
-use nexus_db_model::SagaReasonAbandoned;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore;
-use nexus_db_queries::db::identity::Asset;
-use nexus_db_queries::db::pagination::Paginator;
 use nexus_fm as fm;
+use nexus_fm_preparation::InputLoader;
+use nexus_fm_preparation::PreparationResult;
+use nexus_types::fm::CurrentSitrep;
 use nexus_types::fm::FmConfig;
 use nexus_types::fm::FmConfigSource;
 use nexus_types::fm::FmConfigView;
-use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::fm_analysis as status;
 use nexus_types::inventory;
-use nexus_types::observed_saga::{
-    ObservedSaga, ObservedSagaState, SagaAbandonInfo, SagaAbandonReason,
-    SagaOwnerState,
-};
-use omicron_uuid_kinds::AlertUuid;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use omicron_uuid_kinds::SupportBundleUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
@@ -225,79 +210,62 @@ impl FmAnalysis {
             .collect(),
         );
 
-        // Prepare analysis inputs.
-        let (inputs, prep_status, input_report) = match self
-            .prepare_inputs(&opctx, parent_sitrep, inv)
-            .await
-        {
-            Ok(inputs) => inputs,
-            Err(PreparationError::Other(err)) => {
-                let error = InlineErrorChain::new(&*err);
-                slog::error!(
-                    opctx.log,
-                    "fault management analysis preparation failed";
-                    &error,
-                );
-                return FmAnalysisStatus {
-                    parent_sitrep_id,
-                    inv_collection_id: Some(inv_collection_id),
-                    known_classes,
-                    outcome: status::Outcome::PreparationError(
-                        error.to_string(),
-                    ),
-                    warnings,
-                };
-            }
-            Err(PreparationError::InvalidInputs(
-                err @ InvalidInputs::MissingInput { .. },
-            )) => {
-                // A missing input is a bug in this task: `prepare_inputs`
-                // must provide every required input to the builder.
-                let error = InlineErrorChain::new(&err);
-                slog::error!(
-                    opctx.log,
-                    "fault management analysis preparation failed";
-                    &error,
-                );
-                return FmAnalysisStatus {
-                    parent_sitrep_id,
-                    inv_collection_id: Some(inv_collection_id),
-                    known_classes,
-                    outcome: status::Outcome::PreparationError(
-                        error.to_string(),
-                    ),
-                    warnings,
-                };
-            }
-            Err(PreparationError::InvalidInputs(
-                InvalidInputs::InventoryStale {
-                    parent_inv_id,
-                    next_inv_min_time_started,
-                    input_inv_time_started,
-                },
-            )) => {
+        // Construct the input builder for the preparation phase. This will fail
+        // if the inventory collection is insufficiently new, so we can bail out
+        // here if we need to wait for a new collection without having to spawn
+        // the input-loading tasks.
+        let builder = match Input::builder(parent_sitrep.clone(), inv) {
+            Ok(builder) => builder.config(cfg),
+            Err(stale) => {
                 slog::info!(
                     opctx.log,
                     "fault management analysis: waiting for a newer inventory \
                      to be loaded";
-                    "parent_sitrep_inv_id" => %parent_inv_id,
-                    "next_inv_min_time_started" => %next_inv_min_time_started,
-                    "input_inv_time_started" => %input_inv_time_started,
+                    "parent_sitrep_inv_id" => %stale.parent_inv_id,
+                    "next_inv_min_time_started" =>
+                        %stale.next_inv_min_time_started,
+                    "input_inv_time_started" => %stale.input_inv_time_started,
                 );
                 self.activators.inventory_loader.activate();
                 return FmAnalysisStatus {
                     parent_sitrep_id,
                     inv_collection_id: Some(inv_collection_id),
                     known_classes,
-                    outcome: status::Outcome::WaitingForNewerInventory {
-                        parent_inv_id,
-                        next_inv_min_time_started,
-                        input_inv_time_started,
+                    outcome: status::Outcome::WaitingForNewerInventory(stale),
+                    warnings,
+                };
+            }
+        };
+
+        // Load analysis inputs from the database.
+        let PreparationResult { prep_status, prep_result } =
+            InputLoader::new(self.datastore.clone())
+                .prepare_inputs(&opctx, builder)
+                .await;
+        let (inputs, input_report) = match prep_result {
+            Ok(prepared) => prepared,
+            Err(failure) => {
+                // Each failure has already been logged where it occurred.
+                return FmAnalysisStatus {
+                    parent_sitrep_id,
+                    inv_collection_id: Some(inv_collection_id),
+                    known_classes,
+                    outcome: status::Outcome::PreparationError {
+                        prep_status,
+                        failure,
                     },
                     warnings,
                 };
             }
         };
+
+        slog::info!(
+            opctx.log,
+            "fault management analysis input preparation completed in {:?}",
+            prep_status.total_duration;
+            "new_ereports" => input_report.new_ereport_ids.len(),
+            "ereporter_restarts" => input_report.num_ereporter_restarts,
+        );
 
         // Okay, actually run analysis and generate a new sitrep.
         let outcome = self
@@ -315,368 +283,9 @@ impl FmAnalysis {
             warnings,
         }
     }
+}
 
-    async fn prepare_inputs(
-        &mut self,
-        opctx: &OpContext,
-        parent_sitrep: Option<CurrentSitrep>,
-        inv: Arc<inventory::Collection>,
-    ) -> Result<(Input, status::PreparationStatus, InputReport), PreparationError>
-    {
-        let mut warnings = Vec::new();
-
-        let in_service_disks =
-            Arc::new(self.load_in_service_disks(opctx, &mut warnings).await?);
-
-        let observed_sagas =
-            Arc::new(self.prepare_observed_sagas(opctx).await?);
-
-        let mut builder =
-            fm::analysis_input::Input::builder(parent_sitrep.clone(), inv)?
-                .in_service_disks(in_service_disks)
-                .observed_sagas(observed_sagas);
-        self.load_ereporter_restarts(opctx, &mut builder)
-            .await
-            .context("failed to load ereporter restarts")?;
-        self.load_new_ereports(opctx, &mut builder, &mut warnings)
-            .await
-            .context("failed to load new ereports")?;
-        self.load_existing_alert_markers(
-            opctx,
-            parent_sitrep.as_ref().map(|s| &s.1),
-            &mut builder,
-        )
-        .await
-        .context("failed to load existing alert markers")?;
-        self.load_existing_support_bundle_markers(
-            opctx,
-            parent_sitrep.as_ref().map(|s| &s.1),
-            &mut builder,
-        )
-        .await
-        .context("failed to load existing support bundle markers")?;
-
-        let (input, report) = builder.build()?;
-        Ok((input, status::PreparationStatus { warnings }, report))
-    }
-
-    /// Load all in-service control plane disks, projected down to FM's
-    /// [`InServiceDisk`] view.
-    async fn load_in_service_disks(
-        &self,
-        opctx: &OpContext,
-        warnings: &mut Vec<String>,
-    ) -> anyhow::Result<IdOrdMap<InServiceDisk>> {
-        // Load all external (U.2) zpools and project them down to FM's
-        // `InServiceDisk` view, filtering on `disk_policy = in_service` and a
-        // live (non-soft-deleted) physical_disk row. M.2 disks are not
-        // represented as control plane disks today, so the U.2-only filter
-        // on the underlying query matches reality.
-        //
-        // See `nexus_types::in_service_disk` for why FM reads the executed
-        // DB view rather than the target blueprint.
-        let zpools_and_disks = self
-            .datastore
-            .zpool_list_all_external_batched(opctx)
-            .await
-            .context("failed to load in-service control plane disks")?;
-        let mut in_service_disks = IdOrdMap::new();
-        for (zpool, disk) in zpools_and_disks {
-            if disk.time_deleted().is_some()
-                || disk.disk_policy != PhysicalDiskPolicy::InService
-            {
-                continue;
-            }
-            let physical_disk_id = disk.id();
-            let zpool_id = zpool.id();
-            if in_service_disks
-                .insert_unique(InServiceDisk {
-                    physical_disk_id,
-                    zpool_id,
-                    sled_id: disk.sled_id.into(),
-                    vendor: disk.vendor,
-                    serial: disk.serial,
-                    model: disk.model,
-                    variant: disk.variant.into(),
-                })
-                .is_err()
-            {
-                // One live zpool per disk is a code-maintained invariant,
-                // not a schema constraint. Tolerate a violation rather than
-                // panicking the analysis task: keep the first zpool seen
-                // for the disk.
-                slog::warn!(
-                    &opctx.log,
-                    "multiple live zpools reference the same physical disk";
-                    "physical_disk_id" => %physical_disk_id,
-                    "zpool_id" => %zpool_id,
-                );
-                warnings.push(format!(
-                    "multiple live zpools reference physical disk \
-                     {physical_disk_id} (kept first seen, ignored zpool \
-                     {zpool_id})"
-                ));
-            }
-        }
-        Ok(in_service_disks)
-    }
-
-    /// Build the saga diagnosis engine's input: every non-terminal saga,
-    /// annotated with the timestamp of its latest node event (the progress
-    /// signal) and the state of its owning Nexus.
-    async fn prepare_observed_sagas(
-        &self,
-        opctx: &OpContext,
-    ) -> anyhow::Result<IdOrdMap<ObservedSaga>> {
-        use std::collections::BTreeMap;
-
-        // All unfinished (running, unwinding, or abandoned) sagas. Completed
-        // sagas are excluded; a parent case whose saga is absent from this
-        // set is closed by the engine.
-        let sagas = self
-            .datastore
-            .saga_list_unfinished_batched(opctx)
-            .await
-            .context("failed to list unfinished sagas")?;
-
-        // Latest node-event time per saga: the last durably-recorded step.
-        let saga_ids: Vec<_> = sagas.iter().map(|s| s.id).collect();
-        let last_event_times: BTreeMap<
-            steno::SagaId,
-            Option<chrono::DateTime<Utc>>,
-        > = self
-            .datastore
-            .saga_latest_node_event_times(opctx, &saga_ids)
-            .await
-            .context("failed to load saga node-event times")?
-            .into_iter()
-            .map(|(id, t)| (id.0, t))
-            .collect();
-
-        // Classify each owning Nexus (current_sec) against db_metadata_nexus.
-        let nexus_states: BTreeMap<OmicronZoneUuid, DbMetadataNexusState> =
-            self.datastore
-                .get_db_metadata_nexus_in_state(
-                    opctx,
-                    DbMetadataNexusState::ALL.to_vec(),
-                )
-                .await
-                .context("failed to load db_metadata_nexus records")?
-                .into_iter()
-                .map(|n| (n.nexus_id(), n.state()))
-                .collect();
-
-        let mut observed = IdOrdMap::new();
-        for saga in sagas {
-            let saga_state = match saga.saga_state {
-                SagaExecState::Running => ObservedSagaState::Running,
-                SagaExecState::Unwinding => ObservedSagaState::Unwinding,
-                SagaExecState::Abandoned(metadata) => {
-                    ObservedSagaState::Abandoned(SagaAbandonInfo {
-                        time: metadata.time,
-                        reason: match metadata.reason {
-                            SagaReasonAbandoned::Omdb => {
-                                SagaAbandonReason::Omdb
-                            }
-                            SagaReasonAbandoned::Unrecoverable => {
-                                SagaAbandonReason::Unrecoverable
-                            }
-                            SagaReasonAbandoned::Orphaned => {
-                                SagaAbandonReason::Orphaned
-                            }
-                        },
-                        comment: metadata.comment,
-                    })
-                }
-                // The query filters to unfinished states; defend anyway.
-                SagaExecState::Done => continue,
-            };
-            let current_sec = saga
-                .current_sec
-                .map(|sec| OmicronZoneUuid::from_untyped_uuid(sec.0));
-            let owner_state =
-                current_sec.map(|sec_id| match nexus_states.get(&sec_id) {
-                    Some(DbMetadataNexusState::Active) => {
-                        SagaOwnerState::Active
-                    }
-                    Some(DbMetadataNexusState::NotYet) => {
-                        SagaOwnerState::NotYet
-                    }
-                    Some(DbMetadataNexusState::Quiesced) => {
-                        SagaOwnerState::Quiesced
-                    }
-                    None => SagaOwnerState::Absent,
-                });
-            let last_event_time =
-                last_event_times.get(&saga.id.0).copied().flatten();
-            observed
-                .insert_unique(ObservedSaga {
-                    saga_id: saga.id.0,
-                    saga_name: saga.name,
-                    saga_state,
-                    time_created: saga.time_created,
-                    current_sec,
-                    last_event_time,
-                    owner_state,
-                })
-                .expect(
-                    "saga.id is a primary key, so duplicates are impossible",
-                );
-        }
-        Ok(observed)
-    }
-
-    async fn load_ereporter_restarts(
-        &mut self,
-        opctx: &OpContext,
-        builder: &mut fm::analysis_input::Builder,
-    ) -> anyhow::Result<()> {
-        let mut nbatches = 0;
-        let mut paginator = Paginator::new(
-            nexus_db_queries::db::datastore::SQL_BATCH_SIZE,
-            dropshot::PaginationOrder::Ascending,
-        );
-        while let Some(p) = paginator.next() {
-            nbatches += 1;
-            let batch = self
-                .datastore
-                .ereporter_restart_list(opctx, &p.current_pagparams())
-                .await?;
-            paginator = p.found_batch(&batch, &|e| e.id().into_untyped_uuid());
-            builder.add_ereporter_restarts(batch);
-        }
-
-        slog::debug!(
-            opctx.log,
-            "loaded {} ereporter restarts (in {nbatches} batches)",
-            builder.ereporter_restarts().len(),
-        );
-
-        Ok(())
-    }
-
-    async fn load_new_ereports(
-        &mut self,
-        opctx: &OpContext,
-        builder: &mut fm::analysis_input::Builder,
-        warnings: &mut Vec<String>,
-    ) -> anyhow::Result<()> {
-        // Only surface ereports a diagnosis engine will consume.
-        let classes = fm::diagnosis::known_ereport_classes();
-        let mut paginator = Paginator::new(
-            nexus_db_queries::db::datastore::SQL_BATCH_SIZE,
-            dropshot::PaginationOrder::Ascending,
-        );
-        while let Some(p) = paginator.next() {
-            let prev_total = builder.num_ereports();
-            let batch = self
-                .datastore
-                .ereports_list_unmarked(opctx, classes, &p.current_pagparams())
-                .await?;
-            paginator = p.found_batch(&batch, &|e| {
-                (e.restart_id.into_untyped_uuid(), e.ena)
-            });
-            let loaded = batch.len();
-
-            let mut invalid = 0;
-            for ereport in batch {
-                let ereport = match fm::Ereport::try_from(ereport) {
-                    Ok(ereport) => ereport,
-                    Err(e) => {
-                        invalid += 1;
-                        warnings.push(e.to_string());
-                        continue;
-                    }
-                };
-
-                // Check if this is a reporter we know about, and issue a
-                // warning if it is not.
-                let id = ereport.id;
-                if !builder.ereporter_restarts().contains_key(&id.restart_id) {
-                    let msg = format!(
-                        "ereport {id} has a restart ID not contained in the \
-                         `ereporter_restart` table"
-                    );
-                    slog::warn!(&opctx.log, "{msg}");
-                    warnings.push(msg);
-                }
-                builder.add_unmarked_ereports(std::iter::once(ereport));
-            }
-
-            let total = builder.num_ereports();
-            let new = total - prev_total;
-            if invalid > 0 {
-                slog::warn!(
-                    &opctx.log,
-                    "loaded {loaded} ereports, {new} new, {invalid} invalid"
-                );
-            } else {
-                slog::debug!(&opctx.log, "loaded {loaded} ereports, {new} new");
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn load_existing_alert_markers(
-        &mut self,
-        opctx: &OpContext,
-        parent: Option<&nexus_types::fm::Sitrep>,
-        builder: &mut fm::analysis_input::Builder,
-    ) -> anyhow::Result<()> {
-        let Some(parent) = parent else {
-            // No parent sitrep, so no closed cases, so nothing to look up.
-            return Ok(());
-        };
-        let candidate_ids: Vec<AlertUuid> = parent
-            .cases
-            .iter()
-            .filter(|c| !c.is_open())
-            .flat_map(|c| c.alerts_requested.iter().map(|r| r.id))
-            .collect();
-        if candidate_ids.is_empty() {
-            return Ok(());
-        }
-        let marked = self
-            .datastore
-            .fm_rendezvous_existing_alert_markers(opctx, &candidate_ids)
-            .await
-            .context("failed to look up alert marker existence")?;
-        builder.add_marked_alert_requests(marked);
-        Ok(())
-    }
-
-    async fn load_existing_support_bundle_markers(
-        &mut self,
-        opctx: &OpContext,
-        parent: Option<&nexus_types::fm::Sitrep>,
-        builder: &mut fm::analysis_input::Builder,
-    ) -> anyhow::Result<()> {
-        let Some(parent) = parent else {
-            // No parent sitrep, so no closed cases, so nothing to look up.
-            return Ok(());
-        };
-        let candidate_ids: Vec<SupportBundleUuid> = parent
-            .cases
-            .iter()
-            .filter(|c| !c.is_open())
-            .flat_map(|c| c.support_bundles_requested.iter().map(|r| r.id))
-            .collect();
-        if candidate_ids.is_empty() {
-            return Ok(());
-        }
-        let marked = self
-            .datastore
-            .fm_rendezvous_existing_support_bundle_markers(
-                opctx,
-                &candidate_ids,
-            )
-            .await
-            .context("failed to look up support bundle marker existence")?;
-        builder.add_marked_support_bundle_requests(marked);
-        Ok(())
-    }
-
+impl FmAnalysis {
     async fn analyze(
         &mut self,
         opctx: &OpContext,
@@ -764,6 +373,7 @@ impl FmAnalysis {
             match nexus_db_model::fm::SitrepAnalysisReport::new(
                 input_report,
                 &report,
+                self.datastore.git_version(),
             ) {
                 Ok(analysis_report) => Some(analysis_report),
                 Err(e) => {
@@ -919,34 +529,21 @@ impl FmAnalysis {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-enum PreparationError {
-    #[error(transparent)]
-    InvalidInputs(#[from] InvalidInputs),
-    #[error(transparent)]
-    Other(#[from] anyhow::Error),
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_db_queries::db::pub_test_utils::fm::SitrepModel;
     use nexus_inventory::CollectionBuilder;
-    use nexus_types::alert::AlertClass;
-    use nexus_types::fm::Case;
-    use nexus_types::fm::DiagnosisEngineKind;
+    use nexus_types::fm::InventoryStale;
     use nexus_types::fm::Setting;
     use nexus_types::fm::Sitrep;
     use nexus_types::fm::SitrepMetadata;
     use nexus_types::fm::SitrepVersion;
-    use nexus_types::fm::case;
-    use omicron_generation_kinds::AlertGeneration;
-    use omicron_generation_kinds::SupportBundleGeneration;
+    use omicron_generation_kinds::SitrepAlertGeneration;
+    use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::CaseUuid;
     use omicron_uuid_kinds::SitrepUuid;
-    use std::collections::BTreeSet;
     use std::num::NonZeroU32;
 
     /// Returns an FM config view with the given sitrep limit and history
@@ -967,6 +564,7 @@ mod tests {
             analysis_enabled: Setting::new(true),
             sitrep_limit: Setting::new(sitrep_limit),
             history_pruning_threshold: Setting::new(history_pruning_threshold),
+            certificate_expiry_warning_days: Setting::Default,
         };
         FmConfigView { config, source: Default::default() }
     }
@@ -1008,8 +606,9 @@ mod tests {
                     creator_id: OmicronZoneUuid::new_v4(),
                     comment: "test sitrep".to_string(),
                     time_created: Utc::now(),
-                    alert_generation: AlertGeneration::new(),
-                    support_bundle_generation: SupportBundleGeneration::new(),
+                    alert_generation: SitrepAlertGeneration::new(),
+                    support_bundle_generation:
+                        SitrepSupportBundleGeneration::new(),
                 },
                 cases: Default::default(),
                 ereports_by_id: Default::default(),
@@ -1071,20 +670,14 @@ mod tests {
 
             let result = task.actually_activate(opctx).await;
             assert_eq!(result.inv_collection_id, Some(older.id));
-            match &result.outcome {
-                status::Outcome::WaitingForNewerInventory {
-                    parent_inv_id,
-                    next_inv_min_time_started,
-                    input_inv_time_started,
-                } => {
-                    assert_eq!(*parent_inv_id, newer.id);
-                    assert_eq!(*next_inv_min_time_started, newer.time_done,);
-                    assert_eq!(*input_inv_time_started, older.time_started,);
-                }
-                other => {
-                    panic!("expected WaitingForNewerInventory, got {other:?}")
-                }
-            }
+            assert_eq!(
+                result.outcome,
+                status::Outcome::WaitingForNewerInventory(InventoryStale {
+                    parent_inv_id: newer.id,
+                    next_inv_min_time_started: newer.time_done,
+                    input_inv_time_started: older.time_started,
+                }),
+            );
         }
 
         // If the loaded inventory collection started at or after the parent
@@ -1190,201 +783,16 @@ mod tests {
 
             let result = task.actually_activate(opctx).await;
             assert_eq!(result.inv_collection_id, Some(overlapping.id));
-            match &result.outcome {
-                status::Outcome::WaitingForNewerInventory {
-                    parent_inv_id,
-                    next_inv_min_time_started,
-                    input_inv_time_started,
-                } => {
-                    assert_eq!(*parent_inv_id, older.id);
-                    assert_eq!(*next_inv_min_time_started, older.time_done,);
-                    assert_eq!(
-                        *input_inv_time_started,
-                        overlapping.time_started,
-                    );
-                }
-                other => panic!(
-                    "expected WaitingForNewerInventory for overlapping \
-                     collections, got {other:?}"
-                ),
-            }
+            assert_eq!(
+                result.outcome,
+                status::Outcome::WaitingForNewerInventory(InventoryStale {
+                    parent_inv_id: older.id,
+                    next_inv_min_time_started: older.time_done,
+                    input_inv_time_started: overlapping.time_started,
+                }),
+                "overlapping collections must wait for a newer inventory",
+            );
         }
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    /// Exercises the wiring in `load_existing_alert_markers`: alert request
-    /// ids are collected from the parent sitrep's *closed* cases only, their
-    /// `rendezvous_alert_created` markers are looked up in the database, and
-    /// the results are fed to the input builder, so that:
-    ///
-    /// - a closed case whose alert requests are all satisfied (markers
-    ///   present) is dropped from the carry-forward set,
-    /// - a closed case with an unsatisfied alert request is copied forward,
-    /// - open cases are copied forward as open, regardless of markers.
-    ///
-    /// The builder-side policy itself (including the alert-generation bump
-    /// when a satisfied case is dropped) is pinned by the analysis-input
-    /// tests in the `nexus-fm` crate; this test pins the datastore glue in
-    /// this module.
-    #[tokio::test]
-    async fn test_prepare_inputs_observes_alert_markers() {
-        let logctx =
-            dev::test_setup_log("test_prepare_inputs_observes_alert_markers");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        let inv = Arc::new(CollectionBuilder::new("test").build());
-        let sitrep_id = SitrepUuid::new_v4();
-
-        let open_case_id = CaseUuid::new_v4();
-        let satisfied_case_id = CaseUuid::new_v4();
-        let unsatisfied_case_id = CaseUuid::new_v4();
-        let satisfied_alert_id = AlertUuid::new_v4();
-        let unsatisfied_alert_id = AlertUuid::new_v4();
-
-        let alert_request = |id: AlertUuid| case::AlertRequest {
-            id,
-            class: AlertClass::TestFoo,
-            version: 0,
-            payload: json!({}),
-            requested_sitrep_id: sitrep_id,
-            comment: String::new(),
-        };
-        let make_case =
-            |id: CaseUuid, closed: bool, alert: Option<AlertUuid>| {
-                let mut alerts_requested = iddqd::IdOrdMap::new();
-                if let Some(alert_id) = alert {
-                    alerts_requested
-                        .insert_unique(alert_request(alert_id))
-                        .unwrap();
-                }
-                Case {
-                    id,
-                    metadata: case::Metadata {
-                        created_sitrep_id: sitrep_id,
-                        closed_sitrep_id: closed.then_some(sitrep_id),
-                        de: DiagnosisEngineKind::PowerShelf,
-                        comment: String::new(),
-                    },
-                    ereports: iddqd::IdOrdMap::new(),
-                    alerts_requested,
-                    support_bundles_requested: iddqd::IdOrdMap::new(),
-                    facts: iddqd::IdOrdMap::new(),
-                }
-            };
-
-        let mut cases = iddqd::IdOrdMap::new();
-        cases.insert_unique(make_case(open_case_id, false, None)).unwrap();
-        cases
-            .insert_unique(make_case(
-                satisfied_case_id,
-                true,
-                Some(satisfied_alert_id),
-            ))
-            .unwrap();
-        cases
-            .insert_unique(make_case(
-                unsatisfied_case_id,
-                true,
-                Some(unsatisfied_alert_id),
-            ))
-            .unwrap();
-
-        let sitrep = Sitrep {
-            metadata: SitrepMetadata {
-                id: sitrep_id,
-                parent_sitrep_id: None,
-                inv_collection_id: inv.id,
-                next_inv_min_time_started: inv.time_done,
-                creator_id: OmicronZoneUuid::new_v4(),
-                comment: "test sitrep".to_string(),
-                time_created: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
-            },
-            cases,
-            ereports_by_id: Default::default(),
-        };
-
-        // Insert the sitrep, then satisfy one of the closed cases' alert
-        // requests through the real rendezvous path, which writes the
-        // `rendezvous_alert_created` marker that input preparation must
-        // observe.
-        datastore
-            .fm_sitrep_insert(opctx, sitrep.clone(), None)
-            .await
-            .expect("inserted parent sitrep");
-        datastore
-            .fm_rendezvous_alert_create(
-                opctx,
-                &alert_request(satisfied_alert_id),
-                satisfied_case_id,
-                AlertGeneration::new(),
-            )
-            .await
-            .expect("created the satisfied case's alert");
-
-        let parent: CurrentSitrep = Arc::new((
-            SitrepVersion {
-                id: sitrep_id,
-                version: 1,
-                time_made_current: Utc::now(),
-            },
-            sitrep,
-        ));
-
-        let (_sitrep_tx, sitrep_rx) = watch::channel(None);
-        let (_inv_tx, inv_rx) = watch::channel(None);
-        let mut task = FmAnalysis::new(
-            datastore.clone(),
-            sitrep_rx,
-            inv_rx,
-            config_rx(Default::default()),
-            activators(),
-            OmicronZoneUuid::new_v4(),
-        );
-
-        let (input, prep, report) = task
-            .prepare_inputs(opctx, Some(parent), inv)
-            .await
-            .expect("input preparation should succeed");
-        assert!(
-            prep.warnings.is_empty(),
-            "unexpected preparation warnings: {:?}",
-            prep.warnings,
-        );
-
-        // The open case is copied forward as open.
-        assert!(input.open_cases().contains_key(&open_case_id));
-        assert_eq!(input.open_cases().len(), 1);
-        assert_eq!(
-            report.open_cases.keys().collect::<Vec<_>>(),
-            vec![&open_case_id]
-        );
-
-        // The closed case whose only alert request has a marker is dropped
-        // from the carry-forward set entirely...
-        assert!(
-            !report
-                .closed_cases_copied_forward
-                .contains_key(&satisfied_case_id),
-            "satisfied closed case should be dropped, got: {:?}",
-            report.closed_cases_copied_forward,
-        );
-        // ...while the closed case with an unsatisfied alert request is
-        // copied forward, with that request reported as outstanding.
-        let carried = report
-            .closed_cases_copied_forward
-            .get(&unsatisfied_case_id)
-            .expect("unsatisfied closed case must be copied forward");
-        assert_eq!(
-            carried.unmarked_alert_requests,
-            BTreeSet::from([unsatisfied_alert_id])
-        );
-        assert!(carried.unmarked_ereports.is_empty());
-        assert_eq!(report.closed_cases_copied_forward.len(), 1);
 
         db.terminate().await;
         logctx.cleanup_successful();

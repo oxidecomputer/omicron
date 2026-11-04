@@ -81,6 +81,7 @@ use omicron_sled_agent::sim::SledAgent;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
@@ -394,10 +395,22 @@ pub async fn create_default_ip_pools(
     ];
     let (v4_pool, ..) =
         create_ip_pool(&client, "default-v4", Some(ranges[0])).await;
-    link_ip_pool(&client, "default-v4", &DEFAULT_SILO.id(), true).await;
+    link_ip_pool(
+        &client,
+        "default-v4",
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        true,
+    )
+    .await;
     let (v6_pool, ..) =
         create_ip_pool(&client, "default-v6", Some(ranges[1])).await;
-    link_ip_pool(&client, "default-v6", &DEFAULT_SILO.id(), true).await;
+    link_ip_pool(
+        &client,
+        "default-v6",
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        true,
+    )
+    .await;
     (v4_pool, v6_pool)
 }
 
@@ -450,7 +463,7 @@ pub async fn create_default_subnet_pool(
     link_subnet_pool(
         client,
         pool_name,
-        &nexus_types::silo::DEFAULT_SILO_ID,
+        &nexus_types::silo::DEFAULT_SILO_ID.into_untyped_uuid(),
         true,
     )
     .await;
@@ -593,23 +606,15 @@ pub async fn create_switch(
 pub async fn create_silo(
     client: &ClientTestContext,
     silo_name: &str,
-    discoverable: bool,
     identity_mode: silo::SiloIdentityMode,
 ) -> Silo {
-    create_silo_with_admin_group_name(
-        client,
-        silo_name,
-        discoverable,
-        identity_mode,
-        None,
-    )
-    .await
+    create_silo_with_admin_group_name(client, silo_name, identity_mode, None)
+        .await
 }
 
 pub async fn create_silo_with_admin_group_name(
     client: &ClientTestContext,
     silo_name: &str,
-    discoverable: bool,
     identity_mode: silo::SiloIdentityMode,
     admin_group_name: Option<String>,
 ) -> Silo {
@@ -622,7 +627,6 @@ pub async fn create_silo_with_admin_group_name(
                 description: "a silo".to_string(),
             },
             quotas: silo::SiloQuotasCreate::arbitrarily_high_default(),
-            discoverable,
             identity_mode,
             admin_group_name,
             tls_certificates: vec![],

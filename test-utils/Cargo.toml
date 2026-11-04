@@ -13,6 +13,7 @@ atomicwrites.workspace = true
 camino.workspace = true
 camino-tempfile.workspace = true
 dropshot.workspace = true
+expectorate.workspace = true
 filetime = { workspace = true, optional = true }
 futures.workspace = true
 headers.workspace = true
@@ -39,6 +40,7 @@ usdt.workspace = true
 rcgen.workspace = true
 reqwest.workspace = true
 sha2.workspace = true
+swrite.workspace = true
 walkdir.workspace = true
 omicron-workspace-hack.workspace = true
 uuid.workspace = true
@@ -46,7 +48,6 @@ slog-error-chain.workspace = true
 
 [dev-dependencies]
 chrono.workspace = true
-expectorate.workspace = true
 gethostname.workspace = true
 
 [features]

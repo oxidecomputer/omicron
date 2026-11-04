@@ -6,15 +6,23 @@
 //! queries on the sled table.
 
 use crate::db::DataStore;
-use nexus_db_model::Generation;
+use crate::db::datastore::SledBpAvailabilityDecommissionOutcome;
+use crate::db::datastore::SledBpAvailabilityUpsertOutcome;
+use crate::db::datastore::SledBpAvailabilityWrite;
+use crate::db::datastore::SledBpAvailabilityWriteOutcome;
+use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
+use iddqd::IdOrdMap;
 use nexus_db_model::Sled;
 use nexus_db_model::SledBaseboard;
+use nexus_db_model::SledBlueprintAvailabilityInput;
 use nexus_db_model::SledSystemHardware;
 use nexus_db_model::SledUpdate;
 use nexus_reconfigurator_planning::system::SimulatedSledResources;
 use nexus_reconfigurator_planning::system::Sled as SimulatedSled;
 use nexus_reconfigurator_planning::system::SystemDescription;
+use nexus_types::deployment::Blueprint;
 use omicron_common::api::external::ByteCount;
+use omicron_generation_kinds::SledRegistrationGeneration;
 use omicron_uuid_kinds::RackUuid;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
@@ -64,7 +72,7 @@ pub fn sled_update_from_simulated_sled(
             cpu_family: inventory.cpu_family.into(),
         },
         rack_id,
-        Generation::new(),
+        SledRegistrationGeneration::new(),
     )
 }
 
@@ -89,12 +97,70 @@ pub async fn upsert_sleds_from_system(
     let sled_updates = sled_updates_from_system(system, rack_id);
     let mut sleds = Vec::with_capacity(sled_updates.len());
     for sled_update in sled_updates {
-        let sled_id = sled_update.id();
-        let (sled, _) = datastore
-            .sled_upsert(sled_update)
-            .await
-            .unwrap_or_else(|e| panic!("registered sled {sled_id}: {e}"));
+        let sled = sled_upsert_expect_written(datastore, sled_update).await;
         sleds.push(sled);
     }
     sleds
+}
+
+/// Initialize the `rendezvous_sled_bp_availability` table for the given
+/// blueprint, assuming the table was previously empty.
+pub async fn initialize_sled_bp_availability(
+    datastore: &DataStore,
+    blueprint: &Blueprint,
+) {
+    for write in apply_sled_bp_availability(datastore, blueprint).await {
+        let applied = match write.outcome {
+            SledBpAvailabilityWriteOutcome::Active { outcome, .. } => {
+                match outcome {
+                    SledBpAvailabilityUpsertOutcome::Written => true,
+                    SledBpAvailabilityUpsertOutcome::Rejected => false,
+                }
+            }
+            SledBpAvailabilityWriteOutcome::Decommission(outcome) => {
+                match outcome {
+                    SledBpAvailabilityDecommissionOutcome::Decommissioned => {
+                        true
+                    }
+                    SledBpAvailabilityDecommissionOutcome::AlreadyDecommissioned => {
+                        false
+                    }
+                }
+            }
+        };
+        assert!(
+            applied,
+            "initializing rendezvous_sled_bp_availability from blueprint {}: \
+             write for sled {} was not applied ({:?}), but the table should \
+             have been empty",
+            blueprint.id, write.sled_id, write.outcome,
+        );
+    }
+}
+
+/// Apply a blueprint's sled availability to the `rendezvous_sled_bp_availability`
+/// table.
+///
+/// Returns a result for each sled indicating whether the write was successfully
+/// applied.
+pub async fn apply_sled_bp_availability(
+    datastore: &DataStore,
+    blueprint: &Blueprint,
+) -> IdOrdMap<SledBpAvailabilityWrite> {
+    let conn = datastore
+        .pool_connection_for_tests()
+        .await
+        .expect("acquired database connection");
+    DataStore::rendezvous_sled_bp_availability_write_on_connection(
+        &conn,
+        blueprint.id,
+        SledBlueprintAvailabilityInput::all_from_blueprint(blueprint),
+    )
+    .await
+    .unwrap_or_else(|e| {
+        panic!(
+            "applied rendezvous_sled_bp_availability from blueprint {}: {e}",
+            blueprint.id
+        )
+    })
 }

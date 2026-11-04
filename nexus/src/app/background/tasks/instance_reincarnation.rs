@@ -344,6 +344,7 @@ mod test {
     use omicron_generation_kinds::InstanceStateGeneration;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
+    use omicron_uuid_kinds::ProjectUuid;
     use omicron_uuid_kinds::PropolisUuid;
     use omicron_uuid_kinds::SledUuid;
     use std::time::Duration;
@@ -363,7 +364,7 @@ mod test {
 
         let datastore = cptestctx.server.server_context().nexus.datastore();
         let (_, authz_project) = LookupPath::new(opctx, datastore)
-            .project_id(project.identity.id)
+            .project_id(ProjectUuid::from_untyped_uuid(project.identity.id))
             .lookup_for(authz::Action::CreateChild)
             .await
             .expect("project must exist");

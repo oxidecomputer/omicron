@@ -6,11 +6,13 @@ use super::handle::DebugCollector;
 use crate::InternalDisksReceiver;
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
+use omicron_common::zpool_name::ZpoolName;
 use sled_storage::config::MountConfig;
 use sled_storage::disk::Disk;
 use slog::Logger;
 use slog::error;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -23,7 +25,7 @@ use tokio::sync::watch;
 /// See the comment in debug_collector/mod.rs for details.
 pub(crate) fn spawn(
     internal_disks_rx: InternalDisksReceiver,
-    external_disks_rx: watch::Receiver<HashSet<Disk>>,
+    debug_dataset_zpools_rx: watch::Receiver<BTreeSet<ZpoolName>>,
     mount_config: Arc<MountConfig>,
     base_log: &Logger,
 ) -> FormerZoneRootArchiver {
@@ -35,10 +37,11 @@ pub(crate) fn spawn(
 
     let debug_collector_task = DebugCollectorTask {
         internal_disks_rx,
-        external_disks_rx,
+        debug_dataset_zpools_rx,
         archive_rx,
         debug_collector: DebugCollector::new(base_log, mount_config),
         last_disks_used: HashSet::new(),
+        last_debug_dataset_zpools_used: BTreeSet::new(),
         log: base_log.new(slog::o!("component" => "DebugCollectorTask")),
     };
 
@@ -62,18 +65,21 @@ pub(crate) fn spawn(
 ///
 /// See the comment in debug_collector/mod.rs for details.
 struct DebugCollectorTask {
-    // Input channels on which we receive updates about disk changes.
+    // Input channels on which we receive updates about disk changes: all
+    // internal disks, and the external zpools whose debug dataset has been
+    // ensured by the dataset task.
     internal_disks_rx: InternalDisksReceiver,
-    external_disks_rx: watch::Receiver<HashSet<Disk>>,
+    debug_dataset_zpools_rx: watch::Receiver<BTreeSet<ZpoolName>>,
     // Input channel on which we receive requests to archive zone roots.
     archive_rx: mpsc::Receiver<FormerZoneRootArchiveRequest>,
 
     // Invokes dumpadm(8) and savecore(8) when new disks are encountered
     debug_collector: DebugCollector,
 
-    // Set of internal + external disks we most recently passed to the
-    // Debug Collector
+    // Set of internal disks and external debug dataset zpools we most
+    // recently passed to the Debug Collector
     last_disks_used: HashSet<Disk>,
+    last_debug_dataset_zpools_used: BTreeSet<ZpoolName>,
 
     log: Logger,
 }
@@ -100,11 +106,11 @@ impl DebugCollectorTask {
                 }
 
                 // Cancel-safe per docs on `changed()`
-                res = self.external_disks_rx.changed() => {
+                res = self.debug_dataset_zpools_rx.changed() => {
                     if res.is_err() {
                         error!(
                             self.log,
-                            "external disks channel closed: exiting task"
+                            "debug dataset zpools channel closed: exiting task"
                         );
                         return;
                     }
@@ -118,8 +124,9 @@ impl DebugCollectorTask {
                 // channel is closed.
                 Some(request) = self.archive_rx.recv() => {
                     // One of the cases where we're asked to archive former zone
-                    // roots is that we've just imported a disk.  That disk may
-                    // also have the only debug datasets that we can use for
+                    // roots is that the dataset task is about to clean up a
+                    // newly-adopted disk's transient zone root.  It may have
+                    // just ensured the only debug datasets that we can use for
                     // archival.  So before we send the request to archive the
                     // former zone root, update the disk information.
                     self.update_setup_if_needed().await;
@@ -138,18 +145,26 @@ impl DebugCollectorTask {
     }
 
     async fn update_setup_if_needed(&mut self) {
-        // Combine internal and external disks.
         let disks_avail = self
             .internal_disks_rx
             .borrow_and_update_raw_disks()
             .iter()
             .map(|d| d.deref().clone())
-            .chain(self.external_disks_rx.borrow_and_update().iter().cloned())
             .collect::<HashSet<_>>();
+        let debug_dataset_zpools =
+            self.debug_dataset_zpools_rx.borrow_and_update().clone();
 
-        if disks_avail != self.last_disks_used {
-            self.debug_collector.update_dumpdev_setup(disks_avail.iter()).await;
+        if disks_avail != self.last_disks_used
+            || debug_dataset_zpools != self.last_debug_dataset_zpools_used
+        {
+            self.debug_collector
+                .update_dumpdev_setup(
+                    disks_avail.iter(),
+                    debug_dataset_zpools.iter(),
+                )
+                .await;
             self.last_disks_used = disks_avail;
+            self.last_debug_dataset_zpools_used = debug_dataset_zpools;
         }
     }
 }
@@ -173,6 +188,31 @@ impl FormerZoneRootArchiver {
             log: DebugIgnore(log.clone()),
             archive_tx: DebugIgnore(archive_tx),
         }
+    }
+
+    /// Returns an archiver that records each path it's asked to archive (in
+    /// the returned list), and immediately reports that archival is complete.
+    #[cfg(test)]
+    pub fn recording(
+        log: &Logger,
+    ) -> (Self, Arc<std::sync::Mutex<Vec<Utf8PathBuf>>>) {
+        let (archive_tx, mut archive_rx) =
+            mpsc::channel::<FormerZoneRootArchiveRequest>(1);
+        let paths = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let task_paths = Arc::clone(&paths);
+        tokio::spawn(async move {
+            while let Some(request) = archive_rx.recv().await {
+                let FormerZoneRootArchiveRequest { path, completion_tx } =
+                    request;
+                task_paths.lock().unwrap().push(path);
+                _ = completion_tx.send(());
+            }
+        });
+        let archiver = Self {
+            log: DebugIgnore(log.clone()),
+            archive_tx: DebugIgnore(archive_tx),
+        };
+        (archiver, paths)
     }
 
     /// Archives logs from the given zone root filesystem (identified by path in

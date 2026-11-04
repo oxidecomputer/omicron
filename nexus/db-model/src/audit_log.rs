@@ -4,6 +4,7 @@
 
 use std::net::IpAddr;
 
+use crate::DbTypedUuid;
 use crate::{SqlU16, impl_enum_type};
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
@@ -13,7 +14,9 @@ use nexus_types::external_api::audit;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::BuiltInUserUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloKind;
 use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::SiloUuid;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -21,8 +24,8 @@ use uuid::Uuid;
 #[derive(Clone, Debug)]
 pub enum AuditLogActor {
     UserBuiltin { user_builtin_id: BuiltInUserUuid },
-    SiloUser { silo_user_id: SiloUserUuid, silo_id: Uuid },
-    Scim { silo_id: Uuid },
+    SiloUser { silo_user_id: SiloUserUuid, silo_id: SiloUuid },
+    Scim { silo_id: SiloUuid },
     Unauthenticated,
 }
 
@@ -160,7 +163,7 @@ pub struct AuditLogEntryInit {
     /// Actor kind indicating builtin user, silo user, or unauthenticated
     pub actor_kind: AuditLogActorKind,
     pub actor_id: Option<Uuid>,
-    pub actor_silo_id: Option<Uuid>,
+    pub actor_silo_id: Option<DbTypedUuid<SiloKind>>,
 
     /// API token or session cookie. Optional because it will not be defined
     /// on unauthenticated requests like login attempts.
@@ -192,11 +195,11 @@ impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
             ),
             AuditLogActor::SiloUser { silo_user_id, silo_id } => (
                 Some(silo_user_id.into_untyped_uuid()),
-                Some(silo_id),
+                Some(silo_id.into()),
                 AuditLogActorKind::SiloUser,
             ),
             AuditLogActor::Scim { silo_id } => {
-                (None, Some(silo_id), AuditLogActorKind::Scim)
+                (None, Some(silo_id.into()), AuditLogActorKind::Scim)
             }
             AuditLogActor::Unauthenticated => {
                 (None, None, AuditLogActorKind::Unauthenticated)
@@ -233,7 +236,7 @@ pub struct AuditLogEntry {
     pub source_ip: IpNetwork,
     pub user_agent: Option<String>,
     pub actor_id: Option<Uuid>,
-    pub actor_silo_id: Option<Uuid>,
+    pub actor_silo_id: Option<DbTypedUuid<SiloKind>>,
     /// Actor kind indicating builtin user, silo user, or unauthenticated
     pub actor_kind: AuditLogActorKind,
 
@@ -364,7 +367,7 @@ impl TryFrom<AuditLogEntry> for audit::AuditLogEntry {
                         silo_user_id: SiloUserUuid::from_untyped_uuid(
                             silo_user_id,
                         ),
-                        silo_id,
+                        silo_id: silo_id.into_untyped_uuid(),
                     }
                 }
                 AuditLogActorKind::Scim => {
@@ -373,7 +376,9 @@ impl TryFrom<AuditLogEntry> for audit::AuditLogEntry {
                             "Scim actor missing actor_silo_id",
                         )
                     })?;
-                    audit::AuditLogEntryActor::Scim { silo_id }
+                    audit::AuditLogEntryActor::Scim {
+                        silo_id: silo_id.into_untyped_uuid(),
+                    }
                 }
                 AuditLogActorKind::Unauthenticated => {
                     audit::AuditLogEntryActor::Unauthenticated

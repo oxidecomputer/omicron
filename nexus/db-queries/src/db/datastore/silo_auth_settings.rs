@@ -5,6 +5,7 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
+use crate::db::model::to_db_typed_uuid;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
@@ -64,7 +65,10 @@ impl DataStore {
 
         use nexus_db_schema::schema::silo_auth_settings;
         diesel::delete(silo_auth_settings::table)
-            .filter(silo_auth_settings::silo_id.eq(authz_silo.id()))
+            .filter(
+                silo_auth_settings::silo_id
+                    .eq(to_db_typed_uuid(authz_silo.id())),
+            )
             .execute_async(conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -82,7 +86,7 @@ impl DataStore {
         use nexus_db_schema::schema::silo_auth_settings::dsl;
         let silo_id = authz_silo.id();
         diesel::update(dsl::silo_auth_settings)
-            .filter(dsl::silo_id.eq(silo_id))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(silo_id)))
             .set(updates)
             .returning(SiloAuthSettings::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
@@ -110,7 +114,7 @@ impl DataStore {
 
         use nexus_db_schema::schema::silo_auth_settings::dsl;
         dsl::silo_auth_settings
-            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(authz_silo.id())))
             .first_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))

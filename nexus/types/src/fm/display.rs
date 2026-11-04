@@ -57,7 +57,7 @@ impl Styles {
 
     /// The `/!\ WARNING:` marker (and similar) prefixing warning lines.
     pub(crate) fn warning(self) -> Style {
-        self.style(|s| s.red().bold())
+        self.style(|s| s.yellow().bold())
     }
 
     /// The message text of a warning line.

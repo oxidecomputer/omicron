@@ -205,7 +205,7 @@ pub async fn spawn_sush_tasks(
             );
         }
     }
-    let locker = match Locker::new(&log, slots) {
+    let locker = match Locker::new(&log, own_baseboard.clone(), slots) {
         Ok(locker) => locker,
         Err(err) => {
             error!(
@@ -346,7 +346,7 @@ async fn promote_output_dir(
         if let Some(dataset) =
             available_datasets_rx.all_mounted_debug_datasets().first()
         {
-            let dir = dataset.path.join(SUSH_OUTPUT_SUBDIR);
+            let dir = dataset.path().join(SUSH_OUTPUT_SUBDIR);
             match create_dir_all(&dir).await {
                 Ok(()) => {
                     output_dirs_tx.send_modify(|dirs| {

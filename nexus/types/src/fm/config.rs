@@ -392,6 +392,9 @@ impl fmt::Display for FmConfigSource {
 ///   [`Self::MAX_LIMIT`],
 /// - [`Self::history_pruning_threshold`] must be strictly less than
 ///   [`Self::sitrep_limit`],
+/// - [`Self::certificate_expiry_warning_days`] must be no more than
+///   [`Self::MAX_CERTIFICATE_EXPIRY_WARNING_DAYS`] (it is a `NonZeroU32`, so
+///   it is always at least 1).
 ///
 /// These rules are checked by the [`Self::validate`] method, which is called
 /// prior to accepting a config update.
@@ -425,6 +428,17 @@ pub struct FmConfig {
     /// `fm_sitrep_history_pruner` background task will remove the oldest
     /// entries from the history.
     pub history_pruning_threshold: Setting<HistoryPruningThreshold>,
+
+    /// How many days before a silo's external TLS certificate expires the
+    /// certificate diagnosis engine opens a case and requests a
+    /// `silo.certificate.expiring` alert.
+    ///
+    /// The window applies to the certificate Nexus actually serves for the
+    /// silo (the one with the latest expiration time), so a case opens only
+    /// when no later-expiring replacement is installed. Time is measured
+    /// against the completion time of the inventory collection each sitrep
+    /// is generated from, not the wall clock.
+    pub certificate_expiry_warning_days: Setting<CertificateExpiryWarningDays>,
 }
 
 use self::settings::*;
@@ -465,6 +479,10 @@ pub mod settings {
     define_setting! {
         HistoryPruningThreshold: NonZeroU32 =
             FmConfig::DEFAULT_HISTORY_PRUNING_THRESHOLD
+    }
+    define_setting! {
+        CertificateExpiryWarningDays: NonZeroU32 =
+            FmConfig::DEFAULT_CERTIFICATE_EXPIRY_WARNING_DAYS
     }
 }
 
@@ -520,6 +538,21 @@ impl FmConfig {
     /// enforced by the CHECK constraint on the `fm_config` table.
     pub const MAX_LIMIT: NonZeroU32 = NonZeroU32::new(5000).unwrap();
 
+    /// The default value of [`Self::certificate_expiry_warning_days`], used
+    /// when there is no config override set.
+    pub const DEFAULT_CERTIFICATE_EXPIRY_WARNING_DAYS: NonZeroU32 =
+        NonZeroU32::new(30).unwrap();
+
+    /// The maximum permitted value of
+    /// [`Self::certificate_expiry_warning_days`]: ten years. A window this
+    /// large would flag essentially every certificate ever issued, so larger
+    /// values are treated as typos.
+    ///
+    /// **Note:** This value should be kept in sync with the maximum value
+    /// enforced by the CHECK constraint on the `fm_config` table.
+    pub const MAX_CERTIFICATE_EXPIRY_WARNING_DAYS: NonZeroU32 =
+        NonZeroU32::new(3650).unwrap();
+
     /// Returns a multi-line displayer for this config, with each line
     /// indented by `indent` spaces.
     pub fn display_multiline(&self, indent: usize) -> impl fmt::Display + '_ {
@@ -536,6 +569,7 @@ impl FmConfig {
                             analysis_enabled,
                             sitrep_limit,
                             history_pruning_threshold,
+                            certificate_expiry_warning_days,
                         },
                     indent,
                 } = self;
@@ -554,6 +588,12 @@ impl FmConfig {
                     f,
                     "{:>indent$}{HISTORY_PRUNING_THRESHOLD:<WIDTH$} \
                      {history_pruning_threshold}",
+                    ""
+                )?;
+                writeln!(
+                    f,
+                    "{:>indent$}{CERTIFICATE_EXPIRY_WARNING_DAYS:<WIDTH$} \
+                     {certificate_expiry_warning_days}",
                     ""
                 )
             }
@@ -616,6 +656,13 @@ impl FmConfig {
             ));
         }
 
+        check_limit(
+            self.certificate_expiry_warning_days.value(),
+            "certificate_expiry_warning_days",
+            NonZeroU32::MIN,
+            Self::MAX_CERTIFICATE_EXPIRY_WARNING_DAYS,
+        )?;
+
         Ok(())
     }
 }
@@ -626,6 +673,8 @@ const COMMENT: &str = "  comment:";
 const ANALYSIS_ENABLED: &str = "analysis enabled:";
 const SITREP_LIMIT: &str = "sitrep limit:";
 const HISTORY_PRUNING_THRESHOLD: &str = "history pruning threshold:";
+const CERTIFICATE_EXPIRY_WARNING_DAYS: &str =
+    "certificate expiry warning days:";
 const WIDTH: usize = const_max_len(&[
     SOURCE,
     TIME_MODIFIED,
@@ -633,6 +682,7 @@ const WIDTH: usize = const_max_len(&[
     ANALYSIS_ENABLED,
     SITREP_LIMIT,
     HISTORY_PRUNING_THRESHOLD,
+    CERTIFICATE_EXPIRY_WARNING_DAYS,
 ]);
 
 #[cfg(test)]
@@ -659,6 +709,7 @@ mod tests {
                         "test history_pruning_threshold must be nonzero",
                     ),
                 ),
+                certificate_expiry_warning_days: Setting::Default,
             },
         }
     }
@@ -692,5 +743,26 @@ mod tests {
                 "unexpected error: {err}"
             );
         }
+    }
+
+    #[test]
+    fn test_max_certificate_expiry_warning_days() {
+        let mut p = param(100, 50);
+        p.config.certificate_expiry_warning_days =
+            Setting::new(FmConfig::MAX_CERTIFICATE_EXPIRY_WARNING_DAYS);
+        p.validate().expect("the maximum value is valid");
+
+        p.config.certificate_expiry_warning_days = Setting::new(
+            FmConfig::MAX_CERTIFICATE_EXPIRY_WARNING_DAYS
+                .checked_add(1)
+                .unwrap(),
+        );
+        let err = p.validate().unwrap_err();
+        assert!(
+            err.to_string().contains(
+                "certificate_expiry_warning_days must be less than or equal to"
+            ),
+            "unexpected error: {err}"
+        );
     }
 }

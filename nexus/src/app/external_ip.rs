@@ -209,7 +209,9 @@ impl super::Nexus {
                 let instance_selector = instance::InstanceSelector {
                     project: match &target.parent {
                         NameOrId::Id(_) => None,
-                        NameOrId::Name(_) => Some(authz_project.id().into()),
+                        NameOrId::Name(_) => Some(NameOrId::Id(
+                            authz_project.id().into_untyped_uuid(),
+                        )),
                     },
                     instance: target.parent,
                 };

@@ -682,3 +682,56 @@ async fn test_gzip_compression(cptestctx: &ControlPlaneTestContext) {
         "expected Vary: Accept-Encoding on small uncompressed response, got {vary_values:?}",
     );
 }
+
+/// Test that the external API rejects requests for versions outside the range
+/// that it supports.
+#[nexus_test]
+async fn test_api_version_range(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let oldest = nexus_external_api::oldest_version();
+    let latest = nexus_external_api::latest_version();
+
+    // Requests for the oldest and latest supported versions succeed.
+    for version in [&oldest, &latest] {
+        ping_with_api_version(client, version, StatusCode::OK).await;
+    }
+
+    // Requests for versions older than the oldest supported version or newer
+    // than the latest supported version fail.  Both errors should report the
+    // requested version.
+    let too_old = semver::Version::new(oldest.major - 1, 0, 0);
+    let too_new = semver::Version::new(latest.major + 1, 0, 0);
+    for version in [&too_old, &too_new] {
+        let response =
+            ping_with_api_version(client, version, StatusCode::BAD_REQUEST)
+                .await;
+        let error: HttpErrorResponseBody = response.parsed_body().unwrap();
+        assert!(
+            error.message.contains(&version.to_string()),
+            "expected error message to mention version {version}, \
+             found: {:?}",
+            error.message,
+        );
+    }
+}
+
+/// Makes a ping request with the given API version, expecting the given status
+async fn ping_with_api_version(
+    client: &ClientTestContext,
+    version: &semver::Version,
+    expected_status: StatusCode,
+) -> nexus_test_utils::http_testing::TestResponse {
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, "/v1/ping")
+            .header(omicron_common::api::VERSION_HEADER, version.to_string())
+            .expect_status(Some(expected_status)),
+    )
+    .execute()
+    .await
+    .unwrap_or_else(|error| {
+        panic!(
+            "ping with API version {version} (expecting {expected_status}): \
+             {error:#}"
+        )
+    })
+}

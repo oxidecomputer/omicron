@@ -486,7 +486,7 @@ mod internal_disk_details {
     // have the same contents but they disagree; we'll at least try to have
     // callers prefer the boot disk if they're performing a "check the first
     // disk that succeeds" kind of operation.
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct InternalDiskDetailsId {
         pub(super) is_boot_disk: bool,
         pub(super) identity: Arc<DiskIdentity>,

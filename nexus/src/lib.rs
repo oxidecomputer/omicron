@@ -124,7 +124,8 @@ impl InternalServer {
             dropshot::ClientSpecifiesVersionInHeader::new(
                 omicron_common::api::VERSION_HEADER,
                 nexus_internal_api::latest_version(),
-            ),
+            )
+            .min_version(nexus_internal_api::oldest_version()),
         )))
         .start()
         .map_err(|error| format!("initializing internal server: {}", error))
@@ -243,6 +244,9 @@ impl Server {
                     omicron_common::api::VERSION_HEADER,
                     nexus_external_api::latest_version(),
                 )
+                // Reject requests for versions older than the oldest one that
+                // this server still supports.
+                .min_version(nexus_external_api::oldest_version())
                 // Since we don't have control over all clients to the external
                 // API, we allow the api-version header to not be specified
                 // (picking the latest version in that case). However, all
@@ -483,22 +487,35 @@ impl nexus_test_interface::NexusServer for Server {
         let (ipv4_service_ranges, ipv6_service_ranges): (Vec<_>, Vec<_>) =
             blueprint
                 .in_service_zones()
-                .filter_map(|(_, zc)| match &zc.zone_type {
-                    BlueprintZoneType::BoundaryNtp(
-                        blueprint_zone_type::BoundaryNtp {
-                            external_ip, ..
-                        },
-                    ) => Some(IpRange::from(external_ip.snat_cfg.ip)),
-                    BlueprintZoneType::ExternalDns(
-                        blueprint_zone_type::ExternalDns {
-                            dns_address, ..
-                        },
-                    ) => Some(IpRange::from(dns_address.addr.ip())),
-                    BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                        external_ip,
-                        ..
-                    }) => Some(IpRange::from(external_ip.ip)),
-                    _ => None,
+                .flat_map(|(_, zc)| {
+                    let ranges: Vec<IpRange> = match &zc.zone_type {
+                        BlueprintZoneType::BoundaryNtp(
+                            blueprint_zone_type::BoundaryNtp {
+                                external_ip,
+                                ..
+                            },
+                        ) => external_ip
+                            .iter()
+                            .map(|snat| IpRange::from(snat.snat_cfg.ip))
+                            .collect(),
+                        BlueprintZoneType::ExternalDns(
+                            blueprint_zone_type::ExternalDns {
+                                dns_addresses,
+                                ..
+                            },
+                        ) => dns_addresses
+                            .iter()
+                            .map(|a| IpRange::from(a.addr.ip()))
+                            .collect(),
+                        BlueprintZoneType::Nexus(
+                            blueprint_zone_type::Nexus { external_ips, .. },
+                        ) => external_ips
+                            .iter()
+                            .map(|e| IpRange::from(e.ip))
+                            .collect(),
+                        _ => Vec::new(),
+                    };
+                    ranges
                 })
                 .partition(|r| r.is_ipv4());
 

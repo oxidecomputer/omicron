@@ -285,6 +285,7 @@ pub(crate) mod test {
     use omicron_uuid_kinds::ExternalSubnetUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
+    use omicron_uuid_kinds::ProjectUuid;
     use oxnet::IpNet;
     use sled_agent_types::attached_subnet::AttachedSubnetKind;
 
@@ -326,7 +327,7 @@ pub(crate) mod test {
         // Lookup the project since we need that to make the authz stuff.
         let (.., authz_project, _db_project) =
             LookupPath::new(&opctx, datastore)
-                .project_id(project.identity.id)
+                .project_id(ProjectUuid::from_untyped_uuid(project.identity.id))
                 .fetch()
                 .await
                 .unwrap();

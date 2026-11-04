@@ -190,7 +190,7 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_internal_dns_427ec88f-f467-42fa-9bbb-66a91a36103c      3ac089c9-9dec-465b-863a-188e80d71fb4   in service    none      none          off        
     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_nexus_0c71b3b2-6ceb-4e8f-b020-b08675e83038             4f60b534-eaa3-40a1-b60f-bfdf147af478   in service    none      none          off        
     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_ntp_6444f8a5-6465-4f0b-a549-1993c113569c               686c19cf-a0d7-45f6-866f-c564612b2664   in service    none      none          off        
-    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/debug                                                           248c6c10-1ac6-45de-bb55-ede36ca56bbd   in service    100 GiB   none          gzip-9     
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/debug                                                           248c6c10-1ac6-45de-bb55-ede36ca56bbd   in service    100 GiB   none          lz4        
     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/local_storage                                                   cdf3684f-a6cf-4449-b9ec-e696b2c663e2   in service    none      none          off        
     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/local_storage_unencrypted                                             793ac181-1b01-403c-850d-7f5c54bda6c9   in service    none      none          off        
 
@@ -251,7 +251,7 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
      └─                                                                                                                                            + expunged                                        
 *   oxp_5ad21c90-792e-445b-b25e-285723c44243/crypt/zone/oxz_ntp_db288a1e-c33c-44ca-8c79-9a8978afa34d        7fd50c89-afc0-4a37-ac93-ba5273120d32   - in service   none      none          off        
      └─                                                                                                                                            + expunged                                        
-*   oxp_5ad21c90-792e-445b-b25e-285723c44243/crypt/debug                                                    639da9cf-2ce6-4e90-b95d-a0d0fc57d0f2   - in service   100 GiB   none          gzip-9     
+*   oxp_5ad21c90-792e-445b-b25e-285723c44243/crypt/debug                                                    639da9cf-2ce6-4e90-b95d-a0d0fc57d0f2   - in service   100 GiB   none          lz4        
      └─                                                                                                                                            + expunged                                        
 *   oxp_5ad21c90-792e-445b-b25e-285723c44243/crypt/local_storage                                            51086d20-09ec-454c-9127-435beba2b8f0   - in service   none      none          off        
      └─                                                                                                                                            + expunged                                        
@@ -308,7 +308,7 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
     oxp_f3e1cbbc-5682-46ce-93a2-00a4a603bb63/crypt/zone/oxz_internal_dns_97753dbd-5a0f-4273-b1be-db6bb2b69381      27521fba-e5e3-418f-975b-a499010bf840   in service    none      none          off        
     oxp_f3e1cbbc-5682-46ce-93a2-00a4a603bb63/crypt/zone/oxz_nexus_33862f97-2897-4d53-a9a6-78a80f7eb13f             2f73afe1-14e7-4625-85a6-645d9efaa370   in service    none      none          off        
     oxp_f3e1cbbc-5682-46ce-93a2-00a4a603bb63/crypt/zone/oxz_ntp_e8fe709c-725f-4bb2-b714-ffcda13a9e54               f41fb7c9-c08d-463b-9095-dd7b7a39bd70   in service    none      none          off        
-    oxp_f3e1cbbc-5682-46ce-93a2-00a4a603bb63/crypt/debug                                                           d6f0564e-e4a8-4f6f-b122-0314ff473b20   in service    100 GiB   none          gzip-9     
+    oxp_f3e1cbbc-5682-46ce-93a2-00a4a603bb63/crypt/debug                                                           d6f0564e-e4a8-4f6f-b122-0314ff473b20   in service    100 GiB   none          lz4        
     oxp_f3e1cbbc-5682-46ce-93a2-00a4a603bb63/crypt/local_storage                                                   febe87b8-c8ac-4401-b9ee-bbc3be700946   in service    none      none          off        
     oxp_f3e1cbbc-5682-46ce-93a2-00a4a603bb63/local_storage_unencrypted                                             b8457107-50ca-4454-a17d-f9c0d4f94cde   in service    none      none          off        
 
@@ -482,7 +482,7 @@ to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
     oxp_1fa138c9-708a-4f08-b206-4ccf7436b9d9/crypt/zone                                                     75339bab-d7af-4180-8562-b1754e3b5e6d   in service    none      none          off        
     oxp_1fa138c9-708a-4f08-b206-4ccf7436b9d9/crypt/zone/oxz_crucible_c1467d0e-b3de-4bd8-b36a-d8b36626badc   0fef4f3f-2eda-4342-a846-4c55a122c763   in service    none      none          off        
     oxp_1fa138c9-708a-4f08-b206-4ccf7436b9d9/crypt/zone/oxz_ntp_c800ba17-240e-4b72-8ae6-afc30b6baa96        0355ac47-a47c-4a90-86ec-0c434eb8d376   in service    none      none          off        
-    oxp_1fa138c9-708a-4f08-b206-4ccf7436b9d9/crypt/debug                                                    e0d0222a-f585-4fc3-b04b-1c4e7efb1830   in service    100 GiB   none          gzip-9     
+    oxp_1fa138c9-708a-4f08-b206-4ccf7436b9d9/crypt/debug                                                    e0d0222a-f585-4fc3-b04b-1c4e7efb1830   in service    100 GiB   none          lz4        
     oxp_1fa138c9-708a-4f08-b206-4ccf7436b9d9/crypt/local_storage                                            459f5fdd-1fc1-43b0-b0d0-022298f8abda   in service    none      none          off        
     oxp_1fa138c9-708a-4f08-b206-4ccf7436b9d9/local_storage_unencrypted                                      5cf6fa86-965b-4d42-af5e-1973797bcb62   in service    none      none          off        
 

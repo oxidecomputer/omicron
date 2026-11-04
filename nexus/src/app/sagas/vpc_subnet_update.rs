@@ -118,6 +118,8 @@ pub(crate) mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::vpc;
     use omicron_common::api::external::NameOrId;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::ProjectUuid;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -128,12 +130,15 @@ pub(crate) mod test {
 
     async fn create_org_and_project(
         client: &ClientTestContext,
-    ) -> (Uuid, Uuid) {
+    ) -> (ProjectUuid, Uuid) {
         create_default_ip_pools(&client).await;
         let project = create_project(client, PROJECT_NAME).await;
         let router =
             create_router(client, PROJECT_NAME, "default", ROUTER_NAME).await;
-        (project.identity.id, router.identity.id)
+        (
+            ProjectUuid::from_untyped_uuid(project.identity.id),
+            router.identity.id,
+        )
     }
 
     fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
@@ -145,7 +150,7 @@ pub(crate) mod test {
 
     async fn new_test_params(
         cptestctx: &ControlPlaneTestContext,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         router_id: Uuid,
     ) -> Params {
         let nexus = &cptestctx.server.server_context().nexus;
@@ -154,7 +159,7 @@ pub(crate) mod test {
             .vpc_subnet_lookup(
                 &opctx,
                 vpc::SubnetSelector {
-                    project: Some(project_id.into()),
+                    project: Some(NameOrId::Id(project_id.into_untyped_uuid())),
                     vpc: Some(NameOrId::Name("default".parse().unwrap())),
                     subnet: NameOrId::Name("default".parse().unwrap()),
                 },

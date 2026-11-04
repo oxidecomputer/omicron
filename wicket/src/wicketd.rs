@@ -4,6 +4,7 @@
 
 //! Code for talking to wicketd
 
+use omicron_common::http_client::internal_http_client_builder;
 use slog::{Logger, o, warn};
 use std::convert::From;
 use std::net::SocketAddrV6;
@@ -529,7 +530,7 @@ fn api_endpoint(addr: SocketAddrV6) -> String {
 // Both of wicket's wicketd clients share one transport policy -- keep it in one
 // place so they don't drift.
 fn http_client(timeout: Duration) -> reqwest::Client {
-    reqwest::ClientBuilder::new()
+    internal_http_client_builder()
         .connect_timeout(timeout)
         .timeout(timeout)
         .build()

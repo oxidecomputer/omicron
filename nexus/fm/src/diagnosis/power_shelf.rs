@@ -13,6 +13,7 @@ use nexus_types::alert::power_shelf as alert_types;
 use nexus_types::external_api;
 use nexus_types::fm::DiagnosisEngineKind;
 use nexus_types::inventory;
+use nexus_types::inventory::PsuSlot;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::RackUuid;
@@ -22,7 +23,6 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::Arc;
-use strum::VariantArray;
 
 pub const PSU_REMOVE_EREPORT: &str = "hw.remove.psu";
 pub const PSU_INSERT_EREPORT: &str = "hw.insert.psu";
@@ -321,34 +321,6 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[derive(
-    Copy,
-    Clone,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    Hash,
-    Debug,
-    strum::VariantArray,
-    strum::FromRepr,
-)]
-#[repr(u8)]
-enum PsuSlot {
-    Psu0 = 0,
-    Psu1 = 1,
-    Psu2 = 2,
-    Psu3 = 3,
-    Psu4 = 4,
-    Psu5 = 5,
-}
-
-impl fmt::Display for PsuSlot {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&(*self as u8), f)
-    }
-}
-
 /// A set of PSUs across any number of power shelves.
 #[derive(Default)]
 struct PsuSet {
@@ -422,7 +394,7 @@ impl ShelfPsuSet {
     }
 
     fn iter(&self) -> impl Iterator<Item = PsuSlot> + '_ {
-        PsuSlot::VARIANTS.iter().copied().filter(|slot| self.contains(*slot))
+        PsuSlot::ALL.iter().copied().filter(|slot| self.contains(*slot))
     }
 }
 
@@ -772,8 +744,8 @@ mod tests {
     use nexus_types::fm::case::{AlertRequest, CaseEreport};
     use nexus_types::fm::{self, Sitrep, SitrepVersion};
     use nexus_types::inventory::SpType;
-    use omicron_generation_kinds::AlertGeneration;
-    use omicron_generation_kinds::SupportBundleGeneration;
+    use omicron_generation_kinds::SitrepAlertGeneration;
+    use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_uuid_kinds::{
         AlertUuid, CaseEreportUuid, CaseUuid, CollectionUuid, OmicronZoneUuid,
         SitrepUuid,
@@ -1032,6 +1004,8 @@ mod tests {
                 collection.into(),
                 Arc::new(IdOrdMap::new()),
                 Arc::new(IdOrdMap::new()),
+                Arc::new(IdOrdMap::new()),
+                Default::default(),
             )
             .expect("input builder should accept fresh inventory");
         builder.add_unmarked_ereports(new_ereports);
@@ -1114,8 +1088,8 @@ mod tests {
                 time_created: Utc::now(),
                 next_inv_min_time_started: Utc::now(),
                 comment: "parent sitrep for test".to_string(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases,
             ereports_by_id: ereports.into_iter().collect(),

@@ -91,7 +91,7 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
         DEFAULT_BLUEPRINT_PRUNER_NKEEP, PlannerConfig, ReconfiguratorConfig,
-        ReconfiguratorConfigParam, ReconfiguratorDisruptionPolicy,
+        ReconfiguratorConfigParam,
     };
     use nexus_types::internal_api::background::BlueprintPlannerStatus;
     use nexus_types::internal_api::background::BlueprintPrunerStatus;
@@ -153,7 +153,6 @@ mod test {
             planner_enabled: !default_switches.config.planner_enabled,
             planner_config: PlannerConfig::default(),
             tuf_repo_pruner_enabled: true,
-            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
             blueprint_pruner_enabled: true,
             blueprint_pruner_nkeep: DEFAULT_BLUEPRINT_PRUNER_NKEEP,
         };
@@ -187,7 +186,6 @@ mod test {
             planner_enabled: !expected_switches.planner_enabled,
             planner_config: PlannerConfig::default(),
             tuf_repo_pruner_enabled: true,
-            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
             blueprint_pruner_enabled: true,
             blueprint_pruner_nkeep: DEFAULT_BLUEPRINT_PRUNER_NKEEP,
         };
@@ -246,7 +244,6 @@ mod test {
             planner_enabled: false,
             planner_config: PlannerConfig::default(),
             tuf_repo_pruner_enabled: false,
-            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
             blueprint_pruner_enabled: false,
             blueprint_pruner_nkeep: DEFAULT_BLUEPRINT_PRUNER_NKEEP,
         };
@@ -291,7 +288,6 @@ mod test {
             planner_enabled: true,
             planner_config: PlannerConfig::default(),
             tuf_repo_pruner_enabled: true,
-            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
             blueprint_pruner_enabled: true,
             blueprint_pruner_nkeep: DEFAULT_BLUEPRINT_PRUNER_NKEEP,
         };

@@ -1983,11 +1983,15 @@ impl Zfs {
                 size.to_bytes().to_string(),
                 "-o".to_string(),
                 "rawvol=on".to_string(),
-                // No need to set volblocksize for raw zvols: either the default
-                // record size will be used, or after stlouis#915 integrates an
-                // optimized allocation size will be automatically selected no
-                // matter what volblocksize is set (in this case, volblocksize
-                // sets the minimum allowed record size).
+                // Don't let `zfs create` set a temporary refreservation. The
+                // space is already reserved by the parent dataset, based on
+                // Nexus's accounting, and older ZFS versions' automatic
+                // refreservation may not fit under the parent's quota.
+                "-o".to_string(),
+                "refreservation=none".to_string(),
+                // No need to set volblocksize for raw zvols: ZFS will
+                // automatically select the appropriate volblocksize, with a
+                // minimum of the volblocksize property, which defaults to 8KB.
                 name.to_string(),
             ],
 
