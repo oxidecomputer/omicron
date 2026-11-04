@@ -70,7 +70,9 @@ impl super::Nexus {
         // Now send the reconfiguration request to the coordinator. We do
         // this directly in the API handler because this is a non-idempotent
         // operation and we only want to issue it once.
-        self.tq_send_reconfigure(opctx, &new_config).await?;
+        self.tq_send_reconfigure(opctx, &new_config)
+            .await
+            .into_result(&new_config)?;
 
         Ok(new_config)
     }
@@ -117,7 +119,9 @@ impl super::Nexus {
         // Now send the reconfiguration request to the coordinator. We do
         // this directly in the API handler because this is a non-idempotent
         // operation and we only want to issue it once.
-        self.tq_send_reconfigure(opctx, &new_config).await?;
+        self.tq_send_reconfigure(opctx, &new_config)
+            .await
+            .into_result(&new_config)?;
 
         Ok(new_epoch)
     }
@@ -267,19 +271,27 @@ impl super::Nexus {
     /// the config crashes before this is called, the coordinator never receives
     /// the config, and the reconfiguration gets stuck in the preparing phase.
     /// We should fix this for real.
-    async fn tq_send_reconfigure(
+    pub(crate) async fn tq_send_reconfigure(
         &self,
         opctx: &OpContext,
         config: &TrustQuorumConfig,
-    ) -> Result<(), Error> {
+    ) -> ReconfigureSendOutcome {
         let client = match self.get_coordinator_client(opctx, config).await {
             Ok(client) => client,
-            Err(InServiceSledClientError::NotInService { .. }) => {
+            Err(
+                unavailable @ InServiceSledClientError::NotInService { .. },
+            ) => {
                 self.background_tasks.task_trust_quorum_manager.activate();
-                return Err(coordinator_not_in_service_error(config));
+                return ReconfigureSendOutcome::CoordinatorUnavailable(
+                    unavailable,
+                );
             }
-            Err(InServiceSledClientError::LookupFailed { error, .. }) => {
-                return Err(error);
+            Err(
+                unavailable @ InServiceSledClientError::LookupFailed { .. },
+            ) => {
+                return ReconfigureSendOutcome::CoordinatorUnavailable(
+                    unavailable,
+                );
             }
         };
         let req = trust_quorum_types::messages::ReconfigureMsg {
@@ -289,8 +301,10 @@ impl super::Nexus {
             members: config.members.keys().cloned().collect(),
             threshold: config.threshold,
         };
-        client.trust_quorum_reconfigure(&req).await?;
-        Ok(())
+        match client.trust_quorum_reconfigure(&req).await {
+            Ok(_) => ReconfigureSendOutcome::Sent,
+            Err(error) => ReconfigureSendOutcome::SendFailed(error),
+        }
     }
 
     /// Send an `LrtqUpgradeMsg` corresponding to a config to its coordinator.
@@ -406,6 +420,34 @@ fn tq_remove_sled_refusal(refusal: RemoveSledError) -> Error {
                  {rack_id}: {remaining} sleds would remain, but a trust \
                  quorum must have at least {TRUST_QUORUM_MIN_MEMBERS}."
             ))
+        }
+    }
+}
+
+#[derive(Debug)]
+#[must_use]
+pub(crate) enum ReconfigureSendOutcome {
+    // TODO-RAINCLAUDE: the coordinator accepted the config; this call did not change the config's durable state (normally still Preparing).
+    Sent,
+    // TODO-RAINCLAUDE: nothing was sent; NotInService means the sender woke trust_quorum_manager, which aborts the config if it is still preparing, while LookupFailed means whether the coordinator is in service is unknown, so the config may be aborted or stay preparing until it is aborted.
+    CoordinatorUnavailable(InServiceSledClientError),
+    // TODO-RAINCLAUDE: this call did not change the config's durable state, but the coordinator may or may not have received the config, so whether it will be driven is uncertain.
+    SendFailed(sled_agent_client::Error<sled_agent_client::types::Error>),
+}
+
+impl ReconfigureSendOutcome {
+    fn into_result(self, config: &TrustQuorumConfig) -> Result<(), Error> {
+        match self {
+            ReconfigureSendOutcome::Sent => Ok(()),
+            ReconfigureSendOutcome::CoordinatorUnavailable(
+                InServiceSledClientError::NotInService { .. },
+            ) => Err(coordinator_not_in_service_error(config)),
+            ReconfigureSendOutcome::CoordinatorUnavailable(
+                InServiceSledClientError::LookupFailed { error, .. },
+            ) => Err(error),
+            ReconfigureSendOutcome::SendFailed(error) => {
+                Err(Error::from(error))
+            }
         }
     }
 }
