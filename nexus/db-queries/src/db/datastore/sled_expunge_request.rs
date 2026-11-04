@@ -2,10 +2,115 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use super::DataStore;
+use super::SQL_BATCH_SIZE;
+use crate::authz;
+use crate::context::OpContext;
+use crate::db::pagination::Paginator;
+use crate::db::pagination::paginated;
+use async_bb8_diesel::AsyncRunQueryDsl;
+use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::LookupPath;
+use nexus_db_model::SledExpungeRequest;
+use nexus_db_model::SledExpungeRequestState;
+use nexus_db_schema::schema::sled_expunge_request::dsl;
+use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupResult;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledExpungeRequestUuid;
+use uuid::Uuid;
+
+impl DataStore {
+    pub async fn sled_expunge_request_get(
+        &self,
+        opctx: &OpContext,
+        id: SledExpungeRequestUuid,
+    ) -> LookupResult<SledExpungeRequest> {
+        let (.., request) = LookupPath::new(opctx, self)
+            .sled_expunge_request(id)
+            .fetch()
+            .await?;
+        Ok(request)
+    }
+
+    // TODO-RAINCLAUDE: pages by time_created and then id, like support_bundle_list, using the lookup_sled_expunge_request_by_creation index.
+    pub async fn sled_expunge_request_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, (chrono::DateTime<chrono::Utc>, Uuid)>,
+    ) -> ListResultVec<SledExpungeRequest> {
+        opctx
+            .authorize(
+                authz::Action::ListChildren,
+                &authz::SLED_EXPUNGE_REQUEST_LIST,
+            )
+            .await?;
+        use crate::db::pagination::paginated_multicolumn;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        paginated_multicolumn(
+            dsl::sled_expunge_request,
+            (dsl::time_created, dsl::id),
+            pagparams,
+        )
+        .select(SledExpungeRequest::as_select())
+        .load_async(&*conn)
+        .await
+        .map_err(|error| public_error_from_diesel(error, ErrorHandler::Server))
+    }
+
+    // TODO-RAINCLAUDE: every Nexus's sled_expunge task reads this each activation; batched like other background-task list-all helpers, across all racks; the batches are not one snapshot, so callers must compare-and-swap and tolerate one activation of lag.
+    pub async fn sled_expunge_request_list_unfinished(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<SledExpungeRequest> {
+        opctx
+            .authorize(
+                authz::Action::ListChildren,
+                &authz::SLED_EXPUNGE_REQUEST_LIST,
+            )
+            .await?;
+        opctx.check_complex_operations_allowed()?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let mut requests = Vec::new();
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let batch = paginated(
+                dsl::sled_expunge_request,
+                dsl::id,
+                &p.current_pagparams(),
+            )
+            .filter(dsl::state.eq_any(SledExpungeRequestState::UNFINISHED))
+            .select(SledExpungeRequest::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|error| {
+                public_error_from_diesel(error, ErrorHandler::Server)
+            })?;
+            paginator = p
+                .found_batch(&batch, &|request: &SledExpungeRequest| {
+                    request.id.into_untyped_uuid()
+                });
+            requests.extend(batch);
+        }
+        Ok(requests)
+    }
+}
+
 #[cfg(test)]
 mod test {
+    use super::SQL_BATCH_SIZE;
+    use crate::authn;
+    use crate::authz;
+    use crate::context::OpContext;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::sled_expunge_request::TEST_FAILURE_REASON;
+    use crate::db::pub_test_utils::sled_expunge_request::insert_sled_expunge_request;
     use crate::db::pub_test_utils::sled_expunge_request::new_sled_expunge_request;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::prelude::*;
@@ -17,13 +122,19 @@ mod test {
     use nexus_db_model::SledExpungeRequest;
     use nexus_db_model::SledExpungeRequestState;
     use nexus_db_schema::schema::sled_expunge_request::dsl;
+    use omicron_common::api::external::DataPageParams;
+    use omicron_common::api::external::Error;
+    use omicron_common::api::external::LookupType;
+    use omicron_common::api::external::ResourceType;
     use omicron_common::now_db_precision;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledExpungeRequestKind;
     use omicron_uuid_kinds::SledUuid;
     use sled_hardware_types::BaseboardId;
     use std::collections::BTreeSet;
+    use std::sync::Arc;
     use uuid::Uuid;
 
     const TQ_EPOCH_IS_POSITIVE: &str = "tq_epoch_is_positive";
@@ -330,4 +441,127 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    fn opctx_as(db: &TestDatabase, authn: authn::Context) -> OpContext {
+        let log = db.opctx().log.clone();
+        OpContext::for_background(
+            log.clone(),
+            Arc::new(authz::Authz::new(&log)),
+            authn,
+            Arc::clone(db.datastore()) as Arc<dyn nexus_auth::storage::Storage>,
+        )
+    }
+
+    async fn insert_in_state(
+        db: &TestDatabase,
+        rack_id: RackUuid,
+        tq_epoch: i64,
+        state: SledExpungeRequestState,
+    ) -> SledExpungeRequest {
+        insert_sled_expunge_request(
+            db.datastore(),
+            rack_id,
+            &unique_baseboard(),
+            tq_epoch,
+            state,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn test_sled_expunge_request_list_unfinished() {
+        let logctx =
+            dev::test_setup_log("test_sled_expunge_request_list_unfinished");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // TODO-RAINCLAUDE: cycling through every state gives more than SQL_BATCH_SIZE unfinished rows, so the listing spans two batches and skips the finished rows in both.
+        let batch_size = usize::try_from(SQL_BATCH_SIZE.get()).unwrap();
+        let rows: Vec<_> = SledExpungeRequestState::ALL
+            .iter()
+            .cycle()
+            .take(2 * batch_size)
+            .map(|&state| {
+                new_sled_expunge_request(
+                    RackUuid::new_v4(),
+                    SledUuid::new_v4(),
+                    unique_baseboard(),
+                    1,
+                    state,
+                )
+            })
+            .collect();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let inserted: Vec<SledExpungeRequest> =
+            diesel::insert_into(dsl::sled_expunge_request)
+                .values(rows)
+                .returning(SledExpungeRequest::as_returning())
+                .get_results_async(&*conn)
+                .await
+                .expect("bulk-inserted requests in every state");
+        let mut expected: Vec<_> = inserted
+            .into_iter()
+            .filter(|request| !request.state.is_finished())
+            .collect();
+        expected.sort_by_key(|request| request.id.into_untyped_uuid());
+        assert!(
+            expected.len() > batch_size,
+            "{} unfinished rows span more than one batch of {batch_size}",
+            expected.len(),
+        );
+
+        let listed = datastore
+            .sled_expunge_request_list_unfinished(opctx)
+            .await
+            .expect("listed unfinished requests");
+        assert_eq!(listed, expected);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sled_expunge_request_viewer_denied() {
+        let logctx =
+            dev::test_setup_log("test_sled_expunge_request_viewer_denied");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let opctx = opctx_as(&db, authn::Context::internal_read());
+
+        let request = insert_in_state(
+            &db,
+            RackUuid::new_v4(),
+            1,
+            SledExpungeRequestState::WaitingForTrustQuorum,
+        )
+        .await;
+        let not_found = Error::ObjectNotFound {
+            type_name: ResourceType::SledExpungeRequest,
+            lookup_type: LookupType::ById(request.id().into_untyped_uuid()),
+        };
+
+        assert_eq!(
+            datastore
+                .sled_expunge_request_get(&opctx, request.id())
+                .await
+                .expect_err("a fleet viewer is denied get"),
+            not_found,
+        );
+        assert_eq!(
+            datastore
+                .sled_expunge_request_list(&opctx, &DataPageParams::max_page())
+                .await
+                .expect_err("a fleet viewer is denied list"),
+            Error::Forbidden,
+        );
+        assert_eq!(
+            datastore
+                .sled_expunge_request_list_unfinished(&opctx)
+                .await
+                .expect_err("a fleet viewer is denied list_unfinished"),
+            Error::Forbidden,
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 }

@@ -4103,15 +4103,11 @@ mod tests {
         assert_eq!(latest.epoch, Epoch(3));
         assert!(latest.members.contains_key(&removed));
 
-        let state = {
-            use nexus_db_schema::schema::sled_expunge_request::dsl;
-            dsl::sled_expunge_request
-                .filter(dsl::id.eq(removed_request.id))
-                .select(dsl::state)
-                .get_result_async::<SledExpungeRequestState>(&*conn)
-                .await
-                .unwrap()
-        };
+        let state = datastore
+            .sled_expunge_request_get(opctx, removed_request.id())
+            .await
+            .expect("read back the sled expunge request")
+            .state;
         assert_eq!(state, SledExpungeRequestState::WaitingForTrustQuorum);
 
         db.terminate().await;
