@@ -88,6 +88,17 @@ pub struct Config {
     pub hardware: ConfigHardware,
     /// is this sled a normal gimlet, or a scrimlet?
     pub sled_role: SledRole,
+    #[serde(default)]
+    pub trust_quorum: SimTrustQuorumMode,
+}
+
+// TODO-RAINCLAUDE: fixed at startup: Fake enables the fake trust quorum in sim/trust_quorum.rs; Unimplemented keeps every trust quorum endpoint returning 405.
+#[derive(Copy, Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SimTrustQuorumMode {
+    #[default]
+    Unimplemented,
+    Fake,
 }
 
 pub enum ZpoolConfig {
@@ -178,6 +189,7 @@ impl Config {
                 },
             },
             sled_role,
+            trust_quorum: SimTrustQuorumMode::Unimplemented,
         }
     }
 }
