@@ -8849,19 +8849,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn console_silo_access(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<Response<Body>, HttpError> {
-        console_api::console_index_or_login_redirect(rqctx).await
-    }
-
-    async fn console_silo_users(
-        rqctx: RequestContext<Self::Context>,
-        _path_params: Path<console::RestPathParam>,
-    ) -> Result<Response<Body>, HttpError> {
-        console_api::console_index_or_login_redirect(rqctx).await
-    }
-
-    async fn console_silo_groups(
-        rqctx: RequestContext<Self::Context>,
         _path_params: Path<console::RestPathParam>,
     ) -> Result<Response<Body>, HttpError> {
         console_api::console_index_or_login_redirect(rqctx).await
