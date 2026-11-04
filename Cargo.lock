@@ -6170,6 +6170,42 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
 
 [[package]]
+name = "jbor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "clap",
+ "dropshot",
+ "fmd-adm-sys",
+ "futures",
+ "gateway-client",
+ "gateway-test-utils",
+ "libc",
+ "loopback-ip-mgr",
+ "mg-admin-client",
+ "mg-api-types",
+ "nexus-config",
+ "nexus-test-interface",
+ "nexus-test-utils",
+ "omicron-common",
+ "omicron-dev-lib",
+ "omicron-nexus",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "omicron-workspace-hack",
+ "oxide-tokio-rt",
+ "pq-sys",
+ "signal-hook-tokio",
+ "sled-agent-types",
+ "slog",
+ "slog-async",
+ "slog-term",
+ "tokio",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "jiff"
 version = "0.2.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9081,13 +9117,9 @@ dependencies = [
  "gateway-client",
  "gateway-test-utils",
  "libc",
- "loopback-ip-mgr",
- "mg-admin-client",
- "mg-api-types",
  "nexus-config",
  "nexus-test-interface",
  "nexus-test-utils",
- "omicron-common",
  "omicron-dev-lib",
  "omicron-nexus",
  "omicron-rpaths",
@@ -9097,10 +9129,6 @@ dependencies = [
  "oxide-tokio-rt",
  "pq-sys",
  "signal-hook-tokio",
- "sled-agent-types",
- "slog",
- "slog-async",
- "slog-term",
  "subprocess",
  "tokio",
  "tokio-postgres",
@@ -9111,10 +9139,17 @@ dependencies = [
 name = "omicron-dev-lib"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "camino",
+ "dropshot",
+ "futures",
  "libc",
+ "nexus-config",
  "omicron-test-utils",
  "omicron-workspace-hack",
+ "signal-hook-tokio",
  "subprocess",
+ "toml 0.8.23",
 ]
 
 [[package]]

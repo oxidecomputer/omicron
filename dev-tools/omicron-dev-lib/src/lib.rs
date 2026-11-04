@@ -4,4 +4,5 @@
 
 //! Common code shared by the various -dev tools.
 
+pub mod config;
 pub mod test_utils;
