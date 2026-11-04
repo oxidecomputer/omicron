@@ -733,7 +733,12 @@ pub(super) async fn ensure_vmm_unregistered(
     let osagactx = sagactx.user_data();
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, &serialized_authn);
-    let log = osagactx.log();
+    let whoami = sagactx.node_label();
+    let log = osagactx.log().new(o!(
+        "instance_id" => instance_id.to_string(),
+        "propolis_id" => propolis_id.to_string(),
+        "sled_id" => sled_id.to_string(),
+    ));
 
     retry_notify_ext(
         retry_policy_internal_service(),
@@ -781,10 +786,8 @@ pub(super) async fn ensure_vmm_unregistered(
                 Ok(Outcome::StateChanged { .. }) => {
                     info!(
                         osagactx.log(),
-                        "start saga unwind: marked VMM as `Cancelling`, \
-                         proceeding to unregister it...";
-                        "instance_id" => %instance_id,
-                        "propolis_id" => %propolis_id,
+                        "{whoami}: marked VMM as `Cancelling`, proceeding to \
+                         unregister it...";
                     );
                 }
                 // The VMM record was already in a potentially-non-existent
@@ -799,11 +802,9 @@ pub(super) async fn ensure_vmm_unregistered(
                 Ok(Outcome::StateChangeNotNeeded { current_state }) => {
                     info!(
                         osagactx.log(),
-                        "start saga unwind: VMM already in a potentially \
-                         non-existent state, proceeding to unregister it...";
-                        "instance_id" => %instance_id,
-                        "propolis_id" => %propolis_id,
-                        "state" => ?current_state,
+                        "{whoami}: VMM already in a potentially non-existent \
+                         state, proceeding to unregister it...";
+                        "vmm_state" => ?current_state,
                     );
                 }
                 // If the VMM record has been deleted, then the query that marks
@@ -822,11 +823,9 @@ pub(super) async fn ensure_vmm_unregistered(
                 Ok(Outcome::VmmDeleted) | Err(Error::ObjectNotFound { .. }) => {
                     warn!(
                         osagactx.log(),
-                        "start saga unwind: the VMM record created by this \
-                         has been deleted while we are still unwinding. \
-                         proceeding to unregister it anyway...";
-                        "instance_id" => %instance_id,
-                        "propolis_id" => %propolis_id,
+                        "{whoami}: the VMM record created by this saga has \
+                         been deleted while we are still unwinding. proceeding \
+                         to unregister it anyway...";
                     );
                 }
                 // Any other error must result in us retrying the query until
@@ -848,11 +847,8 @@ pub(super) async fn ensure_vmm_unregistered(
                 }) => {
                     slog::warn!(
                         log,
-                        "sled no longer exists in the database; assuming VMM \
-                         is gone";
-                         "instance_id" => %instance_id,
-                         "propolis_id" => %propolis_id,
-                         "sled_id" => %sled_id,
+                        "{whoami}: sled no longer exists in the database; \
+                         assuming VMM is gone";
                     );
                     return Ok(());
                 }
@@ -879,11 +875,8 @@ pub(super) async fn ensure_vmm_unregistered(
                 |notification| {
                     slog::warn!(
                         log,
-                        "failed to unregister VMM, retrying in {:?}",
+                        "{whoami}: failed to unregister VMM, retrying in {:?}",
                         notification.delay;
-                        "instance_id" => %instance_id,
-                        "propolis_id" => %propolis_id,
-                        "sled_id" => %sled_id,
                         "attempt" => notification.attempt,
                         InlineErrorChain::new(&notification.error),
                     );
@@ -900,20 +893,14 @@ pub(super) async fn ensure_vmm_unregistered(
                     if rsp.into_inner().updated_runtime.is_some() {
                         slog::info!(
                             log,
-                            "unregistered VMM from sled; continuing to \
-                             unwind...";
-                             "instance_id" => %instance_id,
-                             "propolis_id" => %propolis_id,
-                             "sled_id" => %sled_id,
+                            "{whoami}: unregistered VMM from sled; continuing \
+                             to unwind...";
                         );
                     } else {
                         slog::debug!(
                             log,
-                            "VMM was not registered with sled; continuing to \
-                             unwind...";
-                             "instance_id" => %instance_id,
-                             "propolis_id" => %propolis_id,
-                             "sled_id" => %sled_id,
+                            "{whoami}: VMM was not registered with sled; \
+                             continuing to unwind...";
                         );
                     }
                     Ok(())
@@ -924,11 +911,8 @@ pub(super) async fn ensure_vmm_unregistered(
                 Err(e) if e.is_gone() => {
                     slog::info!(
                         log,
-                        "the sled hosting the VMM to unregister is no longer \
-                         in service; assuming the VMM is gone";
-                         "instance_id" => %instance_id,
-                         "propolis_id" => %propolis_id,
-                         "sled_id" => %sled_id,
+                        "{whoami}: the sled hosting the VMM to unregister is \
+                         no longer in service; assuming the VMM is gone";
                     );
                     Ok(())
                 }
@@ -937,10 +921,7 @@ pub(super) async fn ensure_vmm_unregistered(
                     let error = InlineErrorChain::new(&e);
                     slog::error!(
                         log,
-                        "failed to unregister VMM from sled";
-                        "instance_id" => %instance_id,
-                        "propolis_id" => %propolis_id,
-                        "sled_id" => %sled_id,
+                        "{whoami}: failed to unregister VMM from sled";
                         &error
                     );
                     Err(BackoffError::transient(Error::InternalError {
@@ -954,10 +935,7 @@ pub(super) async fn ensure_vmm_unregistered(
         |error, call_count, total_duration| {
             warn!(
                 log,
-                "failed to unregister VMM; retrying";
-                "instance_id" => %instance_id,
-                "propolis_id" => %propolis_id,
-                "sled_id" => %sled_id,
+                "{whoami}: failed to unregister VMM; retrying";
                 "call_count" => call_count,
                 "total_duration" => ?total_duration,
                 InlineErrorChain::new(&error),
