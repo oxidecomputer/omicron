@@ -6,6 +6,7 @@
 
 use anyhow::Context;
 use anyhow::anyhow;
+use anyhow::bail;
 use anyhow::ensure;
 use camino::Utf8Path;
 use dropshot::ResultsPage;
@@ -359,12 +360,14 @@ impl<'a> RequestBuilder<'a> {
             "status" => ?status
         );
 
-        if let Some(expected_status) = self.expected_status {
-            ensure!(
-                expected_status == status,
-                "expected status code {}, found {}",
-                expected_status,
-                status
+        if let Some(expected_status) = self.expected_status
+            && expected_status != status
+        {
+            let body = response.body_mut().collect().await?.to_bytes();
+            bail!(
+                "expected status code {expected_status}, found {status}\n\
+                response body: {}",
+                String::from_utf8_lossy(&body)
             );
         }
 
