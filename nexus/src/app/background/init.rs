@@ -1296,9 +1296,16 @@ impl BackgroundTasksInitializer {
             period: config.sled_expunge.period_secs,
             task_impl: Box::new(sled_expunge::SledExpunge::new(
                 datastore.clone(),
+                resolver.clone(),
+                inventory_load_watcher.clone(),
+                task_inventory_collection.clone(),
+                sled_expunge::SledExpungeActivators {
+                    instance_watcher: task_instance_watcher.clone(),
+                    blueprint_planner: task_blueprint_planner.clone(),
+                },
             )),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![],
+            watchers: vec![Box::new(inventory_load_watcher.clone())],
             activator: task_sled_expunge,
         });
 

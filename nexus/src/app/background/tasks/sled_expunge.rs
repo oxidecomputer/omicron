@@ -2,8 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// TODO-RAINCLAUDE: background task that drives operator-requested sled expunges (RFD 747); part 1 drives only waiting_for_trust_quorum, and powering_off and expunging are listed but left alone.
+// TODO-RAINCLAUDE: background task that drives operator-requested sled expunges (RFD 747) through waiting_for_trust_quorum, powering_off and expunging; a request whose removal is past Preparing goes on to powering_off, and one whose sled is powered off goes on to expunge, in the same activation.
 
+use crate::app::background::Activator;
 use crate::app::background::BackgroundTask;
 use chrono::DateTime;
 use chrono::TimeDelta;
@@ -11,26 +12,47 @@ use chrono::Utc;
 use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::stream;
+use gateway_types::component::SpType;
+use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
+use iddqd::id_upcast;
+use itertools::Itertools;
 use nexus_db_lookup::LookupPath;
+use nexus_db_model::SledExpungePowerOffOutcome;
 use nexus_db_model::SledExpungeRequest;
 use nexus_db_model::SledExpungeRequestAdvance;
 use nexus_db_model::SledExpungeRequestState;
 use nexus_db_model::SledExpungeRequestUnfinishedState;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::SledExpungeRequestCompleteOutcome;
 use nexus_db_queries::db::datastore::SledExpungeRequestUpdateOutcome;
 use nexus_db_queries::db::datastore::SledExpungeTaskGateOutcome;
 use nexus_db_queries::db::datastore::authz_sled_expunge_request_from_id;
+use nexus_networking::GatewayClient;
+use nexus_networking::GatewaysByRack;
+use nexus_networking::PowerOffAtSlotOutcome;
+use nexus_networking::power_off_sled_at_slot;
 use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::external_api::sled::SledProvisionPolicy;
+use nexus_types::internal_api::background::SledExpungeMgsDiscovery;
+use nexus_types::internal_api::background::SledExpungeMgsPowerOffFailure;
+use nexus_types::internal_api::background::SledExpungeMgsRackIdUnknown;
+use nexus_types::internal_api::background::SledExpungePowerCheck;
+use nexus_types::internal_api::background::SledExpungePowerOffWait;
 use nexus_types::internal_api::background::SledExpungeRequestOutcome;
 use nexus_types::internal_api::background::SledExpungeRequestStatus;
 use nexus_types::internal_api::background::SledExpungeStatus;
 use nexus_types::internal_api::background::SledExpungeTaskRequestState;
+use nexus_types::internal_api::background::SledExpungeTaskStep;
+use nexus_types::inventory::Collection;
+use nexus_types::sled_expunge::MgsPowerOffFailure;
+use nexus_types::sled_expunge::SWITCH_ATTACHED_SLED_CUBBIES;
 use nexus_types::trust_quorum::SledExpungeTaskGate;
 use omicron_common::api::external::Error;
 use omicron_common::now_db_precision;
+use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SledExpungeRequestUuid;
 use omicron_uuid_kinds::SledUuid;
 use serde_json::json;
 use slog::Logger;
@@ -40,27 +62,240 @@ use slog::info;
 use slog::o;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeSet;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+use tokio::sync::watch;
 use trust_quorum_types::types::Epoch;
 
 // TODO-RAINCLAUDE: value. How long a removal may stay Preparing, measured from the request's time_created, before last_error tells the operator the removal has stayed preparing.
 const REMOVAL_PREPARING_ATTENTION_THRESHOLD: TimeDelta = TimeDelta::minutes(10);
 
-// TODO-RAINCLAUDE: value. Requests are driven concurrently, at most this many at once, so one slow request does not hold up the others' turn; the activation still awaits every request, and there is no per-request timeout yet (part 2 adds one with the MGS calls).
+// TODO-RAINCLAUDE: value. How many consecutive activations must end a request in an error that should not resolve by retrying before last_error tells the operator; a single such error may be a transient fault that the next activation gets past, so it goes in the status only.
+const INTERNAL_ERROR_ATTENTION_THRESHOLD: u32 = 3;
+
+// TODO-RAINCLAUDE: value. Requests are driven concurrently, at most this many at once, so one slow request does not hold up the others' turn; each request is bounded by PER_REQUEST_TIMEOUT, so a stalled one holds a turn for at most that long, and a request queued behind MAX_CONCURRENT_REQUESTS stalled ones waits at most one timeout for its turn.
 const MAX_CONCURRENT_REQUESTS: usize = 16;
 
+// TODO-RAINCLAUDE: value. A backstop over all of one request's driving in one activation, well above the worst case with every MGS call at its 15s client timeout: the activation's MGS discovery, if this request is the one that starts it (DNS, then each MGS's rack ID, about 20s), re-reading the request row, then a power-off of about 30s per MGS (a re-check and a command), through each MGS of the rack (normally two, one per switch), plus the database writes; so a stalled MGS normally ends in a failed power-off and a last_error rather than in this timeout. A timed-out request is abandoned mid-step and nothing more is written for it; every step is a compare-and-swap or idempotent, so the next activation picks it up from whatever state it reached.
+const PER_REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
+
+#[derive(Clone)]
+pub struct SledExpungeActivators {
+    pub instance_watcher: Activator,
+    pub blueprint_planner: Activator,
+}
+
+impl SledExpungeActivators {
+    fn activate(&self) {
+        self.instance_watcher.activate();
+        self.blueprint_planner.activate();
+    }
+}
+
+// TODO-RAINCLAUDE: inventory_rx is the inventory loader's latest collection, read once per activation; inventory_collection is activated whenever a request could not be powered off for a reason a newer collection may resolve (no collection, sled not found, slot holds another board, every MGS failed).
 pub struct SledExpunge {
     datastore: Arc<DataStore>,
+    resolver: internal_dns_resolver::Resolver,
+    inventory_rx: watch::Receiver<Option<Arc<Collection>>>,
+    inventory_collection: Activator,
+    activators: SledExpungeActivators,
+    internal_errors: IdOrdMap<InternalErrorStreak>,
+}
+
+// TODO-RAINCLAUDE: how many consecutive activations ended this request in an error that should not resolve by retrying. Kept in memory only, so each Nexus counts separately and a Nexus restart starts its counts over, which at worst delays the last_error. An activation the request gets through without an error drops the entry, as does the request leaving the unfinished listing; a retryable error leaves the count as it was, and a timeout keeps whatever count it reached.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct InternalErrorStreak {
+    request_id: SledExpungeRequestUuid,
+    consecutive: u32,
+}
+
+impl IdOrdItem for InternalErrorStreak {
+    type Key<'a> = SledExpungeRequestUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.request_id
+    }
+    id_upcast!();
+}
+
+// TODO-RAINCLAUDE: what an activation that ended in an error does to the request's streak: a retryable error leaves it as it was, and any other error extends it, surfacing the generic last_error once it reaches INTERNAL_ERROR_ATTENTION_THRESHOLD.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InternalErrorStreakStep {
+    Unchanged,
+    BelowThreshold { consecutive: u32 },
+    Surface { consecutive: u32 },
+}
+
+fn extend_internal_error_streak(
+    persistent_error: bool,
+    consecutive: u32,
+) -> InternalErrorStreakStep {
+    if !persistent_error {
+        return InternalErrorStreakStep::Unchanged;
+    }
+    let consecutive = consecutive.saturating_add(1);
+    if consecutive < INTERNAL_ERROR_ATTENTION_THRESHOLD {
+        InternalErrorStreakStep::BelowThreshold { consecutive }
+    } else {
+        InternalErrorStreakStep::Surface { consecutive }
+    }
+}
+
+// TODO-RAINCLAUDE: the result of one MGS discovery. An MGS whose rack could not be learned is left out of its rack, so power-off is tried only through the rack's other MGSes.
+enum MgsDiscovery {
+    Failed(String),
+    Discovered(GatewaysByRack),
+}
+
+impl MgsDiscovery {
+    fn clients_for(&self, rack_id: RackUuid) -> &[GatewayClient] {
+        match self {
+            MgsDiscovery::Failed(_) => &[],
+            MgsDiscovery::Discovered(gateways) => {
+                gateways.for_rack(&rack_id).unwrap_or(&[])
+            }
+        }
+    }
+
+    fn status(&self) -> SledExpungeMgsDiscovery {
+        match self {
+            MgsDiscovery::Failed(error) => {
+                SledExpungeMgsDiscovery::Failed { error: error.clone() }
+            }
+            MgsDiscovery::Discovered(gateways) => {
+                // TODO-RAINCLAUDE: DNS can name one MGS more than once, so the status keeps one entry per address, with the last error seen for it.
+                let mut rack_id_unknown = IdOrdMap::new();
+                for (gateway, error) in gateways.unknown() {
+                    rack_id_unknown.insert_overwrite(
+                        SledExpungeMgsRackIdUnknown {
+                            mgs: gateway.addr,
+                            error: InlineErrorChain::new(error).to_string(),
+                        },
+                    );
+                }
+                SledExpungeMgsDiscovery::Discovered { rack_id_unknown }
+            }
+        }
+    }
+}
+
+// TODO-RAINCLAUDE: what every request in one activation shares: MGS discovery, run lazily by the first request in powering_off (including one that advanced to it in this activation) whose sled inventory places in a sled cubby, at most once per activation, and not at all if no request needs it. The OnceCell is cancel-safe, so a request timing out mid-discovery leaves it to the next request that needs it; started records that it began, so the status can tell "never needed" from "cancelled before it finished".
+struct ActivationMgs<'r> {
+    log: &'r Logger,
+    resolver: &'r internal_dns_resolver::Resolver,
+    started: AtomicBool,
+    discovery: tokio::sync::OnceCell<MgsDiscovery>,
+}
+
+impl<'r> ActivationMgs<'r> {
+    fn new(
+        log: &'r Logger,
+        resolver: &'r internal_dns_resolver::Resolver,
+    ) -> Self {
+        Self {
+            log,
+            resolver,
+            started: AtomicBool::new(false),
+            discovery: tokio::sync::OnceCell::new(),
+        }
+    }
+
+    async fn get(&self) -> &MgsDiscovery {
+        self.discovery
+            .get_or_init(|| {
+                self.started.store(true, Ordering::Relaxed);
+                discover_gateways(self.log, self.resolver)
+            })
+            .await
+    }
+
+    fn status(&self) -> SledExpungeMgsDiscovery {
+        match self.discovery.get() {
+            Some(discovery) => discovery.status(),
+            None if self.started.load(Ordering::Relaxed) => {
+                SledExpungeMgsDiscovery::Unfinished
+            }
+            None => SledExpungeMgsDiscovery::NotNeeded,
+        }
+    }
+}
+
+// TODO-RAINCLAUDE: what driving one request found besides its outcome, kept outside the per-request timeout so that a timed-out request still reports the step it was in and whatever it had found. latest_row is the row as this activation's last successful write returned it, so a persistent error's last_error is written against the request's current state and last_error. internal_errors starts at the request's streak from earlier activations and counts this one if it ends in a persistent error.
+#[derive(Default)]
+struct RequestProgress {
+    step: SledExpungeTaskStep,
+    latest_row: Option<SledExpungeRequest>,
+    persistent_error: bool,
+    internal_errors: u32,
+    inconsistent_records: Option<String>,
+    power_check: Option<SledExpungePowerCheck>,
+}
+
+// TODO-RAINCLAUDE: drives one request, recording its progress as it goes; a trait (rather than a closure) so that its future may borrow the request and progress, and so that tests can drive requests that stall.
+trait RequestDriver {
+    async fn drive(
+        &self,
+        request: &SledExpungeRequest,
+        progress: &mut RequestProgress,
+    ) -> SledExpungeRequestOutcome;
+}
+
+// TODO-RAINCLAUDE: the slot decide() found the sled in, and the rack's MGSes to power it off there through.
+#[derive(Clone, Copy)]
+struct PowerOffAt<'a> {
+    clients: &'a [GatewayClient],
+    slot: u16,
+}
+
+// TODO-RAINCLAUDE: what the powering_off step takes from its activation: the lazily discovered MGSes and the inventory collection read at the start of the activation.
+#[derive(Clone, Copy)]
+struct PoweringOffInputs<'a> {
+    mgs: &'a ActivationMgs<'a>,
+    collection: Option<&'a Collection>,
+}
+
+struct ActivationDriver<'x> {
+    task: &'x SledExpunge,
+    opctx: &'x OpContext,
+    inputs: PoweringOffInputs<'x>,
+    now: DateTime<Utc>,
+}
+
+impl RequestDriver for ActivationDriver<'_> {
+    async fn drive(
+        &self,
+        request: &SledExpungeRequest,
+        progress: &mut RequestProgress,
+    ) -> SledExpungeRequestOutcome {
+        self.task
+            .drive_request(self.opctx, self.inputs, request, self.now, progress)
+            .await
+    }
 }
 
 impl SledExpunge {
-    pub fn new(datastore: Arc<DataStore>) -> Self {
-        Self { datastore }
+    pub fn new(
+        datastore: Arc<DataStore>,
+        resolver: internal_dns_resolver::Resolver,
+        inventory_rx: watch::Receiver<Option<Arc<Collection>>>,
+        inventory_collection: Activator,
+        activators: SledExpungeActivators,
+    ) -> Self {
+        Self {
+            datastore,
+            resolver,
+            inventory_rx,
+            inventory_collection,
+            activators,
+            internal_errors: IdOrdMap::new(),
+        }
     }
 
     // TODO-RAINCLAUDE: now is passed in so that tests can move the clock past the stuck-Preparing threshold without sleeping.
     pub(crate) async fn actually_activate(
-        &self,
+        &mut self,
         opctx: &OpContext,
         now: DateTime<Utc>,
     ) -> SledExpungeStatus {
@@ -85,82 +320,191 @@ impl SledExpunge {
             }
         };
 
-        let statuses: Vec<SledExpungeRequestStatus> = stream::iter(requests)
-            .map(|request| self.drive_request(opctx, request, now))
-            .buffer_unordered(MAX_CONCURRENT_REQUESTS)
-            .collect()
-            .await;
+        let collection = self.inventory_rx.borrow_and_update().clone();
+        let mgs = ActivationMgs::new(&opctx.log, &self.resolver);
+        let driver = ActivationDriver {
+            task: self,
+            opctx,
+            inputs: PoweringOffInputs {
+                mgs: &mgs,
+                collection: collection.as_deref(),
+            },
+            now,
+        };
+        let (statuses, internal_errors) = drive_requests_with_timeout(
+            &opctx.log,
+            requests,
+            &driver,
+            &self.activators,
+            &self.internal_errors,
+        )
+        .await;
+        self.internal_errors = internal_errors;
         let requests = IdOrdMap::from_iter_unique(statuses).expect(
             "list_unfinished pages by id, so each request is listed once",
         );
-        SledExpungeStatus::Listed { requests }
+        SledExpungeStatus::Listed { requests, mgs_discovery: mgs.status() }
     }
 
     async fn drive_request(
         &self,
         opctx: &OpContext,
-        request: SledExpungeRequest,
+        inputs: PoweringOffInputs<'_>,
+        request: &SledExpungeRequest,
         now: DateTime<Utc>,
-    ) -> SledExpungeRequestStatus {
-        let log = opctx.log.new(o!(
-            "sled_expunge_request_id" => request.id().to_string(),
-            "sled_id" => request.sled_id.to_string(),
-            "tq_epoch" => request.tq_epoch,
-            "state" => request.state.to_string(),
-        ));
-        let (outcome, inconsistent_records) = match request
-            .state
-            .as_unfinished()
-        {
-            Some(
-                from @ SledExpungeRequestUnfinishedState::WaitingForTrustQuorum,
-            ) => {
-                self.drive_waiting_for_trust_quorum(
-                    opctx, &log, &request, from, now,
-                )
-                .await
-            }
-            Some(
-                SledExpungeRequestUnfinishedState::PoweringOff
-                | SledExpungeRequestUnfinishedState::Expunging,
-            ) => {
-                debug!(
-                    &log,
-                    "not driving sled expunge request in this state yet"
-                );
-                (SledExpungeRequestOutcome::NotHandledYet, None)
-            }
-            // TODO-RAINCLAUDE: list_unfinished filters on the unfinished states, so this is unreachable short of a bug there.
-            None => (
-                error_outcome(
-                    &log,
-                    "unfinished request list returned a finished request",
-                    &Error::internal_error(&format!(
-                        "listed as unfinished, but in state {}",
-                        request.state,
-                    )),
-                ),
-                None,
-            ),
-        };
-        SledExpungeRequestStatus {
-            request_id: request.id(),
-            sled_id: SledUuid::from(request.sled_id),
-            state: task_request_state(request.state),
-            outcome,
-            inconsistent_records,
-        }
+        progress: &mut RequestProgress,
+    ) -> SledExpungeRequestOutcome {
+        let log = request_log(&opctx.log, request);
+        let outcome =
+            self.drive_steps(opctx, &log, inputs, request, now, progress).await;
+        self.surface_internal_error(opctx, &log, request, outcome, progress)
+            .await
     }
 
-    // TODO-RAINCLAUDE: returns the outcome and, when the gate found the trust quorum records inconsistent, the internal detail for the status.
-    async fn drive_waiting_for_trust_quorum(
+    // TODO-RAINCLAUDE: an error that should not resolve by retrying (anything but ServiceUnavailable) extends the request's streak, and once the streak reaches INTERNAL_ERROR_ATTENTION_THRESHOLD the request gets a generic last_error, written against the row as this activation last left it.
+    async fn surface_internal_error(
         &self,
         opctx: &OpContext,
         log: &Logger,
         request: &SledExpungeRequest,
-        from: SledExpungeRequestUnfinishedState,
+        outcome: SledExpungeRequestOutcome,
+        progress: &mut RequestProgress,
+    ) -> SledExpungeRequestOutcome {
+        let SledExpungeRequestOutcome::Error { error, last_error: None } =
+            outcome
+        else {
+            return outcome;
+        };
+        let consecutive = match extend_internal_error_streak(
+            progress.persistent_error,
+            progress.internal_errors,
+        ) {
+            InternalErrorStreakStep::Unchanged => None,
+            InternalErrorStreakStep::BelowThreshold { consecutive } => {
+                progress.internal_errors = consecutive;
+                info!(
+                    log,
+                    "not yet surfacing the error to the operator";
+                    "consecutive_internal_errors" => consecutive,
+                    "threshold" => INTERNAL_ERROR_ATTENTION_THRESHOLD,
+                );
+                None
+            }
+            InternalErrorStreakStep::Surface { consecutive } => {
+                Some(consecutive)
+            }
+        };
+        let Some(consecutive) = consecutive else {
+            return SledExpungeRequestOutcome::Error {
+                error,
+                last_error: None,
+            };
+        };
+        progress.internal_errors = consecutive;
+        let latest =
+            progress.latest_row.clone().unwrap_or_else(|| request.clone());
+        let Some(state) = latest.state.as_unfinished() else {
+            return SledExpungeRequestOutcome::Error {
+                error,
+                last_error: None,
+            };
+        };
+        // TODO-RAINCLAUDE: when the last_error write itself does not land, the status error says so, so that it can't be mistaken for an error still below the threshold.
+        match self
+            .set_last_error(
+                opctx,
+                log,
+                &latest,
+                state,
+                NeedsAttention::InternalError,
+                progress,
+            )
+            .await
+        {
+            SledExpungeRequestOutcome::LastErrorSet { last_error }
+            | SledExpungeRequestOutcome::LastErrorUnchanged { last_error } => {
+                SledExpungeRequestOutcome::Error {
+                    error,
+                    last_error: Some(last_error),
+                }
+            }
+            SledExpungeRequestOutcome::NotInExpectedState { current_state } => {
+                SledExpungeRequestOutcome::Error {
+                    error: format!(
+                        "{error}; then not setting last_error: the request \
+                         is now {current_state}"
+                    ),
+                    last_error: None,
+                }
+            }
+            SledExpungeRequestOutcome::Error { error: write_error, .. } => {
+                SledExpungeRequestOutcome::Error {
+                    error: format!("{error}; then {write_error}"),
+                    last_error: None,
+                }
+            }
+            unexpected @ (SledExpungeRequestOutcome::RemovalPreparing
+            | SledExpungeRequestOutcome::Completed { .. }
+            | SledExpungeRequestOutcome::Failed { .. }
+            | SledExpungeRequestOutcome::TimedOut { .. }) => {
+                SledExpungeRequestOutcome::Error {
+                    error: format!(
+                        "{error}; then setting last_error returned \
+                         {unexpected:?}"
+                    ),
+                    last_error: None,
+                }
+            }
+        }
+    }
+
+    async fn drive_steps(
+        &self,
+        opctx: &OpContext,
+        log: &Logger,
+        inputs: PoweringOffInputs<'_>,
+        request: &SledExpungeRequest,
         now: DateTime<Utc>,
-    ) -> (SledExpungeRequestOutcome, Option<String>) {
+        progress: &mut RequestProgress,
+    ) -> SledExpungeRequestOutcome {
+        match request.state.as_unfinished() {
+            Some(SledExpungeRequestUnfinishedState::WaitingForTrustQuorum) => {
+                self.drive_waiting_for_trust_quorum(
+                    opctx, log, inputs, request, now, progress,
+                )
+                .await
+            }
+            Some(SledExpungeRequestUnfinishedState::PoweringOff) => {
+                self.drive_powering_off(opctx, log, inputs, request, progress)
+                    .await
+            }
+            Some(SledExpungeRequestUnfinishedState::Expunging) => {
+                self.complete(opctx, log, request, progress).await
+            }
+            // TODO-RAINCLAUDE: list_unfinished filters on the unfinished states, so this is unreachable short of a bug there.
+            None => error_outcome(
+                log,
+                progress,
+                "unfinished request list returned a finished request",
+                &Error::internal_error(&format!(
+                    "listed as unfinished, but in state {}",
+                    request.state,
+                )),
+            ),
+        }
+    }
+
+    async fn drive_waiting_for_trust_quorum(
+        &self,
+        opctx: &OpContext,
+        log: &Logger,
+        inputs: PoweringOffInputs<'_>,
+        request: &SledExpungeRequest,
+        now: DateTime<Utc>,
+        progress: &mut RequestProgress,
+    ) -> SledExpungeRequestOutcome {
+        let from = SledExpungeRequestUnfinishedState::WaitingForTrustQuorum;
+        progress.step = SledExpungeTaskStep::CheckingTrustQuorum;
         let gate = match self
             .datastore
             .sled_expunge_request_check_task_gate(opctx, request)
@@ -173,49 +517,65 @@ impl SledExpunge {
                     "no trust quorum configuration exists at the request's \
                      removal epoch; failing the request"
                 );
-                let outcome = self
+                return self
                     .fail(
                         opctx,
                         log,
                         request,
                         from,
                         FailureReason::RemovalConfigMissing,
+                        progress,
                     )
                     .await;
-                return (outcome, None);
             }
             Ok(SledExpungeTaskGateOutcome::Inconsistent { message }) => {
-                error!(
-                    log,
-                    "sled expunge request's trust quorum records are \
-                     inconsistent";
-                    "error" => &message,
-                );
-                let outcome = self
-                    .set_last_error(
-                        opctx,
-                        log,
-                        request,
-                        from,
-                        NeedsAttention::InconsistentRecords,
-                    )
+                return self
+                    .inconsistent(opctx, log, request, from, message, progress)
                     .await;
-                return (outcome, Some(message));
             }
             Err(error) => {
-                return (
-                    error_outcome(
-                        log,
-                        "checking the trust quorum gate",
-                        &error,
-                    ),
-                    None,
+                return error_outcome(
+                    log,
+                    progress,
+                    "checking the trust quorum gate",
+                    &error,
                 );
             }
         };
-        let outcome = match gate {
+        match gate {
             SledExpungeTaskGate::SledRemoved => {
-                self.advance_to_powering_off(opctx, log, request).await
+                progress.step = SledExpungeTaskStep::AdvancingToPoweringOff;
+                let result = self
+                    .datastore
+                    .sled_expunge_request_advance(
+                        opctx,
+                        &authz_sled_expunge_request_from_id(request.id()),
+                        SledExpungeRequestAdvance::ToPoweringOff,
+                    )
+                    .await;
+                match require_updated(
+                    log,
+                    progress,
+                    "advancing to powering_off",
+                    result,
+                ) {
+                    // TODO-RAINCLAUDE: goes straight on to powering_off with the row the advance returned, as powering_off goes on to expunging, so a removal that is already past Preparing needs no second activation.
+                    Ok(powering_off) => {
+                        info!(
+                            log,
+                            "trust quorum removed the sled; powering it off"
+                        );
+                        self.drive_powering_off(
+                            opctx,
+                            log,
+                            inputs,
+                            &powering_off,
+                            progress,
+                        )
+                        .await
+                    }
+                    Err(outcome) => outcome,
+                }
             }
             SledExpungeTaskGate::RemovalPreparing => {
                 if now - request.time_created
@@ -229,7 +589,14 @@ impl SledExpunge {
                         log,
                         request,
                         from,
-                        NeedsAttention::RemovalStuckPreparing,
+                        NeedsAttention::RemovalStuckPreparing {
+                            send: if request.send_uncertain {
+                                RemovalSend::Uncertain
+                            } else {
+                                RemovalSend::Confirmed
+                            },
+                        },
+                        progress,
                     )
                     .await
                 }
@@ -241,6 +608,7 @@ impl SledExpunge {
                     request,
                     from,
                     FailureReason::RemovalAborted,
+                    progress,
                 )
                 .await
             }
@@ -251,6 +619,7 @@ impl SledExpunge {
                     request,
                     from,
                     NeedsAttention::ReAddPreparing { re_add_epoch: epoch },
+                    progress,
                 )
                 .await
             }
@@ -267,31 +636,292 @@ impl SledExpunge {
                     request,
                     from,
                     FailureReason::ReAdded { re_add_epoch: epoch },
+                    progress,
                 )
                 .await
             }
-        };
-        (outcome, None)
+        }
     }
 
-    async fn advance_to_powering_off(
+    // TODO-RAINCLAUDE: RFD 747's powering_off step: decide() finds the sled's slot in the latest loaded inventory collection before any MGS is needed, and only a sled found in a sled slot is powered off there through the rack's MGSes; every other outcome waits with a last_error.
+    async fn drive_powering_off(
+        &self,
+        opctx: &OpContext,
+        log: &Logger,
+        inputs: PoweringOffInputs<'_>,
+        request: &SledExpungeRequest,
+        progress: &mut RequestProgress,
+    ) -> SledExpungeRequestOutcome {
+        progress.step = SledExpungeTaskStep::ResolvingPower;
+        let decision = decide(request, inputs.collection);
+        debug!(log, "decided where to power off the sled"; "decision" => ?decision);
+        let slot = match decision {
+            Ok(slot) => slot,
+            Err(wait) => {
+                return self
+                    .wait_to_power_off(
+                        opctx,
+                        log,
+                        request,
+                        inputs.collection,
+                        wait,
+                        progress,
+                    )
+                    .await;
+            }
+        };
+        let clients =
+            inputs.mgs.get().await.clients_for(RackUuid::from(request.rack_id));
+        if clients.is_empty() {
+            return self
+                .wait_to_power_off(
+                    opctx,
+                    log,
+                    request,
+                    inputs.collection,
+                    SledExpungePowerOffWait::NoMgs,
+                    progress,
+                )
+                .await;
+        }
+        self.power_off(
+            opctx,
+            log,
+            request,
+            inputs.collection,
+            PowerOffAt { clients, slot },
+            progress,
+        )
+        .await
+    }
+
+    // TODO-RAINCLAUDE: MGS accepting the A2 command is the only proof of power-off, and then the request advances to expunging and is expunged in this same activation; if the slot holds another board or no MGS could power it off, it waits with a last_error.
+    async fn power_off(
         &self,
         opctx: &OpContext,
         log: &Logger,
         request: &SledExpungeRequest,
+        collection: Option<&Collection>,
+        at: PowerOffAt<'_>,
+        progress: &mut RequestProgress,
     ) -> SledExpungeRequestOutcome {
+        let PowerOffAt { clients, slot } = at;
+        // TODO-RAINCLAUDE: the request is re-read once before the MGS loop so that a Nexus whose listing is stale does not power off a sled whose request another Nexus has already moved on (for example, one that failed and whose sled was then added back and powered on); the window between this read and the commands is accepted.
+        let step = "re-reading the request before powering off";
+        let current = match self
+            .datastore
+            .sled_expunge_request_get(opctx, request.id())
+            .await
+        {
+            Ok(current) => current,
+            Err(error) => return error_outcome(log, progress, step, &error),
+        };
+        match current.state {
+            SledExpungeRequestState::PoweringOff => {}
+            SledExpungeRequestState::WaitingForTrustQuorum
+            | SledExpungeRequestState::Expunging
+            | SledExpungeRequestState::Done
+            | SledExpungeRequestState::Failed => {
+                return not_in_expected_state_outcome(log, step, &current);
+            }
+        }
+        progress.latest_row = Some(current.clone());
+
+        progress.step = SledExpungeTaskStep::SendingPowerOff;
+        let outcome =
+            power_off_sled_at_slot(log, clients, &current.baseboard_id(), slot)
+                .await;
+        let wait = match outcome {
+            PowerOffAtSlotOutcome::PoweredOff { mgs } => {
+                progress.power_check =
+                    Some(SledExpungePowerCheck::PoweredOff { slot, mgs });
+                return self
+                    .advance_to_expunging(opctx, log, &current, progress)
+                    .await;
+            }
+            PowerOffAtSlotOutcome::SlotHoldsOtherBoard { mgs, found } => {
+                SledExpungePowerOffWait::SlotHoldsOtherBoard {
+                    slot,
+                    mgs,
+                    found,
+                }
+            }
+            PowerOffAtSlotOutcome::NotPoweredOff { failed_attempts } => {
+                SledExpungePowerOffWait::NotPoweredOff {
+                    slot,
+                    failed_attempts: failed_attempts
+                        .into_iter()
+                        .map(|attempt| SledExpungeMgsPowerOffFailure {
+                            mgs: attempt.mgs,
+                            stage: attempt.failure,
+                            error: attempt.error,
+                        })
+                        .collect(),
+                }
+            }
+        };
+        self.wait_to_power_off(opctx, log, &current, collection, wait, progress)
+            .await
+    }
+
+    // TODO-RAINCLAUDE: records why the sled was not powered off, wakes inventory collection if a newer collection may resolve it, and sets the matching last_error.
+    async fn wait_to_power_off(
+        &self,
+        opctx: &OpContext,
+        log: &Logger,
+        request: &SledExpungeRequest,
+        collection: Option<&Collection>,
+        wait: SledExpungePowerOffWait,
+        progress: &mut RequestProgress,
+    ) -> SledExpungeRequestOutcome {
+        if wakes_inventory_collection(&wait, collection, request) {
+            self.inventory_collection.activate();
+        }
+        progress.power_check =
+            Some(SledExpungePowerCheck::Waiting { wait: wait.clone() });
+        self.set_last_error(
+            opctx,
+            log,
+            request,
+            SledExpungeRequestUnfinishedState::PoweringOff,
+            NeedsAttention::PowerOff(wait),
+            progress,
+        )
+        .await
+    }
+
+    async fn advance_to_expunging(
+        &self,
+        opctx: &OpContext,
+        log: &Logger,
+        request: &SledExpungeRequest,
+        progress: &mut RequestProgress,
+    ) -> SledExpungeRequestOutcome {
+        progress.step = SledExpungeTaskStep::AdvancingToExpunging;
         let result = self
             .datastore
             .sled_expunge_request_advance(
                 opctx,
                 &authz_sled_expunge_request_from_id(request.id()),
-                SledExpungeRequestAdvance::ToPoweringOff,
+                SledExpungeRequestAdvance::ToExpunging {
+                    power_off_outcome: SledExpungePowerOffOutcome::PoweredOff,
+                },
             )
             .await;
-        update_outcome(log, "advancing to powering_off", result, || {
-            info!(log, "trust quorum removed the sled; powering it off next");
-            SledExpungeRequestOutcome::AdvancedToPoweringOff
-        })
+        let expunging = match require_updated(
+            log,
+            progress,
+            "advancing to expunging",
+            result,
+        ) {
+            Ok(expunging) => expunging,
+            Err(outcome) => return outcome,
+        };
+        info!(log, "sled is powered off; expunging it now");
+        self.complete(opctx, log, &expunging, progress).await
+    }
+
+    // TODO-RAINCLAUDE: RFD 747's expunging step: complete re-runs the task gate and expunges the sled in one transaction. It does not resolve the sled's identity again: power-on is out of scope for v1, and the request was only ever advanced after MGS accepted A2. ReAddPreparing and inconsistent records wait with a last_error, and a re-add that has started committing fails the request.
+    async fn complete(
+        &self,
+        opctx: &OpContext,
+        log: &Logger,
+        request: &SledExpungeRequest,
+        progress: &mut RequestProgress,
+    ) -> SledExpungeRequestOutcome {
+        let from = SledExpungeRequestUnfinishedState::Expunging;
+        progress.step = SledExpungeTaskStep::Completing;
+        match self
+            .datastore
+            .sled_expunge_request_complete(
+                opctx,
+                &authz_sled_expunge_request_from_id(request.id()),
+            )
+            .await
+        {
+            Ok(SledExpungeRequestCompleteOutcome::Completed {
+                previous_sled_policy,
+            }) => {
+                info!(
+                    log,
+                    "expunged the sled; sled expunge request is done";
+                    "previous_sled_policy" => ?previous_sled_policy,
+                );
+                // TODO-RAINCLAUDE: as the lockstep sled_expunge does: instance_watcher marks VMMs on the expunged sled Failed sooner, and the planner acts on the expungement.
+                self.activators.activate();
+                SledExpungeRequestOutcome::Completed { previous_sled_policy }
+            }
+            Ok(SledExpungeRequestCompleteOutcome::NotExpunging { current }) => {
+                not_in_expected_state_outcome(
+                    log,
+                    "completing the request",
+                    &current,
+                )
+            }
+            Ok(SledExpungeRequestCompleteOutcome::ReAddPreparing { epoch }) => {
+                self.set_last_error(
+                    opctx,
+                    log,
+                    request,
+                    from,
+                    NeedsAttention::ReAddPreparing { re_add_epoch: epoch },
+                    progress,
+                )
+                .await
+            }
+            Ok(SledExpungeRequestCompleteOutcome::ReAdded { epoch, state }) => {
+                warn!(
+                    log,
+                    "the sled was added back to the trust quorum after its \
+                     request entered expunging";
+                    "re_add_epoch" => %epoch,
+                    "re_add_state" => ?state,
+                );
+                self.fail(
+                    opctx,
+                    log,
+                    request,
+                    from,
+                    FailureReason::ReAdded { re_add_epoch: epoch },
+                    progress,
+                )
+                .await
+            }
+            Ok(SledExpungeRequestCompleteOutcome::Inconsistent { message }) => {
+                self.inconsistent(opctx, log, request, from, message, progress)
+                    .await
+            }
+            Err(error) => {
+                error_outcome(log, progress, "completing the request", &error)
+            }
+        }
+    }
+
+    // TODO-RAINCLAUDE: the request's records contradict each other, which won't resolve by retrying: the internal detail goes in the status, and the operator gets a generic last_error.
+    async fn inconsistent(
+        &self,
+        opctx: &OpContext,
+        log: &Logger,
+        request: &SledExpungeRequest,
+        expected_state: SledExpungeRequestUnfinishedState,
+        message: String,
+        progress: &mut RequestProgress,
+    ) -> SledExpungeRequestOutcome {
+        error!(
+            log,
+            "sled expunge request's records are inconsistent";
+            "error" => &message,
+        );
+        progress.inconsistent_records = Some(message);
+        self.set_last_error(
+            opctx,
+            log,
+            request,
+            expected_state,
+            NeedsAttention::InconsistentRecords,
+            progress,
+        )
+        .await
     }
 
     async fn set_last_error(
@@ -301,9 +931,10 @@ impl SledExpunge {
         request: &SledExpungeRequest,
         expected_state: SledExpungeRequestUnfinishedState,
         attention: NeedsAttention,
+        progress: &mut RequestProgress,
     ) -> SledExpungeRequestOutcome {
         let last_error = attention.render(request);
-        // TODO-RAINCLAUDE: skipping an unchanged message keeps time_modified meaningful; the comparison is against the row as listed, so a concurrent writer can at worst cause one redundant write.
+        // TODO-RAINCLAUDE: skipping an unchanged message keeps time_modified meaningful; callers pass the freshest row this activation has (as listed, or as its last write returned it), so a concurrent writer can at worst cause one redundant write.
         if request.last_error.as_deref() == Some(last_error.as_str()) {
             info!(
                 log,
@@ -314,6 +945,7 @@ impl SledExpunge {
                 last_error,
             };
         }
+        progress.step = SledExpungeTaskStep::SettingLastError;
         let result = self
             .datastore
             .sled_expunge_request_set_last_error(
@@ -323,14 +955,17 @@ impl SledExpunge {
                 last_error.clone(),
             )
             .await;
-        update_outcome(log, "setting last_error", result, || {
-            warn!(
-                log,
-                "sled expunge request needs attention";
-                "last_error" => &last_error,
-            );
-            SledExpungeRequestOutcome::LastErrorSet { last_error }
-        })
+        match require_updated(log, progress, "setting last_error", result) {
+            Ok(_) => {
+                warn!(
+                    log,
+                    "sled expunge request needs attention";
+                    "last_error" => &last_error,
+                );
+                SledExpungeRequestOutcome::LastErrorSet { last_error }
+            }
+            Err(outcome) => outcome,
+        }
     }
 
     async fn fail(
@@ -340,7 +975,9 @@ impl SledExpunge {
         request: &SledExpungeRequest,
         from: SledExpungeRequestUnfinishedState,
         reason: FailureReason,
+        progress: &mut RequestProgress,
     ) -> SledExpungeRequestOutcome {
+        progress.step = SledExpungeTaskStep::Failing;
         let sled_id = SledUuid::from(request.sled_id);
         // TODO-RAINCLAUDE: the failure reason states the sled's policy as read now. A missing sled row still fails the request, saying the policy could not be read; any other read error leaves the request for the next activation.
         let sled_policy = match LookupPath::new(opctx, &self.datastore)
@@ -369,6 +1006,7 @@ impl SledExpunge {
             ) => {
                 return error_outcome(
                     log,
+                    progress,
                     "reading the sled's policy to fail the request",
                     &error,
                 );
@@ -384,14 +1022,17 @@ impl SledExpunge {
                 failure_reason.clone(),
             )
             .await;
-        update_outcome(log, "failing the request", result, || {
-            warn!(
-                log,
-                "failed sled expunge request";
-                "failure_reason" => &failure_reason,
-            );
-            SledExpungeRequestOutcome::Failed { failure_reason }
-        })
+        match require_updated(log, progress, "failing the request", result) {
+            Ok(_) => {
+                warn!(
+                    log,
+                    "failed sled expunge request";
+                    "failure_reason" => &failure_reason,
+                );
+                SledExpungeRequestOutcome::Failed { failure_reason }
+            }
+            Err(outcome) => outcome,
+        }
     }
 }
 
@@ -413,6 +1054,233 @@ impl BackgroundTask for SledExpunge {
     }
 }
 
+fn request_log(log: &Logger, request: &SledExpungeRequest) -> Logger {
+    log.new(o!(
+        "sled_expunge_request_id" => request.id().to_string(),
+        "sled_id" => request.sled_id.to_string(),
+        "tq_epoch" => request.tq_epoch,
+        "state" => request.state.to_string(),
+    ))
+}
+
+// TODO-RAINCLAUDE: drives every request concurrently, at most MAX_CONCURRENT_REQUESTS at once, each bounded by PER_REQUEST_TIMEOUT, so a request stalled on one MGS (or anything else) delays the others only by holding one of the concurrency slots for at most that long; nothing bounds the activation as a whole beyond that. A timed-out request reports TimedOut in the step it had reached, with whatever progress it recorded, and its driving future is dropped; if it may have just completed (it timed out while advancing to expunging or completing), instance_watcher and blueprint_planner are activated anyway, since an extra activation is harmless and a missed one waits for their periodic activations.
+async fn drive_requests_with_timeout<D: RequestDriver>(
+    log: &Logger,
+    requests: Vec<SledExpungeRequest>,
+    driver: &D,
+    activators: &SledExpungeActivators,
+    internal_errors: &IdOrdMap<InternalErrorStreak>,
+) -> (Vec<SledExpungeRequestStatus>, IdOrdMap<InternalErrorStreak>) {
+    let driven: Vec<(SledExpungeRequestStatus, Option<InternalErrorStreak>)> =
+        stream::iter(requests)
+            .map(|request| async move {
+                let mut progress = RequestProgress {
+                    internal_errors: internal_errors
+                        .get(&request.id())
+                        .map_or(0, |streak| streak.consecutive),
+                    ..RequestProgress::default()
+                };
+                let outcome = match tokio::time::timeout(
+                    PER_REQUEST_TIMEOUT,
+                    driver.drive(&request, &mut progress),
+                )
+                .await
+                {
+                    Ok(outcome) => outcome,
+                    Err(_) => {
+                        error!(
+                            request_log(log, &request),
+                            "driving sled expunge request timed out; the next \
+                             activation retries it";
+                            "timeout" => ?PER_REQUEST_TIMEOUT,
+                            "step" => %progress.step,
+                        );
+                        match progress.step {
+                            SledExpungeTaskStep::AdvancingToExpunging
+                            | SledExpungeTaskStep::Completing => {
+                                activators.activate();
+                            }
+                            SledExpungeTaskStep::Starting
+                            | SledExpungeTaskStep::CheckingTrustQuorum
+                            | SledExpungeTaskStep::ResolvingPower
+                            | SledExpungeTaskStep::SendingPowerOff
+                            | SledExpungeTaskStep::AdvancingToPoweringOff
+                            | SledExpungeTaskStep::SettingLastError
+                            | SledExpungeTaskStep::Failing => {}
+                        }
+                        SledExpungeRequestOutcome::TimedOut {
+                            step: progress.step,
+                        }
+                    }
+                };
+                let status = request_status(&request, outcome, progress);
+                let streak =
+                    (status.consecutive_internal_errors > 0).then(|| {
+                        InternalErrorStreak {
+                            request_id: request.id(),
+                            consecutive: status.consecutive_internal_errors,
+                        }
+                    });
+                (status, streak)
+            })
+            .buffer_unordered(MAX_CONCURRENT_REQUESTS)
+            .collect()
+            .await;
+    let mut statuses = Vec::with_capacity(driven.len());
+    let mut streaks = IdOrdMap::new();
+    for (status, streak) in driven {
+        statuses.push(status);
+        if let Some(streak) = streak {
+            streaks.insert_overwrite(streak);
+        }
+    }
+    (statuses, streaks)
+}
+
+fn request_status(
+    request: &SledExpungeRequest,
+    outcome: SledExpungeRequestOutcome,
+    progress: RequestProgress,
+) -> SledExpungeRequestStatus {
+    let RequestProgress {
+        step: _,
+        latest_row,
+        persistent_error: _,
+        internal_errors,
+        inconsistent_records,
+        power_check,
+    } = progress;
+    let consecutive_internal_errors = match &outcome {
+        SledExpungeRequestOutcome::Error { .. }
+        | SledExpungeRequestOutcome::TimedOut { .. } => internal_errors,
+        SledExpungeRequestOutcome::RemovalPreparing
+        | SledExpungeRequestOutcome::LastErrorSet { .. }
+        | SledExpungeRequestOutcome::LastErrorUnchanged { .. }
+        | SledExpungeRequestOutcome::Completed { .. }
+        | SledExpungeRequestOutcome::Failed { .. }
+        | SledExpungeRequestOutcome::NotInExpectedState { .. } => 0,
+    };
+    let state = task_request_state(request.state);
+    // TODO-RAINCLAUDE: Completed and Failed say where the request ended (complete writes done inside its own transaction, not through require_updated); otherwise the last row this activation wrote says, if it wrote one.
+    let state_after = match &outcome {
+        SledExpungeRequestOutcome::Completed { .. } => {
+            Some(SledExpungeTaskRequestState::Done)
+        }
+        SledExpungeRequestOutcome::Failed { .. } => {
+            Some(SledExpungeTaskRequestState::Failed)
+        }
+        SledExpungeRequestOutcome::RemovalPreparing
+        | SledExpungeRequestOutcome::LastErrorSet { .. }
+        | SledExpungeRequestOutcome::LastErrorUnchanged { .. }
+        | SledExpungeRequestOutcome::NotInExpectedState { .. }
+        | SledExpungeRequestOutcome::TimedOut { .. }
+        | SledExpungeRequestOutcome::Error { .. } => {
+            latest_row.map(|row| task_request_state(row.state))
+        }
+    }
+    .filter(|after| *after != state);
+    SledExpungeRequestStatus {
+        request_id: request.id(),
+        sled_id: SledUuid::from(request.sled_id),
+        state,
+        state_after,
+        outcome,
+        consecutive_internal_errors,
+        inconsistent_records,
+        power_check,
+    }
+}
+
+// TODO-RAINCLAUDE: discovery failing outright leaves every request with no MGS for its rack, so each waits with the no-MGS last_error; the error itself goes in the status and log only, never in last_error.
+async fn discover_gateways(
+    log: &Logger,
+    resolver: &internal_dns_resolver::Resolver,
+) -> MgsDiscovery {
+    match GatewaysByRack::resolve_all_gateways(log, resolver).await {
+        Ok(gateways) => {
+            for (gateway, error) in gateways.unknown() {
+                warn!(
+                    log,
+                    "could not discover an MGS's rack; requests do not power \
+                     off through it";
+                    "mgs_addr" => %gateway.addr,
+                    InlineErrorChain::new(error),
+                );
+            }
+            MgsDiscovery::Discovered(gateways)
+        }
+        Err(error) => {
+            let error = format!("{error:#}");
+            error!(
+                log,
+                "failed to discover any MGS; requests see no MGS for their \
+                 rack";
+                "error" => &error,
+            );
+            MgsDiscovery::Failed(error)
+        }
+    }
+}
+
+// TODO-RAINCLAUDE: the slot the latest loaded inventory collection puts the request's sled in, or why it can't be powered off there. The collection can be a loader period or more stale, which power_off_sled_at_slot's identity re-check makes safe. An SP that is not a sled's, or one in another rack, should not happen for a request's sled, so those wait for support.
+fn decide(
+    request: &SledExpungeRequest,
+    collection: Option<&Collection>,
+) -> Result<u16, SledExpungePowerOffWait> {
+    let Some(collection) = collection else {
+        return Err(SledExpungePowerOffWait::NoInventory);
+    };
+    let Some(sp) = collection.sps.get(&request.baseboard_id()) else {
+        return Err(SledExpungePowerOffWait::NotInInventory);
+    };
+    match sp.sp_type {
+        SpType::Sled => {}
+        SpType::Switch | SpType::Power => {
+            return Err(SledExpungePowerOffWait::NotASled {
+                sp_type: sp.sp_type,
+            });
+        }
+    }
+    if sp.rack_id != RackUuid::from(request.rack_id) {
+        return Err(SledExpungePowerOffWait::InAnotherRack {
+            rack_id: sp.rack_id,
+        });
+    }
+    if SWITCH_ATTACHED_SLED_CUBBIES.contains(&sp.sp_slot) {
+        return Err(SledExpungePowerOffWait::SwitchAttachedCubby {
+            slot: sp.sp_slot,
+        });
+    }
+    Ok(sp.sp_slot)
+}
+
+// TODO-RAINCLAUDE: whether a wait should wake inventory collection: only for the waits a newer collection may resolve (no collection, sled not found, its slot holding another board, or an MGS that could not read the slot's identity), and only if the loaded collection started before the request's time_modified, which marks when its current wait began (set_last_error leaves an unchanged last_error alone), so each wait wakes collection at most until a collection taken during it is loaded.
+fn wakes_inventory_collection(
+    wait: &SledExpungePowerOffWait,
+    collection: Option<&Collection>,
+    request: &SledExpungeRequest,
+) -> bool {
+    let newer_collection_may_help = match wait {
+        SledExpungePowerOffWait::NoInventory
+        | SledExpungePowerOffWait::NotInInventory
+        | SledExpungePowerOffWait::SlotHoldsOtherBoard { .. } => true,
+        SledExpungePowerOffWait::NotPoweredOff { failed_attempts, .. } => {
+            failed_attempts.iter().any(|attempt| match attempt.stage {
+                MgsPowerOffFailure::RecheckFailed => true,
+                MgsPowerOffFailure::PowerOffFailed => false,
+            })
+        }
+        SledExpungePowerOffWait::NotASled { .. }
+        | SledExpungePowerOffWait::InAnotherRack { .. }
+        | SledExpungePowerOffWait::SwitchAttachedCubby { .. }
+        | SledExpungePowerOffWait::NoMgs => false,
+    };
+    newer_collection_may_help
+        && collection.is_none_or(|collection| {
+            collection.time_started < request.time_modified
+        })
+}
+
 fn task_request_state(
     state: SledExpungeRequestState,
 ) -> SledExpungeTaskRequestState {
@@ -431,59 +1299,104 @@ fn task_request_state(
     }
 }
 
-// TODO-RAINCLAUDE: maps one compare-and-swap's result: updated runs on success, a lost compare-and-swap is reported (another Nexus moved the request; the next activation sees its new state), and an error is logged and reported.
-fn update_outcome<F>(
+// TODO-RAINCLAUDE: maps one compare-and-swap's result: the updated row on success, else the outcome to report: a lost compare-and-swap (another Nexus moved the request; the next activation sees its new state), or an error, logged.
+fn require_updated(
     log: &Logger,
+    progress: &mut RequestProgress,
     step: &str,
     result: Result<SledExpungeRequestUpdateOutcome, Error>,
-    updated: F,
-) -> SledExpungeRequestOutcome
-where
-    F: FnOnce() -> SledExpungeRequestOutcome,
-{
+) -> Result<SledExpungeRequest, SledExpungeRequestOutcome> {
     match result {
-        Ok(SledExpungeRequestUpdateOutcome::Updated { .. }) => updated(),
-        Ok(SledExpungeRequestUpdateOutcome::NotInExpectedState { current }) => {
-            info!(
-                log,
-                "sled expunge request changed concurrently; leaving it to the \
-                 next activation";
-                "step" => step,
-                "current_state" => current.state.to_string(),
-            );
-            SledExpungeRequestOutcome::NotInExpectedState {
-                current_state: task_request_state(current.state),
-            }
+        Ok(SledExpungeRequestUpdateOutcome::Updated { request }) => {
+            progress.latest_row = Some(request.clone());
+            Ok(request)
         }
-        Err(error) => error_outcome(log, step, &error),
+        Ok(SledExpungeRequestUpdateOutcome::NotInExpectedState { current }) => {
+            Err(not_in_expected_state_outcome(log, step, &current))
+        }
+        Err(error) => Err(error_outcome(log, progress, step, &error)),
     }
 }
 
+fn not_in_expected_state_outcome(
+    log: &Logger,
+    step: &str,
+    current: &SledExpungeRequest,
+) -> SledExpungeRequestOutcome {
+    info!(
+        log,
+        "sled expunge request changed concurrently; leaving it to the next \
+         activation";
+        "step" => step,
+        "current_state" => current.state.to_string(),
+    );
+    SledExpungeRequestOutcome::NotInExpectedState {
+        current_state: task_request_state(current.state),
+    }
+}
+
+// TODO-RAINCLAUDE: a retryable error (Error::retryable: only ServiceUnavailable, the database or another service briefly unreachable) stays in the status only; every other error kind should not resolve by retrying, so surface_internal_error counts it toward a generic last_error.
 fn error_outcome(
     log: &Logger,
+    progress: &mut RequestProgress,
     step: &str,
     error: &Error,
 ) -> SledExpungeRequestOutcome {
-    error!(log, "sled expunge request step failed"; "step" => step, error);
+    if error.retryable() {
+        warn!(log, "sled expunge request step failed"; "step" => step, error);
+    } else {
+        error!(log, "sled expunge request step failed"; "step" => step, error);
+    }
+    progress.persistent_error = !error.retryable();
     SledExpungeRequestOutcome::Error {
         error: format!("{step}: {}", InlineErrorChain::new(error)),
+        last_error: None,
     }
 }
 
-// TODO-RAINCLAUDE: last_error and failure_reason are shown to operators as is, so each is rendered here, in one place, from a typed reason carrying only epochs and ids; no database, MGS, or internal error text can reach them. This module is their only writer, so a module-local enum is enough; an OperatorMessage newtype in nexus-types would only pay off once another crate writes these columns.
+// TODO-RAINCLAUDE: whether creation settled the removal's send (send_uncertain clear): the coordinator accepted it, or its coordinator was not in service so nothing was sent.
 #[derive(Clone, Copy, Debug)]
-enum NeedsAttention {
-    RemovalStuckPreparing,
-    ReAddPreparing { re_add_epoch: Epoch },
-    InconsistentRecords,
+enum RemovalSend {
+    Confirmed,
+    Uncertain,
 }
 
+// TODO-RAINCLAUDE: why a request needs attention, carrying its typed reason; this module is the only writer of last_error, so a module-local enum is enough, and an OperatorMessage newtype in nexus-types would only pay off once another crate writes these columns.
+#[derive(Clone, Debug)]
+enum NeedsAttention {
+    RemovalStuckPreparing { send: RemovalSend },
+    ReAddPreparing { re_add_epoch: Epoch },
+    InconsistentRecords,
+    InternalError,
+    PowerOff(SledExpungePowerOffWait),
+}
+
+const KEEPS_RETRYING: &str =
+    "Nexus will keep retrying; if this persists, contact Oxide support.";
+
 impl NeedsAttention {
-    fn render(self, request: &SledExpungeRequest) -> String {
+    // TODO-RAINCLAUDE: last_error is shown to operators as is, so it is rendered here, in one place, and the rendering takes only epochs, ids, cubby (slot) numbers and switch numbers from the reason; no database, MGS, or internal error text, and no MGS address, reaches it.
+    fn render(&self, request: &SledExpungeRequest) -> String {
         let rack_id = request.rack_id;
         let tq_epoch = request.tq_epoch;
         match self {
-            NeedsAttention::RemovalStuckPreparing => format!(
+            // TODO-RAINCLAUDE: send_uncertain means creation could not confirm the change reached its coordinator, which only support can tell apart from a coordinator that is stuck, so that text gives no abort steps.
+            NeedsAttention::RemovalStuckPreparing {
+                send: RemovalSend::Uncertain,
+            } => {
+                format!(
+                    "The rack membership change that removes this sled \
+                     (version {tq_epoch}) has stayed preparing for more than \
+                     {} minutes, and when this request was created Nexus \
+                     could not confirm that the change reached the sled \
+                     coordinating it, so the change may never have started. \
+                     Contact Oxide support.",
+                    REMOVAL_PREPARING_ATTENTION_THRESHOLD.num_minutes(),
+                )
+            }
+            NeedsAttention::RemovalStuckPreparing {
+                send: RemovalSend::Confirmed,
+            } => format!(
                 "The rack membership change that removes this sled (version \
                  {tq_epoch}) has stayed preparing for more than {} minutes. \
                  Possible causes include an unreachable coordinator sled or \
@@ -506,10 +1419,79 @@ impl NeedsAttention {
                  this persists, contact Oxide support.",
             ),
             NeedsAttention::InconsistentRecords => {
-                "This request's rack membership records are inconsistent, so \
-                 it cannot continue. Contact Oxide support."
+                "This request's records are inconsistent, so it cannot \
+                 continue. Contact Oxide support."
                     .to_string()
             }
+            NeedsAttention::InternalError => format!(
+                "Nexus hit an internal error while driving this request. \
+                 {KEEPS_RETRYING}"
+            ),
+            NeedsAttention::PowerOff(wait) => power_off_wait_text(wait),
+        }
+    }
+}
+
+fn power_off_wait_text(wait: &SledExpungePowerOffWait) -> String {
+    match wait {
+        SledExpungePowerOffWait::SwitchAttachedCubby { slot } => format!(
+            "This sled was found in switch-attached cubby {slot}, so it is a \
+             scrimlet (it manages a switch), and Nexus will not power it off. \
+             Expunging a scrimlet through this API is not supported. Contact \
+             Oxide support."
+        ),
+        SledExpungePowerOffWait::NoMgs => format!(
+            "Nexus could not find the management gateway of either switch in \
+             this sled's rack, so it cannot find the sled. {KEEPS_RETRYING}"
+        ),
+        SledExpungePowerOffWait::NoInventory => format!(
+            "Nexus has not loaded an inventory collection yet, so it cannot \
+             tell which cubby this sled is in. {KEEPS_RETRYING}"
+        ),
+        SledExpungePowerOffWait::NotASled { .. } => "The latest inventory \
+            collection reports this sled's baseboard on a service processor \
+            that is not a sled's, so Nexus will not power it off. Contact \
+            Oxide support."
+            .to_string(),
+        SledExpungePowerOffWait::InAnotherRack { rack_id } => format!(
+            "The latest inventory collection found this sled in rack \
+             {rack_id}, not in this request's rack, so Nexus will not power \
+             it off. Contact Oxide support."
+        ),
+        SledExpungePowerOffWait::NotInInventory => format!(
+            "This sled was not found in the latest inventory collection, so \
+             Nexus cannot tell which cubby it is in. Requests for sleds that \
+             have been physically removed are not handled yet. \
+             {KEEPS_RETRYING}"
+        ),
+        SledExpungePowerOffWait::SlotHoldsOtherBoard { slot, .. } => format!(
+            "Cubby {slot}, where the latest inventory collection found this \
+             sled, now holds another board, so Nexus did not send a power-off \
+             to it. {KEEPS_RETRYING}"
+        ),
+        SledExpungePowerOffWait::NotPoweredOff { slot, failed_attempts } => {
+            format!(
+                "Nexus could not power off this sled in cubby {slot} ({}). \
+                 {KEEPS_RETRYING}",
+                failed_attempts
+                    .iter()
+                    .map(|attempt| power_off_failure_text(&attempt.stage))
+                    .collect::<BTreeSet<_>>()
+                    .iter()
+                    .join("; "),
+            )
+        }
+    }
+}
+
+fn power_off_failure_text(failure: &MgsPowerOffFailure) -> &'static str {
+    match failure {
+        MgsPowerOffFailure::RecheckFailed => {
+            "a management gateway could not check the sled's service \
+             processor's identity"
+        }
+        MgsPowerOffFailure::PowerOffFailed => {
+            "a management gateway did not confirm the power-off command"
         }
     }
 }
@@ -522,7 +1504,7 @@ enum FailureReason {
 }
 
 impl FailureReason {
-    // TODO-RAINCLAUDE: sled_policy is None when the sled's row could not be found.
+    // TODO-RAINCLAUDE: failure_reason is shown to operators as is, so like last_error it is rendered only here, from epochs, ids and policies. sled_policy is None when the sled's row could not be found. A re-add can fail a request in expunging, after the sled was powered off, so that text says so, from the row's power_off_outcome.
     fn render(
         self,
         request: &SledExpungeRequest,
@@ -541,11 +1523,20 @@ impl FailureReason {
                  could not be found, so the sled was neither powered off nor \
                  expunged. Contact Oxide support."
             ),
-            FailureReason::ReAdded { re_add_epoch } => format!(
-                "The sled was added back to the rack (rack membership version \
-                 {re_add_epoch}) after its removal at version {tq_epoch}, so \
-                 it was not expunged. Contact Oxide support."
-            ),
+            FailureReason::ReAdded { re_add_epoch } => {
+                let power_off = match request.power_off_outcome {
+                    None => "",
+                    Some(SledExpungePowerOffOutcome::PoweredOff) => {
+                        " Nexus had powered the sled off."
+                    }
+                };
+                format!(
+                    "The sled was added back to the rack (rack membership \
+                     version {re_add_epoch}) after its removal at version \
+                     {tq_epoch}, so this request did not expunge \
+                     it.{power_off} Contact Oxide support."
+                )
+            }
         };
         let sled_id = request.sled_id;
         let policy = match sled_policy {
@@ -579,6 +1570,8 @@ mod test {
     use super::*;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::prelude::*;
+    use gateway_types::component::PowerState;
+    use gateway_types::component::SpType;
     use nexus_auth::authz;
     use nexus_db_model::HwBaseboardId;
     use nexus_db_queries::db::datastore::TqPrepareStatusOutcome;
@@ -588,15 +1581,21 @@ mod test {
     use nexus_db_queries::db::pub_test_utils::helpers::sled_upsert_for_baseboard;
     use nexus_db_queries::db::pub_test_utils::sled_expunge_request::insert_sled_expunge_request_for_sled;
     use nexus_db_queries::db::pub_test_utils::sled_expunge_request::set_sled_expunge_request_state;
+    use nexus_inventory::CollectionBuilder;
     use nexus_types::identity::Asset;
+    use nexus_types::inventory::ServiceProcessor;
     use nexus_types::trust_quorum::IsLrtqUpgrade;
     use nexus_types::trust_quorum::ProposedTrustQuorumConfig;
     use nexus_types::trust_quorum::TrustQuorumConfig;
     use nexus_types::trust_quorum::TrustQuorumConfigState;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::RackUuid;
+    use omicron_uuid_kinds::SledExpungeRequestUuid;
     use sled_hardware_types::BaseboardId;
     use std::collections::BTreeSet;
+    use std::net::Ipv6Addr;
+    use std::net::SocketAddrV6;
     use trust_quorum_types::configuration::Configuration;
     use trust_quorum_types::crypto::Sha3_256Digest;
     use uuid::Uuid;
@@ -892,9 +1891,8 @@ mod test {
         removes this sled (version 2) was aborted, so the sled is still a \
         member of the rack and was neither powered off nor expunged. To try \
         again, submit a new expunge request for the sled.";
-    const INCONSISTENT_RECORDS_TEXT: &str = "This request's rack membership \
-        records are inconsistent, so it cannot continue. Contact Oxide \
-        support.";
+    const INCONSISTENT_RECORDS_TEXT: &str = "This request's records are \
+        inconsistent, so it cannot continue. Contact Oxide support.";
     const POLICY_UNREADABLE_TEXT: &str =
         "The sled's current policy could not be read.";
 
@@ -913,12 +1911,73 @@ mod test {
         request: &SledExpungeRequest,
         outcome: SledExpungeRequestOutcome,
     ) -> SledExpungeRequestStatus {
+        request_status(request, outcome, RequestProgress::default())
+    }
+
+    const NO_INVENTORY_TEXT: &str = "Nexus has not loaded an inventory \
+        collection yet, so it cannot tell which cubby this sled is in. Nexus \
+        will keep retrying; if this persists, contact Oxide support.";
+
+    // TODO-RAINCLAUDE: a waiting request whose removal has committed, in a database-only test: it advances and goes on to powering_off, where it waits for an inventory collection.
+    fn chained_no_inventory_status(
+        request: &SledExpungeRequest,
+    ) -> SledExpungeRequestStatus {
         SledExpungeRequestStatus {
-            request_id: request.id(),
-            sled_id: SledUuid::from(request.sled_id),
-            state: task_request_state(request.state),
-            outcome,
-            inconsistent_records: None,
+            state_after: Some(SledExpungeTaskRequestState::PoweringOff),
+            ..no_inventory_status(request)
+        }
+    }
+
+    // TODO-RAINCLAUDE: a powering_off request in a database-only test, where no inventory collection is loaded, so the request waits with a last_error before any MGS is needed.
+    fn no_inventory_status(
+        request: &SledExpungeRequest,
+    ) -> SledExpungeRequestStatus {
+        SledExpungeRequestStatus {
+            power_check: Some(SledExpungePowerCheck::Waiting {
+                wait: SledExpungePowerOffWait::NoInventory,
+            }),
+            ..status_for(
+                request,
+                SledExpungeRequestOutcome::LastErrorSet {
+                    last_error: NO_INVENTORY_TEXT.to_string(),
+                },
+            )
+        }
+    }
+
+    fn no_dns_servers_resolver(
+        db: &TestDatabase,
+    ) -> internal_dns_resolver::Resolver {
+        internal_dns_resolver::Resolver::new_from_addrs(
+            db.opctx().log.clone(),
+            &[],
+        )
+        .expect("created a DNS resolver with no servers")
+    }
+
+    // TODO-RAINCLAUDE: a task with no DNS servers, so MGS discovery fails, and no inventory collection loaded, so a powering_off request waits for one; its activators are wired up, and handles to them are returned so tests can check them.
+    fn test_task(db: &TestDatabase) -> (SledExpunge, SledExpungeActivators) {
+        let activators = test_activators();
+        let task = SledExpunge::new(
+            db.datastore().clone(),
+            no_dns_servers_resolver(db),
+            watch::channel(None).1,
+            wired_up_activator(),
+            activators.clone(),
+        );
+        (task, activators)
+    }
+
+    fn wired_up_activator() -> Activator {
+        let activator = Activator::new();
+        activator.mark_wired_up().expect("a new activator is not wired up");
+        activator
+    }
+
+    fn test_activators() -> SledExpungeActivators {
+        SledExpungeActivators {
+            instance_watcher: wired_up_activator(),
+            blueprint_planner: wired_up_activator(),
         }
     }
 
@@ -955,11 +2014,40 @@ mod test {
         read(db, request).await
     }
 
+    fn statuses<I>(entries: I) -> IdOrdMap<SledExpungeRequestStatus>
+    where
+        I: IntoIterator<Item = SledExpungeRequestStatus>,
+    {
+        IdOrdMap::from_iter_unique(entries)
+            .expect("expected entries are unique")
+    }
+
     fn listed(entries: Vec<SledExpungeRequestStatus>) -> SledExpungeStatus {
         SledExpungeStatus::Listed {
-            requests: IdOrdMap::from_iter_unique(entries)
-                .expect("expected entries are unique"),
+            requests: statuses(entries),
+            mgs_discovery: SledExpungeMgsDiscovery::NotNeeded,
         }
+    }
+
+    // TODO-RAINCLAUDE: drives one request directly, as an activation would, with the task's own lazy MGS discovery.
+    async fn drive_one(
+        task: &SledExpunge,
+        opctx: &OpContext,
+        request: &SledExpungeRequest,
+        now: DateTime<Utc>,
+    ) -> SledExpungeRequestStatus {
+        let mgs = ActivationMgs::new(&opctx.log, &task.resolver);
+        let mut progress = RequestProgress::default();
+        let outcome = task
+            .drive_request(
+                opctx,
+                PoweringOffInputs { mgs: &mgs, collection: None },
+                request,
+                now,
+                &mut progress,
+            )
+            .await;
+        request_status(request, outcome, progress)
     }
 
     #[tokio::test]
@@ -968,7 +2056,7 @@ mod test {
             "test_sled_expunge_stuck_preparing_sets_last_error",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let task = SledExpunge::new(db.datastore().clone());
+        let (mut task, _) = test_task(&db);
         let rack = TestRack::new(&db).await;
         rack.propose_removal(&db).await;
         let inserted = rack
@@ -978,6 +2066,14 @@ mod test {
                 SledExpungeRequestState::WaitingForTrustQuorum,
             )
             .await;
+        // TODO-RAINCLAUDE: creation confirmed the removal's send, so the message gives the abort-and-resubmit steps; the send_uncertain message is checked in test_sled_expunge_power_off_texts.
+        db.datastore()
+            .sled_expunge_request_clear_send_uncertain(
+                db.opctx(),
+                &authz_sled_expunge_request_from_id(inserted.id()),
+            )
+            .await
+            .expect("cleared send_uncertain");
         let request = backdated(&db, &inserted).await;
         let threshold_at =
             request.time_created + REMOVAL_PREPARING_ATTENTION_THRESHOLD;
@@ -1039,7 +2135,8 @@ mod test {
             "test_sled_expunge_drives_requests_independently",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let task = SledExpunge::new(db.datastore().clone());
+        let (mut task, activators) = test_task(&db);
+        let mut expected = Vec::new();
 
         let removed = TestRack::new(&db).await;
         removed.propose_removal(&db).await;
@@ -1051,6 +2148,7 @@ mod test {
                 SledExpungeRequestState::WaitingForTrustQuorum,
             )
             .await;
+        expected.push(chained_no_inventory_status(&removed_request));
 
         let aborted = TestRack::new(&db).await;
         aborted.propose_removal(&db).await;
@@ -1062,6 +2160,12 @@ mod test {
                 SledExpungeRequestState::WaitingForTrustQuorum,
             )
             .await;
+        expected.push(aborted.status(
+            &aborted_request,
+            SledExpungeRequestOutcome::Failed {
+                failure_reason: aborted.removal_aborted_text(),
+            },
+        ));
 
         // TODO-RAINCLAUDE: no config exists at epoch 9.
         let missing_config = TestRack::new(&db).await;
@@ -1072,6 +2176,17 @@ mod test {
                 SledExpungeRequestState::WaitingForTrustQuorum,
             )
             .await;
+        expected.push(missing_config.status(
+            &missing_config_request,
+            SledExpungeRequestOutcome::Failed {
+                failure_reason: format!(
+                    "This request's rack membership change (version 9) could \
+                     not be found, so the sled was neither powered off nor \
+                     expunged. Contact Oxide support. {}",
+                    missing_config.non_provisionable_text(),
+                ),
+            },
+        ));
 
         let preparing = TestRack::new(&db).await;
         preparing.propose_removal(&db).await;
@@ -1082,28 +2197,42 @@ mod test {
                 SledExpungeRequestState::WaitingForTrustQuorum,
             )
             .await;
+        expected.push(preparing.status(
+            &preparing_request,
+            SledExpungeRequestOutcome::RemovalPreparing,
+        ));
 
-        // TODO-RAINCLAUDE: check_no_new_member_being_expunged_conn refuses re-adding a sled with an unfinished request, so each re-add is proposed before the request row exists; the task's re-add handling is defensive.
-        let re_add_preparing = TestRack::new(&db).await;
-        let re_added = TestRack::new(&db).await;
-        let mut re_add_requests = Vec::new();
-        for rack in [&re_add_preparing, &re_added] {
+        // TODO-RAINCLAUDE: check_no_new_member_being_expunged_conn refuses re-adding a sled with an unfinished request, so each re-add is proposed before the request row exists; the task's re-add handling is defensive. A re-add still preparing waits with a last_error, and one that has started committing fails the request, whose failure reason says whether Nexus had powered the sled off (it had, for a request in expunging).
+        for (state, committing_power_off_sentence) in [
+            (SledExpungeRequestState::WaitingForTrustQuorum, None),
+            (SledExpungeRequestState::WaitingForTrustQuorum, Some("")),
+            (SledExpungeRequestState::Expunging, None),
+            (
+                SledExpungeRequestState::Expunging,
+                Some(" Nexus had powered the sled off."),
+            ),
+        ] {
+            let rack = TestRack::new(&db).await;
             rack.propose_removal(&db).await;
             rack.commit(&db, 2).await;
             rack.propose(&db, 3, 2, rack.members.clone()).await;
-            re_add_requests.push(
-                rack.insert_request(
-                    &db,
-                    2,
-                    SledExpungeRequestState::WaitingForTrustQuorum,
-                )
-                .await,
-            );
+            let request = rack.insert_request(&db, 2, state).await;
+            let outcome = match committing_power_off_sentence {
+                None => SledExpungeRequestOutcome::LastErrorSet {
+                    last_error: rack.re_add_preparing_text(),
+                },
+                Some(sentence) => {
+                    rack.start_committing(&db, 3).await;
+                    SledExpungeRequestOutcome::Failed {
+                        failure_reason: re_added_text(
+                            sentence,
+                            &non_provisionable_policy_sentence(rack.sled_id),
+                        ),
+                    }
+                }
+            };
+            expected.push(rack.status(&request, outcome));
         }
-        re_added.start_committing(&db, 3).await;
-        let [re_add_preparing_request, re_added_request] = re_add_requests
-            .try_into()
-            .expect("inserted one request for each rack");
 
         let powering_off = TestRack::new(&db).await;
         powering_off.propose_removal(&db).await;
@@ -1111,6 +2240,7 @@ mod test {
         let powering_off_request = powering_off
             .insert_request(&db, 2, SledExpungeRequestState::PoweringOff)
             .await;
+        expected.push(no_inventory_status(&powering_off_request));
 
         let expunging = TestRack::new(&db).await;
         expunging.propose_removal(&db).await;
@@ -1118,6 +2248,14 @@ mod test {
         let expunging_request = expunging
             .insert_request(&db, 2, SledExpungeRequestState::Expunging)
             .await;
+        expected.push(expunging.status(
+            &expunging_request,
+            SledExpungeRequestOutcome::Completed {
+                previous_sled_policy: SledPolicy::InService {
+                    provision_policy: SledProvisionPolicy::NonProvisionable,
+                },
+            },
+        ));
 
         // TODO-RAINCLAUDE: the request points at epoch 1, the committed RSS config that still includes the sled, which the gate reports as inconsistent records.
         let inconsistent = TestRack::new(&db).await;
@@ -1128,6 +2266,22 @@ mod test {
                 SledExpungeRequestState::WaitingForTrustQuorum,
             )
             .await;
+        expected.push(SledExpungeRequestStatus {
+            inconsistent_records: Some(format!(
+                "sled expunge request {} for {} (rack {}, removal epoch 1): \
+                 the removal configuration (epoch 1, state Committed) still \
+                 includes the sled",
+                inconsistent_request.id,
+                inconsistent.target,
+                inconsistent.rack_id,
+            )),
+            ..inconsistent.status(
+                &inconsistent_request,
+                SledExpungeRequestOutcome::LastErrorSet {
+                    last_error: INCONSISTENT_RECORDS_TEXT.to_string(),
+                },
+            )
+        });
 
         // TODO-RAINCLAUDE: the request's sled row does not exist, so it fails without the sled's policy.
         let missing_sled = TestRack::new(&db).await;
@@ -1141,86 +2295,24 @@ mod test {
                 SledExpungeRequestState::WaitingForTrustQuorum,
             )
             .await;
+        expected.push(missing_sled.status(
+            &missing_sled_request,
+            SledExpungeRequestOutcome::Failed {
+                failure_reason: format!(
+                    "{REMOVAL_ABORTED_TEXT} {POLICY_UNREADABLE_TEXT}"
+                ),
+            },
+        ));
 
-        let inconsistent_detail = format!(
-            "sled expunge request {} for {} (rack {}, removal epoch 1): the \
-             removal configuration (epoch 1, state Committed) still includes \
-             the sled",
-            inconsistent_request.id, inconsistent.target, inconsistent.rack_id,
-        );
         assert_eq!(
             task.actually_activate(db.opctx(), now_db_precision()).await,
-            listed(vec![
-                removed.status(
-                    &removed_request,
-                    SledExpungeRequestOutcome::AdvancedToPoweringOff,
-                ),
-                aborted.status(
-                    &aborted_request,
-                    SledExpungeRequestOutcome::Failed {
-                        failure_reason: aborted.removal_aborted_text(),
-                    },
-                ),
-                missing_config.status(
-                    &missing_config_request,
-                    SledExpungeRequestOutcome::Failed {
-                        failure_reason: format!(
-                            "This request's rack membership change (version \
-                             9) could not be found, so the sled was neither \
-                             powered off nor expunged. Contact Oxide \
-                             support. {}",
-                            missing_config.non_provisionable_text(),
-                        ),
-                    },
-                ),
-                preparing.status(
-                    &preparing_request,
-                    SledExpungeRequestOutcome::RemovalPreparing,
-                ),
-                re_add_preparing.status(
-                    &re_add_preparing_request,
-                    SledExpungeRequestOutcome::LastErrorSet {
-                        last_error: re_add_preparing.re_add_preparing_text(),
-                    },
-                ),
-                re_added.status(
-                    &re_added_request,
-                    SledExpungeRequestOutcome::Failed {
-                        failure_reason: format!(
-                            "The sled was added back to the rack (rack \
-                             membership version 3) after its removal at \
-                             version 2, so it was not expunged. Contact Oxide \
-                             support. {}",
-                            re_added.non_provisionable_text(),
-                        ),
-                    },
-                ),
-                powering_off.status(
-                    &powering_off_request,
-                    SledExpungeRequestOutcome::NotHandledYet,
-                ),
-                expunging.status(
-                    &expunging_request,
-                    SledExpungeRequestOutcome::NotHandledYet,
-                ),
-                SledExpungeRequestStatus {
-                    inconsistent_records: Some(inconsistent_detail),
-                    ..inconsistent.status(
-                        &inconsistent_request,
-                        SledExpungeRequestOutcome::LastErrorSet {
-                            last_error: INCONSISTENT_RECORDS_TEXT.to_string(),
-                        },
-                    )
-                },
-                missing_sled.status(
-                    &missing_sled_request,
-                    SledExpungeRequestOutcome::Failed {
-                        failure_reason: format!(
-                            "{REMOVAL_ABORTED_TEXT} {POLICY_UNREADABLE_TEXT}"
-                        ),
-                    },
-                ),
-            ]),
+            listed(expected),
+        );
+        activators.instance_watcher.assert_activated(
+            "completing the expunging request activates instance_watcher",
+        );
+        activators.blueprint_planner.assert_activated(
+            "completing the expunging request activates blueprint_planner",
         );
         assert_eq!(read(&db, &preparing_request).await, preparing_request);
 
@@ -1228,14 +2320,15 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    // TODO-RAINCLAUDE: drive_request is handed the row as another Nexus listed it, after this one already moved it, so its compare-and-swap loses.
+    // TODO-RAINCLAUDE: the request is handed over as another Nexus listed it, after this one already moved it on, so the advance's compare-and-swap loses. Then power_off re-reads the row before any MGS call, so for a request that has since failed it reaches no MGS: its status has no power check (the unreachable MGS here would have recorded one before the last_error write found the request failed).
     #[tokio::test]
     async fn test_sled_expunge_stale_row_is_not_in_expected_state() {
         let logctx = dev::test_setup_log(
             "test_sled_expunge_stale_row_is_not_in_expected_state",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let task = SledExpunge::new(db.datastore().clone());
+        let (task, _) = test_task(&db);
+        let log = &db.opctx().log;
 
         let rack = TestRack::new(&db).await;
         rack.propose_removal(&db).await;
@@ -1253,11 +2346,8 @@ mod test {
             SledExpungeRequestState::PoweringOff,
         )
         .await;
-        let current = read(&db, &stale).await;
-
         assert_eq!(
-            task.drive_request(db.opctx(), stale.clone(), now_db_precision())
-                .await,
+            drive_one(&task, db.opctx(), &stale, now_db_precision()).await,
             rack.status(
                 &stale,
                 SledExpungeRequestOutcome::NotInExpectedState {
@@ -1265,7 +2355,41 @@ mod test {
                 },
             ),
         );
-        assert_eq!(read(&db, &stale).await, current);
+
+        let powering_off = read(&db, &stale).await;
+        set_sled_expunge_request_state(
+            db.datastore(),
+            &powering_off,
+            SledExpungeRequestState::Failed,
+        )
+        .await;
+        let unreachable = GatewayClient::from_addr(
+            log,
+            "[::1]:1".parse().expect("parsed an MGS address"),
+        );
+        let mut progress = RequestProgress::default();
+        let outcome = task
+            .power_off(
+                db.opctx(),
+                log,
+                &powering_off,
+                None,
+                PowerOffAt {
+                    clients: std::slice::from_ref(&unreachable),
+                    slot: 3,
+                },
+                &mut progress,
+            )
+            .await;
+        assert_eq!(
+            request_status(&powering_off, outcome, progress),
+            rack.status(
+                &powering_off,
+                SledExpungeRequestOutcome::NotInExpectedState {
+                    current_state: SledExpungeTaskRequestState::Failed,
+                },
+            ),
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1314,5 +2438,606 @@ mod test {
             render(None),
             format!("{REMOVAL_ABORTED_TEXT} {POLICY_UNREADABLE_TEXT}"),
         );
+    }
+
+    #[test]
+    fn test_sled_expunge_power_off_texts() {
+        let request = test_request();
+        assert_eq!(
+            NeedsAttention::PowerOff(
+                SledExpungePowerOffWait::SwitchAttachedCubby { slot: 14 }
+            )
+            .render(&request),
+            switch_attached_cubby_text(14),
+        );
+        assert_eq!(
+            NeedsAttention::InternalError.render(&request),
+            INTERNAL_ERROR_TEXT,
+        );
+        assert_eq!(
+            NeedsAttention::RemovalStuckPreparing {
+                send: RemovalSend::Uncertain
+            }
+            .render(&request),
+            "The rack membership change that removes this sled (version 2) \
+             has stayed preparing for more than 10 minutes, and when this \
+             request was created Nexus could not confirm that the change \
+             reached the sled coordinating it, so the change may never have \
+             started. Contact Oxide support.",
+        );
+        assert_eq!(
+            NeedsAttention::PowerOff(SledExpungePowerOffWait::NotPoweredOff {
+                slot: 3,
+                failed_attempts: [
+                    ("[::1]:1", MgsPowerOffFailure::PowerOffFailed),
+                    ("[::1]:2", MgsPowerOffFailure::RecheckFailed),
+                    ("[::1]:3", MgsPowerOffFailure::PowerOffFailed),
+                ]
+                .into_iter()
+                .map(|(mgs, stage)| SledExpungeMgsPowerOffFailure {
+                    mgs: mgs.parse().expect("parsed an MGS address"),
+                    stage,
+                    error: "error".to_string(),
+                })
+                .collect(),
+            })
+            .render(&request),
+            format!(
+                "Nexus could not power off this sled in cubby 3 (a \
+                 management gateway could not check the sled's service \
+                 processor's identity; a management gateway did not confirm \
+                 the power-off command). {KEEPS_RETRYING}"
+            ),
+        );
+        // TODO-RAINCLAUDE: a re-add fails a request in expunging after power-off, which the failure reason states; in waiting_for_trust_quorum there is no power-off outcome, so there is no such sentence.
+        let policy = Some(SledPolicy::Expunged);
+        let re_added = FailureReason::ReAdded { re_add_epoch: Epoch(3) };
+        let cases = [
+            (None, ""),
+            (
+                Some(SledExpungePowerOffOutcome::PoweredOff),
+                " Nexus had powered the sled off.",
+            ),
+        ];
+        for (power_off_outcome, sentence) in cases {
+            let request =
+                SledExpungeRequest { power_off_outcome, ..request.clone() };
+            assert_eq!(
+                re_added.render(&request, policy),
+                re_added_text(sentence, "the sled was expunged."),
+            );
+        }
+    }
+
+    // TODO-RAINCLAUDE: decide's outcome for each way the latest collection can place, or fail to place, the request's sled.
+    #[test]
+    fn test_sled_expunge_decide() {
+        let request = test_request();
+        let rack_id = RackUuid::from(request.rack_id);
+        let other_rack = RackUuid::new_v4();
+        let sp = |sp_type, sp_slot, rack_id| ServiceProcessor {
+            time_collected: now_db_precision(),
+            source: "test".to_string(),
+            sp_type,
+            sp_slot,
+            baseboard_revision: 0,
+            hubris_archive: "test".to_string(),
+            power_state: PowerState::A0,
+            rack_id,
+        };
+        assert_eq!(
+            decide(&request, None),
+            Err(SledExpungePowerOffWait::NoInventory)
+        );
+        let cases = [
+            (None, Err(SledExpungePowerOffWait::NotInInventory)),
+            (
+                Some(sp(SpType::Switch, 0, rack_id)),
+                Err(SledExpungePowerOffWait::NotASled {
+                    sp_type: SpType::Switch,
+                }),
+            ),
+            (
+                Some(sp(SpType::Sled, 3, other_rack)),
+                Err(SledExpungePowerOffWait::InAnotherRack {
+                    rack_id: other_rack,
+                }),
+            ),
+            (
+                Some(sp(SpType::Sled, 14, rack_id)),
+                Err(SledExpungePowerOffWait::SwitchAttachedCubby { slot: 14 }),
+            ),
+            (Some(sp(SpType::Sled, 3, rack_id)), Ok(3)),
+        ];
+        for (sp, expected) in cases {
+            let mut collection = CollectionBuilder::new("test").build();
+            if let Some(sp) = sp.clone() {
+                collection.sps.insert(Arc::new(request.baseboard_id()), sp);
+            }
+            assert_eq!(decide(&request, Some(&collection)), expected, "{sp:?}");
+        }
+    }
+
+    const INTERNAL_ERROR_TEXT: &str = "Nexus hit an internal error while \
+        driving this request. Nexus will keep retrying; if this persists, \
+        contact Oxide support.";
+
+    fn re_added_text(power_off_sentence: &str, policy: &str) -> String {
+        format!(
+            "The sled was added back to the rack (rack membership version 3) \
+             after its removal at version 2, so this request did not expunge \
+             it.{power_off_sentence} Contact Oxide support. At the time this \
+             request failed, {policy}"
+        )
+    }
+
+    // TODO-RAINCLAUDE: never answers for the stalled requests, which first record some progress, as if they had powered the sled off and stalled in stall_step; the others answer at once, recording when.
+    struct StallingDriver {
+        stalled: BTreeSet<SledExpungeRequestUuid>,
+        stall_step: SledExpungeTaskStep,
+        finished: std::sync::Mutex<
+            Vec<(SledExpungeRequestUuid, tokio::time::Instant)>,
+        >,
+    }
+
+    impl StallingDriver {
+        fn new<'r, I>(stalled: I, stall_step: SledExpungeTaskStep) -> Self
+        where
+            I: IntoIterator<Item = &'r SledExpungeRequest>,
+        {
+            Self {
+                stalled: stalled
+                    .into_iter()
+                    .map(|request| request.id())
+                    .collect(),
+                stall_step,
+                finished: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    fn stalled_power_check() -> SledExpungePowerCheck {
+        SledExpungePowerCheck::PoweredOff {
+            slot: 3,
+            mgs: "[::1]:12225".parse().expect("parsed an MGS address"),
+        }
+    }
+
+    impl RequestDriver for StallingDriver {
+        async fn drive(
+            &self,
+            request: &SledExpungeRequest,
+            progress: &mut RequestProgress,
+        ) -> SledExpungeRequestOutcome {
+            if self.stalled.contains(&request.id()) {
+                progress.step = self.stall_step;
+                progress.power_check = Some(stalled_power_check());
+                std::future::pending::<()>().await;
+            }
+            self.finished
+                .lock()
+                .expect("the finished list is not poisoned")
+                .push((request.id(), tokio::time::Instant::now()));
+            SledExpungeRequestOutcome::RemovalPreparing
+        }
+    }
+
+    // TODO-RAINCLAUDE: paused time makes the per-request timeout deterministic: tokio advances the clock only when every future is idle, so the stalled request times out at exactly PER_REQUEST_TIMEOUT while the healthy one finishes at once. A timed-out request keeps the step and progress it had reached.
+    #[tokio::test(start_paused = true)]
+    async fn test_sled_expunge_stalled_request_does_not_block_others() {
+        let log = slog::Logger::root(slog::Discard, o!());
+        let stalled = test_request();
+        let healthy = test_request();
+        let driver =
+            StallingDriver::new([&stalled], SledExpungeTaskStep::Completing);
+        let started = tokio::time::Instant::now();
+
+        let (statuses_out, internal_errors) = drive_requests_with_timeout(
+            &log,
+            vec![stalled.clone(), healthy.clone()],
+            &driver,
+            &test_activators(),
+            &IdOrdMap::new(),
+        )
+        .await;
+        assert_eq!(internal_errors, IdOrdMap::new());
+        assert_eq!(
+            driver
+                .finished
+                .into_inner()
+                .expect("the finished list is not poisoned"),
+            vec![(healthy.id(), started)],
+        );
+        assert_eq!(tokio::time::Instant::now() - started, PER_REQUEST_TIMEOUT);
+        assert_eq!(
+            statuses(statuses_out),
+            statuses([
+                SledExpungeRequestStatus {
+                    power_check: Some(stalled_power_check()),
+                    ..status_for(
+                        &stalled,
+                        SledExpungeRequestOutcome::TimedOut {
+                            step: SledExpungeTaskStep::Completing,
+                        },
+                    )
+                },
+                status_for(
+                    &healthy,
+                    SledExpungeRequestOutcome::RemovalPreparing,
+                ),
+            ]),
+        );
+    }
+
+    // TODO-RAINCLAUDE: a request that times out after it may have entered expunging activates instance_watcher and blueprint_planner, and one that times out sending the power-off command does not, since it cannot have completed; either way its internal-error streak is kept as it was.
+    #[tokio::test(start_paused = true)]
+    async fn test_sled_expunge_timeout_activates_by_step() {
+        let log = slog::Logger::root(slog::Discard, o!());
+        for (step, activates) in [
+            (SledExpungeTaskStep::AdvancingToExpunging, true),
+            (SledExpungeTaskStep::SendingPowerOff, false),
+        ] {
+            let stalled = test_request();
+            let driver = StallingDriver::new([&stalled], step);
+            let activators = test_activators();
+            let streak = InternalErrorStreak {
+                request_id: stalled.id(),
+                consecutive: 2,
+            };
+            let earlier = IdOrdMap::from_iter_unique([streak.clone()])
+                .expect("one streak");
+
+            let (statuses_out, internal_errors) = drive_requests_with_timeout(
+                &log,
+                vec![stalled.clone()],
+                &driver,
+                &activators,
+                &earlier,
+            )
+            .await;
+
+            assert_eq!(
+                statuses(statuses_out),
+                statuses([SledExpungeRequestStatus {
+                    consecutive_internal_errors: 2,
+                    power_check: Some(stalled_power_check()),
+                    ..status_for(
+                        &stalled,
+                        SledExpungeRequestOutcome::TimedOut { step },
+                    )
+                }]),
+                "timed out in {step}",
+            );
+            assert_eq!(internal_errors, earlier, "timed out in {step}");
+            if activates {
+                activators.instance_watcher.assert_activated(&format!(
+                    "timing out in {step} activates instance_watcher"
+                ));
+                activators.blueprint_planner.assert_activated(&format!(
+                    "timing out in {step} activates blueprint_planner"
+                ));
+            } else {
+                activators.instance_watcher.assert_not_activated(&format!(
+                    "timing out in {step} does not activate instance_watcher"
+                ));
+                activators.blueprint_planner.assert_not_activated(&format!(
+                    "timing out in {step} does not activate \
+                     blueprint_planner"
+                ));
+            }
+        }
+    }
+
+    fn test_request() -> SledExpungeRequest {
+        SledExpungeRequest::new(
+            RackUuid::new_v4(),
+            SledUuid::new_v4(),
+            BaseboardId {
+                part_number: "test-part".to_string(),
+                serial_number: Uuid::new_v4().to_string(),
+            },
+            2,
+        )
+    }
+
+    fn switch_attached_cubby_text(slot: u16) -> String {
+        format!(
+            "This sled was found in switch-attached cubby {slot}, so it is a \
+             scrimlet (it manages a switch), and Nexus will not power it off. \
+             Expunging a scrimlet through this API is not supported. Contact \
+             Oxide support."
+        )
+    }
+
+    fn non_provisionable_policy_sentence(sled_id: SledUuid) -> String {
+        format!(
+            "the sled's provision policy was non-provisionable (creating an \
+             expunge request makes the sled non-provisionable, and failing it \
+             does not undo that). If you want the sled to host new resources \
+             again, set its provision policy to provisionable with \
+             sled_set_provision_policy (sled {sled_id})."
+        )
+    }
+
+    // TODO-RAINCLAUDE: sets the sled row's state directly, bypassing the transition checks, to make the expunge in complete fail with an error that should not resolve by retrying.
+    async fn set_sled_state(
+        db: &TestDatabase,
+        sled_id: SledUuid,
+        state: nexus_db_model::SledState,
+    ) {
+        use nexus_db_schema::schema::sled::dsl;
+        let conn = db
+            .datastore()
+            .pool_connection_for_tests()
+            .await
+            .expect("got a database connection");
+        diesel::update(dsl::sled)
+            .filter(dsl::id.eq(sled_id.into_untyped_uuid()))
+            .set(dsl::sled_state.eq(state))
+            .execute_async(&*conn)
+            .await
+            .expect("set the sled's state");
+    }
+
+    async fn complete_error(
+        db: &TestDatabase,
+        request: &SledExpungeRequest,
+    ) -> String {
+        let error = db
+            .datastore()
+            .sled_expunge_request_complete(
+                db.opctx(),
+                &authz_sled_expunge_request_from_id(request.id()),
+            )
+            .await
+            .expect_err("a decommissioned sled refuses the expunge");
+        format!("completing the request: {}", InlineErrorChain::new(&error))
+    }
+
+    #[test]
+    fn test_sled_expunge_extend_internal_error_streak() {
+        let threshold = INTERNAL_ERROR_ATTENTION_THRESHOLD;
+        for (persistent_error, consecutive, expected) in [
+            (false, threshold - 1, InternalErrorStreakStep::Unchanged),
+            (
+                true,
+                threshold - 2,
+                InternalErrorStreakStep::BelowThreshold {
+                    consecutive: threshold - 1,
+                },
+            ),
+            (
+                true,
+                threshold - 1,
+                InternalErrorStreakStep::Surface { consecutive: threshold },
+            ),
+            (
+                true,
+                u32::MAX,
+                InternalErrorStreakStep::Surface { consecutive: u32::MAX },
+            ),
+        ] {
+            assert_eq!(
+                extend_internal_error_streak(persistent_error, consecutive),
+                expected,
+                "persistent_error: {persistent_error}, consecutive: \
+                 {consecutive}",
+            );
+        }
+    }
+
+    // TODO-RAINCLAUDE: ends the erroring requests in an error that extends their streak, as surface_internal_error does, and gets the others through.
+    struct ErroringDriver {
+        erroring: BTreeSet<SledExpungeRequestUuid>,
+    }
+
+    impl RequestDriver for ErroringDriver {
+        async fn drive(
+            &self,
+            request: &SledExpungeRequest,
+            progress: &mut RequestProgress,
+        ) -> SledExpungeRequestOutcome {
+            if !self.erroring.contains(&request.id()) {
+                return SledExpungeRequestOutcome::RemovalPreparing;
+            }
+            progress.internal_errors += 1;
+            SledExpungeRequestOutcome::Error {
+                error: "error".to_string(),
+                last_error: None,
+            }
+        }
+    }
+
+    // TODO-RAINCLAUDE: an activation carries an erroring request's streak forward, and drops the streak of a request it gets through without an error and of one no longer listed.
+    #[tokio::test]
+    async fn test_sled_expunge_internal_error_streaks() {
+        let log = slog::Logger::root(slog::Discard, o!());
+        let erroring = test_request();
+        let recovered = test_request();
+        let streak = |request: &SledExpungeRequest, consecutive| {
+            InternalErrorStreak { request_id: request.id(), consecutive }
+        };
+        let earlier = IdOrdMap::from_iter_unique([
+            streak(&erroring, 1),
+            streak(&recovered, 1),
+            streak(&test_request(), 1),
+        ])
+        .expect("streaks are unique");
+        let driver =
+            ErroringDriver { erroring: BTreeSet::from([erroring.id()]) };
+
+        let (_, internal_errors) = drive_requests_with_timeout(
+            &log,
+            vec![erroring.clone(), recovered],
+            &driver,
+            &test_activators(),
+            &earlier,
+        )
+        .await;
+        assert_eq!(
+            internal_errors,
+            IdOrdMap::from_iter_unique([streak(&erroring, 2)])
+                .expect("one streak"),
+        );
+    }
+
+    // TODO-RAINCLAUDE: the request is listed in powering_off with the internal-error last_error already set, then advances to expunging (which clears last_error) in the same activation and fails there; the generic last_error is compared against and written to the expunging row the advance returned, not the listed row, so it is written rather than skipped as unchanged.
+    #[tokio::test]
+    async fn test_sled_expunge_internal_error_uses_latest_row() {
+        let logctx = dev::test_setup_log(
+            "test_sled_expunge_internal_error_uses_latest_row",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (task, _) = test_task(&db);
+        let log = &db.opctx().log;
+        let rack = TestRack::new(&db).await;
+        rack.propose_removal(&db).await;
+        rack.commit(&db, 2).await;
+        let inserted = rack
+            .insert_request(&db, 2, SledExpungeRequestState::PoweringOff)
+            .await;
+        let listed = match db
+            .datastore()
+            .sled_expunge_request_set_last_error(
+                db.opctx(),
+                &authz_sled_expunge_request_from_id(inserted.id()),
+                SledExpungeRequestUnfinishedState::PoweringOff,
+                INTERNAL_ERROR_TEXT.to_string(),
+            )
+            .await
+            .expect("seeded last_error")
+        {
+            SledExpungeRequestUpdateOutcome::Updated { request } => request,
+            SledExpungeRequestUpdateOutcome::NotInExpectedState { current } => {
+                panic!("seeded last_error in powering_off: {current:?}")
+            }
+        };
+        set_sled_state(
+            &db,
+            rack.sled_id,
+            nexus_db_model::SledState::Decommissioned,
+        )
+        .await;
+
+        let mut progress = RequestProgress {
+            internal_errors: INTERNAL_ERROR_ATTENTION_THRESHOLD - 1,
+            ..RequestProgress::default()
+        };
+        let outcome = task
+            .advance_to_expunging(db.opctx(), log, &listed, &mut progress)
+            .await;
+        let outcome = task
+            .surface_internal_error(
+                db.opctx(),
+                log,
+                &listed,
+                outcome,
+                &mut progress,
+            )
+            .await;
+        let expunging = read(&db, &listed).await;
+        let error = complete_error(&db, &expunging).await;
+        assert_eq!(
+            request_status(&listed, outcome, progress),
+            SledExpungeRequestStatus {
+                state_after: Some(SledExpungeTaskRequestState::Expunging),
+                consecutive_internal_errors: INTERNAL_ERROR_ATTENTION_THRESHOLD,
+                ..rack.status(
+                    &listed,
+                    SledExpungeRequestOutcome::Error {
+                        error,
+                        last_error: Some(INTERNAL_ERROR_TEXT.to_string()),
+                    },
+                )
+            },
+        );
+        assert_eq!(
+            expunging,
+            SledExpungeRequest {
+                state: SledExpungeRequestState::Expunging,
+                power_off_outcome: Some(SledExpungePowerOffOutcome::PoweredOff),
+                last_error: Some(INTERNAL_ERROR_TEXT.to_string()),
+                time_modified: expunging.time_modified,
+                ..listed.clone()
+            },
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // TODO-RAINCLAUDE: a wait wakes inventory collection only if a newer collection may resolve it and none was taken during it, i.e. the loaded collection (if any) started before the request's time_modified.
+    #[test]
+    fn test_sled_expunge_wakes_inventory_collection() {
+        let request = test_request();
+        let collection_started_at = |time_started| {
+            let mut collection = CollectionBuilder::new("test").build();
+            collection.time_started = time_started;
+            collection
+        };
+        let older = collection_started_at(
+            request.time_modified - TimeDelta::seconds(1),
+        );
+        let during = collection_started_at(request.time_modified);
+        let mgs: SocketAddrV6 =
+            "[::1]:1".parse().expect("parsed an MGS address");
+        let not_powered_off = |stages: &[MgsPowerOffFailure]| {
+            SledExpungePowerOffWait::NotPoweredOff {
+                slot: 3,
+                failed_attempts: stages
+                    .iter()
+                    .zip(1..)
+                    .map(|(stage, port)| SledExpungeMgsPowerOffFailure {
+                        mgs: SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0),
+                        stage: *stage,
+                        error: "error".to_string(),
+                    })
+                    .collect(),
+            }
+        };
+        for (wait, newer_collection_may_help) in [
+            (SledExpungePowerOffWait::NoInventory, true),
+            (SledExpungePowerOffWait::NotInInventory, true),
+            (
+                SledExpungePowerOffWait::SlotHoldsOtherBoard {
+                    slot: 3,
+                    mgs,
+                    found: request.baseboard_id(),
+                },
+                true,
+            ),
+            (not_powered_off(&[MgsPowerOffFailure::RecheckFailed]), true),
+            (not_powered_off(&[MgsPowerOffFailure::PowerOffFailed]), false),
+            (
+                not_powered_off(&[
+                    MgsPowerOffFailure::PowerOffFailed,
+                    MgsPowerOffFailure::RecheckFailed,
+                ]),
+                true,
+            ),
+            (
+                SledExpungePowerOffWait::NotASled { sp_type: SpType::Switch },
+                false,
+            ),
+            (
+                SledExpungePowerOffWait::InAnotherRack {
+                    rack_id: RackUuid::new_v4(),
+                },
+                false,
+            ),
+            (SledExpungePowerOffWait::SwitchAttachedCubby { slot: 14 }, false),
+            (SledExpungePowerOffWait::NoMgs, false),
+        ] {
+            for (collection, taken_before_wait) in
+                [(None, true), (Some(&older), true), (Some(&during), false)]
+            {
+                assert_eq!(
+                    wakes_inventory_collection(&wait, collection, &request),
+                    newer_collection_may_help && taken_before_wait,
+                    "{wait:?} with collection started at {:?}",
+                    collection.map(|collection| collection.time_started),
+                );
+            }
+        }
     }
 }
