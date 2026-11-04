@@ -4004,8 +4004,10 @@ mod tests {
             ),
         )
         .await
-        .expect_err("Should have timed out waiting for VmmState::Destroyed \
-            in FakeNexus (after canceled stop timeout)");
+        .expect_err(
+            "Should have timed out waiting for VmmState::Destroyed \
+            in FakeNexus (after canceled stop timeout)",
+        );
 
         logctx.cleanup_successful();
     }
