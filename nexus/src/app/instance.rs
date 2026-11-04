@@ -1306,7 +1306,7 @@ impl super::Nexus {
                     // for us to think it's stopped. This will result in us no
                     // longer trying to restart it.
                     InstanceStateChangeRequest::Stop
-                        if vmm.state == db::VmmState::SagaUnwound =>
+                        if vmm.state == db::model::VmmState::SagaUnwound =>
                     {
                         return Ok(
                             InstanceStateChangeRequestAction::UpdateRuntime(
