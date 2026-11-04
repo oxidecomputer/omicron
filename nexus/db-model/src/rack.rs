@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::rack;
@@ -18,6 +19,7 @@ pub struct Rack {
     pub identity: RackIdentity,
     pub initialized: bool,
     pub rack_subnet: Option<IpNetwork>,
+    pub time_deleted: Option<DateTime<Utc>>,
 }
 
 impl Rack {
@@ -26,6 +28,7 @@ impl Rack {
             identity: RackIdentity::new(id),
             initialized: false,
             rack_subnet: None,
+            time_deleted: None,
         }
     }
 }

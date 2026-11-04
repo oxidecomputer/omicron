@@ -1337,6 +1337,47 @@ mod test {
     }
 
     #[tokio::test]
+    async fn rack_time_deleted_defaults_to_none() {
+        use nexus_types::identity::Asset;
+        use omicron_uuid_kinds::RackUuid;
+
+        let logctx = dev::test_setup_log("rack_time_deleted_defaults_to_none");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let rack_id = RackUuid::new_v4();
+        let rack = db::model::Rack::new(rack_id);
+        assert!(rack.time_deleted.is_none());
+
+        let inserted = datastore.rack_insert(opctx, &rack).await.unwrap();
+        assert_eq!(inserted.id(), rack_id);
+        assert_eq!(inserted.time_created(), rack.time_created());
+        assert_eq!(inserted.time_modified(), rack.time_modified());
+        assert_eq!(inserted.initialized, rack.initialized);
+        assert_eq!(inserted.rack_subnet, rack.rack_subnet);
+        assert!(inserted.time_deleted.is_none());
+
+        let racks = datastore
+            .rack_list(opctx, &DataPageParams::max_page())
+            .await
+            .unwrap();
+        let loaded = racks.iter().find(|r| r.id() == rack_id).unwrap();
+        assert_eq!(loaded.time_created(), rack.time_created());
+        assert_eq!(loaded.time_modified(), rack.time_modified());
+        assert_eq!(loaded.initialized, rack.initialized);
+        assert_eq!(loaded.rack_subnet, rack.rack_subnet);
+        assert!(loaded.time_deleted.is_none());
+
+        let initialized = datastore
+            .rack_list_initialized(opctx, &DataPageParams::max_page())
+            .await
+            .unwrap();
+        assert!(!initialized.iter().any(|r| r.id() == rack_id));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn rack_set_initialized_empty() {
         let logctx = dev::test_setup_log("rack_set_initialized_empty");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
@@ -1353,6 +1394,7 @@ mod test {
         let after = Utc::now();
         assert_eq!(rack.id(), nexus_test_utils::RACK_UUID);
         assert!(rack.initialized);
+        assert!(rack.time_deleted.is_none());
 
         // The empty blueprint doesn't have any sleds, so the
         // rendezvous_sled_bp_availability table doesn't need to be populated
