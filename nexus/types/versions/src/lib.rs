@@ -117,3 +117,5 @@ pub mod v2026_10_29_00;
 pub mod v2026_11_04_00;
 #[path = "problems/mod.rs"]
 pub mod v2026_11_05_00;
+#[path = "sled_expunge_requests/mod.rs"]
+pub mod v2026_11_10_01;

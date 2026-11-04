@@ -7,7 +7,10 @@ use crate::typed_uuid::DbTypedUuid;
 use chrono::DateTime;
 use chrono::Utc;
 use nexus_db_schema::schema::sled_expunge_request;
+use nexus_types::external_api::rack::RackMembershipVersion;
+use nexus_types::external_api::sled as views;
 use nexus_types::sled_expunge::FinishedSledExpungeRequestState;
+use omicron_common::api::external::Error;
 use omicron_common::now_db_precision;
 use omicron_uuid_kinds::RackKind;
 use omicron_uuid_kinds::RackUuid;
@@ -317,6 +320,66 @@ impl SledExpungeRequest {
             part_number: self.part_number.clone(),
             serial_number: self.serial_number.clone(),
         }
+    }
+}
+
+impl From<SledExpungeRequestState> for views::SledExpungeRequestState {
+    fn from(state: SledExpungeRequestState) -> Self {
+        match state {
+            SledExpungeRequestState::WaitingForTrustQuorum => {
+                Self::WaitingForTrustQuorum
+            }
+            SledExpungeRequestState::PoweringOff => Self::PoweringOff,
+            SledExpungeRequestState::Expunging => Self::Expunging,
+            SledExpungeRequestState::Done => Self::Done,
+            SledExpungeRequestState::Failed => Self::Failed,
+        }
+    }
+}
+
+// TODO-RAINCLAUDE: fallible only because tq_epoch is stored as INT8; the tq_epoch_is_positive CHECK keeps it convertible.
+impl TryFrom<SledExpungeRequest> for views::SledExpungeRequest {
+    type Error = Error;
+
+    fn try_from(request: SledExpungeRequest) -> Result<Self, Self::Error> {
+        let SledExpungeRequest {
+            id,
+            time_created,
+            time_modified,
+            rack_id,
+            sled_id,
+            part_number,
+            serial_number,
+            tq_epoch,
+            state,
+            power_off_outcome: _,
+            send_uncertain: _,
+            last_error,
+            failure_reason,
+            time_completed,
+        } = request;
+        let rack_membership_version = match u64::try_from(tq_epoch) {
+            Ok(version @ 1..) => RackMembershipVersion(version),
+            Ok(0) | Err(_) => {
+                return Err(Error::internal_error(&format!(
+                    "sled expunge request {id} has tq_epoch {tq_epoch}, but \
+                     tq_epoch must be positive"
+                )));
+            }
+        };
+        Ok(Self {
+            id: id.into(),
+            rack_id: rack_id.into(),
+            sled_id: sled_id.into(),
+            baseboard: BaseboardId { part_number, serial_number },
+            state: state.into(),
+            rack_membership_version,
+            last_error,
+            failure_reason,
+            time_created,
+            time_modified,
+            time_completed,
+        })
     }
 }
 

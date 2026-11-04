@@ -11,6 +11,7 @@ use nexus_db_queries::db::datastore::SledExpungeRequestCreateOutcome;
 use nexus_db_queries::db::datastore::authz_sled_expunge_request_from_id;
 use nexus_db_queries::db::model::SledExpungeRequest;
 use nexus_networking::InServiceSledClientError;
+use nexus_types::external_api::sled as views;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -22,15 +23,28 @@ use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SledExpungeRequestCreateDisposition {
+pub(crate) enum SledExpungeRequestCreateDisposition {
     Created,
     AlreadyOutstanding,
 }
 
+impl From<SledExpungeRequestCreateDisposition>
+    for views::SledExpungeRequestDisposition
+{
+    fn from(disposition: SledExpungeRequestCreateDisposition) -> Self {
+        match disposition {
+            SledExpungeRequestCreateDisposition::Created => Self::Created,
+            SledExpungeRequestCreateDisposition::AlreadyOutstanding => {
+                Self::AlreadyOutstanding
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SledExpungeRequestCreated {
-    pub request: SledExpungeRequest,
-    pub disposition: SledExpungeRequestCreateDisposition,
+pub(crate) struct SledExpungeRequestCreated {
+    pub(crate) request: SledExpungeRequest,
+    pub(crate) disposition: SledExpungeRequestCreateDisposition,
 }
 
 // TODO-RAINCLAUDE: whether the removal's send settled: Settled covers the coordinator accepting it and its coordinator not being an in-service sled (nothing was sent; the trust_quorum_manager task will abort the removal, and the sled_expunge task will then fail the request), both of which settle the send, which is when send_uncertain may be cleared; Uncertain does not.
@@ -90,7 +104,7 @@ fn resolve_removal_send(
 
 impl super::Nexus {
     // TODO-RAINCLAUDE: RFD 747 request creation: Modify on the sled and on its rack's trust quorum config is authorized before the datastore transaction that runs the checks and writes; a new removal is then sent to its coordinator at most once, here and never on retry, since the send is not idempotent.
-    pub async fn sled_expunge_request_create(
+    pub(crate) async fn sled_expunge_request_create(
         &self,
         opctx: &OpContext,
         sled_id: SledUuid,
@@ -173,7 +187,7 @@ impl super::Nexus {
         })
     }
 
-    pub async fn sled_expunge_request_list(
+    pub(crate) async fn sled_expunge_request_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
@@ -181,7 +195,7 @@ impl super::Nexus {
         self.db_datastore.sled_expunge_request_list(opctx, pagparams).await
     }
 
-    pub async fn sled_expunge_request_view(
+    pub(crate) async fn sled_expunge_request_view(
         &self,
         opctx: &OpContext,
         id: SledExpungeRequestUuid,

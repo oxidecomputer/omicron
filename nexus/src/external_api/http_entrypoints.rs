@@ -6,6 +6,7 @@
 
 use super::console_api;
 use crate::app::SetTargetReleaseIntent;
+use crate::app::SledExpungeRequestCreated;
 use crate::app::external_endpoints::authority_for_request;
 use crate::app::support_bundles::SupportBundleQueryType;
 use crate::context::{ApiContext, audit_and_time};
@@ -6863,6 +6864,83 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(response))
         })
         .await
+    }
+
+    async fn sled_expunge(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<path_params::SledPath>,
+        params: TypedBody<sled::SledExpungeParams>,
+    ) -> Result<HttpResponseAccepted<sled::SledExpungeResponse>, HttpError>
+    {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let sled::SledExpungeParams { serial } = params.into_inner();
+            let SledExpungeRequestCreated { request, disposition } = nexus
+                .sled_expunge_request_create(&opctx, path.sled_id, &serial)
+                .await?;
+            Ok(HttpResponseAccepted(sled::SledExpungeResponse {
+                request: request.try_into()?,
+                disposition: disposition.into(),
+            }))
+        })
+        .await
+    }
+
+    async fn sled_expunge_request_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<PaginatedByTimeAndId>,
+    ) -> Result<HttpResponseOk<ResultsPage<sled::SledExpungeRequest>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let requests = nexus
+                .sled_expunge_request_list(
+                    &opctx,
+                    &data_page_params_for(&rqctx, &query)?,
+                )
+                .await?
+                .into_iter()
+                .map(sled::SledExpungeRequest::try_from)
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(HttpResponseOk(ScanByTimeAndId::results_page(
+                &query,
+                requests,
+                &|_, request: &sled::SledExpungeRequest| {
+                    (request.time_created, request.id.into_untyped_uuid())
+                },
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn sled_expunge_request_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<path_params::SledExpungeRequestPath>,
+    ) -> Result<HttpResponseOk<sled::SledExpungeRequest>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let request = nexus
+                .sled_expunge_request_view(&opctx, path.sled_expunge_request_id)
+                .await?;
+            Ok(HttpResponseOk(request.try_into()?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn sled_instance_list(

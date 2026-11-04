@@ -132,6 +132,7 @@ pub(crate) mod sagas;
 
 pub(crate) use self::deployment::BlueprintDebugAction;
 pub(crate) use self::deployment::SetTargetReleaseIntent;
+pub(crate) use self::sled_expunge_request::SledExpungeRequestCreated;
 use crate::app::quiesce::NexusQuiesceHandle;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
