@@ -21,6 +21,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use futures::FutureExt;
 use futures::future::BoxFuture;
+use gateway_test_utils::setup::GatewayTestConfigFiles;
 use gateway_test_utils::setup::GatewayTestContext;
 use iddqd::IdOrdMap;
 use internal_dns_types::config::DnsConfigBuilder;
@@ -423,9 +424,22 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         port: Option<u16>,
         sp_sim_config_file: Utf8PathBuf,
     ) {
+        self.start_gateway_with_config_files(
+            switch_slot,
+            port,
+            GatewayTestConfigFiles::with_default_mgs_config(sp_sim_config_file),
+        )
+        .await
+    }
+
+    pub async fn start_gateway_with_config_files(
+        &mut self,
+        switch_slot: SwitchSlot,
+        port: Option<u16>,
+        gateway_config_files: GatewayTestConfigFiles,
+    ) {
         debug!(&self.logctx.log, "Starting Management Gateway");
-        let (mut mgs_config, sp_sim_config) =
-            gateway_test_utils::setup::load_test_config(sp_sim_config_file);
+        let (mut mgs_config, sp_sim_config) = gateway_config_files.load();
 
         // The sp_sim_config_file contains suitable configuration information for a MGS daemon running on
         // switch0. For switch1, the port information needs to be flipped in order for MGS to correctly identify
@@ -1672,7 +1686,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
     sim_mode: sim::SimMode,
     initial_cert: Option<Certificate>,
     extra_sled_agents: u16,
-    gateway_config_file: Utf8PathBuf,
+    gateway_config_files: GatewayTestConfigFiles,
     second_nexus: bool,
 ) -> ControlPlaneTestContext<N> {
     const STEP_TIMEOUT: Duration = Duration::from_secs(600);
@@ -1743,7 +1757,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
     // be configured. If extra sled agents are requested, then the second sled
     // agent will be for switch1.
 
-    let mgs_config = gateway_config_file.clone();
+    let mgs_config = gateway_config_files.clone();
     starter
         .init_with_steps(
             vec![
@@ -1751,7 +1765,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                     "start_gateway_switch0",
                     Box::new(|builder| {
                         builder
-                            .start_gateway(
+                            .start_gateway_with_config_files(
                                 SwitchSlot::Switch0,
                                 None,
                                 mgs_config,
@@ -1801,10 +1815,10 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                         "start_gateway_switch1",
                         Box::new(|builder| {
                             builder
-                                .start_gateway(
+                                .start_gateway_with_config_files(
                                     SwitchSlot::Switch1,
                                     None,
-                                    gateway_config_file,
+                                    gateway_config_files,
                                 )
                                 .boxed()
                         }),
