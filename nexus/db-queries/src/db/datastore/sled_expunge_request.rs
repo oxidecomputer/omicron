@@ -685,24 +685,24 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_request: &authz::SledExpungeRequest,
-    ) -> Result<(), Error> {
+    ) -> Result<SledExpungeRequest, Error> {
         opctx.authorize(authz::Action::Modify, authz_request).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        let updated = diesel::update(dsl::sled_expunge_request)
+        diesel::update(dsl::sled_expunge_request)
             .filter(dsl::id.eq(to_db_typed_uuid(authz_request.id())))
             .set((
                 dsl::send_uncertain.eq(false),
                 dsl::time_modified.eq(now_db_precision()),
             ))
-            .execute_async(&*conn)
+            .returning(SledExpungeRequest::as_returning())
+            .get_result_async(&*conn)
             .await
             .map_err(|error| {
-                public_error_from_diesel(error, ErrorHandler::Server)
-            })?;
-        if updated == 0 {
-            return Err(authz_request.not_found());
-        }
-        Ok(())
+                public_error_from_diesel(
+                    error,
+                    ErrorHandler::NotFoundByResource(authz_request),
+                )
+            })
     }
 
     pub async fn sled_expunge_request_advance(
@@ -4021,7 +4021,7 @@ mod test {
                 insert_in_state(&db, RackUuid::new_v4(), 1, state).await;
             assert!(request.send_uncertain);
             let before = backdated(datastore, &request).await;
-            datastore
+            let returned = datastore
                 .sled_expunge_request_clear_send_uncertain(
                     opctx,
                     &authz_for(&before),
@@ -4029,6 +4029,7 @@ mod test {
                 .await
                 .expect("cleared send_uncertain");
             let cleared = read(datastore, &before).await;
+            assert_eq!(returned, cleared, "{state}");
             assert!(cleared.time_modified > before.time_modified, "{state}");
             assert_eq!(
                 cleared,
