@@ -5,22 +5,56 @@
 //! Tests for multirack regional cluster APIs.
 
 use super::endpoints::MULTIRACK_RACKS_UNADOPTED_URL;
-use iddqd::id_ord_map;
+use iddqd::IdOrdMap;
 use nexus_db_queries::context::OpContext;
 use nexus_inventory::CollectionBuilder;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::multirack::UnadoptedRack;
 use nexus_types::inventory::DiscoveredRack;
+use nexus_types::inventory::DiscoveredSled;
 use omicron_common::address::Ipv6Subnet;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SledUuid;
+use sled_agent_types_versions::latest::multirack::SledAgentStartState;
+use sled_hardware_types::BaseboardId;
 use std::time::Duration;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 const REGION_PREFIX: &str = "fd00:aaaa:bbbb:10";
+
+/// Construct `count` discovered sleds for the rack identified by `rack_idx`.
+///
+/// Every field is distinct to ensure we catch differences in the event of
+/// something getting round-tripped incorrectly.
+fn make_discovered_sleds(rack_idx: u8, count: u8) -> IdOrdMap<DiscoveredSled> {
+    (0..count)
+        .map(|sled_idx| DiscoveredSled {
+            sled_id: SledUuid::new_v4(),
+            baseboard_id: BaseboardId {
+                part_number: format!("test-part-{rack_idx}-{sled_idx}"),
+                serial_number: format!("test-serial-{rack_idx}-{sled_idx}"),
+            },
+            sled_subnet: Ipv6Subnet::new(
+                format!("{REGION_PREFIX}{rack_idx}:{sled_idx}::")
+                    .parse()
+                    .unwrap(),
+            ),
+            sled_agent_start_state: match sled_idx % 3 {
+                0 => SledAgentStartState::Started,
+                1 => SledAgentStartState::InProgress { last_error: None },
+                _ => SledAgentStartState::InProgress {
+                    last_error: Some(format!(
+                        "test error from sled {rack_idx}-{sled_idx}"
+                    )),
+                },
+            },
+        })
+        .collect()
+}
 
 async fn list_unadopted_racks(
     cptestctx: &ControlPlaneTestContext,
@@ -69,23 +103,30 @@ async fn test_rack_list_unadopted(cptestctx: &ControlPlaneTestContext) {
     // adding other racks into `rack` might cause other weird side effects in
     // the test since they wouldn't have actually been joined into the cluster.)
     let adopted_rack_id = nexus.rack_id();
-    let make_rack = |rack_id: RackUuid, rack_idx: u8| DiscoveredRack {
-        rack_id,
-        rack_subnet: Ipv6Subnet::new(
-            format!("{REGION_PREFIX}{rack_idx}::").parse().unwrap(),
-        ),
-        join_service_ip: format!("{REGION_PREFIX}{rack_idx}::1")
-            .parse()
-            .unwrap(),
-        discovered_sleds: id_ord_map! {},
-    };
-    let mut expected: Vec<DiscoveredRack> =
-        (0..3).map(|i| make_rack(RackUuid::new_v4(), i)).collect();
+    let make_rack =
+        |rack_id: RackUuid, rack_idx: u8, nsleds: u8| DiscoveredRack {
+            rack_id,
+            rack_subnet: Ipv6Subnet::new(
+                format!("{REGION_PREFIX}{rack_idx}::").parse().unwrap(),
+            ),
+            join_service_ip: format!("{REGION_PREFIX}{rack_idx}::1")
+                .parse()
+                .unwrap(),
+            discovered_sleds: make_discovered_sleds(rack_idx, nsleds),
+        };
+    // Give the racks differing numbers of sleds:
+    let mut expected: Vec<DiscoveredRack> = [3, 1, 0]
+        .into_iter()
+        .enumerate()
+        .map(|(i, nsleds)| {
+            make_rack(RackUuid::new_v4(), u8::try_from(i).unwrap(), nsleds)
+        })
+        .collect();
     // The ordering of the API results is by rack ID, so sort this accordingly:
     expected.sort_by_key(|rack| rack.rack_id);
 
     let mut builder = CollectionBuilder::new("multirack-test");
-    builder.found_discovered_rack(make_rack(adopted_rack_id, 10)).unwrap();
+    builder.found_discovered_rack(make_rack(adopted_rack_id, 10, 2)).unwrap();
     for rack in &expected {
         builder.found_discovered_rack(rack.clone()).unwrap();
     }
@@ -116,7 +157,37 @@ async fn test_rack_list_unadopted(cptestctx: &ControlPlaneTestContext) {
             );
             assert_eq!(actual.rack_subnet, expected.rack_subnet.net());
             assert_eq!(actual.join_service_ip, expected.join_service_ip);
-            assert!(actual.unadopted_sleds.is_empty());
+
+            assert_eq!(
+                actual.unadopted_sleds.len(),
+                expected.discovered_sleds.len(),
+                "unexpected number of sleds for rack {}",
+                actual.rack_id
+            );
+            for (actual_sled, expected_sled) in
+                actual.unadopted_sleds.iter().zip(&expected.discovered_sleds)
+            {
+                assert_eq!(
+                    actual_sled.sled_id,
+                    expected_sled.sled_id.into_untyped_uuid()
+                );
+                assert_eq!(
+                    actual_sled.part_number,
+                    expected_sled.baseboard_id.part_number
+                );
+                assert_eq!(
+                    actual_sled.serial_number,
+                    expected_sled.baseboard_id.serial_number
+                );
+                assert_eq!(
+                    actual_sled.sled_subnet,
+                    expected_sled.sled_subnet.net()
+                );
+                assert_eq!(
+                    actual_sled.sled_agent_start_state,
+                    expected_sled.sled_agent_start_state
+                );
+            }
         }
         assert!(
             racks
