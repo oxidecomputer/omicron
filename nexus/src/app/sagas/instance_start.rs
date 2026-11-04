@@ -1142,7 +1142,7 @@ async fn sis_ensure_running(
         &params.serialized_authn,
     );
 
-    let db_instance =
+    let mut db_instance =
         sagactx.lookup::<db::model::Instance>("started_record")?;
     let db_vmm = sagactx.lookup::<db::model::Vmm>(REGISTERED_VMM_RECORD)?;
     let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
@@ -1163,8 +1163,8 @@ async fn sis_ensure_running(
         .instance_request_state(
             &opctx,
             &authz_instance,
-            &db_instance,
-            &Some(db_vmm),
+            &mut db_instance,
+            &mut Some(db_vmm),
             crate::app::instance::InstanceStateChangeRequest::Run,
         )
         .await

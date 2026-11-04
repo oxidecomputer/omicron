@@ -1072,8 +1072,8 @@ impl super::Nexus {
             .instance_request_state(
                 opctx,
                 &authz_instance,
-                state.instance(),
-                state.vmm(),
+                &mut state.instance,
+                &mut state.vmm,
                 InstanceStateChangeRequest::Reboot,
             )
             .await
@@ -1180,8 +1180,8 @@ impl super::Nexus {
             .instance_request_state(
                 opctx,
                 &authz_instance,
-                state.instance(),
-                state.vmm(),
+                &mut state.instance,
+                &mut state.vmm,
                 InstanceStateChangeRequest::Stop,
             )
             .await
@@ -1553,24 +1553,47 @@ impl super::Nexus {
         }
     }
 
+    /// Requests a state change for an instance, given the current state of the
+    /// instance record and its active VMM record.
+    ///
+    /// Depending on the current state of the instance and VMM record and the
+    /// state change requested, this function may send a request to the
+    /// sled-agent for the sled on which the instance's active VMM is located,
+    /// modify the instance or VMM records in the database *without* sending a
+    /// request to a sled (if the instance is not currently incarnated on a
+    /// sled), or do nothing (if the instance is already in the requested
+    /// state). If the instance cannot currently transition to the requested
+    /// state (and is not already in that state), or if an error occurs while
+    /// attempting to perform the state change, this function will return an
+    /// error.
+    ///
+    /// If the request races with a concurrent update and must be retried,
+    /// `prev_instance_state` and `prev_vmm_state` are overwritten with the
+    /// refetched records. This may occur if a start saga is in progress when
+    /// the state change is requested. Therefore, when this function returns,
+    /// the pointed values will represent the state of the instance and VMM
+    /// records which were used to select the *final* state change action this
+    /// function performed. Thus, if the caller wishes to make additional
+    /// changes to the instance or VMM records (such as in order to transition a
+    /// VMM record to `Failed` if this function returns an error), they can
+    /// continue to use the pointed values, because their generation numbers
+    /// will be updated if the records in the database have changed.
     pub(crate) async fn instance_request_state(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        prev_instance_state: &db::model::Instance,
-        prev_vmm_state: &Option<db::model::Vmm>,
+        prev_instance_state: &mut db::model::Instance,
+        prev_vmm_state: &mut Option<db::model::Vmm>,
         requested: InstanceStateChangeRequest,
     ) -> Result<(), InstanceStateChangeError> {
-        let mut selected_action = Self::select_runtime_change_action(
-            &self.log,
-            &prev_instance_state,
-            &prev_vmm_state,
-            &requested,
-        )?;
-
         // time for The Goofy VMM State Compare-And-Swap Loop Dance! yay!
         loop {
-            match selected_action {
+            match Self::select_runtime_change_action(
+                &self.log,
+                prev_instance_state,
+                prev_vmm_state,
+                &requested,
+            )? {
                 InstanceStateChangeRequestAction::AlreadyDone => return Ok(()),
 
                 InstanceStateChangeRequestAction::UpdateRuntime(new_runtime) => {
@@ -1651,12 +1674,8 @@ impl super::Nexus {
                         // `select_runtime_change_action` and try again!
                         let current = self.datastore().instance_fetch_with_vmm(&opctx, &authz_instance).await
                             .map_err(InstanceStateChangeError::Other)?;
-                        selected_action = Self::select_runtime_change_action(
-                            &self.log,
-                            current.instance(),
-                            current.vmm(),
-                            &requested,
-                        )?;
+                        *prev_instance_state = current.instance;
+                        *prev_vmm_state = current.vmm;
 
                     }
                 }

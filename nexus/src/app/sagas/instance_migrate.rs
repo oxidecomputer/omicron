@@ -609,7 +609,7 @@ async fn sim_instance_migrate(
         &params.serialized_authn,
     );
 
-    let db_instance =
+    let mut db_instance =
         sagactx.lookup::<db::model::Instance>("set_migration_ids")?;
 
     let src_vmm_addr = SocketAddr::new(
@@ -649,8 +649,8 @@ async fn sim_instance_migrate(
         .instance_request_state(
             &opctx,
             &authz_instance,
-            &db_instance,
-            &Some(dst_vmm),
+            &mut db_instance,
+            &mut Some(dst_vmm),
             InstanceStateChangeRequest::Migrate(
                 InstanceMigrationTargetParams {
                     src_propolis_addr: src_vmm_addr.to_string(),
