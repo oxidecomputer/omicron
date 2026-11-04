@@ -19,7 +19,7 @@ use omicron_common::api::internal::shared::{
 use sled_agent_types_versions::{
     latest, v1, v11, v14, v15, v18, v20, v22, v24, v25, v26, v28, v29, v30,
     v31, v32, v33, v34, v37, v39, v40, v41, v42, v43, v44, v46, v47, v48, v49,
-    v50, v51, v52, v53, v55, v57,
+    v50, v51, v52, v53, v55, v57, v62,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -36,6 +36,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (63, MAKE_DISK_LOCATION_REQUIRED),
     (62, ADD_DISK_LOCATION_TO_INVENTORY),
     (61, TRUST_QUORUM_NULLABLE_RESPONSES),
     (60, ADD_MULTIRACK_JOIN_SERVICE_STATUS),
@@ -1129,11 +1130,26 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_ADD_DISK_LOCATION_TO_INVENTORY..,
+        versions = VERSION_MAKE_DISK_LOCATION_REQUIRED..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::inventory::Inventory>, HttpError>;
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_ADD_DISK_LOCATION_TO_INVENTORY..VERSION_MAKE_DISK_LOCATION_REQUIRED,
+    }]
+    async fn inventory_v62(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v62::inventory::Inventory>, HttpError> {
+        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v62::inventory::Inventory::from(inv))
+        })
+    }
 
     /// Fetch basic information about this sled
     #[endpoint {
@@ -1145,7 +1161,7 @@ pub trait SledAgentApi {
     async fn inventory_v57(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v57::inventory::Inventory>, HttpError> {
-        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+        Self::inventory_v62(rqctx).await.map(|HttpResponseOk(inv)| {
             HttpResponseOk(v57::inventory::Inventory::from(inv))
         })
     }

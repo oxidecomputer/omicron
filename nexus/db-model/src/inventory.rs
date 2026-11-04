@@ -2675,6 +2675,9 @@ pub struct InvPhysicalDisk {
     pub serial: String,
     pub variant: PhysicalDiskKind,
     /// The location of the disk in the chassis, as identified by libtopo.
+    ///
+    /// Always set on insert. NULL in rows written by Nexus versions that
+    /// predate this column.
     pub location: Option<String>,
 }
 
@@ -2692,7 +2695,7 @@ impl InvPhysicalDisk {
             model: disk.identity.model,
             serial: disk.identity.serial,
             variant: disk.variant.into(),
-            location: disk.location,
+            location: Some(disk.location),
         }
     }
 }

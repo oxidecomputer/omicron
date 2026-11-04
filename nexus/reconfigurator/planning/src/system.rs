@@ -1569,7 +1569,7 @@ impl Sled {
                         identity: disk.disk_identity.clone(),
                         variant: DiskVariant::U2,
                         pcie_slot: i64::try_from(i).unwrap(),
-                        location: Some(format!("N{i}")),
+                        location: format!("N{i}"),
                         active_firmware_slot: 1,
                         next_active_firmware_slot: None,
                         number_of_firmware_slots: 1,
