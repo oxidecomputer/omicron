@@ -15,6 +15,7 @@ use std::net::Ipv6Addr;
 use std::time::Duration;
 use uuid::Uuid;
 
+pub use sim::SimTrustQuorumMode;
 pub use sim::TEST_HARDWARE_THREADS;
 pub use sim::TEST_RESERVOIR_RAM;
 

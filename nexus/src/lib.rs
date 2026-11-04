@@ -54,10 +54,8 @@ use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkPorts;
-use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use strum::IntoEnumIterator;
@@ -403,6 +401,7 @@ impl nexus_test_interface::NexusServer for Server {
         external_dns_zone_name: &str,
         recovery_silo: bootstrap_agent_lockstep_types::RecoverySiloConfig,
         certs: Vec<omicron_common::api::internal::nexus::Certificate>,
+        initial_trust_quorum_configuration: InitialTrustQuorumConfig,
     ) -> Self {
         // Perform the "handoff from RSS".
         //
@@ -410,21 +409,6 @@ impl nexus_test_interface::NexusServer for Server {
         let opctx =
             internal_server.apictx.context.nexus.opctx_for_internal_api();
         let datastore = internal_server.apictx.context.nexus.datastore();
-
-        let tq_members = BTreeSet::from([
-            BaseboardId {
-                part_number: "_test_fake_tq_9adfa".into(),
-                serial_number: "a1".into(),
-            },
-            BaseboardId {
-                part_number: "_test_fake_9adfa".into(),
-                serial_number: "a2".into(),
-            },
-            BaseboardId {
-                part_number: "_test_fake_tq_9adfa".into(),
-                serial_number: "a3".into(),
-            },
-        ]);
 
         // In the real rack init handoff, the `rack_network_config` will contain
         // at least one configured port, and handoff will only complete
@@ -561,29 +545,8 @@ impl nexus_test_interface::NexusServer for Server {
                     },
                     allowed_source_ips: AllowedSourceIps::Any,
                     external_jumbo_frames_opt_in_enabled: false,
-                    // Insert a fake trust quorum config such that existing
-                    // sleds will never be present.
-                    //
-                    // The purpose of this is solely for expunge testing. We
-                    // don't do any trust quorum testing in `NexusServer` based
-                    // tests, but we do test expunging sleds. The second part
-                    // of exunging a sled, as used in these tests, relies on
-                    // the sled not being part of the current trust quorum.
-                    // This gets checked in the production nexus code path. By
-                    // inserting an fake config as the latest committed config
-                    // we can ensure that no sled used by this test will every
-                    // be present in a trust quorum config and that the existing
-                    // expunge tests will pass.
                     initial_trust_quorum_configuration: Some(
-                        InitialTrustQuorumConfig {
-                            // We need at least 3 members
-                            members: tq_members,
-                            // Coordinator must be one of the members
-                            coordinator: BaseboardId {
-                                part_number: "_test_fake_tq_9adfa".into(),
-                                serial_number: "a1".into(),
-                            },
-                        },
+                        initial_trust_quorum_configuration,
                     ),
                 },
                 false, // blueprint_execution_enabled

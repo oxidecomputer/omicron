@@ -166,6 +166,7 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub clickhouse: Option<dev::clickhouse::ClickHouseDeployment>,
     pub sled_agents: Vec<ControlPlaneTestContextSledAgent>,
     sled_index_allocator: SledIndexAllocator,
+    sim_trust_quorum: sim::SimTrustQuorumMode,
     pub oximeter: Option<Oximeter>,
     pub producer: Option<ProducerServer>,
     pub gateway: BTreeMap<SwitchSlot, GatewayTestContext>,
@@ -229,6 +230,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             clickhouse: None,
             sled_agents: vec![],
             sled_index_allocator: SledIndexAllocator::new(),
+            sim_trust_quorum: sim::SimTrustQuorumMode::default(),
             oximeter: None,
             producer: None,
             gateway: BTreeMap::new(),
@@ -253,6 +255,15 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             )),
             debug_dropbox_dir,
         }
+    }
+
+    // TODO-RAINCLAUDE: see ControlPlaneBuilder::with_sim_trust_quorum; applies to sim sleds started after this call and to the RSS handoff.
+    pub fn with_sim_trust_quorum(
+        mut self,
+        sim_trust_quorum: sim::SimTrustQuorumMode,
+    ) -> Self {
+        self.sim_trust_quorum = sim_trust_quorum;
+        self
     }
 
     pub async fn init_with_steps(
@@ -889,6 +900,12 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
 
         self.initial_blueprint_id = Some(blueprint.id);
 
+        let initial_trust_quorum_configuration =
+            crate::trust_quorum::harness_initial_trust_quorum_config(
+                self.sim_trust_quorum,
+                &self.sled_agents,
+            );
+
         // Handoff all known service information to Nexus
         let server = N::start(
             self.nexus_internal
@@ -920,6 +937,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             &external_dns_zone_name,
             recovery_silo,
             tls_certificates,
+            initial_trust_quorum_configuration,
         )
         .await;
 
@@ -997,6 +1015,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             sim_mode,
             SledCpuFamily::AmdMilan,
             sled_role,
+            self.sim_trust_quorum,
             &self.simulated_upstairs,
             sim::NexusRegistration::WaitForCompletion,
         )
@@ -1136,6 +1155,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             sim_mode,
             SledCpuFamily::AmdMilan,
             SledRole::Gimlet,
+            self.sim_trust_quorum,
             &self.simulated_upstairs,
             sim::NexusRegistration::WaitForCompletion,
         )
@@ -1391,6 +1411,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             clickhouse: self.clickhouse.unwrap(),
             sled_agents: self.sled_agents,
             sled_index_allocator: self.sled_index_allocator,
+            sim_trust_quorum: self.sim_trust_quorum,
             oximeter: self.oximeter.unwrap(),
             producer: self.producer.unwrap(),
             logctx: self.logctx,
@@ -2099,6 +2120,7 @@ pub(crate) async fn start_sled_agent(
     sim_mode: sim::SimMode,
     cpu_family: SledCpuFamily,
     sled_role: SledRole,
+    trust_quorum: sim::SimTrustQuorumMode,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
     nexus_registration: sim::NexusRegistration,
 ) -> Result<sim::Server, String> {
@@ -2107,7 +2129,7 @@ pub(crate) async fn start_sled_agent(
     // to their corresponding SPs via baseboard_id.
     let baseboard_serial = format!("SimGimlet{:02}", sled_index);
 
-    let config = sim::Config::for_testing_with_baseboard(
+    let mut config = sim::Config::for_testing_with_baseboard(
         id,
         rack_id,
         sim_mode,
@@ -2117,6 +2139,7 @@ pub(crate) async fn start_sled_agent(
         Some(baseboard_serial),
         sled_role,
     );
+    config.trust_quorum = trust_quorum;
     start_sled_agent_with_config(
         log,
         &config,

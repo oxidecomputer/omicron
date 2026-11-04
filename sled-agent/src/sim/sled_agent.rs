@@ -73,6 +73,7 @@ use sled_agent_types::inventory::{
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
+use sled_hardware_types::BaseboardId;
 
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
@@ -502,6 +503,10 @@ impl SledAgent {
                 }
             },
         })
+    }
+
+    pub fn baseboard_id(&self) -> BaseboardId {
+        self.config.hardware.baseboard.clone().into()
     }
 
     pub(super) fn fake_trust_quorum(
@@ -1353,7 +1358,7 @@ impl SledAgent {
             sled_id: self.id,
             sled_agent_address,
             sled_role: self.config.sled_role,
-            baseboard_id: self.config.hardware.baseboard.clone().into(),
+            baseboard_id: self.baseboard_id(),
             rack_id: self.config.rack_id,
             usable_hardware_threads: self.config.hardware.hardware_threads,
             usable_physical_ram: ByteCount::try_from(

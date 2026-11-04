@@ -67,6 +67,7 @@ pub struct ControlPlaneBuilder<'a> {
     tls_cert: Option<Certificate>,
     nexus_config: NexusConfig,
     configure_second_nexus: bool,
+    sim_trust_quorum: sim::SimTrustQuorumMode,
     gateway_config_files: GatewayTestConfigFiles,
 }
 
@@ -78,6 +79,7 @@ impl<'a> ControlPlaneBuilder<'a> {
             tls_cert: None,
             nexus_config: load_test_config(),
             configure_second_nexus: false,
+            sim_trust_quorum: sim::SimTrustQuorumMode::default(),
             gateway_config_files: GatewayTestConfigFiles::default(),
         }
     }
@@ -94,6 +96,15 @@ impl<'a> ControlPlaneBuilder<'a> {
 
     pub fn with_second_nexus_configured(mut self, do_configure: bool) -> Self {
         self.configure_second_nexus = do_configure;
+        self
+    }
+
+    // TODO-RAINCLAUDE: Fake starts every sim sled (including later add_sled ones) with the fake sim trust quorum, and has the RSS handoff commit epoch 1 over the sim sleds' baseboards instead of fake members; needs 3 to 32 harness sim sleds (extra_sled_agents = 2 to 31), and 4 or more for one removal.
+    pub fn with_sim_trust_quorum(
+        mut self,
+        sim_trust_quorum: sim::SimTrustQuorumMode,
+    ) -> Self {
+        self.sim_trust_quorum = sim_trust_quorum;
         self
     }
 
@@ -131,7 +142,8 @@ impl<'a> ControlPlaneBuilder<'a> {
         }
         let mut nexus_config = self.nexus_config;
         let starter =
-            ControlPlaneStarter::<N>::new(self.test_name, &mut nexus_config);
+            ControlPlaneStarter::<N>::new(self.test_name, &mut nexus_config)
+                .with_sim_trust_quorum(self.sim_trust_quorum);
         setup_with_config_impl(
             starter,
             PopulateCrdb::FromEnvironmentSeed,
@@ -161,6 +173,7 @@ pub struct ControlPlaneTestContext<N> {
     pub logctx: LogContext,
     pub sled_agents: Vec<ControlPlaneTestContextSledAgent>,
     pub(crate) sled_index_allocator: SledIndexAllocator,
+    pub(crate) sim_trust_quorum: sim::SimTrustQuorumMode,
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
     pub gateway: BTreeMap<SwitchSlot, GatewayTestContext>,
@@ -430,6 +443,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
             sim_mode,
             cpu_family,
             SledRole::Gimlet,
+            self.sim_trust_quorum,
             &self.first_sled_agent().simulated_upstairs,
             nexus_registration,
         )
