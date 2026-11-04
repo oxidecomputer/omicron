@@ -5,9 +5,9 @@
 #[cfg(test)]
 mod test {
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::sled_expunge_request::TEST_FAILURE_REASON;
+    use crate::db::pub_test_utils::sled_expunge_request::new_sled_expunge_request;
     use async_bb8_diesel::AsyncRunQueryDsl;
-    use chrono::DateTime;
-    use chrono::Utc;
     use diesel::prelude::*;
     use diesel::result::DatabaseErrorKind;
     use diesel::result::Error as DieselError;
@@ -52,35 +52,14 @@ mod test {
         sled_id: SledUuid,
         baseboard_id: BaseboardId,
         state: SledExpungeRequestState,
-        now: DateTime<Utc>,
     ) -> SledExpungeRequest {
-        let (power_off_outcome, failure_reason, time_completed) = match state {
-            SledExpungeRequestState::WaitingForTrustQuorum
-            | SledExpungeRequestState::PoweringOff => (None, None, None),
-            SledExpungeRequestState::Expunging => {
-                (Some(SledExpungePowerOffOutcome::PoweredOff), None, None)
-            }
-            SledExpungeRequestState::Done => {
-                (Some(SledExpungePowerOffOutcome::PoweredOff), None, Some(now))
-            }
-            SledExpungeRequestState::Failed => {
-                (None, Some("test failure".to_string()), Some(now))
-            }
-        };
-        SledExpungeRequest {
-            time_created: now,
-            time_modified: now,
+        new_sled_expunge_request(
+            RackUuid::new_v4(),
+            sled_id,
+            baseboard_id,
+            2,
             state,
-            power_off_outcome,
-            failure_reason,
-            time_completed,
-            ..SledExpungeRequest::new(
-                RackUuid::new_v4(),
-                sled_id,
-                baseboard_id,
-                2,
-            )
-        }
+        )
     }
 
     async fn insert(
@@ -176,13 +155,14 @@ mod test {
                 last_error: has_last_error
                     .then(|| "test last error".to_string()),
                 failure_reason: has_failure_reason
-                    .then(|| "test failure".to_string()),
+                    .then(|| TEST_FAILURE_REASON.to_string()),
                 time_completed: has_time_completed.then_some(now),
+                time_created: now,
+                time_modified: now,
                 ..request_in_valid_state(
                     SledUuid::new_v4(),
                     unique_baseboard(),
                     WaitingForTrustQuorum,
-                    now,
                 )
             };
             let result = insert(&conn, &request).await;
@@ -232,7 +212,6 @@ mod test {
                     SledUuid::new_v4(),
                     unique_baseboard(),
                     WaitingForTrustQuorum,
-                    now,
                 )
             };
             let constraint = expect_violation(
@@ -253,7 +232,6 @@ mod test {
             dev::test_setup_log("test_sled_expunge_request_unique_indexes");
         let db = TestDatabase::new_with_raw_datastore(&logctx.log).await;
         let conn = db.datastore().pool_connection_for_tests().await.unwrap();
-        let now = now_db_precision();
 
         for (&existing_state, &new_state) in iproduct!(
             SledExpungeRequestState::ALL,
@@ -270,19 +248,13 @@ mod test {
                     sled_id,
                     unique_baseboard(),
                     existing_state,
-                    now,
                 ),
             )
             .await
             .expect("inserted the first request for a sled");
             let result = insert(
                 &conn,
-                &request_in_valid_state(
-                    sled_id,
-                    unique_baseboard(),
-                    new_state,
-                    now,
-                ),
+                &request_in_valid_state(sled_id, unique_baseboard(), new_state),
             )
             .await;
             if both_unfinished {
@@ -305,7 +277,6 @@ mod test {
                     SledUuid::new_v4(),
                     baseboard_id.clone(),
                     existing_state,
-                    now,
                 ),
             )
             .await
@@ -316,7 +287,6 @@ mod test {
                     SledUuid::new_v4(),
                     baseboard_id,
                     new_state,
-                    now,
                 ),
             )
             .await;
@@ -338,7 +308,6 @@ mod test {
             SledUuid::new_v4(),
             unique_baseboard(),
             SledExpungeRequestState::Failed,
-            now,
         );
         insert(&conn, &first).await.expect("inserted the first request");
         let same_epoch = SledExpungeRequest {
@@ -348,7 +317,6 @@ mod test {
                 SledUuid::new_v4(),
                 unique_baseboard(),
                 SledExpungeRequestState::Failed,
-                now,
             )
         };
         let constraint = expect_violation(

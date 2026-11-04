@@ -1874,6 +1874,8 @@ mod tests {
     use crate::db::model::to_db_typed_uuid;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::sled_upsert_for_baseboard;
+    use crate::db::pub_test_utils::sled_expunge_request::insert_sled_expunge_request;
+    use crate::db::pub_test_utils::sled_expunge_request::set_sled_expunge_request_state;
     use async_bb8_diesel::AsyncSimpleConnection;
     use diesel::result::Error as DieselError;
     use nexus_db_lookup::LookupPath;
@@ -1881,7 +1883,6 @@ mod tests {
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::PhysicalDiskPolicy;
-    use nexus_db_model::SledExpungePowerOffOutcome;
     use nexus_db_model::SledState;
     use nexus_types::external_api::sled::SledProvisionPolicy;
     use nexus_types::identity::Asset;
@@ -3750,88 +3751,6 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    async fn insert_expunge_request(
-        datastore: &DataStore,
-        rack_id: RackUuid,
-        baseboard_id: &BaseboardId,
-        tq_epoch: i64,
-        state: SledExpungeRequestState,
-    ) -> SledExpungeRequest {
-        use nexus_db_schema::schema::sled_expunge_request::dsl;
-
-        let now = now_db_precision();
-        let (power_off_outcome, failure_reason, time_completed) = match state {
-            SledExpungeRequestState::WaitingForTrustQuorum
-            | SledExpungeRequestState::PoweringOff => (None, None, None),
-            SledExpungeRequestState::Expunging => {
-                (Some(SledExpungePowerOffOutcome::PoweredOff), None, None)
-            }
-            SledExpungeRequestState::Done => {
-                (Some(SledExpungePowerOffOutcome::PoweredOff), None, Some(now))
-            }
-            SledExpungeRequestState::Failed => {
-                (None, Some("test failure".to_string()), Some(now))
-            }
-        };
-        let request = SledExpungeRequest {
-            state,
-            power_off_outcome,
-            failure_reason,
-            time_completed,
-            ..SledExpungeRequest::new(
-                rack_id,
-                SledUuid::new_v4(),
-                baseboard_id.clone(),
-                tq_epoch,
-            )
-        };
-        let conn = datastore.pool_connection_for_tests().await.unwrap();
-        diesel::insert_into(dsl::sled_expunge_request)
-            .values(request.clone())
-            .execute_async(&*conn)
-            .await
-            .expect("inserted a sled expunge request");
-        request
-    }
-
-    async fn finish_expunge_request(
-        datastore: &DataStore,
-        request: &SledExpungeRequest,
-        finished: SledExpungeRequestState,
-    ) {
-        use nexus_db_schema::schema::sled_expunge_request::dsl;
-
-        let now = now_db_precision();
-        let (power_off_outcome, failure_reason) = match finished {
-            SledExpungeRequestState::Done => {
-                (Some(SledExpungePowerOffOutcome::PoweredOff), None)
-            }
-            SledExpungeRequestState::Failed => {
-                (request.power_off_outcome, Some("test failure".to_string()))
-            }
-            SledExpungeRequestState::WaitingForTrustQuorum
-            | SledExpungeRequestState::PoweringOff
-            | SledExpungeRequestState::Expunging => {
-                panic!("finish_expunge_request called with {finished:?}")
-            }
-        };
-        let conn = datastore.pool_connection_for_tests().await.unwrap();
-        let updated = diesel::update(dsl::sled_expunge_request)
-            .filter(dsl::id.eq(request.id))
-            .set((
-                dsl::state.eq(finished),
-                dsl::power_off_outcome.eq(power_off_outcome),
-                dsl::failure_reason.eq(failure_reason),
-                dsl::last_error.eq(None::<String>),
-                dsl::time_completed.eq(Some(now)),
-                dsl::time_modified.eq(now),
-            ))
-            .execute_async(&*conn)
-            .await
-            .expect("finished the sled expunge request");
-        assert_eq!(updated, 1, "finished exactly one sled expunge request");
-    }
-
     fn one_request_conflict_message(request: &SledExpungeRequest) -> String {
         format!(
             "Cannot add sleds to the trust quorum: 1 sled has an unfinished \
@@ -3891,7 +3810,7 @@ mod tests {
             .await
             .unwrap();
 
-            let request = insert_expunge_request(
+            let request = insert_sled_expunge_request(
                 datastore, rack_id, &re_added, 5, unfinished,
             )
             .await;
@@ -3919,7 +3838,7 @@ mod tests {
                 "a refused proposal ({unfinished:?}) inserts no config",
             );
 
-            finish_expunge_request(datastore, &request, finished).await;
+            set_sled_expunge_request_state(datastore, &request, finished).await;
             datastore
                 .tq_insert_latest_config(opctx, proposal)
                 .await
@@ -3990,7 +3909,7 @@ mod tests {
         .await
         .unwrap();
 
-        let request_b = insert_expunge_request(
+        let request_b = insert_sled_expunge_request(
             datastore,
             rack_id,
             &new_b,
@@ -3998,7 +3917,7 @@ mod tests {
             SledExpungeRequestState::Expunging,
         )
         .await;
-        let request_a_other_rack = insert_expunge_request(
+        let request_a_other_rack = insert_sled_expunge_request(
             datastore,
             RackUuid::new_v4(),
             &new_a,
@@ -4006,7 +3925,7 @@ mod tests {
             SledExpungeRequestState::WaitingForTrustQuorum,
         )
         .await;
-        insert_expunge_request(
+        insert_sled_expunge_request(
             datastore,
             rack_id,
             &new_without_request,
@@ -4014,7 +3933,7 @@ mod tests {
             SledExpungeRequestState::Done,
         )
         .await;
-        insert_expunge_request(
+        insert_sled_expunge_request(
             datastore,
             rack_id,
             &cross_product_decoy,
@@ -4057,13 +3976,13 @@ mod tests {
             Epoch(1)
         );
 
-        finish_expunge_request(
+        set_sled_expunge_request_state(
             datastore,
             &request_a_other_rack,
             SledExpungeRequestState::Failed,
         )
         .await;
-        finish_expunge_request(
+        set_sled_expunge_request_state(
             datastore,
             &request_b,
             SledExpungeRequestState::Done,
@@ -4109,7 +4028,7 @@ mod tests {
         .await
         .unwrap();
 
-        let removed_request = insert_expunge_request(
+        let removed_request = insert_sled_expunge_request(
             datastore,
             rack_id,
             &removed,
@@ -4144,7 +4063,7 @@ mod tests {
             .await
             .unwrap();
 
-        let added_request = insert_expunge_request(
+        let added_request = insert_sled_expunge_request(
             datastore,
             rack_id,
             &added,
@@ -4170,7 +4089,7 @@ mod tests {
         assert_eq!(latest.epoch, Epoch(2));
         assert_eq!(latest.state, TrustQuorumConfigState::Aborted);
 
-        finish_expunge_request(
+        set_sled_expunge_request_state(
             datastore,
             &added_request,
             SledExpungeRequestState::Failed,
