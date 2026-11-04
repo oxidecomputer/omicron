@@ -1469,15 +1469,13 @@ impl BlueprintDisplay<'_> {
             self.blueprint.comment.clone()
         };
 
+        let format_time = |time: chrono::DateTime<chrono::Utc>| {
+            humantime::format_rfc3339_millis(time.into()).to_string()
+        };
+
         let mut rows = vec![
             (CREATED_BY, self.blueprint.creator.clone()),
-            (
-                CREATED_AT,
-                humantime::format_rfc3339_millis(
-                    self.blueprint.time_created.into(),
-                )
-                .to_string(),
-            ),
+            (CREATED_AT, format_time(self.blueprint.time_created)),
             (COMMENT, comment),
         ];
 
@@ -1488,16 +1486,8 @@ impl BlueprintDisplay<'_> {
                 time_done,
             } => {
                 rows.push((REFLECTS_COLLECTION, collection_id.to_string()));
-                rows.push((
-                    COLLECTION_STARTED,
-                    humantime::format_rfc3339_millis(time_started.into())
-                        .to_string(),
-                ));
-                rows.push((
-                    COLLECTION_DONE,
-                    humantime::format_rfc3339_millis(time_done.into())
-                        .to_string(),
-                ));
+                rows.push((COLLECTION_STARTED, format_time(time_started)));
+                rows.push((COLLECTION_DONE, format_time(time_done)));
             }
             ReflectsCollection::Indeterminate => {
                 rows.push((

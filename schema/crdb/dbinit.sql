@@ -5929,7 +5929,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     -- for other purposes in the future.  They are either all NULL (if it's not
     -- known which collection the blueprint reflects) or all non-NULL.
     -- Like `parent_blueprint_id`, `reflects_collection_id` is not a real
-    -- foreign key: the collection may have since been deleted.
+    -- foreign key because the collection may have since been deleted.
     reflects_collection_id UUID,
     reflects_collection_time_started TIMESTAMPTZ,
     reflects_collection_time_done TIMESTAMPTZ,

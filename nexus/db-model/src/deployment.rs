@@ -205,12 +205,11 @@ impl diesel::Insertable<blueprint::table> for DbReflectsCollection {
 }
 
 impl diesel::Insertable<blueprint::table> for &'_ DbReflectsCollection {
-    type Values = <ReflectsCollectionColumns as diesel::Insertable<
-        blueprint::table,
-    >>::Values;
+    type Values =
+        <DbReflectsCollection as diesel::Insertable<blueprint::table>>::Values;
 
     fn values(self) -> Self::Values {
-        ReflectsCollectionColumns::from(*self).values()
+        (*self).values()
     }
 }
 
