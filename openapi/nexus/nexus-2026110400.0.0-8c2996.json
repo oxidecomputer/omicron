@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026110200.0.0"
+    "version": "2026110400.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -10073,6 +10073,66 @@
             "end_time",
             "start_time"
           ]
+        }
+      }
+    },
+    "/v1/system/multirack/racks-unadopted": {
+      "get": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "List racks we've discovered that have joined the underlay network but",
+        "description": "haven't yet been adopted into the regional multirack cluster.\n\nNote that this API is sourced from the inventory system, so it may take some time between when a new rack joins the underlay network and when that rack appears in this API output, since we won't be able to see it here until the inventory collection is refreshed. However, the results returned by this API *are* filtered so that racks which have joined the cluster do not appear in the response, hence the \"unadopted\" naming scheme instead of the \"discovered\" naming scheme used in the corresponding inventory data.",
+        "operationId": "rack_list_unadopted",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnadoptedRackResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
         }
       }
     },
@@ -28498,6 +28558,42 @@
           }
         }
       },
+      "SledAgentStartState": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "last_error": {
+                "nullable": true,
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "in_progress"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "started"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "SledInstance": {
         "description": "An operator's view of an instance running on a given sled",
         "type": "object",
@@ -30530,6 +30626,85 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "UnadoptedRack": {
+        "description": "View of a rack that's joined the underlay network but hasn't been adopted into the regional cluster yet",
+        "type": "object",
+        "properties": {
+          "join_service_ip": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "rack_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "rack_subnet": {
+            "$ref": "#/components/schemas/Ipv6Net"
+          },
+          "unadopted_sleds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnadoptedSled"
+            }
+          }
+        },
+        "required": [
+          "join_service_ip",
+          "rack_id",
+          "rack_subnet",
+          "unadopted_sleds"
+        ]
+      },
+      "UnadoptedRackResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnadoptedRack"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "UnadoptedSled": {
+        "description": "View of an unadopted sled in an unadopted rack",
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "type": "string"
+          },
+          "serial_number": {
+            "type": "string"
+          },
+          "sled_agent_start_state": {
+            "$ref": "#/components/schemas/SledAgentStartState"
+          },
+          "sled_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sled_subnet": {
+            "$ref": "#/components/schemas/Ipv6Net"
+          }
+        },
+        "required": [
+          "part_number",
+          "serial_number",
+          "sled_agent_start_state",
+          "sled_id",
+          "sled_subnet"
         ]
       },
       "UninitializedSled": {
