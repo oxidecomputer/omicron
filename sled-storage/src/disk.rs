@@ -42,7 +42,7 @@ pub struct SyntheticDisk {
 // This shouldn't happen in prod, and is an unlikely test-only scenario, but
 // we'd still like to protect against it, since it could confuse the inventory
 // system.
-const SYNTHETIC_SLOT_OFFSET: i64 = 1024;
+const SYNTHETIC_PCIE_SLOT_OFFSET: i64 = 1024;
 
 // A generic name for the firmware in slot1 of an NVMe device.
 //
@@ -100,8 +100,14 @@ pub struct RawSyntheticDisk {
     pub path: Utf8PathBuf,
     pub identity: DiskIdentity,
     pub variant: DiskVariant,
-    pub slot: i64,
+    /// A fake PCIe physical slot number, offset so it cannot collide with a
+    /// real disk. See [`UnparsedDisk::pcie_slot`].
+    pub pcie_slot: i64,
     pub firmware: DiskFirmware,
+    /// A chassis location spelled the way real hardware spells it, such as
+    /// "N3" or "M.2 East", so that anything keyed on those labels treats a
+    /// synthetic disk like a real one. See [`UnparsedDisk::location`].
+    pub location: String,
 }
 
 impl RawSyntheticDisk {
@@ -110,18 +116,23 @@ impl RawSyntheticDisk {
     pub fn new_with_length<P: AsRef<Utf8Path>>(
         vdev: P,
         length: u64,
-        slot: i64,
+        pcie_slot: i64,
     ) -> Result<Self, anyhow::Error> {
         let file = std::fs::File::create(vdev.as_ref())?;
         file.set_len(length)?;
-        Self::load(vdev, slot)
+        Self::load(vdev, pcie_slot)
     }
 
     /// Treats a file at path `vdev` as a synthetic disk. The file
     /// should already exist, and have the desired length.
+    ///
+    /// The file must be named `m2_<serial>.vdev` or `u2_<serial>.vdev`. When
+    /// `<serial>` is an integer it also picks the disk's chassis location:
+    /// `u2_3.vdev` sits in bay N3, and `m2_0.vdev` and `m2_1.vdev` are M.2
+    /// East and M.2 West. Otherwise `pcie_slot` picks the location.
     pub fn load<P: AsRef<Utf8Path>>(
         vdev: P,
-        slot: i64,
+        pcie_slot: i64,
     ) -> Result<Self, anyhow::Error> {
         let path = vdev.as_ref();
         let Some(file) = path.file_name() else {
@@ -146,6 +157,18 @@ impl RawSyntheticDisk {
             model: format!("synthetic-model-{variant:?}"),
         };
 
+        let ordinal = serial.parse::<i64>().unwrap_or(pcie_slot);
+        let location = match variant {
+            DiskVariant::U2 => format!("N{ordinal}"),
+            DiskVariant::M2 => match ordinal {
+                0 => "M.2 East".to_string(),
+                1 => "M.2 West".to_string(),
+                // Real sleds have two M.2 sockets, but a test may number its
+                // vdevs with one counter across both variants.
+                n => format!("M.2 {n}"),
+            },
+        };
+
         let firmware = DiskFirmware::new(
             1,
             None,
@@ -158,8 +181,9 @@ impl RawSyntheticDisk {
             path: path.into(),
             identity,
             variant,
-            slot: slot + SYNTHETIC_SLOT_OFFSET,
+            pcie_slot: pcie_slot + SYNTHETIC_PCIE_SLOT_OFFSET,
             firmware,
+            location,
         })
     }
 }
@@ -228,10 +252,18 @@ impl RawDisk {
         }
     }
 
-    pub fn slot(&self) -> i64 {
+    pub fn pcie_slot(&self) -> i64 {
         match self {
-            Self::Real(disk) => disk.slot(),
-            Self::Synthetic(disk) => disk.slot,
+            Self::Real(disk) => disk.pcie_slot(),
+            Self::Synthetic(disk) => disk.pcie_slot,
+        }
+    }
+
+    /// See [`UnparsedDisk::location`].
+    pub fn location(&self) -> Option<&str> {
+        match self {
+            Self::Real(disk) => disk.location(),
+            Self::Synthetic(disk) => Some(&disk.location),
         }
     }
 
@@ -374,17 +406,28 @@ impl Disk {
         }
     }
 
-    pub fn slot(&self) -> i64 {
+    pub fn pcie_slot(&self) -> i64 {
         match self {
-            Self::Real(disk) => disk.slot,
-            Self::Synthetic(disk) => disk.raw.slot,
+            Self::Real(disk) => disk.pcie_slot,
+            Self::Synthetic(disk) => disk.raw.pcie_slot,
         }
     }
 
-    pub fn update_firmware_metadata(&mut self, raw_disk: &RawDisk) {
+    /// See [`UnparsedDisk::location`].
+    pub fn location(&self) -> Option<&str> {
+        match self {
+            Self::Real(disk) => disk.location.as_deref(),
+            Self::Synthetic(disk) => Some(&disk.raw.location),
+        }
+    }
+
+    /// Copies the properties that may legitimately change over a disk's
+    /// lifetime (firmware metadata and chassis location) from `raw_disk`.
+    pub fn update_mutable_properties(&mut self, raw_disk: &RawDisk) {
         match self {
             Disk::Real(pooled_disk) => {
                 pooled_disk.firmware = raw_disk.firmware().clone();
+                pooled_disk.location = raw_disk.location().map(str::to_string);
             }
             Disk::Synthetic(synthetic_disk) => {
                 synthetic_disk.raw.firmware = raw_disk.firmware().clone();
@@ -403,18 +446,57 @@ impl Disk {
 impl From<Disk> for RawDisk {
     fn from(disk: Disk) -> RawDisk {
         match disk {
-            Disk::Real(pooled_disk) => RawDisk::Real(UnparsedDisk::new(
-                pooled_disk.paths.devfs_path,
-                pooled_disk.paths.dev_path,
-                pooled_disk.slot,
-                pooled_disk.zpool_name.kind().into(),
-                pooled_disk.identity,
-                pooled_disk.is_boot_disk,
-                pooled_disk.firmware,
-            )),
+            Disk::Real(pooled_disk) => RawDisk::Real(
+                UnparsedDisk::new(
+                    pooled_disk.paths.devfs_path,
+                    pooled_disk.paths.dev_path,
+                    pooled_disk.pcie_slot,
+                    pooled_disk.zpool_name.kind().into(),
+                    pooled_disk.identity,
+                    pooled_disk.is_boot_disk,
+                    pooled_disk.firmware,
+                )
+                .with_location(pooled_disk.location),
+            ),
             Disk::Synthetic(synthetic_disk) => {
                 RawDisk::Synthetic(synthetic_disk.raw)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn location_of(vdev: &str, slot: i64) -> String {
+        RawSyntheticDisk::load(Utf8Path::new(vdev), slot)
+            .expect("vdev name parses")
+            .location
+    }
+
+    #[test]
+    fn synthetic_location_matches_real_labels() {
+        assert_eq!(location_of("u2_0.vdev", 7), "N0");
+        assert_eq!(location_of("/some/dir/u2_9.vdev", 7), "N9");
+        assert_eq!(location_of("m2_0.vdev", 7), "M.2 East");
+        assert_eq!(location_of("m2_1.vdev", 7), "M.2 West");
+    }
+
+    #[test]
+    fn synthetic_location_falls_back_to_slot() {
+        // A non-numeric serial, such as a zpool UUID, cannot pick a bay, so
+        // the caller's slot index does instead.
+        assert_eq!(location_of("u2_deadbeef.vdev", 4), "N4");
+        assert_eq!(location_of("m2_deadbeef.vdev", 0), "M.2 East");
+        assert_eq!(location_of("m2_deadbeef.vdev", 5), "M.2 5");
+    }
+
+    #[test]
+    fn synthetic_location_is_reported() {
+        let disk = RawDisk::Synthetic(
+            RawSyntheticDisk::load(Utf8Path::new("u2_3.vdev"), 0).unwrap(),
+        );
+        assert_eq!(disk.location(), Some("N3"));
     }
 }
