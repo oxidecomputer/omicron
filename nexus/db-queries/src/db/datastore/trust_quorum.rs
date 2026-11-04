@@ -3155,10 +3155,10 @@ mod tests {
             }),
         );
 
-        // Simulate the situation where re-adoption adds the expunged sled's
-        // baseboard back, so the latest trust quorum config now contains it.
-        // Ensure that expunge() returns Ok(SledPolicy::Expunged) (and not an
-        // error or something else that's weird).
+        // Simulate re-adoption adding the expunged sled's baseboard back, so
+        // the latest trust quorum config now contains it. Ensure that expunge()
+        // returns Ok(SledPolicy::Expunged) (and not an error or something else
+        // that's weird).
         let with_sled: BTreeSet<_> =
             hw_ids.iter().cloned().map(BaseboardId::from).collect();
         datastore
@@ -3177,6 +3177,31 @@ mod tests {
             .unwrap();
 
         assert_eq!(expunge().await, Ok(SledPolicy::Expunged));
+
+        // Simulate a decommissioned sled whose baseboard is back in the trust
+        // quorum. We expect the return value to be the policy transition error,
+        // not a trust quorum membership conflict, because the trust quorum
+        // check is skipped.
+        datastore
+            .sled_set_state_to_decommissioned(opctx, &authz_sled)
+            .await
+            .expect("decommissioned sled");
+        let (_, decommissioned) = LookupPath::new(opctx, datastore)
+            .sled_id(sled_id)
+            .fetch()
+            .await
+            .expect("looked up sled");
+        let expected_message = TransitionError::InvalidTransition {
+            current: decommissioned,
+            transition: SledTransition::Policy(SledPolicy::Expunged),
+        }
+        .to_string();
+        match expunge().await {
+            Err(Error::Conflict { message }) => {
+                assert_eq!(message.external_message(), expected_message);
+            }
+            other => panic!("expected Conflict, got {other:?}"),
+        }
 
         db.terminate().await;
         logctx.cleanup_successful();
