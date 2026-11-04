@@ -2088,6 +2088,668 @@ mod test {
         cptestctx.teardown().await;
     }
 
+    /// Tests that a request to reboot an instance whose start saga's VMM is
+    /// still `Creating` is rejected, without failing the instance or
+    /// disturbing the start.
+    ///
+    /// There is nothing to reboot until the VMM has been registered with the
+    /// sled-agent. Forwarding the reboot to the sled-agent before then would
+    /// produce a `NO_SUCH_INSTANCE` error, which moves the instance to
+    /// `Failed`, just as forwarding a stop request did in omicron#11560.
+    #[tokio::test]
+    async fn test_reboot_before_registration_is_rejected() {
+        let cptestctx = test_helpers::instance_saga_test_builder(
+            "test_reboot_before_registration_is_rejected",
+        )
+        .start::<crate::Server>()
+        .await;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let _project_id = setup_test_project(&client).await;
+        let opctx = test_helpers::test_opctx(&cptestctx);
+        let instance = create_instance(client).await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+        let db_instance = test_helpers::instance_fetch(&cptestctx, instance_id)
+            .await
+            .instance()
+            .clone();
+
+        // There's only one sled, so this is where the saga will put the VMM.
+        let register_pause =
+            cptestctx.first_sled_agent().pause_next_vmm_registration();
+
+        let params = Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+            db_instance,
+            reason: Reason::User,
+        };
+        let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
+        let running_saga = nexus
+            .sagas
+            .saga_prepare(dag)
+            .await
+            .expect("saga should be prepared")
+            .start()
+            .await
+            .expect("saga should start");
+
+        let paused_registration =
+            register_pause.wait_for_request(Duration::from_secs(60)).await;
+        let propolis_id = paused_registration.propolis_id();
+
+        // The saga is now waiting on the `vmm_register` request, so its VMM is
+        // linked to the instance but unknown to the sled-agent.
+        let creating_vmm =
+            test_helpers::instance_fetch(&cptestctx, instance_id)
+                .await
+                .vmm()
+                .clone()
+                .expect("the start saga should have linked its VMM");
+        assert_eq!(creating_vmm.id, propolis_id.into_untyped_uuid());
+        assert_eq!(creating_vmm.state, nexus_db_model::VmmState::Creating);
+
+        let instance_lookup = nexus
+            .instance_lookup(
+                &opctx,
+                instance_types::InstanceSelector {
+                    project: None,
+                    instance: instance_id.into_untyped_uuid().into(),
+                },
+            )
+            .expect("instance lookup should succeed");
+
+        // The reboot should be rejected as a request that can't be satisfied in
+        // the instance's current state (a 4xx), rather than reported as the
+        // instance being unreachable (a 5xx).
+        match nexus.instance_reboot(&opctx, &instance_lookup).await {
+            Ok(state) => panic!(
+                "rebooting an instance whose VMM is not yet registered \
+                 should fail: {state:?}",
+            ),
+            Err(e) => {
+                let error = dropshot::HttpError::from(e);
+                assert!(
+                    error.status_code.is_client_error(),
+                    "rebooting an instance whose VMM is not yet registered \
+                     should fail with a client error: {error:?}",
+                );
+            }
+        }
+        let vmm =
+            test_helpers::vmm_fetch_including_deleted(&cptestctx, propolis_id)
+                .await;
+        assert_eq!(
+            vmm.state,
+            nexus_db_model::VmmState::Creating,
+            "the rejected reboot should not have touched VMM {propolis_id}: \
+             {vmm:?}",
+        );
+
+        paused_registration.resume();
+        if let Err(e) =
+            running_saga.wait_until_stopped().await.into_omicron_result()
+        {
+            panic!(
+                "the start saga should succeed despite the rejected reboot: {}",
+                InlineErrorChain::new(&e),
+            );
+        }
+        let final_state =
+            test_helpers::instance_fetch(&cptestctx, instance_id).await;
+        assert_eq!(
+            final_state.vmm().as_ref().map(|vmm| vmm.id),
+            Some(propolis_id.into_untyped_uuid()),
+            "the start saga's VMM should still be the instance's active VMM: \
+             {final_state:?}",
+        );
+        assert!(
+            matches!(
+                final_state.effective_state(),
+                instance_types::InstanceState::Starting
+                    | instance_types::InstanceState::Running
+            ),
+            "the instance should be starting or running: {final_state:?}",
+        );
+
+        cptestctx.teardown().await;
+    }
+
+    /// Tests that stopping an instance after its start saga has registered the
+    /// VMM with the sled-agent, but before the saga has asked the VMM to run,
+    /// stops the instance.
+    ///
+    /// Unlike a stop before registration, this stop is forwarded to the
+    /// sled-agent, which stops the VMM. That triggers an instance-update saga
+    /// to clean up after the VMM, in the background. Meanwhile, the start
+    /// saga's request to run the VMM fails, and the start saga unwinds,
+    /// cleaning up after the same VMM. Together, the two sagas must leave the
+    /// instance stopped, not failed, and must not leak the VMM or any resources
+    /// accounted to it.
+    #[tokio::test]
+    async fn test_stop_after_registration_stops_instance() {
+        use crate::app::instance::SledAgentInstanceError;
+
+        let cptestctx = test_helpers::instance_saga_test_builder(
+            "test_stop_after_registration_stops_instance",
+        )
+        .start::<crate::Server>()
+        .await;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let _project_id = setup_test_project(&client).await;
+        let opctx = test_helpers::test_opctx(&cptestctx);
+        let instance = create_instance(client).await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+        let db_instance = test_helpers::instance_fetch(&cptestctx, instance_id)
+            .await
+            .instance()
+            .clone();
+
+        // The first `vmm_put_state` request the start saga sends is the
+        // ensure-running node's request to run the VMM, which comes after the
+        // VMM has been registered. The stop request's `vmm_put_state` comes
+        // second, so it isn't paused.
+        let run_pause = cptestctx.first_sled_agent().pause_next_vmm_put_state();
+
+        let params = Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+            db_instance,
+            reason: Reason::User,
+        };
+        let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
+        let running_saga = nexus
+            .sagas
+            .saga_prepare(dag)
+            .await
+            .expect("saga should be prepared")
+            .start()
+            .await
+            .expect("saga should start");
+
+        let paused_run =
+            run_pause.wait_for_request(Duration::from_secs(60)).await;
+        let propolis_id = paused_run.propolis_id();
+
+        // The VMM is now registered with the sled-agent, but has not yet been
+        // asked to run.
+        let starting_vmm =
+            test_helpers::instance_fetch(&cptestctx, instance_id)
+                .await
+                .vmm()
+                .clone()
+                .expect("the start saga should have linked its VMM");
+        assert_eq!(starting_vmm.id, propolis_id.into_untyped_uuid());
+        assert_eq!(starting_vmm.state, nexus_db_model::VmmState::Starting);
+
+        let instance_lookup = nexus
+            .instance_lookup(
+                &opctx,
+                instance_types::InstanceSelector {
+                    project: None,
+                    instance: instance_id.into_untyped_uuid().into(),
+                },
+            )
+            .expect("instance lookup should succeed");
+        let state = nexus
+            .instance_stop(&opctx, &instance_lookup)
+            .await
+            .unwrap_or_else(|e| {
+                panic!(
+                    "stopping an instance whose VMM is registered should \
+                     succeed: {}",
+                    InlineErrorChain::new(&e),
+                )
+            });
+        // The instance-update saga runs in the background, so it may or may
+        // not have finished stopping the instance yet.
+        assert!(
+            matches!(
+                state.effective_state(),
+                instance_types::InstanceState::Stopping
+                    | instance_types::InstanceState::Stopped
+            ),
+            "the instance should be stopping or stopped: {state:?}",
+        );
+
+        paused_run.resume();
+        let saga_result =
+            running_saga.wait_until_stopped().await.into_raw_result();
+        match saga_result.kind {
+            Ok(output) => panic!(
+                "the start saga succeeded ({output:?}), even though the \
+                 instance was stopped before its VMM {propolis_id} was asked \
+                 to run. the saga should have unwound!",
+            ),
+            Err(saga_err) => {
+                if let Some((node, error)) = &saga_err.undo_failure {
+                    panic!(
+                        "saga got stuck unwinding (at node {node:?}): {error:?}"
+                    )
+                }
+            }
+        }
+
+        // The instance-update saga may still be running, so wait for the
+        // instance to have no VMM.
+        let final_state = test_helpers::instance_wait_for_state(
+            &cptestctx,
+            instance_id,
+            nexus_db_model::InstanceState::NoVmm,
+        )
+        .await;
+        assert_eq!(
+            final_state.effective_state(),
+            instance_types::InstanceState::Stopped,
+            "the instance should be `Stopped`: {final_state:#?}",
+        );
+        assert_eq!(
+            final_state.instance().intended_state,
+            nexus_db_model::InstanceIntendedState::Stopped,
+        );
+        assert!(
+            test_helpers::no_virtual_provisioning_resource_records_exist(
+                &cptestctx
+            )
+            .await
+        );
+        assert!(
+            test_helpers::no_virtual_provisioning_collection_records_using_instances(
+                &cptestctx
+            )
+            .await
+        );
+        assert!(
+            test_helpers::no_sled_resource_vmm_records_exist(&cptestctx).await
+        );
+
+        let sled_state = nexus
+            .sled_client(&starting_vmm.sled_id())
+            .await
+            .expect("sled-agent client should be available")
+            .vmm_get_state(&propolis_id)
+            .await
+            .map(|state| state.into_inner())
+            .map_err(SledAgentInstanceError);
+        match &sled_state {
+            Err(e) if e.vmm_gone() => {}
+            Ok(state) => panic!(
+                "the instance was stopped, but VMM {propolis_id} is still \
+                 registered with the sled-agent! (sled vmm was in state \
+                 {state:#?})",
+            ),
+            Err(e) => panic!(
+                "unexpected error asking sled-agent about VMM {propolis_id}: \
+                 {}",
+                InlineErrorChain::new(e),
+            ),
+        }
+
+        cptestctx.teardown().await;
+    }
+
+    /// Tests that stopping an instance while its start saga is unwinding,
+    /// before the saga has unregistered its VMM, stops the instance.
+    ///
+    /// To make the saga unwind, the test fails the saga's request to run its
+    /// VMM, and then holds the saga's request to unregister the VMM. While
+    /// that request is held, the instance's active VMM is still the saga's
+    /// VMM, and the database still records it as `Starting`.
+    ///
+    /// The stop is forwarded to the sled-agent, which still has the VMM, and
+    /// stops it. That triggers an instance-update saga, which runs in the
+    /// background and cleans up after the VMM, while the unwinding start saga
+    /// also cleans up after it.
+    #[tokio::test]
+    async fn test_stop_while_unwinding_before_unregistration() {
+        use crate::app::instance::SledAgentInstanceError;
+
+        let cptestctx = test_helpers::instance_saga_test_builder(
+            "test_stop_while_unwinding_before_unregistration",
+        )
+        .start::<crate::Server>()
+        .await;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let _project_id = setup_test_project(&client).await;
+        let opctx = test_helpers::test_opctx(&cptestctx);
+        let instance = create_instance(client).await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+        let db_instance = test_helpers::instance_fetch(&cptestctx, instance_id)
+            .await
+            .instance()
+            .clone();
+
+        // The first `vmm_put_state` request the start saga sends is the
+        // ensure-running node's request to run the VMM, and the first
+        // `vmm_unregister` request is sent by the saga as it unwinds.
+        let sled_agent = cptestctx.first_sled_agent();
+        let run_pause = sled_agent.pause_next_vmm_put_state();
+        let unregister_pause = sled_agent.pause_next_vmm_unregister();
+
+        let params = Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+            db_instance,
+            reason: Reason::User,
+        };
+        let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
+        let running_saga = nexus
+            .sagas
+            .saga_prepare(dag)
+            .await
+            .expect("saga should be prepared")
+            .start()
+            .await
+            .expect("saga should start");
+
+        run_pause.wait_for_request(Duration::from_secs(60)).await.fail(
+            Error::internal_error("injected to make the start saga unwind"),
+        );
+        let paused_unregister =
+            unregister_pause.wait_for_request(Duration::from_secs(60)).await;
+        let propolis_id = paused_unregister.propolis_id();
+
+        // The saga is unwinding, but hasn't yet unregistered its VMM.
+        let starting_vmm =
+            test_helpers::instance_fetch(&cptestctx, instance_id)
+                .await
+                .vmm()
+                .clone()
+                .expect("the start saga's VMM should still be linked");
+        assert_eq!(starting_vmm.id, propolis_id.into_untyped_uuid());
+        assert_eq!(starting_vmm.state, nexus_db_model::VmmState::Starting);
+
+        let instance_lookup = nexus
+            .instance_lookup(
+                &opctx,
+                instance_types::InstanceSelector {
+                    project: None,
+                    instance: instance_id.into_untyped_uuid().into(),
+                },
+            )
+            .expect("instance lookup should succeed");
+        let state = nexus
+            .instance_stop(&opctx, &instance_lookup)
+            .await
+            .unwrap_or_else(|e| {
+                panic!(
+                    "stopping an instance whose start saga is unwinding \
+                     should succeed: {}",
+                    InlineErrorChain::new(&e),
+                )
+            });
+        assert!(
+            matches!(
+                state.effective_state(),
+                instance_types::InstanceState::Stopping
+                    | instance_types::InstanceState::Stopped
+            ),
+            "the instance should be stopping or stopped: {state:?}",
+        );
+
+        paused_unregister.resume();
+        let saga_result =
+            running_saga.wait_until_stopped().await.into_raw_result();
+        match saga_result.kind {
+            Ok(output) => panic!(
+                "the start saga succeeded ({output:?}), even though the test \
+                 failed its request to run VMM {propolis_id}. the saga should \
+                 have unwound!",
+            ),
+            Err(saga_err) => {
+                if let Some((node, error)) = &saga_err.undo_failure {
+                    panic!(
+                        "saga got stuck unwinding (at node {node:?}): {error:?}"
+                    )
+                }
+            }
+        }
+
+        // The instance-update saga may still be running, so wait for the
+        // instance to have no VMM.
+        let final_state = test_helpers::instance_wait_for_state(
+            &cptestctx,
+            instance_id,
+            nexus_db_model::InstanceState::NoVmm,
+        )
+        .await;
+        assert_eq!(
+            final_state.effective_state(),
+            instance_types::InstanceState::Stopped,
+            "the instance should be `Stopped`: {final_state:#?}",
+        );
+        assert_eq!(
+            final_state.instance().intended_state,
+            nexus_db_model::InstanceIntendedState::Stopped,
+        );
+        assert!(
+            test_helpers::no_virtual_provisioning_resource_records_exist(
+                &cptestctx
+            )
+            .await
+        );
+        assert!(
+            test_helpers::no_virtual_provisioning_collection_records_using_instances(
+                &cptestctx
+            )
+            .await
+        );
+        assert!(
+            test_helpers::no_sled_resource_vmm_records_exist(&cptestctx).await
+        );
+
+        let sled_state = nexus
+            .sled_client(&starting_vmm.sled_id())
+            .await
+            .expect("sled-agent client should be available")
+            .vmm_get_state(&propolis_id)
+            .await
+            .map(|state| state.into_inner())
+            .map_err(SledAgentInstanceError);
+        match &sled_state {
+            Err(e) if e.vmm_gone() => {}
+            Ok(state) => panic!(
+                "the instance was stopped, but VMM {propolis_id} is still \
+                 registered with the sled-agent! (sled vmm was in state \
+                 {state:#?})",
+            ),
+            Err(e) => panic!(
+                "unexpected error asking sled-agent about VMM {propolis_id}: \
+                 {}",
+                InlineErrorChain::new(e),
+            ),
+        }
+
+        cptestctx.teardown().await;
+    }
+
+    /// Tests that stopping an instance while its start saga is unwinding,
+    /// after the sled-agent has unregistered the saga's VMM but before the
+    /// saga has unlinked the VMM from the instance, stops the instance.
+    ///
+    /// In this window, the database still records the VMM as `Starting`, but
+    /// the sled-agent no longer knows about it. A stop that is forwarded to
+    /// the sled-agent gets a `NO_SUCH_INSTANCE` error, which must not move the
+    /// instance to `Failed`: the VMM is gone because the instance is being
+    /// stopped, not because anything went wrong.
+    ///
+    /// To act in this window, the test fails the saga's request to run its
+    /// VMM, holds the saga's `vmm_unregister` request as it unwinds,
+    /// unregisters the VMM from the simulated sled-agent directly, and only
+    /// then lets the held request complete. To Nexus, this looks the same as
+    /// the stop arriving just after the sled-agent handled the saga's request,
+    /// except that the saga's unregister request reports that there was no VMM
+    /// to unregister, which the saga only logs.
+    #[tokio::test]
+    async fn test_stop_while_unwinding_after_unregistration() {
+        use crate::app::instance::SledAgentInstanceError;
+
+        let cptestctx = test_helpers::instance_saga_test_builder(
+            "test_stop_while_unwinding_after_unregistration",
+        )
+        .start::<crate::Server>()
+        .await;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let _project_id = setup_test_project(&client).await;
+        let opctx = test_helpers::test_opctx(&cptestctx);
+        let instance = create_instance(client).await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+        let db_instance = test_helpers::instance_fetch(&cptestctx, instance_id)
+            .await
+            .instance()
+            .clone();
+
+        // The first `vmm_put_state` request the start saga sends is the
+        // ensure-running node's request to run the VMM, and the first
+        // `vmm_unregister` request is sent by the saga as it unwinds.
+        let sled_agent = cptestctx.first_sled_agent();
+        let run_pause = sled_agent.pause_next_vmm_put_state();
+        let unregister_pause = sled_agent.pause_next_vmm_unregister();
+
+        let params = Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+            db_instance,
+            reason: Reason::User,
+        };
+        let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
+        let running_saga = nexus
+            .sagas
+            .saga_prepare(dag)
+            .await
+            .expect("saga should be prepared")
+            .start()
+            .await
+            .expect("saga should start");
+
+        run_pause.wait_for_request(Duration::from_secs(60)).await.fail(
+            Error::internal_error("injected to make the start saga unwind"),
+        );
+        let paused_unregister =
+            unregister_pause.wait_for_request(Duration::from_secs(60)).await;
+        let propolis_id = paused_unregister.propolis_id();
+
+        // The saga is unwinding, but hasn't yet unregistered its VMM.
+        let starting_vmm =
+            test_helpers::instance_fetch(&cptestctx, instance_id)
+                .await
+                .vmm()
+                .clone()
+                .expect("the start saga's VMM should still be linked");
+        assert_eq!(starting_vmm.id, propolis_id.into_untyped_uuid());
+        assert_eq!(starting_vmm.state, nexus_db_model::VmmState::Starting);
+
+        sled_agent
+            .instance_unregister(propolis_id)
+            .await
+            .expect("unregistering the VMM from the sled-agent should succeed");
+
+        let instance_lookup = nexus
+            .instance_lookup(
+                &opctx,
+                instance_types::InstanceSelector {
+                    project: None,
+                    instance: instance_id.into_untyped_uuid().into(),
+                },
+            )
+            .expect("instance lookup should succeed");
+        let state = nexus
+            .instance_stop(&opctx, &instance_lookup)
+            .await
+            .unwrap_or_else(|e| {
+                panic!(
+                    "stopping an instance whose start saga is unwinding \
+                     should succeed, even if the sled-agent has already \
+                     unregistered its VMM: {}",
+                    InlineErrorChain::new(&e),
+                )
+            });
+        assert!(
+            matches!(
+                state.effective_state(),
+                instance_types::InstanceState::Stopping
+                    | instance_types::InstanceState::Stopped
+            ),
+            "the instance should be stopping or stopped: {state:?}",
+        );
+
+        paused_unregister.resume();
+        let saga_result =
+            running_saga.wait_until_stopped().await.into_raw_result();
+        match saga_result.kind {
+            Ok(output) => panic!(
+                "the start saga succeeded ({output:?}), even though the test \
+                 failed its request to run VMM {propolis_id}. the saga should \
+                 have unwound!",
+            ),
+            Err(saga_err) => {
+                if let Some((node, error)) = &saga_err.undo_failure {
+                    panic!(
+                        "saga got stuck unwinding (at node {node:?}): {error:?}"
+                    )
+                }
+            }
+        }
+
+        let final_state = test_helpers::instance_wait_for_state(
+            &cptestctx,
+            instance_id,
+            nexus_db_model::InstanceState::NoVmm,
+        )
+        .await;
+        assert_eq!(
+            final_state.effective_state(),
+            instance_types::InstanceState::Stopped,
+            "the instance should be `Stopped`: {final_state:#?}",
+        );
+        assert_eq!(
+            final_state.instance().intended_state,
+            nexus_db_model::InstanceIntendedState::Stopped,
+        );
+        assert!(
+            test_helpers::no_virtual_provisioning_resource_records_exist(
+                &cptestctx
+            )
+            .await
+        );
+        assert!(
+            test_helpers::no_virtual_provisioning_collection_records_using_instances(
+                &cptestctx
+            )
+            .await
+        );
+        assert!(
+            test_helpers::no_sled_resource_vmm_records_exist(&cptestctx).await
+        );
+
+        let sled_state = nexus
+            .sled_client(&starting_vmm.sled_id())
+            .await
+            .expect("sled-agent client should be available")
+            .vmm_get_state(&propolis_id)
+            .await
+            .map(|state| state.into_inner())
+            .map_err(SledAgentInstanceError);
+        match &sled_state {
+            Err(e) if e.vmm_gone() => {}
+            Ok(state) => panic!(
+                "the instance was stopped, but VMM {propolis_id} is still \
+                 registered with the sled-agent! (sled vmm was in state \
+                 {state:#?})",
+            ),
+            Err(e) => panic!(
+                "unexpected error asking sled-agent about VMM {propolis_id}: \
+                 {}",
+                InlineErrorChain::new(e),
+            ),
+        }
+
+        cptestctx.teardown().await;
+    }
+
     #[tokio::test]
     async fn test_cannot_start_local_storage_disk_gone() {
         let cptestctx = test_helpers::instance_saga_test_builder(
