@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Background task for automatically restarting failed instances.
+//! Background task for automatically restarting instances that require it.
 
 use crate::app::background::Activator;
 use crate::app::background::BackgroundTask;
@@ -1171,6 +1171,15 @@ mod test {
         .await;
     }
 
+    // This test differs from `test_only_reincarnates_eligible_instances` in
+    // that it checks the `SledEvacuating` case more thoroughly. Specifically,
+    // it does this by following the real sequence of events, instead of writing
+    // the `SledEvacuating` state directly to the database. Like a little
+    // integration test. We emulate this sequence, first by marking the VMMs to
+    // be stopped for an update, then running the `vmm_stop_for_update` task to
+    // stop them, verifying the `instance-update` saga changes each instance's
+    // state to `SledEvacuating`, and finally making sure they are successfully
+    // reincarnated.
     #[tokio::test]
     async fn test_reincarnates_instances_in_sled_evacuating() {
         // Test setup
@@ -1178,7 +1187,6 @@ mod test {
             "test_reincarnates_instances_in_sled_evacuating",
         )
         .customize_nexus_config(&|config| {
-            let one_day = Duration::from_secs(86_400);
             let tasks = &mut config.pkg.background_tasks;
             // The `instance-update` saga activates the real
             // `instance_reincarnation` background task when an instance's state
@@ -1187,10 +1195,10 @@ mod test {
             tasks.instance_reincarnation.disable = true;
             // Increase the intervals for background tasks that could modify
             // VMM records while this test is running.
-            tasks.instance_watcher.period_secs = one_day;
-            tasks.abandoned_vmm_reaper.period_secs = one_day;
-            tasks.vmm_mark_stop_for_update.period_secs = one_day;
-            tasks.vmm_stop_for_update.period_secs = one_day;
+            tasks.instance_watcher.period_secs = Duration::MAX;
+            tasks.abandoned_vmm_reaper.period_secs = Duration::MAX;
+            tasks.vmm_mark_stop_for_update.period_secs = Duration::MAX;
+            tasks.vmm_stop_for_update.period_secs = Duration::MAX;
         })
         .start::<crate::Server>()
         .await;

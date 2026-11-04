@@ -627,7 +627,7 @@ impl InstanceAutoRestart {
         // should not be automatically restarted, even if they have failed.
         dsl::intended_state
             .eq(IntendedState::Running)
-            // Either the failed-instance preduicate from above matches, *or*
+            // Either the failed-instance predicate from above matches, *or*
             // the instance is rebooting due to its sled evacuating. When an
             // instance had to stop for sled evacuation, can always be
             // reincarnated, regardless of its auto-restart policy and when it
