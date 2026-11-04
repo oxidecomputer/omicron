@@ -1081,151 +1081,22 @@ async fn sis_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
 async fn sis_ensure_unregistered(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
-    use nexus_db_queries::db::datastore::vmm::MarkSagaUnwoundOutcome as Outcome;
 
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
 
     let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
     let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
     let sled_id = sagactx.lookup::<SledUuid>("sled_id")?;
 
-    // `ensure_vmm_unregistered` will not retry errors checking if the sled is
-    // out of service (which may include potentially transient errors querying
-    // the database), nor will it retry errors from the sled-agent that
-    // progenitor-extras considers "permanent". Therefore, we wrap the entire
-    // thing in a second retry loop, so that the saga doesn't get stuck.
-    retry_notify_ext(
-        retry_policy_internal_service(),
-        || async {
-            // First, we must mark the VMM as `Cancelling` so that no one else
-            // (say, a stop request or the instance-watcher background task)
-            // will attempt to send requests to the sled-agent which we are
-            // about to instruct to disown the instance.
-            //
-            // This is safe to do HERE (and here ONLY) for the following
-            // reasons:
-            //
-            // 1. This undo action will continually retry the sled-agent
-            //    request to unregister the VMM indefinitely until we are
-            //    certain it is FOR SURE GONE (either because the sled-agent
-            //    said so or because the sled itself was erased from our
-            //    understanding of the universe).
-            //
-            //    If we did not do that, a failed call to the sled-agent would
-            //    leak the actual Propolis process, leaving it running while the
-            //    database would indicate that it does not exist.
-            //
-            // 2. We are in a saga node that will be re-run if we die between
-            //    when we mark the database record as cancelling and when we
-            //    try to unregister the VMM. If we did this outside of a saga
-            //    context, Nexus could crash between when we put the VMM record
-            //    in the "no longer exists" state and when we actually made it
-            //    no longer exist, but here, the saga node will be executed
-            //    elsewhere if we die between those two steps.
-            //
-            // 3. Finally, and due to the consequences of (2) above, because
-            //    `vmm_mark_saga_unwinding` succeeds idempotently if the VMM
-            //    record is already on a state in which it is not considered to
-            //    exist on a sled. This could occur either because a previous
-            //    execution of this node had already done so, or if the VMM
-            //    record was marked as `Cancelling` by an instance stop request
-            //    which is what caused this saga to unwind in the first place.
-            //
-            match osagactx
-                .datastore()
-                .vmm_mark_saga_unwinding(&opctx, &propolis_id)
-                .await
-            {
-                // We have successfully changed the VMM record to `Cancelling`.
-                Ok(Outcome::StateChanged { .. }) => {
-                    info!(
-                        osagactx.log(),
-                        "start saga unwind: marked VMM as `Cancelling`, \
-                         continuing to unwind...";
-                        "instance_id" => %instance_id,
-                        "propolis_id" => %propolis_id,
-                    );
-                }
-                // The VMM record was already in a potentially-non-existent
-                // state. This is either due to a previous execution of this
-                // action, a concurrent stop request putting it in `Cancelling`
-                // and causing us to unwind, or the sled-agent transitioning the
-                // VMM to `Failed` or `Destroyed` on its own (which currently
-                // doesn't happen, but might in future...). If it is already in
-                // a state where other parts of Nexus will no longer try to
-                // interact with it on the sled, we can safely continue
-                // unwinding.
-                Ok(Outcome::StateChangeNotNeeded { current_state }) => {
-                    info!(
-                        osagactx.log(),
-                        "start saga unwind: VMM already in a potentially \
-                         non-existent state, continuing to unwind...";
-                        "instance_id" => %instance_id,
-                        "propolis_id" => %propolis_id,
-                        "state" => ?current_state,
-                    );
-                }
-                // If the VMM record has been deleted, then the query that marks
-                // it as `Cancelling` not doing that is totally fine: we no
-                // longer need to ensure it is in a non-existent state, since no
-                // other actor that might otherwise try to send requests to the
-                // sled-agent about it will ever see any evidence of its
-                // existence anyway! We can now safely proceed to telling the
-                // sled-agent to disown it.
-                //
-                // N.B. that `vmm_mark_saga_unwinding` does not actually return
-                // `Err(ObjectNotFound)` if the VMM record has been deleted, it
-                // returns `Ok(Outcome::VmmDeleted)`. But, we may as well handle
-                // the `ObjectNotFound` error here too, just in case one slips
-                // in somehow.
-                Ok(Outcome::VmmDeleted) | Err(Error::ObjectNotFound { .. }) => {
-                    info!(
-                        osagactx.log(),
-                        "start saga unwind: the VMM record created by this \
-                         has been deleted while we are still unwinding. \
-                         continuing to unwind anyway...";
-                        "instance_id" => %instance_id,
-                        "propolis_id" => %propolis_id,
-                    );
-                }
-                // Any other error must result in us retrying the query until
-                // the database record no longer indicates that the VMM exists
-                // on the sled. We must bail out here and retry before
-                // attempting to unregister the VMM from the sled, since the VMM
-                // record's state must be changed before we can do that.
-                Err(e) => return Err(BackoffError::transient(e)),
-            };
-
-            // Now, we can safely instruct the sled-agent to unregister the VMM.
-            super::instance_common::ensure_vmm_unregistered(
-                &sagactx,
-                &opctx,
-                instance_id,
-                propolis_id,
-                sled_id,
-            )
-            .await
-            .map_err(BackoffError::transient)
-        },
-        |error, call_count, total_duration| {
-            warn!(
-                osagactx.log(),
-                "start saga: failed to unregister VMM; retrying";
-                "instance_id" => %instance_id,
-                "propolis_id" => %propolis_id,
-                "sled_id" => %sled_id,
-                "call_count" => call_count,
-                "total_duration" => ?total_duration,
-                InlineErrorChain::new(&error),
-            );
-        },
+    super::instance_common::ensure_vmm_unregistered(
+        &sagactx,
+        &params.serialized_authn,
+        instance_id,
+        propolis_id,
+        sled_id,
     )
-    .await?;
+    .await;
 
     Ok(())
 }

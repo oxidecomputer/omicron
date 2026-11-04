@@ -546,10 +546,6 @@ async fn sim_ensure_destination_propolis_undo(
 ) -> Result<(), anyhow::Error> {
     let params = sagactx.saga_params::<Params>()?;
     let osagactx = sagactx.user_data();
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
 
     let dst_propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
     let dst_sled_id = sagactx.lookup::<SledUuid>("dst_sled_id")?;
@@ -562,39 +558,14 @@ async fn sim_ensure_destination_propolis_undo(
           "sled_id" => %dst_sled_id,
           "prev_runtime_state" => ?db_instance.runtime());
 
-    // `ensure_vmm_unregistered` will not retry errors checking if the sled is
-    // out of service (which may include potentially transient errors querying
-    // the database), nor will it retry errors from the sled-agent that
-    // progenitor-extras considers "permanent". Therefore, we wrap the entire
-    // thing in a second retry loop, so that the saga doesn't get stuck.
-    retry_notify_ext(
-        retry_policy_internal_service(),
-        || async {
-            super::instance_common::ensure_vmm_unregistered(
-                &sagactx,
-                &opctx,
-                instance_id,
-                dst_propolis_id,
-                dst_sled_id,
-            )
-            .await
-            .map_err(BackoffError::transient)
-        },
-        |error, call_count, total_duration| {
-            warn!(
-                osagactx.log(),
-                "migration saga: failed to unregister destination VMM; \
-                 retrying";
-                "instance_id" => %instance_id,
-                "dst_propolis_id" => %dst_propolis_id,
-                "dst_sled_id" => %dst_sled_id,
-                "call_count" => call_count,
-                "total_duration" => ?total_duration,
-                InlineErrorChain::new(&error),
-            );
-        },
+    super::instance_common::ensure_vmm_unregistered(
+        &sagactx,
+        &params.serialized_authn,
+        instance_id,
+        dst_propolis_id,
+        dst_sled_id,
     )
-    .await?;
+    .await;
 
     Ok(())
 }
