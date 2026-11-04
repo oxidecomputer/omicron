@@ -1586,7 +1586,6 @@ impl super::Nexus {
         prev_vmm_state: &mut Option<db::model::Vmm>,
         requested: InstanceStateChangeRequest,
     ) -> Result<(), InstanceStateChangeError> {
-        // time for The Goofy VMM State Compare-And-Swap Loop Dance! yay!
         loop {
             match Self::select_runtime_change_action(
                 &self.log,
@@ -1655,6 +1654,21 @@ impl super::Nexus {
                         Err(e) => Err(InstanceStateChangeError::SledAgent(e)),
                     }
                 }
+
+                // The instance has an active VMM *record* in the database, but
+                // the VMM record was in the `Creating` state, indicating that a
+                // start saga is in progress for this instance and the VMM
+                // process may not yet have been started by the sled-agent. In
+                // this case, we must not attempt to communicate with the
+                // sled-agent, because it may not yet know it's supposed to be
+                // running that VMM. Instead, we must attempt to stop the
+                // instance by modifying the *VMM record* in such a way that
+                // will cause the start saga to unwind, *conditionally on the
+                // generation number*. If the write to the VMM record fails
+                // because the generation number has advanced, we must re-fetch
+                // the instance and VMM records and try again: the instance may
+                // now exist on the sled and we can therefore attempt the state
+                // change by communicating with the sled-agent.
                 InstanceStateChangeRequestAction::DoGoofyVmmStateCasLoopDance {
                     vmm_id,
                     next_state,
