@@ -1223,8 +1223,12 @@ mod tests {
             }
         }
 
-        // There should be 27 unmarked rows. 8 unstoppable VMMs on each of
-        // sleds A and B, all 10 on sled C, plus the 3 deleted VMMs.
+        // There should be 30 unmarked rows. 8 unstoppable VMMs on each of
+        // sleds A and B, all 11 on sled C, plus the 3 deleted VMMs.
+        //
+        // Note: adding a new VMM state which should not be marked to stop for
+        // sled evacuation should increment this value by 3 (1 state * 3 sleds).
+        const N_UNMARKED_VMMS: usize = 30;
         let actual = fetch_all(datastore).await;
         assert_rows(&actual, &expected);
         assert_eq!(
@@ -1232,7 +1236,7 @@ mod tests {
                 .values()
                 .filter(|v| v.stop_for_update_disposition_generation.is_none())
                 .count(),
-            27,
+            N_UNMARKED_VMMS,
             "all rows other than sleds A and B's stoppable VMMs remain unmarked"
         );
 
@@ -1251,7 +1255,7 @@ mod tests {
                 .values()
                 .filter(|v| v.stop_for_update_disposition_generation.is_none())
                 .count(),
-            27
+            N_UNMARKED_VMMS,
         );
 
         // Now sled C evacuates too, moving from generation 1 to generation 2.
@@ -1315,7 +1319,7 @@ mod tests {
             "sled B's marked VMMs are unchanged and sled C's are newly marked"
         );
         assert_eq!(
-            null_count, 24,
+            null_count, 27,
             "the unstoppable and deleted VMMs remain unmarked"
         );
 
@@ -1659,8 +1663,10 @@ mod tests {
             }
         }
 
-        // There should be 60 VMM rows. 2 VMMs (one marked, one not) per state
+        // There should be 66 VMM rows. 2 VMMs (one marked, one not) per state
         // per sled
+        //
+        // Note: this assertion will fail if you add a new VMM state.
         let row_count: i64 = dsl::vmm
             // Add a filter to ensure there is no full table scan
             .filter(dsl::id.ne(Uuid::nil()))
@@ -1668,7 +1674,7 @@ mod tests {
             .get_result_async(&*conn)
             .await
             .expect("VMMs should be counted");
-        assert_eq!(row_count, 60);
+        assert_eq!(row_count, 66);
 
         // Check there are 6 stoppable VMMs (3 per in-service sled).
         let expected_ids: BTreeSet<Uuid> =
