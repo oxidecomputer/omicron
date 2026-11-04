@@ -84,8 +84,9 @@ pub struct VmmBulkMarkStopForUpdateResult {
 }
 
 /// The combination of a VMM that should be stopped for its hosting sled to be
-/// evacuated for an update and its instance's shutdown policy, returned by
-/// [`DataStore::vmm_list_stoppable_for_update_by_sled_id`].
+/// evacuated for an update, paired with its instance's shutdown policy.
+///
+/// This is returned by [`DataStore::vmm_list_stoppable_for_update_by_sled_id`].
 #[derive(Debug, Clone)]
 pub struct VmmStoppableForUpdate {
     /// The stoppable VMM.
