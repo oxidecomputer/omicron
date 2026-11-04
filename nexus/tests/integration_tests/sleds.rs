@@ -431,10 +431,10 @@ async fn test_sled_agent_put_checks_fetched_identity(
     expunge_and_decommission(cptestctx, &opctx, sled_id).await;
 }
 
-struct TrustQuorumConfigDriver<'a> {
-    opctx: &'a OpContext,
-    datastore: &'a DataStore,
-    rack_id: RackUuid,
+pub(crate) struct TrustQuorumConfigDriver<'a> {
+    pub(crate) opctx: &'a OpContext,
+    pub(crate) datastore: &'a DataStore,
+    pub(crate) rack_id: RackUuid,
 }
 
 impl TrustQuorumConfigDriver<'_> {
@@ -442,7 +442,7 @@ impl TrustQuorumConfigDriver<'_> {
         authz::TrustQuorumConfig::for_rack_id(self.rack_id)
     }
 
-    async fn config(&self, epoch: u64) -> TrustQuorumConfig {
+    pub(crate) async fn config(&self, epoch: u64) -> TrustQuorumConfig {
         self.datastore
             .tq_get_config(self.opctx, self.authz_tq(), Epoch(epoch))
             .await
@@ -452,7 +452,7 @@ impl TrustQuorumConfigDriver<'_> {
             })
     }
 
-    async fn propose(
+    pub(crate) async fn propose(
         &self,
         epoch: u64,
         last_committed_epoch: u64,
@@ -480,7 +480,7 @@ impl TrustQuorumConfigDriver<'_> {
         );
     }
 
-    async fn ack_all_prepares(&self, epoch: u64) {
+    pub(crate) async fn ack_all_prepares(&self, epoch: u64) {
         let config = self.config(epoch).await;
         let members: BTreeSet<_> = config.members.keys().cloned().collect();
         let coordinator_config = Configuration {
@@ -509,7 +509,7 @@ impl TrustQuorumConfigDriver<'_> {
         };
     }
 
-    async fn ack_commits(
+    pub(crate) async fn ack_commits(
         &self,
         epoch: u64,
         acked: &BTreeSet<BaseboardId>,
