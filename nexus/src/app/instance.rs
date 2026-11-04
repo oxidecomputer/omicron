@@ -1292,7 +1292,7 @@ impl super::Nexus {
             // the sled-agent, because the sled-agent will not know what VMM
             // we're talking about.These states should behave as though the
             // instance is in the `Stopping` state.
-            Some(_) => {
+            Some(vmm) => {
                 return match requested {
                     InstanceStateChangeRequest::Run => {
                         Err(Error::invalid_request(&format!(
@@ -1300,6 +1300,25 @@ impl super::Nexus {
                              with no VMM",
                         )))
                     }
+
+                    // Since SagaUnwound is a a Failed-like state, we will let
+                    // you just kinda poke it into Stopped if you would prefer
+                    // for us to think it's stopped. This will result in us no
+                    // longer trying to restart it.
+                    InstanceStateChangeRequest::Stop
+                        if vmm.state == db::VmmState::SagaUnwound =>
+                    {
+                        return Ok(
+                            InstanceStateChangeRequestAction::UpdateRuntime(
+                                instance_state.runtime().with_new_nexus_state(
+                                    db::model::InstanceState::NoVmm,
+                                ),
+                            ),
+                        );
+                    }
+                    // In the other nonexistent states, we already appear to be
+                    // Stopped, so if you're trying to stop it, we shall just
+                    // say we are still stopped.
                     InstanceStateChangeRequest::Stop => {
                         Ok(InstanceStateChangeRequestAction::AlreadyDone)
                     }
