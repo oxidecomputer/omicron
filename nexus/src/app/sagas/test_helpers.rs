@@ -97,8 +97,7 @@ pub(crate) async fn instance_stop(
         .instance_stop(
             &opctx,
             &instance_lookup,
-            // XXX: vast majority of tests were written before new instances had
-            // the default config of an ACPI shutdown with 10 minute timeout
+            // always hard stop instances for tests (ignoring shutdown policy)
             true,
         )
         .await
@@ -124,8 +123,7 @@ pub(crate) async fn instance_stop_by_name(
         .instance_stop(
             &opctx,
             &instance_lookup,
-            // XXX: vast majority of tests were written before new instances had
-            // the default config of an ACPI shutdown with 10 minute timeout
+            // always hard stop instances for tests (ignoring shutdown policy)
             true,
         )
         .await

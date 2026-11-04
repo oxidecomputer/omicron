@@ -20,6 +20,7 @@ use diesel::prelude::*;
 use diesel::sql_types::{Bool, Nullable};
 use nexus_db_schema::schema::{disk, external_ip, external_subnet, instance};
 use nexus_types::external_api::instance as instance_types;
+use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_generation_kinds::{
     InstanceStateGeneration, InstanceStateGenerationKind,
@@ -30,6 +31,7 @@ use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
 use serde::Serialize;
+use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
 
 /// An Instance (VM).
@@ -191,26 +193,8 @@ impl Instance {
             IntendedState::Stopped
         };
 
-        use instance_types::InstanceShutdownPolicy;
-        let (shutdown_policy_action, shutdown_policy_timeout) = match params
-            .shutdown_policy
-        {
-            // RFD 622: "A user-configurable timeout for the instance to
-            // finish stopping itself should be present, bounded between
-            // 1 and 3600 seconds, inclusive." This is enforced at the API
-            // level and as a crdb constraint (expect `timeout_secs as i64`
-            // to be handled as an error elsewhere if somehow in the range
-            // where the cast would be problematic)
-            Some(InstanceShutdownPolicy::PowerButton { timeout_secs }) => (
-                InstanceShutdownAction::PowerButton,
-                Some(TimeDelta::seconds(timeout_secs as i64)),
-            ),
-            // None: Default to hard-off, preserving the existing behavior of
-            // our system prior to ACPI shutdown support.
-            None | Some(InstanceShutdownPolicy::HardOff) => {
-                (InstanceShutdownAction::HardOff, None)
-            }
-        };
+        let (shutdown_policy_action, shutdown_policy_timeout) =
+            shutdown_policy_to_db_columns(params.shutdown_policy);
 
         Self {
             identity,
@@ -397,6 +381,7 @@ impl InstanceShutdownPolicyColumns {
     pub fn shutdown_policy(
         &self,
     ) -> Result<instance_types::InstanceShutdownPolicy, Error> {
+        use instance_types::AcpiTimeoutSecs;
         use instance_types::InstanceShutdownPolicy;
         match self.shutdown_policy_action {
             InstanceShutdownAction::HardOff => {
@@ -421,6 +406,16 @@ impl InstanceShutdownPolicyColumns {
                              has invalid value {timeout} \
                              (instance {})",
                             self.id
+                        ))
+                    })?;
+                let timeout_secs = AcpiTimeoutSecs::try_from(timeout_secs)
+                    .map_err(|err| {
+                        Error::internal_error(format!(
+                            "db constraint violated or out of sync with API: \
+                             db timeout of {timeout_secs} is invalid: {} \
+                             (instance {})",
+                            InlineErrorChain::new(&*err),
+                            self.id,
                         ))
                     })?;
                 Ok(InstanceShutdownPolicy::PowerButton { timeout_secs })
@@ -735,15 +730,67 @@ pub struct InstanceUpdate {
 
     /// If this is `None`, the instance's shutdown policy will be unchanged by
     /// this update request.
+    ///
+    /// Unlike `Instance` above, these fields are `pub` because we need direct
+    /// access to them in the datastore crate. Consumers outside that crate
+    /// should *not* access these; construction should go through the stronger
+    /// types available via [`InstanceUpdate::new()`].
     #[diesel(treat_none_as_null = false)]
     pub shutdown_policy_action: Option<InstanceShutdownAction>,
     pub shutdown_policy_timeout: Option<TimeDelta>,
 }
 
+impl InstanceUpdate {
+    pub fn new(
+        boot_disk_id: Option<Uuid>,
+        auto_restart_policy: Option<instance_types::InstanceAutoRestartPolicy>,
+        ncpus: instance_types::InstanceCpuCount,
+        memory: external::ByteCount,
+        cpu_platform: Option<instance_types::InstanceCpuPlatform>,
+        enable_jumbo_frames: bool,
+        shutdown_policy: Option<instance_types::InstanceShutdownPolicy>,
+    ) -> Self {
+        let (shutdown_policy_action, shutdown_policy_timeout) =
+            if let Some(shutdown_policy) = shutdown_policy {
+                let (action, timeout) =
+                    shutdown_policy_to_db_columns(shutdown_policy);
+                (Some(action), timeout)
+            } else {
+                (None, None)
+            };
+        Self {
+            boot_disk_id,
+            auto_restart_policy: auto_restart_policy.map(From::from),
+            ncpus: ncpus.into(),
+            memory: memory.into(),
+            cpu_platform: cpu_platform.map(From::from),
+            enable_jumbo_frames,
+            shutdown_policy_action,
+            shutdown_policy_timeout,
+        }
+    }
+}
+
+// convert the API `InstanceShutdownPolicy` into its raw db column
+// representation
+fn shutdown_policy_to_db_columns(
+    shutdown_policy: instance_types::InstanceShutdownPolicy,
+) -> (InstanceShutdownAction, Option<TimeDelta>) {
+    use instance_types::InstanceShutdownPolicy;
+    match shutdown_policy {
+        InstanceShutdownPolicy::HardOff => {
+            (InstanceShutdownAction::HardOff, None)
+        }
+        InstanceShutdownPolicy::PowerButton { timeout_secs } => (
+            InstanceShutdownAction::PowerButton,
+            Some(TimeDelta::seconds(i64::from(timeout_secs))),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use omicron_common::api::external;
 
     #[test]
     fn test_instance_shutdown_policy() {
@@ -769,12 +816,13 @@ mod tests {
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
             enable_jumbo_frames: false,
-            shutdown_policy: None,
+            // explicitly set hard-off
+            shutdown_policy: instance_types::InstanceShutdownPolicy::HardOff,
         };
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
         let project_id = ProjectUuid::from_untyped_uuid(Uuid::new_v4());
 
-        // when shutdown policy omitted at creation, default to HardOff
+        // confirm expected columns for hard-off
         let db_instance = Instance::new(instance_id, project_id, &params);
         assert_eq!(
             db_instance.shutdown_policy_action,
@@ -782,21 +830,11 @@ mod tests {
         );
         assert_eq!(db_instance.shutdown_policy_timeout, None);
 
-        // explicitly set hard-off
+        // set power button with timeout
         params.shutdown_policy =
-            Some(instance_types::InstanceShutdownPolicy::HardOff);
-        let db_instance = Instance::new(instance_id, project_id, &params);
-        assert_eq!(
-            db_instance.shutdown_policy_action,
-            InstanceShutdownAction::HardOff
-        );
-        assert_eq!(db_instance.shutdown_policy_timeout, None);
-
-        // explicitly set power button with timeout
-        params.shutdown_policy =
-            Some(instance_types::InstanceShutdownPolicy::PowerButton {
-                timeout_secs: 42,
-            });
+            instance_types::InstanceShutdownPolicy::PowerButton {
+                timeout_secs: 42.try_into().expect("42 is a valid timeout"),
+            };
         let db_instance = Instance::new(instance_id, project_id, &params);
         assert_eq!(
             db_instance.shutdown_policy_action,
@@ -805,22 +843,6 @@ mod tests {
         assert_eq!(
             db_instance.shutdown_policy_timeout.unwrap().num_seconds(),
             42
-        );
-
-        // Instance::new doesn't clamp an invalid timeout
-        // (enforced instead by Nexus and crdb constraint)
-        params.shutdown_policy =
-            Some(instance_types::InstanceShutdownPolicy::PowerButton {
-                timeout_secs: 999000,
-            });
-        let db_instance = Instance::new(instance_id, project_id, &params);
-        assert_eq!(
-            db_instance.shutdown_policy_action,
-            InstanceShutdownAction::PowerButton
-        );
-        assert_eq!(
-            db_instance.shutdown_policy_timeout.unwrap().num_seconds(),
-            999000
         );
     }
 }

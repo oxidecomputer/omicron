@@ -295,7 +295,7 @@ async fn test_create_instance_with_bad_hostname_impl(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
     let mut body: serde_json::Value =
         serde_json::from_str(&serde_json::to_string(&params).unwrap()).unwrap();
@@ -406,7 +406,7 @@ async fn test_instances_create_reboot_halt(
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
                 enable_jumbo_frames: false,
-                shutdown_policy: None,
+                shutdown_policy: instance::InstanceShutdownPolicy::default(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -845,7 +845,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         Default::default(),
         None,
         Vec::new(),
-        None,
+        instance::InstanceShutdownPolicy::default(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1138,7 +1138,7 @@ async fn test_instance_migrate_target_finishes_first(
         Default::default(),
         None,
         Vec::new(),
-        None,
+        instance::InstanceShutdownPolicy::default(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1443,7 +1443,7 @@ async fn test_instance_migrate_v2p_and_routes(
         Default::default(),
         None,
         Vec::new(),
-        None,
+        instance::InstanceShutdownPolicy::default(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1625,7 +1625,7 @@ async fn test_instance_migration_compatible_cpu_platforms(
         Default::default(),
         Some(InstanceCpuPlatform::AmdMilan),
         Vec::new(),
-        None,
+        instance::InstanceShutdownPolicy::default(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1810,7 +1810,7 @@ async fn test_instance_migration_incompatible_cpu_platforms(
         Default::default(),
         Some(InstanceCpuPlatform::AmdTurin),
         Vec::new(),
-        None,
+        instance::InstanceShutdownPolicy::default(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1900,7 +1900,7 @@ async fn test_instance_migration_unknown_sled_type(
         Default::default(),
         None,
         Vec::new(),
-        None,
+        instance::InstanceShutdownPolicy::default(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1990,7 +1990,7 @@ async fn test_instance_migrate_autoselect_no_other_sled(
         Default::default(),
         None,
         Vec::new(),
-        Some(instance::InstanceShutdownPolicy::HardOff),
+        instance::InstanceShutdownPolicy::HardOff,
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -2067,7 +2067,7 @@ async fn test_instance_migrate_autoselect_skips_non_provisionable_sled(
         Default::default(),
         None,
         Vec::new(),
-        Some(instance::InstanceShutdownPolicy::HardOff),
+        instance::InstanceShutdownPolicy::HardOff,
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -2195,9 +2195,7 @@ async fn test_instance_migrate_autoselect_anti_affinity(
                 )],
                 multicast_groups: Vec::new(),
                 enable_jumbo_frames: false,
-                shutdown_policy: Some(
-                    instance::InstanceShutdownPolicy::HardOff,
-                ),
+                shutdown_policy: instance::InstanceShutdownPolicy::HardOff,
             },
         )
         .await;
@@ -2460,7 +2458,7 @@ async fn test_instance_failed_when_on_expunged_sled(
                 Some(auto_restart),
                 None,
                 Vec::new(),
-                None,
+                instance::InstanceShutdownPolicy::default(),
             )
             .await;
             let instance_id =
@@ -2812,7 +2810,7 @@ async fn make_forgotten_instance(
         Some(auto_restart),
         None,
         Vec::new(),
-        None,
+        instance::InstanceShutdownPolicy::default(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -3043,7 +3041,7 @@ async fn test_instance_metrics_with_migration(
         Default::default(),
         None,
         Vec::new(),
-        None,
+        instance::InstanceShutdownPolicy::default(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -3188,7 +3186,7 @@ async fn test_instances_create_stopped_start(
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             enable_jumbo_frames: false,
-            shutdown_policy: None,
+            shutdown_policy: instance::InstanceShutdownPolicy::default(),
         },
     )
     .await;
@@ -3364,7 +3362,7 @@ async fn test_instance_using_image_from_other_project_fails(
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
                 enable_jumbo_frames: false,
-                shutdown_policy: None,
+                shutdown_policy: instance::InstanceShutdownPolicy::default(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -3435,7 +3433,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
     let response = NexusRequest::objects_post(
         client,
@@ -3470,7 +3468,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
     let _ = NexusRequest::objects_post(
         client,
@@ -3628,7 +3626,7 @@ async fn test_instance_with_single_explicit_ip_address_impl(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
     let response = NexusRequest::objects_post(
         client,
@@ -3810,7 +3808,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
     let response = NexusRequest::objects_post(
         client,
@@ -3944,7 +3942,7 @@ async fn test_instance_create_delete_network_interface(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
     let response = NexusRequest::objects_post(
         client,
@@ -4224,7 +4222,7 @@ async fn test_instance_update_network_interfaces(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
     let response = NexusRequest::objects_post(
         client,
@@ -4650,7 +4648,7 @@ async fn cannot_make_new_primary_nic_lacking_ip_stack_for_external_addresses(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
     let response = NexusRequest::objects_post(
         client,
@@ -4750,7 +4748,7 @@ async fn test_instance_update_network_interface_transit_ips(
         Default::default(),
         None,
         Vec::new(),
-        None,
+        instance::InstanceShutdownPolicy::default(),
     )
     .await;
 
@@ -5034,7 +5032,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
     let builder =
         RequestBuilder::new(client, http::Method::POST, &get_instances_url())
@@ -5112,7 +5110,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -5212,7 +5210,7 @@ async fn test_instance_create_attach_disks(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -5321,7 +5319,7 @@ async fn test_instance_create_attach_disks_undo(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -5410,7 +5408,7 @@ async fn test_attach_eight_disks_to_instance(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -5536,7 +5534,7 @@ async fn test_disk_attach_limit(cptestctx: &ControlPlaneTestContext) {
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let url_instances = format!("/v1/instances?project={}", project_name);
@@ -5643,7 +5641,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -5739,7 +5737,7 @@ async fn test_disks_detached_when_instance_destroyed(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -5839,7 +5837,7 @@ async fn test_disks_detached_when_instance_destroyed(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -5928,7 +5926,7 @@ async fn test_duplicate_disk_attach_requests_ok(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -5977,7 +5975,7 @@ async fn test_duplicate_disk_attach_requests_ok(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -6039,7 +6037,7 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -6182,7 +6180,7 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -6363,7 +6361,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -6586,7 +6584,7 @@ async fn test_auto_restart_policy_can_be_changed(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -6666,7 +6664,7 @@ async fn test_cpu_platform_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         anti_affinity_groups: Vec::new(),
         multicast_groups: vec![],
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -6747,7 +6745,7 @@ async fn test_enable_jumbo_frames_can_be_changed(
         multicast_groups: vec![],
         // Start out opted out.
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -6891,7 +6889,7 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -6970,7 +6968,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -7075,7 +7073,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let error = NexusRequest::new(
@@ -7133,7 +7131,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let error = NexusRequest::new(
@@ -7191,7 +7189,7 @@ async fn test_instances_memory_greater_than_max_size(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let error = NexusRequest::new(
@@ -7302,7 +7300,7 @@ async fn test_instance_create_with_anti_affinity_groups(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: anti_affinity_groups_param,
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -7376,7 +7374,7 @@ async fn test_instance_create_with_duplicate_anti_affinity_groups(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: anti_affinity_groups_param,
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -7451,7 +7449,7 @@ async fn test_instance_create_with_anti_affinity_groups_that_do_not_exist(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: anti_affinity_groups_param,
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let error = object_create_error(
@@ -7539,7 +7537,7 @@ async fn test_instance_create_with_ssh_keys(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -7593,7 +7591,7 @@ async fn test_instance_create_with_ssh_keys(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -7646,7 +7644,7 @@ async fn test_instance_create_with_ssh_keys(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let builder =
@@ -7793,7 +7791,7 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             enable_jumbo_frames: false,
-            shutdown_policy: None,
+            shutdown_policy: instance::InstanceShutdownPolicy::default(),
         };
 
         let url_instances = get_instances_url();
@@ -7857,7 +7855,7 @@ async fn test_cannot_provision_instance_beyond_cpu_limit(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
     let url_instances = get_instances_url();
 
@@ -7917,7 +7915,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             enable_jumbo_frames: false,
-            shutdown_policy: None,
+            shutdown_policy: instance::InstanceShutdownPolicy::default(),
         };
 
         let url_instances = get_instances_url();
@@ -7977,7 +7975,7 @@ async fn test_can_start_instance_with_cpu_platform(
         anti_affinity_groups: Vec::new(),
         multicast_groups: vec![],
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
     let url_instances = get_instances_url();
 
@@ -8127,7 +8125,7 @@ async fn test_cannot_start_instance_with_unsatisfiable_cpu_platform(
         anti_affinity_groups: Vec::new(),
         multicast_groups: vec![],
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
     let url_instances = get_instances_url();
 
@@ -8442,7 +8440,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
     let error = object_create_error(
         client,
@@ -8525,7 +8523,7 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     // instance create 404s
@@ -8594,7 +8592,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let url = format!("/v1/instances?project={}", PROJECT_NAME);
@@ -8631,7 +8629,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
     let error =
         object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
@@ -8703,7 +8701,7 @@ async fn test_instance_attach_several_external_ips(
         Default::default(),
         None,
         Vec::new(),
-        None,
+        instance::InstanceShutdownPolicy::default(),
     )
     .await;
 
@@ -8785,7 +8783,7 @@ async fn test_instance_rejects_three_ephemeral_ips(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
     let error = object_create_error(
         client,
@@ -8838,7 +8836,7 @@ async fn test_instance_rejects_two_ephemeral_auto_without_version(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
     let error = object_create_error(
         client,
@@ -8897,7 +8895,7 @@ async fn test_instance_rejects_two_ephemeral_auto_none_with_explicit(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
     let error = object_create_error(
         client,
@@ -8956,7 +8954,7 @@ async fn test_instance_rejects_two_ephemeral_same_pool(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
     let error = object_create_error(
         client,
@@ -8995,7 +8993,7 @@ async fn create_instance_with_pool(
         Default::default(),
         None,
         Vec::new(),
-        None,
+        instance::InstanceShutdownPolicy::default(),
     )
     .await
 }
@@ -9120,7 +9118,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
     let url_instances = format!("/v1/instances?project={}", PROJECT_NAME);
     NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -9307,7 +9305,7 @@ async fn test_instance_create_with_cross_project_subnet(
         auto_restart_policy: None,
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let instances_url_a = format!("/v1/instances?project={}", project_a_name);
@@ -9438,7 +9436,7 @@ async fn test_silo_limited_collaborator_cross_project_subnet(
         auto_restart_policy: None,
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let instances_url_a = format!("/v1/instances?project={}", project_a_name);
@@ -9507,7 +9505,7 @@ async fn test_silo_limited_collaborator_cross_project_subnet(
         auto_restart_policy: None,
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     // Should get 404 Not Found because VPC/subnet lookups are scoped to the
@@ -10347,7 +10345,7 @@ async fn test_instance_with_max_disks(cptestctx: &ControlPlaneTestContext) {
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: None,
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
 
     let instance: Instance =
@@ -10442,7 +10440,7 @@ async fn can_create_instance_with_multiple_nics_and_ephemeral_ip(
         None,
         None,
         vec![],
-        None,
+        instance::InstanceShutdownPolicy::default(),
     )
     .await;
 }
@@ -10450,7 +10448,7 @@ async fn can_create_instance_with_multiple_nics_and_ephemeral_ip(
 async fn setup_shutdown_test_instance_and_mock_propolis(
     cptestctx: &ControlPlaneTestContext,
     instance_name: &str,
-    shutdown_policy: Option<instance::InstanceShutdownPolicy>,
+    shutdown_policy: instance::InstanceShutdownPolicy,
 ) -> (Instance, std::net::SocketAddr) {
     let client = &cptestctx.external_client;
     create_project_and_pool(&client).await;
@@ -10552,24 +10550,23 @@ async fn test_instances_shutdown_policy_force_hardstop_during_soft(
     let client = &cptestctx.external_client;
     let instance_name = "resonance-cascade";
 
+    // Create an instance with soft shutdown policy.
     const TIMEOUT_SECS: u64 = 42;
     let (instance, propolis_addr) =
         setup_shutdown_test_instance_and_mock_propolis(
             &cptestctx,
             instance_name,
-            Some(instance::InstanceShutdownPolicy::PowerButton {
-                timeout_secs: TIMEOUT_SECS,
-            }),
+            instance::InstanceShutdownPolicy::PowerButton {
+                timeout_secs: TIMEOUT_SECS.try_into().unwrap(),
+            },
         )
         .await;
 
-    // instance create API endpoint sets default policy
-    // (default in DB level is HardOff for migration to preserve existing behaviors)
     assert_eq!(
         instance.shutdown_policy,
-        Some(instance::InstanceShutdownPolicy::PowerButton {
-            timeout_secs: TIMEOUT_SECS,
-        })
+        instance::InstanceShutdownPolicy::PowerButton {
+            timeout_secs: TIMEOUT_SECS.try_into().unwrap(),
+        }
     );
 
     // check the instance receives a shutdown request on stop
@@ -10600,20 +10597,19 @@ async fn test_instances_shutdown_policy_force_hardstop(
     let client = &cptestctx.external_client;
     let instance_name = "resonance-cascade";
     const TIMEOUT_SECS: u64 = 531;
-    const POLICY: Option<instance::InstanceShutdownPolicy> =
-        Some(instance::InstanceShutdownPolicy::PowerButton {
-            timeout_secs: TIMEOUT_SECS,
-        });
+    let policy = instance::InstanceShutdownPolicy::PowerButton {
+        timeout_secs: TIMEOUT_SECS.try_into().unwrap(),
+    };
 
     let (instance, propolis_addr) =
         setup_shutdown_test_instance_and_mock_propolis(
             &cptestctx,
             instance_name,
-            POLICY,
+            policy,
         )
         .await;
 
-    assert_eq!(instance.shutdown_policy, POLICY);
+    assert_eq!(instance.shutdown_policy, policy);
 
     // stop with skip_os_shutdown=true param should request normal Stop
     // to propolis, ignoring configured soft-off policy.
@@ -10634,20 +10630,19 @@ async fn test_instances_shutdown_policy_change_policy_and_send_hardstop_during_s
     let client = &cptestctx.external_client;
     let instance_name = "resonance-cascade";
     const TIMEOUT_SECS: u64 = 42;
-    const POLICY: Option<instance::InstanceShutdownPolicy> =
-        Some(instance::InstanceShutdownPolicy::PowerButton {
-            timeout_secs: TIMEOUT_SECS,
-        });
+    let policy = instance::InstanceShutdownPolicy::PowerButton {
+        timeout_secs: TIMEOUT_SECS.try_into().unwrap(),
+    };
 
     let (instance_soft, propolis_addr) =
         setup_shutdown_test_instance_and_mock_propolis(
             &cptestctx,
             instance_name,
-            POLICY,
+            policy,
         )
         .await;
 
-    assert_eq!(instance_soft.shutdown_policy, POLICY);
+    assert_eq!(instance_soft.shutdown_policy, policy);
 
     expect_instance_stop_ok(client, instance_name, false).await;
     assert_matches::assert_matches!(
@@ -10676,7 +10671,7 @@ async fn test_instances_shutdown_policy_change_policy_and_send_hardstop_during_s
     .await;
     assert_eq!(
         instance_hard.shutdown_policy,
-        Some(instance::InstanceShutdownPolicy::HardOff)
+        instance::InstanceShutdownPolicy::HardOff
     );
 
     // stop without forcing, still is hard-off due to new policy
@@ -10698,18 +10693,17 @@ async fn test_instances_shutdown_policy_change_timeout_and_resend(
     let instance_name = "resonance-cascade";
 
     const TIMEOUT_SECS: u64 = 321;
-    const POLICY: Option<instance::InstanceShutdownPolicy> =
-        Some(instance::InstanceShutdownPolicy::PowerButton {
-            timeout_secs: TIMEOUT_SECS,
-        });
+    let policy = instance::InstanceShutdownPolicy::PowerButton {
+        timeout_secs: TIMEOUT_SECS.try_into().unwrap(),
+    };
     let (instance_default, propolis_addr) =
         setup_shutdown_test_instance_and_mock_propolis(
             &cptestctx,
             instance_name,
-            POLICY,
+            policy,
         )
         .await;
-    assert_eq!(instance_default.shutdown_policy, POLICY);
+    assert_eq!(instance_default.shutdown_policy, policy);
 
     // configured timeout is sent with normal stop request
     expect_instance_stop_ok(client, instance_name, false).await;
@@ -10722,10 +10716,9 @@ async fn test_instances_shutdown_policy_change_timeout_and_resend(
     );
 
     const NEW_TIMEOUT_SECS: u64 = 76;
-    const NEW_POLICY: Option<instance::InstanceShutdownPolicy> =
-        Some(instance::InstanceShutdownPolicy::PowerButton {
-            timeout_secs: NEW_TIMEOUT_SECS,
-        });
+    let new_policy = instance::InstanceShutdownPolicy::PowerButton {
+        timeout_secs: NEW_TIMEOUT_SECS.try_into().unwrap(),
+    };
     let instance_soft = expect_instance_reconfigure_ok(
         client,
         &instance_default.identity.id,
@@ -10738,15 +10731,15 @@ async fn test_instances_shutdown_policy_change_timeout_and_resend(
             multicast_groups: None,
             enable_jumbo_frames: instance_default.enable_jumbo_frames,
             // change shutdown policy to soft-off and different timeout
-            shutdown_policy: NEW_POLICY,
+            shutdown_policy: Some(new_policy),
         },
     )
     .await;
     assert_eq!(
         instance_soft.shutdown_policy,
-        Some(instance::InstanceShutdownPolicy::PowerButton {
-            timeout_secs: NEW_TIMEOUT_SECS
-        })
+        instance::InstanceShutdownPolicy::PowerButton {
+            timeout_secs: NEW_TIMEOUT_SECS.try_into().unwrap(),
+        }
     );
 
     // we still *send* propolis the different timeout (but per rfd622 it will
@@ -10769,16 +10762,15 @@ async fn test_instances_shutdown_policy_unchanged_when_omitted_in_update(
     let instance_name = "resonance-cascade";
 
     const TIMEOUT_SECS: u64 = 321;
-    const POLICY: Option<instance::InstanceShutdownPolicy> =
-        Some(instance::InstanceShutdownPolicy::PowerButton {
-            timeout_secs: TIMEOUT_SECS,
-        });
+    let policy = instance::InstanceShutdownPolicy::PowerButton {
+        timeout_secs: TIMEOUT_SECS.try_into().unwrap(),
+    };
     let (instance_default, propolis_addr) =
         setup_shutdown_test_instance_and_mock_propolis(
             &cptestctx,
             instance_name,
             // Create an instance with a shutdown policy.
-            POLICY,
+            policy,
         )
         .await;
 
@@ -10798,11 +10790,11 @@ async fn test_instances_shutdown_policy_unchanged_when_omitted_in_update(
         },
     )
     .await;
-    assert_eq!(instance_unchanged.shutdown_policy, POLICY);
+    assert_eq!(instance_unchanged.shutdown_policy, policy);
 
     // test that hard-off is not sent for an unforced stop; that is, the
     // 'None' shutdown policy in the update request didn't reset it to the
-    // default HardOff configuration that it would've in a create request.
+    // default HardOff configuration.
     expect_instance_stop_ok(client, instance_name, false).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
@@ -10820,20 +10812,19 @@ async fn test_instances_shutdown_policy_reboot(
     let client = &cptestctx.external_client;
     let instance_name = "resonance-cascade";
     const CUSTOM_TIMEOUT_SECS: u64 = 531;
-    const CUSTOM_POLICY: Option<instance::InstanceShutdownPolicy> =
-        Some(instance::InstanceShutdownPolicy::PowerButton {
-            timeout_secs: CUSTOM_TIMEOUT_SECS,
-        });
+    let custom_policy = instance::InstanceShutdownPolicy::PowerButton {
+        timeout_secs: CUSTOM_TIMEOUT_SECS.try_into().unwrap(),
+    };
 
     let (instance, propolis_addr) =
         setup_shutdown_test_instance_and_mock_propolis(
             &cptestctx,
             instance_name,
-            CUSTOM_POLICY,
+            custom_policy,
         )
         .await;
 
-    assert_eq!(instance.shutdown_policy, CUSTOM_POLICY);
+    assert_eq!(instance.shutdown_policy, custom_policy);
 
     expect_instance_reboot_ok(client, instance_name).await;
     assert_matches::assert_matches!(
@@ -10852,20 +10843,19 @@ async fn test_instances_shutdown_policy_reboot_after_stop(
     let client = &cptestctx.external_client;
     let instance_name = "resonance-cascade";
     const CUSTOM_TIMEOUT_SECS: u64 = 531;
-    const CUSTOM_POLICY: Option<instance::InstanceShutdownPolicy> =
-        Some(instance::InstanceShutdownPolicy::PowerButton {
-            timeout_secs: CUSTOM_TIMEOUT_SECS,
-        });
+    let custom_policy = instance::InstanceShutdownPolicy::PowerButton {
+        timeout_secs: CUSTOM_TIMEOUT_SECS.try_into().unwrap(),
+    };
 
     let (instance, propolis_addr) =
         setup_shutdown_test_instance_and_mock_propolis(
             &cptestctx,
             instance_name,
-            CUSTOM_POLICY,
+            custom_policy,
         )
         .await;
 
-    assert_eq!(instance.shutdown_policy, CUSTOM_POLICY);
+    assert_eq!(instance.shutdown_policy, custom_policy);
 
     expect_instance_stop_ok(client, instance_name, false).await;
     assert_matches::assert_matches!(
