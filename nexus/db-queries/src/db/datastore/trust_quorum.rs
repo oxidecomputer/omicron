@@ -14,6 +14,7 @@ use crate::db::model::to_db_sled_policy;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use itertools::Itertools;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::TransactionError;
@@ -23,6 +24,8 @@ use nexus_db_model::DbTrustQuorumConfigurationState;
 use nexus_db_model::DbTrustQuorumMemberState;
 use nexus_db_model::DbTypedUuid;
 use nexus_db_model::HwBaseboardId;
+use nexus_db_model::SledExpungeRequest;
+use nexus_db_model::SledExpungeRequestState;
 use nexus_db_model::TrustQuorumConfiguration as DbTrustQuorumConfiguration;
 use nexus_db_model::TrustQuorumMember as DbTrustQuorumMember;
 use nexus_types::external_api::sled::SledPolicy;
@@ -842,6 +845,13 @@ impl DataStore {
                     commit_partially_epoch = Some(last_committed_config.epoch);
                 }
 
+                Self::check_no_new_member_being_expunged_conn(
+                    conn,
+                    &proposed,
+                    &last_committed_config,
+                )
+                .await?;
+
                 // A coordinator must have acked a commit in the prior configuration
                 // if it's to be a candidate.
                 let committed_members: BTreeSet<BaseboardId> =
@@ -862,6 +872,7 @@ impl DataStore {
                     .cloned()
                     .collect()
             } else {
+                // TODO-RAINCLAUDE: only LRTQ upgrades get here; they have no base config, so they skip the expunge re-add check.
                 proposed.members.clone()
             };
 
@@ -1680,6 +1691,65 @@ impl DataStore {
             .map_err(TransactionError::Database)
     }
 
+    async fn check_no_new_member_being_expunged_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        proposed: &ProposedTrustQuorumConfig,
+        base_config: &TrustQuorumConfig,
+    ) -> Result<(), TransactionError<Error>> {
+        use nexus_db_schema::schema::sled_expunge_request::dsl;
+
+        let new_members: BTreeSet<&BaseboardId> = proposed
+            .members
+            .iter()
+            .filter(|member| !base_config.members.contains_key(*member))
+            .collect();
+        if new_members.is_empty() {
+            return Ok(());
+        }
+
+        let (parts, serials): (Vec<String>, Vec<String>) = new_members
+            .iter()
+            .map(|member| {
+                (member.part_number.clone(), member.serial_number.clone())
+            })
+            .unzip();
+
+        // TODO-RAINCLAUDE: no rack_id filter on purpose: an unfinished request for a baseboard on any rack blocks re-adding it.
+        let candidates: Vec<SledExpungeRequest> = dsl::sled_expunge_request
+            .filter(dsl::state.eq_any(SledExpungeRequestState::UNFINISHED))
+            .filter(dsl::part_number.eq_any(parts))
+            .filter(dsl::serial_number.eq_any(serials))
+            .select(SledExpungeRequest::as_select())
+            .load_async(conn)
+            .await
+            .map_err(TransactionError::Database)?;
+        // TODO-RAINCLAUDE: the two eq_any filters match the cross product of parts and serials, so keep exact baseboard matches only; the unique partial index allows one unfinished request per baseboard.
+        let requests: BTreeMap<BaseboardId, SledExpungeRequest> = candidates
+            .into_iter()
+            .map(|request| (request.baseboard_id(), request))
+            .filter(|(baseboard_id, _)| new_members.contains(baseboard_id))
+            .collect();
+
+        let summary = match requests.len() {
+            0 => return Ok(()),
+            1 => "1 sled has an unfinished expunge request".to_string(),
+            count => format!("{count} sleds have unfinished expunge requests"),
+        };
+        let listed =
+            requests.iter().format_with("; ", |(baseboard_id, request), f| {
+                f(&format_args!(
+                    "sled {} ({baseboard_id}), request {} in state {}",
+                    request.sled_id, request.id, request.state,
+                ))
+            });
+        Err(TransactionError::CustomError(Error::conflict(format!(
+            "Cannot add sleds to the trust quorum: {summary}: {listed}. Wait \
+            for each expunge request to finish, then retry. If a request is \
+            not making progress, contact Oxide support with the request IDs \
+            above."
+        ))))
+    }
+
     async fn tq_get_latest_config_conn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: RackUuid,
@@ -1811,6 +1881,7 @@ mod tests {
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::PhysicalDiskPolicy;
+    use nexus_db_model::SledExpungePowerOffOutcome;
     use nexus_db_model::SledState;
     use nexus_types::external_api::sled::SledProvisionPolicy;
     use nexus_types::identity::Asset;
@@ -3674,6 +3745,455 @@ mod tests {
             }
             other => panic!("expected Conflict, got {other:?}"),
         }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    async fn insert_expunge_request(
+        datastore: &DataStore,
+        rack_id: RackUuid,
+        baseboard_id: &BaseboardId,
+        tq_epoch: i64,
+        state: SledExpungeRequestState,
+    ) -> SledExpungeRequest {
+        use nexus_db_schema::schema::sled_expunge_request::dsl;
+
+        let now = now_db_precision();
+        let (power_off_outcome, failure_reason, time_completed) = match state {
+            SledExpungeRequestState::WaitingForTrustQuorum
+            | SledExpungeRequestState::PoweringOff => (None, None, None),
+            SledExpungeRequestState::Expunging => {
+                (Some(SledExpungePowerOffOutcome::PoweredOff), None, None)
+            }
+            SledExpungeRequestState::Done => {
+                (Some(SledExpungePowerOffOutcome::PoweredOff), None, Some(now))
+            }
+            SledExpungeRequestState::Failed => {
+                (None, Some("test failure".to_string()), Some(now))
+            }
+        };
+        let request = SledExpungeRequest {
+            state,
+            power_off_outcome,
+            failure_reason,
+            time_completed,
+            ..SledExpungeRequest::new(
+                rack_id,
+                SledUuid::new_v4(),
+                baseboard_id.clone(),
+                tq_epoch,
+            )
+        };
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        diesel::insert_into(dsl::sled_expunge_request)
+            .values(request.clone())
+            .execute_async(&*conn)
+            .await
+            .expect("inserted a sled expunge request");
+        request
+    }
+
+    async fn finish_expunge_request(
+        datastore: &DataStore,
+        request: &SledExpungeRequest,
+        finished: SledExpungeRequestState,
+    ) {
+        use nexus_db_schema::schema::sled_expunge_request::dsl;
+
+        let now = now_db_precision();
+        let (power_off_outcome, failure_reason) = match finished {
+            SledExpungeRequestState::Done => {
+                (Some(SledExpungePowerOffOutcome::PoweredOff), None)
+            }
+            SledExpungeRequestState::Failed => {
+                (request.power_off_outcome, Some("test failure".to_string()))
+            }
+            SledExpungeRequestState::WaitingForTrustQuorum
+            | SledExpungeRequestState::PoweringOff
+            | SledExpungeRequestState::Expunging => {
+                panic!("finish_expunge_request called with {finished:?}")
+            }
+        };
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let updated = diesel::update(dsl::sled_expunge_request)
+            .filter(dsl::id.eq(request.id))
+            .set((
+                dsl::state.eq(finished),
+                dsl::power_off_outcome.eq(power_off_outcome),
+                dsl::failure_reason.eq(failure_reason),
+                dsl::last_error.eq(None::<String>),
+                dsl::time_completed.eq(Some(now)),
+                dsl::time_modified.eq(now),
+            ))
+            .execute_async(&*conn)
+            .await
+            .expect("finished the sled expunge request");
+        assert_eq!(updated, 1, "finished exactly one sled expunge request");
+    }
+
+    fn one_request_conflict_message(request: &SledExpungeRequest) -> String {
+        format!(
+            "Cannot add sleds to the trust quorum: 1 sled has an unfinished \
+             expunge request: sled {} ({}), request {} in state {}. Wait for \
+             each expunge request to finish, then retry. If a request is not \
+             making progress, contact Oxide support with the request IDs \
+             above.",
+            request.sled_id,
+            request.baseboard_id(),
+            request.id,
+            request.state,
+        )
+    }
+
+    async fn latest_config(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        rack_id: RackUuid,
+    ) -> TrustQuorumConfig {
+        datastore
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
+            .await
+            .expect("read the latest trust quorum config")
+            .expect("rack has a trust quorum config")
+    }
+
+    #[tokio::test]
+    async fn test_tq_insert_refuses_re_adding_sled_being_expunged() {
+        let logctx = test_setup_log(
+            "test_tq_insert_refuses_re_adding_sled_being_expunged",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        for (&unfinished, finished) in
+            SledExpungeRequestState::UNFINISHED.iter().zip([
+                SledExpungeRequestState::Done,
+                SledExpungeRequestState::Failed,
+                SledExpungeRequestState::Done,
+            ])
+        {
+            let hw_ids = insert_hw_baseboard_ids(&db).await;
+            let rack_id = RackUuid::new_v4();
+            insert_sled_for_baseboard(datastore, rack_id, &hw_ids[0]).await;
+            let mut members: BTreeSet<_> =
+                hw_ids.iter().cloned().map(BaseboardId::from).collect();
+            let re_added = members.pop_last().unwrap();
+
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            DataStore::tq_insert_rss_config_after_handoff(
+                opctx,
+                &conn,
+                make_authz_tq(rack_id),
+                members.clone(),
+                members.first().unwrap().clone(),
+            )
+            .await
+            .unwrap();
+
+            let request = insert_expunge_request(
+                datastore, rack_id, &re_added, 5, unfinished,
+            )
+            .await;
+
+            let mut with_re_added = members.clone();
+            with_re_added.insert(re_added.clone());
+            let proposal = ProposedTrustQuorumConfig {
+                rack_id,
+                epoch: Epoch(2),
+                is_lrtq_upgrade: IsLrtqUpgrade::No {
+                    last_committed_epoch: Epoch(1),
+                },
+                members: with_re_added,
+            };
+
+            assert_conflict(
+                datastore
+                    .tq_insert_latest_config(opctx, proposal.clone())
+                    .await,
+                &one_request_conflict_message(&request),
+            );
+            assert_eq!(
+                latest_config(datastore, opctx, rack_id).await.epoch,
+                Epoch(1),
+                "a refused proposal ({unfinished:?}) inserts no config",
+            );
+
+            finish_expunge_request(datastore, &request, finished).await;
+            datastore
+                .tq_insert_latest_config(opctx, proposal)
+                .await
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "re-add succeeds once the request moves from \
+                         {unfinished:?} to {finished:?}: {error}"
+                    )
+                });
+            assert_eq!(
+                latest_config(datastore, opctx, rack_id).await.epoch,
+                Epoch(2)
+            );
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_tq_insert_names_every_new_member_being_expunged() {
+        let logctx = test_setup_log(
+            "test_tq_insert_names_every_new_member_being_expunged",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let hw_ids = insert_hw_baseboard_ids(&db).await;
+        let rack_id = RackUuid::new_v4();
+        let members: BTreeSet<_> =
+            hw_ids.iter().cloned().map(BaseboardId::from).collect();
+
+        let new_a = BaseboardId {
+            part_number: "part-a".to_string(),
+            serial_number: Uuid::new_v4().to_string(),
+        };
+        let new_b = BaseboardId {
+            part_number: "part-b".to_string(),
+            serial_number: Uuid::new_v4().to_string(),
+        };
+        let new_without_request = BaseboardId {
+            part_number: "part-c".to_string(),
+            serial_number: Uuid::new_v4().to_string(),
+        };
+        let cross_product_decoy = BaseboardId {
+            part_number: new_a.part_number.clone(),
+            serial_number: new_b.serial_number.clone(),
+        };
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        DataStore::hw_baseboard_ids_insert_conn(
+            &conn,
+            [&new_a, &new_b, &new_without_request]
+                .into_iter()
+                .cloned()
+                .map(HwBaseboardId::from)
+                .collect(),
+        )
+        .await
+        .expect("inserted hw_baseboard_id rows");
+        DataStore::tq_insert_rss_config_after_handoff(
+            opctx,
+            &conn,
+            make_authz_tq(rack_id),
+            members.clone(),
+            members.first().unwrap().clone(),
+        )
+        .await
+        .unwrap();
+
+        let request_b = insert_expunge_request(
+            datastore,
+            rack_id,
+            &new_b,
+            5,
+            SledExpungeRequestState::Expunging,
+        )
+        .await;
+        let request_a_other_rack = insert_expunge_request(
+            datastore,
+            RackUuid::new_v4(),
+            &new_a,
+            6,
+            SledExpungeRequestState::WaitingForTrustQuorum,
+        )
+        .await;
+        insert_expunge_request(
+            datastore,
+            rack_id,
+            &new_without_request,
+            7,
+            SledExpungeRequestState::Done,
+        )
+        .await;
+        insert_expunge_request(
+            datastore,
+            rack_id,
+            &cross_product_decoy,
+            8,
+            SledExpungeRequestState::PoweringOff,
+        )
+        .await;
+
+        // TODO-RAINCLAUDE: no member has a sled row yet, so this proposal also has no in-service coordinator; the permanent re-add refusal wins over that retryable one.
+        let mut proposed_members = members.clone();
+        proposed_members.insert(new_a.clone());
+        proposed_members.insert(new_b.clone());
+        proposed_members.insert(new_without_request.clone());
+        let proposal = ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: Epoch(2),
+            is_lrtq_upgrade: IsLrtqUpgrade::No {
+                last_committed_epoch: Epoch(1),
+            },
+            members: proposed_members,
+        };
+
+        assert_conflict(
+            datastore.tq_insert_latest_config(opctx, proposal.clone()).await,
+            &format!(
+                "Cannot add sleds to the trust quorum: 2 sleds have unfinished \
+                 expunge requests: sled {} ({new_a}), request {} in state \
+                 waiting_for_trust_quorum; sled {} ({new_b}), request {} in \
+                 state expunging. Wait for each expunge request to finish, \
+                 then retry. If a request is not making progress, contact \
+                 Oxide support with the request IDs above.",
+                request_a_other_rack.sled_id,
+                request_a_other_rack.id,
+                request_b.sled_id,
+                request_b.id,
+            ),
+        );
+        assert_eq!(
+            latest_config(datastore, opctx, rack_id).await.epoch,
+            Epoch(1)
+        );
+
+        finish_expunge_request(
+            datastore,
+            &request_a_other_rack,
+            SledExpungeRequestState::Failed,
+        )
+        .await;
+        finish_expunge_request(
+            datastore,
+            &request_b,
+            SledExpungeRequestState::Done,
+        )
+        .await;
+        insert_sled_for_baseboard(datastore, rack_id, &hw_ids[0]).await;
+        datastore.tq_insert_latest_config(opctx, proposal).await.expect(
+            "an unfinished request for a non-member baseboard does not block",
+        );
+        assert_eq!(
+            latest_config(datastore, opctx, rack_id).await.epoch,
+            Epoch(2)
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_tq_insert_new_members_are_relative_to_base_after_abort() {
+        let logctx = test_setup_log(
+            "test_tq_insert_new_members_are_relative_to_base_after_abort",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let hw_ids = insert_hw_baseboard_ids(&db).await;
+        let rack_id = RackUuid::new_v4();
+        insert_sled_for_baseboard(datastore, rack_id, &hw_ids[0]).await;
+        let mut members: BTreeSet<_> =
+            hw_ids.iter().cloned().map(BaseboardId::from).collect();
+        let added = members.pop_last().unwrap();
+        let removed = members.last().unwrap().clone();
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        DataStore::tq_insert_rss_config_after_handoff(
+            opctx,
+            &conn,
+            make_authz_tq(rack_id),
+            members.clone(),
+            members.first().unwrap().clone(),
+        )
+        .await
+        .unwrap();
+
+        let removed_request = insert_expunge_request(
+            datastore,
+            rack_id,
+            &removed,
+            2,
+            SledExpungeRequestState::WaitingForTrustQuorum,
+        )
+        .await;
+        let mut epoch_2_members = members.clone();
+        epoch_2_members.remove(&removed);
+        epoch_2_members.insert(added.clone());
+        datastore
+            .tq_insert_latest_config(
+                opctx,
+                ProposedTrustQuorumConfig {
+                    rack_id,
+                    epoch: Epoch(2),
+                    is_lrtq_upgrade: IsLrtqUpgrade::No {
+                        last_committed_epoch: Epoch(1),
+                    },
+                    members: epoch_2_members,
+                },
+            )
+            .await
+            .expect("removing a sled that has an unfinished request succeeds");
+        datastore
+            .tq_abort_config(
+                opctx,
+                make_authz_tq(rack_id),
+                Epoch(2),
+                "test".into(),
+            )
+            .await
+            .unwrap();
+
+        let added_request = insert_expunge_request(
+            datastore,
+            rack_id,
+            &added,
+            5,
+            SledExpungeRequestState::WaitingForTrustQuorum,
+        )
+        .await;
+        let mut epoch_3_members = members.clone();
+        epoch_3_members.insert(added);
+        let epoch_3 = ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: Epoch(3),
+            is_lrtq_upgrade: IsLrtqUpgrade::No {
+                last_committed_epoch: Epoch(1),
+            },
+            members: epoch_3_members,
+        };
+        assert_conflict(
+            datastore.tq_insert_latest_config(opctx, epoch_3.clone()).await,
+            &one_request_conflict_message(&added_request),
+        );
+        let latest = latest_config(datastore, opctx, rack_id).await;
+        assert_eq!(latest.epoch, Epoch(2));
+        assert_eq!(latest.state, TrustQuorumConfigState::Aborted);
+
+        finish_expunge_request(
+            datastore,
+            &added_request,
+            SledExpungeRequestState::Failed,
+        )
+        .await;
+        datastore.tq_insert_latest_config(opctx, epoch_3).await.expect(
+            "the added sled's request just failed, and keeping a member \
+             of the base config is not a re-add",
+        );
+        let latest = latest_config(datastore, opctx, rack_id).await;
+        assert_eq!(latest.epoch, Epoch(3));
+        assert!(latest.members.contains_key(&removed));
+
+        let state = {
+            use nexus_db_schema::schema::sled_expunge_request::dsl;
+            dsl::sled_expunge_request
+                .filter(dsl::id.eq(removed_request.id))
+                .select(dsl::state)
+                .get_result_async::<SledExpungeRequestState>(&*conn)
+                .await
+                .unwrap()
+        };
+        assert_eq!(state, SledExpungeRequestState::WaitingForTrustQuorum);
 
         db.terminate().await;
         logctx.cleanup_successful();
