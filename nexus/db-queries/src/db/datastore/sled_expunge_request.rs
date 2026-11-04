@@ -192,7 +192,9 @@ fn sled_expunge_request_baseboard_conflict(
     Error::conflict(format!(
         "Cannot expunge sled {sled_id}: its baseboard {baseboard_id} already \
          has an unfinished expunge request, {}, for sled {} (state {}). Wait \
-         for that request to finish, then retry; if it is not making \
+         for that request to finish, then retry. Use \
+         sled_expunge_request_view to follow its progress; its last_error \
+         says what, if anything, needs attention. If it is not making \
          progress, contact Oxide support.",
         blocking.id, blocking.sled_id, blocking.state,
     ))

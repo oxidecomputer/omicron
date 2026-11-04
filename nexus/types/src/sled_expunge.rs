@@ -64,7 +64,7 @@ impl SledNotExpungeable {
         let finished = match latest_finished_request {
             Some(FinishedSledExpungeRequest { id, state }) => format!(
                 " The sled's most recent expunge request, {id}, is {state}; \
-                 see that request for details."
+                 use sled_expunge_request_view to see its details."
             ),
             None => String::new(),
         };
@@ -332,8 +332,8 @@ mod tests {
                 Error::conflict(format!(
                     "Cannot expunge sled {sled_id}: it is already expunged \
                      (its state is active). The sled's most recent expunge \
-                     request, {id}, is {state_text}; see that request for \
-                     details."
+                     request, {id}, is {state_text}; use \
+                     sled_expunge_request_view to see its details."
                 )),
                 "{state:?}",
             );

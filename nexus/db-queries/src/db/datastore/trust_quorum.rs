@@ -266,6 +266,31 @@ enum LatestConfig {
     Aborted { epoch: Epoch, last_committed: Option<TrustQuorumConfig> },
 }
 
+// TODO-RAINCLAUDE: the 409 for a proposal that re-adds sleds with unfinished expunge requests; requests must be non-empty.
+fn re_add_while_expunging_conflict(
+    requests: &BTreeMap<BaseboardId, SledExpungeRequest>,
+) -> Error {
+    let summary = match requests.len() {
+        1 => "1 sled has an unfinished expunge request".to_string(),
+        count => format!("{count} sleds have unfinished expunge requests"),
+    };
+    let listed =
+        requests.iter().format_with("; ", |(baseboard_id, request), f| {
+            f(&format_args!(
+                "sled {} ({baseboard_id}), request {} in state {}",
+                request.sled_id, request.id, request.state,
+            ))
+        });
+    Error::conflict(format!(
+        "Cannot add sleds to the trust quorum: {summary}: {listed}. Wait for \
+         each expunge request to finish, then retry. Use \
+         sled_expunge_request_view to follow each request's progress; its \
+         last_error says what, if anything, needs attention. If a request is \
+         not making progress, contact Oxide support with the request IDs \
+         above."
+    ))
+}
+
 impl DataStore {
     /// Return any active `RackUuid` for each trust quorum along with its latest
     /// `Epoch`.
@@ -1852,24 +1877,12 @@ impl DataStore {
             .filter(|(baseboard_id, _)| new_members.contains(baseboard_id))
             .collect();
 
-        let summary = match requests.len() {
-            0 => return Ok(()),
-            1 => "1 sled has an unfinished expunge request".to_string(),
-            count => format!("{count} sleds have unfinished expunge requests"),
-        };
-        let listed =
-            requests.iter().format_with("; ", |(baseboard_id, request), f| {
-                f(&format_args!(
-                    "sled {} ({baseboard_id}), request {} in state {}",
-                    request.sled_id, request.id, request.state,
-                ))
-            });
-        Err(TransactionError::CustomError(Error::conflict(format!(
-            "Cannot add sleds to the trust quorum: {summary}: {listed}. Wait \
-            for each expunge request to finish, then retry. If a request is \
-            not making progress, contact Oxide support with the request IDs \
-            above."
-        ))))
+        if requests.is_empty() {
+            return Ok(());
+        }
+        Err(TransactionError::CustomError(re_add_while_expunging_conflict(
+            &requests,
+        )))
     }
 
     async fn tq_get_latest_config_conn(
@@ -3911,17 +3924,15 @@ pub(in crate::db::datastore) mod tests {
     }
 
     fn one_request_conflict_message(request: &SledExpungeRequest) -> String {
-        format!(
-            "Cannot add sleds to the trust quorum: 1 sled has an unfinished \
-             expunge request: sled {} ({}), request {} in state {}. Wait for \
-             each expunge request to finish, then retry. If a request is not \
-             making progress, contact Oxide support with the request IDs \
-             above.",
-            request.sled_id,
+        match super::re_add_while_expunging_conflict(&BTreeMap::from([(
             request.baseboard_id(),
-            request.id,
-            request.state,
-        )
+            request.clone(),
+        )])) {
+            Error::Conflict { message } => {
+                message.external_message().to_string()
+            }
+            other => panic!("the re-add refusal is a conflict: {other:?}"),
+        }
     }
 
     pub(in crate::db::datastore) async fn ack_all_prepares(
@@ -4174,8 +4185,10 @@ pub(in crate::db::datastore) mod tests {
                  expunge requests: sled {} ({new_a}), request {} in state \
                  waiting_for_trust_quorum; sled {} ({new_b}), request {} in \
                  state expunging. Wait for each expunge request to finish, \
-                 then retry. If a request is not making progress, contact \
-                 Oxide support with the request IDs above.",
+                 then retry. Use sled_expunge_request_view to follow each \
+                 request's progress; its last_error says what, if anything, \
+                 needs attention. If a request is not making progress, \
+                 contact Oxide support with the request IDs above.",
                 request_a_other_rack.sled_id,
                 request_a_other_rack.id,
                 request_b.sled_id,
