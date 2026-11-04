@@ -1246,6 +1246,11 @@ impl super::Nexus {
         // instance's current sled agent. If there is none, the request needs to
         // be handled specially based on its type.
         let (sled_id, propolis_id) = match vmm_state {
+            // The VMM record not only exists, but has actually been ensured on
+            // the sled, so the request must be directed to the sled-agent.
+            Some(vmm) if vmm.state.exists_on_sled() => {
+                (vmm.sled_id(), PropolisUuid::from_untyped_uuid(vmm.id))
+            }
             // GUYS IT'S TIME FOR THE FUNNY ONE: a VMM record exists in the
             // database, but it is in a state in which it may not yet have been
             // registered with the sled-agent, and whether or not it exists on
@@ -1257,37 +1262,60 @@ impl super::Nexus {
             // saga that it can cancel itself, conditionally on the generation
             // number not having advanced since.
             Some(vmm) if vmm.state == db::model::VmmState::Creating => {
-                match requested {
+                return match requested {
                     InstanceStateChangeRequest::Stop => {
                         let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
                         let next_state =
                             vmm.runtime().transition(VmmState::Cancelling);
-                        return Ok(InstanceStateChangeRequestAction::DoGoofyVmmStateCasLoopDance {
+                        Ok(InstanceStateChangeRequestAction::DoGoofyVmmStateCasLoopDance {
                             vmm_id,
                             next_state,
-                        });
+                        })
                     }
                     InstanceStateChangeRequest::Run => {
-                        return Ok(
-                            InstanceStateChangeRequestAction::AlreadyDone,
-                        );
+                        Ok(InstanceStateChangeRequestAction::AlreadyDone)
                     }
                     InstanceStateChangeRequest::Reboot => {
-                        return Err(Error::invalid_request(
+                        Err(Error::invalid_request(
                             "cannot reboot an instance until it has started",
-                        ));
+                        ))
                     }
                     InstanceStateChangeRequest::Migrate(_) => {
-                        return Err(Error::invalid_request(
+                        Err(Error::invalid_request(
                             "cannot migrate an instance until it has started",
-                        ));
+                        ))
                     }
-                }
+                };
             }
-            // The VMM record not only exists, but has actually been ensured on
-            // the sled, so the request must be directed to the sled-agent.
-            Some(vmm) => {
-                (vmm.sled_id(), PropolisUuid::from_untyped_uuid(vmm.id))
+            // Every other VMM state for which `exists_on_sled()` is false
+            // (Cancelling, SagaUnwound, and Destroyed) should *not* be sent to
+            // the sled-agent, because the sled-agent will not know what VMM
+            // we're talking about.These states should behave as though the
+            // instance is in the `Stopping` state.
+            Some(_) => {
+                return match requested {
+                    InstanceStateChangeRequest::Run => {
+                        Err(Error::invalid_request(&format!(
+                            "cannot run an instance in state {effective_state} \
+                             with no VMM",
+                        )))
+                    }
+                    InstanceStateChangeRequest::Stop => {
+                        Ok(InstanceStateChangeRequestAction::AlreadyDone)
+                    }
+                    InstanceStateChangeRequest::Reboot => {
+                        Err(Error::invalid_request(&format!(
+                            "cannot reboot an instance in state \
+                             {effective_state} with no VMM",
+                        )))
+                    }
+                    InstanceStateChangeRequest::Migrate(_) => {
+                        Err(Error::invalid_request(&format!(
+                            "cannot migrate an instance in state \
+                             {effective_state} with no VMM",
+                        )))
+                    }
+                };
             }
             // The instance hath no active VMM.
             None => match effective_state {
