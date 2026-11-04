@@ -267,7 +267,7 @@ mod tests {
     /// Use the `RotAttestor` to get and appraise an attestation
     #[tokio::test]
     async fn rot_attestor_verify_attestation() {
-        let logctx = test_setup_log("rot_attestor_mock");
+        let logctx = test_setup_log("rot_attestor_verify_attestation");
         let tmp = Utf8TempDir::new().unwrap();
         let cfg = gen_mock_config(tmp.path());
 
@@ -310,7 +310,7 @@ mod tests {
     /// Ensure new requests are rejected when the request queue is full
     #[tokio::test]
     async fn rot_attestor_queue_full() {
-        let logctx = test_setup_log("rot_attestor_busy");
+        let logctx = test_setup_log("rot_attestor_queue_full");
         let tmp = Utf8TempDir::new().unwrap();
         let cfg = gen_mock_config(tmp.path());
         let attestor = RotAttestor::new(&logctx.log, &cfg).unwrap();
