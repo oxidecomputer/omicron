@@ -9447,7 +9447,6 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<Response<Body>, HttpError>;
 
-    // Covers /access as well as the /access/users/* and /access/groups/* pages
     #[endpoint {
         method = GET,
         path = "/access/{path:.*}",
