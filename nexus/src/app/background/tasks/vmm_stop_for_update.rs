@@ -983,13 +983,24 @@ mod tests {
 
         let vmms = fetch_vmms(&conn, &vmm_ids).await;
 
-        // There should be 40 VMM rows:
+        // There should be 44 VMM rows:
         //  - 6 VMMs registered with sled agent (one in each of the 3
         //    `REAL_VMM_STATES` on each of the 2 sleds)
         //  - 20 unmarked VMMs (one in every state on each sled)
-        //  - 14 marked VMMs (one in each of the states *not* in
+        //  - 18 marked VMMs (one in each of the states *not* in
         //    `REAL_VMM_STATES` on each sled)
-        assert_eq!(vmms.len(), 40);
+        const TOTAL_VMMS: usize = 44;
+        assert_eq!(
+            vmms.len(),
+            TOTAL_VMMS,
+            "if this assertion fails, it probably means that you added a new \
+            VMM state, because this test creates VMMs by iterating over all \
+            VMM states. you will need to update the value of `TOTAL_VMMS` to \
+            include the fact that there will be 4 additional VMMs in the new \
+            state. you will also need to update the test to expect that the \
+            new VMM state is, or is not, marked to stop for evacuation, as \
+            appropriate."
+        );
 
         // Collect which VMMs we expect the task will stop and which it won't.
         let should_be_stopped = |vmm: &Vmm| {
@@ -1079,7 +1090,7 @@ mod tests {
         // are finished
         wait_for_running_sagas(&cptestctx).await;
         let vmms_after = fetch_vmms(&conn, &vmm_ids).await;
-        assert_eq!(vmms_after.len(), 40);
+        assert_eq!(vmms_after.len(), TOTAL_VMMS);
 
         // Every VMM we expected to stop should be destroyed at this point
         for expected in &expected_rows_to_be_stopped {
