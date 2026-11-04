@@ -4,22 +4,21 @@
 
 //! Tests for APIs against sled-based endpoints.
 
-use camino::Utf8Path;
 use dropshot::test_util::ClientTestContext;
 use nexus_db_model::PhysicalDisk as DbPhysicalDisk;
 use nexus_db_model::PhysicalDiskKind as DbPhysicalDiskKind;
 use nexus_db_queries::context::OpContext;
-use nexus_test_interface::NexusServer;
 use nexus_test_utils::SLED_AGENT_UUID;
-use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use nexus_test_utils::start_sled_agent;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::views::SledInstance;
-use nexus_types::external_api::views::{PhysicalDisk, Sled};
+use nexus_types::external_api::physical_disk::PhysicalDisk;
+use nexus_types::external_api::sled::Sled;
+use nexus_types::external_api::sled::SledInstance;
 use omicron_sled_agent::sim;
+use omicron_sled_agent::sim::SledCpuFamily;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -62,26 +61,15 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
     // Now start a few more sled agents.
     let nsleds = 3;
     let mut sas = Vec::with_capacity(nsleds);
-    for i in 0..nsleds {
-        let sa_id = SledUuid::new_v4();
-        let log =
-            cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
-        let addr = cptestctx.server.get_http_server_internal_address().await;
-        let update_directory = Utf8Path::new("/should/not/be/used");
+    for _ in 0..nsleds {
         sas.push(
-            start_sled_agent(
-                log,
-                addr,
-                sa_id,
-                // Index starts at 2: the `nexus_test` macro already created two
-                // sled agents as part of the ControlPlaneTestContext setup.
-                2 + i as u16,
-                &update_directory,
-                sim::SimMode::Explicit,
-                &cptestctx.first_sled_agent().simulated_upstairs,
-            )
-            .await
-            .unwrap(),
+            cptestctx
+                .add_sled(
+                    SledUuid::new_v4(),
+                    sim::SimMode::Explicit,
+                    SledCpuFamily::AmdMilan,
+                )
+                .await,
         );
     }
 
@@ -119,8 +107,8 @@ async fn test_physical_disk_create_list_delete(
     // Inject a disk into the database, observe it in the external API
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
-    let sled_id = Uuid::from_str(&SLED_AGENT_UUID).unwrap();
-    let physical_disk = DbPhysicalDisk::new(
+    let sled_id = SledUuid::from_str(&SLED_AGENT_UUID).unwrap();
+    let physical_disk = DbPhysicalDisk::from_parts(
         PhysicalDiskUuid::new_v4(),
         "v".into(),
         "s".into(),
@@ -182,7 +170,7 @@ async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Create an IP pool and project that we'll use for testing.
-    create_default_ip_pool(&external_client).await;
+    create_default_ip_pools(&external_client).await;
     let project = create_project(&external_client, "test-project").await;
     let instance =
         create_instance(&external_client, "test-project", "test-instance")
@@ -213,7 +201,7 @@ async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
                 if total_instances.len() == 1 {
                     Ok(total_instances)
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             }
         },

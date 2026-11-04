@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 
 set -o pipefail
 set -o errexit
@@ -20,11 +24,15 @@ PACKAGES=(
 )
 
 CRATES=(
+  "bhyve_api"
+  "propolis-api-types-versions"
+  "propolis_api_types"
   "propolis-client"
-  "propolis-server"
+  "propolis-mock-server"
 )
 
 REPO="oxidecomputer/propolis"
+TARGET_BRANCH="master"
 
 . "$SOURCE_DIR/update_helpers.sh"
 

@@ -5,25 +5,27 @@
 //! Params define the request bodies of API endpoints for creating or updating resources.
 
 use crate::deployment::Blueprint;
-use crate::external_api::params::PhysicalDiskKind;
-use crate::external_api::shared::Baseboard;
-use crate::external_api::shared::IpRange;
-use nexus_sled_agent_shared::inventory::SledRole;
-use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
+use crate::external_api::physical_disk::PhysicalDiskKind;
+use bootstrap_agent_lockstep_types::RecoverySiloConfig;
+pub use bootstrap_agent_lockstep_types::ServiceIpPoolConfig;
+pub use bootstrap_agent_lockstep_types::ServiceIpPoolError;
+use iddqd::IdOrdMap;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
 use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::api::internal::shared::AllowedSourceIps;
-use omicron_common::api::internal::shared::ExternalPortDiscovery;
-use omicron_common::api::internal::shared::RackNetworkConfig;
-use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_generation_kinds::SledRegistrationGeneration;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::inventory::SourceNatConfigGeneric;
+use sled_hardware_types::BaseboardId;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -31,6 +33,8 @@ use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 /// Sent by a sled agent to Nexus to inform about resources
+// NOTE: The fields in this struct use fixed identifiers, not `latest` floating
+// ones, because the Nexus internal API is client-side versioned.
 #[derive(Serialize, Deserialize, Debug, JsonSchema)]
 pub struct SledAgentInfo {
     /// The address of the sled agent's API endpoint
@@ -40,10 +44,10 @@ pub struct SledAgentInfo {
     pub repo_depot_port: u16,
 
     /// Describes the responsibilities of the sled
-    pub role: SledRole,
+    pub role: sled_agent_types_versions::v1::inventory::SledRole,
 
     /// Describes the sled's identity
-    pub baseboard: Baseboard,
+    pub baseboard: nexus_types_versions::v2025_11_20_00::hardware::Baseboard,
 
     /// The number of hardware threads which can execute on this sled
     pub usable_hardware_threads: u32,
@@ -56,8 +60,11 @@ pub struct SledAgentInfo {
     /// Must be smaller than "usable_physical_ram"
     pub reservoir_size: ByteCount,
 
+    /// The family of the sled's CPU.
+    pub cpu_family: sled_agent_types_versions::v1::inventory::SledCpuFamily,
+
     /// The generation number of this request from sled-agent
-    pub generation: Generation,
+    pub generation: SledRegistrationGeneration,
 
     /// Whether the sled-agent has been decommissioned by nexus
     ///
@@ -66,9 +73,11 @@ pub struct SledAgentInfo {
     pub decommissioned: bool,
 }
 
+// NOTE: The fields in this struct use fixed identifiers, not `latest` floating
+// ones, because the Nexus internal API is client-side versioned.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SwitchPutRequest {
-    pub baseboard: Baseboard,
+    pub baseboard: nexus_types_versions::v2025_11_20_00::hardware::Baseboard,
     pub rack_id: Uuid,
 }
 
@@ -84,15 +93,20 @@ pub struct PhysicalDiskPutRequest {
     pub model: String,
 
     pub variant: PhysicalDiskKind,
-    pub sled_id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub sled_id: SledUuid,
 }
 
 /// Identifies information about a Zpool that should be part of the control
 /// plane.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ZpoolPutRequest {
-    pub id: Uuid,
-    pub sled_id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub id: ZpoolUuid,
+
+    #[schemars(with = "Uuid")]
+    pub sled_id: SledUuid,
+
     pub physical_disk_id: PhysicalDiskUuid,
 }
 
@@ -121,7 +135,7 @@ pub enum ServiceKind {
     Oximeter,
     Dendrite,
     Tfport,
-    BoundaryNtp { snat: SourceNatConfig, nic: ServiceNic },
+    BoundaryNtp { snat: SourceNatConfigGeneric, nic: ServiceNic },
     InternalNtp,
     Mgd,
 }
@@ -172,9 +186,8 @@ pub struct RackInitializationRequest {
     // in `nexus-test-utils` and friends
     // (<https://github.com/oxidecomputer/omicron/issues/7081>).
     pub crucible_datasets: Vec<CrucibleDatasetCreateRequest>,
-    /// Ranges of the service IP pool which may be used for internal services,
-    /// such as Nexus.
-    pub internal_services_ip_pool_ranges: Vec<IpRange>,
+    /// Configuration for IP Pools used for system services.
+    pub service_ip_pools: IdOrdMap<ServiceIpPoolConfig>,
     /// x.509 Certificates used to encrypt communication with the external API.
     pub certs: Vec<Certificate>,
     /// initial internal DNS config
@@ -183,12 +196,21 @@ pub struct RackInitializationRequest {
     pub external_dns_zone_name: String,
     /// configuration for the initial (recovery) Silo
     pub recovery_silo: RecoverySiloConfig,
-    /// The external qsfp ports per sidecar
-    pub external_port_count: ExternalPortDiscovery,
     /// Initial rack network configuration
     pub rack_network_config: RackNetworkConfig,
     /// IPs or subnets allowed to make requests to user-facing services
     pub allowed_source_ips: AllowedSourceIps,
+    /// Data used to write the initial trust quorum configuration to CRDB
+    ///
+    /// This is optional for two reasons:
+    ///   * For clusters fewer than 3 nodes, we don't support trust quorum.
+    ///   * Trust quorum is not fully complete yet, and we only want this to be
+    ///     used in production once it is complete.
+    pub initial_trust_quorum_configuration: Option<InitialTrustQuorumConfig>,
+    /// Fleet-wide jumbo-frames opt-in (defaults to false). Operators can change
+    /// this post-init via the Nexus API.
+    #[serde(default)]
+    pub external_jumbo_frames_opt_in_enabled: bool,
 }
 
 pub type DnsConfigParams = internal_dns_types::config::DnsConfigParams;
@@ -209,6 +231,24 @@ pub struct OximeterInfo {
 /// Parameters used when migrating an instance.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceMigrateRequest {
-    /// The ID of the sled to which to migrate the target instance.
-    pub dst_sled_id: Uuid,
+    pub destination: InstanceMigrateDestination,
+}
+
+/// Destination target for instance migration requests.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum InstanceMigrateDestination {
+    /// Choose a destination sled automatically (similarly to initial VMM
+    /// placement).
+    Autoselect,
+
+    /// Migrate to a specific sled.
+    ById { dst_sled_id: SledUuid },
+}
+
+/// The configuration generated by RSS and used to initialize trust quorum
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct InitialTrustQuorumConfig {
+    pub members: BTreeSet<BaseboardId>,
+    pub coordinator: BaseboardId,
 }

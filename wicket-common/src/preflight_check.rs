@@ -5,11 +5,11 @@
 use std::net::IpAddr;
 
 use dpd_client::types::PortId;
+use oxide_update_engine_types::spec::EngineSpec;
 use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use update_engine::StepSpec;
 
 #[derive(Debug, Error)]
 pub enum UplinkPreflightTerminalError {
@@ -39,7 +39,7 @@ pub enum UplinkPreflightTerminalError {
     },
 }
 
-impl update_engine::AsError for UplinkPreflightTerminalError {
+impl oxide_update_engine_types::spec::AsError for UplinkPreflightTerminalError {
     fn as_error(&self) -> &(dyn std::error::Error + 'static) {
         self
     }
@@ -50,7 +50,11 @@ type DpdError = dpd_client::Error<dpd_client::types::Error>;
 #[derive(JsonSchema)]
 pub enum UplinkPreflightCheckSpec {}
 
-impl StepSpec for UplinkPreflightCheckSpec {
+impl EngineSpec for UplinkPreflightCheckSpec {
+    fn spec_name() -> String {
+        "UplinkPreflightCheckSpec".to_owned()
+    }
+
     type Component = String;
     type StepId = UplinkPreflightStepId;
     type StepMetadata = ();
@@ -74,4 +78,5 @@ pub enum UplinkPreflightStepId {
     CleanupL1,
 }
 
-update_engine::define_update_engine!(pub UplinkPreflightCheckSpec);
+oxide_update_engine::define_update_engine!(pub UplinkPreflightCheckSpec);
+oxide_update_engine_types::define_update_engine_types!(pub UplinkPreflightCheckSpec);

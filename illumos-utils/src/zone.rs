@@ -8,22 +8,26 @@ use anyhow::anyhow;
 use camino::Utf8Path;
 use ipnetwork::IpNetwork;
 use ipnetwork::IpNetworkError;
+use sled_agent_types::inventory::OmicronZoneConfig;
 use slog::Logger;
 use slog::info;
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use tokio::process::Command;
 
 use crate::ExecutionError;
 use crate::addrobj::AddrObject;
 use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
-use crate::zpool::PathInPool;
-use crate::{PFEXEC, execute};
-use omicron_common::address::SLED_PREFIX;
+use crate::route::Route;
+use crate::{PFEXEC, execute_async};
+use omicron_common::address::SLED_PREFIX_LENGTH;
+use omicron_common::backoff;
 use omicron_uuid_kinds::OmicronZoneUuid;
 
 const DLADM: &str = "/usr/sbin/dladm";
 pub const IPADM: &str = "/usr/sbin/ipadm";
 pub const SVCADM: &str = "/usr/sbin/svcadm";
 pub const SVCCFG: &str = "/usr/sbin/svccfg";
+pub const SVCS: &str = "/usr/bin/svcs";
 pub const ZLOGIN: &str = "/usr/sbin/zlogin";
 pub const ROUTE: &str = "/usr/sbin/route";
 
@@ -31,6 +35,16 @@ pub const ROUTE: &str = "/usr/sbin/route";
 pub const ZONE_PREFIX: &str = "oxz_";
 pub const PROPOLIS_ZONE_PREFIX: &str = "oxz_propolis-server_";
 
+/// Returns the name of a zone, based on the base zone name plus any unique
+/// identifying info.
+///
+/// The zone name is based on:
+/// - A unique Oxide prefix ("oxz_")
+/// - The name of the zone type being hosted (e.g., "nexus")
+/// - An optional, zone-unique UUID
+///
+/// This results in a zone name which is distinct across different zpools,
+/// but stable and predictable across reboots.
 pub fn zone_name(prefix: &str, id: Option<OmicronZoneUuid>) -> String {
     if let Some(id) = id {
         format!("{ZONE_PREFIX}{}_{}", prefix, id)
@@ -39,9 +53,28 @@ pub fn zone_name(prefix: &str, id: Option<OmicronZoneUuid>) -> String {
     }
 }
 
+pub trait OmicronZoneConfigExt {
+    /// Returns the name of a zone, based on the zone type plus its unique ID.
+    ///
+    /// The zone name is based on:
+    /// - A unique Oxide prefix ("oxz_")
+    /// - The zone type being hosted (e.g., "nexus")
+    /// - The zone's ID.
+    ///
+    /// This results in a zone name which is distinct across different zpools,
+    /// but stable and predictable across reboots.
+    fn zone_name(&self) -> String;
+}
+
+impl OmicronZoneConfigExt for OmicronZoneConfig {
+    fn zone_name(&self) -> String {
+        zone_name(self.zone_type.kind().zone_prefix(), Some(self.id))
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 enum Error {
-    #[error("Zone execution error: {0}")]
+    #[error("Zone execution error")]
     Execution(#[from] crate::ExecutionError),
 
     #[error(transparent)]
@@ -93,7 +126,7 @@ impl AdmError {
 
 /// Errors which may be encountered when deleting addresses.
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to delete address '{addrobj}' in zone '{zone}': {err}")]
+#[error("Failed to delete address '{addrobj}' in zone '{zone}'")]
 pub struct DeleteAddressError {
     zone: String,
     addrobj: AddrObject,
@@ -105,7 +138,7 @@ pub struct DeleteAddressError {
 /// Error which may be returned accessing the control interface of a zone.
 #[derive(thiserror::Error, Debug)]
 pub enum GetControlInterfaceError {
-    #[error("Failed to query zone '{zone}' for control interface: {err}")]
+    #[error("Failed to query zone '{zone}' for control interface")]
     Execution {
         zone: String,
         #[source]
@@ -120,7 +153,7 @@ pub enum GetControlInterfaceError {
 /// Error which may be returned accessing the bootstrap interface of a zone.
 #[derive(thiserror::Error, Debug)]
 pub enum GetBootstrapInterfaceError {
-    #[error("Failed to query zone '{zone}' for control interface: {err}")]
+    #[error("Failed to query zone '{zone}' for control interface")]
     Execution {
         zone: String,
         #[source]
@@ -183,6 +216,25 @@ pub struct GetAddressesError {
     err: anyhow::Error,
 }
 
+/// Errors configuring the addresses and routes for an OPTE port.
+#[derive(Debug, thiserror::Error)]
+pub enum OptePortSetupError {
+    #[error(transparent)]
+    EnsureAddress(#[from] EnsureAddressError),
+    #[error(transparent)]
+    GetAddresses(#[from] GetAddressesError),
+    #[error("Failed to create link-local IPv6 address for {addrobj}")]
+    LinkLocal {
+        addrobj: AddrObject,
+        #[source]
+        err: crate::ExecutionError,
+    },
+    #[error(transparent)]
+    Exec(#[from] ExecutionError),
+    #[error("Failed to wait for a DHCPv6 address on {addrobj}")]
+    NoDhcpV6Addr { addrobj: AddrObject },
+}
+
 /// Describes the type of addresses which may be requested from a zone.
 #[derive(Copy, Clone, Debug)]
 // TODO-cleanup: Remove, along with moving to IPv6 addressing everywhere.
@@ -198,7 +250,7 @@ impl AddressRequest {
     pub fn new_static(ip: IpAddr, prefix: Option<u8>) -> Self {
         let prefix = prefix.unwrap_or_else(|| match ip {
             IpAddr::V4(_) => 24,
-            IpAddr::V6(_) => SLED_PREFIX,
+            IpAddr::V6(_) => SLED_PREFIX_LENGTH,
         });
         let addr = IpNetwork::new(ip, prefix).unwrap();
         AddressRequest::Static(addr)
@@ -269,7 +321,7 @@ pub trait Api: Send + Sync {
     async fn install_omicron_zone(
         &self,
         log: &Logger,
-        zone_root_path: &PathInPool,
+        zone_root_path: &Utf8Path,
         zone_name: &str,
         zone_image: &Utf8Path,
         datasets: &[zone::Dataset],
@@ -308,7 +360,7 @@ pub trait Api: Send + Sync {
         );
         cfg.get_global()
             .set_brand("omicron1")
-            .set_path(&zone_root_path.path)
+            .set_path(zone_root_path)
             .set_autoboot(false)
             .set_ip_type(zone::IpType::Exclusive);
         if !limit_priv.is_empty() {
@@ -479,10 +531,10 @@ impl Zones {
     }
 
     /// Returns the name of the VNIC used to communicate with the control plane.
-    pub fn get_control_interface(
+    pub async fn get_control_interface(
         zone: &str,
     ) -> Result<String, GetControlInterfaceError> {
-        let mut command = std::process::Command::new(PFEXEC);
+        let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[
             ZLOGIN,
             zone,
@@ -492,7 +544,7 @@ impl Zones {
             "-o",
             "LINK",
         ]);
-        let output = execute(cmd).map_err(|err| {
+        let output = execute_async(cmd).await.map_err(|err| {
             GetControlInterfaceError::Execution { zone: zone.to_string(), err }
         })?;
         String::from_utf8_lossy(&output.stdout)
@@ -510,10 +562,10 @@ impl Zones {
     }
 
     /// Returns the name of the VNIC used to communicate with the bootstrap network.
-    pub fn get_bootstrap_interface(
+    pub async fn get_bootstrap_interface(
         zone: &str,
     ) -> Result<Option<String>, GetBootstrapInterfaceError> {
-        let mut command = std::process::Command::new(PFEXEC);
+        let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[
             ZLOGIN,
             zone,
@@ -523,7 +575,7 @@ impl Zones {
             "-o",
             "LINK",
         ]);
-        let output = execute(cmd).map_err(|err| {
+        let output = execute_async(cmd).await.map_err(|err| {
             GetBootstrapInterfaceError::Execution {
                 zone: zone.to_string(),
                 err,
@@ -556,41 +608,48 @@ impl Zones {
     ///
     /// This address may be optionally within a zone `zone`.
     /// If `None` is supplied, the address is queried from the Global Zone.
-    #[allow(clippy::needless_lifetimes)]
-    pub fn ensure_address<'a>(
-        zone: Option<&'a str>,
+    pub async fn ensure_address(
+        zone: Option<&str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,
     ) -> Result<IpNetwork, EnsureAddressError> {
-        |zone, addrobj, addrtype| -> Result<IpNetwork, anyhow::Error> {
-            match Self::get_address_impl(zone, addrobj) {
-                Ok(addr) => {
-                    if let AddressRequest::Static(expected_addr) = addrtype {
-                        // If the address is static, we need to validate that it
-                        // matches the value we asked for.
-                        if addr != expected_addr {
-                            // If the address doesn't match, try removing the old
-                            // value before using the new one.
-                            Self::delete_address(zone, addrobj)
-                                .map_err(|e| anyhow!(e))?;
-                            return Self::create_address(
-                                zone, addrobj, addrtype,
-                            )
+        Self::ensure_address_inner(zone, addrobj, addrtype).await.map_err(
+            |err| EnsureAddressError {
+                zone: zone.unwrap_or("global").to_string(),
+                request: addrtype,
+                name: addrobj.clone(),
+                err,
+            },
+        )
+    }
+
+    async fn ensure_address_inner(
+        zone: Option<&str>,
+        addrobj: &AddrObject,
+        addrtype: AddressRequest,
+    ) -> anyhow::Result<IpNetwork> {
+        match Self::get_address_impl(zone, addrobj).await {
+            Ok(addr) => {
+                if let AddressRequest::Static(expected_addr) = addrtype {
+                    // If the address is static, we need to validate that it
+                    // matches the value we asked for.
+                    if addr != expected_addr {
+                        // If the address doesn't match, try removing the old
+                        // value before using the new one.
+                        Self::delete_address(zone, addrobj)
+                            .await
+                            .map_err(|e| anyhow!(e))?;
+                        return Self::create_address(zone, addrobj, addrtype)
+                            .await
                             .map_err(|e| anyhow!(e));
-                        }
                     }
-                    Ok(addr)
                 }
-                Err(_) => Self::create_address(zone, addrobj, addrtype)
-                    .map_err(|e| anyhow!(e)),
+                Ok(addr)
             }
-        }(zone, addrobj, addrtype)
-        .map_err(|err| EnsureAddressError {
-            zone: zone.unwrap_or("global").to_string(),
-            request: addrtype,
-            name: addrobj.clone(),
-            err,
-        })
+            Err(_) => Self::create_address(zone, addrobj, addrtype)
+                .await
+                .map_err(|e| anyhow!(e)),
+        }
     }
 
     /// Gets the IP address of an interface.
@@ -598,14 +657,16 @@ impl Zones {
     /// This `addrobj` may optionally be within a zone named `zone`.
     /// If `None` is supplied, the address is queried from the Global Zone.
     #[allow(clippy::needless_lifetimes)]
-    pub fn get_address<'a>(
+    pub async fn get_address<'a>(
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<IpNetwork, GetAddressError> {
-        Self::get_address_impl(zone, addrobj).map_err(|err| GetAddressError {
-            zone: zone.unwrap_or("global").to_string(),
-            name: addrobj.clone(),
-            err: anyhow!(err),
+        Self::get_address_impl(zone, addrobj).await.map_err(|err| {
+            GetAddressError {
+                zone: zone.unwrap_or("global").to_string(),
+                name: addrobj.clone(),
+                err: anyhow!(err),
+            }
         })
     }
 
@@ -614,11 +675,11 @@ impl Zones {
     /// This address may optionally be within a zone named `zone`.
     /// If `None` is supplied, the address is queried from the Global Zone.
     #[allow(clippy::needless_lifetimes)]
-    fn get_address_impl<'a>(
+    async fn get_address_impl<'a>(
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<IpNetwork, Error> {
-        let mut command = std::process::Command::new(PFEXEC);
+        let mut command = Command::new(PFEXEC);
 
         let mut args = vec![];
         if let Some(zone) = zone {
@@ -629,7 +690,7 @@ impl Zones {
         args.extend(&[IPADM, "show-addr", "-p", "-o", "ADDR", &addrobj_str]);
 
         let cmd = command.args(args);
-        let output = execute(cmd)?;
+        let output = execute_async(cmd).await?;
         String::from_utf8_lossy(&output.stdout)
             .lines()
             .find_map(|s| parse_ip_network(s).ok())
@@ -641,11 +702,11 @@ impl Zones {
     /// This `addrobj` may optionally be within a zone named `zone`.
     /// If `None` is supplied, the address is queried from the Global Zone.
     #[allow(clippy::needless_lifetimes)]
-    pub fn get_all_addresses<'a>(
+    pub async fn get_all_addresses<'a>(
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<Vec<IpNetwork>, GetAddressesError> {
-        let mut command = std::process::Command::new(PFEXEC);
+        let mut command = Command::new(PFEXEC);
 
         let mut args = vec![];
         if let Some(zone) = zone {
@@ -656,11 +717,12 @@ impl Zones {
         args.extend(&[IPADM, "show-addr", "-p", "-o", "ADDR", &addrobj_str]);
 
         let cmd = command.args(args);
-        let output = execute(cmd).map_err(|err| GetAddressesError {
-            zone: zone.unwrap_or("global").to_string(),
-            name: addrobj.clone(),
-            err: err.into(),
-        })?;
+        let output =
+            execute_async(cmd).await.map_err(|err| GetAddressesError {
+                zone: zone.unwrap_or("global").to_string(),
+                name: addrobj.clone(),
+                err: err.into(),
+            })?;
         Ok(String::from_utf8_lossy(&output.stdout)
             .lines()
             .filter_map(|s| s.parse().ok())
@@ -672,11 +734,11 @@ impl Zones {
     /// Zone may either be `Some(zone)` for a non-global zone, or `None` to
     /// run the command in the Global zone.
     #[allow(clippy::needless_lifetimes)]
-    fn has_link_local_v6_address<'a>(
+    async fn has_link_local_v6_address<'a>(
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<(), Error> {
-        let mut command = std::process::Command::new(PFEXEC);
+        let mut command = Command::new(PFEXEC);
 
         let prefix =
             if let Some(zone) = zone { vec![ZLOGIN, zone] } else { vec![] };
@@ -687,7 +749,7 @@ impl Zones {
 
         let args = prefix.iter().chain(show_addr_args);
         let cmd = command.args(args);
-        let output = execute(cmd)?;
+        let output = execute_async(cmd).await?;
         if let Some(_) = String::from_utf8_lossy(&output.stdout)
             .lines()
             .find(|s| s.trim() == "addrconf")
@@ -701,12 +763,12 @@ impl Zones {
     //
     // Does NOT check if the address already exists.
     #[allow(clippy::needless_lifetimes)]
-    pub fn create_address_internal<'a>(
+    pub async fn create_address_internal<'a>(
         zone: Option<&'a str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,
     ) -> Result<(), crate::ExecutionError> {
-        let mut command = std::process::Command::new(PFEXEC);
+        let mut command = Command::new(PFEXEC);
         let mut args = vec![];
         if let Some(zone) = zone {
             args.push(ZLOGIN.to_string());
@@ -732,7 +794,7 @@ impl Zones {
         args.push(addrobj.to_string());
 
         let cmd = command.args(args);
-        execute(cmd)?;
+        execute_async(cmd).await?;
 
         Ok(())
     }
@@ -742,7 +804,7 @@ impl Zones {
     /// This method attempts to be idempotent: deleting a nonexistent address
     /// object returns `Ok(())`.
     #[allow(clippy::needless_lifetimes)]
-    pub fn delete_address<'a>(
+    pub async fn delete_address<'a>(
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<(), DeleteAddressError> {
@@ -752,7 +814,7 @@ impl Zones {
         const OBJECT_NOT_FOUND: &str =
             "could not delete address: Object not found";
 
-        let mut command = std::process::Command::new(PFEXEC);
+        let mut command = Command::new(PFEXEC);
         let mut args = vec![];
         if let Some(zone) = zone {
             args.push(ZLOGIN.to_string());
@@ -764,7 +826,7 @@ impl Zones {
         args.push(addrobj.to_string());
 
         let cmd = command.args(args);
-        match execute(cmd) {
+        match execute_async(cmd).await {
             Ok(_) => Ok(()),
             Err(ExecutionError::CommandFailure(err))
                 if err.stderr.contains(OBJECT_NOT_FOUND) =>
@@ -787,16 +849,16 @@ impl Zones {
     /// For more context, see:
     /// <https://ry.goodwu.net/tinkering/a-day-in-the-life-of-an-ipv6-address-on-illumos/>
     #[allow(clippy::needless_lifetimes)]
-    pub fn ensure_has_link_local_v6_address<'a>(
+    pub async fn ensure_has_link_local_v6_address<'a>(
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<(), crate::ExecutionError> {
-        if let Ok(()) = Self::has_link_local_v6_address(zone, &addrobj) {
+        if let Ok(()) = Self::has_link_local_v6_address(zone, &addrobj).await {
             return Ok(());
         }
 
         // No link-local address was found, attempt to make one.
-        let mut command = std::process::Command::new(PFEXEC);
+        let mut command = Command::new(PFEXEC);
 
         let prefix =
             if let Some(zone) = zone { vec![ZLOGIN, zone] } else { vec![] };
@@ -812,7 +874,101 @@ impl Zones {
         let args = prefix.iter().chain(create_addr_args);
 
         let cmd = command.args(args);
-        execute(cmd)?;
+        execute_async(cmd).await?;
+        Ok(())
+    }
+
+    /// Configure a V4-capable OPTE port.
+    ///
+    /// This ensures the DHCP private address object exists, and then (until
+    /// stlouis#326 lands) manually programs the routes to OPTE's virtual
+    /// gateway. See [`Route::configure_opte_virtual_gateway_ipv4_route`] for
+    /// why those routes are needed.
+    ///
+    /// `zone` selects where the commands run: `None` runs them in the current
+    /// zone (the `zone-setup` service, which runs inside the zone itself),
+    /// while `Some(name)` reaches into that zone from the global zone (the
+    /// probe path).
+    pub async fn configure_opte_ipv4_port(
+        zone: Option<&str>,
+        addrobj: &AddrObject,
+        gateway: Ipv4Addr,
+        private_ip: Ipv4Addr,
+    ) -> Result<(), OptePortSetupError> {
+        // Creating the DHCP address blocks until we get a lease, so the
+        // address is usable by the time this returns.
+        Self::ensure_address(zone, addrobj, AddressRequest::Dhcp).await?;
+        Route::configure_opte_virtual_gateway_ipv4_route(
+            zone,
+            addrobj.interface(),
+            &gateway,
+            &private_ip,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Configure a V6-capable OPTE port.
+    ///
+    /// This ensures the addrconf private address object exists, and then waits
+    /// for a DHCPv6 address to be assigned. Unlike IPv4, there are no routes to
+    /// program: IPv6 routing to OPTE's virtual gateway is learned entirely
+    /// through NDP.
+    ///
+    /// See [`Self::configure_opte_ipv4_port`] for the meaning of `zone`.
+    pub async fn configure_opte_ipv6_port(
+        zone: Option<&str>,
+        addrobj: &AddrObject,
+        log: &Logger,
+    ) -> Result<(), OptePortSetupError> {
+        // Creating the addrconf link-local address also kicks off DHCPv6, via
+        // OPTE's Router Advertisements.
+        Self::ensure_has_link_local_v6_address(zone, addrobj).await.map_err(
+            |err| OptePortSetupError::LinkLocal {
+                addrobj: addrobj.clone(),
+                err,
+            },
+        )?;
+
+        // Unlike DHCPv4, there's no blocking call we can make: the DHCPv6
+        // address is configured in the background, after the NDP exchange
+        // completes. Poll until a non-link-local address shows up on the
+        // address object.
+        backoff::retry_notify(
+            backoff::retry_policy_local(),
+            || async {
+                let addrs = Self::get_all_addresses(zone, addrobj)
+                    .await
+                    .map_err(|err| {
+                        backoff::BackoffError::permanent(
+                            OptePortSetupError::from(err),
+                        )
+                    })?;
+                if addrs.iter().any(|addr| {
+                    matches!(
+                        addr,
+                        IpNetwork::V6(ip) if !ip.ip().is_unicast_link_local()
+                    )
+                }) {
+                    Ok(())
+                } else {
+                    Err(backoff::BackoffError::transient(
+                        OptePortSetupError::NoDhcpV6Addr {
+                            addrobj: addrobj.clone(),
+                        },
+                    ))
+                }
+            },
+            |error, delay| {
+                slog::info!(
+                    log,
+                    "No non-link-local IPv6 address yet (retrying)";
+                    "delay" => ?delay,
+                    "error" => ?error,
+                );
+            },
+        )
+        .await?;
         Ok(())
     }
 
@@ -821,20 +977,22 @@ impl Zones {
     // from RSS. Edit to this TODO: we still need this for the bootstrap network
     // (which exists pre-RSS), but we should remove all uses of it other than
     // the bootstrap agent.
-    pub fn ensure_has_global_zone_v6_address(
+    pub async fn ensure_has_global_zone_v6_address(
         link: EtherstubVnic,
         address: Ipv6Addr,
         name: &str,
     ) -> Result<(), EnsureGzAddressError> {
         // Call the guts of this function within a closure to make it easier
         // to wrap the error with appropriate context.
-        |link: EtherstubVnic, address, name| -> Result<(), anyhow::Error> {
+        #[allow(clippy::redundant_closure_call)]
+        async |link: EtherstubVnic, address, name| -> Result<(), anyhow::Error> {
             let gz_link_local_addrobj = AddrObject::link_local(&link.0)
                 .map_err(|err| anyhow!(err))?;
             Self::ensure_has_link_local_v6_address(
                 None,
                 &gz_link_local_addrobj,
             )
+            .await
             .map_err(|err| anyhow!(err))?;
 
             // Ensure that a static IPv6 address has been allocated to the
@@ -850,12 +1008,14 @@ impl Zones {
                     .map_err(|err| anyhow!(err))?,
                 AddressRequest::new_static(
                     IpAddr::V6(address),
-                    Some(omicron_common::address::SLED_PREFIX),
+                    Some(omicron_common::address::SLED_PREFIX_LENGTH),
                 ),
             )
+            .await
             .map_err(|err| anyhow!(err))?;
             Ok(())
         }(link.clone(), address, name)
+        .await
         .map_err(|err| EnsureGzAddressError {
             address: IpAddr::V6(address),
             link: link.0.clone(),
@@ -883,7 +1043,7 @@ impl Zones {
 
     // Creates an IP address within a Zone.
     #[allow(clippy::needless_lifetimes)]
-    fn create_address<'a>(
+    async fn create_address<'a>(
         zone: Option<&'a str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,
@@ -905,16 +1065,17 @@ impl Zones {
                         Self::ensure_has_link_local_v6_address(
                             Some(zone),
                             &link_local_addrobj,
-                        )?;
+                        )
+                        .await?;
                     }
                 }
             }
         };
 
         // Actually perform address allocation.
-        Self::create_address_internal(zone, addrobj, addrtype)?;
+        Self::create_address_internal(zone, addrobj, addrtype).await?;
 
-        Self::get_address_impl(zone, addrobj)
+        Self::get_address_impl(zone, addrobj).await
     }
 }
 
@@ -950,11 +1111,11 @@ mod tests {
     // This test validates that we correctly detect an attempt to delete an
     // address that does not exist and return `Ok(())`.
     #[cfg(target_os = "illumos")]
-    #[test]
-    fn delete_nonexistent_address() {
+    #[tokio::test]
+    async fn delete_nonexistent_address() {
         // We'll pick a name that hopefully no system actually has...
         let addr = AddrObject::new("nonsense", "shouldnotexist").unwrap();
-        match Zones::delete_address(None, &addr) {
+        match Zones::delete_address(None, &addr).await {
             Ok(()) => (),
             Err(err) => panic!(
                 "unexpected error deleting nonexistent address: {}",

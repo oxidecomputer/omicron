@@ -6,22 +6,49 @@
 
 use std::net::Ipv6Addr;
 
-use super::{
-    NexusActionContext, NexusSaga, SagaInitError,
-    instance_common::allocate_vmm_ipv6,
-};
+use super::NexusActionContext;
+use super::NexusSaga;
+use super::SagaInitError;
+use super::instance_common::allocate_vmm_ipv6;
+use crate::app::InlineErrorChain;
+use crate::app::MAX_DISKS_PER_INSTANCE;
 use crate::app::instance::{
     InstanceEnsureRegisteredApiResources, InstanceRegisterReason,
     InstanceStateChangeError,
 };
+use crate::app::instance_network::InstanceNetworkFilters;
 use crate::app::sagas::declare_saga_actions;
+use crate::app::sagas::sled_out_of_service_gone_check;
+use crate::app::sagas::zpool_out_of_service_gone_check;
 use chrono::Utc;
 use nexus_db_lookup::LookupPath;
+use nexus_db_queries::db::datastore::Disk;
+use nexus_db_queries::db::datastore::LocalStorageAllocation;
+use nexus_db_queries::db::datastore::LocalStorageDisk;
+use nexus_db_queries::db::datastore::sled::SledReservationReason;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
+use nexus_types::saga::saga_action_failed;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
+use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::backoff::BackoffError;
+use omicron_common::backoff::backon_retry_policy_internal_service;
+use omicron_common::backoff::retry_notify_ext;
+use omicron_common::backoff::retry_policy_internal_service;
+use omicron_generation_kinds::InstanceStateGeneration;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
+use paste::paste;
+use progenitor_extras::retry::{
+    GoneCheckResult, retry_operation_while_indefinitely,
+};
+use seq_macro::seq;
 use serde::{Deserialize, Serialize};
+use sled_agent_client::types::LocalStorageDatasetEnsureRequest;
 use slog::info;
 use steno::ActionError;
 
@@ -80,6 +107,15 @@ declare_saga_actions! {
         - sis_move_to_starting_undo
     }
 
+    LIST_LOCAL_STORAGE -> "local_storage_records" {
+        + sis_list_local_storage
+    }
+
+    ENSURE_LOCAL_STORAGE (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11) -> "ensure_local_storage" {
+        + sis_ensure_local_storage
+        // No undo action for this, that is handled in the disk delete saga!
+    }
+
     // TODO(#3879) This can be replaced with an action that triggers the NAT RPW
     // once such an RPW is available.
     DPD_ENSURE -> "dpd_ensure" {
@@ -92,9 +128,32 @@ declare_saga_actions! {
         - sis_v2p_ensure_undo
     }
 
+    // This node is essentially the undo action of the `ensure_registered` node,
+    // but factored out into a separate node that's pushed *before*
+    // `sis_ensure_registered`. This is necessary because we want to ensure that
+    // an unwinding saga always attempts to unregister the VMM it may have
+    // created on a sled, regardless of whether the `sis_ensure_registered` node
+    // completes or fails. If that action sends a VMM ensure request to the sled
+    // but then encounters an error and begins unwinding before the node
+    // *completes*, we may have still created a VMM and must attempt to tear it
+    // down. Because undo actions are only performed for *completed* nodes, we
+    // must push a node immediately *before* `sis_ensure_registered` with a
+    // no-op forwards action and `sis_ensure_unregistered` as its undo action.
+    // That way, if we have reached the point where we were going to attempt to
+    // ensure a VMM, we ensure it does not exist while unwinding regardless of
+    // whether we made it past that node.
+    ENSURE_UNREGISTERED_IF_UNWINDING -> "ensure_unregistered_if_unwinding" {
+        + sis_noop
+        - sis_ensure_unregistered
+    }
+
     ENSURE_REGISTERED -> "ensure_registered" {
         + sis_ensure_registered
-        - sis_ensure_registered_undo
+    }
+
+    UPDATE_MULTICAST_SLED_ID -> "multicast_sled_id" {
+        + sis_update_multicast_sled_id
+        - sis_update_multicast_sled_id_undo
     }
 
     // Only account for the instance's resource consumption when the saga is on
@@ -138,11 +197,33 @@ impl NexusSaga for SagaInstanceStart {
         builder.append(alloc_propolis_ip_action());
         builder.append(create_vmm_record_action());
         builder.append(mark_as_starting_action());
+
+        // After the instance's state has moved to starting, this should block
+        // out all disk attach and detach requests. List all the possible local
+        // storage disks attached to this instance, and ensure that they exist
+        // so they can be delegated into the propolis zone.
+        builder.append(list_local_storage_action());
+
+        // Changing MAX_DISKS_PER_INSTANCE requires changing this saga
+        static_assertions::const_assert!(MAX_DISKS_PER_INSTANCE == 12);
+
+        // In parallel, ensure all local storage related to this instance.
+        seq!(N in 0..12 {
+            builder.append_parallel(vec![
+                #(
+                paste!([<ensure_local_storage_ N _action>]()),
+                )*
+            ]);
+        });
+
         builder.append(dpd_ensure_action());
         builder.append(v2p_ensure_action());
+        builder.append(ensure_unregistered_if_unwinding_action());
         builder.append(ensure_registered_action());
+        builder.append(update_multicast_sled_id_action());
         builder.append(add_virtual_resources_action());
         builder.append(ensure_running_action());
+
         Ok(builder.build()?)
     }
 }
@@ -162,13 +243,21 @@ async fn sis_alloc_server(
     let reservoir_ram = params.db_instance.memory;
     let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
 
+    let mut constraint_builder =
+        db::model::SledReservationConstraintBuilder::new();
+    if let Some(cpu_platform) = params.db_instance.cpu_platform.as_ref() {
+        constraint_builder = constraint_builder
+            .cpu_families(cpu_platform.compatible_sled_cpu_families());
+    }
+
     let resource = super::instance_common::reserve_vmm_resources(
         osagactx.nexus(),
         InstanceUuid::from_untyped_uuid(params.db_instance.id()),
         propolis_id,
         u32::from(hardware_threads.0),
         reservoir_ram,
-        db::model::SledReservationConstraints::none(),
+        constraint_builder.build(),
+        SledReservationReason::Start,
     )
     .await?;
 
@@ -211,6 +300,36 @@ async fn sis_create_vmm_record(
     let sled_id = sagactx.lookup::<SledUuid>("sled_id")?;
     let propolis_ip = sagactx.lookup::<Ipv6Addr>("propolis_ip")?;
 
+    // If the instance supplied a CPU platform, record that as the VMM's
+    // required platform, irrespective of what sled was picked. (This allows a
+    // VM to land on a "better" sled than its requirement and migrate back to a
+    // minimum-allowed-by-requirement sled later.)
+    //
+    // If the instance didn't supply a CPU platform, select one for this VMM by
+    // looking up the chosen sled and selecting the "minimum compatible
+    // platform" for sleds of that lineage. This maximizes the number of sleds
+    // that can host the VMM if it needs to migrate in the future. Selecting the
+    // sled first and then deriving the platform is meant to support
+    // heterogeneous deployments: if a deployment contains some sleds with CPUs
+    // from vendor A, and some with CPUs from vendor B, then selecting the sled
+    // first implicitly chooses a vendor, and then the "minimum compatible"
+    // computation selects the most compatible platform that can run on sleds
+    // with CPUs from that vendor.
+    let cpu_platform =
+        if let Some(cpu_platform) = params.db_instance.cpu_platform {
+            cpu_platform.into()
+        } else {
+            let (.., sled) = osagactx
+                .nexus()
+                .sled_lookup(&osagactx.nexus().opctx_alloc, &sled_id)
+                .map_err(saga_action_failed)?
+                .fetch()
+                .await
+                .map_err(saga_action_failed)?;
+
+            sled.cpu_family.minimum_compatible_platform()
+        };
+
     super::instance_common::create_and_insert_vmm_record(
         osagactx.datastore(),
         &opctx,
@@ -218,6 +337,7 @@ async fn sis_create_vmm_record(
         propolis_id,
         sled_id,
         propolis_ip,
+        cpu_platform,
     )
     .await
 }
@@ -248,7 +368,7 @@ async fn sis_destroy_vmm_record(
     // may be permitted to reincarnate. If it is, activate the instance
     // reincarnation background task to help it along.
     let karmic_status =
-        db_instance.auto_restart.can_reincarnate(db_instance.runtime());
+        db_instance.auto_restart.can_reincarnate(&db_instance.runtime());
     if karmic_status == db::model::Reincarnatability::WillReincarnate {
         info!(
             osagactx.log(),
@@ -300,11 +420,11 @@ async fn sis_move_to_starting(
         .instance_id(instance_id.into_untyped_uuid())
         .fetch_for(authz::Action::Modify)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     let state = datastore
         .instance_fetch_with_vmm(&opctx, &authz_instance)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let db_instance = state.instance();
 
@@ -327,14 +447,14 @@ async fn sis_move_to_starting(
         // If the instance has a Propolis ID, but the Propolis was left behind
         // by a previous start saga unwinding, that's fine, we can just clear it
         // out and proceed as though there was no Propolis ID here.
-        Some(vmm) if vmm.runtime.state == db::model::VmmState::SagaUnwound => {
+        Some(vmm) if vmm.state == db::model::VmmState::SagaUnwound => {
             abandoned_unwound_vmm = true;
         }
 
         // If the instance has a different Propolis ID, a competing start saga
         // must have started the instance already, so unwind.
         Some(_) => {
-            return Err(ActionError::action_failed(Error::conflict(
+            return Err(saga_action_failed(Error::conflict(
                 "instance changed state before it could be started",
             )));
         }
@@ -359,9 +479,13 @@ async fn sis_move_to_starting(
         db::model::InstanceRuntimeState {
             nexus_state: db::model::InstanceState::Vmm,
             propolis_id: Some(propolis_id.into_untyped_uuid()),
-            r#gen: db_instance.runtime().r#gen.next().into(),
+            generation: InstanceStateGeneration::from(
+                db_instance.runtime().generation,
+            )
+            .next()
+            .into(),
             time_last_auto_restarted,
-            ..db_instance.runtime_state
+            ..db_instance.runtime()
         }
     };
 
@@ -371,9 +495,9 @@ async fn sis_move_to_starting(
         .datastore()
         .instance_update_runtime(&instance_id, &new_runtime)
         .await
-        .map_err(ActionError::action_failed)?
+        .map_err(saga_action_failed)?
     {
-        return Err(ActionError::action_failed(Error::conflict(
+        return Err(saga_action_failed(Error::conflict(
             "instance changed state before it could be started",
         )));
     }
@@ -384,7 +508,7 @@ async fn sis_move_to_starting(
     }
 
     let mut new_record = db_instance.clone();
-    new_record.runtime_state = new_runtime;
+    new_record.set_runtime(new_runtime);
     Ok(new_record)
 }
 
@@ -401,8 +525,10 @@ async fn sis_move_to_starting_undo(
     let new_runtime = db::model::InstanceRuntimeState {
         nexus_state: db::model::InstanceState::NoVmm,
         propolis_id: None,
-        gen: db_instance.runtime_state.gen.next().into(),
-        ..db_instance.runtime_state
+        generation: InstanceStateGeneration::from(db_instance.state_generation)
+            .next()
+            .into(),
+        ..db_instance.runtime()
     };
 
     if !osagactx
@@ -435,12 +561,12 @@ async fn sis_account_virtual_resources(
         .virtual_provisioning_collection_insert_instance(
             &opctx,
             instance_id,
-            params.db_instance.project_id,
+            params.db_instance.project_id(),
             i64::from(params.db_instance.ncpus.0.0),
             nexus_db_model::ByteCount(*params.db_instance.memory),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -461,14 +587,203 @@ async fn sis_account_virtual_resources_undo(
         .virtual_provisioning_collection_delete_instance(
             &opctx,
             instance_id,
-            params.db_instance.project_id,
+            params.db_instance.project_id(),
             i64::from(params.db_instance.ncpus.0.0),
             nexus_db_model::ByteCount(*params.db_instance.memory),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
+
+async fn sis_list_local_storage(
+    sagactx: NexusActionContext,
+) -> Result<Vec<LocalStorageDisk>, ActionError> {
+    let params = sagactx.saga_params::<Params>()?;
+    let osagactx = sagactx.user_data();
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    let datastore = osagactx.datastore();
+
+    let db_instance =
+        sagactx.lookup::<db::model::Instance>("started_record")?;
+    let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
+
+    let (_, _, authz_instance, ..) = LookupPath::new(&opctx, datastore)
+        .instance_id(instance_id.into_untyped_uuid())
+        .fetch_for(authz::Action::Read)
+        .await
+        .map_err(saga_action_failed)?;
+
+    let disks = datastore
+        .instance_list_disks(
+            &opctx,
+            &authz_instance,
+            &PaginatedBy::Name(DataPageParams {
+                marker: None,
+                direction: dropshot::PaginationOrder::Ascending,
+                limit: std::num::NonZeroU32::new(MAX_DISKS_PER_INSTANCE)
+                    .unwrap(),
+            }),
+        )
+        .await
+        .map_err(saga_action_failed)?;
+
+    let records = disks
+        .into_iter()
+        .filter_map(|disk| match disk {
+            Disk::LocalStorage(disk) => Some(disk),
+            Disk::Crucible(_) => None,
+        })
+        .collect();
+
+    Ok(records)
+}
+
+async fn sis_ensure_local_storage(
+    sagactx: NexusActionContext,
+    which: usize,
+) -> Result<(), ActionError> {
+    let params = sagactx.saga_params::<Params>()?;
+    let osagactx = sagactx.user_data();
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    // Get this node's record
+
+    let local_storage_records =
+        sagactx.lookup::<Vec<LocalStorageDisk>>("local_storage_records")?;
+
+    if local_storage_records.is_empty()
+        || (which >= local_storage_records.len())
+    {
+        return Ok(());
+    }
+
+    let LocalStorageDisk {
+        disk,
+        disk_type_local_storage: _,
+        local_storage_dataset_allocation,
+    } = &local_storage_records[which];
+
+    // All local storage volumes will be created with 4k blocks. Double check
+    // here.
+
+    if disk.block_size.to_bytes() != 4096 {
+        return Err(saga_action_failed(Error::internal_error(&format!(
+            "local storage record {} has block size {}!",
+            which,
+            disk.block_size.to_bytes(),
+        ))));
+    }
+
+    // Make sure this was a complete allocation.
+
+    let Some(allocation) = local_storage_dataset_allocation else {
+        return Err(saga_action_failed(Error::internal_error(&format!(
+            "local storage record {which} has a None unencrypted allocation!",
+        ))));
+    };
+
+    // Ensure that the local storage is created
+
+    let (sled_id, zpool_id, ensure_request) = match allocation {
+        LocalStorageAllocation::Unencrypted(allocation) => {
+            let sled_id = allocation.sled_id();
+            let pool_id: ZpoolUuid = allocation.pool_id().upcast();
+
+            let ensure_request = LocalStorageDatasetEnsureRequest {
+                zpool_id: allocation.pool_id(),
+                dataset_id: allocation.id(),
+                dataset_size: allocation.dataset_size.into(),
+                volume_size: disk.size.into(),
+                encrypted_at_rest: false,
+            };
+
+            (sled_id, pool_id, ensure_request)
+        }
+
+        LocalStorageAllocation::Encrypted(_) => {
+            // This enum variant has been left in pending an investigation of
+            // how we're going to support encryption at rest, but right now we
+            // don't support this yet.
+            return Err(saga_action_failed(Error::internal_error(&format!(
+                "local storage record {which} has a encrypted allocation!",
+            ))));
+        }
+    };
+
+    let sled_agent_client = osagactx
+        .nexus()
+        .sled_client(&sled_id)
+        .await
+        .map_err(saga_action_failed)?;
+
+    let ensure_operation = || async {
+        sled_agent_client.local_storage_dataset_ensure(&ensure_request).await
+    };
+
+    // Bail out of the retry loop if either the disk or sled is no longer
+    // in-service.
+    let gone_check = || async {
+        match sled_out_of_service_gone_check(
+            osagactx.datastore(),
+            &opctx,
+            sled_id,
+        )
+        .await?
+        {
+            GoneCheckResult::StillAvailable => {
+                // proceed to zpool check
+            }
+
+            GoneCheckResult::Gone => {
+                return Ok(GoneCheckResult::Gone);
+            }
+        }
+
+        zpool_out_of_service_gone_check(osagactx.datastore(), &opctx, zpool_id)
+            .await
+    };
+
+    let log = osagactx.log().clone();
+    retry_operation_while_indefinitely(
+        backon_retry_policy_internal_service(),
+        ensure_operation,
+        gone_check,
+        |notification| {
+            slog::warn!(
+                log,
+                "failed to ensure local storage dataset, retrying in {:?}",
+                notification.delay;
+                InlineErrorChain::new(&notification.error),
+            );
+        },
+    )
+    .await
+    .map_err(|e| {
+        saga_action_failed(Error::internal_error(&format!(
+            "failed to ensure local storage: {}",
+            InlineErrorChain::new(&e)
+        )))
+    })?;
+
+    Ok(())
+}
+
+seq!(M in 0..12 {
+    async fn sis_ensure_local_storage_~M(
+        sagactx: NexusActionContext,
+    ) -> Result<(), ActionError> {
+        sis_ensure_local_storage(sagactx, M).await
+    }
+});
 
 async fn sis_dpd_ensure(
     sagactx: NexusActionContext,
@@ -493,16 +808,21 @@ async fn sis_dpd_ensure(
     // for this.
     let sled_uuid = sagactx.lookup::<SledUuid>("sled_id")?;
     let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, datastore)
-        .sled_id(sled_uuid.into_untyped_uuid())
+        .sled_id(sled_uuid)
         .fetch()
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     osagactx
         .nexus()
-        .instance_ensure_dpd_config(&opctx, instance_id, &sled.address(), None)
+        .instance_ensure_dpd_config(
+            &opctx,
+            instance_id,
+            &sled.address(),
+            InstanceNetworkFilters::all(),
+        )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -527,7 +847,7 @@ async fn sis_dpd_ensure_undo(
         .instance_id(instance_id)
         .lookup_for(authz::Action::Modify)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     osagactx
         .nexus()
@@ -581,7 +901,7 @@ async fn sis_ensure_registered(
             .instance_id(instance_id)
             .lookup_for(authz::Action::Modify)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
     osagactx
         .nexus()
@@ -604,135 +924,140 @@ async fn sis_ensure_registered(
                       "start saga: sled agent failed to register instance";
                       "instance_id" => %instance_id,
                       "sled_id" =>  %sled_id,
-                      "error" => ?inner,
+                      "error" => InlineErrorChain::new(&inner),
                       "start_reason" => ?params.reason);
 
                 // Don't set the instance to Failed in this case. Instead, allow
                 // the saga to unwind and restore the instance to the Stopped
                 // state (matching what would happen if there were a failure
                 // prior to this point).
-                ActionError::action_failed(Error::from(inner))
+                saga_action_failed(Error::from(inner))
             }
             InstanceStateChangeError::Other(inner) => {
                 info!(osagactx.log(),
                       "start saga: internal error registering instance";
                       "instance_id" => %instance_id,
-                      "error" => ?inner,
+                      "error" => InlineErrorChain::new(&inner),
                       "start_reason" => ?params.reason);
-                ActionError::action_failed(inner)
+                saga_action_failed(inner)
             }
         })
 }
 
-async fn sis_ensure_registered_undo(
+async fn sis_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
+    Ok(())
+}
+
+async fn sis_ensure_unregistered(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let datastore = osagactx.datastore();
     let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
     let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
     let sled_id = sagactx.lookup::<SledUuid>("sled_id")?;
-    let db_vmm = sagactx.lookup::<db::model::Vmm>(REGISTERED_VMM_RECORD)?;
+
+    // `ensure_vmm_unregistered` will not retry errors checking if the sled is
+    // out of service (which may include potentially transient errors querying
+    // the database), nor will it retry errors from the sled-agent that
+    // progenitor-extras considers "permanent". Therefore, we wrap the entire
+    // thing in a second retry loop, so that the saga doesn't get stuck.
+    retry_notify_ext(
+        retry_policy_internal_service(),
+        || async {
+            super::instance_common::ensure_vmm_unregistered(
+                &sagactx,
+                &params.serialized_authn,
+                instance_id,
+                propolis_id,
+                sled_id,
+            )
+            .await
+            .map_err(BackoffError::transient)
+        },
+        |error, call_count, total_duration| {
+            warn!(
+                osagactx.log(),
+                "start saga: failed to unregister VMM; retrying";
+                "instance_id" => %instance_id,
+                "propolis_id" => %propolis_id,
+                "sled_id" => %sled_id,
+                "call_count" => call_count,
+                "total_duration" => ?total_duration,
+                InlineErrorChain::new(&error),
+            );
+        },
+    )
+    .await?;
+
+    Ok(())
+}
+
+async fn sis_update_multicast_sled_id(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &params.serialized_authn,
     );
 
-    info!(osagactx.log(), "start saga: unregistering instance from sled";
+    // Only update multicast members if multicast is enabled
+    // If disabled, no members exist to update
+    if !osagactx.nexus().multicast_enabled() {
+        return Ok(());
+    }
+
+    let instance_id = params.db_instance.id();
+    let sled_id = sagactx.lookup::<SledUuid>("sled_id")?;
+
+    info!(osagactx.log(), "start saga: updating multicast member sled_id";
           "instance_id" => %instance_id,
-          "propolis_id" => %propolis_id,
           "sled_id" => %sled_id,
           "start_reason" => ?params.reason);
 
-    // Fetch the latest record so that this callee can drive the instance into
-    // a Failed state if the unregister call fails.
-    let (.., authz_instance, _) = LookupPath::new(&opctx, datastore)
-        .instance_id(instance_id.into_untyped_uuid())
-        .fetch()
+    osagactx
+        .datastore()
+        .multicast_group_member_update_sled_id(
+            &opctx,
+            InstanceUuid::from_untyped_uuid(instance_id),
+            Some(sled_id.into()),
+        )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
-    // If the sled successfully unregistered the instance, allow the rest of
-    // saga unwind to restore the instance record to its prior state (without
-    // writing back the state returned from sled agent). Otherwise, try to
-    // reason about the next action from the specific kind of error that was
-    // returned.
-    if let Err(e) = osagactx
-        .nexus()
-        .instance_ensure_unregistered(&propolis_id, &sled_id)
-        .await
-    {
-        error!(osagactx.log(),
-               "start saga: failed to unregister instance from sled";
-               "instance_id" => %instance_id,
-               "start_reason" => ?params.reason,
-               "error" => ?e);
+    Ok(())
+}
 
-        // If the failure came from talking to sled agent, and the error code
-        // indicates the instance or sled might be unhealthy, manual
-        // intervention is likely to be needed, so try to mark the instance as
-        // Failed and then bail on unwinding.
-        //
-        // If sled agent is in good shape but just doesn't know about the
-        // instance, this saga still owns the instance's state, so allow
-        // unwinding to continue.
-        //
-        // If some other Nexus error occurred, this saga is in bad shape, so
-        // return an error indicating that intervention is needed without trying
-        // to modify the instance further.
-        //
-        // TODO(#3238): `instance_unhealthy` does not take an especially nuanced
-        // view of the meanings of the error codes sled agent could return, so
-        // assuming that an error that isn't `instance_unhealthy` means
-        // that everything is hunky-dory and it's OK to continue unwinding may
-        // be a bit of a stretch. See the definition of `instance_unhealthy` for
-        // more details.
-        match e {
-            InstanceStateChangeError::SledAgent(inner) if inner.vmm_gone() => {
-                error!(osagactx.log(),
-                       "start saga: failing instance after unregister failure";
-                       "instance_id" => %instance_id,
-                       "start_reason" => ?params.reason,
-                       "error" => ?inner);
+async fn sis_update_multicast_sled_id_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
-                if let Err(set_failed_error) = osagactx
-                    .nexus()
-                    .mark_vmm_failed(&opctx, authz_instance, &db_vmm, &inner)
-                    .await
-                {
-                    error!(osagactx.log(),
-                           "start saga: failed to mark instance as failed";
-                           "instance_id" => %instance_id,
-                           "start_reason" => ?params.reason,
-                           "error" => ?set_failed_error);
-
-                    Err(set_failed_error.into())
-                } else {
-                    Err(inner.0.into())
-                }
-            }
-            InstanceStateChangeError::SledAgent(_) => {
-                info!(osagactx.log(),
-                       "start saga: instance already unregistered from sled";
-                       "instance_id" => %instance_id,
-                       "start_reason" => ?params.reason);
-
-                Ok(())
-            }
-            InstanceStateChangeError::Other(inner) => {
-                error!(osagactx.log(),
-                       "start saga: internal error unregistering instance";
-                       "instance_id" => %instance_id,
-                       "start_reason" => ?params.reason,
-                       "error" => ?inner);
-
-                Err(inner.into())
-            }
-        }
-    } else {
-        Ok(())
+    // Only clear multicast members if multicast is enabled
+    // If disabled, no members exist to clear
+    if !osagactx.nexus().multicast_enabled() {
+        return Ok(());
     }
+
+    let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
+
+    info!(osagactx.log(), "start saga: clearing multicast member sled_id during undo";
+          "instance_id" => %instance_id,
+          "start_reason" => ?params.reason);
+
+    osagactx
+        .datastore()
+        .multicast_group_member_update_sled_id(&opctx, instance_id, None)
+        .await?;
+
+    Ok(())
 }
 
 async fn sis_ensure_running(
@@ -778,7 +1103,7 @@ async fn sis_ensure_running(
             // the saga to unwind and restore the instance to the Stopped
             // state (matching what would happen if there were a failure
             // prior to this point).
-            Err(ActionError::action_failed(Error::from(inner)))
+            Err(saga_action_failed(Error::from(inner)))
         }
         Err(InstanceStateChangeError::Other(inner)) => {
             info!(osagactx.log(),
@@ -787,48 +1112,56 @@ async fn sis_ensure_running(
                   "start_reason" => ?params.reason,
                   "error" => ?inner);
 
-            Err(ActionError::action_failed(inner))
+            Err(saga_action_failed(inner))
         }
     }
 }
 
 #[cfg(test)]
 mod test {
+    use crate::app::sagas::disk_delete::test::ExpungeTestHarness;
+    use crate::app::sagas::disk_delete::test::create_disk;
+    use crate::app::sagas::disk_delete::test::new_local_disk_create_params;
     use crate::app::{saga::create_saga_dag, sagas::test_helpers};
-    use crate::external_api::params;
+    use core::time::Duration;
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::authn;
+    use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils::resource_helpers::{
-        create_default_ip_pool, create_project, object_create,
+        attach_disk_to_instance, create_default_ip_pools, create_project,
+        object_create,
     };
-    use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance::InstanceCpuCount;
+    use nexus_types::external_api::{instance as instance_types, networking};
+    use nexus_types::identity::Asset as _;
+    use nexus_types::identity::Resource;
+    use nexus_types_versions::latest;
     use omicron_common::api::external::{
-        ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
+        ByteCount, IdentityMetadataCreateParams, Name,
     };
+    use omicron_test_utils::dev::poll;
+    use sled_agent_types::early_networking::SwitchSlot;
     use uuid::Uuid;
 
     use super::*;
-
-    type ControlPlaneTestContext =
-        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
     const PROJECT_NAME: &str = "test-project";
     const INSTANCE_NAME: &str = "test-instance";
 
     async fn setup_test_project(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pools(&client).await;
         let project = create_project(&client, PROJECT_NAME).await;
         project.identity.id
     }
 
     async fn create_instance(
         client: &ClientTestContext,
-    ) -> omicron_common::api::external::Instance {
+    ) -> latest::instance::Instance {
         let instances_url = format!("/v1/instances?project={}", PROJECT_NAME);
         object_create(
             client,
             &instances_url,
-            &params::InstanceCreate {
+            &instance_types::InstanceCreate {
                 identity: IdentityMetadataCreateParams {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: format!("instance {:?}", INSTANCE_NAME),
@@ -839,29 +1172,36 @@ mod test {
                 user_data: b"#cloud-config".to_vec(),
                 ssh_public_keys: Some(Vec::new()),
                 network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::None,
+                    instance_types::InstanceNetworkInterfaceAttachment::DefaultIpv4,
                 external_ips: vec![],
                 disks: vec![],
                 boot_disk: None,
+                cpu_platform: None,
                 start: false,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
+                multicast_groups: Vec::new(),
+                enable_jumbo_frames: false,
             },
         )
         .await
     }
 
-    #[nexus_test(server = crate::Server)]
-    async fn test_saga_basic_usage_succeeds(
-        cptestctx: &ControlPlaneTestContext,
-    ) {
+    #[tokio::test]
+    async fn test_saga_basic_usage_succeeds() {
+        let cptestctx = test_helpers::instance_saga_test_builder(
+            "test_saga_basic_usage_succeeds",
+        )
+        .start::<crate::Server>()
+        .await;
+
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
-        let opctx = test_helpers::test_opctx(cptestctx);
+        let opctx = test_helpers::test_opctx(&cptestctx);
         let instance = create_instance(client).await;
         let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
-        let db_instance = test_helpers::instance_fetch(cptestctx, instance_id)
+        let db_instance = test_helpers::instance_fetch(&cptestctx, instance_id)
             .await
             .instance()
             .clone();
@@ -878,27 +1218,310 @@ mod test {
             .await
             .expect("Start saga should succeed");
 
-        test_helpers::instance_simulate(cptestctx, &instance_id).await;
-        let vmm_state = test_helpers::instance_fetch(cptestctx, instance_id)
+        test_helpers::instance_simulate(&cptestctx, &instance_id).await;
+        let vmm_state = test_helpers::instance_fetch(&cptestctx, instance_id)
             .await
             .vmm()
             .as_ref()
             .expect("running instance should have a vmm")
-            .runtime
             .state;
 
         assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
+
+        cptestctx.teardown().await;
     }
 
-    #[nexus_test(server = crate::Server)]
-    async fn test_action_failure_can_unwind(
-        cptestctx: &ControlPlaneTestContext,
-    ) {
+    #[tokio::test]
+    async fn should_start_with_dead_switch() {
+        let cptestctx = test_helpers::instance_saga_test_builder(
+            "should_start_with_dead_switch",
+        )
+        .with_extra_sled_agents(3)
+        .start::<crate::Server>()
+        .await;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let _project_id = setup_test_project(&client).await;
+        let opctx = test_helpers::test_opctx(&cptestctx);
+        let instance = create_instance(&client).await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+        let db_instance = test_helpers::instance_fetch(&cptestctx, instance_id)
+            .await
+            .instance()
+            .clone();
+
+        let datastore =
+            cptestctx.server.server_context().nexus.datastore().clone();
+
+        // Create uplinks
+        // We only eagerly populate NAT entries on switches that have
+        // uplinks configured, so we need to do some switch configuration
+        // before starting the instance in order to test that section of logic
+        let mut uplink0_params = networking::SwitchPortSettingsCreate::new(
+            IdentityMetadataCreateParams {
+                name: "test-uplink0".parse().unwrap(),
+                description: "test uplink".into(),
+            },
+        );
+
+        uplink0_params.routes = vec![networking::RouteConfig {
+            link_name: "phy0".parse().unwrap(),
+            routes: vec![networking::Route {
+                dst: "0.0.0.0/0".parse().unwrap(),
+                gw: "1.1.1.1".parse().unwrap(),
+                vid: None,
+                rib_priority: None,
+            }],
+        }];
+
+        let mut uplink1_params = networking::SwitchPortSettingsCreate::new(
+            IdentityMetadataCreateParams {
+                name: "test-uplink1".parse().unwrap(),
+                description: "test uplink".into(),
+            },
+        );
+
+        uplink1_params.routes = vec![networking::RouteConfig {
+            link_name: "phy0".parse().unwrap(),
+            routes: vec![networking::Route {
+                dst: "0.0.0.0/0".parse().unwrap(),
+                gw: "2.2.2.2".parse().unwrap(),
+                vid: None,
+                rib_priority: None,
+            }],
+        }];
+
+        let allow_ddm_traffic = false;
+        let uplink0_settings = datastore
+            .switch_port_settings_create(
+                &opctx,
+                &uplink0_params,
+                None,
+                allow_ddm_traffic,
+            )
+            .await
+            .expect("should be able to create configuration for uplink0");
+
+        let uplink1_settings = datastore
+            .switch_port_settings_create(
+                &opctx,
+                &uplink1_params,
+                None,
+                allow_ddm_traffic,
+            )
+            .await
+            .expect("should be able to create configuration for uplink1");
+
+        let rack_id = datastore
+            .rack_list(&opctx, &DataPageParams::max_page())
+            .await
+            .unwrap()
+            .pop()
+            .unwrap()
+            .id();
+
+        let uplink0 = datastore
+            .switch_port_get_id(
+                &opctx,
+                rack_id,
+                SwitchSlot::Switch0,
+                Name::try_from("qsfp0".to_string()).unwrap().into(),
+            )
+            .await
+            .expect("there should be a switch port for switch0");
+
+        let uplink1 = datastore
+            .switch_port_get_id(
+                &opctx,
+                rack_id,
+                SwitchSlot::Switch1,
+                Name::try_from("qsfp0".to_string()).unwrap().into(),
+            )
+            .await
+            .expect("there should be a switch port for switch1");
+
+        datastore
+            .switch_port_set_settings_id(
+                &opctx,
+                uplink0,
+                Some(uplink0_settings.settings.id()),
+                db::datastore::UpdatePrecondition::DontCare,
+            )
+            .await
+            .expect("unable to update switch0 settings");
+
+        datastore
+            .switch_port_set_settings_id(
+                &opctx,
+                uplink1,
+                Some(uplink1_settings.settings.id()),
+                db::datastore::UpdatePrecondition::DontCare,
+            )
+            .await
+            .expect("unable to update switch1 settings");
+
+        // Shutdown one of the switch daemons
+        let switch0_port = {
+            let dendrite_guard = cptestctx.dendrite.read().unwrap();
+            dendrite_guard
+                .get(&SwitchSlot::Switch0)
+                .expect("a dendrite instance should exist for switch0")
+                .port()
+        };
+        cptestctx.stop_dendrite(SwitchSlot::Switch0).await;
+
+        let log = &opctx.log;
+
+        let client_state = dpd_client::ClientState {
+            tag: String::from("nexus"),
+            log: log.new(o!(
+                "component" => "DpdClient"
+            )),
+        };
+
+        let addr = std::net::Ipv6Addr::LOCALHOST;
+
+        let switch_0_dpd_client = dpd_client::Client::new(
+            &format!("http://[{addr}]:{switch0_port}"),
+            client_state,
+        );
+
+        // calls to switch0's dpd should fail
+        assert!(switch_0_dpd_client.dpd_uptime().await.is_err());
+
+        let params = Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+            db_instance,
+            reason: Reason::User,
+        };
+
+        // Start an instance
+        let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
+        test_helpers::actions_succeed_idempotently(nexus, dag).await;
+
+        test_helpers::instance_simulate(&cptestctx, &instance_id).await;
+        let vmm_state = test_helpers::instance_fetch(&cptestctx, instance_id)
+            .await
+            .vmm()
+            .as_ref()
+            .expect("running instance should have a vmm")
+            .state;
+
+        assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
+
+        let port = {
+            let dendrite_guard = cptestctx.dendrite.read().unwrap();
+            dendrite_guard
+                .get(&SwitchSlot::Switch1)
+                .expect("two dendrites should be present in test context")
+                .port()
+        };
+
+        let client_state = dpd_client::ClientState {
+            tag: String::from("nexus"),
+            log: log.new(o!(
+                "component" => "DpdClient"
+            )),
+        };
+
+        let addr = std::net::Ipv6Addr::LOCALHOST;
+
+        let dpd_client = dpd_client::Client::new(
+            &format!("http://[{addr}]:{port}"),
+            client_state.clone(),
+        );
+
+        let log = opctx.log;
+
+        // Check to ensure that the nat entry for the address has made it onto switch1 dendrite.
+        // Note: ipv4_nat_trigger_update() triggers dendrite's RPW asynchronously and returns
+        // immediately, but dendrite still needs time to process the update and create the NAT
+        // entries. Tests need to poll/wait for entries rather than checking immediately, or
+        // they'll be flaky.
+        let expected_nat_entries = 1; // Instance has 1 external IP
+        let nat_subnet = std::net::Ipv4Addr::new(10, 0, 0, 0);
+        let poll_interval = Duration::from_millis(100);
+        let poll_max = Duration::from_secs(60); // Allow time for RPW to process
+
+        poll::wait_for_condition(
+            async || {
+                let result =
+                    dpd_client.nat_ipv4_list(&nat_subnet, None, None).await;
+
+                let data = result.map_err(|_| {
+                    poll::CondCheckError::<()>::NotYet { status: None }
+                })?;
+
+                if data.items.len() == expected_nat_entries {
+                    Ok(())
+                } else {
+                    Err(poll::CondCheckError::<()>::NotYet { status: None })
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .expect("NAT entry should appear on switch1");
+
+        // Test fault recovery for nat propogation
+        // Start a new dpd for switch0
+        cptestctx.restart_dendrite(SwitchSlot::Switch0).await;
+
+        // Ensure that the nat entry for the address has made it onto the new switch0 dendrite.
+        // This might take some time while the new dendrite comes online.
+        let poll_interval = Duration::from_secs(1);
+        let poll_max = Duration::from_secs(60);
+
+        poll::wait_for_condition(
+            async || {
+                let result = dpd_client
+                    .nat_ipv4_list(
+                        &std::net::Ipv4Addr::new(10, 0, 0, 0),
+                        None,
+                        None,
+                    )
+                    .await;
+
+                info!(log, "nat_ipv4_list"; "result" => ?result);
+
+                let data = result.map_err(|_| {
+                    poll::CondCheckError::<()>::NotYet { status: None }
+                })?;
+
+                if data.items.is_empty() {
+                    error!(
+                        log,
+                        "we are expecting nat entries but none were found"
+                    );
+                    Err(poll::CondCheckError::<()>::NotYet { status: None })
+                } else {
+                    Ok(())
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .unwrap();
+
+        cptestctx.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn test_action_failure_can_unwind() {
+        let cptestctx = test_helpers::instance_saga_test_builder(
+            "test_action_failure_can_unwind",
+        )
+        .start::<crate::Server>()
+        .await;
+
         let log = &cptestctx.logctx.log;
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
-        let opctx = test_helpers::test_opctx(cptestctx);
+        let opctx = test_helpers::test_opctx(&cptestctx);
         let instance = create_instance(client).await;
         let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
@@ -912,7 +1535,7 @@ mod test {
                 Box::pin({
                     async {
                         let db_instance = test_helpers::instance_fetch(
-                            cptestctx,
+                            &cptestctx,
                             instance_id,
                         )
                         .await.instance().clone();
@@ -929,7 +1552,7 @@ mod test {
             || {
                 Box::pin(async {
                     let new_db_state = test_helpers::instance_wait_for_state(
-                        cptestctx,
+                        &cptestctx,
                         instance_id,
                         nexus_db_model::InstanceState::NoVmm,
                     ).await;
@@ -942,25 +1565,31 @@ mod test {
 
                     assert!(new_db_instance.runtime().propolis_id.is_none());
 
-                    assert!(test_helpers::no_virtual_provisioning_resource_records_exist(cptestctx).await);
-                    assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx).await);
+                    assert!(test_helpers::no_virtual_provisioning_resource_records_exist(&cptestctx).await);
+                    assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(&cptestctx).await);
                 })
             },
             log,
         ).await;
+
+        cptestctx.teardown().await;
     }
 
-    #[nexus_test(server = crate::Server)]
-    async fn test_actions_succeed_idempotently(
-        cptestctx: &ControlPlaneTestContext,
-    ) {
+    #[tokio::test]
+    async fn test_actions_succeed_idempotently() {
+        let cptestctx = test_helpers::instance_saga_test_builder(
+            "test_actions_succeed_idempotently",
+        )
+        .start::<crate::Server>()
+        .await;
+
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
-        let opctx = test_helpers::test_opctx(cptestctx);
+        let opctx = test_helpers::test_opctx(&cptestctx);
         let instance = create_instance(client).await;
         let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
-        let db_instance = test_helpers::instance_fetch(cptestctx, instance_id)
+        let db_instance = test_helpers::instance_fetch(&cptestctx, instance_id)
             .await
             .instance()
             .clone();
@@ -973,16 +1602,17 @@ mod test {
 
         let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
         test_helpers::actions_succeed_idempotently(nexus, dag).await;
-        test_helpers::instance_simulate(cptestctx, &instance_id).await;
-        let vmm_state = test_helpers::instance_fetch(cptestctx, instance_id)
+        test_helpers::instance_simulate(&cptestctx, &instance_id).await;
+        let vmm_state = test_helpers::instance_fetch(&cptestctx, instance_id)
             .await
             .vmm()
             .as_ref()
             .expect("running instance should have a vmm")
-            .runtime
             .state;
 
         assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
+
+        cptestctx.teardown().await;
     }
 
     /// Tests that if a start saga unwinds because sled agent returned failure
@@ -993,15 +1623,21 @@ mod test {
     /// test causes saga nodes to "fail" without actually executing anything,
     /// whereas this test injects a failure into the normal operation of the
     /// ensure-running node.
-    #[nexus_test(server = crate::Server)]
-    async fn test_ensure_running_unwind(cptestctx: &ControlPlaneTestContext) {
+    #[tokio::test]
+    async fn test_ensure_running_unwind() {
+        let cptestctx = test_helpers::instance_saga_test_builder(
+            "test_ensure_running_unwind",
+        )
+        .start::<crate::Server>()
+        .await;
+
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
-        let opctx = test_helpers::test_opctx(cptestctx);
+        let opctx = test_helpers::test_opctx(&cptestctx);
         let instance = create_instance(client).await;
         let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
-        let db_instance = test_helpers::instance_fetch(cptestctx, instance_id)
+        let db_instance = test_helpers::instance_fetch(&cptestctx, instance_id)
             .await
             .instance()
             .clone();
@@ -1026,20 +1662,24 @@ mod test {
         // Inject failure at the simulated sled agent level. This allows the
         // ensure-running node to attempt to change the instance's state, but
         // forces this operation to fail and produce whatever side effects
-        // result from that failure.
-        let sled_agent = cptestctx.first_sled_agent();
-        sled_agent
-            .set_instance_ensure_state_error(Some(Error::internal_error(
-                "injected by test_ensure_running_unwind",
-            )))
-            .await;
+        // result from that failure. The ensure-running node's request to run
+        // the VMM is the first `vmm_put_state` request the saga sends.
+        let next_put_state =
+            cptestctx.first_sled_agent().pause_next_vmm_put_state();
 
-        let runnable_saga = nexus.sagas.saga_prepare(dag).await.unwrap();
-        let saga_result = runnable_saga
-            .run_to_completion()
+        let running_saga = nexus
+            .sagas
+            .saga_prepare(dag)
             .await
-            .expect("saga execution should have started")
-            .into_raw_result();
+            .expect("saga should be prepared")
+            .start()
+            .await
+            .expect("saga should start");
+        next_put_state.wait_for_request(Duration::from_secs(60)).await.fail(
+            Error::internal_error("injected by test_ensure_running_unwind"),
+        );
+        let saga_result =
+            running_saga.wait_until_stopped().await.into_raw_result();
         let saga_error = saga_result
             .kind
             .expect_err("saga should fail due to injected error");
@@ -1047,20 +1687,286 @@ mod test {
         assert_eq!(saga_error.error_node_name, last_node_name);
 
         let db_instance =
-            test_helpers::instance_fetch(cptestctx, instance_id).await;
+            test_helpers::instance_fetch(&cptestctx, instance_id).await;
 
         assert_eq!(
-            db_instance.instance().runtime_state.nexus_state,
+            db_instance.instance().nexus_state,
             nexus_db_model::InstanceState::NoVmm
         );
         assert!(db_instance.vmm().is_none());
 
         assert!(
             test_helpers::no_virtual_provisioning_resource_records_exist(
-                cptestctx
+                &cptestctx
             )
             .await
         );
-        assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx).await);
+        assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(&cptestctx).await);
+
+        cptestctx.teardown().await;
+    }
+
+    /// Regression test for omicron#11560: if a VMM record is created by a start
+    /// saga (in the `Creating`) state, but the VMM record is marked `Failed`
+    /// before it has been registered with the sled-agent, the start saga must
+    /// not leave that VMM running.
+    ///
+    /// In the race described in omicron#11560, an external API stop request is
+    /// received while the VMM record is `Creating`, and is forwarded to the
+    /// sled agent. At this point in time, the sled-agent has not yet received a
+    /// request to register that VMM, and (correctly) indicates that it does not
+    /// exist, which results in Nexus moving the VMM to `Failed` and kicking off
+    /// an `instance_update` saga to transition the instance to `Failed` and
+    /// delete the `vmm` record. However, this is invisible to the start saga,
+    /// which continues its attempt to register and run the VMM, rather than
+    /// unwinding. This ultimately results in the sled-agent running a VMM that
+    /// the control plane considers dead. The control plane may then attempt to
+    /// restart the instance elsewhere, which gets stuck when the new VMM tries
+    /// to activate the same crucible disk(s) that the zombie VMM is already
+    /// using.
+    ///
+    /// Here, we reproduce this race by pausing the `instance_ensure_register`
+    /// request once it's received by the sled-agent simulator, and then marking
+    /// the VMM as `Failed` before the registration request is allowed to
+    /// complete.
+    #[tokio::test]
+    async fn test_vmm_failed_before_registration() {
+        use crate::app::instance::SledAgentInstanceError;
+
+        let cptestctx = test_helpers::instance_saga_test_builder(
+            "test_vmm_failed_before_registration",
+        )
+        .start::<crate::Server>()
+        .await;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let _project_id = setup_test_project(&client).await;
+        let opctx = test_helpers::test_opctx(&cptestctx);
+        let instance = create_instance(client).await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+        let db_instance = test_helpers::instance_fetch(&cptestctx, instance_id)
+            .await
+            .instance()
+            .clone();
+
+        // There's only one sled, so this is where the saga will put the VMM.
+        let register_pause =
+            cptestctx.first_sled_agent().pause_next_vmm_registration();
+
+        let params = Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+            db_instance,
+            reason: Reason::User,
+        };
+        let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
+        let running_saga = nexus
+            .sagas
+            .saga_prepare(dag)
+            .await
+            .expect("saga should be prepared")
+            .start()
+            .await
+            .expect("saga should start");
+
+        let paused_registration =
+            register_pause.wait_for_request(Duration::from_secs(60)).await;
+        let propolis_id = paused_registration.propolis_id();
+
+        // The saga is now waiting on the `instance_ensure_registered` request
+        // to complete, so its VMM is linked to the instance but unknown to
+        // sled-agent.
+        let creating_vmm =
+            test_helpers::instance_fetch(&cptestctx, instance_id)
+                .await
+                .vmm()
+                .clone()
+                .expect("the start saga should have linked its VMM");
+        assert_eq!(creating_vmm.id, propolis_id.into_untyped_uuid());
+        assert_eq!(creating_vmm.state, nexus_db_model::VmmState::Creating);
+
+        // Fail the VMM, as though a request to sled-agent had received a
+        // NO_SUCH_INSTANCE response.
+        let no_such_instance =
+            SledAgentInstanceError(sled_agent_client::Error::ErrorResponse(
+                progenitor_client::ResponseValue::new(
+                    sled_agent_client::types::Error {
+                        error_code: Some("NO_SUCH_INSTANCE".to_string()),
+                        message: "pretend its gone lol".to_string(),
+                        request_id: Uuid::new_v4().to_string(),
+                    },
+                    http::StatusCode::NOT_FOUND,
+                    Default::default(),
+                ),
+            ));
+        let reason = no_such_instance
+            .vmm_failure_reason()
+            .expect("this should fail the vmm");
+        let (.., authz_instance) = LookupPath::new(&opctx, nexus.datastore())
+            .instance_id(instance_id.into_untyped_uuid())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .expect("instance should exist");
+        nexus
+            .mark_vmm_failed(
+                &opctx,
+                authz_instance,
+                &creating_vmm,
+                &no_such_instance,
+                reason,
+            )
+            .await
+            .expect("marking the VMM failed should succeed");
+        let vmm_after_failure =
+            test_helpers::vmm_fetch_including_deleted(&cptestctx, propolis_id)
+                .await;
+        assert_eq!(
+            dbg!(vmm_after_failure).state,
+            nexus_db_model::VmmState::Failed,
+            "VMM {propolis_id} should have been marked failed",
+        );
+
+        paused_registration.resume();
+        let saga_result =
+            running_saga.wait_until_stopped().await.into_raw_result();
+        match dbg!(saga_result.kind) {
+            // The start saga's VMM failed before it was registered, so the saga
+            // must unwind, and unwinding must unregister the VMM.
+            Ok(output) => {
+                let db_vmm = test_helpers::vmm_fetch_including_deleted(
+                    &cptestctx,
+                    propolis_id,
+                )
+                .await;
+                panic!(
+                    "the start saga succeeded ({output:?}), even though its \
+                     VMM {propolis_id} was marked failed before it was \
+                     registered! \
+                     this is supposed to cause the saga to unwind, so something \
+                     is broken here!\n\
+                     the VMM's database record is {:?} (time_deleted: {:?})",
+                    db_vmm.state, db_vmm.time_deleted,
+                );
+            }
+            // If the saga failed, make sure it did not get stuck unwinding.
+            Err(saga_err) => {
+                if let Some((node, error)) = &saga_err.undo_failure {
+                    panic!(
+                        "saga got stuck unwinding (at node {node:?}): {error:?}"
+                    )
+                }
+            }
+        };
+
+        let sled_state = nexus
+            .sled_client(&creating_vmm.sled_id())
+            .await
+            .expect("sled-agent client should be available")
+            .vmm_get_state(&propolis_id)
+            .await
+            .map(|state| state.into_inner())
+            .map_err(SledAgentInstanceError);
+        match &sled_state {
+            Err(e) if e.vmm_gone() => {}
+            Ok(state) => panic!(
+                "the start saga unwound, but did not unregister VMM \
+                {propolis_id} from the sled-agent! (vmm was in state {state:?})",
+            ),
+            Err(e) => panic!(
+                "unexpected error asking sled-agent about VMM {propolis_id}: \
+                 {}",
+                InlineErrorChain::new(e),
+            ),
+        }
+
+        cptestctx.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn test_cannot_start_local_storage_disk_gone() {
+        let cptestctx = test_helpers::instance_saga_test_builder(
+            "test_cannot_start_local_storage_disk_gone",
+        )
+        .start::<crate::Server>()
+        .await;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let _project_id = setup_test_project(&client).await;
+        let opctx = test_helpers::test_opctx(&cptestctx);
+
+        let instance = create_instance(client).await;
+
+        // Create a local storage disk, manually create an allocation for that
+        // local storage on a pool, attach the disk to the instance, then
+        // expunge the disk backing the pool.
+
+        let disk_test = DiskTest::new(&cptestctx).await;
+        let zpool = disk_test.zpools().next().unwrap();
+        let disk = create_disk(&cptestctx, new_local_disk_create_params).await;
+        let harness =
+            ExpungeTestHarness::setup(&cptestctx, disk.id(), zpool.id).await;
+
+        attach_disk_to_instance(
+            client,
+            PROJECT_NAME,
+            INSTANCE_NAME,
+            disk.name().as_str(),
+        )
+        .await;
+
+        harness.expunge_disk().await;
+
+        // Run the saga and make sure that the instance does not start
+
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+        let db_instance = test_helpers::instance_fetch(&cptestctx, instance_id)
+            .await
+            .instance()
+            .clone();
+
+        let params = Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+            db_instance,
+            reason: Reason::User,
+        };
+
+        let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
+
+        let runnable_saga = nexus.sagas.saga_prepare(dag).await.unwrap();
+        let saga_result = runnable_saga
+            .run_to_completion()
+            .await
+            .expect("saga execution should have started")
+            .into_raw_result();
+
+        let saga_error = saga_result
+            .kind
+            .expect_err("saga should fail when ensuring local storage");
+
+        assert_eq!(
+            saga_error.error_node_name.as_ref(),
+            "ensure_local_storage_0",
+        );
+
+        let db_instance =
+            test_helpers::instance_fetch(&cptestctx, instance_id).await;
+
+        assert_eq!(
+            db_instance.instance().nexus_state,
+            nexus_db_model::InstanceState::NoVmm
+        );
+        assert!(db_instance.vmm().is_none());
+
+        assert!(
+            test_helpers::no_virtual_provisioning_resource_records_exist(
+                &cptestctx
+            )
+            .await
+        );
+
+        assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(&cptestctx).await);
+
+        cptestctx.teardown().await;
     }
 }

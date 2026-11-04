@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
-// Copyright 2024 Oxide Computer Company
 
 //! Encode client packets destined for the server.
 
@@ -19,22 +18,28 @@ use crate::native::packets::client::Stage;
 use crate::native::probes;
 use bytes::BufMut as _;
 use bytes::BytesMut;
+use std::net::IpAddr;
 
 /// Encoder for client packets.
 #[derive(Clone, Copy, Debug)]
-pub struct Encoder;
+pub struct Encoder {
+    /// IP address of the server we're encoding packets to.
+    ///
+    /// This is used only as an argument USDT probes, not encoding itself.
+    pub addr: IpAddr,
+}
 
 impl Encoder {
     /// Encode a client hello packet.
-    fn encode_hello(&self, hello: Hello, mut dst: &mut BytesMut) {
+    fn encode_hello(&self, hello: &Hello, mut dst: &mut BytesMut) {
         dst.put_u8(Packet::HELLO);
-        io::string::encode(hello.client_name, &mut dst);
+        io::string::encode(&hello.client_name, &mut dst);
         io::varuint::encode(hello.version_major, &mut dst);
         io::varuint::encode(hello.version_minor, &mut dst);
         io::varuint::encode(hello.protocol_version, &mut dst);
-        io::string::encode(hello.database, &mut dst);
-        io::string::encode(hello.username, &mut dst);
-        io::string::encode(hello.password, &mut dst);
+        io::string::encode(&hello.database, &mut dst);
+        io::string::encode(&hello.username, &mut dst);
+        io::string::encode(&hello.password, &mut dst);
 
         // NOTE: It's not described in the documentation for the protocol, but
         // recent client versions are required so send an "addendum" packet
@@ -48,7 +53,7 @@ impl Encoder {
     }
 
     /// Encode the client query packet.
-    fn encode_query(&self, query: Query, mut dst: &mut BytesMut) {
+    fn encode_query(&self, query: Box<Query>, mut dst: &mut BytesMut) {
         dst.put_u8(Packet::QUERY);
         io::string::encode(query.id, &mut dst);
         self.encode_client_info(query.client_info, &mut dst);
@@ -121,8 +126,8 @@ impl Encoder {
     fn encode_settings(&self, settings: Settings, mut dst: &mut BytesMut) {
         for (name, setting) in settings.iter() {
             io::string::encode(name, &mut dst);
-            io::string::encode(&setting.value, &mut dst);
             dst.put_u8(u8::from(setting.important));
+            io::string::encode(&setting.value, &mut dst);
         }
 
         // There is no prefix for the length of the settings map. It's NULL
@@ -150,14 +155,22 @@ impl tokio_util::codec::Encoder<Packet> for Encoder {
         dst: &mut BytesMut,
     ) -> Result<(), Self::Error> {
         let kind = item.kind();
+        probes::packet__send__start!(|| (self.addr.to_string(), kind, &item));
         match item {
-            Packet::Hello(hello) => self.encode_hello(hello, dst),
+            Packet::Hello(hello) => self.encode_hello(&hello, dst),
             Packet::Query(query) => self.encode_query(query, dst),
-            Packet::Data(block) => self.encode_block(block, dst)?,
+            Packet::Data(block) => {
+                if let Err(e) = self.encode_block(block, dst) {
+                    probes::packet__send__failed!(|| {
+                        (self.addr.to_string(), kind, e.to_string())
+                    });
+                    return Err(e);
+                }
+            }
             Packet::Cancel => dst.put_u8(Packet::CANCEL),
             Packet::Ping => dst.put_u8(Packet::PING),
         };
-        probes::packet__sent!(|| kind);
+        probes::packet__send__done!(|| self.addr.to_string());
         Ok(())
     }
 }

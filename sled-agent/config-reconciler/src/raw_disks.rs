@@ -5,24 +5,42 @@
 //! Provides thin wrappers around a watch channel managing the set of
 //! [`RawDisk`]s sled-agent is aware of.
 
-use id_map::Entry;
-use id_map::IdMap;
-use id_map::IdMappable;
-use omicron_common::disk::DiskIdentity;
+use iddqd::IdOrdMap;
+use sled_agent_types::inventory::InventoryDisk;
 use sled_storage::disk::RawDisk;
 use slog::Logger;
 use slog::info;
 use std::ops::Deref;
+use std::ops::DerefMut;
 use std::sync::Arc;
 use tokio::sync::watch;
 
-pub(crate) fn new() -> (RawDisksSender, watch::Receiver<IdMap<RawDiskWithId>>) {
-    let (tx, rx) = watch::channel(IdMap::default());
-    (RawDisksSender(tx), rx)
+pub(crate) fn new() -> (RawDisksSender, RawDisksReceiver) {
+    let (tx, rx) = watch::channel(Arc::default());
+    (RawDisksSender(tx), RawDisksReceiver(rx))
 }
 
 #[derive(Debug, Clone)]
-pub struct RawDisksSender(watch::Sender<IdMap<RawDiskWithId>>);
+pub(crate) struct RawDisksReceiver(
+    pub(crate) watch::Receiver<Arc<IdOrdMap<RawDisk>>>,
+);
+
+impl Deref for RawDisksReceiver {
+    type Target = watch::Receiver<Arc<IdOrdMap<RawDisk>>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for RawDisksReceiver {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RawDisksSender(watch::Sender<Arc<IdOrdMap<RawDisk>>>);
 
 impl RawDisksSender {
     /// Set the complete set of raw disks visible to sled-agent.
@@ -30,24 +48,28 @@ impl RawDisksSender {
     where
         I: Iterator<Item = RawDisk>,
     {
-        let mut new_disks =
-            raw_disks.map(From::from).collect::<IdMap<RawDiskWithId>>();
+        let mut new_disks = raw_disks.collect::<IdOrdMap<RawDisk>>();
         self.0.send_if_modified(|disks| {
             // We can't just set `*disks = new_disks` here because we may have
             // disks that shouldn't be removed even if they're not present in
             // `new_disks`; check for that first.
             for old_disk in disks.iter() {
-                if !new_disks.contains_key(&old_disk.identity)
-                    && !can_remove_disk(old_disk, log)
-                {
-                    new_disks.insert(old_disk.clone());
+                if !new_disks.contains_key(old_disk.identity()) {
+                    if can_remove_disk(old_disk, log) {
+                        info!(
+                            log, "Removing disk";
+                            "identity" => ?old_disk.identity(),
+                        );
+                    } else {
+                        new_disks.insert_overwrite(old_disk.clone());
+                    }
                 }
             }
 
-            if *disks == new_disks {
+            if **disks == new_disks {
                 false
             } else {
-                *disks = new_disks;
+                *disks = Arc::new(new_disks);
                 true
             }
         });
@@ -55,68 +77,60 @@ impl RawDisksSender {
 
     /// Add or update the properties of a raw disk visible to sled-agent.
     pub fn add_or_update_raw_disk(&self, disk: RawDisk, log: &Logger) -> bool {
-        let disk = RawDiskWithId::from(disk);
         self.0.send_if_modified(|disks| {
-            match disks.entry(Arc::clone(&disk.identity)) {
-                Entry::Vacant(entry) => {
+            match disks.get(disk.identity()) {
+                Some(existing) if *existing == disk => {
+                    return false;
+                }
+                Some(existing) => {
+                    info!(
+                        log, "Updating raw disk";
+                        "old" => ?existing,
+                        "new" => ?disk,
+                    );
+                }
+                None => {
                     info!(
                         log, "Adding new raw disk";
-                        "identity" => ?disk.identity,
+                        "disk" => ?disk,
                     );
-                    entry.insert(disk);
-                    true
-                }
-                Entry::Occupied(mut entry) => {
-                    if *entry.get() == disk {
-                        false
-                    } else {
-                        info!(
-                            log, "Updating raw disk";
-                            "old" => ?entry.get().disk,
-                            "new" => ?disk.disk,
-                        );
-                        entry.insert(disk);
-                        true
-                    }
                 }
             }
+
+            Arc::make_mut(disks).insert_overwrite(disk);
+            true
         })
     }
 
-    /// Remove a raw disk that is no longer visible to sled-agent.
-    pub fn remove_raw_disk(
-        &self,
-        identity: &DiskIdentity,
-        log: &Logger,
-    ) -> bool {
-        self.0.send_if_modified(|disks| {
-            let Some(disk) = disks.get(identity) else {
-                info!(
-                    log, "Ignoring request to remove nonexistent disk";
-                    "identity" => ?identity,
-                );
-                return false;
-            };
-
-            if !can_remove_disk(disk, log) {
-                return false;
-            }
-
-            info!(log, "Removing disk"; "identity" => ?identity);
-            disks.remove(identity);
-            true
-        })
+    pub(crate) fn to_inventory(&self) -> Vec<InventoryDisk> {
+        self.0
+            .borrow()
+            .iter()
+            .map(|disk| {
+                let firmware = disk.firmware();
+                InventoryDisk {
+                    identity: disk.identity().clone(),
+                    variant: disk.variant(),
+                    slot: disk.slot(),
+                    active_firmware_slot: firmware.active_slot(),
+                    next_active_firmware_slot: firmware.next_active_slot(),
+                    number_of_firmware_slots: firmware.number_of_slots(),
+                    slot1_is_read_only: firmware.slot1_read_only(),
+                    slot_firmware_versions: firmware.slots().to_vec(),
+                }
+            })
+            .collect()
     }
 }
 
 // Synthetic disks added by sled-agent on startup in test/dev environments are
 // never added again; refuse to remove them.
-fn can_remove_disk(disk: &RawDiskWithId, log: &Logger) -> bool {
+fn can_remove_disk(disk: &RawDisk, log: &Logger) -> bool {
     if disk.is_synthetic() {
         // Synthetic disks are only added once; don't remove them.
         info!(
             log, "Not removing synthetic disk";
-            "identity" => ?disk.identity,
+            "identity" => ?disk.identity(),
         );
         false
     } else {
@@ -124,45 +138,17 @@ fn can_remove_disk(disk: &RawDiskWithId, log: &Logger) -> bool {
     }
 }
 
-// Adapter to store `RawDisk` in an `IdMap` with cheap key cloning.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RawDiskWithId {
-    identity: Arc<DiskIdentity>,
-    disk: RawDisk,
-}
-
-impl IdMappable for RawDiskWithId {
-    type Id = Arc<DiskIdentity>;
-
-    fn id(&self) -> Self::Id {
-        Arc::clone(&self.identity)
-    }
-}
-
-impl From<RawDisk> for RawDiskWithId {
-    fn from(disk: RawDisk) -> Self {
-        Self { identity: Arc::new(disk.identity().clone()), disk }
-    }
-}
-
-impl Deref for RawDiskWithId {
-    type Target = RawDisk;
-
-    fn deref(&self) -> &Self::Target {
-        &self.disk
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use camino::Utf8PathBuf;
-    use omicron_common::disk::DiskVariant;
     use omicron_test_utils::dev;
     use proptest::collection::btree_map;
     use proptest::prelude::*;
     use proptest::sample::Index;
     use proptest::sample::size_range;
+    use sled_agent_types::disk::DiskIdentity;
+    use sled_agent_types::disk::DiskVariant;
     use sled_hardware::DiskFirmware;
     use sled_hardware::UnparsedDisk;
     use sled_storage::disk::RawSyntheticDisk;
@@ -246,9 +232,6 @@ mod tests {
         // Change the active firmware slot of the disk at the given index, then
         // pass it to `RawDisksSender::add_or_update_raw_disk`
         Update(Index),
-        // Call `RawDisksSender::remove_raw_disk` with the disk at the given
-        // index
-        Remove(Index),
         // Call `RawDisksSender::set_raw_disks` using the set of disks in the
         // range `[start, start + num)`
         Set { start: Index, num: usize },
@@ -298,19 +281,6 @@ mod tests {
                     tx.add_or_update_raw_disk(disks[index].clone(), log);
                     states[index].present = true;
                     true
-                }
-                Operation::Remove(index) => {
-                    let index = index.index(states.len());
-                    eprintln!("removing disk {index}");
-                    let was_present = states[index].present;
-                    tx.remove_raw_disk(disks[index].identity(), log);
-                    // Synthetic disks should never be removed
-                    if disks[index].is_synthetic() {
-                        false
-                    } else {
-                        states[index].present = false;
-                        was_present
-                    }
                 }
                 Operation::Set { start, num } => {
                     let start = start.index(states.len());
@@ -375,7 +345,7 @@ mod tests {
             assert_eq!(rx.has_changed().expect("channel open"), expect_changes);
 
             // After this operation, check that the disk is either present or
-            // not (the thing changed by our add/remove/set operations) and has
+            // not (the thing changed by our add or set operations) and has
             // the expected firmware slot (the thing changed by our update
             // operation).
             let current = rx.borrow_and_update();

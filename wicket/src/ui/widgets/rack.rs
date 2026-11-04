@@ -71,7 +71,7 @@ impl Rack<'_> {
                             self.state.knight_rider_mode
                         {
                             let width = inner.width as usize;
-                            let go_right = (count / width) % 2 == 0;
+                            let go_right = (count / width).is_multiple_of(2);
                             let offset = if go_right {
                                 count % width
                             } else {
@@ -189,15 +189,15 @@ impl ComponentPresence {
             (None, true) => Self::Suspicious,
             (Some(ignition), false) => match ignition {
                 // No ignition and no state = no sled.
-                SpIgnition::No => Self::NotPresent,
+                SpIgnition::Absent => Self::NotPresent,
                 // Ignition says it's present but we have no state - suspect!
-                SpIgnition::Yes { .. } => Self::Suspicious,
+                SpIgnition::Present { .. } => Self::Suspicious,
             },
             (Some(ignition), true) => match ignition {
                 // No ignition but we have state - suspect!
-                SpIgnition::No => Self::Suspicious,
+                SpIgnition::Absent => Self::Suspicious,
                 // Ignition and state = sled present.
-                SpIgnition::Yes { .. } => Self::Present,
+                SpIgnition::Present { .. } => Self::Present,
             },
         }
     }
@@ -248,8 +248,10 @@ fn resize(rect: Rect) -> ComponentRects {
     let (rack_height, sled_height, other_height): (u16, u16, u16) =
         if max_height < 20 {
             // The window is too short.
-            let text = Paragraph::new(Text::raw("[window too short]"))
-                .alignment(Alignment::Center);
+            let text = Box::new(
+                Paragraph::new(Text::raw("[window too short]"))
+                    .alignment(Alignment::Center),
+            );
             // Center vertically.
             let text_rect =
                 Rect { y: rect.y + max_height / 2, height: 1, ..rect };
@@ -406,12 +408,12 @@ enum ComponentRects {
     },
 
     /// The window is too short and needs to be resized.
-    WindowTooShort { text: Paragraph<'static>, text_rect: Rect },
+    WindowTooShort { text: Box<Paragraph<'static>>, text_rect: Rect },
 }
 
 type ComponentRectsMap = BTreeMap<ComponentId, Rect>;
 
 /// Ensure that a u16 is an even number by adding 1 if necessary.
 pub fn make_even(val: u16) -> u16 {
-    if val % 2 == 0 { val } else { val + 1 }
+    if val.is_multiple_of(2) { val } else { val + 1 }
 }

@@ -13,9 +13,10 @@ use std::{
 };
 
 use installinator_api::EventReportStatus;
+use omicron_uuid_kinds::MupdateUuid;
+use oxide_update_engine_types::events::{EventReport, StepEventIsTerminal};
+use oxide_update_engine_types::spec::GenericSpec;
 use tokio::sync::{oneshot, watch};
-use update_engine::events::StepEventIsTerminal;
-use uuid::Uuid;
 
 /// Creates the artifact server and update tracker's interfaces to the
 /// installinator progress tracker.
@@ -45,14 +46,14 @@ pub(crate) struct IprArtifactServer {
     log: slog::Logger,
     // Note: this is a std::sync::Mutex because it isn't held past an await
     // point. Tokio mutexes have cancel-safety issues.
-    running_updates: Arc<Mutex<HashMap<Uuid, RunningUpdate>>>,
+    running_updates: Arc<Mutex<HashMap<MupdateUuid, RunningUpdate>>>,
 }
 
 impl IprArtifactServer {
     pub(crate) fn report_progress(
         &self,
-        update_id: Uuid,
-        report: installinator_common::EventReport,
+        update_id: MupdateUuid,
+        report: EventReport<GenericSpec>,
     ) -> EventReportStatus {
         let mut running_updates = self.running_updates.lock().unwrap();
         if let Some(update) = running_updates.get_mut(&update_id) {
@@ -120,7 +121,7 @@ impl IprArtifactServer {
 #[must_use]
 pub struct IprUpdateTracker {
     log: slog::Logger,
-    running_updates: Arc<Mutex<HashMap<Uuid, RunningUpdate>>>,
+    running_updates: Arc<Mutex<HashMap<MupdateUuid, RunningUpdate>>>,
 }
 
 impl IprUpdateTracker {
@@ -131,7 +132,7 @@ impl IprUpdateTracker {
     ///
     /// Exposed for testing.
     #[doc(hidden)]
-    pub fn register(&self, update_id: Uuid) -> IprStartReceiver {
+    pub fn register(&self, update_id: MupdateUuid) -> IprStartReceiver {
         slog::debug!(self.log, "registering new update id"; "update_id" => %update_id);
         let (start_sender, start_receiver) = oneshot::channel();
 
@@ -142,7 +143,10 @@ impl IprUpdateTracker {
 
     /// Returns the status of a running update, or None if the update ID hasn't
     /// been registered.
-    pub fn update_state(&self, update_id: Uuid) -> Option<RunningUpdateState> {
+    pub fn update_state(
+        &self,
+        update_id: MupdateUuid,
+    ) -> Option<RunningUpdateState> {
         let running_updates = self.running_updates.lock().unwrap();
         running_updates.get(&update_id).map(|x| x.to_state())
     }
@@ -151,22 +155,20 @@ impl IprUpdateTracker {
 /// Type alias for the receiver that resolves when the first message from the
 /// installinator has been received.
 pub(crate) type IprStartReceiver =
-    oneshot::Receiver<watch::Receiver<installinator_common::EventReport>>;
+    oneshot::Receiver<watch::Receiver<EventReport<GenericSpec>>>;
 
 #[derive(Debug)]
 #[must_use]
 enum RunningUpdate {
     /// This is the initial state: the first message from the installinator
     /// hasn't been received yet.
-    Initial(
-        oneshot::Sender<watch::Receiver<installinator_common::EventReport>>,
-    ),
+    Initial(oneshot::Sender<watch::Receiver<EventReport<GenericSpec>>>),
 
     /// Reports from the installinator have been received.
     ///
     /// This is an `UnboundedSender` to avoid cancel-safety issues (see
     /// <https://github.com/oxidecomputer/omicron/pull/3579>).
-    ReportsReceived(watch::Sender<installinator_common::EventReport>),
+    ReportsReceived(watch::Sender<EventReport<GenericSpec>>),
 
     /// All messages have been received.
     ///
@@ -199,14 +201,15 @@ impl RunningUpdate {
             }
         }
     }
+
     fn take(&mut self) -> Self {
         std::mem::replace(self, Self::Invalid)
     }
 
     fn send_and_next_state(
         log: &slog::Logger,
-        sender: watch::Sender<installinator_common::EventReport>,
-        report: installinator_common::EventReport,
+        sender: watch::Sender<EventReport<GenericSpec>>,
+        report: EventReport<GenericSpec>,
     ) -> (Self, EventReportStatus) {
         let is_terminal = Self::is_terminal(&report);
         match sender.send(report) {
@@ -254,7 +257,7 @@ impl RunningUpdate {
         }
     }
 
-    fn is_terminal(report: &installinator_common::EventReport) -> bool {
+    fn is_terminal(report: &EventReport<GenericSpec>) -> bool {
         report
             .step_events
             .last()
@@ -298,10 +301,10 @@ mod tests {
         InstallinatorSpec, InstallinatorStepId, StepEvent, StepEventKind,
         StepInfo, StepInfoWithMetadata, StepOutcome, WriteOutput,
     };
-    use omicron_common::disk::M2Slot;
     use omicron_test_utils::dev::test_setup_log;
+    use oxide_update_engine_types::events::ExecutionUuid;
     use schemars::JsonSchema;
-    use update_engine::ExecutionId;
+    use sled_agent_types::disk::M2Slot;
 
     use super::*;
 
@@ -311,11 +314,11 @@ mod tests {
 
         let (ipr_artifact, ipr_update_tracker) = new(&logctx.log);
 
-        let update_id = Uuid::new_v4();
+        let update_id = MupdateUuid::new_v4();
 
         assert_eq!(
             ipr_artifact.report_progress(
-                Uuid::new_v4(),
+                MupdateUuid::new_v4(),
                 installinator_common::EventReport::default()
             ),
             EventReportStatus::UnrecognizedUpdateId,
@@ -346,7 +349,7 @@ mod tests {
             "first report matches"
         );
 
-        let execution_id = ExecutionId(Uuid::new_v4());
+        let execution_id = ExecutionUuid::new_v4();
 
         // Send a completion report.
         let completion_report = installinator_common::EventReport {
@@ -358,8 +361,14 @@ mod tests {
                 kind: StepEventKind::ExecutionCompleted {
                     last_step: StepInfoWithMetadata {
                         info: StepInfo {
-                            id: InstallinatorStepId::Write,
-                            component: InstallinatorComponent::Both,
+                            id: serde_json::to_value(
+                                InstallinatorStepId::Write,
+                            )
+                            .expect("serialized step ID"),
+                            component: serde_json::to_value(
+                                InstallinatorComponent::All,
+                            )
+                            .expect("serialized component"),
                             description: "Fake step".into(),
                             index: 0,
                             component_index: 0,
@@ -371,16 +380,22 @@ mod tests {
                     last_outcome: StepOutcome::Success {
                         message: Some("Message".into()),
                         metadata: Some(
-                            InstallinatorCompletionMetadata::Write {
-                                output: WriteOutput {
-                                    slots_attempted: vec![M2Slot::A, M2Slot::B]
+                            serde_json::to_value(
+                                InstallinatorCompletionMetadata::Write {
+                                    output: WriteOutput {
+                                        slots_attempted: vec![
+                                            M2Slot::A,
+                                            M2Slot::B,
+                                        ]
                                         .into_iter()
                                         .collect(),
-                                    slots_written: vec![M2Slot::A]
-                                        .into_iter()
-                                        .collect(),
+                                        slots_written: vec![M2Slot::A]
+                                            .into_iter()
+                                            .collect(),
+                                    },
                                 },
-                            },
+                            )
+                            .expect("serialized metadata"),
                         ),
                     },
                     step_elapsed: Duration::from_secs(1),

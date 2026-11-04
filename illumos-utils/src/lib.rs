@@ -5,11 +5,13 @@
 //! Wrappers around illumos-specific commands.
 
 use dropshot::HttpError;
-use slog_error_chain::InlineErrorChain;
+use slog_error_chain::{InlineErrorChain, SlogInlineError};
 #[allow(unused)]
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub mod addrobj;
+#[cfg(target_os = "illumos")]
+pub mod contract;
 pub mod coreadm;
 pub mod destructor;
 pub mod dkio;
@@ -26,6 +28,7 @@ pub mod scf;
 pub mod smf_helper;
 pub mod svc;
 pub mod svcadm;
+pub mod svcs;
 pub mod vmm_reservoir;
 pub mod zfs;
 pub mod zone;
@@ -56,16 +59,24 @@ impl std::fmt::Display for CommandFailureInfo {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, SlogInlineError)]
 pub enum ExecutionError {
-    #[error("Failed to start execution of [{command}]: {err}")]
-    ExecutionStart { command: String, err: std::io::Error },
+    #[error("Failed to start execution of [{command}]")]
+    ExecutionStart {
+        command: String,
+        #[source]
+        err: std::io::Error,
+    },
 
     #[error("{0}")]
     CommandFailure(Box<CommandFailureInfo>),
 
-    #[error("Failed to manipulate process contract: {err}")]
-    ContractFailure { err: std::io::Error },
+    #[error("contract error: {msg}")]
+    ContractFailure {
+        msg: String,
+        #[source]
+        err: std::io::Error,
+    },
 
     #[error("Failed to parse command output")]
     ParseFailure(String),
@@ -87,7 +98,7 @@ impl From<ExecutionError> for HttpError {
     }
 }
 
-fn command_to_string(command: &mut std::process::Command) -> String {
+fn command_to_string(command: &std::process::Command) -> String {
     command
         .get_args()
         .map(|s| s.to_string_lossy().into())
@@ -124,6 +135,23 @@ pub fn execute(
 
     if !output.status.success() {
         return Err(output_to_exec_error(command, &output));
+    }
+
+    Ok(output)
+}
+
+pub async fn execute_async(
+    command: &mut tokio::process::Command,
+) -> Result<std::process::Output, ExecutionError> {
+    let output = command.output().await.map_err(|err| {
+        ExecutionError::ExecutionStart {
+            command: command_to_string(command.as_std()),
+            err,
+        }
+    })?;
+
+    if !output.status.success() {
+        return Err(output_to_exec_error(command.as_std(), &output));
     }
 
     Ok(output)

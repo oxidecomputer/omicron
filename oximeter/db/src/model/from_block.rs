@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
-// Copyright 2024 Oxide Computer Company
 
 //! Trait for deserializing an array of values from a `Block`.
 
@@ -161,7 +160,7 @@ impl FromBlock for TimeseriesSchema {
                     timeseries_names[row].clone().parse().map_err(|_| {
                         Error::Serde(format!(
                             "Failed to deserialize timeseries name from database: {:?}",
-                            &timeseries_names[row]
+                            timeseries_names[row]
                         ))
                     })?,
                 description: TimeseriesDescription::default(),
@@ -171,7 +170,7 @@ impl FromBlock for TimeseriesSchema {
                     .map_err(|_| {
                         Error::Serde(format!(
                             "Failed to deserialize datum type from database: {:?}",
-                            &datum_type_variants[&datum_types[row]]
+                            datum_type_variants[&datum_types[row]]
                         ))
                     })?,
                 version: unsafe { NonZeroU8::new_unchecked(1) },

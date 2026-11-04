@@ -1,4 +1,8 @@
 #!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 
 set -x
 set -o errexit
@@ -28,6 +32,10 @@ args=(
   '--http-addr' '127.0.0.1:8080'
   '--store' "$DATASTORE"
   '--join' "$JOIN_ADDRS"
+  # The value of --max-sql-memory matches
+  # CockroachStarterBuilder::DEFAULT_MAX_SQL_MEMORY_MIB in
+  # test-utils/src/dev/db.rs.
+  '--max-sql-memory' '256MiB'
 )
 
 exec /opt/oxide/cockroachdb/bin/cockroach start "${args[@]}" &

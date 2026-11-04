@@ -2,11 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
-
 //! Interface for API requests to a Management Gateway Service (MGS) instance
 
 pub use gateway_messages::SpComponent;
+use std::time::Duration;
+use std::time::Instant;
+use types::ComponentFirmwareHashStatus;
 
 // We specifically want to allow consumers, such as `wicketd`, to embed
 // inventory datatypes into their own APIs, rather than recreate structs.
@@ -45,48 +46,177 @@ pub use gateway_messages::SpComponent;
 // call into each other. Since `gateway` is a lower-level service and never
 // calls into Nexus, the current scheme is okay.)
 progenitor::generate_api!(
-    spec = "../../openapi/gateway.json",
+    spec = "../../openapi/gateway/gateway-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
-    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-        slog::debug!(log, "client request";
-            "method" => %request.method(),
-            "uri" => %request.url(),
-            "body" => ?&request.body(),
-        );
-    }),
-    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-        slog::debug!(log, "client response"; "result" => ?result);
-    }),
+    hooks = Expected,
     derives = [schemars::JsonSchema],
     patch = {
+        ComponentFirmwareHashStatus = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         HostPhase2RecoveryImageId = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         ImageVersion = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         RotImageDetails = { derives = [PartialEq, Eq, PartialOrd, Ord] },
-        RotImageError = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
-        RotSlot = { derives = [PartialEq, Eq, PartialOrd, Ord] },
-        RotState = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         SpComponentCaboose = { derives = [PartialEq, Eq] },
-        SpIdentifier = { derives = [Copy, PartialEq, Hash, Eq] },
-        SpIgnition = { derives = [PartialEq, Eq, PartialOrd, Ord] },
-        SpIgnitionSystemType = { derives = [Copy, PartialEq, Eq, PartialOrd, Ord] },
-        SpState = { derives = [PartialEq, Eq, PartialOrd, Ord] },
-        SpType = { derives = [daft::Diffable] },
+        SpComponentInfo = { derives = [PartialEq, Eq] },
         SpUpdateStatus = { derives = [PartialEq, Hash, Eq] },
         UpdatePreparationProgress = { derives = [PartialEq, Hash, Eq] },
     },
+    crates = {
+        "byte-wrapper" = "*",
+        "omicron-uuid-kinds" = "*",
+    },
+
+    replace = {
+        Barcode = gateway_types::component_vpd::Barcode,
+        ComponentVpd = gateway_types::component_vpd::ComponentVpd,
+        Mpn1Barcode = gateway_types::component_vpd::Mpn1Barcode,
+        OxideBarcode = gateway_types::component_vpd::OxideBarcode,
+        PmbusDevice = gateway_types::component_vpd::PmbusDevice,
+        RotSlot = gateway_types::rot::RotSlot,
+        SledFanTray = gateway_types::component_vpd::SledFanTray,
+        Tmp11x = gateway_types::component_vpd::Tmp11x,
+        RotState = gateway_types::rot::RotState,
+        RotImageError = gateway_types::rot::RotImageError,
+        Ena = ereport_types::Ena,
+        Ereport = ereport_types::Ereport,
+        Ereports = ereport_types::Ereports,
+        SpComponentPresence = gateway_types::component::SpComponentPresence,
+        SpIdentifier = gateway_types::component::SpIdentifier,
+        SpIgnition = gateway_types::ignition::SpIgnition,
+        SpIgnitionSystemType = gateway_types::ignition::SpIgnitionSystemType,
+        SpState = gateway_types::component::SpState,
+        SpType = gateway_types::component::SpType,
+        TaskDump = gateway_types::task_dump::TaskDump,
+    },
 );
 
-// Override the impl of Ord for SpIdentifier because the default one orders the
-// fields in a different order than people are likely to want.
-impl Ord for crate::types::SpIdentifier {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.type_.cmp(&other.type_).then(self.slot.cmp(&other.slot))
-    }
+progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
+
+#[derive(Debug, thiserror::Error)]
+pub enum HostPhase1HashError {
+    #[error("timed out after {0:?} waiting for hash calculation")]
+    Timeout(Duration),
+    #[error("hash calculation failed (phase1 written while hashing?)")]
+    ContentsModifiedWhileHashing,
+    #[error("failed to send request to {kind}")]
+    RequestError {
+        kind: &'static str,
+        #[source]
+        err: Error<types::Error>,
+    },
 }
 
-impl PartialOrd for crate::types::SpIdentifier {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
+impl Client {
+    /// Get the hash of the host phase 1 flash contents in the given slot.
+    ///
+    /// This operation is implemented asynchronously on the SP: a client (us)
+    /// must request the hash be calculated, then poll until the calculation is
+    /// complete. This method takes care of the "start / poll" operation; the
+    /// caller must provide a timeout for how long they're willing to wait for
+    /// the calculation to complete. In practice, we expect this to take a
+    /// handful of seconds on real hardware.
+    pub async fn host_phase_1_flash_hash_calculate_with_timeout(
+        &self,
+        sp_type: gateway_types::component::SpType,
+        sp_slot: u16,
+        phase1_slot: u16,
+        timeout: Duration,
+    ) -> Result<[u8; 32], HostPhase1HashError> {
+        // The most common cases of calling this function are:
+        //
+        // 1. The hash is already calculated; we get it in the first `get`
+        //    operation below and return after a single request to MGS.
+        // 2. The hash needs to be recalculated; we'll issue a "start hashing"
+        //    request then go into the polling loop. We expect to sit in that
+        //    loop for a handful of seconds.
+        //
+        // Given these, we could make this poll duration longer, since we know
+        // the operation takes a little while. But there are two arguments for
+        // polling somewhat more frequently:
+        //
+        // 1. Timeouts, timeouts, always wrong; if we believe hashing takes (by
+        //    way of example) 7 seconds, so we set the timeout to something
+        //    slightly larger than that (say 10 seconds), if a real device takes
+        //    slightly longer than our timeout, we now wait 20 seconds.
+        // 2. An uncommon case of calling this function is that our initial
+        //    `get` returns `HashInProgress`; in this case we have no idea how
+        //    long the hashing has already been running, so would not know how
+        //    long to try to wait.
+        //
+        // It should be pretty cheap to poll the SP at 1 Hz, so we sidestep both
+        // of those issues by doing so.
+        const SLEEP_BETWEEN_POLLS: Duration = Duration::from_secs(1);
+        const PHASE1_FLASH: &str =
+            SpComponent::HOST_CPU_BOOT_FLASH.const_as_str();
+
+        let need_to_start_hashing = match self
+            .sp_component_hash_firmware_get(
+                &sp_type,
+                sp_slot,
+                PHASE1_FLASH,
+                phase1_slot,
+            )
+            .await
+            .map_err(|err| HostPhase1HashError::RequestError {
+                kind: "get hash",
+                err,
+            })?
+            .into_inner()
+        {
+            ComponentFirmwareHashStatus::Hashed(hash) => return Ok(hash),
+            ComponentFirmwareHashStatus::HashInProgress => false,
+            ComponentFirmwareHashStatus::HashNotCalculated => true,
+        };
+
+        if need_to_start_hashing {
+            // It's possible multiple Nexus instances race, all see
+            // `HashNotCalculated` above, then all try to start hashing here.
+            // The SP will accept the first request and return a
+            // `HashInProgress` error for subsequent attempts, but MGS does its
+            // best to make this operation idempotent; in particular, it will
+            // catch a `HashInProgress` error here and return an HTTP success.
+            // We'll return any other error.
+            self.sp_component_hash_firmware_start(
+                &sp_type,
+                sp_slot,
+                PHASE1_FLASH,
+                phase1_slot,
+            )
+            .await
+            .map_err(|err| HostPhase1HashError::RequestError {
+                kind: "start hashing",
+                err,
+            })?;
+        }
+
+        let start = Instant::now();
+        loop {
+            tokio::time::sleep(SLEEP_BETWEEN_POLLS).await;
+            if start.elapsed() > timeout {
+                return Err(HostPhase1HashError::Timeout(timeout));
+            }
+            match self
+                .sp_component_hash_firmware_get(
+                    &sp_type,
+                    sp_slot,
+                    PHASE1_FLASH,
+                    phase1_slot,
+                )
+                .await
+                .map_err(|err| HostPhase1HashError::RequestError {
+                    kind: "get hash",
+                    err,
+                })?
+                .into_inner()
+            {
+                ComponentFirmwareHashStatus::Hashed(hash) => return Ok(hash),
+                ComponentFirmwareHashStatus::HashInProgress => continue,
+                ComponentFirmwareHashStatus::HashNotCalculated => {
+                    return Err(
+                        HostPhase1HashError::ContentsModifiedWhileHashing,
+                    );
+                }
+            }
+        }
     }
 }

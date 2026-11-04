@@ -4,8 +4,6 @@
 
 //! Methods for walking a tree of filter nodes and applying a function to them.
 
-// Copyright 2024 Oxide Computer Company
-
 use std::time::Duration;
 
 use super::CompoundFilter;
@@ -235,7 +233,7 @@ impl Visit for RemoveDatum<'_> {
                     "Start time can only be compared if the metric \
                     is cumulative, but table '{}' has metric type {}",
                     self.schema.name,
-                    &self.schema.metric_types[0],
+                    self.schema.metric_types[0],
                 ));
             }
             if matches!(filter.value, Literal::Timestamp(_)) {
@@ -353,7 +351,7 @@ impl Visit for RestrictToMeasurements<'_> {
                     "Start time can only be compared if the metric \
                     is cumulative, but table '{}' has metric type {}",
                     self.schema.name,
-                    &self.schema.metric_types[0],
+                    self.schema.metric_types[0],
                 ));
             }
             if matches!(filter.value, Literal::Timestamp(_)) {
@@ -474,7 +472,7 @@ impl Visit for RewriteForMeasurementTable<'_> {
                     "Start time can only be compared if the metric \
                     is cumulative, but table '{}' has metric type {}",
                     self.schema.name,
-                    &self.schema.metric_types[0],
+                    self.schema.metric_types[0],
                 ));
             }
             if matches!(filter.value, Literal::Timestamp(_)) {

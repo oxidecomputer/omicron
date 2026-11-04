@@ -9,18 +9,20 @@ use nexus_test_utils::assert_same_items;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{create_silo, object_create};
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::shared::RelayState;
-use nexus_types::external_api::views::{self, Silo};
-use nexus_types::external_api::{params, shared};
+use nexus_types::external_api::identity_provider;
+use nexus_types::external_api::saml::RelayState;
+use nexus_types::external_api::silo;
+use nexus_types::external_api::silo::Silo;
+use nexus_types::external_api::user;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::TestInterfaces;
+use omicron_uuid_kinds::SiloGroupUuid;
 
 use base64::Engine;
 use dropshot::ResultsPage;
 use http::StatusCode;
 use http::method::Method;
 use httptest::{Expectation, Server, matchers::*, responders::*};
-use uuid::Uuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -40,8 +42,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
     let silo: Silo = NexusRequest::object_get(
         &client,
         &format!("/v1/system/silos/{}", SILO_NAME,),
@@ -61,10 +62,10 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
             .respond_with(status_code(200).body(saml_idp_descriptor)),
     );
 
-    let silo_saml_idp: views::SamlIdentityProvider = object_create(
+    let silo_saml_idp: identity_provider::SamlIdentityProvider = object_create(
         client,
         &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
-        &params::SamlIdentityProviderCreate {
+        &identity_provider::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()
@@ -73,7 +74,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_source: params::IdpMetadataSource::Url {
+            idp_metadata_source: identity_provider::IdpMetadataSource::Url {
                 url: server.url("/descriptor").to_string(),
             },
 
@@ -161,8 +162,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_truncated(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
 
     let saml_idp_descriptor = {
         let mut saml_idp_descriptor = SAML_IDP_DESCRIPTOR.to_string();
@@ -182,7 +182,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_truncated(
             Method::POST,
             &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
         )
-        .body(Some(&params::SamlIdentityProviderCreate {
+        .body(Some(&identity_provider::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()
@@ -191,7 +191,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_truncated(
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_source: params::IdpMetadataSource::Url {
+            idp_metadata_source: identity_provider::IdpMetadataSource::Url {
                 url: server.url("/descriptor").to_string(),
             },
 
@@ -221,8 +221,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
 
     let saml_idp_descriptor = {
         let saml_idp_descriptor = SAML_IDP_DESCRIPTOR.to_string();
@@ -255,7 +254,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
             Method::POST,
             &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
         )
-        .body(Some(&params::SamlIdentityProviderCreate {
+        .body(Some(&identity_provider::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()
@@ -264,7 +263,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_source: params::IdpMetadataSource::Url {
+            idp_metadata_source: identity_provider::IdpMetadataSource::Url {
                 url: server.url("/descriptor").to_string(),
             },
 
@@ -295,8 +294,7 @@ async fn test_create_a_saml_idp_metadata_only_encryption_keys(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
 
     let saml_idp_descriptor =
         SAML_IDP_DESCRIPTOR_ENCRYPTION_KEY_ONLY.to_string();
@@ -313,7 +311,7 @@ async fn test_create_a_saml_idp_metadata_only_encryption_keys(
             Method::POST,
             &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
         )
-        .body(Some(&params::SamlIdentityProviderCreate {
+        .body(Some(&identity_provider::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()
@@ -322,7 +320,7 @@ async fn test_create_a_saml_idp_metadata_only_encryption_keys(
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_source: params::IdpMetadataSource::Url {
+            idp_metadata_source: identity_provider::IdpMetadataSource::Url {
                 url: server.url("/descriptor").to_string(),
             },
 
@@ -352,8 +350,7 @@ async fn test_create_a_saml_idp_metadata_no_keys(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
 
     let saml_idp_descriptor = SAML_IDP_DESCRIPTOR_NO_KEYS.to_string();
 
@@ -369,7 +366,7 @@ async fn test_create_a_saml_idp_metadata_no_keys(
             Method::POST,
             &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
         )
-        .body(Some(&params::SamlIdentityProviderCreate {
+        .body(Some(&identity_provider::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()
@@ -378,7 +375,7 @@ async fn test_create_a_saml_idp_metadata_no_keys(
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_source: params::IdpMetadataSource::Url {
+            idp_metadata_source: identity_provider::IdpMetadataSource::Url {
                 url: server.url("/descriptor").to_string(),
             },
 
@@ -407,8 +404,7 @@ async fn test_create_a_hidden_silo_saml_idp(
 ) {
     let client = &cptestctx.external_client;
 
-    create_silo(&client, "hidden", false, shared::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, "hidden", silo::SiloIdentityMode::SamlJit).await;
 
     // Valid IdP descriptor
     let saml_idp_descriptor = SAML_IDP_DESCRIPTOR.to_string();
@@ -419,10 +415,10 @@ async fn test_create_a_hidden_silo_saml_idp(
             .respond_with(status_code(200).body(saml_idp_descriptor)),
     );
 
-    let silo_saml_idp: views::SamlIdentityProvider = object_create(
+    let silo_saml_idp: identity_provider::SamlIdentityProvider = object_create(
         client,
         "/v1/system/identity-providers/saml?silo=hidden",
-        &params::SamlIdentityProviderCreate {
+        &identity_provider::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()
@@ -431,7 +427,7 @@ async fn test_create_a_hidden_silo_saml_idp(
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_source: params::IdpMetadataSource::Url {
+            idp_metadata_source: identity_provider::IdpMetadataSource::Url {
                 url: server.url("/descriptor").to_string(),
             },
 
@@ -477,8 +473,7 @@ async fn test_saml_idp_metadata_url_404(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
 
     let server = Server::run();
     server.expect(
@@ -492,7 +487,7 @@ async fn test_saml_idp_metadata_url_404(cptestctx: &ControlPlaneTestContext) {
             Method::POST,
             &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
         )
-        .body(Some(&params::SamlIdentityProviderCreate {
+        .body(Some(&identity_provider::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()
@@ -501,7 +496,7 @@ async fn test_saml_idp_metadata_url_404(cptestctx: &ControlPlaneTestContext) {
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_source: params::IdpMetadataSource::Url {
+            idp_metadata_source: identity_provider::IdpMetadataSource::Url {
                 url: server.url("/descriptor").to_string(),
             },
 
@@ -531,8 +526,7 @@ async fn test_saml_idp_metadata_url_invalid(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
 
     NexusRequest::new(
         RequestBuilder::new(
@@ -540,7 +534,7 @@ async fn test_saml_idp_metadata_url_invalid(
             Method::POST,
             &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
         )
-        .body(Some(&params::SamlIdentityProviderCreate {
+        .body(Some(&identity_provider::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()
@@ -549,7 +543,7 @@ async fn test_saml_idp_metadata_url_invalid(
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_source: params::IdpMetadataSource::Url {
+            idp_metadata_source: identity_provider::IdpMetadataSource::Url {
                 url: "htttps://fake.url".to_string(),
             },
 
@@ -592,43 +586,42 @@ async fn test_saml_idp_reject_keypair(cptestctx: &ControlPlaneTestContext) {
     );
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
 
     let test_cases = vec![
         // Reject signing keypair if the certificate or key is not base64
         // encoded
-        params::DerEncodedKeyPair {
+        identity_provider::DerEncodedKeyPair {
             public_cert: "regular string".to_string(),
             private_key: RSA_KEY_1_PRIVATE.to_string(),
         },
-        params::DerEncodedKeyPair {
+        identity_provider::DerEncodedKeyPair {
             public_cert: RSA_KEY_1_PUBLIC.to_string(),
             private_key: "regular string".to_string(),
         },
         // Reject signing keypair if the certificate or key is base64 encoded
         // but not valid
-        params::DerEncodedKeyPair {
+        identity_provider::DerEncodedKeyPair {
             public_cert: base64::engine::general_purpose::STANDARD
                 .encode("not a cert"),
             private_key: RSA_KEY_1_PRIVATE.to_string(),
         },
-        params::DerEncodedKeyPair {
+        identity_provider::DerEncodedKeyPair {
             public_cert: RSA_KEY_1_PUBLIC.to_string(),
             private_key: base64::engine::general_purpose::STANDARD
                 .encode("not a cert"),
         },
         // Reject signing keypair if cert and key are swapped
-        params::DerEncodedKeyPair {
+        identity_provider::DerEncodedKeyPair {
             public_cert: RSA_KEY_1_PRIVATE.to_string(),
             private_key: RSA_KEY_1_PUBLIC.to_string(),
         },
         // Reject signing keypair if the keys do not match
-        params::DerEncodedKeyPair {
+        identity_provider::DerEncodedKeyPair {
             public_cert: RSA_KEY_1_PUBLIC.to_string(),
             private_key: RSA_KEY_2_PRIVATE.to_string(),
         },
-        params::DerEncodedKeyPair {
+        identity_provider::DerEncodedKeyPair {
             public_cert: RSA_KEY_2_PUBLIC.to_string(),
             private_key: RSA_KEY_1_PRIVATE.to_string(),
         },
@@ -644,7 +637,7 @@ async fn test_saml_idp_reject_keypair(cptestctx: &ControlPlaneTestContext) {
                     SILO_NAME
                 ),
             )
-            .body(Some(&params::SamlIdentityProviderCreate {
+            .body(Some(&identity_provider::SamlIdentityProviderCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "some-totally-real-saml-provider"
                         .to_string()
@@ -653,9 +646,10 @@ async fn test_saml_idp_reject_keypair(cptestctx: &ControlPlaneTestContext) {
                     description: "a demo provider".to_string(),
                 },
 
-                idp_metadata_source: params::IdpMetadataSource::Url {
-                    url: server.url("/descriptor").to_string(),
-                },
+                idp_metadata_source:
+                    identity_provider::IdpMetadataSource::Url {
+                        url: server.url("/descriptor").to_string(),
+                    },
 
                 idp_entity_id: "entity_id".to_string(),
                 sp_client_id: "client_id".to_string(),
@@ -692,8 +686,7 @@ async fn test_saml_idp_rsa_keypair_ok(cptestctx: &ControlPlaneTestContext) {
     );
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
 
     NexusRequest::new(
         RequestBuilder::new(
@@ -701,7 +694,7 @@ async fn test_saml_idp_rsa_keypair_ok(cptestctx: &ControlPlaneTestContext) {
             Method::POST,
             &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
         )
-        .body(Some(&params::SamlIdentityProviderCreate {
+        .body(Some(&identity_provider::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()
@@ -710,7 +703,7 @@ async fn test_saml_idp_rsa_keypair_ok(cptestctx: &ControlPlaneTestContext) {
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_source: params::IdpMetadataSource::Url {
+            idp_metadata_source: identity_provider::IdpMetadataSource::Url {
                 url: server.url("/descriptor").to_string(),
             },
 
@@ -720,7 +713,7 @@ async fn test_saml_idp_rsa_keypair_ok(cptestctx: &ControlPlaneTestContext) {
             slo_url: "http://slo".to_string(),
             technical_contact_email: "technical@fake".to_string(),
 
-            signing_keypair: Some(params::DerEncodedKeyPair {
+            signing_keypair: Some(identity_provider::DerEncodedKeyPair {
                 public_cert: RSA_KEY_1_PUBLIC.to_string(),
                 private_key: RSA_KEY_1_PRIVATE.to_string(),
             }),
@@ -748,6 +741,8 @@ pub const SAML_RESPONSE_UNSIGNED: &str =
     include_str!("data/saml_response_unsigned.xml");
 pub const SAML_RESPONSE_WITH_COMMENT: &str =
     include_str!("data/saml_response_with_comment.xml");
+pub const SAML_RESPONSE_SIGNED_WITH_SHA1: &str =
+    include_str!("data/saml_response_signed_with_sha1.xml");
 pub const SAML_RESPONSE_WITH_GROUPS: &str =
     include_str!("data/saml_response_with_groups.xml");
 
@@ -965,33 +960,22 @@ fn test_reject_unsigned_saml_response() {
     assert!(result.is_err());
 }
 
-// Test accepting a correct SAML response that contains a XML comment in
-// saml:NameID, and ensuring that the full text node is extracted (and not a
-// substring).
+// Test rejecting a correct SAML response that contains a XML comment in
+// saml:NameID.
 //
-// This used to be a test that _rejected_ such responses, but a change to an
-// upstream dependency (quick-xml) caused the behavior around text nodes with
-// embedded comments to change. Specifically, consider:
+// This used to be a test that _accepted_ such responses, but a change to samael
+// caused it to reject this test's response document. An example of an embedded
+// comment is:
 //
 // <saml:NameId>user@example.com<!--comment-->.evil.com</saml:NameId>
 //
-// What should the text node for this element be?
+// Outright rejecting documents with comments will protect us from the
+// vulnerability.
 //
-// * Some XML parsing libraries just return "user@example.com". That leads to a
-//   vulnerability, where an attacker can get a response signed with a
-//   different email address than intended.
-// * Some XML libraries return "user@example.com.evil.com". This is safe,
-//   because the text after the comment hasn't been dropped. This is the behavior
-//   with quick-xml 0.30, and the one that we're testing here.
-// * Some XML libraries are unable to deserialize the document. This is also
-//   safe (and not particularly problematic because typically SAML responses
-//   aren't going to contain comments), and was the behavior with quick-xml
-//   0.23.
-//
-// See:
+// See also:
 // https://duo.com/blog/duo-finds-saml-vulnerabilities-affecting-multiple-implementations
 #[test]
-fn test_handle_saml_response_with_xml_comment() {
+fn test_reject_saml_response_with_xml_comment() {
     let silo_saml_identity_provider = SamlIdentityProvider {
         idp_metadata_document_string: SAML_RESPONSE_IDP_DESCRIPTOR.to_string(),
 
@@ -1026,9 +1010,46 @@ fn test_handle_saml_response_with_xml_comment() {
         ),
     );
 
-    let (authenticated_subject, _) =
-        result.expect("expected validation to succeed");
-    assert_eq!(authenticated_subject.external_id, "some@customer.com");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_reject_saml_response_with_insecure_signature_algo() {
+    let silo_saml_identity_provider = SamlIdentityProvider {
+        idp_metadata_document_string: SAML_RESPONSE_IDP_DESCRIPTOR.to_string(),
+
+        idp_entity_id: "https://some.idp.test/oxide_rack/".to_string(),
+        sp_client_id: "https://customer.site/oxide_rack/saml".to_string(),
+        acs_url: "https://customer.site/oxide_rack/saml".to_string(),
+        slo_url: "http://slo".to_string(),
+        technical_contact_email: "technical@fake".to_string(),
+
+        public_cert: None,
+        private_key: None,
+
+        group_attribute_name: None,
+    };
+
+    let body_bytes = serde_urlencoded::to_string(SamlLoginPost {
+        saml_response: base64::engine::general_purpose::STANDARD
+            .encode(&SAML_RESPONSE_SIGNED_WITH_SHA1),
+        relay_state: None,
+    })
+    .unwrap();
+
+    let result = silo_saml_identity_provider.authenticated_subject(
+        &body_bytes,
+        // Set max_issue_delay so that SAMLResponse is valid
+        Some(
+            chrono::Utc::now()
+                - "2022-05-04T15:36:12.631Z"
+                    .parse::<chrono::DateTime<chrono::Utc>>()
+                    .unwrap()
+                + chrono::Duration::seconds(60),
+        ),
+    );
+
+    assert!(result.is_err());
 }
 
 // Test receiving a correct SAML response that has group attributes
@@ -1135,38 +1156,39 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
+
+    let _silo_saml_idp: identity_provider::SamlIdentityProvider =
+        object_create(
+            client,
+            &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
+            &identity_provider::SamlIdentityProviderCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "some-totally-real-saml-provider"
+                        .to_string()
+                        .parse()
+                        .unwrap(),
+                    description: "a demo provider".to_string(),
+                },
+
+                idp_metadata_source:
+                    identity_provider::IdpMetadataSource::Base64EncodedXml {
+                        data: base64::engine::general_purpose::STANDARD
+                            .encode(SAML_RESPONSE_IDP_DESCRIPTOR),
+                    },
+
+                idp_entity_id: "https://some.idp.test/oxide_rack/".to_string(),
+                sp_client_id: "client_id".to_string(),
+                acs_url: "https://customer.site/oxide_rack/saml".to_string(),
+                slo_url: "https://customer.site/oxide_rack/saml".to_string(),
+                technical_contact_email: "technical@fake".to_string(),
+
+                signing_keypair: None,
+
+                group_attribute_name: Some("groups".into()),
+            },
+        )
         .await;
-
-    let _silo_saml_idp: views::SamlIdentityProvider = object_create(
-        client,
-        &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
-        &params::SamlIdentityProviderCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "some-totally-real-saml-provider"
-                    .to_string()
-                    .parse()
-                    .unwrap(),
-                description: "a demo provider".to_string(),
-            },
-
-            idp_metadata_source: params::IdpMetadataSource::Base64EncodedXml {
-                data: base64::engine::general_purpose::STANDARD
-                    .encode(SAML_RESPONSE_IDP_DESCRIPTOR),
-            },
-
-            idp_entity_id: "https://some.idp.test/oxide_rack/".to_string(),
-            sp_client_id: "client_id".to_string(),
-            acs_url: "https://customer.site/oxide_rack/saml".to_string(),
-            slo_url: "https://customer.site/oxide_rack/saml".to_string(),
-            technical_contact_email: "technical@fake".to_string(),
-
-            signing_keypair: None,
-
-            group_attribute_name: Some("groups".into()),
-        },
-    )
-    .await;
 
     let nexus = &cptestctx.server.server_context().nexus;
     nexus.set_samael_max_issue_delay(
@@ -1214,7 +1236,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
     let session_cookie_value =
         result.headers["Set-Cookie"].to_str().unwrap().to_string();
 
-    let groups: ResultsPage<views::Group> = NexusRequest::new(
+    let groups: ResultsPage<user::Group> = NexusRequest::new(
         RequestBuilder::new(client, Method::GET, "/v1/groups")
             .header(http::header::COOKIE, session_cookie_value.clone())
             .expect_status(Some(StatusCode::OK)),
@@ -1227,7 +1249,8 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
 
     let silo_group_names: Vec<&str> =
         groups.items.iter().map(|g| g.display_name.as_str()).collect();
-    let silo_group_ids: Vec<Uuid> = groups.items.iter().map(|g| g.id).collect();
+    let silo_group_ids: Vec<SiloGroupUuid> =
+        groups.items.iter().map(|g| g.id).collect();
 
     assert_same_items(silo_group_names, vec!["SRE", "Admins"]);
 
@@ -1236,12 +1259,12 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
             .header(http::header::COOKIE, session_cookie_value.clone())
             .expect_status(Some(StatusCode::OK)),
     )
-    .execute_and_parse_unwrap::<views::CurrentUser>()
+    .execute_and_parse_unwrap::<user::CurrentUser>()
     .await;
 
     assert_eq!(session_me.user.display_name, "some@customer.com");
 
-    let groups: ResultsPage<views::Group> = NexusRequest::new(
+    let groups: ResultsPage<user::Group> = NexusRequest::new(
         RequestBuilder::new(client, Method::GET, "/v1/me/groups")
             .header(http::header::COOKIE, session_cookie_value)
             .expect_status(Some(StatusCode::OK)),
@@ -1266,38 +1289,39 @@ async fn test_post_saml_response_with_relay_state(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlJit).await;
+
+    let _silo_saml_idp: identity_provider::SamlIdentityProvider =
+        object_create(
+            client,
+            &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
+            &identity_provider::SamlIdentityProviderCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "some-totally-real-saml-provider"
+                        .to_string()
+                        .parse()
+                        .unwrap(),
+                    description: "a demo provider".to_string(),
+                },
+
+                idp_metadata_source:
+                    identity_provider::IdpMetadataSource::Base64EncodedXml {
+                        data: base64::engine::general_purpose::STANDARD
+                            .encode(SAML_RESPONSE_IDP_DESCRIPTOR),
+                    },
+
+                idp_entity_id: "https://some.idp.test/oxide_rack/".to_string(),
+                sp_client_id: "client_id".to_string(),
+                acs_url: "https://customer.site/oxide_rack/saml".to_string(),
+                slo_url: "https://customer.site/oxide_rack/saml".to_string(),
+                technical_contact_email: "technical@fake".to_string(),
+
+                signing_keypair: None,
+
+                group_attribute_name: None,
+            },
+        )
         .await;
-
-    let _silo_saml_idp: views::SamlIdentityProvider = object_create(
-        client,
-        &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
-        &params::SamlIdentityProviderCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "some-totally-real-saml-provider"
-                    .to_string()
-                    .parse()
-                    .unwrap(),
-                description: "a demo provider".to_string(),
-            },
-
-            idp_metadata_source: params::IdpMetadataSource::Base64EncodedXml {
-                data: base64::engine::general_purpose::STANDARD
-                    .encode(SAML_RESPONSE_IDP_DESCRIPTOR),
-            },
-
-            idp_entity_id: "https://some.idp.test/oxide_rack/".to_string(),
-            sp_client_id: "client_id".to_string(),
-            acs_url: "https://customer.site/oxide_rack/saml".to_string(),
-            slo_url: "https://customer.site/oxide_rack/saml".to_string(),
-            technical_contact_email: "technical@fake".to_string(),
-
-            signing_keypair: None,
-
-            group_attribute_name: None,
-        },
-    )
-    .await;
 
     let nexus = &cptestctx.server.server_context().nexus;
     nexus.set_samael_max_issue_delay(

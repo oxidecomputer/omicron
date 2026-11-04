@@ -6,26 +6,34 @@
 
 use std::{collections::BTreeMap, fmt, sync::Arc};
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
+use itertools::Either;
 use nexus_reconfigurator_planning::{
+    blueprint_builder::BlueprintBuilder,
     example::ExampleSystem,
     system::{SledHwInventory, SystemDescription},
 };
 use nexus_types::{
     deployment::{
-        Blueprint, BlueprintTarget, SledFilter, UnstableReconfiguratorState,
+        Blueprint, BlueprintTarget, CockroachDbSettings, ExternalIpPolicy,
+        SledFilter, UnstableReconfiguratorState,
     },
     internal_api::params::{DnsConfigParams, DnsConfigZone},
-    inventory::Collection,
+    inventory::{CabooseWhich, Collection},
 };
-use omicron_common::{address::IpRange, api::external::Generation};
-use omicron_uuid_kinds::{BlueprintUuid, CollectionUuid, SledUuid};
+use omicron_generation_kinds::Generation;
+use omicron_uuid_kinds::{
+    BlueprintUuid, CollectionUuid, ReconfiguratorSimOpUuid,
+    ReconfiguratorSimStateUuid, SledUuid,
+};
+use sled_agent_types::disk::M2Slot;
+use strum::IntoEnumIterator as _;
 
 use crate::{
     LoadSerializedResultBuilder,
     errors::{DuplicateError, KeyError, NonEmptySystemError},
-    utils::join_comma_or_none,
+    utils::{insert_sorted_by, join_comma_or_none},
 };
 
 /// A versioned, simulated reconfigurator system.
@@ -69,18 +77,14 @@ pub struct SimSystem {
     /// describe the system.
     description: SystemDescription,
 
-    /// Inventory collections created by the user.
+    /// Inventory collections created by the user. Invariant: the `IndexMap`
+    /// is ordered by time started.
     ///
     /// Stored with `Arc` to allow cheap cloning.
     collections: IndexMap<CollectionUuid, Arc<Collection>>,
 
-    /// Blueprints created by the user.
-    ///
-    /// Stored with `Arc` to allow cheap cloning.
-    blueprints: IndexMap<BlueprintUuid, Arc<Blueprint>>,
-
-    /// Current target blueprint.
-    target_blueprint: Option<BlueprintTarget>,
+    /// Internal blueprint state.
+    blueprints: SimBlueprintState,
 
     /// Internal DNS configurations.
     ///
@@ -93,13 +97,140 @@ pub struct SimSystem {
     external_dns: BTreeMap<Generation, Arc<DnsConfigParams>>,
 }
 
+#[derive(Clone, Debug)]
+enum SimBlueprintState {
+    Empty(Arc<Blueprint>),
+    Nonempty {
+        /// Blueprints created by the user. Invariant: the `IndexMap` is ordered
+        /// by time created.
+        ///
+        /// Stored with `Arc` to allow cheap cloning.
+        blueprints: IndexMap<BlueprintUuid, Arc<Blueprint>>,
+
+        /// Current target blueprint.
+        target: BlueprintTarget,
+    },
+}
+
+impl SimBlueprintState {
+    /// Every real system always has a target blueprint set. We'd like that to
+    /// be true for simulated systems, too, but also we'd like to be able to
+    /// start from an "empty" simulated system. Any time our empty simulated
+    /// system is asked for information about its blueprints, it will claim it
+    /// has exactly one blueprint: itself empty, with the special all-zeroes ID
+    /// (so it sticks out like a sore thumb in any output).
+    fn empty() -> Self {
+        let mut blueprint = BlueprintBuilder::build_empty("reconfigurator-sim");
+        blueprint.id = BlueprintUuid::nil();
+        Self::Empty(Arc::new(blueprint))
+    }
+
+    /// Create a simulated blueprint state containing a single blueprint (the
+    /// target).
+    fn sole_target(blueprint: Arc<Blueprint>) -> Self {
+        let target = BlueprintTarget {
+            target_id: blueprint.id,
+            enabled: true,
+            time_made_target: blueprint.time_created,
+        };
+
+        let mut blueprints = IndexMap::new();
+        blueprints.insert(blueprint.id, blueprint);
+
+        Self::Nonempty { blueprints, target }
+    }
+
+    fn target(&self) -> BlueprintTarget {
+        match self {
+            SimBlueprintState::Empty(blueprint) => BlueprintTarget {
+                target_id: blueprint.id,
+                enabled: false,
+                time_made_target: DateTime::UNIX_EPOCH,
+            },
+            SimBlueprintState::Nonempty { target, .. } => *target,
+        }
+    }
+
+    fn latest(&self) -> &Arc<Blueprint> {
+        match self {
+            SimBlueprintState::Empty(blueprint) => &blueprint,
+            SimBlueprintState::Nonempty { blueprints, .. } => {
+                // The invariant of `blueprints` is that the last element is
+                // the latest.
+                blueprints
+                    .last()
+                    .expect(
+                        "SimBlueprintState::Nonempty always has \
+                         at least one blueprint",
+                    )
+                    .1
+            }
+        }
+    }
+
+    fn get(&self, id: &BlueprintUuid) -> Option<&Arc<Blueprint>> {
+        match self {
+            SimBlueprintState::Empty(blueprint) => {
+                (*id == blueprint.id).then_some(blueprint)
+            }
+            SimBlueprintState::Nonempty { blueprints, .. } => {
+                blueprints.get(id)
+            }
+        }
+    }
+
+    pub fn all_blueprints(&self) -> impl ExactSizeIterator<Item = &Blueprint> {
+        match self {
+            SimBlueprintState::Empty(blueprint) => {
+                Either::Left(std::iter::once(&**blueprint))
+            }
+            SimBlueprintState::Nonempty { blueprints, .. } => {
+                Either::Right(blueprints.values().map(|b| &**b))
+            }
+        }
+    }
+
+    pub fn add_blueprint(
+        &mut self,
+        blueprint: Arc<Blueprint>,
+    ) -> Result<(), DuplicateError> {
+        let blueprint_id = blueprint.id;
+        let time_created = blueprint.time_created;
+
+        match self {
+            SimBlueprintState::Empty(existing) => {
+                if existing.id == blueprint_id {
+                    return Err(DuplicateError::blueprint(BlueprintId::Id(
+                        blueprint_id,
+                    )));
+                }
+
+                *self = Self::sole_target(blueprint);
+                Ok(())
+            }
+            SimBlueprintState::Nonempty { blueprints, .. } => {
+                match insert_sorted_by(
+                    blueprints,
+                    blueprint_id,
+                    blueprint,
+                    |_, other| other.time_created <= time_created,
+                ) {
+                    Ok(()) => Ok(()),
+                    Err(_) => Err(DuplicateError::blueprint(BlueprintId::Id(
+                        blueprint_id,
+                    ))),
+                }
+            }
+        }
+    }
+}
+
 impl SimSystem {
     pub fn new() -> Self {
         Self {
             description: SystemDescription::new(),
             collections: IndexMap::new(),
-            blueprints: IndexMap::new(),
-            target_blueprint: None,
+            blueprints: SimBlueprintState::empty(),
             internal_dns: BTreeMap::new(),
             external_dns: BTreeMap::new(),
         }
@@ -108,10 +239,9 @@ impl SimSystem {
     pub fn is_empty(&self) -> bool {
         !self.description.has_sleds()
             && self.collections.is_empty()
-            && self.blueprints.is_empty()
-            && self.target_blueprint.is_none()
             && self.internal_dns.is_empty()
             && self.external_dns.is_empty()
+            && matches!(self.blueprints, SimBlueprintState::Empty(_))
     }
 
     #[inline]
@@ -119,13 +249,32 @@ impl SimSystem {
         &self.description
     }
 
+    pub fn resolve_collection_id(
+        &self,
+        original: CollectionId,
+    ) -> Result<ResolvedCollectionId, KeyError> {
+        let resolved = match original {
+            CollectionId::Latest => {
+                // The invariant of self.collections is that the last element is
+                // the latest.
+                let (id, _) = self
+                    .collections
+                    .last()
+                    .ok_or(KeyError::collection(original))?;
+                *id
+            }
+            CollectionId::Id(id) => id,
+        };
+        Ok(ResolvedCollectionId { original, resolved })
+    }
+
     pub fn get_collection(
         &self,
-        id: CollectionUuid,
+        id: &ResolvedCollectionId,
     ) -> Result<&Collection, KeyError> {
-        match self.collections.get(&id) {
+        match self.collections.get(&id.resolved()) {
             Some(c) => Ok(&**c),
-            None => Err(KeyError::collection(id)),
+            None => Err(KeyError::resolved_collection(id.clone())),
         }
     }
 
@@ -135,22 +284,46 @@ impl SimSystem {
         self.collections.values().map(|c| &**c)
     }
 
+    pub fn resolve_blueprint_id(
+        &self,
+        original: BlueprintId,
+    ) -> ResolvedBlueprintId {
+        let resolved = match original {
+            BlueprintId::Target => self.blueprints.target().target_id,
+            BlueprintId::Latest => self.blueprints.latest().id,
+            BlueprintId::Id(id) => id,
+        };
+        ResolvedBlueprintId { original, resolved }
+    }
+
     pub fn get_blueprint(
         &self,
-        id: BlueprintUuid,
-    ) -> Result<&Blueprint, KeyError> {
-        match self.blueprints.get(&id) {
-            Some(b) => Ok(&**b),
-            None => Err(KeyError::blueprint(id)),
+        id: &ResolvedBlueprintId,
+    ) -> Result<&Arc<Blueprint>, KeyError> {
+        match self.blueprints.get(&id.resolved()) {
+            Some(b) => Ok(b),
+            None => Err(KeyError::resolved_blueprint(id.clone())),
         }
     }
 
-    pub fn target_blueprint(&self) -> Option<BlueprintTarget> {
-        self.target_blueprint
+    /// Combines `self.resolve_blueprint_id` and `self.get_blueprint`.
+    ///
+    /// This can be convenient when the intermediate [`ResolvedBlueprintId`] is
+    /// not needed.
+    pub fn resolve_and_get_blueprint(
+        &self,
+        original: BlueprintId,
+    ) -> Result<&Arc<Blueprint>, KeyError> {
+        let id = self.resolve_blueprint_id(original);
+        self.get_blueprint(&id)
+    }
+
+    pub fn target_blueprint(&self) -> BlueprintTarget {
+        self.blueprints.target()
     }
 
     pub fn all_blueprints(&self) -> impl ExactSizeIterator<Item = &Blueprint> {
-        self.blueprints.values().map(|b| &**b)
+        self.blueprints.all_blueprints()
     }
 
     pub fn get_internal_dns(
@@ -224,9 +397,17 @@ impl SimSystemBuilder {
     }
 
     #[inline]
+    pub fn resolve_collection_id(
+        &self,
+        original: CollectionId,
+    ) -> Result<ResolvedCollectionId, KeyError> {
+        self.inner.system.resolve_collection_id(original)
+    }
+
+    #[inline]
     pub fn get_collection(
         &self,
-        id: CollectionUuid,
+        id: &ResolvedCollectionId,
     ) -> Result<&Collection, KeyError> {
         self.inner.system.get_collection(id)
     }
@@ -239,10 +420,18 @@ impl SimSystemBuilder {
     }
 
     #[inline]
+    pub fn resolve_blueprint_id(
+        &self,
+        original: BlueprintId,
+    ) -> ResolvedBlueprintId {
+        self.inner.system.resolve_blueprint_id(original)
+    }
+
+    #[inline]
     pub fn get_blueprint(
         &self,
-        id: BlueprintUuid,
-    ) -> Result<&Blueprint, KeyError> {
+        id: &ResolvedBlueprintId,
+    ) -> Result<&Arc<Blueprint>, KeyError> {
         self.inner.system.get_blueprint(id)
     }
 
@@ -332,7 +521,9 @@ impl SimSystemBuilder {
 
         let system_res =
             self.inner.load_serialized_inner(state, primary_collection_id, res);
-        self.log.push(SimSystemLogEntry::LoadSerialized(system_res.clone()));
+        self.log.push(SimSystemLogEntry::LoadSerialized(Box::new(
+            system_res.clone(),
+        )));
         system_res
     }
 
@@ -394,6 +585,118 @@ impl SimSystemBuilder {
     }
 }
 
+/// An identifier for a blueprint.
+#[derive(Clone, Copy, Debug)]
+pub enum BlueprintId {
+    /// The target blueprint.
+    Target,
+
+    /// The latest blueprint added to the system.
+    Latest,
+
+    /// The specified blueprint.
+    Id(BlueprintUuid),
+}
+
+/// An identifier for a blueprint after it has been resolved.
+#[derive(Clone, Debug)]
+pub struct ResolvedBlueprintId {
+    /// The original blueprint ID.
+    original: BlueprintId,
+
+    /// The resolved blueprint ID.
+    resolved: BlueprintUuid,
+}
+
+impl ResolvedBlueprintId {
+    /// Return the original blueprint ID.
+    pub fn original(&self) -> BlueprintId {
+        self.original
+    }
+
+    /// Return the resolved blueprint ID.
+    pub fn resolved(&self) -> BlueprintUuid {
+        self.resolved
+    }
+}
+
+impl fmt::Display for ResolvedBlueprintId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.original {
+            BlueprintId::Target => {
+                write!(f, "target blueprint ({})", self.resolved)
+            }
+            BlueprintId::Latest => {
+                write!(f, "latest blueprint ({})", self.resolved)
+            }
+            BlueprintId::Id(id) => write!(f, "blueprint {id}"),
+        }
+    }
+}
+
+/// An identifier for an inventory collection.
+#[derive(Clone, Copy, Debug)]
+pub enum CollectionId {
+    /// The latest inventory collection added to the system.
+    Latest,
+
+    /// The specified inventory collection.
+    Id(CollectionUuid),
+}
+
+/// An identifier for a blueprint after it has been resolved.
+#[derive(Clone, Debug)]
+pub struct ResolvedCollectionId {
+    /// The original collection ID.
+    original: CollectionId,
+
+    /// The resolved collection ID.
+    resolved: CollectionUuid,
+}
+
+impl ResolvedCollectionId {
+    /// Return the original collection ID.
+    pub fn original(&self) -> CollectionId {
+        self.original
+    }
+
+    /// Return the resolved collection ID.
+    pub fn resolved(&self) -> CollectionUuid {
+        self.resolved
+    }
+}
+
+impl fmt::Display for ResolvedCollectionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.original {
+            CollectionId::Latest => {
+                write!(f, "latest collection ({})", self.resolved)
+            }
+            CollectionId::Id(id) => write!(f, "collection {id}"),
+        }
+    }
+}
+
+/// An identifier for a reconfigurator sim state.
+#[derive(Clone, Debug)]
+pub enum ReconfiguratorSimId {
+    /// The specified state by full UUID.
+    Id(ReconfiguratorSimStateUuid),
+
+    /// The specified state by UUID prefix.
+    Prefix(String),
+}
+
+/// An identifier for a reconfigurator sim operation.
+#[derive(Clone, Debug)]
+pub enum ReconfiguratorSimOpId {
+    /// The specified operation by full UUID.
+    Id(ReconfiguratorSimOpUuid),
+
+    /// The specified operation by UUID prefix.
+    Prefix(String),
+}
+
 /// A log entry corresponding to an individual operation on a
 /// [`SimSystemBuilder`].
 #[derive(Clone, Debug)]
@@ -404,12 +707,51 @@ pub enum SimSystemLogEntry {
         internal_dns_version: Generation,
         external_dns_version: Generation,
     },
-    LoadSerialized(LoadSerializedSystemResult),
+    LoadSerialized(Box<LoadSerializedSystemResult>),
     AddCollection(CollectionUuid),
     AddBlueprint(BlueprintUuid),
     AddInternalDns(Generation),
     AddExternalDns(Generation),
     Wipe,
+}
+
+impl fmt::Display for SimSystemLogEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SimSystemLogEntry::LoadExample {
+                collection_id,
+                blueprint_id,
+                internal_dns_version,
+                external_dns_version,
+            } => {
+                write!(
+                    f,
+                    "load example: collection {}, blueprint {}, \
+                     internal dns {}, external dns {}",
+                    collection_id,
+                    blueprint_id,
+                    internal_dns_version,
+                    external_dns_version
+                )
+            }
+            SimSystemLogEntry::LoadSerialized(result) => {
+                write!(f, "load serialized:\n{}", result)
+            }
+            SimSystemLogEntry::AddCollection(id) => {
+                write!(f, "add collection {}", id)
+            }
+            SimSystemLogEntry::AddBlueprint(id) => {
+                write!(f, "add blueprint {}", id)
+            }
+            SimSystemLogEntry::AddInternalDns(generation) => {
+                write!(f, "add internal dns {}", generation)
+            }
+            SimSystemLogEntry::AddExternalDns(generation) => {
+                write!(f, "add external dns {}", generation)
+            }
+            SimSystemLogEntry::Wipe => write!(f, "wipe"),
+        }
+    }
 }
 
 /// The result of loading a serialized system state.
@@ -431,8 +773,11 @@ pub struct LoadSerializedSystemResult {
     /// The blueprint IDs successfully loaded.
     pub blueprint_ids: Vec<BlueprintUuid>,
 
-    /// The service IP pool ranges.
-    pub service_ip_pool_ranges: Vec<IpRange>,
+    /// The external IP policy.
+    pub external_ip_policy: ExternalIpPolicy,
+
+    /// The CockroachDB settings.
+    pub cockroachdb_settings: CockroachDbSettings,
 
     /// Internal DNS generations.
     pub internal_dns_generations: Vec<Generation>,
@@ -449,7 +794,8 @@ impl LoadSerializedSystemResult {
             sled_ids: Vec::new(),
             collection_ids: Vec::new(),
             blueprint_ids: Vec::new(),
-            service_ip_pool_ranges: Vec::new(),
+            external_ip_policy: ExternalIpPolicy::empty(),
+            cockroachdb_settings: CockroachDbSettings::empty(),
             internal_dns_generations: Vec::new(),
             external_dns_generations: Vec::new(),
         }
@@ -475,10 +821,15 @@ impl fmt::Display for LoadSerializedSystemResult {
             join_comma_or_none(&self.blueprint_ids)
         )?;
         writeln!(
-            // TODO: output format for IP ranges that's not just Debug?
+            // TODO: output format for IP policy that's not just Debug?
             f,
-            "loaded service IP pool ranges: {:?}",
-            self.service_ip_pool_ranges,
+            "loaded external IP policy: {:?}",
+            self.external_ip_policy,
+        )?;
+        writeln!(
+            f,
+            "loaded cockroachdb settings: {}",
+            self.cockroachdb_settings,
         )?;
         writeln!(
             f,
@@ -515,13 +866,19 @@ impl SimSystemBuilderInner {
         external_dns: DnsConfigZone,
     ) {
         self.system.description = example.system;
-        self.system
-            .collections
-            .insert(example.collection.id, Arc::new(example.collection));
+
+        self.add_collection_inner(Arc::new(example.collection))
+            .expect("already checked that system is empty");
+
+        let generation_to_serial = |generation: Generation| -> u32 {
+            generation.as_u64().try_into().expect("generation fits into a u32")
+        };
+
         self.system.internal_dns.insert(
             blueprint.internal_dns_version,
             Arc::new(DnsConfigParams {
                 generation: blueprint.internal_dns_version,
+                serial: generation_to_serial(blueprint.internal_dns_version),
                 // TODO: probably want to make time controllable by the caller.
                 time_created: Utc::now(),
                 zones: vec![internal_dns],
@@ -531,21 +888,31 @@ impl SimSystemBuilderInner {
             blueprint.external_dns_version,
             Arc::new(DnsConfigParams {
                 generation: blueprint.external_dns_version,
+                serial: generation_to_serial(blueprint.external_dns_version),
                 // TODO: probably want to make time controllable by the caller.
                 time_created: Utc::now(),
                 zones: vec![external_dns],
             }),
         );
-        self.system.blueprints.insert(
-            example.initial_blueprint.id,
-            Arc::new(example.initial_blueprint),
+
+        let initial_blueprint_id = example.initial_blueprint.id;
+        let target_blueprint_id = blueprint.id;
+
+        self.system.blueprints =
+            SimBlueprintState::sole_target(Arc::new(blueprint));
+
+        // XXX: it's not normal, but hypothetically possible, that the initial
+        // and target blueprints have the same ID. This will panic if so. Maybe
+        // we should make it not panic.
+        self.add_blueprint_inner(example.initial_blueprint).unwrap_or_else(
+            |_| {
+                panic!(
+                    "possible conflict between initial blueprint \
+                     (ID {initial_blueprint_id}) and target blueprint \
+                     (ID {target_blueprint_id})"
+                )
+            },
         );
-        self.system.target_blueprint = Some(BlueprintTarget {
-            target_id: blueprint.id,
-            enabled: true,
-            time_made_target: blueprint.time_created,
-        });
-        self.system.blueprints.insert(blueprint.id, Arc::new(blueprint));
     }
 
     // This method MUST be infallible. It should only be called after checking
@@ -572,7 +939,7 @@ impl SimSystemBuilderInner {
             else {
                 res.warnings.push(format!(
                     "sled {}: skipped (no inventory found for sled agent in \
-                     collection {}",
+                     collection {})",
                     sled_id, primary_collection_id
                 ));
                 continue;
@@ -584,11 +951,50 @@ impl SimSystemBuilderInner {
                 .and_then(|baseboard_id| {
                     let inv_sp = primary_collection.sps.get(baseboard_id);
                     let inv_rot = primary_collection.rots.get(baseboard_id);
+                    let stage0 = primary_collection
+                        .caboose_for(CabooseWhich::Stage0, baseboard_id)
+                        .map(|c| c.caboose.clone());
+                    let stage0_next = primary_collection
+                        .caboose_for(CabooseWhich::Stage0Next, baseboard_id)
+                        .map(|c| c.caboose.clone());
+                    let sp_host_phase_1_active_slot = primary_collection
+                        .host_phase_1_active_slot_for(baseboard_id)
+                        .map(|s| s.slot);
+                    let sp_host_phase_1_hash_flash = M2Slot::iter()
+                        .filter_map(|slot| {
+                            let found = primary_collection
+                                .host_phase_1_flash_hash_for(
+                                    slot,
+                                    baseboard_id,
+                                )?;
+                            Some((slot, found.hash))
+                        })
+                        .collect();
+                    let sp_active = primary_collection
+                        .caboose_for(CabooseWhich::SpSlot0, baseboard_id)
+                        .map(|c| c.caboose.clone());
+                    let sp_inactive = primary_collection
+                        .caboose_for(CabooseWhich::SpSlot1, baseboard_id)
+                        .map(|c| c.caboose.clone());
+                    let rot_slot_a = primary_collection
+                        .caboose_for(CabooseWhich::RotSlotA, baseboard_id)
+                        .map(|c| c.caboose.clone());
+                    let rot_slot_b = primary_collection
+                        .caboose_for(CabooseWhich::RotSlotB, baseboard_id)
+                        .map(|c| c.caboose.clone());
                     if let (Some(inv_sp), Some(inv_rot)) = (inv_sp, inv_rot) {
                         Some(SledHwInventory {
                             baseboard_id: &baseboard_id,
                             sp: inv_sp,
                             rot: inv_rot,
+                            stage0,
+                            stage0_next,
+                            sp_host_phase_1_active_slot,
+                            sp_host_phase_1_hash_flash,
+                            sp_active,
+                            sp_inactive,
+                            rot_slot_a,
+                            rot_slot_b,
                         })
                     } else {
                         None
@@ -638,7 +1044,10 @@ impl SimSystemBuilderInner {
             }
         }
 
-        self.system.target_blueprint = state.target_blueprint;
+        self.system.blueprints = SimBlueprintState::Nonempty {
+            blueprints: IndexMap::new(),
+            target: state.target_blueprint,
+        };
 
         for blueprint in state.blueprints {
             let blueprint_id = blueprint.id;
@@ -655,14 +1064,24 @@ impl SimSystemBuilderInner {
             }
         }
 
-        self.system.description.service_ip_pool_ranges(
-            state.planning_input.service_ip_pool_ranges().to_vec(),
+        self.system.description.set_external_ip_policy(
+            state.planning_input.external_ip_policy().clone(),
         );
-        system_res.service_ip_pool_ranges =
-            state.planning_input.service_ip_pool_ranges().to_vec();
+        system_res.external_ip_policy =
+            state.planning_input.external_ip_policy().clone();
 
         self.set_internal_dns(state.internal_dns);
         self.set_external_dns(state.external_dns);
+
+        self.system.description.set_cockroachdb_settings(
+            state.planning_input.cockroachdb_settings().clone(),
+        );
+        system_res.cockroachdb_settings =
+            state.planning_input.cockroachdb_settings().clone();
+
+        self.system
+            .description
+            .set_tuf_repo(state.planning_input.tuf_repo().clone());
 
         system_res
     }
@@ -672,13 +1091,17 @@ impl SimSystemBuilderInner {
         collection: Arc<Collection>,
     ) -> Result<(), DuplicateError> {
         let collection_id = collection.id;
-        match self.system.collections.entry(collection_id) {
-            indexmap::map::Entry::Vacant(entry) => {
-                entry.insert(collection);
-                Ok(())
-            }
-            indexmap::map::Entry::Occupied(_) => {
-                Err(DuplicateError::collection(collection_id))
+        let time_started = collection.time_started;
+
+        match insert_sorted_by(
+            &mut self.system.collections,
+            collection_id,
+            collection,
+            |_, other| other.time_started <= time_started,
+        ) {
+            Ok(()) => Ok(()),
+            Err(_) => {
+                Err(DuplicateError::collection(CollectionId::Id(collection_id)))
             }
         }
     }
@@ -687,16 +1110,7 @@ impl SimSystemBuilderInner {
         &mut self,
         blueprint: Arc<Blueprint>,
     ) -> Result<(), DuplicateError> {
-        let blueprint_id = blueprint.id;
-        match self.system.blueprints.entry(blueprint_id) {
-            indexmap::map::Entry::Vacant(entry) => {
-                entry.insert(blueprint);
-                Ok(())
-            }
-            indexmap::map::Entry::Occupied(_) => {
-                Err(DuplicateError::blueprint(blueprint_id))
-            }
-        }
+        self.system.blueprints.add_blueprint(blueprint)
     }
 
     fn add_internal_dns_inner(

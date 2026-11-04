@@ -69,6 +69,13 @@ pub async fn start_server(
         log.new(slog::o!("component" => "dropshot")),
     )
     .config(server_config.dropshot)
+    .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+        dropshot::ClientSpecifiesVersionInHeader::new(
+            omicron_common::api::VERSION_HEADER,
+            cockroach_admin_api::latest_version(),
+        )
+        .min_version(cockroach_admin_api::oldest_version()),
+    )))
     .start()
     .map_err(StartError::InitializeHttpServer)
 }

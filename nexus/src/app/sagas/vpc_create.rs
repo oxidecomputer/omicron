@@ -7,12 +7,13 @@ use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
-use crate::external_api::params;
 use nexus_db_model::InternetGatewayIpPool;
 use nexus_db_queries::db::queries::vpc_subnet::InsertVpcSubnetError;
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults as defaults;
+use nexus_types::external_api::{internet_gateway, vpc};
 use nexus_types::identity::Resource;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::LookupType;
@@ -28,7 +29,7 @@ use uuid::Uuid;
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
-    pub vpc_create: params::VpcCreate,
+    pub vpc_create: vpc::VpcCreate,
     pub authz_project: authz::Project,
 }
 
@@ -79,6 +80,7 @@ declare_saga_actions! {
 /// to identify that parameters do not need to be supplied as input.
 pub fn create_dag(
     mut builder: steno::DagBuilder,
+    create_default_subnet: bool,
 ) -> Result<steno::Dag, super::SagaInitError> {
     builder.append(Node::action(
         "vpc_id",
@@ -100,16 +102,18 @@ pub fn create_dag(
         "GenerateDefaultV6RouteId",
         ACTION_GENERATE_ID.as_ref(),
     ));
-    builder.append(Node::action(
-        "subnet_route_id",
-        "GenerateSubnetRouteId",
-        ACTION_GENERATE_ID.as_ref(),
-    ));
-    builder.append(Node::action(
-        "default_subnet_id",
-        "GenerateDefaultSubnetId",
-        ACTION_GENERATE_ID.as_ref(),
-    ));
+    if create_default_subnet {
+        builder.append(Node::action(
+            "subnet_route_id",
+            "GenerateSubnetRouteId",
+            ACTION_GENERATE_ID.as_ref(),
+        ));
+        builder.append(Node::action(
+            "default_subnet_id",
+            "GenerateDefaultSubnetId",
+            ACTION_GENERATE_ID.as_ref(),
+        ));
+    }
     builder.append(Node::action(
         "default_internet_gateway_id",
         "GenerateDefaultInternetGatewayId",
@@ -119,8 +123,10 @@ pub fn create_dag(
     builder.append(vpc_create_router_action());
     builder.append(vpc_create_v4_route_action());
     builder.append(vpc_create_v6_route_action());
-    builder.append(vpc_create_subnet_action());
-    builder.append(vpc_create_subnet_route_action());
+    if create_default_subnet {
+        builder.append(vpc_create_subnet_action());
+        builder.append(vpc_create_subnet_route_action());
+    }
     builder.append(vpc_update_firewall_action());
     builder.append(vpc_create_gateway_action());
     builder.append(vpc_notify_sleds_action());
@@ -139,11 +145,20 @@ impl NexusSaga for SagaVpcCreate {
     }
 
     fn make_saga_dag(
-        _params: &Self::Params,
+        params: &Self::Params,
         builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
-        create_dag(builder)
+        create_dag(
+            builder,
+            should_create_default_subnet(params.vpc_create.defaults.as_ref()),
+        )
     }
+}
+
+pub(crate) fn should_create_default_subnet(
+    defaults: Option<&vpc::VpcCreateDefaults>,
+) -> bool {
+    defaults.is_none_or(|defaults| defaults.subnet.is_some())
 }
 
 // vpc create saga: action implementations
@@ -166,12 +181,12 @@ async fn svc_create_vpc(
         system_router_id,
         params.vpc_create.clone(),
     )
-    .map_err(ActionError::action_failed)?;
+    .map_err(saga_action_failed)?;
     let (authz_vpc, db_vpc) = osagactx
         .datastore()
         .project_create_vpc(&opctx, &params.authz_project, vpc)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok((authz_vpc, db_vpc))
 }
 
@@ -215,7 +230,7 @@ async fn svc_create_router(
         system_router_id,
         vpc_id,
         db::model::VpcRouterKind::System,
-        params::VpcRouterCreate {
+        vpc::VpcRouterCreate {
             identity: IdentityMetadataCreateParams {
                 name: "system".parse().unwrap(),
                 description: "Routes are automatically added to this \
@@ -228,7 +243,7 @@ async fn svc_create_router(
         .datastore()
         .vpc_create_router(&opctx, &authz_vpc, router)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(authz_router)
 }
 
@@ -300,7 +315,7 @@ async fn svc_create_route(
         route_id,
         system_router_id,
         external::RouterRouteKind::Default,
-        params::RouterRouteCreate {
+        vpc::RouterRouteCreate {
             identity: IdentityMetadataCreateParams {
                 name: name.parse().unwrap(),
                 description: "The default route of a vpc".to_string(),
@@ -316,7 +331,7 @@ async fn svc_create_route(
         .datastore()
         .router_create_route(&opctx, &authz_router, route)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -363,7 +378,7 @@ async fn svc_create_subnet(
                 "Failed to allocate default IPv6 subnet",
             )
         })
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let subnet = db::model::VpcSubnet::new(
         default_subnet_id,
@@ -411,7 +426,7 @@ async fn svc_create_subnet(
             }
             InsertVpcSubnetError::External(e) => e,
         })
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 async fn svc_create_subnet_undo(
@@ -462,7 +477,7 @@ async fn svc_create_subnet_route(
             route_id,
         )
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
         .map(|(auth, ..)| auth)
 }
 
@@ -502,12 +517,12 @@ async fn svc_update_firewall(
             params.vpc_create.identity.name.clone().into(),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     osagactx
         .datastore()
         .vpc_update_firewall_rules(&opctx, &authz_vpc, rules.clone())
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(rules)
 }
@@ -548,7 +563,7 @@ async fn svc_create_gateway(
     let igw = db::model::InternetGateway::new(
         default_igw_id,
         vpc_id,
-        params::InternetGatewayCreate {
+        internet_gateway::InternetGatewayCreate {
             identity: IdentityMetadataCreateParams {
                 name: "default".parse().unwrap(),
                 description: "Automatically created default VPC gateway".into(),
@@ -560,40 +575,64 @@ async fn svc_create_gateway(
         .datastore()
         .vpc_create_internet_gateway(&opctx, &authz_vpc, igw)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
-    match osagactx.datastore().ip_pools_fetch_default(&opctx).await {
-        Ok((authz_ip_pool, _db_ip_pool)) => {
-            // Attach the default IP pool to the default gateway.
-            // Failure of this saga takes out the gateway with a cascading delete and
-            // thus this ip pool.
-            osagactx
-                .datastore()
-                .internet_gateway_attach_ip_pool(
-                    &opctx,
-                    &authz_igw,
-                    InternetGatewayIpPool::new(
-                        Uuid::new_v4(),
-                        authz_ip_pool.id(),
-                        authz_igw.id(),
-                        IdentityMetadataCreateParams {
-                            name: "default".parse().unwrap(),
-                            description:
-                                "Automatically attached default IP pool".into(),
-                        },
-                    ),
-                )
-                .await
-                .map_err(ActionError::action_failed)?;
-        }
-        Err(e) => {
-            warn!(
-                opctx.log,
-                "Default ip pool lookup failed: {e}. \
-                Default gateway has no ip pool association",
+    // Attach all default unicast pools for the silo to the default gateway,
+    // one per IP version.
+    let default_pools = osagactx
+        .datastore()
+        .ip_pools_fetch_all_unicast_defaults(&opctx)
+        .await
+        .map_err(saga_action_failed)?;
+
+    if default_pools.v4.is_none() && default_pools.v6.is_none() {
+        warn!(
+            osagactx.log(),
+            "This VPC's silo has no default IP pools of \
+            either IP version, so nothing to attach to the \
+            internet gateway. Instances in this VPC will not \
+            have default outbound connectivity until IP pools \
+            are attached.";
+            "vpc_id" => %vpc_id,
+            "igw_id" => %default_igw_id,
+        );
+        return Ok(authz_igw);
+    }
+
+    // We have at least one IP Pool linked as the default, so attach it to the
+    // internet gateway too.
+    for (authz_ip_pool, name, version) in [
+        (default_pools.v4, "default-v4", "IPv4"),
+        (default_pools.v6, "default-v6", "IPv6"),
+    ] {
+        let Some((authz_ip_pool, _)) = authz_ip_pool else {
+            debug!(
+                osagactx.log(),
+                "No default {version} IP pool for silo, skipping \
+                attachment to default internet gateway";
+                "internet_gateway_id" => %authz_igw.id(),
             );
-        }
-    };
+            continue;
+        };
+        osagactx
+            .datastore()
+            .internet_gateway_attach_ip_pool(
+                &opctx,
+                &authz_igw,
+                InternetGatewayIpPool::new(
+                    Uuid::new_v4(),
+                    authz_ip_pool.id(),
+                    authz_igw.id(),
+                    IdentityMetadataCreateParams {
+                        name: name.parse().unwrap(),
+                        description: "Automatically attached default IP pool"
+                            .into(),
+                    },
+                ),
+            )
+            .await
+            .map_err(saga_action_failed)?;
+    }
 
     Ok(authz_igw)
 }
@@ -634,13 +673,13 @@ async fn svc_notify_sleds(
         .nexus()
         .send_sled_agents_firewall_rules(&opctx, &db_vpc, &rules, &[])
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     osagactx
         .datastore()
         .vpc_increment_rpw_version(&opctx, db_vpc.id())
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -649,7 +688,6 @@ async fn svc_notify_sleds(
 pub(crate) mod test {
     use crate::{
         app::sagas::vpc_create::Params, app::sagas::vpc_create::SagaVpcCreate,
-        external_api::params,
     };
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
@@ -662,23 +700,38 @@ pub(crate) mod test {
         authn::saga::Serialized, authz, context::OpContext,
         db::datastore::DataStore, db::fixed_data::vpc::SERVICES_VPC_ID,
     };
-    use nexus_test_utils::resource_helpers::create_default_ip_pool;
+    use nexus_test_utils::resource_helpers::create_default_ip_pools;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::{project, vpc as vpc_types};
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
     use omicron_common::api::external::NameOrId;
-    use uuid::Uuid;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::ProjectUuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
     const PROJECT_NAME: &str = "springfield-squidport";
 
-    async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+    #[test]
+    fn test_should_create_default_subnet() {
+        assert!(super::should_create_default_subnet(None));
+        assert!(!super::should_create_default_subnet(Some(
+            &vpc_types::VpcCreateDefaults { subnet: None }
+        )));
+        assert!(super::should_create_default_subnet(Some(
+            &vpc_types::VpcCreateDefaults {
+                subnet: Some(vpc_types::SubnetCreateDefaults {}),
+            }
+        )));
+    }
+
+    async fn create_org_and_project(client: &ClientTestContext) -> ProjectUuid {
+        create_default_ip_pools(&client).await;
         let project = create_project(client, PROJECT_NAME).await;
-        project.identity.id
+        ProjectUuid::from_untyped_uuid(project.identity.id)
     }
 
     // Helper for creating VPC create parameters
@@ -688,13 +741,14 @@ pub(crate) mod test {
     ) -> Params {
         Params {
             serialized_authn: Serialized::for_opctx(opctx),
-            vpc_create: params::VpcCreate {
+            vpc_create: vpc_types::VpcCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "my-vpc".parse().unwrap(),
                     description: "My VPC".to_string(),
                 },
                 ipv6_prefix: None,
                 dns_name: "abc".parse().unwrap(),
+                defaults: None,
             },
             authz_project,
         }
@@ -709,12 +763,13 @@ pub(crate) mod test {
 
     async fn get_authz_project(
         cptestctx: &ControlPlaneTestContext,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         action: authz::Action,
     ) -> authz::Project {
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_selector =
-            params::ProjectSelector { project: NameOrId::Id(project_id) };
+        let project_selector = project::ProjectSelector {
+            project: NameOrId::Id(project_id.into_untyped_uuid()),
+        };
         let opctx = test_opctx(&cptestctx);
         let (.., authz_project) = nexus
             .project_lookup(&opctx, project_selector)
@@ -727,7 +782,7 @@ pub(crate) mod test {
 
     async fn delete_project_vpc_defaults(
         cptestctx: &ControlPlaneTestContext,
-        project_id: Uuid,
+        project_id: ProjectUuid,
     ) {
         let opctx = test_opctx(&cptestctx);
         let datastore = cptestctx.server.server_context().nexus.datastore();

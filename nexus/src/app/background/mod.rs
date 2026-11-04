@@ -103,12 +103,14 @@
 //! * Each activation of the reconciler accepts no input.  That is, even when we
 //!   think we know what changed, we do not use that information.  This ensures
 //!   that the reconciler really is idempotent and its actions are based solely
-//!   on the state that it's watching.  Put differently: having reconcilers
-//!   accept an explicit hint about what changed (and then doing something
-//!   differently based on that) bifurcates the code: there's the common case
-//!   where that hint is available and the rarely-exercised case when it's not
-//!   (e.g., because Nexus crashed and it's the subsequent periodic activation
-//!   that's propagating this change).  This is what we're trying to avoid.
+//!   on the state that it's watching.  If the background task accepted input to
+//!   determine what to do, then it would separately have to handle two cases
+//!   where that input isn't available: (1) after a Nexus restart, and (2) when
+//!   there's more than one Nexus and the input is only seen in one of the Nexus
+//!   instances.  Thus, having reconcilers accept an explicit hint about what
+//!   changed (and then doing something differently based on that) bifurcates
+//!   the code: there's the common case where that hint is available and the
+//!   rarely-exercised case when it's not.  This is what we're trying to avoid.
 //! * We do allow reconcilers to be triggered by a `tokio::sync::watch` channel
 //!   -- but again, not using the _data_ from that channel.  There are two big
 //!   advantages here: (1) reduced latency from when a change is made to when
@@ -138,6 +140,7 @@ pub use init::BackgroundTasksData;
 pub use init::BackgroundTasksInitializer;
 pub(crate) use init::BackgroundTasksInternal;
 pub use nexus_background_task_interface::Activator;
+pub(crate) use tasks::blueprint_load::LoadedTargetBlueprint;
 pub use tasks::saga_recovery::SagaRecoveryHelpers;
 
 use futures::future::BoxFuture;
@@ -164,5 +167,24 @@ pub struct TaskName(String);
 impl TaskName {
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+#[usdt::provider(provider = "nexus")]
+mod probes {
+    /// Fires just before running the activate method of the named task.
+    fn background__task__activate__start(
+        task_name: &str,
+        iteration: u64,
+        reason: &str,
+    ) {
+    }
+
+    /// Fires just after completing the task, with the result as JSON.
+    fn background__task__activate__done(
+        task_name: &str,
+        iteration: u64,
+        details: &str,
+    ) {
     }
 }

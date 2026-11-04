@@ -5,6 +5,7 @@
 //! Well-known DNS names and related types for internal DNS (see RFD 248)
 
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
+use strum::{EnumIter, IntoEnumIterator};
 
 /// Name for the special boundary NTP DNS name
 ///
@@ -20,8 +21,21 @@ pub const DNS_ZONE: &str = "control-plane.oxide.internal";
 /// development
 pub const DNS_ZONE_EXTERNAL_TESTING: &str = "oxide-dev.test";
 
+/// Label for records associated with a zone itself, rather than any names
+/// inside it.
+///
+/// This string is not part of a valid DNS name; no query can actually be
+/// issued for `@.<ZONE>`. The string is chosen to match with what users might
+/// expect with the prior experience of zone files for more traditional DNS
+/// servers - in cases where zone files are actual literal text files either
+/// manually or programmatically constructed, records of this nature are
+/// typically described with the name "@".
+pub const ZONE_APEX_NAME: &str = "@";
+
 /// Names of services within the control plane
-#[derive(Clone, Copy, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(
+    Clone, Copy, Debug, Hash, Eq, Ord, PartialEq, PartialOrd, EnumIter,
+)]
 pub enum ServiceName {
     /// The HTTP interface to a single-node ClickHouse server.
     Clickhouse,
@@ -47,25 +61,34 @@ pub enum ServiceName {
     InternalDns,
     ExternalDns,
     Nexus,
+    NexusLockstep,
     Oximeter,
     /// Determines whether to read from a replicated cluster or single-node
     /// ClickHouse installation.
     OximeterReader,
     ManagementGatewayService,
     RepoDepot,
-    Wicketd,
     Dendrite,
-    Tfport,
     CruciblePantry,
     SledAgent(SledUuid),
     Crucible(OmicronZoneUuid),
     BoundaryNtp,
     InternalNtp,
-    Maghemite, //TODO change to Dpd - maghemite has several services.
     Mgd,
+    Ddm,
 }
 
 impl ServiceName {
+    /// Returns an iterator over all service name variants.
+    ///
+    /// Service names with associated data, such as [`Self::SledAgent`] and
+    /// [`Self::Crucible`], will have default values associated with them. When
+    /// iterating over these service names, ensure that you provide the expected
+    /// values associated with them.
+    pub fn iter() -> impl Iterator<Item = Self> {
+        <Self as IntoEnumIterator>::iter()
+    }
+
     fn service_kind(&self) -> &'static str {
         match self {
             ServiceName::Clickhouse => "clickhouse",
@@ -82,20 +105,19 @@ impl ServiceName {
             ServiceName::ExternalDns => "external-dns",
             ServiceName::InternalDns => "nameservice",
             ServiceName::Nexus => "nexus",
+            ServiceName::NexusLockstep => "nexus-lockstep",
             ServiceName::Oximeter => "oximeter",
             ServiceName::OximeterReader => "oximeter-reader",
             ServiceName::ManagementGatewayService => "mgs",
             ServiceName::RepoDepot => "repo-depot",
-            ServiceName::Wicketd => "wicketd",
             ServiceName::Dendrite => "dendrite",
-            ServiceName::Tfport => "tfport",
             ServiceName::CruciblePantry => "crucible-pantry",
             ServiceName::SledAgent(_) => "sledagent",
             ServiceName::Crucible(_) => "crucible",
             ServiceName::BoundaryNtp => "boundary-ntp",
             ServiceName::InternalNtp => "internal-ntp",
-            ServiceName::Maghemite => "maghemite",
             ServiceName::Mgd => "mgd",
+            ServiceName::Ddm => "ddm",
         }
     }
 
@@ -115,18 +137,17 @@ impl ServiceName {
             | ServiceName::InternalDns
             | ServiceName::ExternalDns
             | ServiceName::Nexus
+            | ServiceName::NexusLockstep
             | ServiceName::Oximeter
             | ServiceName::OximeterReader
             | ServiceName::ManagementGatewayService
             | ServiceName::RepoDepot
-            | ServiceName::Wicketd
             | ServiceName::Dendrite
-            | ServiceName::Tfport
             | ServiceName::CruciblePantry
             | ServiceName::BoundaryNtp
             | ServiceName::InternalNtp
-            | ServiceName::Maghemite
-            | ServiceName::Mgd => {
+            | ServiceName::Mgd
+            | ServiceName::Ddm => {
                 format!("_{}._tcp", self.service_kind())
             }
             ServiceName::SledAgent(id) => {

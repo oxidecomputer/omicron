@@ -24,7 +24,7 @@ impl ResourceWithUuidKindIdentity {
         id: ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::CustomKind>,
         params: ::omicron_common::api::external::IdentityMetadataCreateParams,
     ) -> Self {
-        let now = ::chrono::Utc::now();
+        let now = ::omicron_common::now_db_precision();
         Self {
             id: crate::to_db_typed_uuid(id),
             name: params.name.into(),

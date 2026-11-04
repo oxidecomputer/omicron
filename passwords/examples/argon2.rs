@@ -49,7 +49,7 @@ fn main() -> anyhow::Result<()> {
         Params::new(cli.m_cost, cli.t_cost, cli.p_cost, OUTPUT_SIZE_OVERRIDE)
             .context("unsupported Argon2 parameters")?;
     let argon = Argon2::new(ALGORITHM, version, params);
-    let mut hasher = Hasher::new(argon.clone(), rand::thread_rng());
+    let mut hasher = Hasher::new(argon.clone(), rand::rng());
     let password = Password::new(&cli.input).unwrap();
     let password_hash = hasher.create_password(&password).unwrap();
 

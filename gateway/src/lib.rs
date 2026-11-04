@@ -20,6 +20,7 @@ use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use gateway_sp_comms::InMemoryHostPhase2Provider;
 pub use management_switch::LocationConfig;
+pub use management_switch::LocationDescriptionConfig;
 pub use management_switch::LocationDeterminationConfig;
 pub use management_switch::ManagementSwitch;
 pub use management_switch::RetryConfig;
@@ -29,6 +30,7 @@ pub use management_switch::SwitchConfig;
 pub use management_switch::SwitchPortConfig;
 pub use management_switch::SwitchPortDescription;
 use omicron_common::FileKv;
+use omicron_uuid_kinds::RackUuid;
 
 use dropshot::ConfigDropshot;
 use dropshot::HandlerTaskMode;
@@ -50,7 +52,7 @@ use uuid::Uuid;
 pub struct MgsArguments {
     pub id: Uuid,
     pub addresses: Vec<SocketAddrV6>,
-    pub rack_id: Option<Uuid>,
+    pub rack_id: Option<RackUuid>,
 }
 
 type HttpServer = dropshot::HttpServer<Arc<ServerContext>>;
@@ -94,6 +96,7 @@ fn start_dropshot_server(
                 default_request_body_max_bytes,
                 default_handler_task_mode: HandlerTaskMode::Detached,
                 log_headers: vec![],
+                compression: dropshot::CompressionConfig::None,
             };
 
             let http_server = dropshot::ServerBuilder::new(
@@ -102,6 +105,13 @@ fn start_dropshot_server(
                 log.new(o!("component" => "dropshot")),
             )
             .config(dropshot)
+            .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+                dropshot::ClientSpecifiesVersionInHeader::new(
+                    omicron_common::api::VERSION_HEADER,
+                    gateway_api::latest_version(),
+                )
+                .min_version(gateway_api::oldest_version()),
+            )))
             .start()
             .map_err(|error| {
                 format!(
@@ -298,7 +308,7 @@ impl Server {
 
     /// The rack_id will be set on a refresh of the SMF property when the sled
     /// agent starts.
-    pub fn set_rack_id(&mut self, rack_id: Option<Uuid>) {
+    pub fn set_rack_id(&mut self, rack_id: Option<RackUuid>) {
         if let Some(rack_id) = rack_id {
             let val = self.apictx.rack_id.get_or_init(|| rack_id);
             if *val != rack_id {
@@ -324,10 +334,9 @@ pub async fn start_server(
 ) -> Result<Server, String> {
     use slog::Drain;
     let (drain, registration) = slog_dtrace::with_drain(
-        config
-            .log
-            .to_logger("gateway")
-            .map_err(|message| format!("initializing logger: {}", message))?,
+        config.log.to_logger("gateway").map_err(|message| {
+            format!("initializing logger: {}", InlineErrorChain::new(&message))
+        })?,
     );
     let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
     if let slog_dtrace::ProbeRegistration::Failed(err) = registration {

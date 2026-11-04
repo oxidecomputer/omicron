@@ -38,11 +38,25 @@ pub(crate) const fn const_max_len(strs: &[&str]) -> usize {
     max
 }
 
+// Wrapper for deriving Tabled with something that derives Debug
+pub(crate) fn display_debug<T: std::fmt::Debug>(v: &T) -> String {
+    format!("{:?}", v)
+}
+
 // Display an empty cell for an Option<T> if it's None.
 pub(crate) fn display_option_blank<T: std::fmt::Display>(
     opt: &Option<T>,
 ) -> String {
     opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
+}
+
+/// Display the string `<INVALID>` for an Option<T> if it's None.
+pub(crate) fn display_option_invalid<T: std::fmt::Display>(
+    opt: &Option<T>,
+) -> String {
+    opt.as_ref()
+        .map(|x| x.to_string())
+        .unwrap_or_else(|| "<INVALID>".to_string())
 }
 
 // Format a `chrono::DateTime` in RFC3339 with milliseconds precision and using

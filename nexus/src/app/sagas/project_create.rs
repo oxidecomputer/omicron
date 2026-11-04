@@ -7,10 +7,11 @@ use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
-use crate::external_api::params;
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults as defaults;
+use nexus_types::external_api::{project, vpc};
 use nexus_types::identity::Resource;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use serde::Deserialize;
 use serde::Serialize;
@@ -21,7 +22,7 @@ use steno::ActionError;
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
-    pub project_create: params::ProjectCreate,
+    pub project_create: project::ProjectCreate,
     pub authz_silo: authz::Silo,
 }
 
@@ -51,21 +52,46 @@ impl NexusSaga for SagaProjectCreate {
     }
 
     fn make_saga_dag(
-        _params: &Self::Params,
+        params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
         builder.append(project_create_record_action());
-        builder.append(project_create_vpc_params_action());
 
-        let subsaga_builder = steno::DagBuilder::new(steno::SagaName::new(
-            sagas::vpc_create::SagaVpcCreate::NAME,
-        ));
-        builder.append(steno::Node::subsaga(
-            "vpc",
-            sagas::vpc_create::create_dag(subsaga_builder)?,
-            "vpc_create_params",
-        ));
+        if let Some(vpc_defaults) = default_vpc_defaults(&params.project_create)
+        {
+            builder.append(project_create_vpc_params_action());
+
+            let subsaga_builder = steno::DagBuilder::new(steno::SagaName::new(
+                sagas::vpc_create::SagaVpcCreate::NAME,
+            ));
+            builder.append(steno::Node::subsaga(
+                "vpc",
+                sagas::vpc_create::create_dag(
+                    subsaga_builder,
+                    sagas::vpc_create::should_create_default_subnet(
+                        vpc_defaults,
+                    ),
+                )?,
+                "vpc_create_params",
+            ));
+        }
         Ok(builder.build()?)
+    }
+}
+
+fn default_vpc_defaults(
+    project_create: &project::ProjectCreate,
+) -> Option<Option<&vpc::VpcCreateDefaults>> {
+    match &project_create.defaults {
+        None => Some(None),
+        Some(defaults) => {
+            defaults.vpc.as_ref().map(|selection| match selection {
+                vpc::VpcCreateDefaultsSelection::All {} => None,
+                vpc::VpcCreateDefaultsSelection::Explicit { defaults } => {
+                    Some(defaults)
+                }
+            })
+        }
     }
 }
 
@@ -87,7 +113,7 @@ async fn spc_create_record(
         .datastore()
         .project_create(&opctx, db_project)
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 async fn spc_create_record_undo(
@@ -127,12 +153,10 @@ async fn spc_create_vpc_params(
 
     let (authz_project, _project) =
         sagactx.lookup::<(authz::Project, db::model::Project)>("project")?;
-    let ipv6_prefix = Some(
-        defaults::random_vpc_ipv6_prefix()
-            .map_err(ActionError::action_failed)?,
-    );
+    let ipv6_prefix =
+        Some(defaults::random_vpc_ipv6_prefix().map_err(saga_action_failed)?);
 
-    let vpc_create = params::VpcCreate {
+    let vpc_create = vpc::VpcCreate {
         identity: IdentityMetadataCreateParams {
             name: "default".parse().unwrap(),
             description: "Default VPC".to_string(),
@@ -142,6 +166,9 @@ async fn spc_create_vpc_params(
         // handle the logic around name and dns_name by making
         // dns_name optional
         dns_name: "default".parse().unwrap(),
+        defaults: default_vpc_defaults(&params.project_create)
+            .expect("default VPC parameters require a default VPC")
+            .cloned(),
     };
     let saga_params = sagas::vpc_create::Params {
         serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
@@ -155,7 +182,8 @@ async fn spc_create_vpc_params(
 mod test {
     use crate::{
         app::sagas::project_create::Params,
-        app::sagas::project_create::SagaProjectCreate, external_api::params,
+        app::sagas::project_create::SagaProjectCreate,
+        app::sagas::project_create::default_vpc_defaults,
     };
     use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use diesel::{
@@ -166,20 +194,73 @@ mod test {
         db::datastore::DataStore,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::{project, vpc};
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_uuid_kinds::GenericUuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    #[test]
+    fn test_default_vpc_defaults() {
+        let mut project_create = project::ProjectCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-project".parse().unwrap(),
+                description: String::new(),
+            },
+            defaults: None,
+        };
+
+        assert_eq!(default_vpc_defaults(&project_create), Some(None));
+
+        project_create.defaults =
+            Some(project::ProjectCreateDefaults { vpc: None });
+        assert_eq!(default_vpc_defaults(&project_create), None);
+
+        project_create.defaults = Some(project::ProjectCreateDefaults {
+            vpc: Some(vpc::VpcCreateDefaultsSelection::All {}),
+        });
+        assert_eq!(default_vpc_defaults(&project_create), Some(None));
+
+        project_create.defaults = Some(project::ProjectCreateDefaults {
+            vpc: Some(vpc::VpcCreateDefaultsSelection::Explicit {
+                defaults: vpc::VpcCreateDefaults { subnet: None },
+            }),
+        });
+        assert!(
+            default_vpc_defaults(&project_create)
+                .unwrap()
+                .unwrap()
+                .subnet
+                .is_none()
+        );
+
+        project_create.defaults = Some(project::ProjectCreateDefaults {
+            vpc: Some(vpc::VpcCreateDefaultsSelection::Explicit {
+                defaults: vpc::VpcCreateDefaults {
+                    subnet: Some(vpc::SubnetCreateDefaults {}),
+                },
+            }),
+        });
+        assert!(
+            default_vpc_defaults(&project_create)
+                .unwrap()
+                .unwrap()
+                .subnet
+                .is_some()
+        );
+    }
 
     // Helper for creating project create parameters
     fn new_test_params(opctx: &OpContext, authz_silo: authz::Silo) -> Params {
         Params {
             serialized_authn: Serialized::for_opctx(opctx),
-            project_create: params::ProjectCreate {
+            project_create: project::ProjectCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "my-project".parse().unwrap(),
                     description: "My Project".to_string(),
                 },
+                defaults: None,
             },
             authz_silo,
         }
@@ -205,12 +286,13 @@ mod test {
     async fn no_projects_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::fixed_data::project::SERVICES_PROJECT_ID;
         use nexus_db_queries::db::model::Project;
+        use nexus_db_queries::db::model::to_db_typed_uuid;
         use nexus_db_schema::schema::project::dsl;
 
         dsl::project
             .filter(dsl::time_deleted.is_null())
             // ignore built-in services project
-            .filter(dsl::id.ne(*SERVICES_PROJECT_ID))
+            .filter(dsl::id.ne(to_db_typed_uuid(*SERVICES_PROJECT_ID)))
             .select(Project::as_select())
             .first_async::<Project>(
                 &*datastore.pool_connection_for_tests().await.unwrap(),
@@ -244,7 +326,7 @@ mod test {
                     dsl::virtual_provisioning_collection
                         .filter(dsl::collection_type.eq(nexus_db_queries::db::model::CollectionTypeProvisioned::Project.to_string()))
                         // ignore built-in services project
-                        .filter(dsl::id.ne(*SERVICES_PROJECT_ID))
+                        .filter(dsl::id.ne(SERVICES_PROJECT_ID.into_untyped_uuid()))
                         .select(VirtualProvisioningCollection::as_select())
                         .get_results_async::<VirtualProvisioningCollection>(&conn)
                         .await

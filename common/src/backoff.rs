@@ -20,6 +20,7 @@ pub use ::backoff::future::{retry, retry_notify};
 pub use ::backoff::{
     ExponentialBackoff, ExponentialBackoffBuilder, Notify, backoff::Backoff,
 };
+use progenitor_extras::retry::IndefiniteBackoffParams;
 
 /// A helper function which modifies what information is tracked within the
 /// callback of the notify function.
@@ -65,10 +66,7 @@ where
 /// This policy makes attempts to retry under one second, but backs off
 /// significantly to avoid overloading critical services.
 pub fn retry_policy_internal_service() -> ::backoff::ExponentialBackoff {
-    backoff_builder()
-        .with_initial_interval(Duration::from_millis(250))
-        .with_max_interval(Duration::from_secs(60 * 3))
-        .build()
+    configure_internal_service_intervals(&mut backoff_builder()).build()
 }
 
 /// Return a backoff policy for querying internal services aggressively.
@@ -88,6 +86,21 @@ pub fn retry_policy_internal_service_aggressive()
         .build()
 }
 
+/// Return a backoff policy for querying internal services with a maximum
+/// elapsed time limit after which no further retries will be permitted.
+///
+/// This policy is similar to [`retry_policy_internal_service`], with one key
+/// exception: unlike every other policy in this module, this retry policy will
+/// **give up** after `timeout` has elapsed, rather than continuing to retry
+/// indefinitely.
+pub fn retry_policy_internal_service_timeout(
+    timeout: Duration,
+) -> ::backoff::ExponentialBackoff {
+    configure_internal_service_intervals(&mut backoff_builder())
+        .with_max_elapsed_time(Some(timeout))
+        .build()
+}
+
 /// Return a backoff policy for querying local-to-sled conditions.
 ///
 /// This policy has a very small max interval, and should be used only in cases
@@ -101,8 +114,37 @@ pub fn retry_policy_local() -> ::backoff::ExponentialBackoff {
         .build()
 }
 
+/// Return an indefinite backoff policy for querying internal services.
+///
+/// This policy makes attempts to retry under one second, but backs off
+/// significantly to avoid overloading critical services. It retries transient
+/// failures indefinitely.
+///
+/// The base delay is set to 167ms rather than 250ms to compensate for
+/// `backon`'s additive jitter, which distributes each delay `d` over
+/// `[d, 2d)` (mean = 1.5d). With a 167ms base, the mean first retry
+/// delay is ~250ms.
+pub fn backon_retry_policy_internal_service() -> IndefiniteBackoffParams {
+    IndefiniteBackoffParams {
+        factor: 2.0,
+        min_delay: Duration::from_millis(167),
+        max_delay: Duration::from_secs(60 * 3),
+        jitter: true,
+    }
+}
+
 fn backoff_builder() -> ::backoff::ExponentialBackoffBuilder {
     let mut builder = ::backoff::ExponentialBackoffBuilder::new();
     builder.with_multiplier(2.0).with_max_elapsed_time(None);
     builder
+}
+
+/// Configure `builder` with the initial and maximum intervals for an internal
+/// service.
+fn configure_internal_service_intervals(
+    builder: &mut ::backoff::ExponentialBackoffBuilder,
+) -> &mut ::backoff::ExponentialBackoffBuilder {
+    builder
+        .with_initial_interval(Duration::from_millis(250))
+        .with_max_interval(Duration::from_secs(60 * 3))
 }

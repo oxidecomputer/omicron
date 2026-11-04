@@ -15,12 +15,11 @@ use installinator_client::ClientError;
 use installinator_common::{
     InstallinatorProgressMetadata, StepContext, StepProgress,
 };
+use oxide_update_engine_types::events::ProgressUnits;
 use tokio::{sync::mpsc, time::Instant};
-use tufaceous_artifact::ArtifactHashId;
-use update_engine::events::ProgressUnits;
 
 use crate::{
-    artifact::ArtifactClient,
+    artifact::{ArtifactClient, ArtifactLookupId},
     errors::{ArtifactFetchError, DiscoverPeersError, HttpError},
     peers::{PeerAddress, PeerAddresses},
 };
@@ -41,7 +40,7 @@ impl FetchedArtifact {
         cx: &StepContext,
         log: &slog::Logger,
         mut discover_fn: F,
-        artifact_hash_id: &ArtifactHashId,
+        id: ArtifactLookupId,
     ) -> Result<Self>
     where
         F: FnMut() -> Fut,
@@ -84,7 +83,7 @@ impl FetchedArtifact {
                 peers.len(),
                 peers.display(),
             );
-            match fetch_backend.fetch_artifact(&cx, artifact_hash_id).await {
+            match fetch_backend.fetch_artifact(&cx, id).await {
                 Some((peer, artifact)) => {
                     return Ok(Self { attempt, peer, artifact });
                 }
@@ -126,35 +125,35 @@ impl fmt::Debug for FetchedArtifact {
 pub(crate) struct FetchArtifactBackend {
     log: slog::Logger,
     imp: Box<dyn FetchArtifactImpl>,
-    timeout: Duration,
+    read_timeout: Duration,
+    preferred_peer: Option<PeerAddress>,
 }
 
 impl FetchArtifactBackend {
     pub(crate) fn new(
         log: &slog::Logger,
         imp: Box<dyn FetchArtifactImpl>,
-        timeout: Duration,
+        read_timeout: Duration,
+        preferred_peer: Option<PeerAddress>,
     ) -> Self {
         let log = log.new(slog::o!("component" => "Peers"));
-        Self { log, imp, timeout }
+        Self { log, imp, read_timeout, preferred_peer }
     }
 
     pub(crate) async fn fetch_artifact(
         &self,
         cx: &StepContext,
-        artifact_hash_id: &ArtifactHashId,
+        id: ArtifactLookupId,
     ) -> Option<(PeerAddress, BufList)> {
         // TODO: do we want a check phase that happens before the download?
         let peers = self.peers();
         let mut remaining_peers = peers.len();
 
-        let log = self.log.new(
-            slog::o!("artifact_hash_id" => format!("{artifact_hash_id:?}")),
-        );
+        let log = self.log.new(slog::o!("id" => format!("{id:?}")));
 
         slog::debug!(log, "start fetch from peers"; "remaining_peers" => remaining_peers);
 
-        for &peer in peers.peers() {
+        for &peer in peers.iter_with_preferred(self.preferred_peer) {
             remaining_peers -= 1;
 
             slog::debug!(
@@ -164,7 +163,7 @@ impl FetchArtifactBackend {
 
             // Attempt to download data from this peer.
             let start = Instant::now();
-            match self.fetch_from_peer(cx, peer, artifact_hash_id).await {
+            match self.fetch_from_peer(cx, peer, id).await {
                 Ok(artifact_bytes) => {
                     let elapsed = start.elapsed();
                     slog::info!(
@@ -196,30 +195,27 @@ impl FetchArtifactBackend {
         &self,
         cx: &StepContext,
         peer: PeerAddress,
-        artifact_hash_id: &ArtifactHashId,
+        id: ArtifactLookupId,
     ) -> Result<BufList, ArtifactFetchError> {
         let log = self.log.new(slog::o!("peer" => peer.to_string()));
 
-        let (total_bytes, mut receiver) = match self
-            .imp
-            .fetch_from_peer_impl(peer, artifact_hash_id.clone())
-            .await
-        {
-            Ok(x) => x,
-            Err(error) => {
-                cx.send_progress(StepProgress::Reset {
-                    metadata: InstallinatorProgressMetadata::Download {
+        let (total_bytes, mut receiver) =
+            match self.imp.fetch_from_peer_impl(peer, id).await {
+                Ok(x) => x,
+                Err(error) => {
+                    cx.send_progress(StepProgress::Reset {
+                        metadata: InstallinatorProgressMetadata::Download {
+                            peer: peer.address(),
+                        },
+                        message: error.to_string().into(),
+                    })
+                    .await;
+                    return Err(ArtifactFetchError::HttpError {
                         peer: peer.address(),
-                    },
-                    message: error.to_string().into(),
-                })
-                .await;
-                return Err(ArtifactFetchError::HttpError {
-                    peer: peer.address(),
-                    error,
-                });
-            }
-        };
+                        error,
+                    });
+                }
+            };
 
         let mut artifact_bytes = BufList::new();
         let mut downloaded_bytes = 0u64;
@@ -227,7 +223,10 @@ impl FetchArtifactBackend {
             InstallinatorProgressMetadata::Download { peer: peer.address() };
 
         loop {
-            match tokio::time::timeout(self.timeout, receiver.recv()).await {
+            // This is the read timeout. See ArtifactClient::new for details
+            // about connect, read, and total timeouts.
+            match tokio::time::timeout(self.read_timeout, receiver.recv()).await
+            {
                 Ok(Some(Ok(bytes))) => {
                     slog::debug!(
                         &log,
@@ -270,14 +269,14 @@ impl FetchArtifactBackend {
                         metadata,
                         message: format!(
                             "operation timed out ({:?})",
-                            self.timeout
+                            self.read_timeout
                         )
                         .into(),
                     })
                     .await;
                     return Err(ArtifactFetchError::Timeout {
                         peer: peer.address(),
-                        timeout: self.timeout,
+                        timeout: self.read_timeout,
                         bytes_fetched: artifact_bytes.num_bytes(),
                     });
                 }
@@ -314,7 +313,7 @@ pub(crate) trait FetchArtifactImpl: fmt::Debug + Send + Sync {
     async fn fetch_from_peer_impl(
         &self,
         peer: PeerAddress,
-        artifact_hash_id: ArtifactHashId,
+        id: ArtifactLookupId,
     ) -> Result<(u64, FetchReceiver), HttpError>;
 }
 
@@ -346,10 +345,10 @@ impl FetchArtifactImpl for HttpFetchBackend {
     async fn fetch_from_peer_impl(
         &self,
         peer: PeerAddress,
-        artifact_hash_id: ArtifactHashId,
+        id: ArtifactLookupId,
     ) -> Result<(u64, FetchReceiver), HttpError> {
         // TODO: be able to fetch from sled-agent clients as well
         let artifact_client = ArtifactClient::new(peer.address(), &self.log);
-        artifact_client.fetch(artifact_hash_id).await
+        artifact_client.fetch(id).await
     }
 }

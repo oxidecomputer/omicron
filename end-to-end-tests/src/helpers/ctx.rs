@@ -1,7 +1,13 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use crate::helpers::generate_name;
 use anyhow::{Context as _, Result, anyhow};
+use bootstrap_agent_lockstep_types::RackInitializeRequest;
 use chrono::Utc;
-use hickory_resolver::error::ResolveErrorKind;
+use hickory_resolver::ResolveErrorKind;
+use hickory_resolver::proto::ProtoErrorKind;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use oxide_client::CustomDnsResolver;
 use oxide_client::types::{Name, ProjectCreate};
@@ -9,7 +15,7 @@ use oxide_client::{Client, ClientImagesExt, ClientProjectsExt, ClientVpcsExt};
 use reqwest::Url;
 use reqwest::dns::Resolve;
 use reqwest::header::{HeaderMap, HeaderValue};
-use sled_agent_types::rack_init::RackInitializeRequest;
+use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -41,6 +47,7 @@ impl Context {
             .body(ProjectCreate {
                 name: generate_name("proj")?,
                 description: String::new(),
+                defaults: None,
             })
             .send()
             .await?
@@ -93,10 +100,11 @@ fn external_dns_addr(config: &RackInitializeRequest) -> Result<SocketAddr> {
     // From the RSS config, grab the first address from the configured services
     // IP pool as the DNS server's IP address.
     let dns_ip = config
-        .internal_services_ip_pool_ranges
-        .iter()
-        .flat_map(|range| range.iter())
-        .next()
+        .service_ip_pools
+        .first()
+        .and_then(|pool| {
+            pool.ranges().first().expect("guaranteed non-empty").iter().next()
+        })
         .ok_or_else(|| {
             anyhow!(
                 "failed to get first IP from internal service \
@@ -162,11 +170,11 @@ impl ClientParams {
             Err(_) => ("http", None),
             Ok(path) => {
                 let cert_bytes = std::fs::read(&path).with_context(|| {
-                    format!("reading certificate from {:?}", &path)
+                    format!("reading certificate from {:?}", path)
                 })?;
                 let cert = reqwest::tls::Certificate::from_pem(&cert_bytes)
                     .with_context(|| {
-                        format!("parsing certificate from {:?}", &path)
+                        format!("parsing certificate from {:?}", path)
                     })?;
                 ("https", Some(cert))
             }
@@ -254,10 +262,14 @@ impl ClientParams {
                 )
                 .await
                 .map_err(|e| {
-                    eprintln!("{}: login failed: {:#}", Utc::now(), e);
+                    eprintln!(
+                        "{}: login failed: {}",
+                        Utc::now(),
+                        InlineErrorChain::new(&e)
+                    );
                     if let oxide_client::LoginError::RequestError(e) = &e {
                         if e.is_connect() {
-                            return CondCheckError::NotYet;
+                            return CondCheckError::NotYet { status: None };
                         }
                     }
 
@@ -305,9 +317,11 @@ async fn wait_for_records(
                 .resolver()
                 .lookup_ip(dns_name)
                 .await
-                .map_err(|e| match e.kind() {
-                    ResolveErrorKind::NoRecordsFound { .. }
-                    | ResolveErrorKind::Timeout => CondCheckError::NotYet,
+                .map_err(|e| match resolve_error_proto_kind(&e) {
+                    Some(ProtoErrorKind::NoRecordsFound { .. })
+                    | Some(ProtoErrorKind::Timeout) => {
+                        CondCheckError::NotYet { status: None }
+                    }
                     _ => CondCheckError::Failed(anyhow::Error::new(e).context(
                         format!(
                             "resolving {:?} from {}",
@@ -318,7 +332,7 @@ async fn wait_for_records(
                 })?
                 .iter()
                 .next()
-                .ok_or(CondCheckError::NotYet)
+                .ok_or(CondCheckError::NotYet { status: None })
         },
         &check_period,
         &max,
@@ -332,4 +346,11 @@ async fn wait_for_records(
             max
         )
     })
+}
+
+fn resolve_error_proto_kind(
+    e: &hickory_resolver::ResolveError,
+) -> Option<&ProtoErrorKind> {
+    let ResolveErrorKind::Proto(proto_error) = e.kind() else { return None };
+    Some(proto_error.kind())
 }

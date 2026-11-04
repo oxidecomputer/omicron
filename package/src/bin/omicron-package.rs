@@ -24,7 +24,7 @@ use omicron_zone_package::package::{Package, PackageOutput, PackageSource};
 use omicron_zone_package::progress::Progress;
 use omicron_zone_package::target::TargetMap;
 use rayon::prelude::*;
-use ring::digest::{Context as DigestContext, Digest, SHA256};
+use sha2::{Digest, Sha256};
 use sled_hardware::cleanup::cleanup_networking_resources;
 use slog::Drain;
 use slog::Logger;
@@ -134,7 +134,6 @@ async fn do_target(
             preset,
             image,
             machine,
-            switch,
             rack_topology,
             clickhouse_topology,
         } => {
@@ -142,7 +141,6 @@ async fn do_target(
             let target = preset_target.with_overrides(
                 image.clone(),
                 machine.clone(),
-                switch.clone(),
                 rack_topology.clone(),
                 clickhouse_topology.clone(),
             )?;
@@ -243,14 +241,14 @@ async fn replace_active_link(
 }
 
 // Calculates the SHA256 digest for a file.
-async fn get_sha256_digest(path: &Utf8PathBuf) -> Result<Digest> {
+async fn get_sha256_digest(path: &Utf8PathBuf) -> Result<[u8; 32]> {
     let mut reader = BufReader::new(
         tokio::fs::File::open(&path)
             .await
             .with_context(|| format!("could not open {path:?}"))?,
     );
-    let mut context = DigestContext::new(&SHA256);
-    let mut buffer = [0; 1024];
+    let mut hasher = Sha256::new();
+    let mut buffer = [0; 8192];
 
     loop {
         let count = reader
@@ -260,10 +258,10 @@ async fn get_sha256_digest(path: &Utf8PathBuf) -> Result<Digest> {
         if count == 0 {
             break;
         } else {
-            context.update(&buffer[..count]);
+            hasher.update(&buffer[..count]);
         }
     }
-    Ok(context.finish())
+    Ok(hasher.finalize().into())
 }
 
 async fn download_prebuilt(
@@ -305,12 +303,12 @@ async fn download_prebuilt(
         .await
         .with_context(|| format!("failed to create {path:?}"))?;
     let mut stream = response.bytes_stream();
-    let mut context = DigestContext::new(&SHA256);
+    let mut hasher = Sha256::new();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk
             .with_context(|| format!("failed reading response from {url}"))?;
         // Update the running SHA digest
-        context.update(&chunk);
+        hasher.update(&chunk);
         // Update the downloaded file
         file.write_all(&chunk)
             .await
@@ -319,8 +317,8 @@ async fn download_prebuilt(
         progress.increment_completed(chunk.len().try_into().unwrap());
     }
 
-    let digest = context.finish();
-    if digest.as_ref() == expected_digest {
+    let digest: [u8; 32] = hasher.finalize().into();
+    if digest == **expected_digest {
         Ok(())
     } else {
         Err(anyhow!("Failed validating download of {url}").context(format!(
@@ -493,9 +491,8 @@ async fn do_unpack(
     artifact_dir: &Utf8Path,
     install_dir: &Utf8Path,
 ) -> Result<()> {
-    create_dir_all(&install_dir).map_err(|err| {
-        anyhow!("Cannot create installation directory: {}", err)
-    })?;
+    create_dir_all(&install_dir)
+        .context("Cannot create installation directory")?;
 
     // Copy all packages to the install location in parallel.
     let packages =
@@ -512,13 +509,11 @@ async fn do_unpack(
                 "src" => %src,
                 "dst" => %dst,
             );
-            std::fs::copy(&src, &dst).map_err(|err| {
-                anyhow!(
-                    "Failed to copy {src} to {dst}: {err}",
-                    src = src,
-                    dst = dst
-                )
-            })?;
+            std::fs::copy(&src, &dst).context(format!(
+                "Failed to copy {src} to {dst}",
+                src = src,
+                dst = dst,
+            ))?;
             Ok(())
         },
     )?;
@@ -530,7 +525,7 @@ async fn do_unpack(
 
     // Extract all global zone services.
     let global_zone_service_names =
-        packages.into_iter().filter_map(|(_, p)| match p.output {
+        packages.into_values().filter_map(|p| match p.output {
             PackageOutput::Zone { .. } => None,
             PackageOutput::Tarball => Some(&p.service_name),
         });
@@ -597,8 +592,8 @@ async fn uninstall_all_omicron_zones() -> Result<()> {
     Ok(())
 }
 
-fn uninstall_all_omicron_datasets(config: &Config) -> Result<()> {
-    let datasets = match zfs::get_all_omicron_datasets_for_delete() {
+async fn uninstall_all_omicron_datasets(config: &Config) -> Result<()> {
+    let datasets = match zfs::get_all_omicron_datasets_for_delete().await {
         Err(e) => {
             warn!(config.log(), "Failed to get omicron datasets: {}", e);
             return Err(e);
@@ -616,7 +611,7 @@ fn uninstall_all_omicron_datasets(config: &Config) -> Result<()> {
     ))?;
     for dataset in &datasets {
         info!(config.log(), "Deleting dataset: {dataset}");
-        zfs::Zfs::destroy_dataset(dataset)?;
+        zfs::Zfs::destroy_dataset(dataset).await?;
     }
 
     Ok(())
@@ -702,7 +697,7 @@ async fn do_deactivate(config: &Config) -> Result<()> {
 async fn do_uninstall(config: &Config) -> Result<()> {
     do_deactivate(config).await?;
     info!(config.log(), "Removing datasets");
-    uninstall_all_omicron_datasets(config)?;
+    uninstall_all_omicron_datasets(config).await?;
     Ok(())
 }
 
@@ -835,8 +830,11 @@ impl Progress for PackageProgress {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    oxide_tokio_rt::run(main_impl())
+}
+
+async fn main_impl() -> Result<()> {
     let args = Args::try_parse()?;
     let base_config = BaseConfig::load(&args.manifest).with_context(|| {
         format!("failed to load base config from {:?}", args.manifest)

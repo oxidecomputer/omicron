@@ -51,12 +51,15 @@ use nexus_db_queries::authn::{Actor, Reason};
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::model::{DeviceAccessToken, DeviceAuthRequest};
+use omicron_uuid_kinds::{GenericUuid, SiloUserUuid};
 
-use nexus_types::external_api::params::DeviceAccessTokenRequest;
-use nexus_types::external_api::views;
-use omicron_common::api::external::{CreateResult, Error};
+use anyhow::anyhow;
+use nexus_types::external_api::device;
+use omicron_common::api::external::{
+    CreateResult, DataPageParams, Error, ListResultVec,
+};
 
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -74,13 +77,17 @@ impl super::Nexus {
     pub(crate) async fn device_auth_request_create(
         &self,
         opctx: &OpContext,
-        client_id: Uuid,
+        params: device::DeviceAuthRequest,
     ) -> CreateResult<DeviceAuthRequest> {
         // TODO-correctness: the `user_code` generated for a new request
         // is used as a primary key, but may potentially collide with an
         // existing outstanding request. So we should retry some (small)
         // number of times if inserting the new request fails.
-        let auth_request = DeviceAuthRequest::new(client_id);
+
+        // Note that we cannot validate the TTL here against the silo max
+        // because we do not know what silo we're talking about until verify
+        let auth_request =
+            DeviceAuthRequest::new(params.client_id, params.ttl_seconds);
         self.db_datastore.device_auth_request_create(opctx, auth_request).await
     }
 
@@ -92,7 +99,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         user_code: String,
-        silo_user_id: Uuid,
+        silo_user_id: SiloUserUuid,
     ) -> CreateResult<DeviceAccessToken> {
         let (.., authz_request, db_request) =
             LookupPath::new(opctx, &self.db_datastore)
@@ -100,18 +107,89 @@ impl super::Nexus {
                 .fetch()
                 .await?;
 
-        let (.., authz_user) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_user_id(silo_user_id)
-            .lookup_for(authz::Action::CreateChild)
-            .await?;
+        let (authz_silo, authz_user) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .silo_user_id(silo_user_id)
+                .lookup_for(authz::Action::CreateChild)
+                .await?;
         assert_eq!(authz_user.id(), silo_user_id);
 
-        // Create an access token record.
+        let silo_auth_settings = self
+            .db_datastore
+            .silo_auth_settings_view(opctx, &authz_silo)
+            .await?;
+
+        let silo_max_ttl = silo_auth_settings.device_token_max_ttl_seconds;
+        let requested_ttl = db_request.token_ttl_seconds;
+
+        // This logic is a bit gnarly, but we landed on it as the least bad
+        // option. Error out if the user requests a token TTL that is longer
+        // than allowed, i.e., either
+        //
+        //   a) it is longer than the silo max TTL, or
+        //   b) this request was authenticated with a device token and the TTL
+        //      would produce an expiration later than the current token's.
+        //
+        // If the user does not request a specific TTL, we do not error out.
+        // We calculate the token TTL as min(silo max TTL, current token TTL
+        // if present). Token confirm requests authenticated with a console
+        // session can get device tokens with TTLs up to the silo max.
+
+        let time_expires = if let Some(requested_ttl) = requested_ttl {
+            // If the user requested a TTL, validate it against the silo max
+            // TTL as well as the expiration time of the token being used (if a
+            // token is being used)
+
+            // Validate the requested TTL against the silo's max TTL
+            if let Some(max) = silo_max_ttl
+                && requested_ttl > max.0.into()
+            {
+                return Err(Error::invalid_request(&format!(
+                    "Requested TTL {} seconds exceeds maximum allowed \
+                     TTL for this silo of {} seconds",
+                    requested_ttl, max
+                )));
+            };
+
+            let requested_exp =
+                Utc::now() + Duration::seconds(requested_ttl.0.into());
+
+            // If currently authenticated via token, error if requested exceeds it
+            if let Some(auth_exp) = opctx.authn.device_token_expiration()
+                && requested_exp > auth_exp
+            {
+                return Err(Error::invalid_request(
+                    "Requested token TTL would exceed the expiration time \
+                     of the token being used to authenticate the confirm \
+                     request. To get the full requested TTL, confirm \
+                     this token using a web console session. Alternatively, \
+                     omit requested TTL to get a token with the longest \
+                     allowed lifetime, determined by the lesser of the silo \
+                     max and the current token's expiration time.",
+                ));
+            }
+
+            Some(requested_exp)
+        } else {
+            // No explicit TTL requested. Rather than erroring out if silo max
+            // exceeds TTL exceeds expiration time of current token, just clamp.
+            let silo_max_exp = silo_max_ttl
+                .map(|ttl| Utc::now() + Duration::seconds(ttl.0.into()));
+            // a.min(b) doesn't do it because None is always less than Some(_)
+            match (silo_max_exp, opctx.authn.device_token_expiration()) {
+                (Some(silo_exp), Some(token_exp)) => {
+                    Some(silo_exp.min(token_exp))
+                }
+                (a, b) => a.or(b),
+            }
+        };
+
         let token = DeviceAccessToken::new(
             db_request.client_id,
             db_request.device_code,
             db_request.time_created,
             silo_user_id,
+            time_expires,
         );
 
         if db_request.time_expires < Utc::now() {
@@ -161,14 +239,15 @@ impl super::Nexus {
 
     /// Look up the actor for which a token was granted.
     /// Corresponds to a request *after* completing the flow above.
-    pub(crate) async fn device_access_token_actor(
+    /// Returns the actor, the token's expiration time (if any), and the token ID.
+    pub(crate) async fn authenticate_token(
         &self,
         opctx: &OpContext,
         token: String,
-    ) -> Result<Actor, Reason> {
-        let (.., db_access_token) = LookupPath::new(opctx, &self.db_datastore)
-            .device_access_token(&token)
-            .fetch()
+    ) -> Result<(Actor, Option<chrono::DateTime<Utc>>, Uuid), Reason> {
+        let (.., db_access_token) = self
+            .db_datastore
+            .device_token_lookup_by_token(opctx, token)
             .await
             .map_err(|e| match e {
                 Error::ObjectNotFound { .. } => Reason::UnknownActor {
@@ -177,7 +256,7 @@ impl super::Nexus {
                 e => Reason::UnknownError { source: e },
             })?;
 
-        let silo_user_id = db_access_token.silo_user_id;
+        let silo_user_id = db_access_token.silo_user_id();
         let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
             .silo_user_id(silo_user_id)
             .fetch()
@@ -188,15 +267,32 @@ impl super::Nexus {
                 }
                 e => Reason::UnknownError { source: e },
             })?;
-        let silo_id = db_silo_user.silo_id;
+        let silo_id = db_silo_user.silo_id();
 
-        Ok(Actor::SiloUser { silo_user_id, silo_id })
+        let expiration = db_access_token.time_expires;
+        let token_id = db_access_token.id().into_untyped_uuid();
+
+        if let Some(time_expires) = expiration {
+            let now = Utc::now();
+            if time_expires < now {
+                return Err(Reason::BadCredentials {
+                    actor: Actor::SiloUser { silo_user_id, silo_id },
+                    source: anyhow!(
+                        "token expired at {} (current time: {})",
+                        time_expires,
+                        now
+                    ),
+                });
+            }
+        }
+
+        Ok((Actor::SiloUser { silo_user_id, silo_id }, expiration, token_id))
     }
 
     pub(crate) async fn device_access_token(
         &self,
         opctx: &OpContext,
-        params: DeviceAccessTokenRequest,
+        params: device::DeviceAccessTokenRequest,
     ) -> Result<Response<Body>, HttpError> {
         // RFC 8628 §3.4
         if params.grant_type != "urn:ietf:params:oauth:grant-type:device_code" {
@@ -221,7 +317,7 @@ impl super::Nexus {
             Ok(response) => match response {
                 Granted(token) => self.build_oauth_response(
                     StatusCode::OK,
-                    &views::DeviceAccessTokenGrant::from(token),
+                    &device::DeviceAccessTokenGrant::from(token),
                 ),
                 Pending => self.build_oauth_response(
                     StatusCode::BAD_REQUEST,
@@ -264,5 +360,21 @@ impl super::Nexus {
             .status(status)
             .header(header::CONTENT_TYPE, "application/json")
             .body(body.into())?)
+    }
+
+    pub(crate) async fn current_user_token_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<DeviceAccessToken> {
+        self.db_datastore.current_user_token_list(opctx, pagparams).await
+    }
+
+    pub(crate) async fn current_user_token_delete(
+        &self,
+        opctx: &OpContext,
+        token_id: Uuid,
+    ) -> Result<(), Error> {
+        self.db_datastore.current_user_token_delete(opctx, token_id).await
     }
 }

@@ -67,9 +67,8 @@
 //!
 //! ## Role lookup
 //!
-//! Users, roles, and API resources are all stored in the database.  Naturally,
-//! so is the relationship that says a particular user has a particular role for
-//! a particular resource.
+//! Users and API resources are stored in the database, as is the relationship
+//! that says a particular user has a particular role for a particular resource.
 //!
 //! Suppose a built-in user "cookie-monster" has the "viewer" role for a Project
 //! "monster-foodies".  It looks like this:
@@ -91,26 +90,16 @@
 //! |   |    |
 //! |   |    +---------------------------------------------------------------+
 //! |   |                                                                    |
-//! |   | table: "role_builtin"                                              |
-//! |   | primary key: (resource_type, role_name)                            |
-//! |   | +---------------+-----------+-----+                                |
-//! |   | | resource_type | role_name | ... |                                |
-//! |   | +---------------+-----------+-----+                                |
-//! +---|-> "project "    | "viewer"  | ... |                                |
-//! |   | +---------------+--^--------+-----+                                |
-//! |   |                    |                                               |
-//! | +-|--------------------+                                               |
-//! | | |                                                                    |
-//! | | | table: "role_assignment"                                           |
-//! | | | (assigns built-in roles to users on arbitrary resources)           |
-//! | | | +---------------+-----------+-------------+-------------+---+      |
-//! | | | | resource_type | role_name | resource_id | identity_id |...|      |
-//! | | | +---------------+-----------+-------------+-------------+---+      |
-//! | | | | "project "    | "viewer"  |         123 |         234 |...|      |
-//! | | | +--^------------+--^--------+----------^--+-----------^-+---+      |
-//! | | |    |               |                   |              |            |
-//! +-|-|----+               |                   |              +------------+
-//!   +-|--------------------+                   |
+//! |   | table: "role_assignment"                                           |
+//! |   | (assigns roles to users on arbitrary resources)                    |
+//! |   | +---------------+-----------+-------------+-------------+---+      |
+//! |   | | resource_type | role_name | resource_id | identity_id |...|      |
+//! |   | +---------------+-----------+-------------+-------------+---+      |
+//! |   | | "project "    | "viewer"  |         123 |         234 |...|      |
+//! |   | +--^------------+--^--------+----------^--+-----------^-+---+      |
+//! |   |    |                                   |              |            |
+//! +---|----+                                   |              +------------+
+//!     |                                        |
 //!     +----------------------------------------+
 //! ```
 //!

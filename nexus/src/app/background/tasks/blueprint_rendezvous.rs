@@ -5,37 +5,45 @@
 //! Background task for reconciling blueprints and inventory, updating
 //! Reconfigurator rendezvous tables
 
-use crate::app::background::BackgroundTask;
+use crate::app::background::{
+    BackgroundTask, tasks::blueprint_load::LoadedTargetBlueprint,
+};
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_reconfigurator_rendezvous::reconcile_blueprint_rendezvous_tables;
-use nexus_types::{
-    deployment::{Blueprint, BlueprintTarget},
-    internal_api::background::BlueprintRendezvousStatus,
-};
+use nexus_reconfigurator_rendezvous::reconcile_dataset_rendezvous_tables;
+use nexus_reconfigurator_rendezvous::reconcile_sled_blueprint_availability;
+use nexus_types::internal_api::background::BlueprintRendezvousStatus;
+use nexus_types::internal_api::background::DatasetRendezvousOutcome;
+use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousOutcome;
+use nexus_types::inventory::Collection;
 use serde_json::json;
-use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio::sync::watch;
 
-/// Background task that takes a [`Blueprint`] and an inventory `Collection`
+/// Background task that takes a `Blueprint` and an inventory `Collection`
 /// and updates any rendezvous tables to track resources under Reconfigurator's
 /// control for other parts of Nexus to consume.
 pub struct BlueprintRendezvous {
     datastore: Arc<DataStore>,
-    rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+    rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
+    rx_inventory: watch::Receiver<Option<Arc<Collection>>>,
+    tx: watch::Sender<usize>,
 }
 
 impl BlueprintRendezvous {
     pub fn new(
         datastore: Arc<DataStore>,
-        rx_blueprint: watch::Receiver<
-            Option<Arc<(BlueprintTarget, Blueprint)>>,
-        >,
+        rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
+        rx_inventory: watch::Receiver<Option<Arc<Collection>>>,
     ) -> Self {
-        Self { datastore, rx_blueprint }
+        let (tx, _rx) = watch::channel(0);
+        Self { datastore, rx_blueprint, rx_inventory, tx }
+    }
+
+    pub fn watcher(&self) -> watch::Receiver<usize> {
+        self.tx.subscribe()
     }
 
     /// Implementation for `BackgroundTask::activate` for `BlueprintRendezvous`,
@@ -48,7 +56,8 @@ impl BlueprintRendezvous {
         // Get the latest blueprint, cloning to prevent holding a read lock
         // on the watch.
         let update = self.rx_blueprint.borrow_and_update().clone();
-        let Some((_, blueprint)) = update.as_deref() else {
+        let Some(LoadedTargetBlueprint { blueprint, target: _ }) = update
+        else {
             warn!(
                 &opctx.log, "Blueprint rendezvous: skipped";
                 "reason" => "no blueprint",
@@ -56,57 +65,88 @@ impl BlueprintRendezvous {
             return json!({"error": "no blueprint" });
         };
 
-        // Get the latest inventory collection
-        let maybe_collection = match self
-            .datastore
-            .inventory_get_latest_collection(opctx)
+        // Reconcile sled availability -- this can be done without an inventory
+        // collection available.
+        let sled_blueprint_availability =
+            match reconcile_sled_blueprint_availability(
+                opctx,
+                &self.datastore,
+                &blueprint,
+            )
             .await
-        {
-            Ok(maybe_collection) => maybe_collection,
-            Err(err) => {
-                let err = InlineErrorChain::new(&err);
+            {
+                Ok(stats) => {
+                    SledBlueprintAvailabilityRendezvousOutcome::Reconciled(
+                        stats,
+                    )
+                }
+                Err(err) => {
+                    error!(
+                        &opctx.log,
+                        "Blueprint rendezvous: sled availability reconciliation \
+                         failed";
+                        "blueprint_id" => %blueprint.id,
+                        "error" => format!("{err:#}"),
+                    );
+                    SledBlueprintAvailabilityRendezvousOutcome::Error(format!(
+                        "{err:#}"
+                    ))
+                }
+            };
+
+        // Get the inventory most recently seen by the inventory loader
+        // background task. We clone the Arc to avoid keeping the channel locked
+        // for the rest of our execution.
+        let inventory =
+            self.rx_inventory.borrow_and_update().as_ref().map(Arc::clone);
+        let datasets = match inventory {
+            None => {
                 warn!(
-                    &opctx.log, "Blueprint rendezvous: skipped";
-                    "reason" => "failed to read latest inventory collection",
-                    &err,
+                    &opctx.log,
+                    "Blueprint rendezvous: skipped dataset reconciliation";
+                    "reason" => "no inventory collection",
                 );
-                return json!({ "error":
-                    format!("failed reading inventory collection: {err}"),
-                });
+                DatasetRendezvousOutcome::NoInventoryCollection
+            }
+            Some(collection) => {
+                match reconcile_dataset_rendezvous_tables(
+                    opctx,
+                    &self.datastore,
+                    &blueprint,
+                    &collection,
+                )
+                .await
+                {
+                    Ok(stats) => DatasetRendezvousOutcome::Reconciled {
+                        inventory_collection_id: collection.id,
+                        stats,
+                    },
+                    Err(err) => {
+                        error!(
+                            &opctx.log,
+                            "Blueprint rendezvous: dataset reconciliation \
+                             failed";
+                            "blueprint_id" => %blueprint.id,
+                            "inventory_collection_id" => %collection.id,
+                            "error" => format!("{err:#}"),
+                        );
+                        DatasetRendezvousOutcome::Error {
+                            inventory_collection_id: collection.id,
+                            error: format!("{err:#}"),
+                        }
+                    }
+                }
             }
         };
 
-        let Some(collection) = maybe_collection else {
-            warn!(
-                &opctx.log, "Blueprint rendezvous: skipped";
-                "reason" => "no inventory collection",
-            );
-            return json!({"error": "no inventory collection" });
-        };
+        // Trigger anything waiting on this task to run.
+        self.tx.send_modify(|count| *count = *count + 1);
 
-        // Actually perform rendezvous table reconciliation
-        let result = reconcile_blueprint_rendezvous_tables(
-            opctx,
-            &self.datastore,
-            blueprint,
-            &collection,
-        )
-        .await;
-
-        // Return the result as a `serde_json::Value`
-        match result {
-            Ok(stats) => {
-                let status = BlueprintRendezvousStatus {
-                    blueprint_id: blueprint.id,
-                    inventory_collection_id: collection.id,
-                    stats,
-                };
-                json!(status)
-            }
-            Err(err) => json!({ "error":
-                format!("rendezvous reconciliation failed: {err:#}"),
-            }),
-        }
+        json!(BlueprintRendezvousStatus {
+            blueprint_id: blueprint.id,
+            sled_blueprint_availability,
+            datasets,
+        })
     }
 }
 

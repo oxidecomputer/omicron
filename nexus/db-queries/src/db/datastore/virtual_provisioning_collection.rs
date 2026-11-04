@@ -18,6 +18,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use omicron_common::api::external::{DeleteResult, Error};
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::ProjectUuid;
 use uuid::Uuid;
 
 /// The types of resources which can consume storage space.
@@ -148,7 +149,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         id: Uuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         disk_byte_diff: ByteCount,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         self.virtual_provisioning_collection_insert_storage(
@@ -165,7 +166,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         id: Uuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         disk_byte_diff: ByteCount,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         self.virtual_provisioning_collection_insert_storage(
@@ -183,7 +184,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         id: Uuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         disk_byte_diff: ByteCount,
         storage_type: StorageType,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
@@ -208,7 +209,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         id: Uuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         disk_byte_diff: ByteCount,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         self.virtual_provisioning_collection_delete_storage(
@@ -224,7 +225,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         id: Uuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         disk_byte_diff: ByteCount,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         self.virtual_provisioning_collection_delete_storage(
@@ -241,7 +242,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         id: Uuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         disk_byte_diff: ByteCount,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         let provisions =
@@ -263,7 +264,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         id: InstanceUuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         cpus_diff: i64,
         ram_diff: ByteCount,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
@@ -285,7 +286,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         id: InstanceUuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         cpus_diff: i64,
         ram_diff: ByteCount,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
@@ -331,10 +332,14 @@ mod test {
     use nexus_db_model::Instance;
     use nexus_db_model::Project;
     use nexus_db_model::SiloQuotasUpdate;
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::instance as instance_types;
+    use nexus_types::external_api::project;
     use nexus_types::silo::DEFAULT_SILO_ID;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::ProjectUuid;
+    use omicron_uuid_kinds::SiloUuid;
     use uuid::Uuid;
 
     async fn verify_collection_usage(
@@ -362,15 +367,19 @@ mod test {
     }
 
     struct TestData {
-        project_id: Uuid,
-        silo_id: Uuid,
+        project_id: ProjectUuid,
+        silo_id: SiloUuid,
         fleet_id: Uuid,
         authz_project: crate::authz::Project,
     }
 
     impl TestData {
         fn ids(&self) -> [Uuid; 3] {
-            [self.project_id, self.silo_id, self.fleet_id]
+            [
+                self.project_id.into_untyped_uuid(),
+                self.silo_id.into_untyped_uuid(),
+                self.fleet_id,
+            ]
         }
     }
 
@@ -381,7 +390,7 @@ mod test {
     ) -> TestData {
         let fleet_id = *nexus_db_fixed_data::FLEET_ID;
         let silo_id = DEFAULT_SILO_ID;
-        let project_id = Uuid::new_v4();
+        let project_id = ProjectUuid::new_v4();
 
         let (authz_project, _project) = datastore
             .project_create(
@@ -389,11 +398,12 @@ mod test {
                 Project::new_with_id(
                     project_id,
                     silo_id,
-                    params::ProjectCreate {
+                    project::ProjectCreate {
                         identity: IdentityMetadataCreateParams {
                             name: "myproject".parse().unwrap(),
                             description: "It's a project".into(),
                         },
+                        defaults: None,
                     },
                 ),
             )
@@ -407,8 +417,8 @@ mod test {
 
         let quotas_update = SiloQuotasUpdate {
             cpus: Some(24),
-            memory: Some(1 << 40),
-            storage: Some(1 << 50),
+            memory: Some((1 << 40).try_into().unwrap()),
+            storage: Some((1 << 50).try_into().unwrap()),
             time_modified: chrono::Utc::now(),
         };
         let authz_silo = LookupPath::new(&opctx, datastore)
@@ -430,7 +440,7 @@ mod test {
         opctx: &OpContext,
         authz_project: &crate::authz::Project,
         instance_id: InstanceUuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         cpus: i64,
         memory: ByteCount,
     ) {
@@ -441,7 +451,7 @@ mod test {
                 Instance::new(
                     instance_id,
                     project_id,
-                    &params::InstanceCreate {
+                    &instance_types::InstanceCreate {
                         identity: IdentityMetadataCreateParams {
                             name: "myinstance".parse().unwrap(),
                             description: "It's an instance".into(),
@@ -451,14 +461,17 @@ mod test {
                         hostname: "myhostname".try_into().unwrap(),
                         user_data: Vec::new(),
                         network_interfaces:
-                            params::InstanceNetworkInterfaceAttachment::None,
+                            instance_types::InstanceNetworkInterfaceAttachment::None,
                         external_ips: Vec::new(),
                         disks: Vec::new(),
                         boot_disk: None,
+                        cpu_platform: None,
                         ssh_public_keys: None,
                         start: false,
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
+                        multicast_groups: Vec::new(),
+                        enable_jumbo_frames: false,
                     },
                 ),
             )

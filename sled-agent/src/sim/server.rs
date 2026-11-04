@@ -8,61 +8,100 @@ use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use super::storage::PantryServer;
-use crate::nexus::NexusClient;
-use crate::rack_setup::SledConfig;
-use crate::rack_setup::service::build_initial_blueprint_from_sled_configs;
-use crate::rack_setup::{
-    from_ipaddr_to_external_floating_ip,
-    from_sockaddr_to_external_floating_addr,
-};
+use crate::nexus::{ConvertInto, NexusClient};
 use crate::sim::SimulatedUpstairs;
-use anyhow::{Context as _, anyhow};
+use anyhow::{Context, anyhow, bail};
+use bootstrap_agent_lockstep_types::RecoverySiloConfig;
+use bootstrap_agent_lockstep_types::ServiceIpPoolConfig;
 use crucible_agent_client::types::State as RegionState;
-use id_map::IdMap;
+use iddqd::IdOrdMap;
 use illumos_utils::zpool::ZpoolName;
 use internal_dns_types::config::DnsConfigBuilder;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use internal_dns_types::names::ServiceName;
 use nexus_client::types as NexusTypes;
-use nexus_client::types::{IpRange, Ipv4Range, Ipv6Range};
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
-use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+use nexus_lockstep_client::types::{
+    AllowedSourceIps, CrucibleDatasetCreateRequest, RackInitializationRequest,
+    RackNetworkConfig,
+};
 use nexus_types::deployment::{
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
-    BlueprintZoneImageSource, blueprint_zone_type,
+    BlueprintZoneImageSource, LastAllocatedSubnetIpOffset, blueprint_zone_type,
 };
 use nexus_types::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
+    OmicronZoneExternalFloatingAddrs, OmicronZoneExternalFloatingIps,
 };
-use nexus_types::inventory::NetworkInterfaceKind;
 use omicron_common::FileKv;
-use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
+use omicron_common::address::IpRange;
+use omicron_common::address::Ipv4Range;
+use omicron_common::address::Ipv6Range;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
-use omicron_common::api::external::Generation;
+use omicron_common::address::{DNS_OPTE_IPV4_SUBNET, Ipv6Subnet};
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus::Certificate;
+use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
-use omicron_common::disk::DiskIdentity;
+use omicron_generation_kinds::{Generation, NexusGeneration};
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
-use sled_agent_types::rack_init::RecoverySiloConfig;
+use rand::seq::IndexedRandom;
+use sled_agent_rack_setup::{
+    PlannedSledDescription, ServicePlan, SledConfig,
+    from_ipaddr_to_external_floating_ip,
+    from_sockaddr_to_external_floating_addr,
+};
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::early_networking::PortConfig;
+use sled_agent_types::early_networking::UplinkPorts;
+use sled_agent_types::inventory::NetworkInterface;
+use sled_agent_types::inventory::NetworkInterfaceKind;
+use sled_agent_types::inventory::OmicronZoneDataset;
 use slog::{Drain, Logger, info};
-use std::collections::BTreeMap;
-use std::collections::HashMap;
+use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
+use transient_dns_server::TransientDnsServer;
 use uuid::Uuid;
+
+// Well-known service IP pool names the simulated sled-agent creates, mirroring
+// what real rack setup produces.
+const SERVICE_POOL_IPV4_NAME: &str = "oxide-service-pool-v4";
+const SERVICE_POOL_IPV6_NAME: &str = "oxide-service-pool-v6";
+
+/// How [`Server::start`] handles the sled agent's registration with Nexus.
+///
+/// A simulated sled agent announces itself to Nexus with `sled_agent_put`,
+/// retrying until Nexus accepts it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NexusRegistration {
+    /// Wait until Nexus has accepted the registration, so that the sled exists
+    /// in the db's `sled` table by the time [`Server::start`] returns.
+    ///
+    /// If registration fails, [`Server::start`] will return an error.
+    WaitForCompletion,
+    /// Return immediately, retrying registration in the background.
+    ///
+    /// Since registration becomes asynchronous, if it fails [`Server::start`]
+    /// cannot return an error.
+    ///
+    /// Use this in cases where Nexus might not be reachable (for example, a
+    /// sled agent started against a placeholder Nexus address).
+    Background,
+}
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
 /// server wired up to the sled agent
@@ -87,7 +126,7 @@ impl Server {
     pub async fn start(
         config: &Config,
         log: &Logger,
-        wait_for_nexus: bool,
+        nexus_registration: NexusRegistration,
         simulated_upstairs: &Arc<SimulatedUpstairs>,
         sled_index: u16,
     ) -> Result<Server, anyhow::Error> {
@@ -105,7 +144,6 @@ impl Server {
         let sled_agent = SledAgent::new_simulated_with_id(
             &config,
             sa_log,
-            config.nexus_address,
             Arc::clone(&nexus_client),
             simulated_upstairs.clone(),
             sled_index,
@@ -119,6 +157,13 @@ impl Server {
             dropshot_log,
         )
         .config(config.dropshot.clone())
+        .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+            dropshot::ClientSpecifiesVersionInHeader::new(
+                omicron_common::api::VERSION_HEADER,
+                sled_agent_api::latest_version(),
+            )
+            .min_version(sled_agent_api::oldest_version()),
+        )))
         .start()
         .map_err(|error| anyhow!("initializing server: {}", error))?;
 
@@ -145,14 +190,19 @@ impl Server {
                         &NexusTypes::SledAgentInfo {
                             sa_address: sa_address.to_string(),
                             repo_depot_port,
-                            role: NexusTypes::SledRole::Scrimlet,
+                            role: config.sled_role,
                             baseboard: NexusTypes::Baseboard {
-                                serial: format!(
-                                    "sim-{}",
-                                    &config.id.to_string()[0..8]
-                                ),
-                                part: String::from("Unknown"),
-                                revision: 0,
+                                serial: config
+                                    .hardware
+                                    .baseboard
+                                    .identifier()
+                                    .to_string(),
+                                part: config
+                                    .hardware
+                                    .baseboard
+                                    .model()
+                                    .to_string(),
+                                revision: config.hardware.baseboard.revision(),
                             },
                             usable_hardware_threads: config
                                 .hardware
@@ -166,6 +216,7 @@ impl Server {
                                 config.hardware.reservoir_ram,
                             )
                             .unwrap(),
+                            cpu_family: config.hardware.cpu_family.convert(),
                             generation: Generation::new(),
                             decommissioned: false,
                         },
@@ -186,8 +237,11 @@ impl Server {
             .expect("Expected an infinite retry loop contacting Nexus");
         });
 
-        if wait_for_nexus {
-            task.await.unwrap();
+        match nexus_registration {
+            NexusRegistration::WaitForCompletion => {
+                task.await.context("registering with Nexus")?;
+            }
+            NexusRegistration::Background => {}
         }
 
         let mut datasets = vec![];
@@ -209,12 +263,17 @@ impl Server {
                 },
             );
 
-            sled_agent.create_zpool(zpool_id, physical_disk_id, zpool.size);
+            sled_agent.create_zpool(
+                zpool_id,
+                physical_disk_id,
+                zpool.size,
+                zpool.health,
+            );
             let dataset_id = DatasetUuid::new_v4();
             let address =
                 sled_agent.create_crucible_dataset(zpool_id, dataset_id);
 
-            datasets.push(NexusTypes::CrucibleDatasetCreateRequest {
+            datasets.push(CrucibleDatasetCreateRequest {
                 zpool_id,
                 dataset_id,
                 address: address.to_string(),
@@ -261,23 +320,27 @@ impl Server {
 
 async fn handoff_to_nexus(
     log: &Logger,
-    config: &Config,
-    request: &NexusTypes::RackInitializationRequest,
+    nexus_lockstep_address: SocketAddr,
+    rack_id: RackUuid,
+    request: &RackInitializationRequest,
 ) -> Result<(), anyhow::Error> {
-    let nexus_client = NexusClient::new(
-        &format!("http://{}", config.nexus_address),
-        log.new(o!("component" => "NexusClient")),
+    let nexus_client = nexus_lockstep_client::Client::new(
+        &format!("http://{}", nexus_lockstep_address),
+        log.new(o!("component" => "NexusLockstepClient")),
     );
-    let rack_id = uuid::uuid!("c19a698f-c6f9-4a17-ae30-20d711b8f7dc");
 
     let notify_nexus = || async {
         nexus_client
-            .rack_initialization_complete(&rack_id, &request)
+            .rack_initialization_complete(
+                &rack_id.into_untyped_uuid(),
+                &request,
+            )
             .await
             .map_err(BackoffError::transient)
     };
     let log_failure = |err, _| {
-        info!(log, "Failed to handoff to nexus: {err}");
+        info!(log, "Failed to handoff to nexus";
+            InlineErrorChain::new(&err));
     };
     retry_notify(
         retry_policy_internal_service_aggressive(),
@@ -316,13 +379,12 @@ pub struct RssArgs {
 /// - Performs handoff to Nexus
 pub async fn run_standalone_server(
     config: &Config,
+    nexus_lockstep_port: u16,
     logging: &dropshot::ConfigLogging,
     rss_args: &RssArgs,
 ) -> Result<(), anyhow::Error> {
     let (drain, registration) = slog_dtrace::with_drain(
-        logging
-            .to_logger("sled-agent")
-            .map_err(|message| anyhow!("initializing logger: {}", message))?,
+        logging.to_logger("sled-agent").context("initializing logger")?,
     );
     let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
@@ -335,15 +397,21 @@ pub async fn run_standalone_server(
 
     // Start the sled agent
     let simulated_upstairs = Arc::new(SimulatedUpstairs::new(log.clone()));
-    let mut server =
-        Server::start(config, &log, true, &simulated_upstairs, 0).await?;
+    let mut server = Server::start(
+        config,
+        &log,
+        NexusRegistration::WaitForCompletion,
+        &simulated_upstairs,
+        0,
+    )
+    .await?;
     info!(log, "sled agent started successfully");
 
     // Start the Internal DNS server
     let dns = if let Some(addr) = rss_args.internal_dns_dns_addr {
-        dns_server::TransientServer::new_with_address(&log, addr.into()).await?
+        TransientDnsServer::new_with_address(&log, addr.into()).await?
     } else {
-        dns_server::TransientServer::new(&log).await?
+        TransientDnsServer::new(&log).await?
     };
     let mut dns_config_builder = DnsConfigBuilder::new();
 
@@ -373,13 +441,11 @@ pub async fn run_standalone_server(
     let dns_config =
         dns_config_builder.build_full_config_for_initial_generation();
     dns.initialize_with_config(&log, &dns_config).await?;
-    let internal_dns_version = dns_config.generation;
 
     let all_u2_zpools = server.sled_agent.get_zpools();
     let get_random_zpool = || {
-        use rand::seq::SliceRandom;
         let pool = all_u2_zpools
-            .choose(&mut rand::thread_rng())
+            .choose(&mut rand::rng())
             .expect("No external zpools found, but we need one");
         ZpoolName::new_external(ZpoolUuid::from_untyped_uuid(pool.id))
     };
@@ -391,74 +457,95 @@ pub async fn run_standalone_server(
         SocketAddr::V6(a) => a,
     };
     let pool_name = ZpoolName::new_external(ZpoolUuid::new_v4());
-    let mut zones = IdMap::new();
-    zones.insert(BlueprintZoneConfig {
-        disposition: BlueprintZoneDisposition::InService,
-        id: OmicronZoneUuid::new_v4(),
-        zone_type: BlueprintZoneType::InternalDns(
-            blueprint_zone_type::InternalDns {
-                dataset: OmicronZoneDataset { pool_name },
-                http_address: http_bound,
-                dns_address: match dns.dns_server.local_address() {
-                    SocketAddr::V4(_) => panic!("did not expect v4 address"),
-                    SocketAddr::V6(a) => a,
+    let mut zones = IdOrdMap::new();
+    zones
+        .insert_unique(BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id: OmicronZoneUuid::new_v4(),
+            zone_type: BlueprintZoneType::InternalDns(
+                blueprint_zone_type::InternalDns {
+                    dataset: OmicronZoneDataset { pool_name },
+                    http_address: http_bound,
+                    dns_address: match dns.dns_server.sole_local_address()? {
+                        SocketAddr::V4(_) => {
+                            panic!("did not expect v4 address")
+                        }
+                        SocketAddr::V6(a) => a,
+                    },
+                    gz_address: Ipv6Addr::LOCALHOST,
+                    gz_address_index: 0,
                 },
-                gz_address: Ipv6Addr::LOCALHOST,
-                gz_address_index: 0,
-            },
-        ),
-        // Co-locate the filesystem pool with the dataset
-        filesystem_pool: pool_name,
-        image_source: BlueprintZoneImageSource::InstallDataset,
-    });
+            ),
+            // Co-locate the filesystem pool with the dataset
+            filesystem_pool: pool_name,
+            image_source: BlueprintZoneImageSource::InstallDataset,
+        })
+        .expect("freshly generated zone IDs are unique");
 
-    let mut internal_services_ip_pool_ranges = vec![];
+    let mut internal_services_ipv4_ranges = vec![];
+    let mut internal_services_ipv6_ranges = vec![];
     let mut macs = MacAddr::iter_system();
     if let Some(nexus_external_addr) = rss_args.nexus_external_addr {
-        let ip = nexus_external_addr.ip();
+        let external_ip = nexus_external_addr.ip();
         let id = OmicronZoneUuid::new_v4();
+        let private_ip = NEXUS_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
+            .unwrap();
+        let ip_config =
+            PrivateIpConfig::new_ipv4(private_ip, *NEXUS_OPTE_IPV4_SUBNET)
+                .context("creating private IP configuration")?;
 
-        zones.insert(BlueprintZoneConfig {
-            disposition: BlueprintZoneDisposition::InService,
-            id,
-            zone_type: BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                internal_address: match config.nexus_address {
-                    SocketAddr::V4(_) => panic!("did not expect v4 address"),
-                    SocketAddr::V6(a) => a,
-                },
-                external_ip: from_ipaddr_to_external_floating_ip(ip),
-                nic: nexus_types::inventory::NetworkInterface {
-                    id: Uuid::new_v4(),
-                    kind: NetworkInterfaceKind::Service {
-                        id: id.into_untyped_uuid(),
+        zones
+            .insert_unique(BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id,
+                zone_type: BlueprintZoneType::Nexus(
+                    blueprint_zone_type::Nexus {
+                        internal_address: match config.nexus_address {
+                            SocketAddr::V4(_) => {
+                                panic!("did not expect v4 address")
+                            }
+                            SocketAddr::V6(a) => a,
+                        },
+                        lockstep_port: nexus_lockstep_port,
+                        external_ips:
+                            OmicronZoneExternalFloatingIps::from_single(
+                                from_ipaddr_to_external_floating_ip(
+                                    external_ip,
+                                ),
+                            ),
+                        nic: NetworkInterface {
+                            id: Uuid::new_v4(),
+                            kind: NetworkInterfaceKind::Service {
+                                id: id.into_untyped_uuid(),
+                            },
+                            name: "nexus".parse().unwrap(),
+                            ip_config,
+                            mac: macs.next().unwrap(),
+                            vni: Vni::SERVICES_VNI,
+                            primary: true,
+                            slot: 0,
+                        },
+                        external_tls: false,
+                        external_dns_servers: vec![],
+                        nexus_generation: NexusGeneration::new(),
                     },
-                    name: "nexus".parse().unwrap(),
-                    ip: NEXUS_OPTE_IPV4_SUBNET
-                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
-                        .unwrap()
-                        .into(),
-                    mac: macs.next().unwrap(),
-                    subnet: (*NEXUS_OPTE_IPV4_SUBNET).into(),
-                    vni: Vni::SERVICES_VNI,
-                    primary: true,
-                    slot: 0,
-                    transit_ips: vec![],
-                },
-                external_tls: false,
-                external_dns_servers: vec![],
-            }),
-            filesystem_pool: get_random_zpool(),
-            image_source: BlueprintZoneImageSource::InstallDataset,
-        });
+                ),
+                filesystem_pool: get_random_zpool(),
+                image_source: BlueprintZoneImageSource::InstallDataset,
+            })
+            .expect("freshly generated zone IDs are unique");
 
-        internal_services_ip_pool_ranges.push(match ip {
+        match external_ip {
             IpAddr::V4(addr) => {
-                IpRange::V4(Ipv4Range { first: addr, last: addr })
+                internal_services_ipv4_ranges
+                    .push(IpRange::V4(Ipv4Range { first: addr, last: addr }));
             }
             IpAddr::V6(addr) => {
-                IpRange::V6(Ipv6Range { first: addr, last: addr })
+                internal_services_ipv6_ranges
+                    .push(IpRange::V6(Ipv6Range { first: addr, last: addr }));
             }
-        });
+        }
     }
 
     if let Some(external_dns_internal_addr) =
@@ -466,42 +553,48 @@ pub async fn run_standalone_server(
     {
         let ip = *external_dns_internal_addr.ip();
         let id = OmicronZoneUuid::new_v4();
+        let private_ip = DNS_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
+            .unwrap();
+        let ip_config =
+            PrivateIpConfig::new_ipv4(private_ip, *DNS_OPTE_IPV4_SUBNET)
+                .context("creating private IP configuration")?;
         let pool_name = ZpoolName::new_external(ZpoolUuid::new_v4());
-        zones.insert(BlueprintZoneConfig {
-            disposition: BlueprintZoneDisposition::InService,
-            id,
-            zone_type: BlueprintZoneType::ExternalDns(
-                blueprint_zone_type::ExternalDns {
-                    dataset: OmicronZoneDataset { pool_name },
-                    http_address: external_dns_internal_addr,
-                    dns_address: from_sockaddr_to_external_floating_addr(
-                        SocketAddr::V6(external_dns_internal_addr),
-                    ),
-                    nic: nexus_types::inventory::NetworkInterface {
-                        id: Uuid::new_v4(),
-                        kind: NetworkInterfaceKind::Service {
-                            id: id.into_untyped_uuid(),
+        zones
+            .insert_unique(BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id,
+                zone_type: BlueprintZoneType::ExternalDns(
+                    blueprint_zone_type::ExternalDns {
+                        dataset: OmicronZoneDataset { pool_name },
+                        http_address: external_dns_internal_addr,
+                        dns_addresses:
+                            OmicronZoneExternalFloatingAddrs::from_single(
+                                from_sockaddr_to_external_floating_addr(
+                                    SocketAddr::V6(external_dns_internal_addr),
+                                ),
+                            ),
+                        nic: NetworkInterface {
+                            id: Uuid::new_v4(),
+                            kind: NetworkInterfaceKind::Service {
+                                id: id.into_untyped_uuid(),
+                            },
+                            name: "external-dns".parse().unwrap(),
+                            ip_config,
+                            mac: macs.next().unwrap(),
+                            vni: Vni::SERVICES_VNI,
+                            primary: true,
+                            slot: 0,
                         },
-                        name: "external-dns".parse().unwrap(),
-                        ip: DNS_OPTE_IPV4_SUBNET
-                            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
-                            .unwrap()
-                            .into(),
-                        mac: macs.next().unwrap(),
-                        subnet: (*DNS_OPTE_IPV4_SUBNET).into(),
-                        vni: Vni::SERVICES_VNI,
-                        primary: true,
-                        slot: 0,
-                        transit_ips: vec![],
                     },
-                },
-            ),
-            // Co-locate the filesystem pool with the dataset
-            filesystem_pool: pool_name,
-            image_source: BlueprintZoneImageSource::InstallDataset,
-        });
+                ),
+                // Co-locate the filesystem pool with the dataset
+                filesystem_pool: pool_name,
+                image_source: BlueprintZoneImageSource::InstallDataset,
+            })
+            .expect("freshly generated zone IDs are unique");
 
-        internal_services_ip_pool_ranges
+        internal_services_ipv6_ranges
             .push(IpRange::V6(Ipv6Range { first: ip, last: ip }));
     }
 
@@ -534,7 +627,7 @@ pub async fn run_standalone_server(
         for (dataset_id, address) in
             server.sled_agent.get_crucible_datasets(zpool_id)
         {
-            crucible_datasets.push(NexusTypes::CrucibleDatasetCreateRequest {
+            crucible_datasets.push(CrucibleDatasetCreateRequest {
                 zpool_id,
                 dataset_id,
                 address: address.to_string(),
@@ -547,57 +640,126 @@ pub async fn run_standalone_server(
         None => vec![],
     };
 
-    let omicron_physical_disks_config =
-        server.sled_agent.omicron_physical_disks_list()?;
-    let mut sled_configs = BTreeMap::new();
-    sled_configs.insert(
-        config.id,
-        SledConfig {
-            disks: omicron_physical_disks_config
-                .disks
-                .into_iter()
-                .map(|config| BlueprintPhysicalDiskConfig {
-                    disposition: BlueprintPhysicalDiskDisposition::InService,
-                    identity: config.identity,
-                    id: config.id,
-                    pool_id: config.pool_id,
-                })
-                .collect(),
-            datasets: server.sled_agent.datasets_config_list()?.datasets,
-            zones,
-        },
-    );
+    let blueprint = {
+        let sled_config =
+            server.sled_agent.omicron_sled_config().unwrap_or_default();
+        let underlay_address = match server.http_server.local_addr() {
+            SocketAddr::V4(_) => {
+                bail!("sled_agent_ip must be v6")
+            }
+            SocketAddr::V6(addr) => addr,
+        };
 
-    let blueprint = build_initial_blueprint_from_sled_configs(
-        &sled_configs,
-        internal_dns_version,
-    )
-    .context("could not construct initial blueprint")?;
-    let rack_init_request = NexusTypes::RackInitializationRequest {
+        let subnet = Ipv6Subnet::new(*underlay_address.ip());
+        let last_allocated_ip_subnet_offset = LastAllocatedSubnetIpOffset::new(
+            zones
+                .iter()
+                .map(|zone| zone.zone_type.underlay_ip())
+                .filter(|ip| subnet.net().contains(*ip))
+                .map(|ip| ip.segments()[7])
+                .max()
+                .expect("no zones are included in the plan"),
+        );
+
+        let inventory =
+            server.sled_agent.inventory(underlay_address.into()).await?;
+        let mut all_sleds = IdOrdMap::new();
+        all_sleds.insert_overwrite(PlannedSledDescription {
+            underlay_address,
+            sled_id: config.id,
+            subnet,
+            last_allocated_ip_subnet_offset,
+            config: SledConfig {
+                disks: sled_config
+                    .disks
+                    .into_iter()
+                    .map(|config| BlueprintPhysicalDiskConfig {
+                        disposition:
+                            BlueprintPhysicalDiskDisposition::InService,
+                        identity: config.identity,
+                        id: config.id,
+                        pool_id: config.pool_id,
+                    })
+                    .collect(),
+                datasets: sled_config
+                    .datasets
+                    .into_iter()
+                    .map(|config| (config.id, config))
+                    .collect(),
+                zones,
+            },
+        });
+
+        let plan = ServicePlan { all_sleds, dns_config: dns_config.clone() };
+        let generation = inventory
+            .ledgered_sled_config
+            .context(
+                "simulated inventory does not have a ledgered sled config",
+            )?
+            .generation;
+        plan.to_blueprint(generation)
+            .context("could not construct initial blueprint")?
+    };
+
+    let mut service_ip_pools = IdOrdMap::new();
+    if let Ok(service_ipv4_pool) = ServiceIpPoolConfig::new(
+        SERVICE_POOL_IPV4_NAME.parse().unwrap(),
+        String::from("IPv4 IP Pool for Oxide Services"),
+        internal_services_ipv4_ranges,
+    ) {
+        if service_ip_pools.insert_unique(service_ipv4_pool).is_err() {
+            anyhow::bail!(
+                "duplicate IPv4 service pool name: '{SERVICE_POOL_IPV4_NAME}'"
+            );
+        }
+    }
+    if let Ok(service_ipv6_pool) = ServiceIpPoolConfig::new(
+        SERVICE_POOL_IPV6_NAME.parse().unwrap(),
+        String::from("IPv6 IP Pool for Oxide Services"),
+        internal_services_ipv6_ranges,
+    ) {
+        if service_ip_pools.insert_unique(service_ipv6_pool).is_err() {
+            anyhow::bail!(
+                "duplicate IPv6 service pool name: '{SERVICE_POOL_IPV6_NAME}'"
+            );
+        }
+    }
+
+    let rack_init_request = RackInitializationRequest {
         blueprint,
         physical_disks,
         zpools,
         crucible_datasets,
-        internal_services_ip_pool_ranges,
+        service_ip_pools,
         certs,
         internal_dns_zone_config: dns_config,
         external_dns_zone_name: DNS_ZONE_EXTERNAL_TESTING.to_owned(),
         recovery_silo,
-        external_port_count: NexusTypes::ExternalPortDiscovery::Static(
-            HashMap::new(),
-        ),
-        rack_network_config: NexusTypes::RackNetworkConfigV2 {
+        rack_network_config: RackNetworkConfig {
             rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
-            infra_ip_first: Ipv4Addr::LOCALHOST,
-            infra_ip_last: Ipv4Addr::LOCALHOST,
-            ports: Vec::new(),
+            infra_ip_first: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            infra_ip_last: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            // `UplinkPorts` must be non-empty; the simulated rack doesn't
+            // exercise uplinks, so use a single placeholder port.
+            ports: UplinkPorts::new(vec![PortConfig::empty_for_tests("qsfp0")])
+                .expect("placeholder port list is non-empty"),
             bgp: Vec::new(),
             bfd: Vec::new(),
         },
-        allowed_source_ips: NexusTypes::AllowedSourceIps::Any,
+        allowed_source_ips: AllowedSourceIps::Any,
+        initial_trust_quorum_configuration: None,
+        external_jumbo_frames_opt_in_enabled: false,
     };
 
-    handoff_to_nexus(&log, &config, &rack_init_request).await?;
+    let mut nexus_lockstep_address = config.nexus_address;
+    nexus_lockstep_address.set_port(nexus_lockstep_port);
+    handoff_to_nexus(
+        &log,
+        nexus_lockstep_address,
+        config.rack_id,
+        &rack_init_request,
+    )
+    .await?;
     info!(log, "Handoff to Nexus is complete");
 
     server.wait_for_finish().await

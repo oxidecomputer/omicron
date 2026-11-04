@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
-
 //!
 //! Long-running task responsible for tracking the topology of the SPs connected
 //! to the management network switch ports.
@@ -14,6 +12,7 @@
 mod location_map;
 
 pub use self::location_map::LocationConfig;
+pub use self::location_map::LocationDescriptionConfig;
 pub use self::location_map::LocationDeterminationConfig;
 use self::location_map::LocationMap;
 pub use self::location_map::SwitchPortConfig;
@@ -22,6 +21,7 @@ use self::location_map::ValidatedLocationConfig;
 use crate::error::SpCommsError;
 use crate::error::SpLookupError;
 use crate::error::StartupError;
+use dropshot::HttpError;
 use gateway_messages::IgnitionState;
 use gateway_sp_comms::BindError;
 use gateway_sp_comms::HostPhase2Provider;
@@ -29,6 +29,10 @@ use gateway_sp_comms::SharedSocket;
 use gateway_sp_comms::SingleSp;
 use gateway_sp_comms::SpRetryConfig;
 use gateway_sp_comms::default_discovery_addr;
+use gateway_sp_comms::default_ereport_addr;
+use gateway_sp_comms::ereport;
+use gateway_sp_comms::shared_socket;
+use gateway_types::update::SpComponentResetError;
 use serde::Deserialize;
 use serde::Serialize;
 use slog::Logger;
@@ -48,6 +52,8 @@ use tokio::task::JoinHandle;
 pub struct SwitchConfig {
     #[serde(default = "default_udp_listen_port")]
     pub udp_listen_port: u16,
+    #[serde(default = "default_ereport_listen_port")]
+    pub ereport_udp_listen_port: u16,
     pub local_ignition_controller_interface: String,
     pub rpc_retry_config: RetryConfig,
     pub location: LocationConfig,
@@ -77,37 +83,31 @@ fn default_udp_listen_port() -> u16 {
     gateway_sp_comms::MGS_PORT
 }
 
+fn default_ereport_listen_port() -> u16 {
+    gateway_sp_comms::ereport::MGS_PORT
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct SpIdentifier {
     pub typ: SpType,
-    pub slot: usize,
+    pub slot: u16,
 }
 
 impl SpIdentifier {
-    pub fn new(typ: SpType, slot: usize) -> Self {
+    pub fn new(typ: SpType, slot: u16) -> Self {
         Self { typ, slot }
     }
 }
 
 impl From<gateway_types::component::SpIdentifier> for SpIdentifier {
     fn from(id: gateway_types::component::SpIdentifier) -> Self {
-        Self {
-            typ: id.typ.into(),
-            // id.slot may come from an untrusted source, but usize >= 32 bits
-            // on any platform that will run this code, so unwrap is fine
-            slot: usize::try_from(id.slot).unwrap(),
-        }
+        Self { typ: id.typ.into(), slot: id.slot }
     }
 }
 
 impl From<SpIdentifier> for gateway_types::component::SpIdentifier {
     fn from(id: SpIdentifier) -> Self {
-        Self {
-            typ: id.typ.into(),
-            // id.slot comes from a trusted source (crate::management_switch)
-            // and will not exceed u32::MAX
-            slot: u32::try_from(id.slot).unwrap(),
-        }
+        Self { typ: id.typ.into(), slot: id.slot }
     }
 }
 
@@ -161,7 +161,9 @@ pub struct ManagementSwitch {
     // `new()`. We need to hold onto it to prevent it being dropped, though:
     // When it's dropped, it cancels the background tokio task that loops on
     // that socket receiving incoming packets.
-    _shared_socket: Option<SharedSocket>,
+    _shared_socket: Option<SharedSocket<shared_socket::SingleSpMessage>>,
+    // As above, we must also not drop the shared ereport socket.
+    _shared_ereport_socket: Option<SharedSocket<Vec<u8>>>,
     location_map: Arc<OnceLock<Result<LocationMap, String>>>,
     discovery_task: JoinHandle<()>,
     log: Logger,
@@ -186,6 +188,7 @@ impl ManagementSwitch {
         // Convert our config into actual SP handles and sockets, keyed by
         // `SwitchPort` (newtype around an index into `config.port`).
         let mut shared_socket = None;
+        let mut ereport_socket = None;
         let mut port_to_handle = Vec::with_capacity(config.port.len());
         let mut port_to_desc = Vec::with_capacity(config.port.len());
         let mut port_to_ignition_target = Vec::with_capacity(config.port.len());
@@ -202,10 +205,10 @@ impl ManagementSwitch {
                             shared_socket = Some(
                                 SharedSocket::bind(
                                     config.udp_listen_port,
-                                    Arc::clone(&host_phase2_provider),
-                                    log.clone(),
+                                    shared_socket::ControlPlaneAgentHandler::new(&host_phase2_provider),
+                                    log.new(slog::o!("socket" => "control-plane-agent")),
                                 )
-                                .await?,
+                                .await?
                             );
 
                             shared_socket.as_ref().unwrap()
@@ -214,10 +217,28 @@ impl ManagementSwitch {
                         Some(v) => v,
                     };
 
+                    let ereport_socket = match &mut ereport_socket {
+                        None => {
+                            ereport_socket = Some(
+                                SharedSocket::bind(
+                                    config.ereport_udp_listen_port,
+                                    ereport::EreportHandler::default(),
+                                    log.new(slog::o!("socket" => "ereport")),
+                                )
+                                .await?,
+                            );
+
+                            ereport_socket.as_ref().unwrap()
+                        }
+
+                        Some(v) => v,
+                    };
                     SingleSp::new(
                         &socket,
+                        ereport_socket,
                         gateway_sp_comms::SwitchPortConfig {
                             discovery_addr: default_discovery_addr(),
+                            ereport_addr: default_ereport_addr(),
                             interface: interface.clone(),
                         },
                         retry_config,
@@ -225,7 +246,11 @@ impl ManagementSwitch {
                     .await
                 }
 
-                SwitchPortConfig::Simulated { addr, .. } => {
+                SwitchPortConfig::Simulated {
+                    addr,
+                    ereport_addr,
+                    fake_interface,
+                } => {
                     // Bind a new socket for each simulated switch port.
                     let bind_addr: SocketAddrV6 =
                         SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0);
@@ -236,11 +261,25 @@ impl ManagementSwitch {
                                 err,
                             })
                         })?;
+                    let ereport_bind_addr: SocketAddrV6 =
+                        SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0);
+                    let ereport_socket = UdpSocket::bind(ereport_bind_addr)
+                        .await
+                        .map_err(|err| {
+                            StartupError::BindError(BindError {
+                                addr: ereport_bind_addr,
+                                err,
+                            })
+                        })?;
                     SingleSp::new_direct_socket_for_testing(
                         socket,
                         *addr,
+                        ereport_socket,
+                        *ereport_addr,
                         retry_config,
-                        log.clone(),
+                        log.new(
+                            slog::o!("interface" => fake_interface.clone()),
+                        ),
                     )
                 }
             };
@@ -300,6 +339,7 @@ impl ManagementSwitch {
             local_ignition_controller_port,
             location_map,
             _shared_socket: shared_socket,
+            _shared_ereport_socket: ereport_socket,
             port_to_handle,
             port_to_ignition_target,
             discovery_task,
@@ -326,7 +366,59 @@ impl ManagementSwitch {
     /// Get the identifier of our local switch.
     pub fn local_switch(&self) -> Result<SpIdentifier, SpLookupError> {
         let location_map = self.location_map()?;
-        Ok(location_map.port_to_id(self.local_ignition_controller_port))
+        Ok(self.local_switch_via_location_map(location_map))
+    }
+
+    fn local_switch_via_location_map(
+        &self,
+        location_map: &LocationMap,
+    ) -> SpIdentifier {
+        location_map.port_to_id(self.local_ignition_controller_port)
+    }
+
+    /// Determine whether it's valid to issue an SP reset to `id`.
+    ///
+    /// # Errors
+    ///
+    /// This method will fail if discovery is not yet complete (i.e., we don't
+    /// know the logical identifiers of any SP yet!), or if `id` corresponds to
+    /// our local sled or switch and our config prevents resetting them.
+    pub(crate) fn validate_sp_reset_is_allowed(
+        &self,
+        id: SpIdentifier,
+    ) -> Result<(), SpComponentResetError> {
+        // Error conversion here is a little awkward. If we don't yet have our
+        // location map, we can convert that error into an
+        // `SpComponentResetError` by travelling through `HttpError`, which
+        // turns into `SpComponentResetError::Other { .. }`.
+        let location_map = self.location_map().map_err(HttpError::from)?;
+
+        // If our config allows us to reset local SPs, we have nothing to
+        // validate.
+        if location_map.allow_local_sp_reset() {
+            return Ok(());
+        }
+
+        // Otherwise, check whether `id` corresponds to our local sled or
+        // switch.
+        match id.typ {
+            // PSCs are never local to an MGS.
+            SpType::Power => Ok(()),
+            SpType::Switch => {
+                if id == self.local_switch_via_location_map(location_map) {
+                    Err(SpComponentResetError::ResetSpOfLocalSwitch)
+                } else {
+                    Ok(())
+                }
+            }
+            SpType::Sled => {
+                if id.slot == location_map.local_sled() {
+                    Err(SpComponentResetError::ResetSpOfLocalSled)
+                } else {
+                    Ok(())
+                }
+            }
+        }
     }
 
     /// Get the handle for communicating with an SP by its switch port.

@@ -4,82 +4,120 @@
 
 //! Sled agent implementation
 
-use crate::artifact_store::ArtifactStore;
-use crate::boot_disk_os_writer::BootDiskOsWriter;
-use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
-use crate::bootstrap::early_networking::EarlyNetworkSetupError;
+use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
+use crate::bootstrap::{MultirackJoinAccessor, RssAccessError};
 use crate::config::Config;
+use crate::hardware_monitor::HardwareMonitorHandle;
 use crate::instance_manager::InstanceManager;
 use crate::long_running_tasks::LongRunningTaskHandles;
-use crate::metrics::MetricsManager;
+use crate::metrics::{MetricsManager, MetricsRequestQueue};
 use crate::nexus::{
     NexusClient, NexusNotifierHandle, NexusNotifierInput, NexusNotifierTask,
 };
-use crate::params::OmicronZoneTypeExt;
 use crate::probe_manager::ProbeManager;
-use crate::services::{self, ServiceManager};
-use crate::storage_monitor::StorageMonitorHandle;
+use crate::rot::{RotAttestationHandle, RotAttestationTask};
+use crate::services::{self, ServiceManager, SledAgentInfo};
 use crate::support_bundle::logs::SupportBundleLogs;
 use crate::support_bundle::storage::SupportBundleManager;
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
 use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
+use anyhow::anyhow;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use derive_more::From;
 use dropshot::HttpError;
-use futures::StreamExt;
-use futures::stream::FuturesUnordered;
+use iddqd::IdHashMap;
 use illumos_utils::opte::PortManager;
-use nexus_sled_agent_shared::inventory::{
-    Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
-    OmicronSledConfig, OmicronSledConfigResult, OmicronZonesConfig, SledRole,
-};
+use illumos_utils::running_zone::RunningZone;
+use illumos_utils::zfs::CanMount;
+use illumos_utils::zfs::DatasetEnsureArgs;
+use illumos_utils::zfs::DatasetVolumeDeleteArgs;
+use illumos_utils::zfs::DatasetVolumeEnsureArgs;
+use illumos_utils::zfs::DestroyDatasetErrorVariant;
+use illumos_utils::zfs::Mountpoint;
+use illumos_utils::zfs::RemoveReservationError;
+use illumos_utils::zfs::RemoveReservationErrorInner;
+use illumos_utils::zfs::SizeDetails;
+use illumos_utils::zfs::Zfs;
+use itertools::Itertools as _;
+use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_common::address::{
-    Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
+    Ipv6Subnet, SLED_PREFIX_LENGTH, get_sled_address,
 };
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
-use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
+use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::{
-    ExternalIpGatewayMap, HostPortConfig, RackNetworkConfig,
-    ResolvedVpcFirewallRule, ResolvedVpcRouteSet, ResolvedVpcRouteState,
+    ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
     SledIdentifiers, VirtualNetworkInterfaceHost,
 };
-use omicron_common::backoff::{
-    BackoffError, retry_notify, retry_policy_internal_service_aggressive,
-};
-use omicron_common::disk::{
-    DatasetsConfig, DatasetsManagementResult, DisksManagementResult,
-    OmicronPhysicalDisksConfig,
-};
+use omicron_common::zpool_name::ZpoolName;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
-use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid};
-use sled_agent_api::Zpool;
-use sled_agent_types::disk::DiskStateRequested;
-use sled_agent_types::early_networking::EarlyNetworkConfig;
-use sled_agent_types::instance::{
-    InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateResponse,
-    VmmStateRequested, VmmUnregisterResponse,
+use omicron_uuid_kinds::{
+    GenericUuid, MupdateOverrideUuid, PropolisUuid, SledUuid,
 };
-use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
-use sled_agent_types::time_sync::TimeSync;
+use oximeter_instruments::http::LatencyTracker;
+use oxnet::IpNet;
+use sled_agent_bootstrap_common::sprockets::{
+    SprocketsClient, SprocketsClientError,
+};
+use sled_agent_config_reconciler::PathInPool;
+use sled_agent_config_reconciler::{
+    ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
+    InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
+    ReconcilerInventory, SledAgentFacilities,
+};
+use sled_agent_health_monitor::handle::HealthMonitorHandle;
+use sled_agent_measurements::MeasurementsHandle;
+use sled_agent_scrimlet_reconcilers::{
+    ScrimletReconcilersMode, SledAgentNetworkingInfo,
+};
+use sled_agent_types::attached_subnet::AttachedSubnet;
+use sled_agent_types::attached_subnet::AttachedSubnets;
+use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
+use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
+use sled_agent_types::disk::CompressionAlgorithm;
+use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
+use sled_agent_types::instance::ResolvedVpcFirewallRule;
+use sled_agent_types::instance::{
+    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
+    SledVmmState, VmmPutStateResponse, VmmStateRequested,
+    VmmUnregisterResponse,
+};
+use sled_agent_types::inventory::{Inventory, OmicronSledConfig, SledRole};
+use sled_agent_types::multirack::MultirackJoinServiceStatus;
+use sled_agent_types::probes::ProbeCreate;
+use sled_agent_types::resolvable_files::{
+    PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
+};
+use sled_agent_types::rot::Rot;
+use sled_agent_types::sled::{
+    StartSledAgentRequest, ThisSledSwitchZoneUnderlayIpAddr,
+};
+use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleMetadata,
 };
-use sled_diagnostics::{SledDiagnosticsCmdError, SledDiagnosticsCmdOutput};
+use sled_diagnostics::SledDiagnosticsCmdError;
+use sled_diagnostics::SledDiagnosticsCmdOutput;
 use sled_hardware::{HardwareManager, MemoryReservations, underlay};
 use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use sled_hardware_types::underlay::BootstrapInterface;
-use sled_storage::manager::StorageHandle;
 use slog::Logger;
+use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeMap;
-use std::net::{Ipv6Addr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
+use tokio::net::TcpStream;
+use tokio::sync::watch;
+use tokio::task::JoinSet;
+use trust_quorum::platform_id_to_baseboard_id;
 use uuid::Uuid;
 
-use illumos_utils::dladm::Dladm;
+use illumos_utils::dladm::{Dladm, EtherstubVnic};
 use illumos_utils::zone::Api;
 use illumos_utils::zone::Zones;
 
@@ -88,79 +126,67 @@ pub enum Error {
     #[error("Could not find boot disk")]
     BootDiskNotFound,
 
-    #[error("Configuration error: {0}")]
+    #[error("Configuration error")]
     Config(#[from] crate::config::ConfigError),
 
-    #[error("Error setting up backing filesystems: {0}")]
+    #[error("Error setting up backing filesystems")]
     BackingFs(#[from] crate::backing_fs::BackingFsError),
 
-    #[error("Error setting up swap device: {0}")]
+    #[error("Error setting up swap device")]
     SwapDevice(#[from] crate::swap_device::SwapDeviceError),
 
-    #[error("Failed to acquire etherstub: {0}")]
-    Etherstub(illumos_utils::ExecutionError),
+    #[error("Failed to acquire etherstub")]
+    Etherstub(#[source] illumos_utils::ExecutionError),
 
-    #[error("Failed to acquire etherstub VNIC: {0}")]
-    EtherstubVnic(illumos_utils::dladm::CreateVnicError),
+    #[error("Failed to acquire etherstub VNIC")]
+    EtherstubVnic(#[source] illumos_utils::dladm::CreateVnicError),
 
-    #[error("Bootstrap error: {0}")]
+    #[error("Bootstrap error")]
     Bootstrap(#[from] crate::bootstrap::BootstrapError),
 
-    #[error("Failed to remove Omicron address: {0}")]
+    #[error("Failed to remove Omicron address")]
     DeleteAddress(#[from] illumos_utils::ExecutionError),
 
-    #[error("Failed to operate on underlay device: {0}")]
+    #[error("Failed to operate on underlay device")]
     Underlay(#[from] underlay::Error),
-
-    #[error("Failed to request firewall rules")]
-    FirewallRequest(#[source] nexus_client::Error<nexus_client::types::Error>),
 
     #[error(transparent)]
     Services(#[from] crate::services::Error),
 
-    #[error("Failed to create Sled Subnet: {err}")]
-    SledSubnet { err: illumos_utils::zone::EnsureGzAddressError },
+    #[error("Failed to create Sled Subnet")]
+    SledSubnet {
+        #[source]
+        err: illumos_utils::zone::EnsureGzAddressError,
+    },
 
-    #[error("Error managing instances: {0}")]
+    #[error("Error managing instances")]
     Instance(#[from] crate::instance_manager::Error),
 
-    #[error("Error managing storage: {0}")]
-    Storage(#[from] sled_storage::error::Error),
-
-    #[error("Error monitoring storage: {0}")]
-    StorageMonitor(#[from] crate::storage_monitor::Error),
-
-    #[error("Error updating: {0}")]
-    Download(#[from] crate::updates::Error),
-
-    #[error("Error managing guest networking: {0}")]
+    #[error("Error managing guest networking")]
     Opte(#[from] illumos_utils::opte::Error),
 
     #[error("Error monitoring hardware: {0}")]
     Hardware(String),
 
-    #[error("Error resolving DNS name: {0}")]
+    #[error("Error resolving DNS name")]
     ResolveError(#[from] internal_dns_resolver::ResolveError),
 
     #[error(transparent)]
     ZpoolList(#[from] illumos_utils::zpool::ListError),
 
-    #[error(transparent)]
-    EarlyNetworkError(#[from] EarlyNetworkSetupError),
-
-    #[error("Bootstore Error: {0}")]
+    #[error("Bootstore Error")]
     Bootstore(#[from] bootstore::NodeRequestError),
 
-    #[error("Failed to deserialize early network config: {0}")]
-    EarlyNetworkDeserialize(serde_json::Error),
+    #[error("Failed to deserialize early network config")]
+    EarlyNetworkDeserialize(#[source] serde_json::Error),
 
     #[error("Support bundle error: {0}")]
     SupportBundle(String),
 
-    #[error("Zone bundle error: {0}")]
+    #[error("Zone bundle error")]
     ZoneBundle(#[from] BundleError),
 
-    #[error("Metrics error: {0}")]
+    #[error("Metrics error")]
     Metrics(#[from] crate::metrics::Error),
 
     #[error("Expected revision to fit in a u32, but found {0}")]
@@ -168,6 +194,15 @@ pub enum Error {
 
     #[error(transparent)]
     RepoDepotStart(#[from] crate::artifact_store::StartError),
+
+    #[error("Time not yet synchronized")]
+    TimeNotSynchronized,
+
+    #[error(transparent)]
+    Rot(#[from] crate::rot::RotError),
+
+    #[error("Failed to complete multirack join request")]
+    MultirackJoin(#[from] crate::bootstrap::RssAccessError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -175,9 +210,8 @@ impl From<Error> for omicron_common::api::external::Error {
         match err {
             // Some errors can convert themselves into the external error
             Error::Services(err) => err.into(),
-            Error::Storage(err) => err.into(),
             _ => omicron_common::api::external::Error::InternalError {
-                internal_message: err.to_string(),
+                internal_message: InlineErrorChain::new(&err).to_string(),
             },
         }
     }
@@ -186,26 +220,29 @@ impl From<Error> for omicron_common::api::external::Error {
 // Provide a more specific HTTP error for some sled agent errors.
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
+        use crate::instance::Error as InstanceError;
+        use crate::instance_manager::Error as InstanceManagerError;
         use dropshot::ClientErrorStatusCode;
         use dropshot::ErrorStatusCode;
 
         const NO_SUCH_INSTANCE: &str = "NO_SUCH_INSTANCE";
         const INSTANCE_CHANNEL_FULL: &str = "INSTANCE_CHANNEL_FULL";
+        const SUBNET_ALREADY_ATTACHED: &str = "SUBNET_ALREADY_ATTACHED";
         match err {
-            Error::Instance(crate::instance_manager::Error::Instance(
-                instance_error,
-            )) => {
+            Error::Instance(InstanceManagerError::Instance(instance_error)) => {
                 match instance_error {
                     // The instance's request channel is full, so it cannot
                     // currently process this request. Shed load, but indicate
                     // to the client that it can try again later.
-                    err @ crate::instance::Error::FailedSendChannelFull => {
+                    err @ InstanceError::FailedSendChannelFull => {
                         HttpError::for_unavail(
                             Some(INSTANCE_CHANNEL_FULL.to_string()),
-                            err.to_string(),
+                            // InlineErrorChain isn't really necessary here, but include it anyway,
+                            // in case the code that returns it starts using #[from] one day.
+                            InlineErrorChain::new(&err).to_string(),
                         )
                     }
-                    crate::instance::Error::Propolis(propolis_error) => {
+                    InstanceError::Propolis(propolis_error) => {
                         if let Some(status_code) =
                             propolis_error.status().and_then(|status| {
                                 ErrorStatusCode::try_from(status).ok()
@@ -233,27 +270,86 @@ impl From<Error> for dropshot::HttpError {
                             propolis_error.to_string(),
                         )
                     }
-                    crate::instance::Error::Transition(omicron_error) => {
+                    InstanceError::Transition(omicron_error) => {
                         // Preserve the status associated with the wrapped
                         // Omicron error so that Nexus will see it in the
                         // Progenitor client error it gets back.
                         HttpError::from(omicron_error)
                     }
-                    crate::instance::Error::Terminating => {
+                    InstanceError::Terminating => {
                         HttpError::for_client_error(
                             Some(NO_SUCH_INSTANCE.to_string()),
                             ClientErrorStatusCode::GONE,
-                            instance_error.to_string(),
+                            // InlineErrorChain isn't strictly necessary for this type of error,
+                            // but we might as well be consistent, in case that changes in the
+                            // future.
+                            InlineErrorChain::new(&instance_error).to_string(),
                         )
                     }
-                    e => HttpError::for_internal_error(e.to_string()),
+                    err @ InstanceError::SubnetAlreadyAttached(_) => {
+                        HttpError::for_client_error(
+                            Some(SUBNET_ALREADY_ATTACHED.to_string()),
+                            ClientErrorStatusCode::CONFLICT,
+                            // As above, InlineErrorChain isn't strictly necessary here.
+                            InlineErrorChain::new(&err).to_string(),
+                        )
+                    }
+                    err @ (InstanceError::Timeout(_)
+                    | InstanceError::VnicCreation(_)
+                    | InstanceError::Notification(_)
+                    | InstanceError::Migration(_)
+                    | InstanceError::NicNotInPropolisSpec(_)
+                    | InstanceError::ZoneCommand(_)
+                    | InstanceError::ZoneBoot(_)
+                    | InstanceError::ZoneEnsureAddress(_)
+                    | InstanceError::ZoneInstall(_)
+                    | InstanceError::SerdeJsonError(_)
+                    | InstanceError::Opte(_)
+                    | InstanceError::InvalidHostname(_)
+                    | InstanceError::ResolveError(_)
+                    | InstanceError::VmNotRunning(_)
+                    | InstanceError::PropolisAlreadyRegistered(_)
+                    | InstanceError::U2NotFound
+                    | InstanceError::Io(_)
+                    | InstanceError::FailedSendChannelClosed
+                    | InstanceError::FailedSendClientClosed
+                    | InstanceError::RequestDropped(_)) => {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&err).to_string(),
+                        )
+                    }
                 }
             }
+            Error::Instance(e @ InstanceManagerError::NoSuchVmm(_)) => {
+                HttpError::for_not_found(
+                    Some(NO_SUCH_INSTANCE.to_string()),
+                    // NoSuchVmm has no source error, so it's currently not
+                    // necessary to use a chain-logging adapter here, but if
+                    // that changes in the future, the compiler won't complain.
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            }
             Error::Instance(
-                e @ crate::instance_manager::Error::NoSuchVmm(_),
-            ) => HttpError::for_not_found(
-                Some(NO_SUCH_INSTANCE.to_string()),
-                e.to_string(),
+                e @ InstanceManagerError::VmmRegistrationDisallowed(reason),
+            ) => {
+                HttpError::for_unavail(
+                    Some(reason.http_error_code().to_string()),
+                    // VmmRegistrationDisallowed has no source error, so it's
+                    // currently not necessary to use a chain-logging adapter
+                    // here, but if that changes in the future, the compiler
+                    // won't complain.
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            }
+            err @ Error::Instance(
+                InstanceManagerError::Opte(_)
+                | InstanceManagerError::Underlay(_)
+                | InstanceManagerError::ZoneBundle(_)
+                | InstanceManagerError::FailedSendInstanceManagerClosed
+                | InstanceManagerError::FailedSendClientClosed
+                | InstanceManagerError::RequestDropped(_),
+            ) => HttpError::for_internal_error(
+                InlineErrorChain::new(&err).to_string(),
             ),
             Error::ZoneBundle(ref inner) => match inner {
                 BundleError::NoStorage | BundleError::Unavailable { .. } => {
@@ -274,13 +370,64 @@ impl From<Error> for dropshot::HttpError {
                         inner.to_string(),
                     )
                 }
-                _ => HttpError::for_internal_error(err.to_string()),
+                err @ (BundleError::Command { .. }
+                | BundleError::CreateDirectory { .. }
+                | BundleError::OpenBundleFile { .. }
+                | BundleError::AddBundleData { .. }
+                | BundleError::ReadBundleData { .. }
+                | BundleError::CopyArchive { .. }
+                | BundleError::ReadDirectory { .. }
+                | BundleError::Metadata { .. }
+                | BundleError::Serialization(_)
+                | BundleError::Deserialization(_)
+                | BundleError::Task(_)
+                | BundleError::FailedSend(_)
+                | BundleError::DroppedRequest(_)
+                | BundleError::BundleFailed(_)
+                | BundleError::Zone(_)
+                | BundleError::PathBuf(_)
+                | BundleError::Cleanup(_)
+                | BundleError::CreateSnapshot(_)
+                | BundleError::DestroySnapshot(_)
+                | BundleError::ListSnapshot(_)
+                | BundleError::EnsureDataset(_)
+                | BundleError::DestroyDataset(_)
+                | BundleError::ListDatasets(_)
+                | BundleError::SetProperty(_)
+                | BundleError::GetProperty(_)
+                | BundleError::WalkDir(_)) => HttpError::for_internal_error(
+                    InlineErrorChain::new(&err).to_string(),
+                ),
             },
             Error::Services(err) => {
                 let err = omicron_common::api::external::Error::from(err);
                 err.into()
             }
-            e => HttpError::for_internal_error(e.to_string()),
+            err @ (Error::BootDiskNotFound
+            | Error::Config(_)
+            | Error::BackingFs(_)
+            | Error::SwapDevice(_)
+            | Error::Etherstub(_)
+            | Error::EtherstubVnic(_)
+            | Error::Bootstrap(_)
+            | Error::DeleteAddress(_)
+            | Error::Underlay(_)
+            | Error::SledSubnet { .. }
+            | Error::Opte(_)
+            | Error::Hardware(_)
+            | Error::ResolveError(_)
+            | Error::ZpoolList(_)
+            | Error::Bootstore(_)
+            | Error::EarlyNetworkDeserialize(_)
+            | Error::SupportBundle(_)
+            | Error::Metrics(_)
+            | Error::UnexpectedRevision(_)
+            | Error::RepoDepotStart(_)
+            | Error::TimeNotSynchronized
+            | Error::MultirackJoin(_)
+            | Error::Rot(_)) => HttpError::for_internal_error(
+                InlineErrorChain::new(&err).to_string(),
+            ),
         }
     }
 }
@@ -293,16 +440,18 @@ pub enum InventoryError {
     // system.
     #[error(transparent)]
     BadByteCount(#[from] ByteCountRangeError),
+    #[error(transparent)]
+    InventoryError(#[from] sled_agent_config_reconciler::InventoryError),
 }
 
 impl From<InventoryError> for omicron_common::api::external::Error {
     fn from(inventory_error: InventoryError) -> Self {
         match inventory_error {
-            e @ InventoryError::BadByteCount(..) => {
-                omicron_common::api::external::Error::internal_error(&format!(
-                    "{:#}",
-                    e
-                ))
+            e @ (InventoryError::BadByteCount(..)
+            | InventoryError::InventoryError(_)) => {
+                omicron_common::api::external::Error::internal_error(
+                    &InlineErrorChain::new(&e).to_string(),
+                )
             }
         }
     }
@@ -324,18 +473,14 @@ struct SledAgentInner {
     // Subnet of the Sled's underlay.
     //
     // The Sled Agent's address can be derived from this value.
-    subnet: Ipv6Subnet<SLED_PREFIX>,
+    subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
 
     // The request that was used to start the sled-agent
     // This is used for idempotence checks during RSS/Add-Sled internal APIs
     start_request: StartSledAgentRequest,
 
-    // Component of Sled Agent responsible for storage and dataset management.
-    storage: StorageHandle,
-
-    // Component of Sled Agent responsible for monitoring storage and updating
-    // dump devices.
-    storage_monitor: StorageMonitorHandle,
+    // Handle to the sled-agent-config-reconciler system.
+    config_reconciler: Arc<ConfigReconcilerHandle>,
 
     // Component of Sled Agent responsible for managing Propolis instances.
     instances: InstanceManager,
@@ -349,14 +494,11 @@ struct SledAgentInner {
     // Other Oxide-controlled services running on this Sled.
     services: ServiceManager,
 
-    // Connection to Nexus.
-    nexus_client: NexusClient,
-
     // A mechanism for notifiying nexus about sled-agent updates
     nexus_notifier: NexusNotifierHandle,
 
-    // The rack network config provided at RSS time.
-    rack_network_config: Option<RackNetworkConfig>,
+    // A handle to the RoT for attestation requests.
+    rot_attestor: RotAttestationHandle,
 
     // Object managing zone bundles.
     zone_bundler: zone_bundle::ZoneBundler,
@@ -364,17 +506,29 @@ struct SledAgentInner {
     // A handle to the bootstore.
     bootstore: bootstore::NodeHandle,
 
-    // Object handling production of metrics for oximeter.
-    _metrics_manager: MetricsManager,
+    // A handle to the trust quorum.
+    trust_quorum: trust_quorum::NodeTaskHandle,
 
-    // Handle to the traffic manager for writing OS updates to our boot disks.
-    boot_disk_os_writer: BootDiskOsWriter,
+    // A handle to the hardware monitor.
+    hardware_monitor: HardwareMonitorHandle,
+
+    // A handle to the health monitor.
+    health_monitor: HealthMonitorHandle,
+
+    // Object handling production of metrics for oximeter.
+    metrics_manager: MetricsManager,
 
     // Component of Sled Agent responsible for managing instrumentation probes.
     probes: ProbeManager,
 
     // Component of Sled Agent responsible for managing the artifact store.
-    repo_depot: dropshot::HttpServer<ArtifactStore<StorageHandle>>,
+    repo_depot: dropshot::HttpServer<Arc<ArtifactStore<InternalDisksReceiver>>>,
+
+    // Handle to access reference measurements for Sprockets/TrustQuorum
+    measurements: Arc<MeasurementsHandle>,
+
+    // A mechanism to access a multirack join service task
+    multirack_join_accessor: MultirackJoinAccessor,
 }
 
 impl SledAgentInner {
@@ -382,8 +536,10 @@ impl SledAgentInner {
         get_sled_address(self.subnet)
     }
 
-    fn switch_zone_ip(&self) -> Ipv6Addr {
-        get_switch_zone_address(self.subnet)
+    fn switch_zone_ip(&self) -> ThisSledSwitchZoneUnderlayIpAddr {
+        ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(
+            &self.start_request,
+        )
     }
 }
 
@@ -396,6 +552,7 @@ pub struct SledAgent {
 
 impl SledAgent {
     /// Initializes a new [`SledAgent`] object.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         config: &Config,
         log: Logger,
@@ -403,6 +560,8 @@ impl SledAgent {
         request: StartSledAgentRequest,
         services: ServiceManager,
         long_running_task_handles: LongRunningTaskHandles,
+        config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
+        multirack_join_accessor: MultirackJoinAccessor,
     ) -> Result<SledAgent, Error> {
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
@@ -419,13 +578,15 @@ impl SledAgent {
         sled_diagnostics::LogsHandle::new(
             log.new(o!("component" => "sled-diagnostics-cleanup")),
         )
-        .cleanup_snapshots();
+        .cleanup_snapshots()
+        .await;
 
-        let storage_manager = &long_running_task_handles.storage_manager;
-        let boot_disk = storage_manager
-            .get_latest_disks()
-            .await
-            .boot_disk()
+        let config_reconciler =
+            Arc::clone(&long_running_task_handles.config_reconciler);
+        let boot_disk_zpool = config_reconciler
+            .internal_disks_rx()
+            .current()
+            .boot_disk_zpool_name()
             .ok_or_else(|| Error::BootDiskNotFound)?;
 
         // Configure a swap device of the configured size before other system setup.
@@ -434,7 +595,7 @@ impl SledAgent {
                 info!(log, "Requested swap device of size {} GiB", sz);
                 crate::swap_device::ensure_swap_device(
                     &parent_log,
-                    &boot_disk.1,
+                    &boot_disk_zpool,
                     sz,
                 )?;
             }
@@ -447,7 +608,8 @@ impl SledAgent {
         }
 
         info!(log, "Mounting backing filesystems");
-        crate::backing_fs::ensure_backing_fs(&parent_log, &boot_disk.1)?;
+        crate::backing_fs::ensure_backing_fs(&parent_log, &boot_disk_zpool)
+            .await?;
 
         // TODO-correctness Bootstrap-agent already ensures the underlay
         // etherstub and etherstub VNIC exist on startup - could it pass them
@@ -455,8 +617,10 @@ impl SledAgent {
         let etherstub = Dladm::ensure_etherstub(
             illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
         )
+        .await
         .map_err(|e| Error::Etherstub(e))?;
         let etherstub_vnic = Dladm::ensure_etherstub_vnic(&etherstub)
+            .await
             .map_err(|e| Error::EtherstubVnic(e))?;
 
         // Ensure the global zone has a functioning IPv6 address.
@@ -466,16 +630,17 @@ impl SledAgent {
             *sled_address.ip(),
             "sled6",
         )
+        .await
         .map_err(|err| Error::SledSubnet { err })?;
 
         // Initialize the xde kernel driver with the underlay devices.
-        let underlay_nics = underlay::find_nics(&config.data_links)?;
+        let underlay_nics = underlay::find_nics(&config.data_links).await?;
         illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
 
         // Start collecting metric data.
         let baseboard = long_running_task_handles.hardware_manager.baseboard();
         let identifiers = SledIdentifiers {
-            rack_id: request.body.rack_id,
+            rack_id: request.body.rack_id.into_untyped_uuid(),
             sled_id: request.body.id.into_untyped_uuid(),
             model: baseboard.model().to_string(),
             revision: baseboard.revision(),
@@ -485,7 +650,7 @@ impl SledAgent {
             MetricsManager::new(&log, identifiers.clone(), *sled_address.ip())?;
 
         // Start tracking the underlay physical links.
-        for link in underlay::find_chelsio_links(&config.data_links)? {
+        for link in underlay::find_chelsio_links(&config.data_links).await? {
             match metrics_manager
                 .request_queue()
                 .track_physical("global", &link.0)
@@ -499,6 +664,18 @@ impl SledAgent {
                     "error" => slog_error_chain::InlineErrorChain::new(&e),
                 ),
             }
+        }
+
+        // Start tracking sled-level stats (CPU, zones).
+        match metrics_manager.request_queue().track_sled_stats() {
+            Ok(_) => {
+                debug!(log, "started tracking sled stats")
+            }
+            Err(e) => error!(
+                log,
+                "failed to track CPU metrics";
+                "error" => slog_error_chain::InlineErrorChain::new(&e),
+            ),
         }
 
         // Create the PortManager to manage all the OPTE ports on the sled.
@@ -537,77 +714,125 @@ impl SledAgent {
             nexus_client.clone(),
             instance_vnic_allocator,
             port_manager.clone(),
-            storage_manager.clone(),
+            config_reconciler.currently_managed_zpools_rx().clone(),
+            config_reconciler.available_datasets_rx(),
             long_running_task_handles.zone_bundler.clone(),
             vmm_reservoir_manager.clone(),
             metrics_manager.request_queue(),
+            config_reconciler_spawn_token.subscribe_update_disposition(),
         )?;
 
-        let svc_config =
-            services::Config::new(identifiers, config.sidecar_revision.clone());
+        let svc_config = services::Config::new(
+            identifiers,
+            config.deployment.sidecar_revision(),
+        );
 
-        // Get our rack network config from the bootstore; we cannot proceed
-        // until we have this, as we need to know which switches have uplinks to
-        // correctly set up services.
-        let get_network_config = || async {
-            let serialized_config = long_running_task_handles
-                .bootstore
-                .get_network_config()
-                .await
-                .map_err(|err| BackoffError::transient(err.to_string()))?
-                .ok_or_else(|| {
-                    BackoffError::transient(
-                        "Missing early network config in bootstore".to_string(),
-                    )
-                })?;
+        // Get our system network config from the bootstore; we cannot proceed
+        // until we have this, as we need to set up uplinks inside the switch
+        // zone (if we're a scrimlet) and configure services that need NAT
+        // entries in dendrite (if we start any such services).
+        let mut bootstore_network_config_rx =
+            long_running_task_handles.bootstore.network_config_subscribe();
+        let network_config = loop {
+            let maybe_serialized_config =
+                bootstore_network_config_rx.borrow_and_update().clone();
 
-            let early_network_config =
-                EarlyNetworkConfig::deserialize_bootstore_config(
-                    &log,
-                    &serialized_config,
-                )
-                .map_err(|err| BackoffError::transient(err.to_string()))?;
+            // If we don't have a network config at all yet, wait until the
+            // watch channel changes then try again.
+            let Some(serialized_config) = maybe_serialized_config else {
+                warn!(log, "Waiting for network config from bootstore");
+                bootstore_network_config_rx
+                    .changed()
+                    .await
+                    .expect("bootstore task never exits");
+                continue;
+            };
 
-            Ok(early_network_config.body.rack_network_config)
-        };
-        let rack_network_config: Option<RackNetworkConfig> =
-            retry_notify::<_, String, _, _, _, _>(
-                retry_policy_internal_service_aggressive(),
-                get_network_config,
-                |error, delay| {
+            // We _should_ always be able to deserialize the raw config from the
+            // bootstore, but if we can't, log an error and wait for it to
+            // change; an operator may be able to fix it and push new contents.
+            match EarlyNetworkConfigEnvelope::deserialize_from_bootstore(
+                &serialized_config,
+            )
+            .and_then(|envelope| envelope.deserialize_body())
+            {
+                Ok(network_config) => {
+                    break network_config;
+                }
+                Err(err) => {
                     warn!(
                         log,
-                        "failed to get network config from bootstore";
-                        "error" => ?error,
-                        "retry_after" => ?delay,
+                        "failed to deserialize network config from bootstore; \
+                         will wait for new config then try again";
+                        InlineErrorChain::new(&err),
                     );
-                },
-            )
-            .await
-            .expect(
-                "Expected an infinite retry loop getting \
-             network config from bootstore",
-            );
+                    bootstore_network_config_rx
+                        .changed()
+                        .await
+                        .expect("bootstore task never exits");
+                    continue;
+                }
+            };
+        };
+
+        // Spawn a task responsible for forwarding any changes to the rack
+        // network config from the bootstore back to us fully-deserialized.
+        //
+        // This is spiritually a "long-running task", but we can't spawn it with
+        // the other long-running tasks because it can't begin prior to this
+        // point: we must have already received and successfully deserialized a
+        // `SystemNetworkingConfig`.
+        let (network_config_tx, network_config_rx) =
+            watch::channel(network_config);
+        tokio::spawn(network_config_deserialization_task(
+            bootstore_network_config_rx,
+            network_config_tx,
+            parent_log
+                .new(o!("component" => "NetworkConfigDeserializationTask")),
+        ));
+
+        // Hand our scrimlet reconcilers the information they need, now that we
+        // have it available.
+        let this_sled_switch_zone_ip =
+            ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(&request);
+        long_running_task_handles
+            .scrimlet_reconcilers
+            .set_sled_agent_networking_info_once(SledAgentNetworkingInfo {
+                system_networking_config_rx: network_config_rx,
+                mode: ScrimletReconcilersMode::SwitchZone(
+                    this_sled_switch_zone_ip,
+                ),
+            });
+
+        // Start reconciling against our ledgered sled config.
+        config_reconciler.spawn_reconciliation_task(
+            ReconcilerFacilities {
+                etherstub_vnic,
+                service_manager: services.clone(),
+                metrics_queue: metrics_manager.request_queue(),
+            },
+            SledAgentArtifactStoreWrapper(Arc::clone(
+                &long_running_task_handles.artifact_store,
+            )),
+            long_running_task_handles.trust_quorum.committed_epoch_rx(),
+            config_reconciler_spawn_token,
+        );
 
         services
-            .sled_agent_started(
-                svc_config,
-                port_manager.clone(),
-                *sled_address.ip(),
-                request.body.rack_id,
-                rack_network_config.clone(),
-                metrics_manager.request_queue(),
-            )
+            .sled_agent_started(SledAgentInfo {
+                config: svc_config,
+                port_manager: port_manager.clone(),
+                underlay_address: *sled_address.ip(),
+                local_switch_zone_ip: this_sled_switch_zone_ip,
+                rack_id: request.body.rack_id,
+                metrics_queue: metrics_manager.request_queue(),
+            })
             .await?;
 
-        let repo_depot = ArtifactStore::new(
-            &log,
-            storage_manager.clone(),
-            Some(services.clone()),
-        )
-        .await
-        .start(sled_address, &config.dropshot)
-        .await?;
+        let repo_depot = long_running_task_handles
+            .artifact_store
+            .start(sled_address, &config.dropshot)
+            .await?;
 
         // Spawn a background task for managing notifications to nexus
         // about this sled-agent.
@@ -626,14 +851,19 @@ impl SledAgent {
             nexus_notifier_task.run().await;
         });
 
+        // Spawn a background task for handling RoT attestation operations
+        let rot_attest_handle =
+            RotAttestationTask::launch(&log, &config.sprockets.attest)?;
+
+        let currently_managed_zpools_rx =
+            config_reconciler.currently_managed_zpools_rx().clone();
         let probes = ProbeManager::new(
-            request.body.id.into_untyped_uuid(),
-            nexus_client.clone(),
             etherstub.clone(),
-            storage_manager.clone(),
             port_manager.clone(),
             metrics_manager.request_queue(),
+            config_reconciler.available_datasets_rx(),
             log.new(o!("component" => "ProbeManager")),
+            currently_managed_zpools_rx,
         );
 
         let sled_agent = SledAgent {
@@ -641,29 +871,31 @@ impl SledAgent {
                 id: request.body.id,
                 subnet: request.body.subnet,
                 start_request: request,
-                storage: long_running_task_handles.storage_manager.clone(),
-                storage_monitor: long_running_task_handles
-                    .storage_monitor_handle
-                    .clone(),
+                config_reconciler,
                 instances,
                 probes,
                 hardware: long_running_task_handles.hardware_manager.clone(),
                 port_manager,
                 services,
-                nexus_client,
                 nexus_notifier: nexus_notifier_handle,
-                rack_network_config,
+                rot_attestor: rot_attest_handle,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
-                _metrics_manager: metrics_manager,
-                boot_disk_os_writer: BootDiskOsWriter::new(&parent_log),
+                trust_quorum: long_running_task_handles.trust_quorum.clone(),
+                hardware_monitor: long_running_task_handles
+                    .hardware_monitor
+                    .clone(),
+                health_monitor: long_running_task_handles
+                    .health_monitor
+                    .clone(),
+                metrics_manager,
                 repo_depot,
+                measurements: long_running_task_handles.measurements.clone(),
+                multirack_join_accessor,
             }),
             log: log.clone(),
             sprockets: config.sprockets.clone(),
         };
-
-        sled_agent.inner.probes.run().await;
 
         // We immediately add a notification to the request queue about our
         // existence. If inspection of the hardware later informs us that we're
@@ -674,76 +906,31 @@ impl SledAgent {
         Ok(sled_agent)
     }
 
-    /// Load services for which we're responsible.
-    ///
-    /// Blocks until all services have started, retrying indefinitely on
-    /// failure.
-    pub(crate) async fn load_services(&self) {
-        info!(self.log, "Loading cold boot services");
-        retry_notify(
-            retry_policy_internal_service_aggressive(),
-            || async {
-                // Load as many services as we can, and don't exit immediately
-                // upon failure.
-                let load_services_result =
-                    self.inner.services.load_services().await.map_err(|err| {
-                        BackoffError::transient(Error::from(err))
-                    });
-
-                // If there wasn't any work to do, we're done immediately.
-                if matches!(
-                    load_services_result,
-                    Ok(services::LoadServicesResult::NoServicesToLoad)
-                ) {
-                    info!(
-                        self.log,
-                        "load_services exiting early; no services to be loaded"
-                    );
-                    return Ok(());
-                }
-
-                // Otherwise, request firewall rule updates for as many services as
-                // we can. Note that we still make this request even if we only
-                // partially load some services.
-                let firewall_result = self
-                    .request_firewall_update()
-                    .await
-                    .map_err(|err| BackoffError::transient(err));
-
-                // Only complete if we have loaded all services and firewall
-                // rules successfully.
-                load_services_result.and(firewall_result)
-            },
-            |err, delay| {
-                warn!(
-                    self.log,
-                    "Failed to load services, will retry in {:?}", delay;
-                    "error" => ?err,
-                );
-            },
-        )
-        .await
-        .unwrap(); // we retry forever, so this can't fail
-    }
-
     /// Accesses the [SupportBundleManager] API.
     pub(crate) fn as_support_bundle_storage(&self) -> SupportBundleManager<'_> {
-        SupportBundleManager::new(&self.log, self.storage())
+        SupportBundleManager::new(&self.log, &*self.inner.config_reconciler)
     }
 
     /// Accesses the [SupportBundleLogs] API.
     pub(crate) fn as_support_bundle_logs(&self) -> SupportBundleLogs<'_> {
-        SupportBundleLogs::new(&self.log, self.storage())
+        SupportBundleLogs::new(
+            &self.log,
+            self.inner.config_reconciler.available_datasets_rx(),
+        )
     }
 
-    pub(crate) fn switch_zone_underlay_info(
+    pub(crate) fn local_switch_zone_ip(
         &self,
-    ) -> (Ipv6Addr, Option<&RackNetworkConfig>) {
-        (self.inner.switch_zone_ip(), self.inner.rack_network_config.as_ref())
+    ) -> ThisSledSwitchZoneUnderlayIpAddr {
+        self.inner.switch_zone_ip()
     }
 
     pub fn id(&self) -> SledUuid {
         self.inner.id
+    }
+
+    pub(crate) fn latencies(&self) -> &LatencyTracker {
+        &self.inner.metrics_manager.latencies
     }
 
     pub fn logger(&self) -> &Logger {
@@ -758,18 +945,20 @@ impl SledAgent {
         self.sprockets.clone()
     }
 
-    /// Requests firewall rules from Nexus.
-    ///
-    /// Does not retry upon failure.
-    async fn request_firewall_update(&self) -> Result<(), Error> {
-        let sled_id = self.inner.id;
+    pub(crate) fn hardware_monitor(&self) -> &HardwareMonitorHandle {
+        &self.inner.hardware_monitor
+    }
 
-        self.inner
-            .nexus_client
-            .sled_firewall_rules_request(&sled_id)
-            .await
-            .map_err(|err| Error::FirewallRequest(err))?;
-        Ok(())
+    pub(crate) fn rot_attestor(
+        &self,
+        rot: Rot,
+        remote_addr: SocketAddr,
+    ) -> Result<&RotAttestationHandle, HttpError> {
+        // We currently only support the LPC55 RoT
+        let Rot::Oxide = rot;
+        // And we only serve sled-local clients
+        self.ensure_sled_local_request(remote_addr)?;
+        Ok(&self.inner.rot_attestor)
     }
 
     /// Trigger a request to Nexus informing it that the current sled exists,
@@ -862,221 +1051,13 @@ impl SledAgent {
         self.inner.zone_bundler.cleanup().await.map_err(Error::from)
     }
 
-    pub async fn datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
-        Ok(self.storage().datasets_config_list().await?)
-    }
-
-    async fn datasets_ensure(
-        &self,
-        config: DatasetsConfig,
-    ) -> Result<DatasetsManagementResult, Error> {
-        info!(self.log, "datasets ensure");
-        let datasets_result = self.storage().datasets_ensure(config).await?;
-        info!(self.log, "datasets ensure: Updated storage");
-
-        // TODO(https://github.com/oxidecomputer/omicron/issues/6177):
-        // At the moment, we don't actually remove any datasets -- this function
-        // just adds new datasets.
-        //
-        // Once we start removing old datasets, we should probably ensure that
-        // they are not longer in-use before returning (similar to
-        // omicron_physical_disks_ensure).
-
-        Ok(datasets_result)
-    }
-
-    /// Requests the set of physical disks currently managed by the Sled Agent.
-    ///
-    /// This should be contrasted by the set of disks in the inventory, which
-    /// may contain a slightly different set, if certain disks are not expected
-    /// to be in-use by the broader control plane.
-    pub async fn omicron_physical_disks_list(
-        &self,
-    ) -> Result<OmicronPhysicalDisksConfig, Error> {
-        Ok(self.storage().omicron_physical_disks_list().await?)
-    }
-
-    /// Ensures that the specific set of Omicron Physical Disks are running
-    /// on this sled, and that no other disks are being used by the control
-    /// plane (with the exception of M.2s, which are always automatically
-    /// in-use).
-    async fn omicron_physical_disks_ensure(
-        &self,
-        config: OmicronPhysicalDisksConfig,
-    ) -> Result<DisksManagementResult, Error> {
-        info!(self.log, "physical disks ensure");
-        // Tell the storage subsystem which disks should be managed.
-        let disk_result =
-            self.storage().omicron_physical_disks_ensure(config).await?;
-        info!(self.log, "physical disks ensure: Updated storage");
-
-        // Grab a view of the latest set of disks, alongside a generation
-        // number.
-        //
-        // This generation is at LEAST as high as our last call through
-        // omicron_physical_disks_ensure. It may actually be higher, if a
-        // concurrent operation occurred.
-        //
-        // "latest_disks" has a generation number, which is important for other
-        // subcomponents of Sled Agent to consider. If multiple requests to
-        // ensure disks arrive concurrently, it's important to "only advance
-        // forward" as requested by Nexus.
-        //
-        // For example: if we receive the following requests concurrently:
-        // - Use Disks {A, B, C}, generation = 1
-        // - Use Disks {A, B, C, D}, generation = 2
-        //
-        // If we ignore generation numbers, it's possible that we start using
-        // "disk D" -- e.g., for instance filesystems -- and then immediately
-        // delete it when we process the request with "generation 1".
-        //
-        // By keeping these requests ordered, we prevent this thrashing, and
-        // ensure that we always progress towards the last-requested state.
-        let latest_disks = self.storage().get_latest_disks().await;
-        let our_gen = latest_disks.generation();
-        info!(self.log, "physical disks ensure: Propagating new generation of disks"; "generation" => ?our_gen);
-
-        // Ensure that the StorageMonitor, and the dump devices, have committed
-        // to start using new disks and stop using old ones.
-        self.inner.storage_monitor.await_generation(*our_gen).await?;
-        info!(self.log, "physical disks ensure: Updated storage monitor");
-
-        // Ensure that the ZoneBundler, if it was creating a bundle referencing
-        // the old U.2s, has stopped using them.
-        self.inner.zone_bundler.await_completion_of_prior_bundles().await;
-        info!(self.log, "physical disks ensure: Updated zone bundler");
-
-        // Ensure that all probes, at least after our call to
-        // "omicron_physical_disks_ensure", stop using any disks that
-        // may have been in-service from before that request.
-        self.inner.probes.use_only_these_disks(&latest_disks).await;
-        info!(self.log, "physical disks ensure: Updated probes");
-
-        // Do the same for instances - mark them failed if they were using
-        // expunged disks.
-        self.inner.instances.use_only_these_disks(latest_disks).await?;
-        info!(self.log, "physical disks ensure: Updated instances");
-
-        Ok(disk_result)
-    }
-
     /// Ensures that the specific sets of disks, datasets, and zones specified
     /// by `config` are running.
-    ///
-    /// This method currently blocks while each of disks, datasets, and zones
-    /// are ensured in that order; a failure on one prevents any attempt to
-    /// ensure the subsequent step(s).
     pub async fn set_omicron_config(
         &self,
         config: OmicronSledConfig,
-    ) -> Result<OmicronSledConfigResult, Error> {
-        // Until the config-reconciler work lands: unpack the unified config
-        // into the three split configs for indepenedent ledgering.
-        let disks_config = OmicronPhysicalDisksConfig {
-            generation: config.generation,
-            disks: config.disks.into_iter().collect(),
-        };
-
-        let disks = self.omicron_physical_disks_ensure(disks_config).await?;
-
-        // If we only had partial success deploying disks, don't proceed.
-        if disks.has_error() {
-            return Ok(OmicronSledConfigResult {
-                disks: disks.status,
-                datasets: Vec::new(),
-            });
-        }
-
-        let datasets_config = DatasetsConfig {
-            generation: config.generation,
-            datasets: config.datasets.into_iter().map(|d| (d.id, d)).collect(),
-        };
-
-        let datasets = self.datasets_ensure(datasets_config).await?;
-
-        // If we only had partial success deploying datasets, don't proceed.
-        if datasets.has_error() {
-            return Ok(OmicronSledConfigResult {
-                disks: disks.status,
-                datasets: datasets.status,
-            });
-        }
-
-        let zones_config = OmicronZonesConfig {
-            generation: config.generation,
-            zones: config.zones.into_iter().collect(),
-        };
-
-        self.omicron_zones_ensure(zones_config).await?;
-
-        Ok(OmicronSledConfigResult {
-            disks: disks.status,
-            datasets: datasets.status,
-        })
-    }
-
-    /// Ensures that the specific set of Omicron zones are running as configured
-    /// (and that no other zones are running)
-    async fn omicron_zones_ensure(
-        &self,
-        requested_zones: OmicronZonesConfig,
-    ) -> Result<(), Error> {
-        // TODO(https://github.com/oxidecomputer/omicron/issues/6043):
-        // - If these are the set of filesystems, we should also consider
-        // removing the ones which are not listed here.
-        // - It's probably worth sending a bulk request to the storage system,
-        // rather than requesting individual datasets.
-        for zone in &requested_zones.zones {
-            let Some(dataset_name) = zone.dataset_name() else {
-                continue;
-            };
-
-            // NOTE: This code will be deprecated by https://github.com/oxidecomputer/omicron/pull/7160
-            //
-            // However, we need to ensure that all blueprints have datasets
-            // within them before we can remove this back-fill.
-            //
-            // Therefore, we do something hairy here: We ensure the filesystem
-            // exists, but don't specify any dataset UUID value.
-            //
-            // This means that:
-            // - If the dataset exists and has a UUID, this will be a no-op
-            // - If the dataset doesn't exist, it'll be created without its
-            // oxide:uuid zfs property set
-            // - If a subsequent call to "datasets_ensure" tries to set a UUID,
-            // it should be able to get set (once).
-            self.inner.storage.upsert_filesystem(None, dataset_name).await?;
-        }
-
-        self.inner
-            .services
-            .ensure_all_omicron_zones_persistent(requested_zones)
-            .await?;
-        Ok(())
-    }
-
-    /// Gets the sled's current list of all zpools.
-    pub async fn zpools_get(&self) -> Vec<Zpool> {
-        self.inner
-            .storage
-            .get_latest_disks()
-            .await
-            .get_all_zpools()
-            .into_iter()
-            .map(|(name, variant)| Zpool {
-                id: name.id(),
-                disk_type: variant.into(),
-            })
-            .collect()
-    }
-
-    /// Returns whether or not the sled believes itself to be a scrimlet
-    pub fn get_role(&self) -> SledRole {
-        if self.inner.hardware.is_scrimlet() {
-            SledRole::Scrimlet
-        } else {
-            SledRole::Gimlet
-        }
+    ) -> Result<Result<(), LedgerNewConfigError>, LedgerTaskError> {
+        self.inner.config_reconciler.set_sled_config(config).await
     }
 
     /// Idempotently ensures that a given instance is registered with this sled,
@@ -1155,6 +1136,30 @@ impl SledAgent {
             .map_err(|e| Error::Instance(e))
     }
 
+    pub async fn instance_join_multicast_group(
+        &self,
+        propolis_id: PropolisUuid,
+        multicast_body: &InstanceMulticastBody,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .join_multicast_group(propolis_id, multicast_body)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    pub async fn instance_leave_multicast_group(
+        &self,
+        propolis_id: PropolisUuid,
+        multicast_body: &InstanceMulticastBody,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .leave_multicast_group(propolis_id, multicast_body)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
     /// Returns the state of the instance with the provided ID.
     pub async fn instance_get_state(
         &self,
@@ -1167,20 +1172,7 @@ impl SledAgent {
             .map_err(|e| Error::Instance(e))
     }
 
-    /// Idempotently ensures that the given virtual disk is attached (or not) as
-    /// specified.
-    ///
-    /// NOTE: Not yet implemented.
-    pub async fn disk_ensure(
-        &self,
-        _disk_id: Uuid,
-        _initial_state: DiskRuntimeState,
-        _target: DiskStateRequested,
-    ) -> Result<DiskRuntimeState, Error> {
-        todo!("Disk attachment not yet implemented");
-    }
-
-    pub fn artifact_store(&self) -> &ArtifactStore<StorageHandle> {
+    pub fn artifact_store(&self) -> &ArtifactStore<InternalDisksReceiver> {
         &self.inner.repo_depot.app_private()
     }
 
@@ -1235,24 +1227,36 @@ impl SledAgent {
             .map_err(Error::from)
     }
 
-    /// Gets the sled's current time synchronization state
-    pub async fn timesync_get(&self) -> Result<TimeSync, Error> {
-        self.inner.services.timesync_get().await.map_err(Error::from)
-    }
-
-    pub async fn ensure_scrimlet_host_ports(
+    /// Validate if the given [`SocketAddr`] represents a peer on the same
+    /// underlay subnet as the current sled.
+    pub fn ensure_sled_local_request(
         &self,
-        uplinks: Vec<HostPortConfig>,
-    ) -> Result<(), Error> {
-        self.inner
-            .services
-            .ensure_scrimlet_host_ports(uplinks)
-            .await
-            .map_err(Error::from)
+        remote_addr: SocketAddr,
+    ) -> Result<(), HttpError> {
+        let SocketAddr::V6(remote_addr) = remote_addr else {
+            return Err(HttpError::for_client_error(
+                None,
+                dropshot::ClientErrorStatusCode::FORBIDDEN,
+                String::from("unexpected non-v6 request"),
+            ));
+        };
+        let underlay_subnet = self.inner.subnet.net();
+        if !underlay_subnet.contains(*remote_addr.ip()) {
+            return Err(HttpError::for_client_error(
+                None,
+                dropshot::ClientErrorStatusCode::FORBIDDEN,
+                String::from("non-sled-local request not allowed"),
+            ));
+        }
+        Ok(())
     }
 
     pub fn bootstore(&self) -> bootstore::NodeHandle {
         self.inner.bootstore.clone()
+    }
+
+    pub fn trust_quorum(&self) -> trust_quorum::NodeTaskHandle {
+        self.inner.trust_quorum.clone()
     }
 
     pub fn list_vpc_routes(&self) -> Vec<ResolvedVpcRouteState> {
@@ -1302,12 +1306,8 @@ impl SledAgent {
         Ok(())
     }
 
-    pub(crate) fn storage(&self) -> &StorageHandle {
-        &self.inner.storage
-    }
-
-    pub(crate) fn boot_disk_os_writer(&self) -> &BootDiskOsWriter {
-        &self.inner.boot_disk_os_writer
+    pub(crate) fn measurements(&self) -> Arc<MeasurementsHandle> {
+        self.inner.measurements.clone()
     }
 
     /// Return identifiers for this sled.
@@ -1322,7 +1322,7 @@ impl SledAgent {
     pub(crate) fn sled_identifiers(&self) -> SledIdentifiers {
         let baseboard = self.inner.hardware.baseboard();
         SledIdentifiers {
-            rack_id: self.inner.start_request.body.rack_id,
+            rack_id: self.inner.start_request.body.rack_id.into_untyped_uuid(),
             sled_id: self.inner.id.into_untyped_uuid(),
             model: baseboard.model().to_string(),
             revision: baseboard.revision(),
@@ -1339,84 +1339,53 @@ impl SledAgent {
         let sled_agent_address = self.inner.sled_address();
         let is_scrimlet = self.inner.hardware.is_scrimlet();
         let baseboard = self.inner.hardware.baseboard();
+        let rack_id = self.inner.start_request.body.rack_id;
         let usable_hardware_threads =
             self.inner.hardware.online_processor_count();
         let usable_physical_ram =
             self.inner.hardware.usable_physical_ram_bytes();
+        let cpu_family = self.inner.hardware.cpu_family();
         let reservoir_size = self.inner.instances.reservoir_size();
         let sled_role =
             if is_scrimlet { SledRole::Scrimlet } else { SledRole::Gimlet };
+        let file_source_resolver =
+            self.inner.services.zone_image_resolver().status().to_inventory();
 
-        let mut disks = vec![];
-        let mut zpools = vec![];
-        let mut datasets = vec![];
-        let (all_disks, omicron_zones) = tokio::join!(
-            self.storage().get_latest_disks(),
-            self.inner.services.omicron_zones_list()
-        );
-        for (identity, variant, slot, firmware) in all_disks.iter_all() {
-            disks.push(InventoryDisk {
-                identity: identity.clone(),
-                variant,
-                slot,
-                active_firmware_slot: firmware.active_slot(),
-                next_active_firmware_slot: firmware.next_active_slot(),
-                number_of_firmware_slots: firmware.number_of_slots(),
-                slot1_is_read_only: firmware.slot1_read_only(),
-                slot_firmware_versions: firmware.slots().to_vec(),
-            });
-        }
-        for zpool in all_disks.all_u2_zpools() {
-            let info =
-                match illumos_utils::zpool::Zpool::get_info(&zpool.to_string())
-                {
-                    Ok(info) => info,
-                    Err(err) => {
-                        warn!(
-                            self.log,
-                            "Failed to access zpool info";
-                            "zpool" => %zpool,
-                            "err" => %err
-                        );
-                        continue;
-                    }
-                };
+        let smf_services_enabled_not_online =
+            self.inner.health_monitor.to_inventory();
 
-            zpools.push(InventoryZpool {
-                id: zpool.id(),
-                total_size: ByteCount::try_from(info.size())?,
-            });
+        let fmd = crate::fmd::collect_fmd_inventory(&self.log).await;
 
-            let inv_props = match self.storage().datasets_list(zpool).await {
-                Ok(props) => {
-                    props.into_iter().map(|prop| InventoryDataset::from(prop))
-                }
-                Err(err) => {
-                    warn!(
-                        self.log,
-                        "Failed to access dataset info within zpool";
-                        "zpool" => %zpool,
-                        "err" => %err
-                    );
-                    continue;
-                }
-            };
-            datasets.extend(inv_props);
-        }
+        let ReconcilerInventory {
+            disks,
+            zpools,
+            datasets,
+            ledgered_sled_config,
+            reconciler_status,
+            last_reconciliation,
+        } = self.inner.config_reconciler.inventory(&self.log).await?;
 
         Ok(Inventory {
             sled_id,
             sled_agent_address,
             sled_role,
-            baseboard,
+            baseboard_id: baseboard.into(),
+            rack_id,
             usable_hardware_threads,
             usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
+            cpu_family: cpu_family.into(),
             reservoir_size,
-            omicron_zones,
             disks,
             zpools,
             datasets,
-            omicron_physical_disks_generation: *all_disks.generation(),
+            ledgered_sled_config,
+            reconciler_status,
+            last_reconciliation,
+            file_source_resolver,
+            instance_manager_status: self.inner.instances.status(),
+            smf_services_enabled_not_online,
+            reference_measurements: self.inner.measurements.to_inventory(),
+            fmd,
         })
     }
 
@@ -1473,24 +1442,305 @@ impl SledAgent {
     ) -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
         sled_diagnostics::zpool_info().await
     }
+
+    pub(crate) async fn support_health_check(
+        &self,
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::health_check().await
+    }
+
+    /// Completely replace the set of probes managed by this sled.
+    pub(crate) fn set_probes(&self, probes: IdHashMap<ProbeCreate>) {
+        self.inner.probes.set_probes(probes);
+    }
+
+    pub(crate) async fn create_local_storage_dataset(
+        &self,
+        request: LocalStorageDatasetEnsureRequest,
+    ) -> Result<(), HttpError> {
+        let LocalStorageDatasetEnsureRequest {
+            zpool_id,
+            dataset_id,
+            dataset_size,
+            volume_size,
+            encrypted_at_rest,
+        } = request;
+
+        // For now, a request from Nexus to create a local storage dataset is
+        // only supported for unencrypted local storage. Reject this request
+        // otherwise.
+        if encrypted_at_rest {
+            let error =
+                String::from("using encrypted local storage not supported");
+            return Err(HttpError::for_bad_request(Some(error.clone()), error));
+        }
+
+        // Ensure that the local storage dataset we want to use is still present
+        let present = self
+            .inner
+            .config_reconciler
+            .available_datasets_rx()
+            .all_mounted_local_storage_unencrypted_datasets()
+            .into_iter()
+            .any(|path_in_pool| {
+                path_in_pool.pool() == ZpoolName::External(zpool_id)
+            });
+
+        if !present {
+            // We cannot create a child dataset of the local storage dataset if
+            // it's not present! Return a 503.
+            let error = format!(
+                "local storage unencrypted dataset for pool {zpool_id} \
+                missing!"
+            );
+            return Err(HttpError::for_unavail(Some(error.clone()), error));
+        }
+
+        let delegated_zvol =
+            DelegatedZvol::LocalStorageUnencrypted { zpool_id, dataset_id };
+
+        Zfs::ensure_dataset(DatasetEnsureArgs {
+            name: &delegated_zvol.parent_dataset_name(),
+            // dataset will never be mounted but a unique value is required here
+            // just in case.
+            mountpoint: Mountpoint(
+                delegated_zvol.parent_dataset_mountpoint().into(),
+            ),
+            can_mount: CanMount::Off,
+            zoned: false,
+            // Disks backed by unencrypted local storage are _not_ encrypted at
+            // rest.
+            encryption_details: None,
+            size_details: Some(SizeDetails {
+                quota: Some(dataset_size),
+                reservation: Some(dataset_size),
+                compression: CompressionAlgorithm::Off,
+            }),
+            id: None,
+            additional_options: None,
+        })
+        .await
+        .map_err(|e| {
+            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
+        })?;
+
+        Zfs::ensure_dataset_volume(DatasetVolumeEnsureArgs::Raw {
+            name: &delegated_zvol.volume_name(),
+            size: volume_size,
+        })
+        .await
+        .map_err(|e| {
+            if e.is_not_ready() {
+                HttpError::for_unavail(None, e.to_string())
+            } else {
+                HttpError::for_internal_error(e.to_string())
+            }
+        })?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn delete_local_storage_dataset(
+        &self,
+        request: LocalStorageDatasetDeleteRequest,
+    ) -> Result<(), HttpError> {
+        let LocalStorageDatasetDeleteRequest {
+            zpool_id,
+            dataset_id,
+            encrypted_at_rest,
+        } = request;
+
+        let delegated_zvol = if encrypted_at_rest {
+            // Ensure that the local storage dataset we want to use is still
+            // present
+            let present = self
+                .inner
+                .config_reconciler
+                .available_datasets_rx()
+                .all_mounted_local_storage_datasets()
+                .into_iter()
+                .any(|path_in_pool| {
+                    path_in_pool.pool() == ZpoolName::External(zpool_id)
+                });
+
+            if !present {
+                // We cannot destroy a child dataset of the local storage
+                // dataset if it's not present! Return a 503.
+                let error = format!(
+                    "local storage dataset for pool {zpool_id} missing!"
+                );
+                return Err(HttpError::for_unavail(Some(error.clone()), error));
+            }
+
+            DelegatedZvol::LocalStorageEncrypted { zpool_id, dataset_id }
+        } else {
+            // Ensure that the local storage dataset we want to use is still
+            // present
+            let present = self
+                .inner
+                .config_reconciler
+                .available_datasets_rx()
+                .all_mounted_local_storage_unencrypted_datasets()
+                .into_iter()
+                .any(|path_in_pool| {
+                    path_in_pool.pool() == ZpoolName::External(zpool_id)
+                });
+
+            if !present {
+                // We cannot destroy a child dataset of the local storage
+                // dataset if it's not present! Return a 503.
+                let error = format!(
+                    "local storage unencrypted dataset for pool {zpool_id} \
+                    missing!"
+                );
+                return Err(HttpError::for_unavail(Some(error.clone()), error));
+            }
+
+            DelegatedZvol::LocalStorageUnencrypted { zpool_id, dataset_id }
+        };
+
+        // If you have a parent dataset that has a reservation, and a child
+        // dataset has a bunch of data, you can run into an out-of-space issue
+        // when deleting the child dataset if the pool is nearly full: when you
+        // delete the child dataset, it moves into a "to be deleted" area in the
+        // background, but the space is still used by the child (this amount can
+        // be accessed by querying for the `freeing` property of the pool).
+        //
+        // This, combined with a parent dataset that has a reservation, causes
+        // the amount of free space in the pool to go down, so before deleting
+        // the volume, remove the reservation set for the parent dataset if one
+        // exists.
+
+        let result =
+            Zfs::remove_reservation(&delegated_zvol.parent_dataset_name())
+                .await;
+
+        if let Err(e) = result {
+            let RemoveReservationError { name: _, err } = &e;
+            match err {
+                RemoveReservationErrorInner::DatasetNotFound => {
+                    // If the parent dataset is no longer found, then a
+                    // concurrent deletion occurred. Return Ok
+                    return Ok(());
+                }
+
+                _ => {
+                    // Anything else is a 500
+                    return Err(HttpError::for_internal_error(
+                        InlineErrorChain::new(&e).to_string(),
+                    ));
+                }
+            }
+        }
+
+        // Then proceed with deleting the child volume dataset, then the parent
+        // dataset
+
+        Zfs::delete_dataset_volume(DatasetVolumeDeleteArgs {
+            name: &delegated_zvol.volume_name(),
+            raw: true,
+        })
+        .await
+        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        match Zfs::destroy_dataset(&delegated_zvol.parent_dataset_name()).await
+        {
+            Ok(()) => Ok(()),
+
+            Err(e) => match e.err {
+                // This is called from a saga, so it has to be idempotent
+                DestroyDatasetErrorVariant::NotFound => Ok(()),
+
+                DestroyDatasetErrorVariant::Other(e) => {
+                    Err(HttpError::for_internal_error(
+                        InlineErrorChain::new(&e).to_string(),
+                    ))
+                }
+            },
+        }
+    }
+
+    /// Update the set of subnets attached to an instance.
+    pub(crate) async fn instance_put_attached_subnets(
+        &self,
+        propolis_id: PropolisUuid,
+        subnets: AttachedSubnets,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .set_attached_subnets(propolis_id, subnets)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Delete the set of subnets attached to an instance.
+    pub(crate) async fn instance_delete_attached_subnets(
+        &self,
+        propolis_id: PropolisUuid,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .clear_attached_subnets(propolis_id)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Attach a subnet to an instance.
+    pub(crate) async fn instance_attach_subnet(
+        &self,
+        propolis_id: PropolisUuid,
+        subnet: AttachedSubnet,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .attach_subnet(propolis_id, subnet)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Detach a subnet from an instance
+    pub(crate) async fn instance_detach_subnet(
+        &self,
+        propolis_id: PropolisUuid,
+        subnet: IpNet,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .detach_subnet(propolis_id, subnet)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Complete a multirack join operation
+    pub(crate) fn complete_multirack_join(&self) -> Result<(), Error> {
+        self.inner.multirack_join_accessor.complete_multirack_join()?;
+        Ok(())
+    }
+
+    pub(crate) fn multirack_join_service_status(
+        &self,
+    ) -> Result<MultirackJoinServiceStatus, RssAccessError> {
+        self.inner.multirack_join_accessor.multirack_join_service_status()
+    }
 }
 
-#[derive(From, thiserror::Error, Debug)]
+#[derive(From, thiserror::Error, Debug, SlogInlineError)]
 pub enum AddSledError {
     #[error("Failed to learn bootstrap ip for {sled_id}")]
     BootstrapAgentClient {
         sled_id: Baseboard,
         #[source]
-        err: bootstrap_agent_client::Error,
+        err: SprocketsClientError,
     },
     #[error("Failed to connect to DDM")]
     DdmAdminClient(#[source] omicron_ddm_admin_client::DdmError),
     #[error("Failed to learn bootstrap ip for {0:?}")]
     NotFound(BaseboardId),
-    #[error("Failed to initialize {sled_id}: {err}")]
+    #[error("Failed to initialize {sled_id}")]
     BootstrapTcpClient {
-        sled_id: Baseboard,
-        err: crate::bootstrap::client::Error,
+        sled_id: BaseboardId,
+        #[source]
+        err: SprocketsClientError,
     },
 }
 
@@ -1498,77 +1748,249 @@ pub enum AddSledError {
 pub async fn sled_add(
     log: Logger,
     sprockets_config: SprocketsConfig,
+    measurements: Arc<MeasurementsHandle>,
     sled_id: BaseboardId,
     request: StartSledAgentRequest,
 ) -> Result<(), AddSledError> {
+    let (bootstrap_addr, stream) = find_sprockets_stream(
+        &log,
+        sprockets_config,
+        measurements,
+        sled_id.clone(),
+    )
+    .await?;
+
+    SprocketsClient::start_sled_agent_with_stream(stream, &request)
+        .await
+        .map_err(|err| AddSledError::BootstrapTcpClient {
+            sled_id: sled_id.clone(),
+            err,
+        })?;
+
+    info!(
+        log,
+        "Peer agent initialized";
+        "peer_bootstrap_addr" => %bootstrap_addr,
+        "peer_id" => %sled_id
+    );
+
+    Ok(())
+}
+
+/// Connect to each bootstrap address with sprockets until the one with a
+/// matching `BaseboardId` is found. Return that connection.
+async fn find_sprockets_stream(
+    log: &Logger,
+    sprockets_config: SprocketsConfig,
+    measurements: Arc<MeasurementsHandle>,
+    sled_id: BaseboardId,
+) -> Result<(Ipv6Addr, sprockets_tls::Stream<TcpStream>), AddSledError> {
     // Get all known bootstrap addresses via DDM
     let ddm_admin_client = DdmAdminClient::localhost(&log)?;
     let addrs = ddm_admin_client
         .derive_bootstrap_addrs_from_prefixes(&[BootstrapInterface::GlobalZone])
         .await?;
 
-    // Create a set of futures to concurrently map the baseboard to bootstrap ip
-    // for each sled
-    let mut addrs_to_sleds = addrs
-        .map(|ip| {
-            let log = log.clone();
-            async move {
-                let client = bootstrap_agent_client::Client::new(
-                    &format!("http://[{ip}]"),
-                    log,
+    let mut set = JoinSet::new();
+
+    for ip in addrs {
+        let sprockets_config = sprockets_config.clone();
+        let measurements = measurements.clone();
+        let bootstrap_addr =
+            SocketAddrV6::new(ip, BOOTSTRAP_AGENT_RACK_INIT_PORT, 0, 0);
+        let log =
+            log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string()));
+        set.spawn(async move {
+            let client = SprocketsClient::new(
+                bootstrap_addr,
+                sprockets_config,
+                measurements,
+                log,
+            );
+            (ip, client.connect().await)
+        });
+    }
+
+    let mut found = None;
+    while let Some(res) = set.join_next().await {
+        match res {
+            Ok((ip, Ok(stream))) => {
+                // Safety: We guarantee the format of the platform id at manufacturing time.
+                let baseboard_id = platform_id_to_baseboard_id(
+                    stream.peer_platform_id().as_str(),
                 );
-                let result = client.baseboard_get().await;
 
-                (ip, result)
-            }
-        })
-        .collect::<FuturesUnordered<_>>();
+                if baseboard_id == sled_id {
+                    // We found the stream for our new client.
+                    let log =
+                        log.new(o!("BootstrapAgentClient" => ip.to_string()));
+                    info!(
+                        log,
+                        "Found bootstrap IP for sled";
+                        "baseboard_id" => %baseboard_id
+                    );
+                    found = Some((ip, stream));
 
-    // Execute the futures until we find our matching sled or are done searching
-    let mut target_ip = None;
-    let mut found_baseboard = None;
-    while let Some((ip, result)) = addrs_to_sleds.next().await {
-        match result {
-            Ok(baseboard) => {
-                // Convert from progenitor type back to `sled-hardware`
-                // type.
-                let found: Baseboard = baseboard.into_inner().into();
-                if sled_id.serial_number == found.identifier()
-                    && sled_id.part_number == found.model()
-                {
-                    target_ip = Some(ip);
-                    found_baseboard = Some(found);
+                    // This aborts the rest of the tasks in `set`, which is what
+                    // we want in this case. They are only trying to establish
+                    // connections and so cancellation is fine.
                     break;
                 }
             }
+            Ok((ip, Err(err))) => {
+                let log = log.new(o!("BootstrapAgentClient" => ip.to_string()));
+                warn!(log, "Failed to get baseboard for {ip}"; "err" => #%err);
+            }
             Err(err) => {
                 warn!(
-                    log, "Failed to get baseboard for {ip}";
-                    "err" => #%err,
+                    log,
+                    "Failed to join sprockets connection task";
+                    "err" => #%err
                 );
             }
         }
     }
 
-    // Contact the sled and initialize it
-    let bootstrap_addr =
-        target_ip.ok_or_else(|| AddSledError::NotFound(sled_id.clone()))?;
-    let bootstrap_addr =
-        SocketAddrV6::new(bootstrap_addr, BOOTSTRAP_AGENT_RACK_INIT_PORT, 0, 0);
-    let client = crate::bootstrap::client::Client::new(
-        bootstrap_addr,
-        sprockets_config,
-        log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
-    );
+    let ip_and_stream = found.ok_or_else(|| AddSledError::NotFound(sled_id))?;
+    Ok(ip_and_stream)
+}
 
-    // Safe to unwrap, because we would have bailed when checking target_ip
-    // above otherwise. baseboard and target_ip are set together.
-    let baseboard = found_baseboard.unwrap();
+// Long-running task that updates the contents of `network_config_tx` any
+// time the contents of `bootstore_network_config_rx` changes.
+//
+// Assumes the caller already deserialized the current bootstore network config
+// and used the result to initialize `network_config_tx`; this task starts
+// by waiting for any changes to `bootstore_network_config_rx`.
+async fn network_config_deserialization_task(
+    mut bootstore_network_config_rx: watch::Receiver<
+        Option<bootstore::NetworkConfig>,
+    >,
+    network_config_tx: watch::Sender<SystemNetworkingConfig>,
+    log: Logger,
+) {
+    loop {
+        // This should never happen - if it does, we're permanently dead.
+        if bootstore_network_config_rx.changed().await.is_err() {
+            error!(
+                log,
+                "bootstore task exited - \
+                 network_config_deserialization_task exiting"
+            );
+            return;
+        }
 
-    client.start_sled_agent(&request).await.map_err(|err| {
-        AddSledError::BootstrapTcpClient { sled_id: baseboard.clone(), err }
-    })?;
+        let maybe_bootstore_network_config =
+            bootstore_network_config_rx.borrow_and_update().clone();
 
-    info!(log, "Peer agent initialized"; "peer_bootstrap_addr" => %bootstrap_addr, "peer_id" => %baseboard);
-    Ok(())
+        // We were only spawned if we had a bootstore network config; we never
+        // expect to go back to `None`. If we do, there isn't much we can do -
+        // log an error.
+        let Some(bootstore_network_config) = maybe_bootstore_network_config
+        else {
+            error!(
+                log,
+                "bootstore network config was previously `Some(_)` but is \
+                 now `None` - this should never happen!",
+            );
+            continue;
+        };
+
+        // We _should_ always be able to deserialize the raw config from the
+        // bootstore, but if we can't, log an error and wait for it to
+        // change; an operator may be able to fix it and push new contents.
+        match EarlyNetworkConfigEnvelope::deserialize_from_bootstore(
+            &bootstore_network_config,
+        )
+        .and_then(|envelope| envelope.deserialize_body())
+        {
+            Ok(network_config) => {
+                info!(
+                    log,
+                    "received new network config from bootstore";
+                    "generation" => %bootstore_network_config.generation,
+                );
+                network_config_tx.send_modify(|c| {
+                    *c = network_config;
+                });
+            }
+            Err(err) => {
+                error!(
+                    log,
+                    "failed to deserialize network config from bootstore; \
+                     will wait for new config then try again - \
+                     this should never happen!";
+                    InlineErrorChain::new(&err),
+                );
+            }
+        }
+    }
+}
+
+struct ReconcilerFacilities {
+    etherstub_vnic: EtherstubVnic,
+    service_manager: ServiceManager,
+    metrics_queue: MetricsRequestQueue,
+}
+
+impl SledAgentFacilities for ReconcilerFacilities {
+    fn underlay_vnic(&self) -> &EtherstubVnic {
+        &self.etherstub_vnic
+    }
+
+    fn on_time_sync(&self) {
+        self.service_manager.on_time_sync();
+    }
+
+    async fn start_omicron_zone(
+        &self,
+        prepared_zone: PreparedOmicronZone<'_>,
+        zone_root_path: PathInPool,
+    ) -> anyhow::Result<RunningZone> {
+        let zone = self
+            .service_manager
+            .start_omicron_zone(prepared_zone, zone_root_path)
+            .await?;
+        Ok(zone)
+    }
+
+    fn file_source_resolver_status(&self) -> ResolverStatus {
+        self.service_manager.zone_image_resolver().status()
+    }
+
+    fn remove_mupdate_override(
+        &self,
+        override_id: MupdateOverrideUuid,
+        internal_disks: &InternalDisks,
+    ) -> RemoveMupdateOverrideResult {
+        self.service_manager
+            .zone_image_resolver()
+            .remove_mupdate_override(override_id, internal_disks)
+    }
+
+    fn metrics_untrack_zone_links(
+        &self,
+        zone: &RunningZone,
+    ) -> anyhow::Result<()> {
+        match self.metrics_queue.untrack_zone_links(zone) {
+            Ok(()) => Ok(()),
+            Err(errors) => {
+                let mut errors =
+                    errors.iter().map(|err| InlineErrorChain::new(err));
+                Err(anyhow!(
+                    "{} errors untracking zone links: {}",
+                    errors.len(),
+                    errors.join(", ")
+                ))
+            }
+        }
+    }
+
+    fn ddm_remove_internal_dns_prefix(
+        &self,
+        prefix: Ipv6Subnet<SLED_PREFIX_LENGTH>,
+    ) {
+        self.service_manager
+            .ddm_reconciler()
+            .remove_internal_dns_subnet(prefix);
+    }
 }

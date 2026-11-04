@@ -16,7 +16,7 @@ use std::ffi::c_int;
 use std::ffi::c_uint;
 use std::ptr;
 
-extern "C" {
+unsafe extern "C" {
     // `X509_check_host()` is only exported by `openssl-sys` if the `bindgen`
     // feature is enabled
     // (https://github.com/sfackler/rust-openssl/issues/2041). For now, we'll

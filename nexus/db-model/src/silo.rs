@@ -3,20 +3,22 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{Generation, Project};
+use crate::DbTypedUuid;
 use crate::collection::DatastoreCollectionConfig;
 use crate::{DatabaseString, Image, impl_enum_type};
 use db_macros::Resource;
 use nexus_db_schema::schema::{image, project, silo};
-use nexus_types::external_api::shared::{
-    FleetRole, SiloIdentityMode, SiloRole,
+use nexus_types::external_api::policy::{FleetRole, SiloRole};
+use nexus_types::external_api::silo::{
+    self as silo_types, AuthenticationMode as SharedAuthenticationMode,
+    SiloIdentityMode, UserProvisionType as SharedUserProvisionType,
 };
-use nexus_types::external_api::views;
-use nexus_types::external_api::{params, shared};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::SiloKind;
+use omicron_uuid_kinds::SiloUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use uuid::Uuid;
 
 impl_enum_type!(
     AuthenticationModeEnum:
@@ -29,16 +31,16 @@ impl_enum_type!(
     Saml => b"saml"
 );
 
-impl From<shared::AuthenticationMode> for AuthenticationMode {
-    fn from(params: shared::AuthenticationMode) -> Self {
+impl From<SharedAuthenticationMode> for AuthenticationMode {
+    fn from(params: SharedAuthenticationMode) -> Self {
         match params {
-            shared::AuthenticationMode::Local => AuthenticationMode::Local,
-            shared::AuthenticationMode::Saml => AuthenticationMode::Saml,
+            SharedAuthenticationMode::Local => AuthenticationMode::Local,
+            SharedAuthenticationMode::Saml => AuthenticationMode::Saml,
         }
     }
 }
 
-impl From<AuthenticationMode> for shared::AuthenticationMode {
+impl From<AuthenticationMode> for SharedAuthenticationMode {
     fn from(model: AuthenticationMode) -> Self {
         match model {
             AuthenticationMode::Local => Self::Local,
@@ -56,22 +58,25 @@ impl_enum_type!(
     // Enum values
     ApiOnly => b"api_only"
     Jit => b"jit"
+    Scim => b"scim"
 );
 
-impl From<shared::UserProvisionType> for UserProvisionType {
-    fn from(params: shared::UserProvisionType) -> Self {
+impl From<SharedUserProvisionType> for UserProvisionType {
+    fn from(params: SharedUserProvisionType) -> Self {
         match params {
-            shared::UserProvisionType::ApiOnly => UserProvisionType::ApiOnly,
-            shared::UserProvisionType::Jit => UserProvisionType::Jit,
+            SharedUserProvisionType::ApiOnly => UserProvisionType::ApiOnly,
+            SharedUserProvisionType::Jit => UserProvisionType::Jit,
+            SharedUserProvisionType::Scim => UserProvisionType::Scim,
         }
     }
 }
 
-impl From<UserProvisionType> for shared::UserProvisionType {
+impl From<UserProvisionType> for SharedUserProvisionType {
     fn from(model: UserProvisionType) -> Self {
         match model {
             UserProvisionType::ApiOnly => Self::ApiOnly,
             UserProvisionType::Jit => Self::Jit,
+            UserProvisionType::Scim => Self::Scim,
         }
     }
 }
@@ -81,6 +86,7 @@ impl From<UserProvisionType> for shared::UserProvisionType {
     Clone, PartialEq, Eq, Queryable, Insertable, Debug, Resource, Selectable,
 )]
 #[diesel(table_name = silo)]
+#[resource(uuid_kind = SiloKind)]
 pub struct Silo {
     #[diesel(embed)]
     identity: SiloIdentity,
@@ -100,6 +106,22 @@ pub struct Silo {
 
     /// child resource generation number, per RFD 192
     pub rcgen: Generation,
+
+    /// Store a group name that will be
+    ///
+    /// 1) automatically created (depending on the provision type of this silo)
+    ///    at silo create time.
+    /// 2) assigned a policy granting members the silo admin role
+    ///
+    /// Prior to this column existing, for api_only and jit provision types,
+    /// Nexus would create this group, and create a policy where users of the
+    /// group would have the silo admin role. It wouldn't store this information
+    /// though as groups cannot be deleted with those provision types.
+    ///
+    /// For provision types that can both create and delete groups, it's
+    /// important to store this name so that when groups are created the same
+    /// automatic policy can be created as well.
+    pub admin_group_name: Option<String>,
 }
 
 /// Form of mapped fleet roles used when serializing to the database
@@ -150,13 +172,17 @@ impl<'a> From<&'a BTreeMap<SiloRole, BTreeSet<FleetRole>>>
 
 impl Silo {
     /// Creates a new database Silo object.
-    pub fn new(params: params::SiloCreate) -> Result<Self, Error> {
-        Self::new_with_id(Uuid::new_v4(), params)
+    pub fn new(
+        params: silo_types::SiloCreate,
+        discoverable: bool,
+    ) -> Result<Self, Error> {
+        Self::new_with_id(SiloUuid::new_v4(), params, discoverable)
     }
 
     pub fn new_with_id(
-        id: Uuid,
-        params: params::SiloCreate,
+        id: SiloUuid,
+        params: silo_types::SiloCreate,
+        discoverable: bool,
     ) -> Result<Self, Error> {
         let mapped_fleet_roles = serde_json::to_value(
             &SerializedMappedFleetRoles::from(&params.mapped_fleet_roles).0,
@@ -169,7 +195,7 @@ impl Silo {
         })?;
         Ok(Self {
             identity: SiloIdentity::new(id, params.identity),
-            discoverable: params.discoverable,
+            discoverable,
             authentication_mode: params
                 .identity_mode
                 .authentication_mode()
@@ -180,6 +206,7 @@ impl Silo {
                 .into(),
             rcgen: Generation::new(),
             mapped_fleet_roles,
+            admin_group_name: params.admin_group_name,
         })
     }
 
@@ -195,7 +222,7 @@ impl Silo {
     }
 }
 
-impl TryFrom<Silo> for views::Silo {
+impl TryFrom<Silo> for silo_types::Silo {
     type Error = Error;
     fn try_from(silo: Silo) -> Result<Self, Self::Error> {
         let authn_mode = &silo.authentication_mode;
@@ -204,11 +231,16 @@ impl TryFrom<Silo> for views::Silo {
             (AuthenticationMode::Saml, UserProvisionType::Jit) => {
                 Some(SiloIdentityMode::SamlJit)
             }
-            (AuthenticationMode::Saml, UserProvisionType::ApiOnly) => None,
+
             (AuthenticationMode::Local, UserProvisionType::ApiOnly) => {
                 Some(SiloIdentityMode::LocalOnly)
             }
-            (AuthenticationMode::Local, UserProvisionType::Jit) => None,
+
+            (AuthenticationMode::Saml, UserProvisionType::Scim) => {
+                Some(SiloIdentityMode::SamlScim)
+            }
+
+            _ => None,
         }
         .ok_or_else(|| {
             Error::internal_error(&format!(
@@ -225,19 +257,20 @@ impl TryFrom<Silo> for views::Silo {
             discoverable: silo.discoverable,
             identity_mode,
             mapped_fleet_roles,
+            admin_group_name: silo.admin_group_name,
         })
     }
 }
 
 impl DatastoreCollectionConfig<Project> for Silo {
-    type CollectionId = Uuid;
+    type CollectionId = DbTypedUuid<SiloKind>;
     type GenerationNumberColumn = silo::dsl::rcgen;
     type CollectionTimeDeletedColumn = silo::dsl::time_deleted;
     type CollectionIdColumn = project::dsl::silo_id;
 }
 
 impl DatastoreCollectionConfig<Image> for Silo {
-    type CollectionId = Uuid;
+    type CollectionId = DbTypedUuid<SiloKind>;
     type GenerationNumberColumn = silo::dsl::rcgen;
     type CollectionTimeDeletedColumn = silo::dsl::time_deleted;
     type CollectionIdColumn = image::dsl::silo_id;

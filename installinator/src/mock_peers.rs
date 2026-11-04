@@ -19,15 +19,15 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use installinator_client::{ClientError, ResponseValue};
 use installinator_common::EventReport;
+use omicron_uuid_kinds::MupdateUuid;
+use oxide_update_engine_types::events::StepEventIsTerminal;
 use proptest::{collection::vec_deque, prelude::*};
 use reqwest::StatusCode;
 use test_strategy::Arbitrary;
 use tokio::sync::mpsc;
-use tufaceous_artifact::ArtifactHashId;
-use update_engine::events::StepEventIsTerminal;
-use uuid::Uuid;
 
 use crate::{
+    artifact::ArtifactLookupId,
     errors::{DiscoverPeersError, HttpError},
     fetch::{FetchArtifactImpl, FetchReceiver},
     peers::{PeerAddress, PeerAddresses},
@@ -252,7 +252,7 @@ impl FetchArtifactImpl for MockFetchBackend {
         &self,
         peer: PeerAddress,
         // We don't (yet) use the artifact ID in MockPeers
-        _artifact_hash_id: ArtifactHashId,
+        _hash: ArtifactLookupId,
     ) -> Result<(u64, FetchReceiver), HttpError> {
         let peer_data = self
             .get(peer)
@@ -458,7 +458,7 @@ impl ResponseAction_ {
 /// In the future, this will be combined with `MockPeers` so we can model.
 #[derive(Debug)]
 struct MockProgressBackend {
-    update_id: Uuid,
+    update_id: MupdateUuid,
     // Use an unbounded sender to avoid async code in handle_valid_peer_event.
     report_sender: mpsc::UnboundedSender<EventReport>,
     behaviors: Mutex<ReportBehaviors>,
@@ -481,7 +481,7 @@ impl MockProgressBackend {
     ));
 
     fn new(
-        update_id: Uuid,
+        update_id: MupdateUuid,
         report_sender: mpsc::UnboundedSender<EventReport>,
         behaviors: ReportBehaviors,
     ) -> Self {
@@ -574,7 +574,7 @@ impl ReportProgressImpl for MockProgressBackend {
     async fn report_progress_impl(
         &self,
         peer: PeerAddress,
-        update_id: Uuid,
+        update_id: MupdateUuid,
         report: EventReport,
     ) -> Result<(), ClientError> {
         assert_eq!(update_id, self.update_id, "update ID matches");
@@ -690,7 +690,7 @@ mod tests {
         errors::DiscoverPeersError,
         fetch::{FetchArtifactBackend, FetchedArtifact},
         reporter::{ProgressReporter, ReportProgressBackend},
-        test_helpers::{dummy_artifact_hash_id, with_test_runtime},
+        test_helpers::with_test_runtime,
     };
 
     use bytes::Buf;
@@ -703,7 +703,7 @@ mod tests {
     use omicron_test_utils::dev::test_setup_log;
     use test_strategy::proptest;
     use tokio_stream::wrappers::UnboundedReceiverStream;
-    use tufaceous_artifact::KnownArtifactKind;
+    use tufaceous_artifact::ArtifactHash;
 
     // The #[proptest] macro doesn't currently with with #[tokio::test] sadly.
     #[proptest]
@@ -711,14 +711,14 @@ mod tests {
         #[strategy(MockPeersUniverse::strategy(32))]
         universe: MockPeersUniverse,
         #[strategy((0..2000u64).prop_map(Duration::from_millis))]
-        timeout: Duration,
-        #[strategy(any::<[u8; 16]>().prop_map(Uuid::from_bytes))]
-        update_id: Uuid,
+        read_timeout: Duration,
+        #[strategy(any::<[u8; 16]>().prop_map(MupdateUuid::from_bytes))]
+        update_id: MupdateUuid,
         valid_peer_behaviors: ReportBehaviors,
     ) {
         with_test_runtime(async move {
             let logctx = test_setup_log("proptest_fetch_artifact");
-            let expected_result = universe.expected_result(timeout);
+            let expected_result = universe.expected_result(read_timeout);
             let expected_artifact = universe.artifact.clone();
 
             let attempts = universe.attempts();
@@ -754,7 +754,7 @@ mod tests {
                     "Downloading artifact",
                     async move |cx| {
                         let artifact =
-                            fetch_artifact(&cx, &log, attempts, timeout)
+                            fetch_artifact(&cx, &log, attempts, read_timeout)
                                 .await?;
                         let peer = artifact.peer;
                         StepSuccess::new(artifact)
@@ -826,7 +826,7 @@ mod tests {
         cx: &StepContext,
         log: &slog::Logger,
         attempts: impl IntoIterator<Item = Result<MockFetchBackend>>,
-        timeout: Duration,
+        read_timeout: Duration,
     ) -> Result<FetchedArtifact> {
         let mut attempts = attempts.into_iter();
         FetchedArtifact::loop_fetch_from_peers(
@@ -836,7 +836,8 @@ mod tests {
                 Some(Ok(peers)) => future::ok(FetchArtifactBackend::new(
                     &log,
                     Box::new(peers),
-                    timeout,
+                    read_timeout,
+                    None,
                 )),
                 Some(Err(error)) => {
                     future::err(DiscoverPeersError::Retry(error))
@@ -845,7 +846,10 @@ mod tests {
                     anyhow::anyhow!("ran out of attempts"),
                 )),
             },
-            &dummy_artifact_hash_id(KnownArtifactKind::ControlPlane),
+            ArtifactLookupId {
+                kind: "test-control-plane",
+                hash: ArtifactHash([0; 32]),
+            },
         )
         .await
     }

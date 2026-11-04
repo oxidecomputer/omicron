@@ -9,15 +9,19 @@ Omicron debugger (unstable)
 Usage: omdb [OPTIONS] <COMMAND>
 
 Commands:
-  crucible-agent  Debug a specific crucible-agent
-  db              Query the control plane database (CockroachDB)
-  mgs             Debug a specific Management Gateway Service instance
-  nexus           Debug a specific Nexus instance
-  oximeter        Query oximeter collector state
-  oxql            Enter the Oximeter Query Language shell for interactive querying
-  reconfigurator  Interact with the Reconfigurator system
-  sled-agent      Debug a specific Sled
-  help            Print this message or the help of the given subcommand(s)
+  clickhouse-admin  Operate on a single-node ClickHouse admin server
+  crucible-agent    Debug a specific crucible-agent
+  crucible-pantry   Query a specific crucible-pantry
+  db                Query the control plane database (CockroachDB)
+  mgs               Debug a specific Management Gateway Service instance
+  nexus             Debug a specific Nexus instance
+  oximeter          Query oximeter collector state
+  oxql              Enter the Oximeter Query Language shell for interactive querying
+  reconfigurator    Interact with the Reconfigurator system
+  sled-agent        Debug a specific Sled
+  support-bundle    Collect or inspect a support bundle
+  timesync          Monitor time synchronization
+  help              Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
@@ -25,7 +29,7 @@ Options:
   -h, --help                   Print help (see more with '--help')
 
 Connection Options:
-  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -42,15 +46,19 @@ using internal APIs.  This is a prototype.  The commands and output are unstable
 Usage: omdb [OPTIONS] <COMMAND>
 
 Commands:
-  crucible-agent  Debug a specific crucible-agent
-  db              Query the control plane database (CockroachDB)
-  mgs             Debug a specific Management Gateway Service instance
-  nexus           Debug a specific Nexus instance
-  oximeter        Query oximeter collector state
-  oxql            Enter the Oximeter Query Language shell for interactive querying
-  reconfigurator  Interact with the Reconfigurator system
-  sled-agent      Debug a specific Sled
-  help            Print this message or the help of the given subcommand(s)
+  clickhouse-admin  Operate on a single-node ClickHouse admin server
+  crucible-agent    Debug a specific crucible-agent
+  crucible-pantry   Query a specific crucible-pantry
+  db                Query the control plane database (CockroachDB)
+  mgs               Debug a specific Management Gateway Service instance
+  nexus             Debug a specific Nexus instance
+  oximeter          Query oximeter collector state
+  oxql              Enter the Oximeter Query Language shell for interactive querying
+  reconfigurator    Interact with the Reconfigurator system
+  sled-agent        Debug a specific Sled
+  support-bundle    Collect or inspect a support bundle
+  timesync          Monitor time synchronization
+  help              Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>
@@ -69,7 +77,7 @@ Options:
           Print help (see a summary with '-h')
 
 Connection Options:
-  --dns-server <DNS_SERVER>
+      --dns-server <DNS_SERVER>
           [env: OMDB_DNS_SERVER=]
 
 Safety Options:
@@ -113,12 +121,16 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
+  sql                          Launch `cockroach-sql`
+  blueprints                   Print information about blueprints
+  db-metadata                  Commands for database metadata
   crucible-dataset             Commands relevant to Crucible datasets
   replacements-to-do           Print any Crucible resources that are located on expunged physical
                                disks
   rack                         Print information about the rack
   disks                        Print information about virtual disks
   dns                          Print information about internal and external DNS
+  ereport                      Query and display error reports
   inventory                    Print information about collected hardware/software inventory
   physical-disks               Print information about physical disks
   region                       Print information about regions
@@ -127,7 +139,12 @@ Commands:
   region-snapshot-replacement  Query for information about region snapshot replacements, optionally
                                manually triggering one
   saga                         Commands for querying and interacting with sagas
+  sitrep                       Commands for querying and interacting with fault management situation
+                               reports
+  sitreps                      Show the current history of fault management situation reports
   sleds                        Print information about sleds
+  sled-instances               Show instances grouped by the sled they are running on
+  target-release               Print the current target release and the update date
   instance                     Print information about customer instances
   instances                    Alias to `omdb instance list`
   network                      Print information about the network
@@ -139,8 +156,11 @@ Commands:
                                processes
   vmms                         Alias to `omdb db vmm list`
   oximeter                     Print information about the oximeter collector
-  webhook                      Print information about webhooks
+  alert                        Print information about alerts
   zpool                        Commands for querying and interacting with pools
+  user-data-export             Commands for querying and interacting with user data export objects
+  whatis                       Given a UUID, try to figure out what type of object it refers to
+  trust-quorum                 Print information about trust quorum configurations
   help                         Print this message or the help of the given subcommand(s)
 
 Options:
@@ -149,14 +169,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
-                               [default: 500]
-  --include-deleted            whether to include soft-deleted records when enumerating objects that
-                               can be soft-deleted
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -170,12 +190,16 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
+  sql                          Launch `cockroach-sql`
+  blueprints                   Print information about blueprints
+  db-metadata                  Commands for database metadata
   crucible-dataset             Commands relevant to Crucible datasets
   replacements-to-do           Print any Crucible resources that are located on expunged physical
                                disks
   rack                         Print information about the rack
   disks                        Print information about virtual disks
   dns                          Print information about internal and external DNS
+  ereport                      Query and display error reports
   inventory                    Print information about collected hardware/software inventory
   physical-disks               Print information about physical disks
   region                       Print information about regions
@@ -184,7 +208,12 @@ Commands:
   region-snapshot-replacement  Query for information about region snapshot replacements, optionally
                                manually triggering one
   saga                         Commands for querying and interacting with sagas
+  sitrep                       Commands for querying and interacting with fault management situation
+                               reports
+  sitreps                      Show the current history of fault management situation reports
   sleds                        Print information about sleds
+  sled-instances               Show instances grouped by the sled they are running on
+  target-release               Print the current target release and the update date
   instance                     Print information about customer instances
   instances                    Alias to `omdb instance list`
   network                      Print information about the network
@@ -196,8 +225,11 @@ Commands:
                                processes
   vmms                         Alias to `omdb db vmm list`
   oximeter                     Print information about the oximeter collector
-  webhook                      Print information about webhooks
+  alert                        Print information about alerts
   zpool                        Commands for querying and interacting with pools
+  user-data-export             Commands for querying and interacting with user data export objects
+  whatis                       Given a UUID, try to figure out what type of object it refers to
+  trust-quorum                 Print information about trust quorum configurations
   help                         Print this message or the help of the given subcommand(s)
 
 Options:
@@ -206,19 +238,272 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
-                               [default: 500]
-  --include-deleted            whether to include soft-deleted records when enumerating objects that
-                               can be soft-deleted
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
 ---------------------------------------------
 stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+Print information about alerts
+
+Usage: omdb db alert [OPTIONS] <COMMAND>
+
+Commands:
+  list     List alerts
+  info     Show details on an alert
+  webhook  Commands relating to webhook alerts
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
+  -h, --help                   Print help
+
+Connection Options:
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert", "list", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+List alerts
+
+Usage: omdb db alert list [OPTIONS]
+
+Options:
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+  -p, --payload
+          If set, include alert JSON payloads in the output.
+          
+          Note that this results in very wide output.
+
+  -b, --before <BEFORE>
+          Include only alerts created before this timestamp
+
+  -a, --after <AFTER>
+          Include only alerts created after this timestamp
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+      --dispatched-before <DISPATCHED_BEFORE>
+          Include only alerts fully dispatched before this timestamp
+
+      --dispatched-after <DISPATCHED_AFTER>
+          Include only alerts fully dispatched after this timestamp
+
+      --cases <CASES>...
+          Include only alerts requested by the fault management case(s) with the specified UUIDs.
+          
+          If multiple case IDs are provided, alerts requested by any of those cases will be included
+          in the output.
+          
+          Note that not all alerts are requested by fault management cases.
+
+      --classes <CLASSES>...
+          Include only alerts with the specified alert classes.
+          
+          If multiple values are provided, alerts with any of those classes will be included in the
+          output.
+
+          Possible values:
+          - probe:                           Synthetic events sent for webhook receiver liveness
+            probes.
+            Receivers should return 2xx HTTP responses for these events, but they should NOT be
+            treated as notifications of an actual event in the system.
+          - test.foo:                        This is a test of the emergency alert system
+          - test.foo.bar:                    This is a test of the emergency alert system
+          - test.foo.baz:                    This is a test of the emergency alert system
+          - test.quux.bar:                   This is a test of the emergency alert system
+          - test.quux.bar.baz:               This is a test of the emergency alert system
+          - hardware.power_shelf.psu.insert: A power supply unit (PSU) has been inserted into a
+            power shelf
+          - hardware.power_shelf.psu.remove: A power supply unit (PSU) has been removed from a power
+            shelf
+          - silo.certificate.expiring:       The TLS certificate that a silo's external API serves
+            is about to expire, and no later-expiring certificate is installed for that silo
+          - silo.certificate.expired:        The TLS certificate that a silo's external API serves
+            has expired, and no later-expiring certificate is installed for that silo
+
+  -d, --dispatched <DISPATCHED>
+          If `true`, include only alerts that have been fully dispatched. If `false`, include only
+          alerts that have not been fully dispatched.
+          
+          If this argument is not provided, both dispatched and un-dispatched events are included.
+          
+          [possible values: true, false]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Connection Options:
+      --db-url <DB_URL>
+          URL of the database SQL interface
+          
+          [env: OMDB_DB_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>
+          limit to apply to queries that fetch rows
+          
+          [env: OMDB_FETCH_LIMIT=]
+          [default: 500]
+
+      --include-deleted
+          whether to include soft-deleted records when enumerating objects that can be soft-deleted
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert", "list", "--classes", "test.foo.bar", "test.foo.box"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+error: invalid value 'test.foo.box' for '--classes <CLASSES>...'
+  [possible values: probe, test.foo, test.foo.bar, test.foo.baz, test.quux.bar, test.quux.bar.baz, hardware.power_shelf.psu.insert, hardware.power_shelf.psu.remove, silo.certificate.expiring, silo.certificate.expired]
+
+  tip: a similar value exists: 'test.foo.baz'
+
+For more information, try '--help'.
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert", "webhook", "delivery", "list", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+List webhook deliveries
+
+Usage: omdb db alert webhook delivery list [OPTIONS]
+
+Options:
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+  -r, --receiver <RECEIVER>
+          If present, show only deliveries to this receiver
+
+  -A, --alert <ALERT>
+          If present, select only deliveries for the given alert
+
+  -s, --state <STATES>...
+          If present, select only deliveries in the provided state(s)
+          
+          If multiple values are provided, deliveries in any of those states will be included in the
+          output.
+          
+          [possible values: pending, delivered, failed]
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+  -t, --trigger <TRIGGERS>...
+          If present, select only deliveries with the provided trigger(s)
+          
+          If multiple values are provided, deliveries with any of those triggers will be included in
+          the output.
+          
+          [possible values: alert, resend, probe]
+
+  -b, --before <BEFORE>
+          Include only delivery entries created before this timestamp
+
+  -a, --after <AFTER>
+          Include only delivery entries created after this timestamp
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Connection Options:
+      --db-url <DB_URL>
+          URL of the database SQL interface
+          
+          [env: OMDB_DB_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>
+          limit to apply to queries that fetch rows
+          
+          [env: OMDB_FETCH_LIMIT=]
+          [default: 500]
+
+      --include-deleted
+          whether to include soft-deleted records when enumerating objects that can be soft-deleted
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert", "webhook", "delivery", "list", "--state", "bogus"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+error: invalid value 'bogus' for '--state <STATES>...'
+  [possible values: pending, delivered, failed]
+
+For more information, try '--help'.
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert", "webhook", "delivery", "list", "--trigger", "bogus"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+error: invalid value 'bogus' for '--trigger <TRIGGERS>...'
+  [possible values: alert, resend, probe]
+
+For more information, try '--help'.
 =============================================
 EXECUTING COMMAND: omdb ["db", "disks"]
 termination: Exited(2)
@@ -242,14 +527,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
-                               [default: 500]
-  --include-deleted            whether to include soft-deleted records when enumerating objects that
-                               can be soft-deleted
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -276,14 +561,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
-                               [default: 500]
-  --include-deleted            whether to include soft-deleted records when enumerating objects that
-                               can be soft-deleted
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -338,14 +623,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
-                               [default: 500]
-  --include-deleted            whether to include soft-deleted records when enumerating objects that
-                               can be soft-deleted
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -371,14 +656,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
-                               [default: 500]
-  --include-deleted            whether to include soft-deleted records when enumerating objects that
-                               can be soft-deleted
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -407,9 +692,11 @@ show what was found in a particular collection
 Usage: omdb db inventory collections show [OPTIONS] <ID_OR_LATEST> [COMMAND]
 
 Commands:
-  all   show all information from the collection
-  sp    show information about service processors (baseboard)
-  help  Print this message or the help of the given subcommand(s)
+  all                show all information from the collection
+  sp                 show information about service processors (baseboard)
+  racks              show all information collected from the rack(s) with the given UUID(s)
+  orphaned-datasets  show orphaned datasets
+  help               Print this message or the help of the given subcommand(s)
 
 Arguments:
   <ID_OR_LATEST>  id of the collection (or `latest`)
@@ -421,14 +708,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
-                               [default: 500]
-  --include-deleted            whether to include soft-deleted records when enumerating objects that
-                               can be soft-deleted
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -449,14 +736,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
-                               [default: 500]
-  --include-deleted            whether to include soft-deleted records when enumerating objects that
-                               can be soft-deleted
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -480,17 +767,232 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
-                               [default: 500]
-  --include-deleted            whether to include soft-deleted records when enumerating objects that
-                               can be soft-deleted
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "ereport"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+Query and display error reports
+
+Usage: omdb db ereport [OPTIONS] <COMMAND>
+
+Commands:
+  list       List ereports
+  info       Show an ereport
+  reporters  List ereport reporters
+  classes    Summarize ereports by class, marking which classes a diagnosis engine in Nexus consumes
+             (fetched from Nexus's lockstep API; falls back to `?` if Nexus is unreachable)
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
+  -h, --help                   Print help
+
+Connection Options:
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
+=============================================
+EXECUTING COMMAND: omdb ["db", "ereport", "list", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+List ereports
+
+Usage: omdb db ereport list [OPTIONS]
+
+Options:
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+  -s, --serial <SERIALS>
+          Include only ereports from systems with the provided serial numbers
+
+  -i, --id <IDS>
+          Include only ereports from the provided reporter restart IDs
+
+  -c, --class <CLASSES>
+          Include only ereports with the provided class strings
+
+  -b, --before <BEFORE>
+          Include only ereports collected before this timestamp
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+  -a, --after <AFTER>
+          Include only ereports collected after this timestamp
+
+  -m, --seen <SEEN>
+          Filter ereports based on whether or not their database records have been marked as "seen"
+          (included in a committed sitrep).
+          
+          Note that ereports which have not been marked in the database *may* still have been
+          included in a sitrep. Marking of ereport database records occurs in the background, and
+          may not be up to date with the latest sitrep. If an ereport has been marked as seen, it
+          has *definitely* been included in a committed sitrep, but if an ereport has not been
+          marked, it *may or may not* have been included in a committed sitrep.
+
+          Possible values:
+          - all:      Include all ereports, regardless of whether or not they have been marked
+          - marked:   Include only ereports whose database records have been marked as seen
+          - unmarked: Include only ereports whose database records have NOT been marked as seen
+          
+          [default: all]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Connection Options:
+      --db-url <DB_URL>
+          URL of the database SQL interface
+          
+          [env: OMDB_DB_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>
+          limit to apply to queries that fetch rows
+          
+          [env: OMDB_FETCH_LIMIT=]
+          [default: 500]
+
+      --include-deleted
+          whether to include soft-deleted records when enumerating objects that can be soft-deleted
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "ereport", "reporters", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+List ereport reporters
+
+Usage: omdb db ereport reporters [OPTIONS]
+
+Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+  -t, --type <SLOT_TYPE>       
+  -s, --slot <SLOT>            
+      --serial <SERIAL>        
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
+  -h, --help                   Print help
+
+Connection Options:
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "ereport", "info", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Show an ereport
+
+Usage: omdb db ereport info [OPTIONS] <RESTART_ID> <ENA>
+
+Arguments:
+  <RESTART_ID>
+          The reporter restart UUID of the ereport to show
+
+  <ENA>
+          The ENA of the ereport within the reporter restart
+
+Options:
+  -j, --json
+          If set, output the ereport as JSON, rather than using the default human-readable format.
+          
+          Note that this will output a JSON object containing the raw ereport data along with
+          additional metadata from the database record for this ereport. To emit *only* the original
+          JSON received from the reporter, add the `--raw` flag in addition to `--json`.
+
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+  -r, --raw
+          If outputting the ereport as JSON, output *only* the raw JSON received from the reporter
+          in its original form, omitting additional metadata from the database
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Connection Options:
+      --db-url <DB_URL>
+          URL of the database SQL interface
+          
+          [env: OMDB_DB_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>
+          limit to apply to queries that fetch rows
+          
+          [env: OMDB_FETCH_LIMIT=]
+          [default: 500]
+
+      --include-deleted
+          whether to include soft-deleted records when enumerating objects that can be soft-deleted
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
 ---------------------------------------------
 stderr:
 =============================================
@@ -507,19 +1009,22 @@ Options:
           Show sleds that match the given filter
 
           Possible values:
-          - all:                      All sleds in the system, regardless of policy or state
-          - commissioned:             All sleds that are currently part of the control plane cluster
-          - decommissioned:           All sleds that were previously part of the control plane
+          - all:                           All sleds in the system, regardless of policy or state
+          - commissioned:                  All sleds that are currently part of the control plane
+            cluster
+          - decommissioned:                All sleds that were previously part of the control plane
             cluster but have been decommissioned
-          - discretionary:            Sleds that are eligible for discretionary services
-          - in-service:               Sleds that are in service (even if they might not be eligible
-            for discretionary services)
-          - query-during-inventory:   Sleds whose sled agents should be queried for inventory
-          - reservation-create:       Sleds on which reservations can be created
-          - vpc-routing:              Sleds which should be sent OPTE V2P mappings and Routing rules
-          - vpc-firewall:             Sleds which should be sent VPC firewall rules
-          - tuf-artifact-replication: Sleds which should have TUF repo artifacts replicated onto
-            them
+          - discretionary:                 Sleds that are eligible for discretionary services
+          - in-service:                    Sleds that are in service (even if they might not be
+            eligible for discretionary services)
+          - query-during-inventory:        Sleds whose sled agents should be queried for inventory
+          - reservation-create:            Sleds on which reservations can be created
+          - vpc-routing:                   Sleds which should be sent OPTE V2P mappings and Routing
+            rules
+          - vpc-firewall:                  Sleds which should be sent VPC firewall rules
+          - tuf-artifact-replication:      Sleds which should have TUF repo artifacts replicated
+            onto them
+          - sps-updated-by-reconfigurator: Sleds whose SPs should be updated by Reconfigurator
 
       --log-level <LOG_LEVEL>
           log level filter
@@ -537,22 +1042,22 @@ Options:
           Print help (see a summary with '-h')
 
 Connection Options:
-  --db-url <DB_URL>
+      --db-url <DB_URL>
           URL of the database SQL interface
           
           [env: OMDB_DB_URL=]
 
-  --dns-server <DNS_SERVER>
+      --dns-server <DNS_SERVER>
           [env: OMDB_DNS_SERVER=]
 
 Database Options:
-  --fetch-limit <FETCH_LIMIT>
+      --fetch-limit <FETCH_LIMIT>
           limit to apply to queries that fetch rows
           
           [env: OMDB_FETCH_LIMIT=]
           [default: 500]
 
-  --include-deleted
+      --include-deleted
           whether to include soft-deleted records when enumerating objects that can be soft-deleted
 
 Safety Options:
@@ -560,6 +1065,183 @@ Safety Options:
           Allow potentially-destructive subcommands
 ---------------------------------------------
 stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Commands for querying and interacting with fault management situation reports
+
+Usage: omdb db sitrep [OPTIONS] <COMMAND>
+
+Commands:
+  history          List the current situation report history
+  current          Show the current situation report
+  info             Show details on a situation report
+  analysis-report  Show the analysis report for the requested sitrep, if one exists
+  slippy           Run the slippy sitrep linter over the requested sitrep
+  help             Print this message or the help of the given subcommand(s)
+
+Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
+  -h, --help                   Print help
+
+Connection Options:
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Show details on a situation report
+
+Usage: omdb db sitrep info [OPTIONS] <UUID|VERSION|current>
+
+Arguments:
+  <UUID|VERSION|current>
+          The sitrep to show, identified by UUID, version number, or "current".
+          
+          A value of "current" selects the current sitrep. An integer (optionally prefixed with "v",
+          e.g. "3" or "v3") selects the sitrep with that version number in the sitrep history. Any
+          other value is parsed as a sitrep UUID.
+
+Options:
+  -j, --json
+          
+
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Connection Options:
+      --db-url <DB_URL>
+          URL of the database SQL interface
+          
+          [env: OMDB_DB_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>
+          limit to apply to queries that fetch rows
+          
+          [env: OMDB_FETCH_LIMIT=]
+          [default: 500]
+
+      --include-deleted
+          whether to include soft-deleted records when enumerating objects that can be soft-deleted
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "analysis-report", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Show the analysis report for the requested sitrep, if one exists
+
+Usage: omdb db sitrep analysis-report [OPTIONS] <UUID|VERSION|current>
+
+Arguments:
+  <UUID|VERSION|current>
+          The sitrep whose analysis report to show, identified by UUID, version number, or
+          "current".
+          
+          A value of "current" selects the current sitrep. An integer (optionally prefixed with "v",
+          e.g. "3" or "v3") selects the sitrep with that version number in the sitrep history. Any
+          other value is parsed as a sitrep UUID.
+
+Options:
+  -j, --json
+          
+
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Connection Options:
+      --db-url <DB_URL>
+          URL of the database SQL interface
+          
+          [env: OMDB_DB_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>
+          limit to apply to queries that fetch rows
+          
+          [env: OMDB_FETCH_LIMIT=]
+          [default: 500]
+
+      --include-deleted
+          whether to include soft-deleted records when enumerating objects that can be soft-deleted
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "not-a-sitrep"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+error: invalid value 'not-a-sitrep' for '<UUID|VERSION|current>': expected a sitrep UUID, a version number, or "current"
+
+For more information, try '--help'.
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "v1.2.3"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+error: invalid value 'v1.2.3' for '<UUID|VERSION|current>': a sitrep version (prefixed with 'v' or 'V') must be a valid 32-bit unsigned integer
+
+For more information, try '--help'.
 =============================================
 EXECUTING COMMAND: omdb ["db", "saga"]
 termination: Exited(2)
@@ -575,6 +1257,7 @@ Commands:
   running       List running sagas
   inject-error  Inject an error into a saga's currently running node(s)
   abandon       Prevent new Nexus processes from resuming execution of a saga
+  show          Show the execution of a saga
   help          Print this message or the help of the given subcommand(s)
 
 Options:
@@ -583,14 +1266,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
-                               [default: 500]
-  --include-deleted            whether to include soft-deleted records when enumerating objects that
-                               can be soft-deleted
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -616,14 +1299,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
-                               [default: 500]
-  --include-deleted            whether to include soft-deleted records when enumerating objects that
-                               can be soft-deleted
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -650,14 +1333,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
-                               [default: 500]
-  --include-deleted            whether to include soft-deleted records when enumerating objects that
-                               can be soft-deleted
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -684,8 +1367,8 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-  --mgs-url <MGS_URL>        URL of an MGS instance to query [env: OMDB_MGS_URL=]
-  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+      --mgs-url <MGS_URL>        URL of an MGS instance to query [env: OMDB_MGS_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -701,15 +1384,21 @@ Debug a specific Nexus instance
 Usage: omdb nexus [OPTIONS] <COMMAND>
 
 Commands:
-  background-tasks      print information about background tasks
-  blueprints            interact with blueprints
-  clickhouse-policy     interact with clickhouse policy
-  mgs-updates           print information about pending MGS updates
-  oximeter-read-policy  interact with oximeter read policy
-  sagas                 view sagas, create and complete demo sagas
-  sleds                 interact with sleds
-  support-bundles       interact with support bundles [aliases: sb]
-  help                  Print this message or the help of the given subcommand(s)
+  background-tasks       print information about background tasks
+  blueprints             interact with blueprints
+  clickhouse-policy      interact with clickhouse policy
+  fetch-omdb             fetch an omdb binary associated with an active Nexus
+  mgs-updates            print information about pending MGS updates
+  oximeter-read-policy   interact with oximeter read policy
+  quiesce                view or modify the quiesce status
+  reconfigurator-config  interact with reconfigurator config
+  sagas                  view sagas, create and complete demo sagas
+  sleds                  interact with sleds
+  support-bundles        interact with support bundles [aliases: sb]
+  trust-quorum           interact with the trust quorum
+  update-status          show running artifact versions
+  fm-config              view or modify fault management config
+  help                   Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
@@ -717,8 +1406,10 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-  --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env: OMDB_NEXUS_URL=]
-  --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -747,8 +1438,10 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-  --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env: OMDB_NEXUS_URL=]
-  --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -775,6 +1468,11 @@ Options:
           [env: LOG_LEVEL=]
           [default: warn]
 
+      --no-executing-info
+          Do not display information about whether a task is currently executing.
+          
+          Useful for test output stability.
+
       --color <COLOR>
           Color output
           
@@ -785,12 +1483,12 @@ Options:
           Print help (see a summary with '-h')
 
 Connection Options:
-  --nexus-internal-url <NEXUS_INTERNAL_URL>
-          URL of the Nexus internal API
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API
           
           [env: OMDB_NEXUS_URL=]
 
-  --dns-server <DNS_SERVER>
+      --dns-server <DNS_SERVER>
           [env: OMDB_DNS_SERVER=]
 
 Safety Options:
@@ -825,8 +1523,10 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-  --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env: OMDB_NEXUS_URL=]
-  --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -853,8 +1553,10 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-  --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env: OMDB_NEXUS_URL=]
-  --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -880,7 +1582,6 @@ Usage: omdb nexus sleds [OPTIONS] <COMMAND>
 
 Commands:
   list-uninitialized  List all uninitialized sleds
-  add                 Add an uninitialized sled
   expunge             Expunge a sled (DANGEROUS)
   expunge-disk        Expunge a disk (DANGEROUS)
   help                Print this message or the help of the given subcommand(s)
@@ -891,8 +1592,10 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-  --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env: OMDB_NEXUS_URL=]
-  --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -908,20 +1611,25 @@ Debug a specific Sled
 Usage: omdb sled-agent [OPTIONS] <COMMAND>
 
 Commands:
-  zones      print information about zones
-  zpools     print information about zpools
-  datasets   print information about datasets
-  bootstore  print information about the local bootstore node
-  help       Print this message or the help of the given subcommand(s)
+  zones               print information about zones
+  switch-zone-policy  control the switch zone policy
+  network-config      print information about the replicated network config
+  bootstore           print information about the local bootstore node
+  trust-quorum        print information about the local trust quorum node
+  help                Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
       --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
-  -h, --help                   Print help
+  -h, --help                   Print help (see more with '--help')
 
 Connection Options:
-  --sled-agent-url <SLED_AGENT_URL>  URL of the Sled internal API [env: OMDB_SLED_AGENT_URL=]
-  --dns-server <DNS_SERVER>          [env: OMDB_DNS_SERVER=]
+      --sled-agent-url <SLED_AGENT_URL>
+          URL of the Sled internal API [env: OMDB_SLED_AGENT_URL=]
+      --bootstrap-lockstep-url <BOOTSTRAP_LOCKSTEP_URL>
+          URL of the sled bootstrap-agent-lockstep API [env: OMDB_BOOTSTRAP_LOCKSTEP_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -937,43 +1645,52 @@ print information about zones
 Usage: omdb sled-agent zones [OPTIONS] <COMMAND>
 
 Commands:
-  list  Print list of all running control plane zones
+  list  print list of all running control plane zones
   help  Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
       --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
-  -h, --help                   Print help
+  -h, --help                   Print help (see more with '--help')
 
 Connection Options:
-  --sled-agent-url <SLED_AGENT_URL>  URL of the Sled internal API [env: OMDB_SLED_AGENT_URL=]
-  --dns-server <DNS_SERVER>          [env: OMDB_DNS_SERVER=]
+      --sled-agent-url <SLED_AGENT_URL>
+          URL of the Sled internal API [env: OMDB_SLED_AGENT_URL=]
+      --bootstrap-lockstep-url <BOOTSTRAP_LOCKSTEP_URL>
+          URL of the sled bootstrap-agent-lockstep API [env: OMDB_BOOTSTRAP_LOCKSTEP_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
 =============================================
-EXECUTING COMMAND: omdb ["sled-agent", "zpools"]
+EXECUTING COMMAND: omdb ["sled-agent", "network-config"]
 termination: Exited(2)
 ---------------------------------------------
 stdout:
 ---------------------------------------------
 stderr:
-print information about zpools
+print information about the replicated network config
 
-Usage: omdb sled-agent zpools [OPTIONS] <COMMAND>
+Usage: omdb sled-agent network-config [OPTIONS] <COMMAND>
 
 Commands:
-  list  Print list of all zpools managed by the sled agent
-  help  Print this message or the help of the given subcommand(s)
+  show               show the current contents of the replicated network config
+  reconciler-status  get the state of the scrimlet-reconcilers system
+  help               Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
       --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
-  -h, --help                   Print help
+  -h, --help                   Print help (see more with '--help')
 
 Connection Options:
-  --sled-agent-url <SLED_AGENT_URL>  URL of the Sled internal API [env: OMDB_SLED_AGENT_URL=]
-  --dns-server <DNS_SERVER>          [env: OMDB_DNS_SERVER=]
+      --sled-agent-url <SLED_AGENT_URL>
+          URL of the Sled internal API [env: OMDB_SLED_AGENT_URL=]
+      --bootstrap-lockstep-url <BOOTSTRAP_LOCKSTEP_URL>
+          URL of the sled bootstrap-agent-lockstep API [env: OMDB_BOOTSTRAP_LOCKSTEP_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -997,8 +1714,9 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-  --oximeter-url <OXIMETER_URL>  URL of the oximeter collector to query [env: OMDB_OXIMETER_URL=]
-  --dns-server <DNS_SERVER>      [env: OMDB_DNS_SERVER=]
+      --oximeter-url <OXIMETER_URL>  URL of the oximeter collector to query [env:
+                                     OMDB_OXIMETER_URL=]
+      --dns-server <DNS_SERVER>      [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -1014,19 +1732,53 @@ Enter the Oximeter Query Language shell for interactive querying
 Usage: omdb oxql [OPTIONS]
 
 Options:
-      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
-      --summaries              Print summaries of each SQL query run against the database
-      --elapsed                Print the total elapsed query duration
-      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
-  -h, --help                   Print help
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+      --summaries
+          Print summaries of each SQL query run against the database
+
+      --elapsed
+          Print the total elapsed query duration
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+  -e, --execute <QUERY>
+          Execute the query and exit
+
+  -f <OUTPUT_FORMAT>
+          The format for printing the result of queries
+
+          Possible values:
+          - human-readable: Human-readable formatted output, the default
+          - simple:         Simple human-readable formatted output
+          - json:           Compact JSON format
+          - json-pretty:    Prettified JSON format
+          
+          [default: human-readable]
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Connection Options:
-  --clickhouse-url <CLICKHOUSE_URL>  URL of the ClickHouse server to connect to [env:
-                                     OMDB_CLICKHOUSE_URL=]
-  --dns-server <DNS_SERVER>          [env: OMDB_DNS_SERVER=]
+      --clickhouse-url <CLICKHOUSE_URL>
+          URL of the ClickHouse server to connect to
+          
+          [env: OMDB_CLICKHOUSE_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
-  -w, --destructive  Allow potentially-destructive subcommands
+  -w, --destructive
+          Allow potentially-destructive subcommands
 ---------------------------------------------
 stderr:
 =============================================
@@ -1055,11 +1807,12 @@ Interact with the Reconfigurator system
 Usage: omdb reconfigurator [OPTIONS] <COMMAND>
 
 Commands:
-  export   Save the current Reconfigurator state to a file
-  archive  Save the current Reconfigurator state to a file and remove historical artifacts from the
-           live system (e.g., non-target blueprints)
-  history  Show recent history of blueprints
-  help     Print this message or the help of the given subcommand(s)
+  export          Save the current Reconfigurator state to a file
+  archive         Save the current Reconfigurator state to a file and remove historical artifacts
+                  from the live system (e.g., non-target blueprints)
+  history         Show recent history of blueprints
+  config-history  Show the recent history of configuration values
+  help            Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
@@ -1067,8 +1820,8 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -1098,4 +1851,185 @@ error: the following required arguments were not provided:
 Usage: omdb reconfigurator archive <OUTPUT_FILE>
 
 For more information, try '--help'.
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "fm-config"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+view or modify fault management config
+
+Usage: omdb nexus fm-config [OPTIONS] <COMMAND>
+
+Commands:
+  current        Show the current fault management configuration
+  show           Show a configuration at a given version
+  show-defaults  Show the system-defined default values for all config settings, as of the current
+                 Oxide system software version
+  set            Override one or more config option(s), creating a new version
+  help           Print this message or the help of the given subcommand(s)
+
+Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
+  -h, --help                   Print help
+
+Connection Options:
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "fm-config", "show", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Show a configuration at a given version
+
+Usage: omdb nexus fm-config show [OPTIONS] <VERSION|current|default>
+
+Arguments:
+  <VERSION|current|default>
+          The config version to show
+          
+          A value of 'current' or 'latest' selects the currently active config version, while a
+          value of 'default' displays the default values as defined by the current Oxide system
+          software release. An integer version will select that config version if it exists.
+
+Options:
+      --json
+          If set, output the config in JSON rather than pretty-printing it
+
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Connection Options:
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API
+          
+          [env: OMDB_NEXUS_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "fm-config", "set", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Override one or more config option(s), creating a new version.
+
+The flags listed under 'Config Options' provide values for settings in the fault-management config.
+Any number of these flags may be provided to set multiple config values. If a flag is *not*
+provided, the previous value of that setting (which may be an override from an earlier config
+version or the system-defined default) is preserved.
+
+A value of 'default' may also be provided for any flag. This will explicitly restore that setting to
+its system-provided default value. Note that default values may change in new Oxide system software
+releases. Therefore, there is a semantic difference between an override that explicitly sets a
+config option to a value that *happens* to be the default, and restoring the default value through
+this mechanism: if the default value changes in a new system software version, the override will
+remain the same, while the restored default will use the value defined by the current software
+version.
+
+Use the `omdb nexus fm-config show-defaults` command to view the default values for all config
+options.
+
+Usage: omdb nexus fm-config set [OPTIONS] --comment <COMMENT> <--sitrep-limit <SITREP_LIMIT>|--history-pruning-threshold <HISTORY_PRUNING_THRESHOLD>|--analysis-enabled <ANALYSIS_ENABLED>|--certificate-expiry-warning-days <CERTIFICATE_EXPIRY_WARNING_DAYS>>
+
+Options:
+      --comment <COMMENT>
+          A comment describing this config change.
+          
+          Note that comments are mandatory and may not be empty.
+
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Config Options:
+      --sitrep-limit <SITREP_LIMIT>
+          Configures the maximum number of sitreps permitted in the database.
+          
+          If the number of sitreps in the database, including orphaned sitreps, reaches or exceeds
+          this limit, fault management analysis will not produce new sitreps until some are deleted.
+          
+          This must be a non-zero integer, or 'default'. If it is set to 'default', any previous
+          override will be removed, and the system will revert this setting to the default value.
+
+      --history-pruning-threshold <HISTORY_PRUNING_THRESHOLD>
+          Sets the number of sitreps in the history table after which the oldest sitreps will be
+          removed from the history.
+          
+          This must be a non-zero integer, or 'default'. If it is set to 'default', any previous
+          override will be removed, and the system will revert this setting to the default value.
+          
+          If an integer value is provided, it must be less than the total sitrep limit.
+
+      --analysis-enabled <ANALYSIS_ENABLED>
+          BREAK GLASS IN CASE OF EMERGENCY: COMPLETELY DISABLE FM ANALYSIS
+          
+          This must be a boolean ('true' or 'false'), or 'default'. If it is set to 'default', any
+          previous override will be removed, and the system will revert this setting to the default
+          value.
+
+      --certificate-expiry-warning-days <CERTIFICATE_EXPIRY_WARNING_DAYS>
+          Sets the certificate expiry warning window, in days.
+          
+          When a silo's external TLS certificate is within this many days of expiring, the
+          certificate diagnosis engine opens a case and requests an alert.
+          
+          The window applies to the certificate Nexus serves for the silo (the one with the latest
+          expiration time), so a case opens only when no later-expiring replacement is installed.
+          
+          This must be a non-zero integer no greater than 3650, or 'default'. If it is set to
+          'default', any previous override will be removed, and the system will revert this setting
+          to the default value.
+
+Connection Options:
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API
+          
+          [env: OMDB_NEXUS_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
 =============================================

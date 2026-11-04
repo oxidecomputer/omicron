@@ -1,0 +1,163 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Interface for making API requests to the Oxide control plane at large from
+//! callers that update in lockstep with Nexus itself (e.g. rack initialization,
+//! tests and debugging)
+
+use iddqd::IdOrdItem;
+use iddqd::id_upcast;
+
+progenitor::generate_api!(
+    spec = "../../openapi/nexus-lockstep.json",
+    interface = Positional,
+    derives = [schemars::JsonSchema, PartialEq],
+    inner_type = slog::Logger,
+    hooks = Expected,
+    crates = {
+        "iddqd" = "*",
+        "omicron-generation-kinds" = "*",
+        "omicron-uuid-kinds" = "*",
+        "oxnet" = "0.1.0",
+        "steno" = "*",
+    },
+    replace = {
+        BaseboardId = sled_hardware_types::BaseboardId,
+        BfdMode = sled_agent_types::early_networking::BfdMode,
+        BgpPeerConfig = sled_agent_types::early_networking::BgpPeerConfig,
+        // It's kind of unfortunate to pull in such a complex and unstable type
+        // as "blueprint" this way, but we have really useful functionality
+        // (e.g., diff'ing) that's implemented on our local type.
+        Blueprint = nexus_types::deployment::Blueprint,
+        BlueprintDatasetConfig = nexus_types::deployment::BlueprintDatasetConfig,
+        BlueprintHostPhase2DesiredContents = nexus_types::deployment::BlueprintHostPhase2DesiredContents,
+        BlueprintPhysicalDiskConfig = nexus_types::deployment::BlueprintPhysicalDiskConfig,
+        BlueprintPhysicalDiskDisposition = nexus_types::deployment::BlueprintPhysicalDiskDisposition,
+        BlueprintZoneConfig = nexus_types::deployment::BlueprintZoneConfig,
+        BlueprintZoneImageSource = nexus_types::deployment::BlueprintZoneImageSource,
+        Certificate = omicron_common::api::internal::nexus::Certificate,
+        ClickhouseMode = nexus_types::deployment::ClickhouseMode,
+        ClickhousePolicy = nexus_types::deployment::ClickhousePolicy,
+        DatasetKind = omicron_common::api::internal::shared::DatasetKind,
+        DnsConfigParams = nexus_types::internal_api::params::DnsConfigParams,
+        DnsConfigZone = nexus_types::internal_api::params::DnsConfigZone,
+        DnsRecord = nexus_types::internal_api::params::DnsRecord,
+        Generation = omicron_generation_kinds::Generation,
+        FmConfigView = nexus_types::fm::FmConfigView,
+        FmConfigParam = nexus_types::fm::FmConfigParam,
+        ImportExportPolicy = sled_agent_types::early_networking::ImportExportPolicy,
+        LinkFec = sled_agent_types::early_networking::LinkFec,
+        LinkSpeed = sled_agent_types::early_networking::LinkSpeed,
+        LldpAdminStatus = sled_agent_types::early_networking::LldpAdminStatus,
+        LldpPortConfig = sled_agent_types::early_networking::LldpPortConfig,
+        MacAddr = omicron_common::api::external::MacAddr,
+        MgsUpdateDriverStatus = nexus_types::internal_api::views::MgsUpdateDriverStatus,
+        Name = omicron_common::api::external::Name,
+        NetworkInterface = sled_agent_types::inventory::NetworkInterface,
+        NetworkInterfaceKind = sled_agent_types::inventory::NetworkInterfaceKind,
+        NewPasswordHash = omicron_passwords::NewPasswordHash,
+        OmicronZoneExternalFloatingAddr =
+            nexus_types::deployment::OmicronZoneExternalFloatingAddr,
+        OmicronZoneExternalFloatingIp =
+            nexus_types::deployment::OmicronZoneExternalFloatingIp,
+        OximeterReadMode = nexus_types::deployment::OximeterReadMode,
+        OximeterReadPolicy = nexus_types::deployment::OximeterReadPolicy,
+        PendingMgsUpdate = nexus_types::deployment::PendingMgsUpdate,
+        PlannerConfig = nexus_types::deployment::PlannerConfig,
+        PortConfig = sled_agent_types::early_networking::PortConfig,
+        ReconfiguratorConfig = nexus_types::deployment::ReconfiguratorConfig,
+        ReconfiguratorConfigParam = nexus_types::deployment::ReconfiguratorConfigParam,
+        ReconfiguratorConfigView = nexus_types::deployment::ReconfiguratorConfigView,
+        RecoverySiloConfig = bootstrap_agent_lockstep_types::RecoverySiloConfig,
+        RouteConfig = sled_agent_types::early_networking::RouteConfig,
+        RouterLifetimeConfig = sled_agent_types::early_networking::RouterLifetimeConfig,
+        RouterPeerType = sled_agent_types::early_networking::RouterPeerType,
+        ServiceIpPoolConfig = nexus_types::internal_api::params::ServiceIpPoolConfig,
+        SledAgentUpdateStatus = nexus_types::internal_api::views::SledAgentUpdateStatus,
+        SwitchSlot = sled_agent_types::early_networking::SwitchSlot,
+        TrustQuorumConfig = nexus_types::trust_quorum::TrustQuorumConfig,
+        TxEqConfig = sled_agent_types::early_networking::TxEqConfig,
+        UpdateStatus = nexus_types::internal_api::views::UpdateStatus,
+        UplinkAddressConfig = sled_agent_types::early_networking::UplinkAddressConfig,
+        UplinkPorts = sled_agent_types::early_networking::UplinkPorts,
+        ZoneStatus = nexus_types::internal_api::views::ZoneStatus,
+        ZpoolName = omicron_common::zpool_name::ZpoolName,
+    },
+    patch = {
+        ByteCount = { derives = [PartialEq, Eq] },
+        Baseboard = { derives = [PartialEq, Eq] }
+    }
+);
+
+progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
+
+impl IdOrdItem for types::PendingSagaInfo {
+    type Key<'a> = steno::SagaId;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.saga_id
+    }
+
+    id_upcast!();
+}
+
+impl IdOrdItem for types::HeldDbClaimInfo {
+    type Key<'a> = u64;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
+}
+
+impl From<std::time::Duration> for types::Duration {
+    fn from(s: std::time::Duration) -> Self {
+        Self { secs: s.as_secs(), nanos: s.subsec_nanos() }
+    }
+}
+
+impl From<types::Duration> for std::time::Duration {
+    fn from(s: types::Duration) -> Self {
+        std::time::Duration::from_nanos(
+            s.secs * 1000000000 + u64::from(s.nanos),
+        )
+    }
+}
+
+impl From<omicron_common::address::IpRange> for types::IpRange {
+    fn from(r: omicron_common::address::IpRange) -> Self {
+        use omicron_common::address::IpRange;
+        match r {
+            IpRange::V4(r) => types::IpRange::V4(r.into()),
+            IpRange::V6(r) => types::IpRange::V6(r.into()),
+        }
+    }
+}
+
+impl From<omicron_common::address::Ipv4Range> for types::Ipv4Range {
+    fn from(r: omicron_common::address::Ipv4Range) -> Self {
+        Self { first: r.first, last: r.last }
+    }
+}
+
+impl From<omicron_common::address::Ipv6Range> for types::Ipv6Range {
+    fn from(r: omicron_common::address::Ipv6Range) -> Self {
+        Self { first: r.first, last: r.last }
+    }
+}
+
+impl From<&omicron_common::api::external::AllowedSourceIps>
+    for types::AllowedSourceIps
+{
+    fn from(ips: &omicron_common::api::external::AllowedSourceIps) -> Self {
+        use omicron_common::api::external::AllowedSourceIps;
+        match ips {
+            AllowedSourceIps::Any => types::AllowedSourceIps::Any,
+            AllowedSourceIps::List(list) => {
+                types::AllowedSourceIps::List(list.iter().cloned().collect())
+            }
+        }
+    }
+}

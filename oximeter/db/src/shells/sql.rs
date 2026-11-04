@@ -4,11 +4,10 @@
 
 //! SQL shell implementation.
 
-// Copyright 2024 Oxide Computer Company
-
 use super::prepare_columns;
 use crate::sql::{QueryResult, Table, function_allow_list};
-use crate::{Client, QuerySummary, make_client};
+use crate::{Client, DbWrite as _, User};
+use anyhow::Context as _;
 use clap::Args;
 use dropshot::EmptyScanParams;
 use dropshot::WhichPage;
@@ -17,7 +16,7 @@ use reedline::DefaultPromptSegment;
 use reedline::Reedline;
 use reedline::Signal;
 use slog::Logger;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 
 /// Options for the SQL shell.
 #[derive(Clone, Debug, Args)]
@@ -54,7 +53,11 @@ pub async fn shell(
     log: Logger,
     opts: ShellOptions,
 ) -> anyhow::Result<()> {
-    let client = make_client(address, port, &log).await?;
+    let client = Client::new(User::Admin, SocketAddr::new(address, port), &log);
+    client
+        .init_single_node_db()
+        .await
+        .context("Failed to initialize timeseries database")?;
 
     // A workaround to ensure the client has all available timeseries when the
     // shell starts.
@@ -69,8 +72,8 @@ pub async fn shell(
             sqlformat::format(
                 &transformed,
                 &sqlformat::QueryParams::None,
-                sqlformat::FormatOptions {
-                    uppercase: true,
+                &sqlformat::FormatOptions {
+                    uppercase: Some(true),
                     ..Default::default()
                 }
             )
@@ -246,13 +249,16 @@ fn print_sql_query(query: &str) {
         sqlformat::format(
             &query,
             &sqlformat::QueryParams::None,
-            sqlformat::FormatOptions { uppercase: true, ..Default::default() }
+            &sqlformat::FormatOptions {
+                uppercase: Some(true),
+                ..Default::default()
+            }
         )
     );
     println!();
 }
 
-fn print_query_summary(table: &Table, summary: &QuerySummary) {
+fn print_query_summary(table: &Table, summary: &oxql_types::QuerySummary) {
     println!("Summary");
     println!(" Query ID:    {}", summary.id);
     println!(" Result rows: {}", table.rows.len());

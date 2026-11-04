@@ -9,10 +9,10 @@ use clap::Args;
 use gateway_client::types::MeasurementErrorCode;
 use gateway_client::types::MeasurementKind;
 use gateway_client::types::SpComponentDetails;
-use gateway_client::types::SpIdentifier;
-use gateway_client::types::SpIgnition;
-use gateway_client::types::SpType;
+use gateway_types::component::SpIdentifier;
+use gateway_types::ignition::SpIgnition;
 use multimap::MultiMap;
+use nexus_types::inventory::SpType;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::sync::Arc;
@@ -26,7 +26,7 @@ pub(crate) struct SensorsArgs {
 
     /// restrict to specified sled(s)
     #[clap(long, use_value_delimiter = true)]
-    pub sled: Vec<u32>,
+    pub sled: Vec<u16>,
 
     /// exclude sleds rather than include them
     #[clap(long, short)]
@@ -94,7 +94,7 @@ pub(crate) struct SensorsArgs {
 
 impl SensorsArgs {
     fn matches_sp(&self, sp: &SpIdentifier) -> bool {
-        match sp.type_ {
+        match sp.typ {
             SpType::Sled => {
                 let matched = if !self.sled.is_empty() {
                     self.sled.contains(&sp.slot)
@@ -235,7 +235,7 @@ pub(crate) enum DeviceIdentifier {
 impl DeviceIdentifier {
     fn device(&self) -> &String {
         match self {
-            Self::Device(ref device) => device,
+            Self::Device(device) => device,
             _ => panic!(),
         }
     }
@@ -256,7 +256,7 @@ struct SpInfo {
 async fn sp_info(
     mgs_client: gateway_client::Client,
     type_: SpType,
-    slot: u32,
+    slot: u16,
 ) -> Result<SpInfo, anyhow::Error> {
     let mut devices = MultiMap::new();
     let mut timestamps = vec![];
@@ -266,7 +266,7 @@ async fn sp_info(
     //
     // First, get a component list.
     //
-    let components = mgs_client.sp_component_list(type_, slot).await?;
+    let components = mgs_client.sp_component_list(&type_, slot).await?;
     timestamps.push(std::time::Instant::now());
 
     //
@@ -275,27 +275,33 @@ async fn sp_info(
     // of the sensor as well as the retrieved value.
     //
     for c in &components.components {
-        for s in mgs_client
-            .sp_component_get(type_, slot, &c.component)
-            .await?
-            .iter()
-            .filter_map(|detail| match detail {
-                SpComponentDetails::Measurement { kind, name, value } => Some(
-                    (Sensor { name: name.clone(), kind: *kind }, Some(*value)),
-                ),
-                SpComponentDetails::MeasurementError { kind, name, error } => {
-                    match error {
-                        MeasurementErrorCode::NoReading
-                        | MeasurementErrorCode::NotPresent => None,
-                        _ => Some((
-                            Sensor { name: name.clone(), kind: *kind },
-                            None,
-                        )),
+        let details =
+            match mgs_client.sp_component_get(&type_, slot, &c.component).await
+            {
+                Ok(s) => s,
+                Err(gateway_client::Error::ErrorResponse(rsp))
+                    if rsp.error_code.as_deref()
+                        == Some("UnsupportedComponentDetails") =>
+                {
+                    continue;
+                }
+                Err(e) => return Err(e.into()),
+            };
+        for s in details.iter().filter_map(|detail| match detail {
+            SpComponentDetails::Measurement { kind, name, value } => {
+                Some((Sensor { name: name.clone(), kind: *kind }, Some(*value)))
+            }
+            SpComponentDetails::MeasurementError { kind, name, error } => {
+                match error {
+                    MeasurementErrorCode::NoReading
+                    | MeasurementErrorCode::NotPresent => None,
+                    _ => {
+                        Some((Sensor { name: name.clone(), kind: *kind }, None))
                     }
                 }
-                _ => None,
-            })
-        {
+            }
+            _ => None,
+        }) {
             devices.insert(DeviceIdentifier::Device(c.component.clone()), s);
         }
     }
@@ -321,8 +327,8 @@ async fn sp_info_mgs(
     let mut sp_list = all_sp_list
         .iter()
         .filter_map(|ignition| {
-            if matches!(ignition.details, SpIgnition::Yes { .. })
-                && ignition.id.type_ == SpType::Sled
+            if matches!(ignition.details, SpIgnition::Present { .. })
+                && ignition.id.typ == SpType::Sled
             {
                 if args.matches_sp(&ignition.id) {
                     return Some(ignition.id);
@@ -333,12 +339,12 @@ async fn sp_info_mgs(
         .collect::<Vec<_>>();
 
     if args.switches {
-        sp_list.push(SpIdentifier { type_: SpType::Switch, slot: 0 });
-        sp_list.push(SpIdentifier { type_: SpType::Switch, slot: 1 });
+        sp_list.push(SpIdentifier { typ: SpType::Switch, slot: 0 });
+        sp_list.push(SpIdentifier { typ: SpType::Switch, slot: 1 });
     }
 
     if args.psc {
-        sp_list.push(SpIdentifier { type_: SpType::Power, slot: 0 });
+        sp_list.push(SpIdentifier { typ: SpType::Power, slot: 0 });
     }
 
     sp_list.sort();
@@ -348,7 +354,7 @@ async fn sp_info_mgs(
     let mut handles = vec![];
     for sp_id in sp_list {
         let handle =
-            tokio::spawn(sp_info(mgs_client.clone(), sp_id.type_, sp_id.slot));
+            tokio::spawn(sp_info(mgs_client.clone(), sp_id.typ, sp_id.slot));
 
         handles.push((sp_id, handle));
     }
@@ -406,7 +412,7 @@ fn sp_info_csv<R: std::io::Read>(
         if &headers[ndx] != expected[ndx] {
             bail!(
                 "malformed headers: expected {}, found {} ({headers:?})",
-                &expected[ndx],
+                expected[ndx],
                 &headers[ndx]
             );
         }
@@ -429,11 +435,11 @@ fn sp_info_csv<R: std::io::Read>(
             }
         };
 
-        let slot = parts[1].parse::<u32>().or_else(|_| {
+        let slot = parts[1].parse::<u16>().or_else(|_| {
             bail!("invalid slot in \"{field}\"");
         })?;
 
-        let sp = SpIdentifier { type_, slot };
+        let sp = SpIdentifier { typ: type_, slot };
 
         if args.matches_sp(&sp) {
             sps.push(Some(sp));
@@ -512,7 +518,7 @@ fn sp_info_csv<R: std::io::Read>(
                                             "line {}: unrecognized value \
                                             \"{}\" in field {}",
                                             position.line(),
-                                            record[ndx + len].to_string(),
+                                            &record[ndx + len],
                                             ndx + len
                                         );
                                     }
@@ -577,7 +583,7 @@ pub(crate) async fn sensor_metadata<R: std::io::Read>(
         .map(|named| named.into_iter().collect::<HashSet<_>>());
 
     let info = match input {
-        SensorInput::MgsClient(ref mgs_client) => {
+        &mut SensorInput::MgsClient(ref mgs_client) => {
             sp_info_mgs(mgs_client, args).await?
         }
         SensorInput::CsvReader(reader, position) => {
@@ -673,7 +679,7 @@ async fn sp_read_sensors(
 
     for (component, ids) in work.iter() {
         for (value, id) in mgs_client
-            .sp_component_get(id.type_, id.slot, component.device())
+            .sp_component_get(&id.typ, id.slot, component.device())
             .await?
             .iter()
             .filter_map(|detail| match detail {
@@ -804,7 +810,7 @@ pub(crate) async fn sensor_data<R: std::io::Read + std::io::Seek>(
     metadata: &Arc<SensorMetadata>,
 ) -> Result<SensorValues, anyhow::Error> {
     match input {
-        SensorInput::MgsClient(ref mgs_client) => {
+        &mut SensorInput::MgsClient(ref mgs_client) => {
             sp_data_mgs(mgs_client, metadata).await
         }
         SensorInput::CsvReader(reader, position) => {
@@ -859,7 +865,7 @@ pub(crate) async fn cmd_mgs_sensors(
         for sp in &sps {
             print_value(format!(
                 "{}-{}",
-                crate::mgs::sp_type_to_str(&sp.type_).to_uppercase(),
+                crate::mgs::sp_type_to_str(&sp.typ).to_uppercase(),
                 sp.slot
             ));
         }

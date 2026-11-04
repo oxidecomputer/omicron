@@ -59,13 +59,13 @@ pub enum ClickHouseDeployment {
     ///
     /// This starts a single replica on one server. It is expected to work with
     /// the non-replicated version of the `oximeter` database.
-    SingleNode(ClickHouseReplica),
+    SingleNode(Box<ClickHouseReplica>),
     /// A replicated ClickHouse cluster.
     ///
     /// This starts several replica servers, and the required ClickHouse Keeper
     /// nodes that manage the cluster. It is expected to work with the
     /// replicated version of the `oximeter` database.
-    Cluster(ClickHouseCluster),
+    Cluster(Box<ClickHouseCluster>),
 }
 
 /// Port numbers that a ClickHouse replica listens on.
@@ -146,7 +146,7 @@ impl ClickHouseDeployment {
     ) -> Result<Self, anyhow::Error> {
         ClickHouseProcess::new_single_node(logctx, ports)
             .await
-            .map(Self::SingleNode)
+            .map(|replica| Self::SingleNode(Box::new(replica)))
     }
 
     /// Create a replicated cluster deployment.
@@ -157,7 +157,7 @@ impl ClickHouseDeployment {
     ) -> Result<Self, anyhow::Error> {
         ClickHouseCluster::new(logctx, replica_config, keeper_config)
             .await
-            .map(Self::Cluster)
+            .map(|cluster| Self::Cluster(Box::new(cluster)))
     }
 
     /// Return true if this is a cluster deployment.
@@ -296,7 +296,7 @@ impl ClickHouseDeployment {
     ) -> Box<dyn Iterator<Item = &ClickHouseReplica> + '_> {
         match self {
             ClickHouseDeployment::SingleNode(instance) => {
-                Box::new(std::iter::once(instance))
+                Box::new(std::iter::once(&**instance))
             }
             ClickHouseDeployment::Cluster(cluster) => {
                 Box::new(cluster.replicas())
@@ -389,6 +389,10 @@ pub enum ClickHouseError {
 
 const SINGLE_NODE_CONFIG_FILE: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../smf/clickhouse/config.xml");
+const SINGLE_NODE_USERS_FILE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../smf/clickhouse/users-and-roles.xml"
+);
 
 impl ClickHouseProcess {
     /// Start a new single node ClickHouse server listening on the provided
@@ -408,6 +412,16 @@ impl ClickHouseProcess {
                     "failed to copy config file from {} to test data path {}",
                     SINGLE_NODE_CONFIG_FILE,
                     data_dir.config_file_path(),
+                )
+            })?;
+
+        tokio::fs::copy(SINGLE_NODE_USERS_FILE, data_dir.users_file_path())
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to copy users file from {} to test data path {}",
+                    SINGLE_NODE_USERS_FILE,
+                    data_dir.users_file_path(),
                 )
             })?;
         let args = vec![
@@ -448,7 +462,7 @@ impl ClickHouseProcess {
             .envs(&env)
             .spawn()
             .with_context(|| {
-                format!("failed to spawn `clickhouse` (with args: {:?})", &args)
+                format!("failed to spawn `clickhouse` (with args: {:?})", args)
             })?;
         for (k, v) in std::env::vars_os() {
             env.insert(
@@ -548,7 +562,7 @@ impl ClickHouseProcess {
             .envs(&env)
             .spawn()
             .with_context(|| {
-                format!("failed to spawn `clickhouse` (with args: {:?})", &args)
+                format!("failed to spawn `clickhouse` (with args: {:?})", args)
             })?;
         for (k, v) in std::env::vars_os() {
             env.insert(
@@ -637,7 +651,7 @@ impl ClickHouseProcess {
             .with_context(|| {
                 format!(
                     "failed to spawn `clickhouse keeper` (with args: {:?})",
-                    &args
+                    args
                 )
             })?;
         for (k, v) in std::env::vars_os() {
@@ -752,6 +766,10 @@ impl ClickHouseDataDir {
         self.root_path().join("config.xml")
     }
 
+    fn users_file_path(&self) -> Utf8PathBuf {
+        self.root_path().join("users-and-roles.xml")
+    }
+
     fn datastore_path(&self) -> Utf8PathBuf {
         self.dir.path().join("datastore/")
     }
@@ -825,7 +843,7 @@ impl ClickHouseDataDir {
         ];
         // Persist this temporary directory since we're going to be doing the
         // cleanup ourselves.
-        let dir = self.dir.into_path();
+        let dir = self.dir.keep();
 
         let mut error_paths = BTreeMap::new();
         // contents_first = true ensures that we delete inner files before
@@ -1106,7 +1124,7 @@ impl ClickHouseCluster {
     // This is pretty hacky, but used to wait _any_ child in
     // `wait_for_shutdown()`, along with child kind and its index among that
     // kind.
-    fn children_mut(&mut self) -> impl Iterator<Item = ChildWaitInfo> {
+    fn children_mut(&mut self) -> impl Iterator<Item = ChildWaitInfo<'_>> {
         let keepers =
             self.keepers.iter_mut().enumerate().map(|(index, keeper)| {
                 ChildWaitInfo {
@@ -1256,7 +1274,9 @@ pub async fn wait_for_ready(
                                 inner.kind(),
                                 std::io::ErrorKind::NotFound
                             ) {
-                                return Err(poll::CondCheckError::NotYet);
+                                return Err(poll::CondCheckError::NotYet {
+                                    status: None,
+                                });
                             }
                         }
                         _ => {}

@@ -1,13 +1,18 @@
 [package]
 name = "nexus-background-task-interface"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
 workspace = true
 
+[features]
+# Enable test-only assertion helpers on `Activator`.
+testing = ["dep:tokio-test"]
+
 [dependencies]
 omicron-workspace-hack.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-test = { workspace = true, optional = true }

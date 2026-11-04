@@ -75,8 +75,7 @@ pub enum Cmd {
     AbortUpdate,
 
     /// Reset screen-specific state (e.g., clearing the state for a
-    /// completed/failed update, or resetting the rack from the rack setup
-    /// screen).
+    /// completed/failed update).
     ResetState,
 
     /// Begin rack setup.
@@ -148,9 +147,6 @@ pub enum ShowPopupCmd {
 
     /// A response to a rack-setup request.
     StartRackSetupResponse(Result<(), String>),
-
-    /// A response to a rack-reset request.
-    StartRackResetResponse(Result<(), String>),
 }
 
 /// We allow certain multi-key sequences, and explicitly enumerate the starting

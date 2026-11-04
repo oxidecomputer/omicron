@@ -64,12 +64,14 @@ use crate::names::{BOUNDARY_NTP_DNS_NAME, DNS_ZONE, ServiceName};
 use anyhow::{anyhow, ensure};
 use core::fmt;
 use omicron_common::address::{CLICKHOUSE_ADMIN_PORT, CLICKHOUSE_TCP_PORT};
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV6};
+use std::collections::BTreeMap;
+use std::net::{Ipv6Addr, SocketAddrV6};
+
+// Re-export the latest versions from the versions crate for dependents that
+// just want "latest".
+pub use internal_dns_types_versions::latest::config::*;
 
 /// Used to construct the DNS name for a control plane host
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
@@ -142,6 +144,14 @@ pub struct DnsConfigBuilder {
     /// network
     zones: BTreeMap<Zone, Ipv6Addr>,
 
+    /// a map of internal DNS service zone UUIDs to the address that service
+    /// answers DNS queries on.  Each internal DNS server is present on the
+    /// control plane network with its HTTP interface on an IPv6 address in the
+    /// map above.  In practice the addresses here are the same as the addresses
+    /// associated with this same UUID in `zones` above, but they are tracked
+    /// separately here to avoid surprise if they differ in the future.
+    internal_dns_addresses: BTreeMap<Zone, Ipv6Addr>,
+
     /// set of services (see module-level comment) that have been configured so
     /// far, mapping the name of the service (encapsulated in a [`ServiceName`])
     /// to the backends configured for that service.  The set of backends is
@@ -151,6 +161,20 @@ pub struct DnsConfigBuilder {
 
     /// similar to service_instances_zones, but for services that run on sleds
     service_instances_sleds: BTreeMap<ServiceName, BTreeMap<Sled, u16>>,
+}
+
+/// Ports for the per-switch services published in internal DNS by
+/// [`DnsConfigBuilder::host_zone_switch`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HostSwitchZonePorts {
+    /// Dendrite (`dpd`) admin API port.
+    pub dendrite: u16,
+    /// Management Gateway Service (`mgs`) port.
+    pub mgs: u16,
+    /// Maghemite `mgd` admin API port.
+    pub mgd: u16,
+    /// Maghemite `ddmd` admin API port.
+    pub ddm: u16,
 }
 
 /// Describes a host of type "sled" in the control plane DNS zone
@@ -197,6 +221,7 @@ impl DnsConfigBuilder {
         DnsConfigBuilder {
             sleds: BTreeMap::new(),
             zones: BTreeMap::new(),
+            internal_dns_addresses: BTreeMap::new(),
             service_instances_zones: BTreeMap::new(),
             service_instances_sleds: BTreeMap::new(),
         }
@@ -385,10 +410,14 @@ impl DnsConfigBuilder {
         &mut self,
         sled_id: SledUuid,
         switch_zone_ip: Ipv6Addr,
-        dendrite_port: u16,
-        mgs_port: u16,
-        mgd_port: u16,
+        ports: HostSwitchZonePorts,
     ) -> anyhow::Result<()> {
+        let HostSwitchZonePorts {
+            dendrite: dendrite_port,
+            mgs: mgs_port,
+            mgd: mgd_port,
+            ddm: ddm_port,
+        } = ports;
         let zone = self.host_dendrite(sled_id, switch_zone_ip)?;
         self.service_backend_zone(ServiceName::Dendrite, &zone, dendrite_port)?;
         self.service_backend_zone(
@@ -396,7 +425,34 @@ impl DnsConfigBuilder {
             &zone,
             mgs_port,
         )?;
-        self.service_backend_zone(ServiceName::Mgd, &zone, mgd_port)
+        self.service_backend_zone(ServiceName::Mgd, &zone, mgd_port)?;
+        self.service_backend_zone(ServiceName::Ddm, &zone, ddm_port)
+    }
+
+    /// Higher-level shorthand for adding a Nexus zone with both its internal
+    /// API service and its lockstep API service.
+    ///
+    /// # Errors
+    ///
+    /// This function fails only if the given zone has already been added to the
+    /// configuration.
+    pub fn host_zone_nexus(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+        internal_address: SocketAddrV6,
+        lockstep_port: u16,
+    ) -> anyhow::Result<()> {
+        let zone = self.host_zone(zone_id, *internal_address.ip())?;
+        self.service_backend_zone(
+            ServiceName::Nexus,
+            &zone,
+            internal_address.port(),
+        )?;
+        self.service_backend_zone(
+            ServiceName::NexusLockstep,
+            &zone,
+            lockstep_port,
+        )
     }
 
     /// Higher-level shorthand for adding a ClickHouse single node zone with
@@ -533,8 +589,38 @@ impl DnsConfigBuilder {
         )
     }
 
-    /// Construct a `DnsConfigZone` describing the control plane zone described
-    /// up to this point
+    /// Higher-level shorthand for adding an internal DNS zone, including
+    /// records for both its HTTP and DNS interfaces.
+    ///
+    /// # Errors
+    ///
+    /// This fails if the provided `service` is not for an internal DNS zone. It
+    /// also fails if the given zone has already been added to the
+    /// configuration.
+    pub fn host_zone_internal_dns(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+        service: ServiceName,
+        http_address: SocketAddrV6,
+        dns_address: SocketAddrV6,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            service == ServiceName::InternalDns,
+            "This method is only valid for internal DNS servers, \
+            but we were provided the service '{service:?}'",
+        );
+        let zone = self.host_zone(zone_id, *http_address.ip())?;
+        self.service_backend_zone(service, &zone, http_address.port())?;
+        let prior_address =
+            self.internal_dns_addresses.insert(zone.clone(), *dns_address.ip());
+        if let Some(addr) = prior_address {
+            anyhow::bail!("zone {} already had a DNS address: {}", zone, addr);
+        }
+        Ok(())
+    }
+
+    /// Construct a `DnsConfigZone` describing the control plane DNS zone
+    /// described up to this point
     pub fn build_zone(self) -> DnsConfigZone {
         // Assemble the set of "AAAA" records for sleds.
         let sled_records = self.sleds.into_iter().map(|(sled, sled_ip)| {
@@ -552,8 +638,8 @@ impl DnsConfigBuilder {
             .get(&ServiceName::BoundaryNtp)
             .map(|zone2port| {
                 let records = zone2port
-                    .iter()
-                    .map(|(zone, _port)| {
+                    .keys()
+                    .map(|zone| {
                         let zone_ip = self.zones.get(&zone).expect(
                             "service_backend_zone() ensures zones are defined",
                         );
@@ -567,6 +653,31 @@ impl DnsConfigBuilder {
         let zone_records = self.zones.into_iter().map(|(zone, zone_ip)| {
             (zone.dns_name(), vec![DnsRecord::Aaaa(zone_ip)])
         });
+
+        // DNS nameservers can be added in arbitrary order to this builder.
+        // Before assembling DNS records, sort the addresses to have stability
+        // in which IPs are for which nameserver records.
+        let mut internal_dns_addresses =
+            self.internal_dns_addresses.values().collect::<Vec<_>>();
+        internal_dns_addresses.sort();
+        let mut internal_nameservers = Vec::new();
+        let mut internal_dns_records = internal_dns_addresses
+            .iter()
+            .enumerate()
+            .map(|(idx, ip)| {
+                // Enumeration starts at zero, but name server names start from one.
+                let name = format!("ns{}", idx + 1);
+                internal_nameservers.push(DnsRecord::Ns(format!(
+                    "{}.{}",
+                    name,
+                    crate::names::DNS_ZONE
+                )));
+                (name, vec![DnsRecord::Aaaa(**ip)])
+            })
+            .collect::<Vec<_>>();
+        if !internal_nameservers.is_empty() {
+            internal_dns_records.push(("@".to_string(), internal_nameservers));
+        }
 
         // Assemble the set of SRV records, which implicitly point back at
         // zones' AAAA records.
@@ -611,6 +722,7 @@ impl DnsConfigBuilder {
         let all_records = sled_records
             .chain(zone_records)
             .chain(boundary_ntp_records)
+            .chain(internal_dns_records)
             .chain(srv_records_sleds)
             .chain(srv_records_zones)
             .collect();
@@ -623,124 +735,26 @@ impl DnsConfigBuilder {
     /// point
     pub fn build_full_config_for_initial_generation(self) -> DnsConfigParams {
         let zone = self.build_zone();
+        let generation = Generation::new();
         DnsConfigParams {
-            generation: Generation::new(),
+            generation,
+            serial: generation
+                .as_u64()
+                .try_into()
+                .expect("initial generation fits into u32"),
             time_created: chrono::Utc::now(),
             zones: vec![zone],
         }
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct DnsConfigParams {
-    pub generation: Generation,
-    pub time_created: chrono::DateTime<chrono::Utc>,
-    pub zones: Vec<DnsConfigZone>,
-}
-
-impl DnsConfigParams {
-    /// Given a high-level DNS configuration, return a reference to its sole
-    /// DNS zone.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if there are 0 or more than one zones in this
-    /// configuration.
-    pub fn sole_zone(&self) -> Result<&DnsConfigZone, anyhow::Error> {
-        ensure!(
-            self.zones.len() == 1,
-            "expected exactly one DNS zone, but found {}",
-            self.zones.len()
-        );
-        Ok(&self.zones[0])
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct DnsConfig {
-    pub generation: Generation,
-    pub time_created: chrono::DateTime<chrono::Utc>,
-    pub time_applied: chrono::DateTime<chrono::Utc>,
-    pub zones: Vec<DnsConfigZone>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct DnsConfigZone {
-    pub zone_name: String,
-    pub records: HashMap<String, Vec<DnsRecord>>,
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-)]
-#[serde(tag = "type", content = "data")]
-pub enum DnsRecord {
-    A(Ipv4Addr),
-    // The renames are because openapi-lint complains about `Aaaa` and `Srv`
-    // not being in screaming snake case. `Aaaa` and `Srv` are the idiomatic
-    // Rust casings, though.
-    #[serde(rename = "AAAA")]
-    Aaaa(Ipv6Addr),
-    #[serde(rename = "SRV")]
-    Srv(Srv),
-}
-
-// The `From<Ipv4Addr>` and `From<Ipv6Addr>` implementations are very slightly
-// dubious, because a v4 or v6 address could also theoretically map to a DNS
-// PTR record
-// (https://www.cloudflare.com/learning/dns/dns-records/dns-ptr-record/).
-// However, we don't support PTR records at the moment, so this is fine. Would
-// certainly be worth revisiting if we do in the future, though.
-
-impl From<Ipv4Addr> for DnsRecord {
-    fn from(ip: Ipv4Addr) -> Self {
-        DnsRecord::A(ip)
-    }
-}
-
-impl From<Ipv6Addr> for DnsRecord {
-    fn from(ip: Ipv6Addr) -> Self {
-        DnsRecord::Aaaa(ip)
-    }
-}
-
-impl From<Srv> for DnsRecord {
-    fn from(srv: Srv) -> Self {
-        DnsRecord::Srv(srv)
-    }
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-)]
-pub struct Srv {
-    pub prio: u16,
-    pub weight: u16,
-    pub port: u16,
-    pub target: String,
-}
-
 #[cfg(test)]
 mod test {
-    use super::{DnsConfigBuilder, Host, ServiceName};
+    use super::{
+        DnsConfigBuilder, DnsRecord, Host, HostSwitchZonePorts, ServiceName,
+    };
     use crate::{config::Zone, names::DNS_ZONE};
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
     use std::{
         collections::BTreeMap, io::Write, net::Ipv6Addr, net::SocketAddrV6,
@@ -776,12 +790,18 @@ mod test {
         assert_eq!(ServiceName::Cockroach.dns_name(), "_cockroach._tcp",);
         assert_eq!(ServiceName::InternalDns.dns_name(), "_nameservice._tcp",);
         assert_eq!(ServiceName::Nexus.dns_name(), "_nexus._tcp",);
+        assert_eq!(
+            ServiceName::NexusLockstep.dns_name(),
+            "_nexus-lockstep._tcp",
+        );
         assert_eq!(ServiceName::Oximeter.dns_name(), "_oximeter._tcp",);
         assert_eq!(
             ServiceName::OximeterReader.dns_name(),
             "_oximeter-reader._tcp",
         );
         assert_eq!(ServiceName::Dendrite.dns_name(), "_dendrite._tcp",);
+        assert_eq!(ServiceName::Mgd.dns_name(), "_mgd._tcp",);
+        assert_eq!(ServiceName::Ddm.dns_name(), "_ddm._tcp",);
         assert_eq!(
             ServiceName::CruciblePantry.dns_name(),
             "_crucible-pantry._tcp",
@@ -797,6 +817,71 @@ mod test {
             ServiceName::Crucible(zone_uuid).dns_name(),
             "_crucible._tcp.00000000-0000-0000-0000-000000000000",
         );
+    }
+
+    #[test]
+    fn host_zone_switch_publishes_all_services() {
+        let sled_uuid: SledUuid =
+            "001de000-51ed-4000-8000-000000000001".parse().unwrap();
+        let switch_zone_ip = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1);
+
+        // Use distinct port numbers so an arg-order swap in `host_zone_switch`
+        // surfaces as a port mismatch on the affected service.
+        let dendrite_port = 11;
+        let mgs_port = 13;
+        let mgd_port = 17;
+        let ddm_port = 19;
+
+        let mut builder = DnsConfigBuilder::new();
+        builder
+            .host_zone_switch(
+                sled_uuid,
+                switch_zone_ip,
+                HostSwitchZonePorts {
+                    dendrite: dendrite_port,
+                    mgs: mgs_port,
+                    mgd: mgd_port,
+                    ddm: ddm_port,
+                },
+            )
+            .unwrap();
+
+        let config = builder.build_full_config_for_initial_generation();
+
+        let mut by_name: BTreeMap<&str, &[DnsRecord]> = BTreeMap::new();
+        for zone in &config.zones {
+            for (name, records) in &zone.records {
+                by_name.insert(name.as_str(), records.as_slice());
+            }
+        }
+
+        for (expected_name, expected_port) in [
+            ("_dendrite._tcp", dendrite_port),
+            ("_mgs._tcp", mgs_port),
+            ("_mgd._tcp", mgd_port),
+            ("_ddm._tcp", ddm_port),
+        ] {
+            let records = by_name.get(expected_name).unwrap_or_else(|| {
+                panic!(
+                    "expected {expected_name} in published switch-zone \
+                     services; got {by_name:?}"
+                )
+            });
+            let srv_port = records
+                .iter()
+                .find_map(|r| match r {
+                    DnsRecord::Srv(s) => Some(s.port),
+                    _ => None,
+                })
+                .unwrap_or_else(|| {
+                    panic!("no SRV record for {expected_name}: {records:?}")
+                });
+
+            assert_eq!(
+                srv_port, expected_port,
+                "wrong SRV port for {expected_name}"
+            );
+        }
     }
 
     #[test]

@@ -17,6 +17,8 @@ use gateway_sp_comms::VersionedSpState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::backoff;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use oximeter::MetricsError;
 use oximeter::types::Cumulative;
 use oximeter::types::ProducerRegistry;
@@ -46,7 +48,7 @@ pub struct Metrics {
 
 struct Handles {
     addrs_tx: watch::Sender<Vec<SocketAddrV6>>,
-    rack_id_tx: Option<oneshot::Sender<Uuid>>,
+    rack_id_tx: Option<oneshot::Sender<RackUuid>>,
     server: JoinHandle<anyhow::Result<()>>,
 }
 
@@ -90,7 +92,7 @@ struct SpPoller {
     known_state: Option<SpUnderstanding>,
     components: HashMap<SpComponent, ComponentMetrics>,
     log: slog::Logger,
-    rack_id: Uuid,
+    rack_id: RackUuid,
     mgs_id: Uuid,
     sample_tx: broadcast::Sender<Vec<Sample>>,
 }
@@ -269,7 +271,7 @@ impl Metrics {
         Self { inner: Some(Handles { addrs_tx, rack_id_tx, server }) }
     }
 
-    pub fn set_rack_id(&mut self, rack_id: Uuid) {
+    pub fn set_rack_id(&mut self, rack_id: RackUuid) {
         let tx = self.inner.as_mut().and_then(|i| i.rack_id_tx.take());
         if let Some(tx) = tx {
             // If the task that starts sensor pollers has gone away already,
@@ -379,7 +381,7 @@ impl oximeter::Producer for Producer {
 async fn start_pollers(
     log: slog::Logger,
     apictx: Arc<ServerContext>,
-    rack_id: oneshot::Receiver<Uuid>,
+    rack_id: oneshot::Receiver<RackUuid>,
     mgs_id: Uuid,
     sample_tx: broadcast::Sender<Vec<Sample>>,
 ) -> anyhow::Result<()> {
@@ -461,6 +463,19 @@ async fn start_pollers(
 impl SpPoller {
     async fn run(mut self, apictx: Arc<ServerContext>) {
         let mut interval = tokio::time::interval(SP_POLL_INTERVAL);
+        // The goal is to poll each SP once per SP_POLL_INTERVAL. If we miss
+        // that interval because, say, MGS was busy doing other things, the
+        // network was congested, or due to vagaries of OS scheduling, we don't
+        // want to issue a whole bunch of polls with less than a second part.
+        // This is what we would get with the default,
+        // `MissedTickBehavior::Burst`. Instead, configure the `Interval` to
+        // skip missed ticks, so that we poll the SP a maximum of once per
+        // second, with potential gaps if MGS was not able to poll the SP within
+        // a given second. This should mean that if MGS is delayed, we don't
+        // overwhelm the poor SP's network stack with a big burst of requests.
+        interval
+            .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
         let switch = &apictx.mgmt_switch;
         let sp = match switch.sp(self.spid) {
             Ok(sp) => sp,
@@ -623,7 +638,7 @@ impl SpPoller {
                             // These are supposed to always be strings. But, if we
                             // see one that's not a string, fall back to the hex
                             // representation rather than panicking.
-                            let hex = hex::encode(dev.component.id);
+                            let hex = hex::encode(dev.component.id());
                             slog::warn!(
                                 &self.log,
                                 "a SP component ID was not a string! this isn't \
@@ -639,7 +654,7 @@ impl SpPoller {
                     // every device on the SP...it would be cool if Oximeter let us
                     // reference count them...
                     let target = metric::HardwareComponent {
-                        rack_id: self.rack_id,
+                        rack_id: self.rack_id.into_untyped_uuid(),
                         gateway_id: self.mgs_id,
                         chassis_model: Cow::Owned(model.clone()),
                         chassis_revision: current_state.revision,
@@ -648,7 +663,7 @@ impl SpPoller {
                         hubris_archive_id: Cow::Owned(
                             hubris_archive_id.clone(),
                         ),
-                        slot: self.spid.slot as u32,
+                        slot: u32::from(self.spid.slot),
                         component_kind: Cow::Owned(dev.device),
                         component_id,
                         description: Cow::Owned(dev.description),
@@ -805,6 +820,10 @@ impl SpPoller {
                             MeasurementKind::InputCurrent => "input_current",
                             MeasurementKind::InputVoltage => "input_voltage",
                             MeasurementKind::Speed => "fan_speed",
+                            MeasurementKind::Pwm => "pwm",
+                            MeasurementKind::InputPower => "input_power",
+                            MeasurementKind::OutputEnergy => "output_energy",
+                            MeasurementKind::InputEnergy => "input_energy",
                         };
                         let error = match error {
                             MeasurementError::InvalidSensor => "invalid_sensor",
@@ -880,7 +899,6 @@ impl SpPoller {
                                 &metric::Temperature { sensor, datum: 0.0 },
                             )
                         }
-
                         (Ok(datum), MeasurementKind::CpuTctl) => Sample::new(
                             target,
                             &metric::AmdCpuTctl { sensor, datum },
@@ -905,7 +923,6 @@ impl SpPoller {
                             target,
                             &metric::Voltage { sensor, datum },
                         ),
-
                         (Err(_), MeasurementKind::Voltage) => {
                             Sample::new_missing(
                                 target,
@@ -954,6 +971,49 @@ impl SpPoller {
                             Sample::new_missing(
                                 target,
                                 &metric::FanSpeed { sensor, datum: 0.0 },
+                            )
+                        }
+                        (Ok(datum), MeasurementKind::Pwm) => {
+                            Sample::new(target, &metric::Pwm { sensor, datum })
+                        }
+                        (Err(_), MeasurementKind::Pwm) => Sample::new_missing(
+                            target,
+                            &metric::Pwm { sensor, datum: 0.0 },
+                        ),
+                        (Ok(datum), MeasurementKind::InputPower) => {
+                            Sample::new(
+                                target,
+                                &metric::InputPower { sensor, datum },
+                            )
+                        }
+                        (Err(_), MeasurementKind::InputPower) => {
+                            Sample::new_missing(
+                                target,
+                                &metric::InputPower { sensor, datum: 0.0 },
+                            )
+                        }
+                        (Ok(datum), MeasurementKind::OutputEnergy) => {
+                            Sample::new(
+                                target,
+                                &metric::OutputEnergy { sensor, datum },
+                            )
+                        }
+                        (Err(_), MeasurementKind::OutputEnergy) => {
+                            Sample::new_missing(
+                                target,
+                                &metric::OutputEnergy { sensor, datum: 0.0 },
+                            )
+                        }
+                        (Ok(datum), MeasurementKind::InputEnergy) => {
+                            Sample::new(
+                                target,
+                                &metric::InputEnergy { sensor, datum },
+                            )
+                        }
+                        (Err(_), MeasurementKind::InputEnergy) => {
+                            Sample::new_missing(
+                                target,
+                                &metric::InputEnergy { sensor, datum: 0.0 },
                             )
                         }
                     };
@@ -1219,6 +1279,12 @@ fn comms_error_str(error: CommunicationError) -> &'static str {
         }
         CommunicationError::BadDecompressionSize { .. } => {
             "bad_decompression_size"
+        }
+        CommunicationError::HostPanicDataChanged { .. } => {
+            "host_panic_data_changed"
+        }
+        CommunicationError::HostBootfailDataChanged { .. } => {
+            "host_boot_fail_data_changed"
         }
     }
 }

@@ -7,10 +7,12 @@
 use anyhow::bail;
 use camino::{Utf8Path, Utf8PathBuf};
 use derive_more::From;
+use iddqd::{IdOrdItem, id_upcast};
 use key_manager::StorageKeyRequester;
-use omicron_common::disk::{DiskIdentity, DiskVariant};
-use omicron_common::zpool_name::{ZpoolKind, ZpoolName};
+use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::DiskVariant;
 use sled_hardware::{
     DiskFirmware, Partition, PooledDisk, PooledDiskError, UnparsedDisk,
 };
@@ -50,7 +52,7 @@ const SYNTHETIC_FIRMWARE_SLOT1: &str = "SYNTH1";
 impl SyntheticDisk {
     // "Manages" a SyntheticDisk by ensuring that it has a Zpool and importing
     // it. If the zpool already exists, it is imported, but not re-created.
-    pub fn new(
+    pub async fn new(
         log: &Logger,
         mount_config: &MountConfig,
         raw: RawSyntheticDisk,
@@ -75,12 +77,16 @@ impl SyntheticDisk {
             &path,
             zpool_id,
         )
+        .await
         .unwrap();
-        sled_hardware::disk::ensure_zpool_imported(log, &zpool_name).unwrap();
+        sled_hardware::disk::ensure_zpool_imported(log, &zpool_name)
+            .await
+            .unwrap();
         sled_hardware::disk::ensure_zpool_failmode_is_continue(
             log,
             &zpool_name,
         )
+        .await
         .unwrap();
 
         Self { raw, zpool_name }
@@ -197,10 +203,6 @@ impl RawDisk {
         }
     }
 
-    pub fn is_real(&self) -> bool {
-        !self.is_synthetic()
-    }
-
     pub fn u2_zpool_path(&self) -> Result<Utf8PathBuf, PooledDiskError> {
         if !matches!(self.variant(), DiskVariant::U2) {
             return Err(PooledDiskError::UnexpectedVariant);
@@ -249,6 +251,16 @@ impl RawDisk {
     }
 }
 
+impl IdOrdItem for RawDisk {
+    type Key<'a> = &'a DiskIdentity;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.identity()
+    }
+
+    id_upcast!();
+}
+
 /// A physical [`PooledDisk`] or a [`SyntheticDisk`] that contains or is backed
 /// by a single zpool and that has provisioned datasets. This disk is ready for
 /// usage by higher level software.
@@ -267,13 +279,12 @@ impl Disk {
         key_requester: Option<&StorageKeyRequester>,
     ) -> Result<Self, DiskError> {
         let disk: Disk = match raw_disk {
-            RawDisk::Real(disk) => PooledDisk::new(log, disk, pool_id)?.into(),
-            RawDisk::Synthetic(disk) => Disk::Synthetic(SyntheticDisk::new(
-                log,
-                mount_config,
-                disk,
-                pool_id,
-            )),
+            RawDisk::Real(disk) => {
+                PooledDisk::new(log, disk, pool_id).await?.into()
+            }
+            RawDisk::Synthetic(disk) => Disk::Synthetic(
+                SyntheticDisk::new(log, mount_config, disk, pool_id).await,
+            ),
         };
         dataset::ensure_zpool_has_datasets(
             log,
@@ -296,17 +307,6 @@ impl Disk {
         Ok(disk)
     }
 
-    pub fn is_synthetic(&self) -> bool {
-        match self {
-            Self::Real(_) => false,
-            Self::Synthetic(_) => true,
-        }
-    }
-
-    pub fn is_real(&self) -> bool {
-        !self.is_synthetic()
-    }
-
     pub fn is_boot_disk(&self) -> bool {
         match self {
             Self::Real(disk) => disk.is_boot_disk,
@@ -325,13 +325,7 @@ impl Disk {
     }
 
     pub fn variant(&self) -> DiskVariant {
-        match self {
-            Self::Real(disk) => disk.variant,
-            Self::Synthetic(disk) => match disk.zpool_name.kind() {
-                ZpoolKind::External => DiskVariant::U2,
-                ZpoolKind::Internal => DiskVariant::M2,
-            },
-        }
+        self.zpool_name().kind().into()
     }
 
     pub fn devfs_path(&self) -> &Utf8PathBuf {
@@ -358,7 +352,9 @@ impl Disk {
                 Partition::BootImage,
                 raw,
             ),
-            Self::Synthetic(_) => unreachable!(),
+            Self::Synthetic(_) => {
+                Err(PooledDiskError::SyntheticDiskNoDevfsPath)
+            }
         }
     }
 
@@ -372,7 +368,9 @@ impl Disk {
                 Partition::DumpDevice,
                 raw,
             ),
-            Self::Synthetic(_) => unreachable!(),
+            Self::Synthetic(_) => {
+                Err(PooledDiskError::SyntheticDiskNoDevfsPath)
+            }
         }
     }
 
@@ -383,7 +381,7 @@ impl Disk {
         }
     }
 
-    pub(crate) fn update_firmware_metadata(&mut self, raw_disk: &RawDisk) {
+    pub fn update_firmware_metadata(&mut self, raw_disk: &RawDisk) {
         match self {
             Disk::Real(pooled_disk) => {
                 pooled_disk.firmware = raw_disk.firmware().clone();
@@ -409,7 +407,7 @@ impl From<Disk> for RawDisk {
                 pooled_disk.paths.devfs_path,
                 pooled_disk.paths.dev_path,
                 pooled_disk.slot,
-                pooled_disk.variant,
+                pooled_disk.zpool_name.kind().into(),
                 pooled_disk.identity,
                 pooled_disk.is_boot_disk,
                 pooled_disk.firmware,

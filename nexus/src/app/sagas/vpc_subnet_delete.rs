@@ -7,6 +7,7 @@ use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::{authn, authz, db};
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external;
 use serde::Deserialize;
 use serde::Serialize;
@@ -80,7 +81,7 @@ async fn svsd_delete_subnet(
 
     match res {
         Ok(_) | Err(external::Error::ObjectNotFound { .. }) => Ok(()),
-        Err(e) => Err(ActionError::action_failed(e)),
+        Err(e) => Err(saga_action_failed(e)),
     }
 }
 
@@ -98,7 +99,7 @@ async fn svsd_delete_route(
         .datastore()
         .vpc_delete_subnet_route(&opctx, &params.authz_subnet)
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 async fn svsd_notify_rpw(
@@ -115,7 +116,7 @@ async fn svsd_notify_rpw(
         .datastore()
         .vpc_increment_rpw_version(&opctx, params.authz_vpc.id())
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 #[cfg(test)]
@@ -125,25 +126,26 @@ pub(crate) mod test {
     use crate::{
         app::sagas::vpc_subnet_delete::Params,
         app::sagas::vpc_subnet_delete::SagaVpcSubnetDelete,
-        external_api::params,
     };
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::{authn::saga::Serialized, context::OpContext};
-    use nexus_test_utils::resource_helpers::create_default_ip_pool;
+    use nexus_test_utils::resource_helpers::create_default_ip_pools;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::vpc;
     use omicron_common::api::external::NameOrId;
-    use uuid::Uuid;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::ProjectUuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
     const PROJECT_NAME: &str = "springfield-squidport";
 
-    async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+    async fn create_org_and_project(client: &ClientTestContext) -> ProjectUuid {
+        create_default_ip_pools(&client).await;
         let project = create_project(client, PROJECT_NAME).await;
-        project.identity.id
+        ProjectUuid::from_untyped_uuid(project.identity.id)
     }
 
     fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
@@ -155,15 +157,15 @@ pub(crate) mod test {
 
     async fn new_test_params(
         cptestctx: &ControlPlaneTestContext,
-        project_id: Uuid,
+        project_id: ProjectUuid,
     ) -> Params {
         let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
         let (.., authz_vpc, authz_subnet, db_subnet) = nexus
             .vpc_subnet_lookup(
                 &opctx,
-                params::SubnetSelector {
-                    project: Some(project_id.into()),
+                vpc::SubnetSelector {
+                    project: Some(NameOrId::Id(project_id.into_untyped_uuid())),
                     vpc: Some(NameOrId::Name("default".parse().unwrap())),
                     subnet: NameOrId::Name("default".parse().unwrap()),
                 },

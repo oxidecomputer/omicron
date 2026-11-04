@@ -1,5 +1,7 @@
 # Load example system
-load-example --nsleds 3 --ndisks-per-sled 3
+# This is a legacy test; new tests shouldn't need to set a seed
+
+load-example --nsleds 3 --ndisks-per-sled 3 --seed test_set_mgs_updates
 blueprint-show ad97e762-7bf1-45a6-a98f-60afb7e491c0
 
 # Configure an MGS-managed update to one of the SPs.

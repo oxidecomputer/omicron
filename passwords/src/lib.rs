@@ -9,6 +9,7 @@ use argon2::Argon2;
 use argon2::PasswordHasher;
 use argon2::PasswordVerifier;
 use argon2::password_hash;
+use argon2::password_hash::Salt;
 pub use password_hash::PasswordHashString;
 use password_hash::SaltString;
 use password_hash::errors::Error as PasswordHashError;
@@ -16,6 +17,7 @@ use rand::CryptoRng;
 use rand::RngCore;
 use rand::prelude::ThreadRng;
 use schemars::JsonSchema;
+use secrecy::ExposeSecret;
 use serde::Deserialize;
 use serde_with::SerializeDisplay;
 use std::fmt;
@@ -83,14 +85,14 @@ pub fn external_password_argon() -> Argon2<'static> {
 // This type deliberately does not allow someone to get the string back out, not
 // even for serde::Serialize or Debug.
 #[derive(Clone)]
-pub struct Password(String);
+pub struct Password(secrecy::SecretString);
 
 impl Password {
     pub fn new(password: &str) -> Result<Password, PasswordTooLongError> {
         if password.len() > MAX_PASSWORD_LENGTH {
             Err(PasswordTooLongError)
         } else {
-            Ok(Password(password.to_owned()))
+            Ok(Password(secrecy::SecretString::from(password)))
         }
     }
 }
@@ -174,7 +176,7 @@ impl JsonSchema for NewPasswordHash {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -206,7 +208,7 @@ pub struct Hasher<R: CryptoRng + RngCore> {
 
 impl Default for Hasher<ThreadRng> {
     fn default() -> Self {
-        Hasher::new(external_password_argon(), rand::thread_rng())
+        Hasher::new(external_password_argon(), rand::rng())
     }
 }
 
@@ -219,8 +221,12 @@ impl<R: CryptoRng + RngCore> Hasher<R> {
         &mut self,
         password: &Password,
     ) -> Result<PasswordHashString, PasswordSetError> {
-        let salt = SaltString::generate(&mut self.rng);
-        Ok(self.argon2.hash_password(password.0.as_bytes(), &salt)?.serialize())
+        let salt = generate_salt_string(&mut self.rng);
+
+        Ok(self
+            .argon2
+            .hash_password(password.0.expose_secret().as_bytes(), &salt)?
+            .serialize())
     }
 
     pub fn verify_password(
@@ -229,12 +235,26 @@ impl<R: CryptoRng + RngCore> Hasher<R> {
         hashed: &PasswordHashString,
     ) -> Result<bool, PasswordVerifyError> {
         let parsed = hashed.password_hash();
-        match self.argon2.verify_password(password.0.as_bytes(), &parsed) {
+        match self
+            .argon2
+            .verify_password(password.0.expose_secret().as_bytes(), &parsed)
+        {
             Ok(_) => Ok(true),
             Err(PasswordHashError::Password) => Ok(false),
             Err(error) => Err(PasswordVerifyError(error)),
         }
     }
+}
+
+fn generate_salt_string<R>(rng: &mut R) -> SaltString
+where
+    R: RngCore + CryptoRng,
+{
+    // Hand-write the code to fill the salt bytes because we're on rand 0.9
+    // while password-hash 0.5.0 is on an older version of rand.
+    let mut bytes = [0u8; Salt::RECOMMENDED_LENGTH];
+    rng.fill_bytes(&mut bytes);
+    SaltString::encode_b64(&bytes).expect("salt string invariant violated")
 }
 
 /// Parses the given PHC-format password hash string and returns it only if it
@@ -319,10 +339,10 @@ mod test {
     use super::PasswordTooLongError;
     use super::external_password_argon;
     use crate::MIN_EXPECTED_PASSWORD_VERIFY_TIME;
+    use crate::generate_salt_string;
     use crate::parse_phc_hash;
     use crate::verify_strength;
     use argon2::password_hash::PasswordHashString;
-    use argon2::password_hash::SaltString;
     use rand::SeedableRng;
 
     // A well-known password.
@@ -364,7 +384,7 @@ mod test {
 
         // Verify that salt strings are at least as long as we think they are
         // (16 bytes).
-        assert!(SaltString::generate(rand::thread_rng()).len() >= 16);
+        assert!(generate_salt_string(&mut rand::rng()).len() >= 16);
 
         // Verify that the output length produced by this crate hasn't changed
         // unexpectedly.  It may not be a big deal if this does change, but we

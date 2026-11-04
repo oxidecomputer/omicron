@@ -9,8 +9,6 @@
 //! retrieve the names, types, and values of their struct fields, and to associate a supported
 //! datum type with their metric struct.
 
-// Copyright 2021 Oxide Computer Company
-
 extern crate proc_macro;
 
 use proc_macro2::TokenStream;

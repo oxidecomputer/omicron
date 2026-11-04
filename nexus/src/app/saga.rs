@@ -59,6 +59,7 @@ use futures::future::BoxFuture;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_types::internal_api::views::DemoSaga;
+use nexus_types::quiesce::SagaQuiesceHandle;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResult;
@@ -66,6 +67,8 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::DemoSagaUuid;
+use omicron_uuid_kinds::GenericUuid;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use steno::SagaDag;
@@ -158,6 +161,7 @@ pub(crate) struct SagaExecutor {
     log: slog::Logger,
     nexus: OnceLock<Arc<Nexus>>,
     saga_create_tx: mpsc::UnboundedSender<steno::SagaId>,
+    quiesce: SagaQuiesceHandle,
 }
 
 impl SagaExecutor {
@@ -165,8 +169,15 @@ impl SagaExecutor {
         sec_client: Arc<steno::SecClient>,
         log: slog::Logger,
         saga_create_tx: mpsc::UnboundedSender<steno::SagaId>,
+        quiesce: SagaQuiesceHandle,
     ) -> SagaExecutor {
-        SagaExecutor { sec_client, log, nexus: OnceLock::new(), saga_create_tx }
+        SagaExecutor {
+            sec_client,
+            log,
+            nexus: OnceLock::new(),
+            saga_create_tx,
+            quiesce,
+        }
     }
 
     // This is a little gross.  We want to hang the SagaExecutor off of Nexus,
@@ -226,11 +237,29 @@ impl SagaExecutor {
         &self,
         dag: SagaDag,
     ) -> Result<RunnableSaga, Error> {
+        let saga_id = SagaId::new_v4();
+        let saga_name = dag.saga_name();
+
+        // Record this new saga in the quiesce state.  This will fail if saga
+        // creation is disallowed (e.g., because Nexus is quiescing).
+        // This check should happen before we start the saga running.
+        let qsaga = match self.quiesce.saga_create(saga_id, &saga_name) {
+            Ok(qsaga) => qsaga,
+            Err(error) => {
+                warn!(
+                    &self.log,
+                    "error creating new saga";
+                    "saga_name" => saga_name.to_string(),
+                    InlineErrorChain::new(&error)
+                );
+                return Err(Error::from(error));
+            }
+        };
+
         // Construct the context necessary to execute this saga.
         let nexus = self.nexus()?;
-        let saga_id = SagaId(Uuid::new_v4());
         let saga_logger = self.log.new(o!(
-            "saga_name" => dag.saga_name().to_string(),
+            "saga_name" => saga_name.to_string(),
             "saga_id" => saga_id.to_string()
         ));
         let saga_context = Arc::new(Arc::new(SagaContext::new(
@@ -269,6 +298,8 @@ impl SagaExecutor {
                 // Steno.
                 Error::internal_error(&format!("{:#}", error))
             })?;
+        let saga_completion_future =
+            qsaga.saga_completion_future(saga_completion_future);
         Ok(RunnableSaga {
             id: saga_id,
             saga_completion_future,
@@ -356,7 +387,6 @@ impl RunnableSaga {
             .await
             .context("starting saga")
             .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
-
         Ok(RunningSaga {
             id: self.id,
             saga_completion_future: self.saga_completion_future,
@@ -465,7 +495,7 @@ impl super::Nexus {
             pagparams.direction == dropshot::PaginationOrder::Ascending
         );
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        let marker = pagparams.marker.map(|s| SagaId::from(*s));
+        let marker = pagparams.marker.map(|s| SagaId::from_untyped_uuid(*s));
         let saga_list = self
             .sagas
             .sec_client
@@ -481,17 +511,20 @@ impl super::Nexus {
     pub(crate) async fn saga_get(
         &self,
         opctx: &OpContext,
-        id: Uuid,
+        id: SagaId,
     ) -> LookupResult<nexus_types::internal_api::views::Saga> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.sagas
             .sec_client
-            .saga_get(SagaId::from(id))
+            .saga_get(id)
             .await
             .map(nexus_types::internal_api::views::Saga::from)
             .map(Ok)
             .map_err(|_: ()| {
-                Error::not_found_by_id(ResourceType::SagaDbg, &id)
+                Error::not_found_by_id(
+                    ResourceType::SagaDbg,
+                    id.as_untyped_uuid(),
+                )
             })?
     }
 
@@ -508,7 +541,7 @@ impl super::Nexus {
         let saga_params = demo::Params { id: demo_saga_id };
         let saga_dag = create_saga_dag::<demo::SagaDemo>(saga_params)?;
         let runnable_saga = self.sagas.saga_prepare(saga_dag).await?;
-        let saga_id = runnable_saga.id().0;
+        let saga_id = runnable_saga.id();
         // We don't need the handle that runnable_saga.start() returns because
         // we're not going to wait for the saga to finish here.
         let _ = runnable_saga.start().await?;

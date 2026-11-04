@@ -4,16 +4,16 @@
 
 //! Metrics
 
-use crate::external_api::params::ResourceMetrics;
 use dropshot::PaginationParams;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::{context::OpContext, db::fixed_data::FLEET_ID};
 use nexus_external_api::TimeseriesSchemaPaginationParams;
-use nexus_types::external_api::params::SystemMetricName;
+use nexus_types::external_api::metrics::{ResourceMetrics, SystemMetricName};
 use omicron_common::api::external::{Error, InternalContext};
+use omicron_uuid_kinds::GenericUuid;
 use oximeter_db::{
-    Measurement, TimeseriesSchema, oxql::query::QueryAuthzScope,
+    Measurement, OxqlResult, TimeseriesSchema, oxql::query::QueryAuthzScope,
 };
 use std::num::NonZeroU32;
 
@@ -34,7 +34,7 @@ impl super::Nexus {
                 // Make sure silo exists and current user can read it
                 let (.., authz_silo) =
                     silo_lookup.lookup_for(authz::Action::Read).await?;
-                authz_silo.id()
+                authz_silo.id().into_untyped_uuid()
             }
             // if no project specified, scope to entire fleet, i.e., all silos
             _ => *FLEET_ID,
@@ -75,10 +75,10 @@ impl super::Nexus {
                 // make sure project exists and current user can read it
                 let (.., authz_project) =
                     project_lookup.lookup_for(authz::Action::Read).await?;
-                authz_project.id()
+                authz_project.id().into_untyped_uuid()
             }
             // if no project specified, scope to current silo
-            _ => authz_silo.id(),
+            _ => authz_silo.id().into_untyped_uuid(),
         };
 
         let timeseries = match metric_name {
@@ -114,15 +114,7 @@ impl super::Nexus {
         self.timeseries_client
             .timeseries_schema_list(&pagination.page, limit)
             .await
-            .map_err(|e| match e {
-                oximeter_db::Error::DatabaseUnavailable(_)
-                | oximeter_db::Error::Connection(_) => {
-                    Error::ServiceUnavailable {
-                        internal_message: e.to_string(),
-                    }
-                }
-                _ => Error::InternalError { internal_message: e.to_string() },
-            })
+            .map_err(super::oximeter::map_oximeter_err)
     }
 
     /// Run an OxQL query against the timeseries database.
@@ -130,7 +122,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         query: impl AsRef<str>,
-    ) -> Result<Vec<oxql_types::Table>, Error> {
+    ) -> Result<OxqlResult, Error> {
         // Must be a fleet user to list timeseries schema.
         //
         // TODO-security: We need to figure out how to implement proper security
@@ -140,15 +132,7 @@ impl super::Nexus {
         self.timeseries_client
             .oxql_query(query, QueryAuthzScope::Fleet)
             .await
-            // TODO-observability: The query method returns information
-            // about the duration of the OxQL query and the database
-            // resource usage for each contained SQL query. We should
-            // publish this as a timeseries itself, so that we can track
-            // improvements to query processing.
-            //
-            // For now, simply return the tables alone.
-            .map(|result| result.tables)
-            .map_err(map_timeseries_err)
+            .map_err(super::oximeter::map_oximeter_err)
     }
 
     /// Run an OxQL query against the timeseries database, scoped to a specific project.
@@ -157,7 +141,7 @@ impl super::Nexus {
         _opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
         query: impl AsRef<str>,
-    ) -> Result<Vec<oxql_types::Table>, Error> {
+    ) -> Result<OxqlResult, Error> {
         // Ensure the user has read access to the project
         let (authz_silo, authz_project) =
             project_lookup.lookup_for(authz::Action::Read).await?;
@@ -165,24 +149,11 @@ impl super::Nexus {
             .oxql_query(
                 query,
                 QueryAuthzScope::Project {
-                    silo_id: authz_silo.id(),
-                    project_id: authz_project.id(),
+                    silo_id: authz_silo.id().into_untyped_uuid(),
+                    project_id: authz_project.id().into_untyped_uuid(),
                 },
             )
             .await
-            .map(|result| result.tables)
-            .map_err(map_timeseries_err)
-    }
-}
-
-fn map_timeseries_err(e: oximeter_db::Error) -> Error {
-    match e {
-        oximeter_db::Error::DatabaseUnavailable(_)
-        | oximeter_db::Error::Connection(_) => Error::unavail(&e.to_string()),
-        oximeter_db::Error::Oxql(_)
-        | oximeter_db::Error::TimeseriesNotFound(_) => {
-            Error::invalid_request(e.to_string())
-        }
-        _ => Error::internal_error(&e.to_string()),
+            .map_err(super::oximeter::map_oximeter_err)
     }
 }

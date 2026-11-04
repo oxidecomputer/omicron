@@ -1,15 +1,16 @@
 [package]
 name = "ereport-types"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
 
 [dependencies]
-omicron-uuid-kinds.workspace = true
+dropshot.workspace = true
+thiserror.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-uuid.workspace = true
 omicron-workspace-hack.workspace = true
+omicron-uuid-kinds.workspace = true
 
 [lints]
 workspace = true

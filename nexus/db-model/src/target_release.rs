@@ -2,19 +2,27 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{Generation, impl_enum_type};
+use crate::typed_generation::DbTypedGeneration;
 use crate::typed_uuid::DbTypedUuid;
+use anyhow::Context;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::target_release;
-use nexus_types::external_api::views;
-use omicron_uuid_kinds::TufRepoKind;
+use omicron_generation_kinds::{
+    TargetReleaseGeneration, TargetReleaseGenerationKind,
+};
+use omicron_uuid_kinds::{TufRepoKind, TufRepoUuid};
+
+use crate::impl_enum_type;
 
 impl_enum_type!(
     TargetReleaseSourceEnum:
 
-    /// The source of the software release that should be deployed to the rack.
-    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq, Eq, Hash)]
-    pub enum TargetReleaseSource;
+    /// The source of the software release that should be deployed to the
+    /// rack.
+    #[derive(
+        Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq, Eq, Hash,
+    )]
+    pub enum DbTargetReleaseSource;
 
     Unspecified => b"unspecified"
     SystemVersion => b"system_version"
@@ -27,24 +35,44 @@ pub struct TargetRelease {
     /// Each change to the target release is recorded as a row with
     /// a monotonically increasing generation number. The row with
     /// the largest generation is the current target release.
-    pub generation: Generation,
+    ///
+    /// Strongly consider using `TargetRelease::generation()` instead of
+    /// accessing this field; this is `pub` to allow database queries.
+    pub generation: DbTypedGeneration<TargetReleaseGenerationKind>,
 
     /// The time at which this target release was requested.
     pub time_requested: DateTime<Utc>,
 
     /// The source of the target release.
-    pub release_source: TargetReleaseSource,
+    ///
+    /// Strongly consider using `TargetRelease::release_source()` instead of
+    /// accessing this field; this is `pub` to allow database queries.
+    pub release_source: DbTargetReleaseSource,
 
     /// The TUF repo containing the target release.
+    ///
+    /// Strongly consider using `TargetRelease::release_source()` instead of
+    /// accessing this field; this is `pub` to allow database queries.
     pub tuf_repo_id: Option<DbTypedUuid<TufRepoKind>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetReleaseSource {
+    Unspecified,
+    SystemVersion(TufRepoUuid),
+}
+
 impl TargetRelease {
+    /// Returns the generation number of this target release.
+    pub fn generation(&self) -> TargetReleaseGeneration {
+        self.generation.into()
+    }
+
     pub fn new_unspecified(prev: &TargetRelease) -> Self {
         Self {
-            generation: Generation(prev.generation.next()),
+            generation: prev.generation().next().into(),
             time_requested: Utc::now(),
-            release_source: TargetReleaseSource::Unspecified,
+            release_source: DbTargetReleaseSource::Unspecified,
             tuf_repo_id: None,
         }
     }
@@ -54,21 +82,29 @@ impl TargetRelease {
         tuf_repo_id: DbTypedUuid<TufRepoKind>,
     ) -> Self {
         Self {
-            generation: Generation(prev.generation.next()),
+            generation: prev.generation().next().into(),
             time_requested: Utc::now(),
-            release_source: TargetReleaseSource::SystemVersion,
+            release_source: DbTargetReleaseSource::SystemVersion,
             tuf_repo_id: Some(tuf_repo_id),
         }
     }
 
-    pub fn into_external(
-        &self,
-        release_source: views::TargetReleaseSource,
-    ) -> views::TargetRelease {
-        views::TargetRelease {
-            generation: (&self.generation.0).into(),
-            time_requested: self.time_requested,
-            release_source,
+    pub fn release_source(&self) -> anyhow::Result<TargetReleaseSource> {
+        match self.release_source {
+            DbTargetReleaseSource::Unspecified => {
+                Ok(TargetReleaseSource::Unspecified)
+            }
+            DbTargetReleaseSource::SystemVersion => {
+                let repo_id = self.tuf_repo_id.with_context(|| {
+                    format!(
+                        "invalid database contents: target release generation \
+                         {} has release source `system_version` with no \
+                         `tuf_repo_id`",
+                        self.generation()
+                    )
+                })?;
+                Ok(TargetReleaseSource::SystemVersion(repo_id.into()))
+            }
         }
     }
 }

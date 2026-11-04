@@ -2,7 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{L4PortRange, SqlU16, impl_enum_wrapper};
+use super::{
+    DatabaseString, L4PortRange, SqlU16, impl_enum_wrapper, impl_from_sql_text,
+};
 use db_macros::Resource;
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
@@ -14,8 +16,10 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use serde::Deserialize;
 use serde::Serialize;
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::io::Write;
+use std::str::FromStr;
 use uuid::Uuid;
 
 impl_enum_wrapper!(
@@ -54,18 +58,28 @@ impl_enum_wrapper!(
 NewtypeFrom! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAction); }
 NewtypeDeref! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAction); }
 
-impl_enum_wrapper!(
-    VpcFirewallRuleProtocolEnum:
-
-    #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
-    pub struct VpcFirewallRuleProtocol(pub external::VpcFirewallRuleProtocol);
-
-    Tcp => b"TCP"
-    Udp => b"UDP"
-    Icmp => b"ICMP"
-);
+/// Newtype wrapper around [`external::VpcFirewallRuleProtocol`] so we can derive
+/// diesel traits for it
+#[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
+#[diesel(sql_type = sql_types::Text)]
+#[repr(transparent)]
+pub struct VpcFirewallRuleProtocol(pub external::VpcFirewallRuleProtocol);
 NewtypeFrom! { () pub struct VpcFirewallRuleProtocol(external::VpcFirewallRuleProtocol); }
 NewtypeDeref! { () pub struct VpcFirewallRuleProtocol(external::VpcFirewallRuleProtocol); }
+
+impl DatabaseString for VpcFirewallRuleProtocol {
+    type Error = external::Error;
+
+    fn to_database_string(&self) -> Cow<'_, str> {
+        self.0.to_api_string().into()
+    }
+
+    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+        external::VpcFirewallRuleProtocol::from_api_string(s).map(Self)
+    }
+}
+
+impl_from_sql_text!(VpcFirewallRuleProtocol);
 
 /// Newtype wrapper around [`external::VpcFirewallRuleTarget`] so we can derive
 /// diesel traits for it
@@ -76,31 +90,19 @@ pub struct VpcFirewallRuleTarget(pub external::VpcFirewallRuleTarget);
 NewtypeFrom! { () pub struct VpcFirewallRuleTarget(external::VpcFirewallRuleTarget); }
 NewtypeDeref! { () pub struct VpcFirewallRuleTarget(external::VpcFirewallRuleTarget); }
 
-impl ToSql<sql_types::Text, Pg> for VpcFirewallRuleTarget {
-    fn to_sql<'a>(
-        &'a self,
-        out: &mut serialize::Output<'a, '_, Pg>,
-    ) -> serialize::Result {
-        <String as ToSql<sql_types::Text, Pg>>::to_sql(
-            &self.0.to_string(),
-            &mut out.reborrow(),
-        )
+impl DatabaseString for VpcFirewallRuleTarget {
+    type Error = <external::VpcFirewallRuleTarget as FromStr>::Err;
+
+    fn to_database_string(&self) -> Cow<'_, str> {
+        self.0.to_string().into()
+    }
+
+    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+        s.parse::<external::VpcFirewallRuleTarget>().map(Self)
     }
 }
 
-// Deserialize the "VpcFirewallRuleTarget" object from SQL TEXT.
-impl<DB> FromSql<sql_types::Text, DB> for VpcFirewallRuleTarget
-where
-    DB: Backend,
-    String: FromSql<sql_types::Text, DB>,
-{
-    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
-        Ok(VpcFirewallRuleTarget(
-            String::from_sql(bytes)?
-                .parse::<external::VpcFirewallRuleTarget>()?,
-        ))
-    }
-}
+impl_from_sql_text!(VpcFirewallRuleTarget);
 
 /// Newtype wrapper around [`external::VpcFirewallRuleHostFilter`] so we can derive
 /// diesel traits for it
@@ -111,31 +113,19 @@ pub struct VpcFirewallRuleHostFilter(pub external::VpcFirewallRuleHostFilter);
 NewtypeFrom! { () pub struct VpcFirewallRuleHostFilter(external::VpcFirewallRuleHostFilter); }
 NewtypeDeref! { () pub struct VpcFirewallRuleHostFilter(external::VpcFirewallRuleHostFilter); }
 
-impl ToSql<sql_types::Text, Pg> for VpcFirewallRuleHostFilter {
-    fn to_sql<'a>(
-        &'a self,
-        out: &mut serialize::Output<'a, '_, Pg>,
-    ) -> serialize::Result {
-        <String as ToSql<sql_types::Text, Pg>>::to_sql(
-            &self.0.to_string(),
-            &mut out.reborrow(),
-        )
+impl DatabaseString for VpcFirewallRuleHostFilter {
+    type Error = <external::VpcFirewallRuleHostFilter as FromStr>::Err;
+
+    fn to_database_string(&self) -> Cow<'_, str> {
+        self.0.to_string().into()
+    }
+
+    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+        s.parse::<external::VpcFirewallRuleHostFilter>().map(Self)
     }
 }
 
-// Deserialize the "VpcFirewallRuleHostFilter" object from SQL TEXT.
-impl<DB> FromSql<sql_types::Text, DB> for VpcFirewallRuleHostFilter
-where
-    DB: Backend,
-    String: FromSql<sql_types::Text, DB>,
-{
-    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
-        Ok(VpcFirewallRuleHostFilter(
-            String::from_sql(bytes)?
-                .parse::<external::VpcFirewallRuleHostFilter>()?,
-        ))
-    }
-}
+impl_from_sql_text!(VpcFirewallRuleHostFilter);
 
 /// Newtype wrapper around [`external::VpcFirewallRulePriority`] so we can derive
 /// diesel traits for it
@@ -221,6 +211,39 @@ fn ensure_max_len<T>(
     Ok(())
 }
 
+fn validate_port_ranges(
+    items: &[external::L4PortRange],
+) -> Result<(), external::Error> {
+    for range in items {
+        if range.last < range.first {
+            return Err(external::L4PortRangeError::EmptyRange.into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_protocols(
+    items: &[external::VpcFirewallRuleProtocol],
+) -> Result<(), external::Error> {
+    for proto in items {
+        if let external::VpcFirewallRuleProtocol::Icmp(Some(
+            external::VpcFirewallIcmpFilter {
+                code: Some(external::IcmpParamRange { first, last }),
+                ..
+            },
+        )) = proto
+        {
+            if last < first {
+                return Err(external::Error::invalid_value(
+                    "code",
+                    external::IcmpParamRangeError::EmptyRange.to_string(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 impl VpcFirewallRule {
     pub fn new(
         rule_id: Uuid,
@@ -242,9 +265,11 @@ impl VpcFirewallRule {
         }
         if let Some(ports) = rule.filters.ports.as_ref() {
             ensure_max_len(&ports, "filters.ports", MAX_FW_RULE_PARTS)?;
+            validate_port_ranges(ports.as_slice())?;
         }
         if let Some(protocols) = rule.filters.protocols.as_ref() {
             ensure_max_len(&protocols, "filters.protocols", MAX_FW_RULE_PARTS)?;
+            validate_protocols(protocols.as_slice())?;
         }
 
         Ok(Self {

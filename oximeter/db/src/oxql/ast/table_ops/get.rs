@@ -4,8 +4,6 @@
 
 //! AST node for the `get` table operation.
 
-// Copyright 2024 Oxide Computer Company
-
 use oximeter::TimeseriesName;
 
 /// An AST node like: `get foo:bar`

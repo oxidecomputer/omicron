@@ -10,7 +10,6 @@ use crate::authz::ApiResource;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::column_walker::AllColumnsOf;
-use crate::db::datastore::InstanceStateComputer;
 use crate::db::datastore::OpContext;
 use crate::db::identity::Resource;
 use crate::db::model::AffinityGroup;
@@ -20,9 +19,11 @@ use crate::db::model::AntiAffinityGroup;
 use crate::db::model::AntiAffinityGroupInstanceMembership;
 use crate::db::model::AntiAffinityGroupUpdate;
 use crate::db::model::InstanceState;
+use crate::db::model::InstanceStateComputer;
 use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::model::VmmState;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::RawPaginator;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -35,6 +36,7 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_schema::enums::InstanceStateEnum;
 use nexus_db_schema::enums::VmmStateEnum;
+use nexus_types::external_api::affinity;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -94,7 +96,7 @@ impl DataStore {
             .filter(
                 dsl::id.eq_any(ids.clone()).or(dsl::name.eq_any(names.clone())),
             )
-            .filter(dsl::project_id.eq(authz_project.id()))
+            .filter(dsl::project_id.eq(to_db_typed_uuid(authz_project.id())))
             .filter(dsl::time_deleted.is_null())
             .select((dsl::id, dsl::name))
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
@@ -224,7 +226,9 @@ impl DataStore {
             .sql(AllColumnsOf::<dsl::affinity_group>::as_str())
             .sql(" FROM affinity_group WHERE project_id = ")
             .param()
-            .bind::<diesel::sql_types::Uuid, _>(authz_project.id())
+            .bind::<diesel::sql_types::Uuid, _>(
+                authz_project.id().into_untyped_uuid(),
+            )
             .sql(" AND time_deleted IS NULL");
         paginator
             .paginate_by_id_or_name(pagparams)
@@ -251,7 +255,9 @@ impl DataStore {
             .sql(AllColumnsOf::<dsl::anti_affinity_group>::as_str())
             .sql(" FROM anti_affinity_group WHERE project_id = ")
             .param()
-            .bind::<diesel::sql_types::Uuid, _>(authz_project.id())
+            .bind::<diesel::sql_types::Uuid, _>(
+                authz_project.id().into_untyped_uuid(),
+            )
             .sql(" AND time_deleted IS NULL");
         paginator
             .paginate_by_id_or_name(pagparams)
@@ -275,7 +281,7 @@ impl DataStore {
         let name = group.name().as_str().to_string();
 
         let affinity_group: AffinityGroup = Project::insert_resource(
-            authz_project.id(),
+            authz_project.id().into(),
             diesel::insert_into(dsl::affinity_group).values(group),
         )
         .insert_and_get_result_async(&conn)
@@ -306,7 +312,7 @@ impl DataStore {
         let name = group.name().as_str().to_string();
 
         let anti_affinity_group: AntiAffinityGroup = Project::insert_resource(
-            authz_project.id(),
+            authz_project.id().into(),
             diesel::insert_into(dsl::anti_affinity_group).values(group),
         )
         .insert_and_get_result_async(&conn)
@@ -503,7 +509,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_affinity_group: &authz::AffinityGroup,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<external::AffinityGroupMember> {
+    ) -> ListResultVec<affinity::AffinityGroupMember> {
         opctx.authorize(authz::Action::Read, authz_affinity_group).await?;
 
         let mut paginator = RawPaginator::new();
@@ -544,7 +550,7 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
             .into_iter()
             .map(|(id, name, instance_state, migration_id, vmm_state)| {
-                Ok(external::AffinityGroupMember::Instance {
+                Ok(affinity::AffinityGroupMember::Instance {
                     id: InstanceUuid::from_untyped_uuid(id),
                     name: name.into(),
                     run_state: InstanceStateComputer::compute_state_from(
@@ -562,7 +568,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_anti_affinity_group: &authz::AntiAffinityGroup,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<external::AntiAffinityGroupMember> {
+    ) -> ListResultVec<affinity::AntiAffinityGroupMember> {
         opctx.authorize(authz::Action::Read, authz_anti_affinity_group).await?;
 
         let mut paginator = RawPaginator::new();
@@ -612,7 +618,7 @@ impl DataStore {
                         "Anti-Affinity instance member missing state in database"
                     ));
                 };
-                Ok(external::AntiAffinityGroupMember::Instance {
+                Ok(affinity::AntiAffinityGroupMember::Instance {
                     id: InstanceUuid::from_untyped_uuid(id),
                     name: name.into(),
                     run_state: InstanceStateComputer::compute_state_from(
@@ -630,7 +636,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_affinity_group: &authz::AffinityGroup,
         instance_id: InstanceUuid,
-    ) -> Result<external::AffinityGroupMember, Error> {
+    ) -> Result<affinity::AffinityGroupMember, Error> {
         opctx.authorize(authz::Action::Read, authz_affinity_group).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -688,7 +694,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_anti_affinity_group: &authz::AntiAffinityGroup,
         instance_id: InstanceUuid,
-    ) -> Result<external::AntiAffinityGroupMember, Error> {
+    ) -> Result<affinity::AntiAffinityGroupMember, Error> {
         opctx.authorize(authz::Action::Read, authz_anti_affinity_group).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -1228,15 +1234,16 @@ impl DataStore {
 mod tests {
     use super::*;
 
+    use crate::db::datastore::sled::SledReservationReason;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::create_project;
     use crate::db::pub_test_utils::helpers::create_stopped_instance_record;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::Resources;
     use nexus_db_model::SledResourceVmm;
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::{affinity, instance};
     use omicron_common::api::external::{
-        self, ByteCount, DataPageParams, IdentityMetadataCreateParams,
+        ByteCount, DataPageParams, IdentityMetadataCreateParams,
         SimpleIdentityOrName,
     };
     use omicron_test_utils::dev;
@@ -1256,13 +1263,13 @@ mod tests {
     ) -> CreateResult<AffinityGroup> {
         let group = AffinityGroup::new(
             authz_project.id(),
-            params::AffinityGroupCreate {
+            affinity::AffinityGroupCreate {
                 identity: IdentityMetadataCreateParams {
                     name: name.parse().unwrap(),
                     description: "".to_string(),
                 },
-                policy: external::AffinityPolicy::Fail,
-                failure_domain: external::FailureDomain::Sled,
+                policy: affinity::AffinityPolicy::Fail,
+                failure_domain: affinity::FailureDomain::Sled,
             },
         );
         datastore.affinity_group_create(&opctx, &authz_project, group).await
@@ -1278,13 +1285,13 @@ mod tests {
     ) -> CreateResult<AntiAffinityGroup> {
         let group = AntiAffinityGroup::new(
             authz_project.id(),
-            params::AntiAffinityGroupCreate {
+            affinity::AntiAffinityGroupCreate {
                 identity: IdentityMetadataCreateParams {
                     name: name.parse().unwrap(),
                     description: "".to_string(),
                 },
-                policy: external::AffinityPolicy::Fail,
-                failure_domain: external::FailureDomain::Sled,
+                policy: affinity::AffinityPolicy::Fail,
+                failure_domain: affinity::FailureDomain::Sled,
             },
         );
         datastore
@@ -1314,6 +1321,7 @@ mod tests {
                     ByteCount::from_kibibytes_u32(1).into(),
                     ByteCount::from_kibibytes_u32(1).into(),
                 ),
+                SledReservationReason::Start.into(),
             ))
             .execute_async(
                 &*datastore.pool_connection_for_tests().await.unwrap(),
@@ -1871,7 +1879,7 @@ mod tests {
         assert_eq!(members.len(), 1);
         assert!(matches!(
             members[0],
-            external::AntiAffinityGroupMember::Instance {
+            affinity::AntiAffinityGroupMember::Instance {
                 id,
                 ..
             } if id == instance,
@@ -1951,10 +1959,10 @@ mod tests {
             .await;
 
             // Add the instance as a member to the group
-            let member = external::AffinityGroupMember::Instance {
+            let member = affinity::AffinityGroupMember::Instance {
                 id: instance,
                 name: name.try_into().unwrap(),
-                run_state: external::InstanceState::Stopped,
+                run_state: instance::InstanceState::Stopped,
             };
             datastore
                 .affinity_group_member_instance_add(
@@ -2130,10 +2138,10 @@ mod tests {
             .await;
 
             // Add the instance as a member to the group
-            let member = external::AntiAffinityGroupMember::Instance {
+            let member = affinity::AntiAffinityGroupMember::Instance {
                 id: instance,
                 name: name.try_into().unwrap(),
-                run_state: external::InstanceState::Stopped,
+                run_state: instance::InstanceState::Stopped,
             };
             datastore
                 .anti_affinity_group_member_instance_add(
@@ -2470,7 +2478,7 @@ mod tests {
         assert_eq!(members.len(), 1);
         assert!(matches!(
             members[0],
-            external::AntiAffinityGroupMember::Instance {
+            affinity::AntiAffinityGroupMember::Instance {
                 id,
                 ..
             } if id == instance,

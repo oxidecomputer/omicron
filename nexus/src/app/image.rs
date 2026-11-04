@@ -4,7 +4,6 @@
 
 //! Images (both project and silo scoped)
 
-use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_lookup::lookup::ImageLookup;
@@ -13,6 +12,8 @@ use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_types::external_api::image;
+use nexus_types::external_api::project;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -30,13 +31,10 @@ impl super::Nexus {
     pub(crate) async fn image_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        image_selector: params::ImageSelector,
+        image_selector: image::ImageSelector,
     ) -> LookupResult<ImageLookup<'a>> {
         match image_selector {
-            params::ImageSelector {
-                image: NameOrId::Id(id),
-                project: None,
-            } => {
+            image::ImageSelector { image: NameOrId::Id(id), project: None } => {
                 let (.., db_image) = LookupPath::new(opctx, &self.db_datastore)
                     .image_id(id)
                     .fetch()
@@ -53,16 +51,19 @@ impl super::Nexus {
                 };
                 Ok(lookup)
             }
-            params::ImageSelector {
+            image::ImageSelector {
                 image: NameOrId::Name(name),
                 project: Some(project),
             } => {
                 let image = self
-                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .project_lookup(
+                        opctx,
+                        project::ProjectSelector { project },
+                    )?
                     .project_image_name_owned(name.into());
                 Ok(ImageLookup::ProjectImage(image))
             }
-            params::ImageSelector {
+            image::ImageSelector {
                 image: NameOrId::Name(name),
                 project: None,
             } => {
@@ -71,7 +72,7 @@ impl super::Nexus {
                     .silo_image_name_owned(name.into());
                 Ok(ImageLookup::SiloImage(image))
             }
-            params::ImageSelector { image: NameOrId::Id(_), .. } => {
+            image::ImageSelector { image: NameOrId::Id(_), .. } => {
                 Err(Error::invalid_request(
                     "when providing image as an ID, project should not be specified",
                 ))
@@ -84,7 +85,7 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         lookup_parent: &ImageParentLookup<'_>,
-        params: &params::ImageCreate,
+        params: &image::ImageCreate,
     ) -> CreateResult<db::model::Image> {
         let image_type = match lookup_parent {
             ImageParentLookup::Project(project) => {
@@ -99,7 +100,21 @@ impl super::Nexus {
 
             ImageParentLookup::Silo(silo) => {
                 let (.., authz_silo) =
-                    silo.lookup_for(authz::Action::CreateChild).await?;
+                    silo.lookup_for(authz::Action::Read).await?;
+
+                // Check CreateChild on SiloImageList rather than the Silo
+                // itself so that limited-collaborators can create silo images.
+                // The datastore checks this again when creating the image
+                // record, but we check here to avoid kicking off a saga that
+                // would fail partway through and have to unwind.
+                let authz_silo_image_list =
+                    authz::SiloImageList::new(authz_silo.clone());
+                opctx
+                    .authorize(
+                        authz::Action::CreateChild,
+                        &authz_silo_image_list,
+                    )
+                    .await?;
 
                 sagas::image_create::ImageType::Silo { authz_silo }
             }
@@ -118,7 +133,7 @@ impl super::Nexus {
 
         let created_image = saga_outputs
             .lookup_node_output::<db::model::Image>("created_image")
-            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .map_err(|e| Error::internal_error(&format!("{:#}", e)))
             .internal_context("looking up output from image create saga")?;
 
         Ok(created_image)
@@ -139,8 +154,10 @@ impl super::Nexus {
                     .await
             }
             ImageParentLookup::Silo(silo) => {
+                // The ListChildren check happens against SiloImageList in the
+                // datastore; here we only need to be able to see the silo.
                 let (.., authz_silo) =
-                    silo.lookup_for(authz::Action::ListChildren).await?;
+                    silo.lookup_for(authz::Action::Read).await?;
                 self.db_datastore
                     .silo_image_list(opctx, &authz_silo, pagparams)
                     .await
@@ -188,9 +205,7 @@ impl super::Nexus {
             ImageLookup::ProjectImage(lookup) => {
                 let (authz_silo, _, authz_project_image, project_image) =
                     lookup.fetch_for(authz::Action::Modify).await?;
-                opctx
-                    .authorize(authz::Action::CreateChild, &authz_silo)
-                    .await?;
+
                 self.db_datastore
                     .project_image_promote(
                         opctx,
@@ -217,8 +232,11 @@ impl super::Nexus {
             ImageLookup::SiloImage(lookup) => {
                 let (_, authz_silo_image, silo_image) =
                     lookup.fetch_for(authz::Action::Modify).await?;
-                let (_, authz_project) =
-                    project_lookup.lookup_for(authz::Action::Modify).await?;
+                // Check CreateChild on the project since we're creating a ProjectImage.
+                // This allows limited-collaborators to demote images.
+                let (_, authz_project) = project_lookup
+                    .lookup_for(authz::Action::CreateChild)
+                    .await?;
                 self.db_datastore
                     .silo_image_demote(
                         opctx,

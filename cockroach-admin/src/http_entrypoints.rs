@@ -3,14 +3,18 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::context::ServerContext;
-use cockroach_admin_api::*;
-use cockroach_admin_types::NodeDecommission;
+use cockroach_admin_api::{CockroachAdminApi, cockroach_admin_api_mod};
+use cockroach_admin_types::node::{
+    ClusterNodeStatus, LocalNodeId, NodeDecommission, NodeId,
+};
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
+use omicron_common::http_client::internal_http_client_builder;
 use slog::info;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 
 type CrdbApiDescription = dropshot::ApiDescription<Arc<ServerContext>>;
@@ -45,8 +49,11 @@ impl CockroachAdminApi for CockroachAdminImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<ClusterNodeStatus>, HttpError> {
         let ctx = rqctx.context();
-        let all_nodes =
-            ctx.cockroach_cli().node_status().await.map_err(HttpError::from)?;
+        let all_nodes = ctx
+            .cockroach_cli()
+            .node_status(ctx.log())
+            .await
+            .map_err(HttpError::from)?;
         Ok(HttpResponseOk(ClusterNodeStatus { all_nodes }))
     }
 
@@ -60,13 +67,103 @@ impl CockroachAdminApi for CockroachAdminImpl {
     }
 
     async fn node_decommission(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<NodeId>,
+        _rqctx: RequestContext<Self::Context>,
+        _body: TypedBody<NodeId>,
     ) -> Result<HttpResponseOk<NodeDecommission>, HttpError> {
+        // We should call ctx.cockroach_cli().node_decommission(), but can't at
+        // the moment due to timing concerns.
+        Err(HttpError::for_bad_request(
+            None,
+            "decommissioning cockroach nodes not supported (see omicron#8445)"
+                .to_string(),
+        ))
+    }
+
+    async fn status_vars(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<String>, HttpError> {
         let ctx = rqctx.context();
-        let NodeId { node_id } = body.into_inner();
-        let decommission_status =
-            ctx.cockroach_cli().node_decommission(&node_id).await?;
-        Ok(HttpResponseOk(decommission_status))
+        let cockroach_http_address =
+            ctx.cockroach_cli().cockroach_http_address();
+        let url = format!("http://{}/_status/vars", cockroach_http_address);
+
+        let client = internal_http_client_builder()
+            .build()
+            .expect("building a client without TLS roots does no I/O");
+        let response = client.get(&url).send().await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "Failed to proxy to CockroachDB: {}",
+                InlineErrorChain::new(&e),
+            ))
+        })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_else(|_| {
+                "Failed to read error response".to_string()
+            });
+            let status_code = dropshot::ErrorStatusCode::from_status(status)
+                .unwrap_or(dropshot::ErrorStatusCode::INTERNAL_SERVER_ERROR);
+            return Err(HttpError {
+                status_code,
+                error_code: None,
+                external_message: body.clone(),
+                internal_message: body,
+                headers: None,
+            });
+        }
+
+        let body = response.text().await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "Failed to read response body: {}",
+                InlineErrorChain::new(&e),
+            ))
+        })?;
+
+        Ok(HttpResponseOk(body))
+    }
+
+    async fn status_nodes(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<String>, HttpError> {
+        let ctx = rqctx.context();
+        let cockroach_http_address =
+            ctx.cockroach_cli().cockroach_http_address();
+        let url = format!("http://{}/_status/nodes", cockroach_http_address);
+
+        let client = internal_http_client_builder()
+            .build()
+            .expect("building a client without TLS roots does no I/O");
+        let response = client.get(&url).send().await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "Failed to proxy to CockroachDB: {}",
+                InlineErrorChain::new(&e),
+            ))
+        })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_else(|_| {
+                "Failed to read error response".to_string()
+            });
+            let status_code = dropshot::ErrorStatusCode::from_status(status)
+                .unwrap_or(dropshot::ErrorStatusCode::INTERNAL_SERVER_ERROR);
+            return Err(HttpError {
+                status_code,
+                error_code: None,
+                external_message: body.clone(),
+                internal_message: body,
+                headers: None,
+            });
+        }
+
+        let body = response.text().await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "Failed to read response body: {}",
+                InlineErrorChain::new(&e),
+            ))
+        })?;
+
+        Ok(HttpResponseOk(body))
     }
 }

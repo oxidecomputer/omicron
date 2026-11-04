@@ -227,6 +227,27 @@ If you're using an existing external network, you likely don't need to specify a
     --physical-link igb0           # The physical link for your external network.
 ----
 
+When running `cargo xtask virtual-hardware create`, consider using the
+`--vdev-dir` option to specify where the tool will create files that will back
+the virtual U2/M2 devices:
+
+```bash
+cargo xtask virtual-hardware create \
+   --vdev-dir /scratch \
+   --gateway-ip 192.168.1.199 \
+   --pxa-start 192.168.1.20 \
+   --pxa-end 192.168.1.40
+```
+
+If the directory is changed, the `vdevs` field in
+`smf/sled-agent/non-gimlet/config.toml` needs to be updated to point to the
+new location.
+
+Why is this useful? Separating vdev storage allows you to granularly control how
+you want to manage storage resources. For example, you can use a separate disk
+or partition for vdevs, which can be useful for performance and alleviating hard
+disk stress.
+
 If you're running on a bench Gimlet, you may not need (or want) most of what `cargo xtask virtual-hardware create` does, but you do still need SoftNPU. You can tweak what resources are created with the `--scope` flag.
 
 Later, you can clean up the resources created by `cargo xtask virtual-hardware create` with:
@@ -253,12 +274,13 @@ The relevant configuration files are in `./smf/sled-agent/$MACHINE`.  Start with
 
 [source,toml]
 ----
-[[internal_services_ip_pool_ranges]]
-first = "192.168.1.20"
-last = "192.168.1.29"
+[[service_ip_pools]]
+name = "oxide-service-pool-v4"
+description = "IPv4 IP Pool for Oxide Services"
+ranges = [ { first = "192.168.1.20", last = "192.168.1.29" } ]
 ----
 
-This is a range of IP addresses on your external network that Omicron can assign to externally-facing services (like DNS and the API).  You'll need to change these if you've picked different addresses for your external network.  See <<_external_networking>> above for more on this.
+This pool contains a range of IP addresses on your external network that Omicron can assign to externally-facing services (like DNS and the API).  You'll need to change the range if you've picked different addresses for your external network.  See <<_external_networking>> above for more on this. You can also add more ranges or additional pools.
 
 You will also need to update route information if your `$GATEWAY_IP` differs from the default.
 The below example demonstrates a single static gateway route; in-depth explanations for testing with BGP can be found https://docs.oxide.computer/guides/system/network-preparations#_rack_switch_configuration_with_bgp[in the Network Preparations guide] and https://docs.oxide.computer/guides/operator/configuring-bgp[the Configuring BGP guide]:
@@ -366,14 +388,6 @@ Options:
           - gimlet:            Use sled agent configuration for a Gimlet
           - gimlet-standalone: Use sled agent configuration for a Gimlet running in isolation
           - non-gimlet:        Use sled agent configuration for a device emulating a Gimlet
-
-  -s, --switch <SWITCH>
-          The switch to use for the target
-
-          Possible values:
-          - asic:    Use the "real" Dendrite, that attempts to interact with the Tofino
-          - stub:    Use a "stub" Dendrite that does not require any real hardware
-          - softnpu: Use a "softnpu" Dendrite that uses the SoftNPU asic emulator
 
   -r, --rack-topology <RACK_TOPOLOGY>
           Specify whether nexus will run in a single-sled or multi-sled environment.
@@ -552,7 +566,7 @@ In this example we'll update the recovery silo so we can provision instances dir
 [source, console]
 ----
 $ oxide silo quotas update \
-    --silo fa12b74d-30f8-4d5a-bc0e-4d229f13c6e5 \
+    --silo recovery \
     --cpus 9999999999 \
     --memory 999999999999999999 \
     --storage 999999999999999999
@@ -573,13 +587,15 @@ An IP pool is needed to provide external connectivity to Instances.  The address
 Here we will first create an ip pool for the recovery silo:
 [source,console]
 ----
-$ oxide ip-pool create --name "default" --description "default ip-pool"
+$ oxide system networking ip-pool create --name "default" --description "default ip-pool"
 
 # example response
 {
   "description": "default ip-pool",
   "id": "1c3dfa5c-7b00-46ff-987a-4e59e512b250",
+  "ip_version": "v4",
   "name": "default",
+  "pool_type": "unicast",
   "time_created": "2024-01-16T22:51:54.679751Z",
   "time_modified": "2024-01-16T22:51:54.679751Z"
 }
@@ -588,13 +604,13 @@ $ oxide ip-pool create --name "default" --description "default ip-pool"
 Now we will associate (link) the pool with the recovery silo.
 [source,console]
 ----
-$ oxide ip-pool silo link --pool default --is-default true --silo recovery
+$ oxide system networking ip-pool silo link --pool default --is-default true --silo recovery
 
 # example response
 {
   "ip_pool_id": "1c3dfa5c-7b00-46ff-987a-4e59e512b250",
   "is_default": true,
-  "silo_id": "5c0aca09-d7ee-4be6-b7b1-060655659f74"
+  "silo_id": "fa12b74d-30f8-4d5a-bc0e-4d229f13c6e5",
 }
 ----
 
@@ -602,7 +618,7 @@ Now we will add an address range to the recovery silo:
 
 [source,console]
 ----
-oxide ip-pool range add --pool default --first $IP_POOL_START --last $IP_POOL_END
+oxide system networking ip-pool range add --pool default --first $IP_POOL_START --last $IP_POOL_END
 
 # example response
 {
@@ -616,51 +632,48 @@ oxide ip-pool range add --pool default --first $IP_POOL_START --last $IP_POOL_EN
 }
 ----
 
-=== Create a Project and Image
+=== Create a Project
 
-First, create a Project:
-
-[source,console]
-----
-$ oxide project create --name=myproj --description demo
-----
-
-Create a Project Image that will be used as initial disk contents.
-
-This can be the alpine.iso image that ships with propolis:
+Create a project:
 
 [source,console]
 ----
-$ oxide api /v1/images?project=myproj --method POST --input - <<EOF
-{
-  "name": "alpine",
-  "description": "boot from propolis zone blob!",
-  "os": "linux",
-  "version": "1",
-  "source": {
-    "type": "you_can_boot_anything_as_long_as_its_alpine"
-  }
-}
-EOF
+$ oxide project create --name=oxide --description "An Oxide project."
 ----
 
-Or an ISO / raw disk image / etc hosted at a URL:
+=== Create a Project Image
+
+You'll need an operating system image to boot an instance on Oxide.
+
+Download an image (e.g., link:https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img[Ubuntu 24.04 LTS]):
 
 [source,console]
 ----
-$ oxide api /v1/images --method POST --input - <<EOF
-{
-  "name": "crucible-tester-sparse",
-  "description": "boot from a url!",
-  "os": "debian",
-  "version": "9",
-  "source": {
-    "type": "url",
-    "url": "http://[fd00:1122:3344:101::15]/crucible-tester-sparse.img",
-    "block_size": 512
-  }
-}
-EOF
+curl -L -o ubuntu-24-04.img https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+----
+
+Convert the image to raw format:
+
+[source,console]
+----
+qemu-img convert -f qcow2 -O raw ./ubuntu-24-04.img ./ubuntu-24-04.raw
+----
+
+Upload the image to Oxide as a project image:
+
+[source,console]
+----
+oxide disk import \
+    --project "oxide" \
+    --path "./ubuntu-24-04.raw" \
+    --disk "ubuntu-24-04" \
+    --disk-block-size 512 \
+    --description "Ubuntu 24.04." \
+    --snapshot "ubuntu-24-04" \
+    --image "ubuntu-24-04" \
+    --image-description "Ubuntu 24.04." \
+    --image-os "Ubuntu" \
+    --image-version "24.04"
 ----
 
 === Provision an instance using the CLI
@@ -752,32 +765,41 @@ $ oxide --resolve recovery.sys.oxide.test:443:192.168.1.22 --cacert ./smf/sled-a
 
 === Switch Zone
 
-In a real rack, two of the Gimlets (referred to as Scrimlets) will be connected directly to the switch (Sidecar). Those sleds will thus be configured with a switch zone (`oxz_switch`) used to manage the switch. The `sled_mode` option in Sled Agent's config will indicate whether the sled its running on is potentially a Scrimlet or Gimlet.
+In a real rack, two of the sleds (referred to as Scrimlets) will be connected directly to the switch (Sidecar). Those sleds will thus be configured with a switch zone (`oxz_switch`) used to manage the switch. The `deployment` table in Sled Agent's config says what kind of system the sled is part of, which decides whether it is a Scrimlet and which switch backend its switch zone runs.
 
 The relevant config will be in `smf/sled-agent/$MACHINE/config.toml`.
 
 [source,text]
 ----
-# Identifies whether sled agent treats itself as a scrimlet or a gimlet.
-#
-# If this is set to "scrimlet", the sled agent treats itself as a scrimlet.
-# If this is set to "gimlet", the sled agent treats itself as a gimlet.
-# If this is set to "auto":
-# - On illumos, the sled automatically detects whether or not it is a scrimlet.
-# - On all other platforms, the sled assumes it is a gimlet.
-sled_mode = "scrimlet"
+# For simulated Omicron: one host running a SoftNPU zone; always a scrimlet.
+deployment = { kind = "standalone", front_port_count = 1, rear_port_count = 1 }
 ----
 
-Once Sled Agent has been configured to run as a Scrimlet (whether explicitly or implicitly), it will attempt to create and start the switch zone. This will depend on the switch type that was specified in the build target:
+The deployment kinds are:
 
-1. `asic` implies we're running on a real Gimlet and are directly attached to the
-Tofino ASIC.
-2. `stub` provides a stubbed out switch implementation that doesn't
-require any hardware.
-3. `softnpu` provides a simulated switch implementation that
-runs the same P4 program as the ASIC, but in software.
+1. `production`: an Oxide rack. The hardware monitor detects the Tofino ASIC
+and the sled runs as a Scrimlet when an ASIC is attached. The sidecar board revision
+defaults to `"b"` and can be set with `sidecar_revision`.
+2. `virtual`: a propolis-hosted, multi-sled lab such as voxel. `sled-agent` probes for
+the propolis SoftNPU device at startup and runs as a Scrimlet when one is attached.
+Requires `front_port_count` and `rear_port_count`.
+3. `standalone`: a single host running a SoftNPU zone. Always a Scrimlet.
+Requires `front_port_count` and `rear_port_count`.
+4. `custom`: an explicit `sled_mode` (`auto`, `sled`, or `scrimlet`) and a
+`switch` table whose `kind` is `tofino_asic`, `tofino_stub`,
+`soft_npu_propolis_device`, or `soft_npu_zone`.
 
-For the purposes of local development, the `softnpu` switch is used.  Unfortunately, Omicron does not currently automatically configure the switch with respect to external networking, so you'll need to manually do so.
+With a custom deployment kind, the detected backends
+`tofino_asic` and `soft_npu_propolis_device` take `auto`; the fixed backends
+`tofino_stub` and `soft_npu_zone` take `scrimlet`; `sled` ignores the switch.
+This gimlet-standalone config is an example:
+
+[source,text]
+----
+deployment = { kind = "custom", sled_mode = "scrimlet", switch = { kind = "tofino_stub" } }
+----
+
+For the purposes of local development, the `soft_npu_zone` switch is used.  Unfortunately, Omicron does not currently automatically configure the switch with respect to external networking, so you'll need to manually do so.
 
 === Test Environment
 

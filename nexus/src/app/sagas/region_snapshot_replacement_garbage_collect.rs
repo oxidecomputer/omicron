@@ -31,6 +31,7 @@ use super::{
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::volume_delete;
 use crate::app::{authn, db};
+use nexus_types::saga::saga_action_failed;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
@@ -150,7 +151,7 @@ async fn rsrgs_set_saga_id(
             saga_id,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -203,7 +204,7 @@ async fn rsrgs_update_request_record(
             saga_id,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -249,7 +250,7 @@ pub(crate) mod test {
                 block_size: 0,
                 blocks_per_extent: 0,
                 extent_count: 0,
-                gen: 0,
+                generation: 0,
                 opts: CrucibleOpts {
                     id: *old_snapshot_volume_id.as_untyped_uuid(),
                     target: vec![

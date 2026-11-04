@@ -17,23 +17,18 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use db_macros::lookup_resource;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use ipnetwork::IpNetwork;
+use nexus_auth::authn;
 use nexus_auth::authz;
 use nexus_auth::context::OpContext;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
+use nexus_db_model::DbSwitchSlot;
 use nexus_db_model::Name;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
-use omicron_uuid_kinds::PhysicalDiskUuid;
-use omicron_uuid_kinds::SupportBundleUuid;
-use omicron_uuid_kinds::TufArtifactKind;
-use omicron_uuid_kinds::TufRepoKind;
-use omicron_uuid_kinds::TypedUuid;
-use omicron_uuid_kinds::WebhookEventUuid;
-use omicron_uuid_kinds::WebhookReceiverUuid;
-use omicron_uuid_kinds::WebhookSecretUuid;
+use omicron_uuid_kinds::*;
 use slog::{error, trace};
 use uuid::Uuid;
 
@@ -68,11 +63,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type Project, identified by its owned name
-    pub fn project_name_owned<'b, 'c>(self, name: Name) -> Project<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
+    pub fn project_name_owned(self, name: Name) -> Project<'a> {
         match self
             .opctx
             .authn
@@ -92,7 +83,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type Project, identified by its id
-    pub fn project_id(self, id: Uuid) -> Project<'a> {
+    pub fn project_id(self, id: ProjectUuid) -> Project<'a> {
         Project::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -199,74 +190,32 @@ impl<'a> LookupPath<'a> {
 
     // Fleet-level resources
 
-    /// Select a resource of type ConsoleSession, identified by its `token`
-    pub fn console_session_token<'b, 'c>(
+    /// Select a resource of type ConsoleSession, identified by its `id`
+    pub fn console_session_id(
         self,
-        token: &'b str,
-    ) -> ConsoleSession<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
-        ConsoleSession::PrimaryKey(
-            Root { lookup_root: self },
-            token.to_string(),
-        )
+        id: ConsoleSessionUuid,
+    ) -> ConsoleSession<'a> {
+        ConsoleSession::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type DeviceAuthRequest, identified by its `user_code`
-    pub fn device_auth_request<'b, 'c>(
-        self,
-        user_code: &'b str,
-    ) -> DeviceAuthRequest<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
+    pub fn device_auth_request(self, user_code: &str) -> DeviceAuthRequest<'a> {
         DeviceAuthRequest::PrimaryKey(
             Root { lookup_root: self },
             user_code.to_string(),
         )
     }
 
-    /// Select a resource of type DeviceAccessToken, identified by its `token`
-    pub fn device_access_token<'b, 'c>(
+    /// Select a resource of type DeviceAccessToken, identified by its `id`
+    pub fn device_access_token_id(
         self,
-        token: &'b str,
-    ) -> DeviceAccessToken<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
-        DeviceAccessToken::PrimaryKey(
-            Root { lookup_root: self },
-            token.to_string(),
-        )
-    }
-
-    /// Select a resource of type RoleBuiltin, identified by its `name`
-    pub fn role_builtin_name(self, name: &str) -> RoleBuiltin<'a> {
-        let parts = name.split_once('.');
-        if let Some((resource_type, role_name)) = parts {
-            RoleBuiltin::PrimaryKey(
-                Root { lookup_root: self },
-                resource_type.to_string(),
-                role_name.to_string(),
-            )
-        } else {
-            let root = Root { lookup_root: self };
-            RoleBuiltin::Error(
-                root,
-                Error::ObjectNotFound {
-                    type_name: ResourceType::RoleBuiltin,
-                    lookup_type: LookupType::ByName(String::from(name)),
-                },
-            )
-        }
+        id: TypedUuid<AccessTokenKind>,
+    ) -> DeviceAccessToken<'a> {
+        DeviceAccessToken::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type Silo, identified by its id
-    pub fn silo_id(self, id: Uuid) -> Silo<'a> {
+    pub fn silo_id(self, id: SiloUuid) -> Silo<'a> {
         Silo::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -280,21 +229,35 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type Silo, identified by its owned name
-    pub fn silo_name_owned<'b, 'c>(self, name: Name) -> Silo<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
+    pub fn silo_name_owned(self, name: Name) -> Silo<'a> {
         Silo::OwnedName(Root { lookup_root: self }, name)
     }
 
     /// Select a resource of type SiloUser, identified by its id
-    pub fn silo_user_id(self, id: Uuid) -> SiloUser<'a> {
+    pub fn silo_user_id(self, id: SiloUserUuid) -> SiloUser<'a> {
         SiloUser::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type SiloUser that matches an authenticated Actor
+    pub fn silo_user_actor(
+        self,
+        actor: &authn::Actor,
+    ) -> Result<SiloUser<'a>, Error> {
+        match actor {
+            authn::Actor::SiloUser { silo_user_id, .. } => Ok(
+                SiloUser::PrimaryKey(Root { lookup_root: self }, *silo_user_id),
+            ),
+
+            authn::Actor::UserBuiltin { .. } | authn::Actor::Scim { .. } => {
+                Err(Error::non_resourcetype_not_found(
+                    "could not find silo user",
+                ))
+            }
+        }
+    }
+
     /// Select a resource of type SiloGroup, identified by its id
-    pub fn silo_group_id(self, id: Uuid) -> SiloGroup<'a> {
+    pub fn silo_group_id(self, id: SiloGroupUuid) -> SiloGroup<'a> {
         SiloGroup::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -304,17 +267,17 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type Rack, identified by its id
-    pub fn rack_id(self, id: Uuid) -> Rack<'a> {
+    pub fn rack_id(self, id: RackUuid) -> Rack<'a> {
         Rack::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type Sled, identified by its id
-    pub fn sled_id(self, id: Uuid) -> Sled<'a> {
+    pub fn sled_id(self, id: SledUuid) -> Sled<'a> {
         Sled::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type Zpool, identified by its id
-    pub fn zpool_id(self, id: Uuid) -> Zpool<'a> {
+    pub fn zpool_id(self, id: ZpoolUuid) -> Zpool<'a> {
         Zpool::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -331,6 +294,10 @@ impl<'a> LookupPath<'a> {
     /// Select a resource of type SupportBundle, identified by its id
     pub fn support_bundle(self, id: SupportBundleUuid) -> SupportBundle<'a> {
         SupportBundle::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    pub fn tuf_trust_root(self, id: TufTrustRootUuid) -> TufTrustRoot<'a> {
+        TufTrustRoot::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     pub fn silo_image_id(self, id: Uuid) -> SiloImage<'a> {
@@ -368,17 +335,53 @@ impl<'a> LookupPath<'a> {
         AddressLot::OwnedName(Root { lookup_root: self }, name)
     }
 
+    pub fn bgp_config_id(self, id: BgpConfigUuid) -> BgpConfig<'a> {
+        BgpConfig::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    pub fn bgp_config_name_owned(self, name: Name) -> BgpConfig<'a> {
+        BgpConfig::OwnedName(Root { lookup_root: self }, name)
+    }
+
+    pub fn bgp_announce_set_id(
+        self,
+        id: BgpAnnounceSetUuid,
+    ) -> BgpAnnounceSet<'a> {
+        BgpAnnounceSet::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    pub fn bgp_announce_set_name_owned(self, name: Name) -> BgpAnnounceSet<'a> {
+        BgpAnnounceSet::OwnedName(Root { lookup_root: self }, name)
+    }
+
+    /// Select a resource of type MulticastGroup, identified by its name
+    pub fn multicast_group_name<'b, 'c>(
+        self,
+        name: &'b Name,
+    ) -> MulticastGroup<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        MulticastGroup::Name(Root { lookup_root: self }, name)
+    }
+
+    /// Select a resource of type MulticastGroup, identified by its id
+    pub fn multicast_group_id(self, id: Uuid) -> MulticastGroup<'a> {
+        MulticastGroup::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     pub fn loopback_address(
         self,
-        rack_id: Uuid,
-        switch_location: Name,
+        rack_id: RackUuid,
+        switch_slot: DbSwitchSlot,
         address: IpNetwork,
     ) -> LoopbackAddress<'a> {
         LoopbackAddress::PrimaryKey(
             Root { lookup_root: self },
             address,
             rack_id,
-            switch_location.to_string(),
+            switch_slot,
         )
     }
 
@@ -396,11 +399,8 @@ impl<'a> LookupPath<'a> {
         TufArtifact::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    /// Select a resource of type UserBuiltin, identified by its `name`
-    pub fn user_builtin_id<'b>(self, id: Uuid) -> UserBuiltin<'b>
-    where
-        'a: 'b,
-    {
+    /// Select a resource of type UserBuiltin, identified by its `id`
+    pub fn user_builtin_id(self, id: BuiltInUserUuid) -> UserBuiltin<'a> {
         UserBuiltin::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -414,10 +414,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type Certificate, identified by its id
-    pub fn certificate_id<'b>(self, id: Uuid) -> Certificate<'b>
-    where
-        'a: 'b,
-    {
+    pub fn certificate_id(self, id: Uuid) -> Certificate<'a> {
         Certificate::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -446,11 +443,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type Certificate, identified by its owned name
-    pub fn certificate_name_owned<'b, 'c>(self, name: Name) -> Certificate<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
+    pub fn certificate_name_owned(self, name: Name) -> Certificate<'a> {
         match self
             .opctx
             .authn
@@ -470,67 +463,69 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type SamlIdentityProvider, identified by its id
-    pub fn saml_identity_provider_id<'b>(
+    pub fn saml_identity_provider_id(
         self,
         id: Uuid,
-    ) -> SamlIdentityProvider<'b>
-    where
-        'a: 'b,
-    {
+    ) -> SamlIdentityProvider<'a> {
         SamlIdentityProvider::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    pub fn webhook_receiver_id<'b>(
-        self,
-        id: WebhookReceiverUuid,
-    ) -> WebhookReceiver<'b>
-    where
-        'a: 'b,
-    {
-        WebhookReceiver::PrimaryKey(Root { lookup_root: self }, id)
+    pub fn alert_receiver_id(self, id: AlertReceiverUuid) -> AlertReceiver<'a> {
+        AlertReceiver::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    /// Select a resource of type [`WebhookReceiver`], identified by its name
-    pub fn webhook_receiver_name<'b, 'c>(
+    /// Select a resource of type [`AlertReceiver`], identified by its name
+    pub fn alert_receiver_name<'b, 'c>(
         self,
         name: &'b Name,
-    ) -> WebhookReceiver<'c>
+    ) -> AlertReceiver<'c>
     where
         'a: 'c,
         'b: 'c,
     {
-        WebhookReceiver::Name(Root { lookup_root: self }, name)
+        AlertReceiver::Name(Root { lookup_root: self }, name)
     }
 
-    /// Select a resource of type [`WebhookReceiver`], identified by its owned name
-    pub fn webhook_receiver_name_owned<'b, 'c>(
-        self,
-        name: Name,
-    ) -> WebhookReceiver<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
-        WebhookReceiver::OwnedName(Root { lookup_root: self }, name)
+    /// Select a resource of type [`AlertReceiver`], identified by its owned name
+    pub fn alert_receiver_name_owned(self, name: Name) -> AlertReceiver<'a> {
+        AlertReceiver::OwnedName(Root { lookup_root: self }, name)
     }
 
     /// Select a resource of type [`WebhookSecret`], identified by its UUID.
-    pub fn webhook_secret_id<'b>(
-        self,
-        id: WebhookSecretUuid,
-    ) -> WebhookSecret<'b>
-    where
-        'a: 'b,
-    {
+    pub fn webhook_secret_id(self, id: WebhookSecretUuid) -> WebhookSecret<'a> {
         WebhookSecret::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    /// Select a resource of type [`WebhookEvent`], identified by its UUID.
-    pub fn webhook_event_id<'b>(self, id: WebhookEventUuid) -> WebhookEvent<'b>
-    where
-        'a: 'b,
-    {
-        WebhookEvent::PrimaryKey(Root { lookup_root: self }, id)
+    /// Select a resource of type [`Alert`], identified by its UUID.
+    pub fn alert_id(self, id: AlertUuid) -> Alert<'a> {
+        Alert::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type [`ScimClientBearerToken`], identified by its
+    /// UUID.
+    pub fn scim_client_bearer_token_id(
+        self,
+        id: Uuid,
+    ) -> ScimClientBearerToken<'a> {
+        ScimClientBearerToken::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type [`SubnetPool`], identified by its UUID.
+    pub fn subnet_pool_id(self, id: SubnetPoolUuid) -> SubnetPool<'a> {
+        SubnetPool::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type [`SubnetPool`], identified by its Name.
+    pub fn subnet_pool_name(self, name: Name) -> SubnetPool<'a> {
+        SubnetPool::OwnedName(Root { lookup_root: self }, name)
+    }
+
+    /// Select a resource of type [`ExternalSubnet`], identified by its UUID.
+    pub fn external_subnet_id(
+        self,
+        id: ExternalSubnetUuid,
+    ) -> ExternalSubnet<'a> {
+        ExternalSubnet::PrimaryKey(Root { lookup_root: self }, id)
     }
 }
 
@@ -552,7 +547,7 @@ lookup_resource! {
     ancestors = [],
     lookup_by_name = true,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = SiloKind } ]
 }
 
 lookup_resource! {
@@ -560,7 +555,7 @@ lookup_resource! {
     ancestors = [ "Silo" ],
     lookup_by_name = false,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
+    primary_key_columns = [ { column_name = "id", uuid_kind = SiloUserKind } ],
     visible_outside_silo = true
 }
 
@@ -569,7 +564,7 @@ lookup_resource! {
     ancestors = [ "Silo" ],
     lookup_by_name = false,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = SiloGroupKind } ]
 }
 
 lookup_resource! {
@@ -623,7 +618,7 @@ lookup_resource! {
     ancestors = [ "Silo" ],
     lookup_by_name = true,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = ProjectKind } ]
 }
 
 lookup_resource! {
@@ -757,13 +752,19 @@ lookup_resource! {
 // Miscellaneous resources nested directly below "Fleet"
 
 lookup_resource! {
+    name = "MulticastGroup",
+    ancestors = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
     name = "ConsoleSession",
     ancestors = [],
     lookup_by_name = false,
     soft_deletes = false,
-    primary_key_columns = [
-        { column_name = "token", rust_type = String },
-    ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = ConsoleSessionKind } ]
 }
 
 lookup_resource! {
@@ -781,20 +782,7 @@ lookup_resource! {
     ancestors = [],
     lookup_by_name = false,
     soft_deletes = false,
-    primary_key_columns = [
-        { column_name = "token", rust_type = String },
-    ]
-}
-
-lookup_resource! {
-    name = "RoleBuiltin",
-    ancestors = [],
-    lookup_by_name = false,
-    soft_deletes = false,
-    primary_key_columns = [
-        { column_name = "resource_type", rust_type = String },
-        { column_name = "role_name", rust_type = String },
-    ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = AccessTokenKind } ]
 }
 
 lookup_resource! {
@@ -802,7 +790,7 @@ lookup_resource! {
     ancestors = [],
     lookup_by_name = false,
     soft_deletes = false,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = RackKind } ]
 }
 
 lookup_resource! {
@@ -810,7 +798,7 @@ lookup_resource! {
     ancestors = [],
     lookup_by_name = false,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = SledKind } ]
 }
 
 lookup_resource! {
@@ -818,7 +806,7 @@ lookup_resource! {
     ancestors = [],
     lookup_by_name = false,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = ZpoolKind } ]
 }
 
 lookup_resource! {
@@ -872,19 +860,31 @@ lookup_resource! {
 }
 
 lookup_resource! {
+    name = "TufTrustRoot",
+    ancestors = [],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", uuid_kind = TufTrustRootKind } ]
+}
+
+lookup_resource! {
     name = "UserBuiltin",
     ancestors = [],
     lookup_by_name = true,
     soft_deletes = false,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = BuiltInUserKind } ]
 }
 
+// Visible outside the silo so fleet admins can manage any silo's certificates
+// by ID. Lookups on behalf of the current silo must check the silo themselves
+// (see `current_silo_certificate_fetch_for` in Nexus).
 lookup_resource! {
     name = "Certificate",
     ancestors = [ "Silo" ],
     lookup_by_name = true,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
+    visible_outside_silo = true
 }
 
 lookup_resource! {
@@ -896,30 +896,46 @@ lookup_resource! {
 }
 
 lookup_resource! {
+    name = "BgpConfig",
+    ancestors = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", uuid_kind = BgpConfigKind} ]
+}
+
+lookup_resource! {
+    name = "BgpAnnounceSet",
+    ancestors = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", uuid_kind = BgpAnnounceSetKind } ]
+}
+
+lookup_resource! {
     name = "LoopbackAddress",
     ancestors = [],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [
         { column_name = "address", rust_type = IpNetwork },
-        { column_name = "rack_id", rust_type = Uuid },
-        { column_name = "switch_location", rust_type = String }
+        { column_name = "rack_id", uuid_kind = RackKind },
+        { column_name = "switch_slot", rust_type = DbSwitchSlot }
     ]
 }
 
 lookup_resource! {
-    name = "WebhookReceiver",
+    name = "AlertReceiver",
     ancestors = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [
-        { column_name = "id", uuid_kind = WebhookReceiverKind }
+        { column_name = "id", uuid_kind = AlertReceiverKind }
     ]
 }
 
 lookup_resource! {
     name = "WebhookSecret",
-    ancestors = ["WebhookReceiver"],
+    ancestors = ["AlertReceiver"],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [
@@ -928,13 +944,44 @@ lookup_resource! {
 }
 
 lookup_resource! {
-    name = "WebhookEvent",
+    name = "Alert",
     ancestors = [],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [
-        { column_name = "id", uuid_kind = WebhookEventKind }
+        { column_name = "id", uuid_kind = AlertKind }
     ]
+}
+
+lookup_resource! {
+    name = "ScimClientBearerToken",
+    ancestors = ["Silo"],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
+    visible_outside_silo = true
+}
+
+lookup_resource! {
+    name = "SubnetPool",
+    ancestors = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [
+        { column_name = "id", uuid_kind = SubnetPoolKind }
+    ],
+    visible_outside_silo = true
+}
+
+lookup_resource! {
+    name = "ExternalSubnet",
+    ancestors = [ "Silo", "Project" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [
+        { column_name = "id", uuid_kind = ExternalSubnetKind }
+    ],
+    visible_outside_silo = false,
 }
 
 // Helpers for unifying the interfaces around images

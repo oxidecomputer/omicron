@@ -8,22 +8,20 @@ use crate::config::MountConfig;
 use crate::keyfile::KeyFile;
 use camino::Utf8PathBuf;
 use illumos_utils::zfs::{
-    self, DestroyDatasetErrorVariant, EncryptionDetails, Keypath, Mountpoint,
-    SizeDetails, Zfs,
+    self, EncryptionDetails, Keypath, Mountpoint, SizeDetails, Zfs,
 };
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::shared::DatasetKind;
-use omicron_common::disk::{
-    CompressionAlgorithm, DatasetName, DiskIdentity, DiskVariant, GzipLevel,
-};
-use rand::distributions::{Alphanumeric, DistString};
+use omicron_common::disk::DatasetName;
+use sled_agent_types::disk::CompressionAlgorithm;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::DiskVariant;
 use slog::{Logger, debug, info, warn};
 use slog_error_chain::InlineErrorChain;
 use std::process::Stdio;
 use std::str::FromStr;
-use std::sync::OnceLock;
 
 pub const INSTALL_DATASET: &'static str = "install";
 pub const CRASH_DATASET: &'static str = "crash";
@@ -42,34 +40,23 @@ pub const DEBUG_DATASET_QUOTA: ByteCount =
         // should be tuned as needed.
         ByteCount::from_gibibytes_u32(100)
     };
-// TODO-correctness: This value of 100GiB is a pretty wild guess, and should be
-// tuned as needed.
-pub const DUMP_DATASET_QUOTA: ByteCount = ByteCount::from_gibibytes_u32(100);
-// passed to zfs create -o compression=
-pub const DUMP_DATASET_COMPRESSION: CompressionAlgorithm =
-    CompressionAlgorithm::GzipN { level: GzipLevel::new::<9>() };
-// TODO-correctness: This value of 20 GiB is a wild guess -- given TUF repo
-// sizes as of Oct 2024, it would be capable of storing about 10 distinct system
+// TODO-correctness: This value of 40 GiB is a wild guess -- given TUF repo
+// sizes as of Sep 2025, it would be capable of storing about 16 distinct system
 // versions.
-pub const ARTIFACT_DATASET_QUOTA: ByteCount = ByteCount::from_gibibytes_u32(20);
+pub const ARTIFACT_DATASET_QUOTA: ByteCount = ByteCount::from_gibibytes_u32(40);
 
 // U.2 datasets live under the encrypted dataset and inherit encryption
 pub const ZONE_DATASET: &'static str = "crypt/zone";
 pub const DUMP_DATASET: &'static str = "crypt/debug";
 pub const U2_DEBUG_DATASET: &'static str = "crypt/debug";
+pub const LOCAL_STORAGE_DATASET: &'static str = "crypt/local_storage";
+
+// Some U.2 datasets do not inherit any encryption
+pub const LOCAL_STORAGE_UNENCRYPTED_DATASET: &'static str =
+    "local_storage_unencrypted";
 
 // This is the root dataset for all U.2 drives. Encryption is inherited.
 pub const CRYPT_DATASET: &'static str = "crypt";
-
-pub const U2_EXPECTED_DATASET_COUNT: usize = 2;
-pub const U2_EXPECTED_DATASETS: [ExpectedDataset; U2_EXPECTED_DATASET_COUNT] = [
-    // Stores filesystems for zones
-    ExpectedDataset::new(ZONE_DATASET).wipe(),
-    // For storing full kernel RAM dumps
-    ExpectedDataset::new(DUMP_DATASET)
-        .quota(DUMP_DATASET_QUOTA)
-        .compression(DUMP_DATASET_COMPRESSION),
-];
 
 const M2_EXPECTED_DATASET_COUNT: usize = 7;
 const M2_EXPECTED_DATASETS: [ExpectedDataset; M2_EXPECTED_DATASET_COUNT] = [
@@ -77,7 +64,7 @@ const M2_EXPECTED_DATASETS: [ExpectedDataset; M2_EXPECTED_DATASET_COUNT] = [
     //
     // Should be duplicated to both M.2s.
     ExpectedDataset::new(INSTALL_DATASET),
-    // Stores crash dumps.
+    // Initial staging area for process core dumps.
     ExpectedDataset::new(CRASH_DATASET),
     // Backing store for OS data that should be persisted across reboots.
     // Its children are selectively overlay mounted onto parts of the ramdisk
@@ -103,13 +90,11 @@ const M2_EXPECTED_DATASETS: [ExpectedDataset; M2_EXPECTED_DATASET_COUNT] = [
 
 // Helper type for describing expected datasets and their optional quota.
 #[derive(Clone, Copy, Debug)]
-pub struct ExpectedDataset {
+struct ExpectedDataset {
     // Name for the dataset
     name: &'static str,
     // Optional quota, in _bytes_
     quota: Option<ByteCount>,
-    // Identifies if the dataset should be deleted on boot
-    wipe: bool,
     // Optional compression mode
     compression: CompressionAlgorithm,
 }
@@ -119,56 +104,35 @@ impl ExpectedDataset {
         ExpectedDataset {
             name,
             quota: None,
-            wipe: false,
             compression: CompressionAlgorithm::Off,
         }
-    }
-
-    pub fn get_name(&self) -> &'static str {
-        self.name
-    }
-
-    pub fn get_quota(&self) -> Option<ByteCount> {
-        self.quota
-    }
-
-    pub fn get_compression(&self) -> CompressionAlgorithm {
-        self.compression
     }
 
     const fn quota(mut self, quota: ByteCount) -> Self {
         self.quota = Some(quota);
         self
     }
-
-    const fn wipe(mut self) -> Self {
-        self.wipe = true;
-        self
-    }
-
-    const fn compression(mut self, compression: CompressionAlgorithm) -> Self {
-        self.compression = compression;
-        self
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum DatasetError {
-    #[error("Cannot open {path} due to {error}")]
-    IoError { path: Utf8PathBuf, error: std::io::Error },
+    #[error("Cannot open {path}")]
+    IoError {
+        path: Utf8PathBuf,
+        #[source]
+        error: std::io::Error,
+    },
     #[error(transparent)]
     DestroyFilesystem(#[from] illumos_utils::zfs::DestroyDatasetError),
     #[error(transparent)]
     EnsureDataset(#[from] illumos_utils::zfs::EnsureDatasetError),
-    #[error("KeyManager error: {0}")]
+    #[error("KeyManager error")]
     KeyManager(#[from] key_manager::Error),
     #[error("Missing StorageKeyRequester when creating U.2 disk")]
     MissingStorageKeyRequester,
     #[error("Encrypted filesystem '{0}' missing 'oxide:epoch' property")]
     CannotParseEpochProperty(String),
-    #[error(
-        "Encrypted dataset '{dataset}' cannot set 'oxide:agent' property: {err}"
-    )]
+    #[error("Encrypted dataset '{dataset}' cannot set 'oxide:agent' property")]
     CannotSetAgentProperty {
         dataset: String,
         #[source]
@@ -176,6 +140,15 @@ pub enum DatasetError {
     },
     #[error("Failed to make datasets encrypted")]
     EncryptionMigration(#[from] DatasetEncryptionMigrationError),
+
+    #[error(transparent)]
+    ZfsQueryFailed(#[from] zfs::DatasetExistsError),
+
+    #[error(
+        "Trial decryption recovery failed for dataset '{dataset}' \
+         after trying epochs {latest_epoch} down to 0"
+    )]
+    TrialDecryptionFailed { dataset: String, latest_epoch: u64 },
 
     #[error(transparent)]
     Other(#[from] anyhow::Error),
@@ -197,9 +170,12 @@ pub(crate) async fn ensure_zpool_has_datasets(
     key_requester: Option<&StorageKeyRequester>,
 ) -> Result<(), DatasetError> {
     info!(log, "Ensuring zpool has datasets"; "zpool" => ?zpool_name, "disk_identity" => ?disk_identity);
+    // On U.2s, we only ensure the encrypted root dataset here. The datasets
+    // within it (and any others on the U.2) are part of the sled config, and
+    // are created and managed by the config reconciler.
     let (root, datasets) = match zpool_name.kind().into() {
-        DiskVariant::M2 => (None, M2_EXPECTED_DATASETS.iter()),
-        DiskVariant::U2 => (Some(CRYPT_DATASET), U2_EXPECTED_DATASETS.iter()),
+        DiskVariant::M2 => (None, M2_EXPECTED_DATASETS.as_slice()),
+        DiskVariant::U2 => (Some(CRYPT_DATASET), [].as_slice()),
     };
 
     let zoned = false;
@@ -215,8 +191,9 @@ pub(crate) async fn ensure_zpool_has_datasets(
         let keypath: Keypath =
             illumos_utils::zfs::Keypath::new(disk_identity, &mount_config.root);
 
+        let name = format!("{}/{}", zpool_name, dataset);
         let epoch = if let Ok(epoch_str) =
-            Zfs::get_oxide_value(dataset, "epoch")
+            Zfs::get_oxide_value(&name, "epoch").await
         {
             if let Ok(epoch) = epoch_str.parse::<u64>() {
                 epoch
@@ -227,22 +204,37 @@ pub(crate) async fn ensure_zpool_has_datasets(
             }
         } else {
             // We got an error trying to call `Zfs::get_oxide_value`
-            // which indicates that the dataset doesn't exist or there
-            // was a problem  running the command.
+            // which indicates that the dataset doesn't exist, or
+            // the epoch property is missing (returns "-").
             //
-            // Note that `Zfs::get_oxide_value` will succeed even if
-            // the epoch is missing. `epoch_str` will show up as a dash
-            // (`-`) and will not parse into a `u64`. So we don't have
-            // to worry about that case here as it is handled above.
-            //
-            // If the error indicated that the command failed for some
-            // other reason, but the dataset actually existed, we will
-            // try to create the dataset below and that will fail. So
-            // there is no harm in just loading the latest secret here.
-            info!(log, "Loading latest secret"; "disk_id"=>?disk_identity);
-            let epoch = key_requester.load_latest_secret().await?;
-            info!(log, "Loaded latest secret"; "epoch"=>%epoch, "disk_id"=>?disk_identity);
-            epoch
+            // Check if the dataset actually exists to distinguish
+            // between these two cases.
+            let exists = Zfs::dataset_exists(&name).await?;
+            if exists {
+                // Dataset exists but epoch property is missing - this is
+                // an unexpected state that shouldn't happen in normal
+                // operation. Attempt to recover by trial decryption.
+                warn!(
+                    log,
+                    "Epoch property missing from existing crypt dataset, \
+                     attempting recovery by trial decryption";
+                    "dataset" => &name
+                );
+                recover_epoch_by_trial_decryption(
+                    &name,
+                    disk_identity,
+                    mount_config,
+                    key_requester,
+                    log,
+                )
+                .await?
+            } else {
+                // Dataset doesn't exist - use latest epoch to create it.
+                info!(log, "Loading latest secret"; "disk_id"=>?disk_identity);
+                let epoch = key_requester.load_latest_secret().await?;
+                info!(log, "Loaded latest secret"; "epoch"=>%epoch, "disk_id"=>?disk_identity);
+                epoch
+            }
         };
 
         info!(log, "Retrieving key"; "epoch"=>%epoch, "disk_id"=>?disk_identity);
@@ -261,9 +253,8 @@ pub(crate) async fn ensure_zpool_has_datasets(
 
         info!(
             log,
-            "Ensuring encrypted filesystem: {} for epoch {}", dataset, epoch
+            "Ensuring encrypted filesystem: {} for epoch {}", name, epoch
         );
-        let name = format!("{}/{}", zpool_name, dataset);
         let result = Zfs::ensure_dataset(zfs::DatasetEnsureArgs {
             name: &name,
             mountpoint: Mountpoint(mountpoint),
@@ -274,6 +265,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
             id: None,
             additional_options: None,
         })
+        .await
         .inspect_err(|err| {
             warn!(
                 log,
@@ -295,40 +287,6 @@ pub(crate) async fn ensure_zpool_has_datasets(
             zpool_name.dataset_mountpoint(&mount_config.root, dataset.name);
         let name = &format!("{}/{}", zpool_name, dataset.name);
 
-        // Use a value that's alive for the duration of this sled agent
-        // to answer the question: should we wipe this disk, or have
-        // we seen it before?
-        //
-        // If this value comes from a prior iteration of the sled agent,
-        // we opt to remove the corresponding dataset.
-        static AGENT_LOCAL_VALUE: OnceLock<String> = OnceLock::new();
-        let agent_local_value = AGENT_LOCAL_VALUE.get_or_init(|| {
-            Alphanumeric.sample_string(&mut rand::thread_rng(), 20)
-        });
-
-        if dataset.wipe {
-            match Zfs::get_oxide_value(name, "agent") {
-                Ok(v) if &v == agent_local_value => {
-                    info!(log, "Skipping automatic wipe for dataset: {}", name);
-                }
-                Ok(_) | Err(_) => {
-                    info!(log, "Automatically destroying dataset: {}", name);
-                    Zfs::destroy_dataset(name).or_else(|err| {
-                        // If we can't find the dataset, that's fine -- it might
-                        // not have been formatted yet.
-                        if matches!(
-                            err.err,
-                            DestroyDatasetErrorVariant::NotFound
-                        ) {
-                            Ok(())
-                        } else {
-                            Err(err)
-                        }
-                    })?;
-                }
-            }
-        }
-
         let encryption_details = None;
         let size_details = Some(SizeDetails {
             quota: dataset.quota,
@@ -345,6 +303,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
             id: None,
             additional_options: None,
         })
+        .await
         .inspect_err(|err| {
             warn!(
                 log,
@@ -353,15 +312,6 @@ pub(crate) async fn ensure_zpool_has_datasets(
                 "err" => InlineErrorChain::new(&err),
             );
         })?;
-
-        if dataset.wipe {
-            Zfs::set_oxide_value(name, "agent", agent_local_value).map_err(
-                |err| DatasetError::CannotSetAgentProperty {
-                    dataset: name.clone(),
-                    err: Box::new(err),
-                },
-            )?;
-        }
     }
     info!(log, "Finished ensuring zpool has datasets"; "zpool" => ?zpool_name, "disk_identity" => ?disk_identity);
     Ok(())
@@ -377,6 +327,9 @@ pub enum DatasetEncryptionMigrationError {
 
     #[error("Cannot create new encrypted dataset")]
     DatasetCreation(#[from] illumos_utils::zfs::EnsureDatasetError),
+
+    #[error(transparent)]
+    DatasetExistsCheck(#[from] illumos_utils::zfs::DatasetExistsError),
 
     #[error("Missing stdout stream during 'zfs send' command")]
     MissingStdoutForZfsSend,
@@ -506,8 +459,8 @@ async fn ensure_zpool_dataset_is_encrypted(
     let encrypted_dataset = encrypted_dataset.full_name();
 
     let (unencrypted_dataset_exists, encrypted_dataset_exists) = (
-        dataset_exists(&unencrypted_dataset).await?,
-        dataset_exists(&encrypted_dataset).await?,
+        Zfs::dataset_exists(&unencrypted_dataset).await?,
+        Zfs::dataset_exists(&encrypted_dataset).await?,
     );
 
     match (unencrypted_dataset_exists, encrypted_dataset_exists) {
@@ -592,15 +545,6 @@ async fn ensure_zpool_dataset_is_encrypted(
         &unencrypted_dataset,
     )
     .await;
-}
-
-// Returns true if the dataset exists.
-async fn dataset_exists(
-    dataset: &str,
-) -> Result<bool, DatasetEncryptionMigrationError> {
-    let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
-    let cmd = command.args(&["list", "-H", dataset]);
-    Ok(cmd.status().await?.success())
 }
 
 // Destroys the dataset and all children, recursively.
@@ -722,14 +666,155 @@ async fn finalize_encryption_migration(
     Ok(())
 }
 
+/// Recover the encryption epoch for an existing crypt dataset by trial decryption.
+///
+/// This function is called when an encrypted dataset exists but its `oxide:epoch`
+/// property is missing or corrupt. It attempts to mount the dataset with keys
+/// from the latest epoch down to 0, finding the correct key by trial and error.
+///
+/// If successful, it also sets the `oxide:epoch` property so future boots don't
+/// need recovery.
+///
+/// This is an unexpected situation that indicates something went wrong (e.g.,
+/// property was accidentally cleared, or a crash during rekey). The function
+/// emits warnings to indicate this abnormal state.
+async fn recover_epoch_by_trial_decryption(
+    dataset_name: &str,
+    disk_identity: &DiskIdentity,
+    mount_config: &MountConfig,
+    key_requester: &StorageKeyRequester,
+    log: &Logger,
+) -> Result<u64, DatasetError> {
+    // Get the latest epoch to know where to start our search
+    let latest_epoch = key_requester.load_latest_secret().await?;
+
+    info!(
+        log,
+        "Attempting trial decryption recovery";
+        "dataset" => dataset_name,
+        "latest_epoch" => latest_epoch,
+    );
+
+    let keypath = Keypath::new(disk_identity, &mount_config.root);
+
+    // Try each epoch from latest down to 0
+    for epoch in (0..=latest_epoch).rev() {
+        // Unload any previously-loaded key before each attempt. ZFS retains
+        // loaded keys across process restarts, so if we crashed after a
+        // successful load-key but before setting the epoch property, the
+        // correct key would still be loaded and our load-key would fail.
+        if let Err(e) = Zfs::unload_key(dataset_name).await {
+            debug!(
+                log,
+                "Failed to unload key as expected during trial decryption";
+                "dataset" => dataset_name,
+                "error" => %e,
+            );
+        } else {
+            warn!(
+                log,
+                "Successfully unloaded key during trial decryption,\\
+                likely due to prior crash before setting oxide:epoch";
+                "dataset" => dataset_name,
+            );
+        }
+
+        // Get the key for this epoch
+        let key =
+            match key_requester.get_key(epoch, disk_identity.clone()).await {
+                Ok(k) => k,
+                Err(e) => {
+                    debug!(
+                        log,
+                        "Failed to get key for epoch, skipping";
+                        "epoch" => epoch,
+                        "error" => %e,
+                    );
+                    continue;
+                }
+            };
+
+        // Write the keyfile
+        let mut keyfile =
+            match KeyFile::create(keypath.clone(), key.expose_secret(), log)
+                .await
+            {
+                Ok(kf) => kf,
+                Err(e) => {
+                    warn!(
+                        log,
+                        "Failed to create keyfile for trial decryption";
+                        "epoch" => epoch,
+                        InlineErrorChain::new(&e),
+                    );
+                    continue;
+                }
+            };
+
+        // Try to load the encryption key for this dataset
+        // Using `zfs load-key` to test if this is the right key
+        let load_result = Zfs::load_key(dataset_name).await;
+
+        // Always clean up the keyfile
+        if let Err(e) = keyfile.zero_and_unlink().await {
+            warn!(
+                log,
+                "Failed to clean up keyfile after trial decryption attempt";
+                "epoch" => epoch,
+                InlineErrorChain::new(&e),
+            );
+        }
+
+        if load_result.is_ok() {
+            info!(
+                log,
+                "Successfully recovered epoch by trial decryption";
+                "dataset" => dataset_name,
+                "epoch" => epoch,
+            );
+
+            // Set the epoch property so future boots don't need recovery
+            if let Err(e) =
+                Zfs::set_oxide_value(dataset_name, "epoch", &epoch.to_string())
+                    .await
+            {
+                warn!(
+                    log,
+                    "Failed to set epoch property after recovery \
+                     (dataset will work but recovery may be needed again)";
+                    "dataset" => dataset_name,
+                    "epoch" => epoch,
+                    e,
+                );
+            }
+
+            return Ok(epoch);
+        }
+
+        debug!(
+            log,
+            "Trial decryption failed for epoch, trying next";
+            "dataset" => dataset_name,
+            "epoch" => epoch,
+        );
+
+        // No need to unload here -- we unload at the start of each iteration
+    }
+
+    Err(DatasetError::TrialDecryptionFailed {
+        dataset: dataset_name.to_string(),
+        latest_epoch,
+    })
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
-    use omicron_uuid_kinds::ZpoolUuid;
+    use omicron_uuid_kinds::InternalZpoolUuid;
 
     #[test]
     fn serialize_dataset_name() {
-        let pool = ZpoolName::new_internal(ZpoolUuid::new_v4());
+        let pool = ZpoolName::Internal(InternalZpoolUuid::new_v4());
         let kind = DatasetKind::Crucible;
         let name = DatasetName::new(pool, kind);
         serde_json::to_string(&name).unwrap();

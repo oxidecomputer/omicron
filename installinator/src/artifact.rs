@@ -2,24 +2,28 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::net::SocketAddr;
+use omicron_common::http_client::internal_http_client_builder;
+use std::{net::SocketAddr, time::Duration};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Args;
 use futures::StreamExt;
 use installinator_client::ClientError;
 use installinator_common::EventReport;
 use ipcc::{InstallinatorImageId, Ipcc};
+use omicron_uuid_kinds::MupdateUuid;
 use tokio::sync::mpsc;
-use tufaceous_artifact::{ArtifactHash, ArtifactHashId};
-use uuid::Uuid;
+use tufaceous_artifact::ArtifactHash;
 
 use crate::{errors::HttpError, fetch::FetchReceiver};
 
 #[derive(Clone, Debug, Eq, PartialEq, Args)]
 pub(crate) struct ArtifactIdOpts {
     /// Retrieve artifact ID from IPCC
-    #[clap(long, required_unless_present_any = ["update_id", "host_phase_2", "control_plane"])]
+    #[clap(
+        long,
+        required_unless_present_any = ["update_id", "installinator_doc"]
+    )]
     from_ipcc: bool,
 
     #[clap(
@@ -27,36 +31,54 @@ pub(crate) struct ArtifactIdOpts {
         conflicts_with = "from_ipcc",
         required_unless_present = "from_ipcc"
     )]
-    update_id: Option<Uuid>,
+    update_id: Option<MupdateUuid>,
 
     #[clap(
         long,
-        conflicts_with = "from_ipcc",
-        required_unless_present = "from_ipcc"
+        conflicts_with_all = ["from_ipcc"],
+        required_unless_present_any = ["from_ipcc"],
     )]
-    host_phase_2: Option<ArtifactHash>,
-
-    #[clap(
-        long,
-        conflicts_with = "from_ipcc",
-        required_unless_present = "from_ipcc"
-    )]
-    control_plane: Option<ArtifactHash>,
+    installinator_doc: Option<ArtifactHash>,
 }
 
 impl ArtifactIdOpts {
-    pub(crate) fn resolve(&self) -> Result<InstallinatorImageId> {
+    pub(crate) fn resolve(&self) -> Result<LookupId> {
         if self.from_ipcc {
             let ipcc = Ipcc::new().context("error opening IPCC")?;
-            ipcc.installinator_image_id()
-                .context("error retrieving installinator image ID")
+            let image_id = ipcc
+                .installinator_image_id()
+                .context("error retrieving installinator image ID")?;
+            LookupId::from_image_id(&image_id)
         } else {
             let update_id = self.update_id.unwrap();
-            let host_phase_2 = self.host_phase_2.unwrap();
-            let control_plane = self.control_plane.unwrap();
+            let document = self
+                .installinator_doc
+                .context("error retrieving installinator doc hash")?;
 
-            Ok(InstallinatorImageId { update_id, host_phase_2, control_plane })
+            Ok(LookupId { update_id, document })
         }
+    }
+}
+
+/// Identifiers used by installinator to retrieve artifacts.
+pub(crate) struct LookupId {
+    pub(crate) update_id: MupdateUuid,
+    pub(crate) document: ArtifactHash,
+}
+
+impl LookupId {
+    fn from_image_id(image_id: &InstallinatorImageId) -> Result<Self> {
+        // This sentinel hash is used to indicate that the host phase 2 hash is
+        // actually the hash to the installinator document.
+
+        if image_id.control_plane != ArtifactHash([0; 32]) {
+            bail!("non-zero control plane hash, this isn't using doc format");
+        }
+
+        Ok(Self {
+            update_id: image_id.update_id,
+            document: image_id.host_phase_2,
+        })
     }
 }
 
@@ -81,20 +103,43 @@ impl ArtifactClient {
         let log = log.new(
             slog::o!("component" => "ArtifactClient", "peer" => addr.to_string()),
         );
-        let client = installinator_client::Client::new(&endpoint, log.clone());
+
+        // Set a connect timeout of 5 seconds and a total timeout of 5 minutes.
+        // The progenitor default for the total timeout is 15 seconds, which can
+        // easily be exceeded for large downloads. (Don't set the total timeout
+        // to be too long, though, because we're fetching ~2GiB artifacts over a
+        // LAN which really should take less than 5 minutes.)
+        //
+        // The connect timeout is deliberately short: these are LAN connections
+        // on the bootstrap network, and peers are tried serially. A long
+        // connect timeout (the progenitor default of 15s) means unresponsive
+        // peers block progress for a long time before the next peer is tried.
+        //
+        // Do not set a read timeout here -- instead, read timeouts are handled
+        // by the fetch loop. (Why is the read timeout handled by the fetch
+        // loop? So that it can also apply to the mock peer backend, and logic
+        // shared across both.)
+        let client = internal_http_client_builder()
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(5 * 60))
+            .build()
+            .expect("installinator artifact client created");
+        let client = installinator_client::Client::new_with_client(
+            &endpoint,
+            client,
+            log.clone(),
+        );
+
         Self { log, client }
     }
 
     pub(crate) async fn fetch(
         &self,
-        artifact_hash_id: ArtifactHashId,
+        id: ArtifactLookupId,
     ) -> Result<(u64, FetchReceiver), HttpError> {
         let artifact_bytes = self
             .client
-            .get_artifact_by_hash(
-                artifact_hash_id.kind.as_str(),
-                &artifact_hash_id.hash.to_string(),
-            )
+            .get_artifact_by_hash(id.kind, &id.hash.to_string())
             .await?;
 
         slog::debug!(
@@ -134,12 +179,23 @@ impl ArtifactClient {
 
     pub(crate) async fn report_progress(
         &self,
-        update_id: Uuid,
+        update_id: MupdateUuid,
         report: EventReport,
     ) -> Result<(), ClientError> {
         self.client
-            .report_progress(&update_id, &report)
+            .report_progress(&update_id, &report.into_generic())
             .await
             .map(|resp| resp.into_inner())
     }
+}
+
+/// Wicket prior to Tufaceous v2 looks up artifacts by both kind and hash. The
+/// kind must be correct in order for an artifact to be retrieved. When the
+/// Tufaceous v2 transition is complete, only the hash will be used to look up
+/// artifacts, and the `kind` value at the API layer can be replaced with any
+/// string.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ArtifactLookupId {
+    pub(crate) kind: &'static str,
+    pub(crate) hash: ArtifactHash,
 }

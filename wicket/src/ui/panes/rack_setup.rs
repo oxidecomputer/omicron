@@ -18,11 +18,6 @@ use crate::ui::widgets::ButtonText;
 use crate::ui::widgets::PopupBuilder;
 use crate::ui::widgets::PopupScrollOffset;
 use itertools::Itertools;
-use omicron_common::address::IpRange;
-use omicron_common::api::internal::shared::AllowedSourceIps;
-use omicron_common::api::internal::shared::BgpConfig;
-use omicron_common::api::internal::shared::LldpPortConfig;
-use omicron_common::api::internal::shared::RouteConfig;
 use ratatui::Frame;
 use ratatui::layout::Constraint;
 use ratatui::layout::Direction;
@@ -35,23 +30,31 @@ use ratatui::widgets::Block;
 use ratatui::widgets::BorderType;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
-use sled_hardware_types::Baseboard;
+use sled_agent_types::early_networking::BgpConfig;
+use sled_agent_types::early_networking::LldpAdminStatus;
+use sled_agent_types::early_networking::LldpPortConfig;
+use sled_agent_types::early_networking::RouteConfig;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::borrow::Cow;
 use wicket_common::rack_setup::BgpAuthKeyInfo;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
-use wicket_common::rack_setup::UserSpecifiedBgpPeerConfig;
-use wicket_common::rack_setup::UserSpecifiedImportExportPolicy;
-use wicket_common::rack_setup::UserSpecifiedPortConfig;
-use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 use wicketd_client::types::CurrentRssUserConfig;
 use wicketd_client::types::CurrentRssUserConfigSensitive;
 use wicketd_client::types::RackOperationStatus;
+use wicketd_commission_types::rack_setup::AllowedSourceIps;
+use wicketd_commission_types::rack_setup::IpRange;
+use wicketd_commission_types::rack_setup::UplinkAddress;
+use wicketd_commission_types::rack_setup::UplinkPortConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedBgpPeerConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedImportExportPolicy;
+use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedRouterPeerAddr;
+use wicketd_commission_types::rack_setup::UserSpecifiedUplinkAddressConfig;
 
 #[derive(Debug)]
 enum Popup {
     RackSetup(PopupKind),
-    RackReset(PopupKind),
     RackStatusDetails(PopupScrollOffset),
 }
 
@@ -60,17 +63,13 @@ impl Popup {
         Self::RackSetup(PopupKind::Prompting)
     }
 
-    fn new_rack_reset() -> Self {
-        Self::RackReset(PopupKind::Prompting)
-    }
-
     fn new_rack_status_details() -> Self {
         Self::RackStatusDetails(PopupScrollOffset::default())
     }
 
     fn scroll_offset_mut(&mut self) -> Option<&mut PopupScrollOffset> {
         match self {
-            Popup::RackSetup(kind) | Popup::RackReset(kind) => match kind {
+            Popup::RackSetup(kind) => match kind {
                 PopupKind::Prompting | PopupKind::Waiting => None,
                 PopupKind::Failed { scroll_offset, .. } => Some(scroll_offset),
             },
@@ -94,7 +93,6 @@ enum PopupKind {
 pub struct RackSetupPane {
     help: Vec<(&'static str, &'static str)>,
     rack_uninitialized_help: Vec<(&'static str, &'static str)>,
-    rack_initialized_help: Vec<(&'static str, &'static str)>,
     scroll_offset: usize,
     pending_scroll: Option<PendingScroll>,
 
@@ -112,11 +110,6 @@ impl Default for RackSetupPane {
                 ("Scroll", "<Up/Down>"),
                 ("Current Status Details", "<D>"),
                 ("Start Rack Setup", "<Ctrl-K>"),
-            ],
-            rack_initialized_help: vec![
-                ("Scroll", "<Up/Down>"),
-                ("Current Status Details", "<D>"),
-                ("Start Rack Reset", "<Ctrl-R Ctrl-R>"),
             ],
             scroll_offset: 0,
             pending_scroll: None,
@@ -142,14 +135,9 @@ impl RackSetupPane {
         }
 
         match (popup, cmd) {
-            (
-                Popup::RackSetup(PopupKind::Prompting)
-                | Popup::RackReset(PopupKind::Prompting),
-                Cmd::No,
-            )
+            (Popup::RackSetup(PopupKind::Prompting), Cmd::No)
             | (
                 Popup::RackSetup(PopupKind::Failed { .. })
-                | Popup::RackReset(PopupKind::Failed { .. })
                 | Popup::RackStatusDetails(_),
                 Cmd::Exit,
             ) => {
@@ -160,30 +148,9 @@ impl RackSetupPane {
                 *kind = PopupKind::Waiting;
                 Some(Action::StartRackSetup)
             }
-            (Popup::RackReset(kind @ PopupKind::Prompting), Cmd::Yes) => {
-                *kind = PopupKind::Waiting;
-                Some(Action::StartRackReset)
-            }
             (
                 Popup::RackSetup(kind @ PopupKind::Waiting),
                 Cmd::ShowPopup(ShowPopupCmd::StartRackSetupResponse(response)),
-            ) => {
-                match response {
-                    Ok(()) => {
-                        self.popup = None;
-                    }
-                    Err(message) => {
-                        *kind = PopupKind::Failed {
-                            message,
-                            scroll_offset: PopupScrollOffset::default(),
-                        };
-                    }
-                }
-                Some(Action::Redraw)
-            }
-            (
-                Popup::RackReset(kind @ PopupKind::Waiting),
-                Cmd::ShowPopup(ShowPopupCmd::StartRackResetResponse(response)),
             ) => {
                 match response {
                     Ok(()) => {
@@ -267,89 +234,6 @@ fn draw_rack_setup_popup(
     }
 }
 
-fn draw_rack_reset_popup(
-    state: &State,
-    frame: &mut Frame<'_>,
-    kind: &mut PopupKind,
-) {
-    let full_screen = Rect {
-        width: state.screen_width,
-        height: state.screen_height,
-        x: 0,
-        y: 0,
-    };
-
-    match kind {
-        PopupKind::Prompting => {
-            let header = Line::from(vec![Span::styled(
-                "Rack Reset (DESTRUCTIVE!)",
-                style::header(true),
-            )]);
-            let mut body = Text::from(vec![Line::from(vec![Span::styled(
-                "Would you like to reset the rack to an uninitialized state?",
-                style::plain_text(),
-            )])]);
-            // One might see this warning and ask "why is this feature even
-            // here, then?" We do eventually want "rack reset" to work as a
-            // sort of factory reset, and the current implementation is a good
-            // starting point, so there's no sense in removing it (this is
-            // certainly not the only feature currently in this state).
-            //
-            // The warning is intended to remove the speed bump where someone
-            // has to find out the hard way that this doesn't work, without
-            // removing the speed bump where we're reminded of the feature that
-            // doesn't work yet.
-            body.lines.push(Line::from(""));
-            body.lines.push(Line::from(vec![
-                Span::styled("WARNING: ", style::warning()),
-                Span::styled(
-                    "This does not work yet and will leave the rack \
-                     in an unknown state (see omicron#3820)",
-                    style::plain_text(),
-                ),
-            ]));
-            let buttons =
-                vec![ButtonText::new("Yes", "Y"), ButtonText::new("No", "N")];
-
-            let popup_builder = PopupBuilder { header, body, buttons };
-            let popup = popup_builder.build(full_screen);
-            frame.render_widget(popup, full_screen);
-        }
-        PopupKind::Waiting => {
-            let header = Line::from(vec![Span::styled(
-                "Rack Reset",
-                style::header(true),
-            )]);
-            let body = Text::from(vec![Line::from(vec![Span::styled(
-                "Waiting for rack reset to start",
-                style::plain_text(),
-            )])]);
-            let buttons = vec![];
-
-            let popup_builder = PopupBuilder { header, body, buttons };
-            let popup = popup_builder.build(full_screen);
-            frame.render_widget(popup, full_screen);
-        }
-        PopupKind::Failed { message, scroll_offset } => {
-            let header = Line::from(vec![Span::styled(
-                "Rack Reset Failed",
-                style::failed_update(),
-            )]);
-            let mut failed_body = Text::default();
-            let prefix = vec![Span::styled("Message: ", style::selected())];
-            push_text_lines(message, prefix, &mut failed_body.lines);
-            let body = failed_body;
-            let buttons = vec![ButtonText::new("Close", "Esc")];
-
-            let popup_builder = PopupBuilder { header, body, buttons };
-            let popup =
-                popup_builder.build_scrollable(full_screen, *scroll_offset);
-            *scroll_offset = popup.actual_scroll_offset();
-            frame.render_widget(popup, full_screen);
-        }
-    }
-}
-
 fn draw_rack_status_details_popup(
     state: &State,
     frame: &mut Frame<'_>,
@@ -365,17 +249,11 @@ fn draw_rack_status_details_popup(
     let status = Span::styled("Status: ", style::selected());
     let prefix = vec![Span::styled("Message: ", style::selected())];
     match state.rack_setup_state.as_ref() {
-        Ok(RackOperationStatus::Uninitialized { reset_id }) => {
+        Ok(RackOperationStatus::Uninitialized) => {
             body.lines.push(Line::from(vec![
                 status,
                 Span::styled("Uninitialized", style::plain_text()),
             ]));
-            if let Some(id) = reset_id {
-                body.lines.push(Line::from(vec![Span::styled(
-                    format!("Last reset operation ID: {}", id),
-                    style::plain_text(),
-                )]));
-            }
         }
         Ok(RackOperationStatus::Initialized { id }) => {
             body.lines.push(Line::from(vec![
@@ -410,27 +288,6 @@ fn draw_rack_status_details_popup(
                 style::plain_text(),
             )]));
         }
-        Ok(RackOperationStatus::ResetFailed { id, message }) => {
-            body.lines.push(Line::from(vec![
-                status,
-                Span::styled("Reset Failed", style::plain_text()),
-            ]));
-            body.lines.push(Line::from(vec![Span::styled(
-                format!("Last reset operation ID: {}", id),
-                style::plain_text(),
-            )]));
-            push_text_lines(message, prefix, &mut body.lines);
-        }
-        Ok(RackOperationStatus::ResetPanicked { id }) => {
-            body.lines.push(Line::from(vec![
-                status,
-                Span::styled("Reset Panicked", style::plain_text()),
-            ]));
-            body.lines.push(Line::from(vec![Span::styled(
-                format!("Last reset operation ID: {}", id),
-                style::plain_text(),
-            )]));
-        }
         Ok(RackOperationStatus::Initializing { id, step }) => {
             body.lines.push(Line::from(vec![
                 status,
@@ -451,13 +308,46 @@ fn draw_rack_status_details_popup(
                 style::plain_text(),
             )]));
         }
-        Ok(RackOperationStatus::Resetting { id }) => {
+        Ok(RackOperationStatus::MultirackJoinInProgress { id }) => {
             body.lines.push(Line::from(vec![
                 status,
-                Span::styled("Resetting", style::plain_text()),
+                Span::styled("Multirack Join In Progress", style::plain_text()),
             ]));
             body.lines.push(Line::from(vec![Span::styled(
                 format!("Current operation ID: {}", id),
+                style::plain_text(),
+            )]));
+        }
+        Ok(RackOperationStatus::MultirackJoinCompleted { id }) => {
+            body.lines.push(Line::from(vec![
+                status,
+                Span::styled("Multirack Join Completed", style::plain_text()),
+            ]));
+            if let Some(id) = id {
+                body.lines.push(Line::from(vec![Span::styled(
+                    format!("Last multirack join operation ID: {}", id),
+                    style::plain_text(),
+                )]));
+            }
+        }
+        Ok(RackOperationStatus::MultirackJoinFailed { id, message }) => {
+            body.lines.push(Line::from(vec![
+                status,
+                Span::styled("Multirack Join Failed", style::plain_text()),
+            ]));
+            body.lines.push(Line::from(vec![Span::styled(
+                format!("Last multirack join operation ID: {}", id),
+                style::plain_text(),
+            )]));
+            push_text_lines(message, prefix, &mut body.lines);
+        }
+        Ok(RackOperationStatus::MultirackJoinPanicked { id }) => {
+            body.lines.push(Line::from(vec![
+                status,
+                Span::styled("Multirack Join Panicked", style::plain_text()),
+            ]));
+            body.lines.push(Line::from(vec![Span::styled(
+                format!("Last multirack join operation ID: {}", id),
                 style::plain_text(),
             )]));
         }
@@ -504,13 +394,6 @@ impl Control for RackSetupPane {
             Cmd::StartRackSetup => match state.rack_setup_state.as_ref() {
                 Ok(RackOperationStatus::Uninitialized { .. }) => {
                     self.popup = Some(Popup::new_rack_setup());
-                    Some(Action::Redraw)
-                }
-                _ => None,
-            },
-            Cmd::ResetState => match state.rack_setup_state.as_ref() {
-                Ok(RackOperationStatus::Initialized { .. }) => {
-                    self.popup = Some(Popup::new_rack_reset());
                     Some(Action::Redraw)
                 }
                 _ => None,
@@ -578,13 +461,20 @@ impl Control for RackSetupPane {
 
         // Draw the help bar
         let help = match state.rack_setup_state.as_ref() {
-            Ok(RackOperationStatus::Uninitialized { .. }) => {
+            Ok(RackOperationStatus::Uninitialized) => {
                 &self.rack_uninitialized_help
             }
-            Ok(RackOperationStatus::Initialized { .. }) => {
-                &self.rack_initialized_help
-            }
-            _ => &self.help,
+            Ok(
+                RackOperationStatus::Initialized { .. }
+                | RackOperationStatus::Initializing { .. }
+                | RackOperationStatus::InitializationFailed { .. }
+                | RackOperationStatus::InitializationPanicked { .. }
+                | RackOperationStatus::MultirackJoinCompleted { .. }
+                | RackOperationStatus::MultirackJoinInProgress { .. }
+                | RackOperationStatus::MultirackJoinFailed { .. }
+                | RackOperationStatus::MultirackJoinPanicked { .. },
+            )
+            | Err(_) => &self.help,
         };
         let help = help_text(help).block(block.clone());
         frame.render_widget(help, chunks[2]);
@@ -599,9 +489,6 @@ impl Control for RackSetupPane {
             match popup {
                 Popup::RackSetup(kind) => {
                     draw_rack_setup_popup(state, frame, kind);
-                }
-                Popup::RackReset(kind) => {
-                    draw_rack_reset_popup(state, frame, kind);
                 }
                 Popup::RackStatusDetails(scroll_offset) => {
                     draw_rack_status_details_popup(state, frame, scroll_offset);
@@ -648,17 +535,20 @@ fn rss_config_text<'a>(
             let msg = format!("Initializing: Step {}/{}", index, max);
             Span::styled(msg, warn_style)
         }
-        Ok(RackOperationStatus::Resetting { .. }) => {
-            Span::styled("Resetting", warn_style)
-        }
         Ok(
             RackOperationStatus::InitializationFailed { .. }
             | RackOperationStatus::InitializationPanicked { .. },
         ) => Span::styled("Initialization Failed", bad_style),
+        Ok(RackOperationStatus::MultirackJoinInProgress { .. }) => {
+            Span::styled("Multirack Join In Progress", warn_style)
+        }
+        Ok(RackOperationStatus::MultirackJoinCompleted { .. }) => {
+            Span::styled("Multirack Join Completed", ok_style)
+        }
         Ok(
-            RackOperationStatus::ResetFailed { .. }
-            | RackOperationStatus::ResetPanicked { .. },
-        ) => Span::styled("Resetting Failed", bad_style),
+            RackOperationStatus::MultirackJoinFailed { .. }
+            | RackOperationStatus::MultirackJoinPanicked { .. },
+        ) => Span::styled("Multirack Join Failed", bad_style),
         Err(_) => Span::styled("Unknown", bad_style),
     };
 
@@ -683,11 +573,12 @@ fn rss_config_text<'a>(
         bootstrap_sleds,
         ntp_servers,
         dns_servers,
-        internal_services_ip_pool_ranges,
+        service_ip_pools,
         external_dns_ips,
         external_dns_zone_name,
         rack_network_config,
         allowed_source_ips,
+        external_jumbo_frames_opt_in_enabled,
     } = &config.insensitive;
 
     // Special single-line values, where we convert some kind of condition into
@@ -703,6 +594,10 @@ fn rss_config_text<'a>(
         Span::styled("Recovery password set: ", label_style),
         dyn_span(*recovery_silo_password_set, "Yes", "No"),
     ]));
+    spans.push(Line::from(vec![
+        Span::styled("External jumbo frames opt-in: ", label_style),
+        dyn_span(*external_jumbo_frames_opt_in_enabled, "Enabled", "Disabled"),
+    ]));
 
     // List of single-line values, each of which may or may not be set; if it's
     // set we show its value, and if not we show "Not set" in bad_style.
@@ -710,6 +605,19 @@ fn rss_config_text<'a>(
         (
             "External DNS zone name: ",
             Cow::from(external_dns_zone_name.as_str()),
+        ),
+        (
+            "Rack subnet address (IPv6 /56): ",
+            rack_network_config.as_ref().map_or(
+                "(will be chosen randomly)".into(),
+                |c| {
+                    match c.rack_subnet_address {
+                        Some(v) => v.to_string(),
+                        None => "(chosen randomly)".to_string(),
+                    }
+                    .into()
+                },
+            ),
         ),
         (
             "Infrastructure first IP: ",
@@ -756,7 +664,9 @@ fn rss_config_text<'a>(
         // This style ensures that if a new field is added to the struct, it
         // fails to compile.
         let UserSpecifiedRackNetworkConfig {
-            // infra_ip_first and infra_ip_last have already been handled above.
+            // rack_subnet_address, infra_ip_first, and infra_ip_last
+            // have already been handled above.
+            rack_subnet_address: _,
             infra_ip_first: _,
             infra_ip_last: _,
             // switch0 and switch1 re handled via the iter_uplinks iterator.
@@ -766,7 +676,7 @@ fn rss_config_text<'a>(
         } = cfg;
 
         for (i, (switch, port, uplink)) in cfg.iter_uplinks().enumerate() {
-            let UserSpecifiedPortConfig {
+            let UplinkPortConfig {
                 routes,
                 addresses,
                 uplink_port_speed,
@@ -777,12 +687,17 @@ fn rss_config_text<'a>(
                 tx_eq,
             } = uplink;
 
+            let switch_description = match switch {
+                SwitchSlot::Switch0 => "0",
+                SwitchSlot::Switch1 => "1",
+            };
+
             let mut items = vec![
                 vec![
                     Span::styled("  • Port          : ", label_style),
                     Span::styled(port.to_string(), ok_style),
                     Span::styled(" on switch ", label_style),
-                    Span::styled(switch.to_string(), ok_style),
+                    Span::styled(switch_description, ok_style),
                 ],
                 vec![
                     Span::styled("  • Speed         : ", label_style),
@@ -846,11 +761,19 @@ fn rss_config_text<'a>(
                 });
 
             let addresses = addresses.iter().map(|a| {
-                let mut items = vec![
-                    Span::styled("  • Address       : ", label_style),
-                    Span::styled(a.address.to_string(), ok_style),
-                ];
-                if let Some(vlan_id) = a.vlan_id {
+                let UserSpecifiedUplinkAddressConfig { address, vlan_id } = a;
+                let addr_description = match address {
+                    UplinkAddress::AddrConf => Cow::Borrowed(
+                        UserSpecifiedUplinkAddressConfig::ADDR_CONF,
+                    ),
+                    UplinkAddress::Static { ip_net } => {
+                        Cow::Owned(ip_net.to_string())
+                    }
+                };
+                let mut items =
+                    vec![Span::styled("  • Address       : ", label_style)];
+                items.push(Span::styled(addr_description, ok_style));
+                if let Some(vlan_id) = vlan_id {
                     items.extend([
                         Span::styled(" (vlan_id=", label_style),
                         Span::styled(vlan_id.to_string(), ok_style),
@@ -884,13 +807,24 @@ fn rss_config_text<'a>(
                     enforce_first_as,
                     allowed_import,
                     allowed_export,
+                    src_addr,
                     vlan_id,
+                    router_lifetime,
                 } = p;
+
+                let addr_string = match addr {
+                    UserSpecifiedRouterPeerAddr::Unnumbered => Cow::Borrowed(
+                        UserSpecifiedRouterPeerAddr::UNNUMBERED_PEER,
+                    ),
+                    UserSpecifiedRouterPeerAddr::Numbered(ip) => {
+                        Cow::Owned(ip.to_string())
+                    }
+                };
 
                 let mut lines = vec![
                     vec![
                         Span::styled("  • BGP peer      : ", label_style),
-                        Span::styled(addr.to_string(), ok_style),
+                        Span::styled(addr_string, ok_style),
                         Span::styled(" asn=", label_style),
                         Span::styled(asn.to_string(), ok_style),
                         Span::styled(" port=", label_style),
@@ -965,10 +899,25 @@ fn rss_config_text<'a>(
                             ),
                         ]);
                     }
+                    if let Some(src_addr) = src_addr {
+                        settings.extend([
+                            Span::styled(" src_addr=", label_style),
+                            Span::styled(src_addr.to_string(), ok_style),
+                        ]);
+                    }
                     if let Some(vlan_id) = vlan_id {
                         settings.extend([
                             Span::styled(" vlan_id=", label_style),
                             Span::styled(vlan_id.to_string(), ok_style),
+                        ]);
+                    }
+                    if router_lifetime.as_u16() != 0 {
+                        settings.extend([
+                            Span::styled(" router_lifetime=", label_style),
+                            Span::styled(
+                                format!("{}s", router_lifetime),
+                                ok_style,
+                            ),
                         ]);
                     }
 
@@ -1092,11 +1041,18 @@ fn rss_config_text<'a>(
                     management_addrs,
                 } = lp;
 
+                let status_description = match status {
+                    LldpAdminStatus::Enabled => "enabled",
+                    LldpAdminStatus::Disabled => "disabled",
+                    LldpAdminStatus::RxOnly => "rx only",
+                    LldpAdminStatus::TxOnly => "tx only",
+                };
+
                 let mut lldp = vec![
                     vec![Span::styled("  • LLDP port settings: ", label_style)],
                     vec![
                         Span::styled("    • Admin status      : ", label_style),
-                        Span::styled(status.to_string(), ok_style),
+                        Span::styled(status_description, ok_style),
                     ],
                 ];
 
@@ -1189,27 +1145,40 @@ fn rss_config_text<'a>(
             );
         }
 
-        // Show BGP configuration.
-        for cfg in bgp {
+        // Show BGP configurations.
+        for (i, cfg) in bgp.iter().enumerate() {
             let BgpConfig {
                 asn,
                 originate,
                 // The shaper and checker are not currently used.
                 shaper: _,
                 checker: _,
+                max_paths,
             } = cfg;
             let mut items = vec![
-                Span::styled("  • BGP config    :", label_style),
-                Span::styled(" asn=", label_style),
-                Span::styled(asn.to_string(), ok_style),
-                Span::styled(" originate=", label_style),
+                vec![
+                    Span::styled("  • asn       : ", label_style),
+                    Span::styled(asn.to_string(), ok_style),
+                ],
+                vec![
+                    Span::styled("  • max_paths : ", label_style),
+                    Span::styled(max_paths.to_string(), ok_style),
+                ],
             ];
+            let mut originate_spans =
+                vec![Span::styled("  • originate : ", label_style)];
             if originate.is_empty() {
-                items.push(Span::styled("None", warn_style));
+                originate_spans.push(Span::styled("None", warn_style));
             } else {
-                items.push(Span::styled(originate.iter().join(","), ok_style));
+                originate_spans
+                    .push(Span::styled(originate.iter().join(","), ok_style));
             }
-            spans.push(Line::from(items));
+            items.push(originate_spans);
+            append_list(
+                &mut spans,
+                Cow::from(format!("BGP config {}:", i + 1)),
+                items,
+            );
         }
     } else {
         append_list(&mut spans, "Uplinks: ".into(), vec![]);
@@ -1227,15 +1196,34 @@ fn rss_config_text<'a>(
     );
     append_list(
         &mut spans,
-        "Internal services IP pool ranges: ".into(),
-        internal_services_ip_pool_ranges
+        "Service IP pools: ".into(),
+        service_ip_pools
             .iter()
-            .map(|r| {
-                let s = match r {
-                    IpRange::V4(r) => format!("{} - {}", r.first, r.last),
-                    IpRange::V6(r) => format!("{} - {}", r.first, r.last),
-                };
-                plain_list_item(s)
+            .flat_map(|pool| {
+                // Pools are displayed as a header line with the name and
+                // description, and then an indented list with one bullet for
+                // each IP range in the pool. This is vertically-expansive, but
+                // the ranges can easily be cut off on small terminals,
+                // especially for IPv6 addresses.
+                let header = vec![
+                    Span::styled("  • ", label_style),
+                    Span::styled(pool.name.to_string(), ok_style),
+                    Span::styled(
+                        format!(" ({})", pool.description),
+                        label_style,
+                    ),
+                ];
+                let ranges = pool.ranges().iter().map(|r| {
+                    let s = match r {
+                        IpRange::V4(r) => format!("{} - {}", r.first, r.last),
+                        IpRange::V6(r) => format!("{} - {}", r.first, r.last),
+                    };
+                    vec![
+                        Span::styled("    • ", label_style),
+                        Span::styled(s, ok_style),
+                    ]
+                });
+                std::iter::once(header).chain(ranges)
             })
             .collect(),
     );
@@ -1278,11 +1266,7 @@ fn rss_config_text<'a>(
         bootstrap_sleds
             .iter()
             .map(|desc| {
-                let identifier = match &desc.baseboard {
-                    Baseboard::Gimlet { identifier, .. } => identifier,
-                    Baseboard::Pc { identifier, .. } => identifier,
-                    Baseboard::Unknown => "unknown",
-                };
+                let identifier = &desc.baseboard_id.serial_number;
                 let mut spans = vec![
                     Span::styled("  • ", label_style),
                     Span::styled(format!("Cubby {}", desc.id.slot), ok_style),
@@ -1306,4 +1290,104 @@ fn rss_config_text<'a>(
     spans.push(Line::default());
 
     Text::from(spans)
+}
+
+#[cfg(test)]
+mod preview {
+    use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::widgets::Paragraph;
+    use std::collections::BTreeMap;
+    use wicket_common::example::ExampleRackSetupData;
+    use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
+
+    // This "test" isn't really a test. It's a quick-and-dirty way to visual
+    // inspect the RSS-configuration pane at various terminal widths. This can
+    // be useful to get a sense of the layout, and also to ensure that data
+    // isn't clipped or badly-formatted. The pane uses a `Paragraph`, which does
+    // not wrap lines by default, so long lines (like several IPv6 addresses,
+    // for example) can bet cut off.
+    //
+    // Run this explicitly with:
+    //
+    //   cargo test -p wicket -- --ignored --nocapture preview_rss_config_pane
+    #[test]
+    #[ignore = "manual TUI-rendering preview, not an assertion"]
+    fn preview_rss_config_pane() {
+        let example = ExampleRackSetupData::non_empty();
+        // Add a second, IPv6 pool with two ranges so the preview exercises the
+        // long-address / multi-range case.
+        let mut insensitive = example.current_insensitive;
+        insensitive
+            .service_ip_pools
+            .insert_unique(
+                wicketd_commission_types::rack_setup::ServiceIpPoolConfig::new(
+                    "oxide-service-pool-v6".parse().unwrap(),
+                    "IPv6 IP Pool for Oxide Services".to_string(),
+                    vec![
+                        IpRange::try_from((
+                            "fd00:1122:3344:0100::1"
+                                .parse::<std::net::Ipv6Addr>()
+                                .unwrap(),
+                            "fd00:1122:3344:0100::a"
+                                .parse::<std::net::Ipv6Addr>()
+                                .unwrap(),
+                        ))
+                        .unwrap(),
+                        IpRange::try_from((
+                            "fd00:1122:3344:0200::1"
+                                .parse::<std::net::Ipv6Addr>()
+                                .unwrap(),
+                            "fd00:1122:3344:0200::14"
+                                .parse::<std::net::Ipv6Addr>()
+                                .unwrap(),
+                        ))
+                        .unwrap(),
+                    ],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let config = CurrentRssUserConfig {
+            insensitive,
+            sensitive: CurrentRssUserConfigSensitive {
+                num_external_certificates: 1,
+                recovery_silo_password_set: true,
+                bgp_auth_keys: GetBgpAuthKeyInfoResponse {
+                    data: BTreeMap::new(),
+                },
+            },
+        };
+        let text = rss_config_text(
+            Ok(&RackOperationStatus::Uninitialized),
+            Some(&config),
+        );
+
+        // Render the pane text the same way `draw()` does (a non-wrapping
+        // `Paragraph`) into fixed-width buffers, and dump them. The `|` markers
+        // show the exact right edge at each width.
+        for width in [60u16, 72, 78, 100] {
+            let height = text.height() as u16;
+            let backend = TestBackend::new(width, height);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| {
+                    frame.render_widget(
+                        Paragraph::new(text.clone()),
+                        frame.area(),
+                    );
+                })
+                .unwrap();
+            let buf = terminal.backend().buffer();
+            println!("\n================= width = {width} =================");
+            for y in 0..buf.area.height {
+                let mut line = String::new();
+                for x in 0..buf.area.width {
+                    line.push_str(buf[(x, y)].symbol());
+                }
+                println!("|{}|", line.trim_end());
+            }
+        }
+    }
 }

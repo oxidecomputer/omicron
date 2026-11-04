@@ -67,7 +67,7 @@ pub enum Cmd {
 pub enum Rpy {
     Ok,
     Err(String),
-    State(State),
+    State(Box<State>),
     Event(usize),
     Debug(DebugState),
 }

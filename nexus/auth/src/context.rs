@@ -8,9 +8,13 @@ use super::authz;
 use crate::authn::ConsoleSessionWithSiloId;
 use crate::authn::external::session_cookie::Session;
 use crate::authz::AuthorizedResource;
+use crate::probes;
 use crate::storage::Storage;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::ConsoleSessionUuid;
+use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::SiloUuid;
 use slog::debug;
 use slog::o;
 use slog::trace;
@@ -19,7 +23,6 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Instant;
 use std::time::SystemTime;
-use uuid::Uuid;
 
 /// Provides general facilities scoped to whatever operation Nexus is currently
 /// doing
@@ -125,14 +128,32 @@ impl OpContext {
         let mut metadata = BTreeMap::new();
 
         let log = if let Some(actor) = authn.actor() {
-            let actor_id = actor.actor_id();
             metadata
                 .insert(String::from("authenticated"), String::from("true"));
             metadata.insert(String::from("actor"), format!("{:?}", actor));
 
-            log.new(
-                o!("authenticated" => true, "actor_id" => actor_id.to_string()),
-            )
+            match &actor {
+                authn::Actor::SiloUser { silo_user_id, silo_id } => {
+                    log.new(o!(
+                        "authenticated" => true,
+                        "type" => "silo_user",
+                        "silo_user_id" => silo_user_id.to_string(),
+                        "silo_id" => silo_id.to_string(),
+                    ))
+                }
+
+                authn::Actor::UserBuiltin { user_builtin_id } => log.new(o!(
+                    "authenticated" => true,
+                    "type" => "user_builtin",
+                    "user_builtin_id" => user_builtin_id.to_string(),
+                )),
+
+                authn::Actor::Scim { silo_id } => log.new(o!(
+                    "authenticated" => true,
+                    "type" => "scim",
+                    "silo_id" => silo_id.to_string(),
+                )),
+            }
         } else {
             metadata
                 .insert(String::from("authenticated"), String::from("false"));
@@ -192,6 +213,30 @@ impl OpContext {
         let created_instant = Instant::now();
         let created_walltime = SystemTime::now();
         let authn = Arc::new(authn::Context::privileged_test_user());
+        let authz = authz::Context::new(
+            Arc::clone(&authn),
+            Arc::new(authz::Authz::new(&log)),
+            Arc::clone(&datastore),
+        );
+        OpContext {
+            log,
+            authz,
+            authn,
+            created_instant,
+            created_walltime,
+            metadata: BTreeMap::new(),
+            kind: OpKind::Test,
+        }
+    }
+
+    /// Returns a context for use by omdb (the debugging tool).
+    pub fn for_omdb(
+        log: slog::Logger,
+        datastore: Arc<dyn Storage>,
+    ) -> OpContext {
+        let created_instant = Instant::now();
+        let created_walltime = SystemTime::now();
+        let authn = Arc::new(authn::Context::omdb());
         let authz = authz::Context::new(
             Arc::clone(&authn),
             Arc::new(authz::Authz::new(&log)),
@@ -274,7 +319,23 @@ impl OpContext {
             "action" => ?action,
             "resource" => ?*resource
         );
+        let id = usdt::UniqueId::new();
+        probes::authz__start!(|| {
+            let request_id = self
+                .metadata
+                .get("request_id")
+                .cloned()
+                .unwrap_or_else(|| String::from("none"));
+            (
+                &id,
+                request_id,
+                format!("{:?}", self.authn.actor()),
+                format!("{action:?}"),
+                format!("{resource:?}"),
+            )
+        });
         let result = self.authz.authorize(self, action, resource.clone()).await;
+        probes::authz__done!(|| (&id, format!("{result:?}")));
         debug!(self.log, "authorize result";
             "actor" => ?self.authn.actor(),
             "action" => ?action,
@@ -352,10 +413,13 @@ impl OpContext {
 }
 
 impl Session for ConsoleSessionWithSiloId {
-    fn silo_user_id(&self) -> Uuid {
-        self.console_session.silo_user_id
+    fn id(&self) -> ConsoleSessionUuid {
+        self.console_session.id()
     }
-    fn silo_id(&self) -> Uuid {
+    fn silo_user_id(&self) -> SiloUserUuid {
+        self.console_session.silo_user_id()
+    }
+    fn silo_id(&self) -> SiloUuid {
         self.silo_id
     }
     fn time_last_used(&self) -> DateTime<Utc> {

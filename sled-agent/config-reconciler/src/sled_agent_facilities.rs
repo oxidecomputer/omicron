@@ -5,37 +5,53 @@
 //! Traits that allow `sled-agent-config-reconciler` to be a separate crate but
 //! still use facilities implemented in `sled-agent` proper.
 
+use illumos_utils::dladm::EtherstubVnic;
 use illumos_utils::running_zone::RunningZone;
-use illumos_utils::zpool::ZpoolName;
-use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
-use sled_agent_types::zone_bundle::ZoneBundleCause;
-use sled_storage::config::MountConfig;
+use omicron_common::address::SLED_PREFIX_LENGTH;
+use omicron_uuid_kinds::MupdateOverrideUuid;
+use sled_agent_types::resolvable_files::PreparedOmicronZone;
+use sled_agent_types::resolvable_files::RemoveMupdateOverrideResult;
+use sled_agent_types::resolvable_files::ResolverStatus;
 use std::future::Future;
 use tufaceous_artifact::ArtifactHash;
 
-pub trait SledAgentFacilities: Send + 'static {
+use crate::InternalDisks;
+use crate::PathInPool;
+
+pub trait SledAgentFacilities: Send + Sync + 'static {
+    /// The underlay VNIC interface in the global zone.
+    ///
+    /// Used to determine `AddrObject`s for internal DNS global zone interaces.
+    fn underlay_vnic(&self) -> &EtherstubVnic;
+
     /// Called by the reconciler task to inform sled-agent that time is
     /// sychronized. May be called multiple times.
     // TODO-cleanup should we do this work ourselves instead? This is
     // currently implemented by `ServiceManager` and does a couple one-time
     // setup things (like rewrite the OS boot time). We could probably absorb
     // that work and remove this callback.
-    fn on_time_sync(&self) -> impl Future<Output = ()> + Send;
+    fn on_time_sync(&self);
 
     /// Method to start a zone.
-    // TODO-cleanup This is implemented by
-    // `ServiceManager::start_omicron_zone()`, which does too much; we should
-    // absorb some of its functionality and shrink this interface. We definitely
-    // should not need to pass the full list of U2 zpools.
     fn start_omicron_zone(
         &self,
-        zone_config: &OmicronZoneConfig,
-        mount_config: &MountConfig,
-        is_time_synchronized: bool,
-        all_u2_pools: &[ZpoolName],
+        zone_config: PreparedOmicronZone<'_>,
+        zone_root_path: PathInPool,
     ) -> impl Future<Output = anyhow::Result<RunningZone>> + Send;
+
+    /// Get the status of the file source resolver.
+    /// This is designed to translate information about a file into
+    /// something usable at runtime.
+    /// This can be used to prepare zones as well as start them.
+    fn file_source_resolver_status(&self) -> ResolverStatus;
+
+    /// Remove the mupdate override file from disk.
+    fn remove_mupdate_override(
+        &self,
+        override_id: MupdateOverrideUuid,
+        internal_disks: &InternalDisks,
+    ) -> RemoveMupdateOverrideResult;
 
     /// Stop tracking metrics for a zone's datalinks.
     fn metrics_untrack_zone_links(
@@ -43,24 +59,17 @@ pub trait SledAgentFacilities: Send + 'static {
         zone: &RunningZone,
     ) -> anyhow::Result<()>;
 
-    /// Instruct DDM to start advertising a prefix.
-    fn ddm_add_internal_dns_prefix(&self, prefix: Ipv6Subnet<SLED_PREFIX>);
-
     /// Instruct DDM to stop advertising a prefix.
-    fn ddm_remove_internal_dns_prefix(&self, prefix: Ipv6Subnet<SLED_PREFIX>);
-
-    /// Create a zone bundle.
-    fn zone_bundle_create(
+    fn ddm_remove_internal_dns_prefix(
         &self,
-        zone: &RunningZone,
-        cause: ZoneBundleCause,
-    ) -> impl Future<Output = anyhow::Result<()>> + Send;
+        prefix: Ipv6Subnet<SLED_PREFIX_LENGTH>,
+    );
 }
 
 pub trait SledAgentArtifactStore: Send + Sync + 'static {
-    /// Check an artifact exists in the TUF Repo Depot storage.
-    fn validate_artifact_exists_in_storage(
+    /// Get an artifact from the local artifact store.
+    fn get_artifact(
         &self,
         artifact: ArtifactHash,
-    ) -> impl Future<Output = anyhow::Result<()>> + Send;
+    ) -> impl Future<Output = anyhow::Result<tokio::fs::File>> + Send;
 }

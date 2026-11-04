@@ -34,16 +34,21 @@ pub use nexus_db_fixed_data::user_builtin::USER_DB_INIT;
 pub use nexus_db_fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
 pub use nexus_db_fixed_data::user_builtin::USER_INTERNAL_API;
 pub use nexus_db_fixed_data::user_builtin::USER_INTERNAL_READ;
+pub use nexus_db_fixed_data::user_builtin::USER_OMDB;
 pub use nexus_db_fixed_data::user_builtin::USER_SAGA_RECOVERY;
 pub use nexus_db_fixed_data::user_builtin::USER_SERVICE_BALANCER;
 
 use crate::authz;
-use newtype_derive::NewtypeDisplay;
+use chrono::{DateTime, Utc};
 use nexus_db_fixed_data::silo::DEFAULT_SILO;
-use nexus_types::external_api::shared::FleetRole;
-use nexus_types::external_api::shared::SiloRole;
+use nexus_types::external_api::policy::FleetRole;
+use nexus_types::external_api::policy::SiloRole;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::LookupType;
+use omicron_uuid_kinds::BuiltInUserUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::SiloUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -81,12 +86,41 @@ impl Context {
         &self,
     ) -> Result<&Actor, omicron_common::api::external::Error> {
         match &self.kind {
-            Kind::Authenticated(Details { actor }, ..) => Ok(actor),
+            Kind::Authenticated(Details { actor, .. }, ..) => Ok(actor),
             Kind::Unauthenticated => {
                 Err(omicron_common::api::external::Error::Unauthenticated {
                     internal_message: "Actor required".to_string(),
                 })
             }
+        }
+    }
+
+    /// Returns the expiration time if authenticated via a device token.
+    ///
+    /// This is used to prevent token lifetime extension during token creation:
+    /// a new token created using an existing token should not outlive the
+    /// token used to authenticate.
+    pub fn device_token_expiration(&self) -> Option<DateTime<Utc>> {
+        match &self.kind {
+            Kind::Authenticated(
+                Details { device_token_expiration, .. },
+                ..,
+            ) => *device_token_expiration,
+            Kind::Unauthenticated => None,
+        }
+    }
+
+    /// Returns the ID of the credential used to authenticate, if any.
+    ///
+    /// For session auth, this is the session ID. For access token auth, this is
+    /// the token ID. For SCIM auth, this is the SCIM token ID.
+    /// Not set for spoof auth, built-in users, or unauthenticated requests.
+    pub fn credential_id(&self) -> Option<Uuid> {
+        match &self.kind {
+            Kind::Authenticated(Details { credential_id, .. }, ..) => {
+                *credential_id
+            }
+            Kind::Unauthenticated => None,
         }
     }
 
@@ -123,6 +157,8 @@ impl Context {
     /// Built-in users have no Silo, and so they usually can't do anything that
     /// might use a Silo.  You usually want to use [`Context::silo_required()`]
     /// if you don't expect to be looking at a built-in user.
+    ///
+    /// Additionally, non-user Actors may also be associated with a Silo.
     pub fn silo_or_builtin(
         &self,
     ) -> Result<Option<authz::Silo>, omicron_common::api::external::Error> {
@@ -130,17 +166,28 @@ impl Context {
             Actor::SiloUser { silo_id, .. } => Some(authz::Silo::new(
                 authz::FLEET,
                 *silo_id,
-                LookupType::ById(*silo_id),
+                LookupType::by_id(*silo_id),
             )),
             Actor::UserBuiltin { .. } => None,
+            Actor::Scim { silo_id } => Some(authz::Silo::new(
+                authz::FLEET,
+                *silo_id,
+                LookupType::by_id(*silo_id),
+            )),
         })
     }
 
-    /// Returns the `SiloAuthnPolicy` for the authenticated actor's Silo, if any
+    /// Returns the `SiloAuthnPolicy` for the authenticated actor's Silo, if
+    /// any.
     pub fn silo_authn_policy(&self) -> Option<&SiloAuthnPolicy> {
         match &self.kind {
             Kind::Unauthenticated => None,
-            Kind::Authenticated(_, policy) => policy.as_ref(),
+            Kind::Authenticated(_, policy) => {
+                // note: must be Some if `details.actor` is also Some, otherwise
+                // you'll see a 500 in the impl of
+                // `ApiResourceWithRoles::conferred_roles_by` for Fleet.
+                policy.as_ref()
+            }
         }
     }
 
@@ -149,6 +196,15 @@ impl Context {
     /// This should generally *not* be exposed to clients.
     pub fn schemes_tried(&self) -> &[SchemeName] {
         &self.schemes_tried
+    }
+
+    /// If the user is authenticated, return the last scheme in the list of
+    /// schemes tried, which is the one that worked.
+    pub fn scheme_used(&self) -> Option<&SchemeName> {
+        match &self.kind {
+            Kind::Authenticated(..) => self.schemes_tried().last(),
+            Kind::Unauthenticated => None,
+        }
     }
 
     /// Returns an unauthenticated context for use internally
@@ -188,10 +244,19 @@ impl Context {
         Context::context_for_builtin_user(USER_SERVICE_BALANCER.id)
     }
 
-    fn context_for_builtin_user(user_builtin_id: Uuid) -> Context {
+    /// Returns an authenticated context for omdb
+    pub fn omdb() -> Context {
+        Context::context_for_builtin_user(USER_OMDB.id)
+    }
+
+    fn context_for_builtin_user(user_builtin_id: BuiltInUserUuid) -> Context {
         Context {
             kind: Kind::Authenticated(
-                Details { actor: Actor::UserBuiltin { user_builtin_id } },
+                Details {
+                    actor: Actor::UserBuiltin { user_builtin_id },
+                    device_token_expiration: None,
+                    credential_id: None,
+                },
                 None,
             ),
             schemes_tried: Vec::new(),
@@ -207,8 +272,10 @@ impl Context {
                 Details {
                     actor: Actor::SiloUser {
                         silo_user_id: USER_TEST_PRIVILEGED.id(),
-                        silo_id: USER_TEST_PRIVILEGED.silo_id,
+                        silo_id: USER_TEST_PRIVILEGED.silo_id(),
                     },
+                    device_token_expiration: None,
+                    credential_id: None,
                 },
                 Some(SiloAuthnPolicy::try_from(&*DEFAULT_SILO).unwrap()),
             ),
@@ -222,7 +289,7 @@ impl Context {
     pub fn unprivileged_test_user() -> Context {
         Context::for_test_user(
             USER_TEST_UNPRIVILEGED.id(),
-            USER_TEST_UNPRIVILEGED.silo_id,
+            USER_TEST_UNPRIVILEGED.silo_id(),
             SiloAuthnPolicy::try_from(&*DEFAULT_SILO).unwrap(),
         )
     }
@@ -230,14 +297,36 @@ impl Context {
     /// Returns an authenticated context for the specific Silo user. Not marked
     /// as #[cfg(test)] so that this is available in integration tests.
     pub fn for_test_user(
-        silo_user_id: Uuid,
-        silo_id: Uuid,
+        silo_user_id: SiloUserUuid,
+        silo_id: SiloUuid,
         silo_authn_policy: SiloAuthnPolicy,
     ) -> Context {
         Context {
             kind: Kind::Authenticated(
-                Details { actor: Actor::SiloUser { silo_user_id, silo_id } },
+                Details {
+                    actor: Actor::SiloUser { silo_user_id, silo_id },
+                    device_token_expiration: None,
+                    credential_id: None,
+                },
                 Some(silo_authn_policy),
+            ),
+            schemes_tried: Vec::new(),
+        }
+    }
+
+    /// Returns an authenticated context for a Silo's SCIM Actor. Not marked as
+    /// #[cfg(test)] so that this is available in integration tests.
+    pub fn for_scim(silo_id: SiloUuid) -> Context {
+        Context {
+            kind: Kind::Authenticated(
+                Details {
+                    actor: Actor::Scim { silo_id },
+                    device_token_expiration: None,
+                    credential_id: None,
+                },
+                // This should never be non-empty, we don't want the SCIM user
+                // to ever have associated roles.
+                Some(SiloAuthnPolicy::new(BTreeMap::default())),
             ),
             schemes_tried: Vec::new(),
         }
@@ -284,6 +373,7 @@ mod test {
     use super::USER_DB_INIT;
     use super::USER_INTERNAL_API;
     use super::USER_INTERNAL_READ;
+    use super::USER_OMDB;
     use super::USER_SAGA_RECOVERY;
     use super::USER_SERVICE_BALANCER;
     use super::USER_TEST_PRIVILEGED;
@@ -302,35 +392,39 @@ mod test {
         // The privileges are (or will be) verified in authz tests.
         let authn = Context::privileged_test_user();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_TEST_PRIVILEGED.id());
+        assert_eq!(actor.silo_user_id(), Some(USER_TEST_PRIVILEGED.id()));
 
         let authn = Context::unprivileged_test_user();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_TEST_UNPRIVILEGED.id());
+        assert_eq!(actor.silo_user_id(), Some(USER_TEST_UNPRIVILEGED.id()));
 
         let authn = Context::internal_read();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_INTERNAL_READ.id);
+        assert_eq!(actor.built_in_user_id(), Some(USER_INTERNAL_READ.id));
 
         let authn = Context::external_authn();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_EXTERNAL_AUTHN.id);
+        assert_eq!(actor.built_in_user_id(), Some(USER_EXTERNAL_AUTHN.id));
 
         let authn = Context::internal_db_init();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_DB_INIT.id);
+        assert_eq!(actor.built_in_user_id(), Some(USER_DB_INIT.id));
 
         let authn = Context::internal_service_balancer();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_SERVICE_BALANCER.id);
+        assert_eq!(actor.built_in_user_id(), Some(USER_SERVICE_BALANCER.id));
 
         let authn = Context::internal_saga_recovery();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_SAGA_RECOVERY.id);
+        assert_eq!(actor.built_in_user_id(), Some(USER_SAGA_RECOVERY.id));
 
         let authn = Context::internal_api();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_INTERNAL_API.id);
+        assert_eq!(actor.built_in_user_id(), Some(USER_INTERNAL_API.id));
+
+        let authn = Context::omdb();
+        let actor = authn.actor().unwrap();
+        assert_eq!(actor.built_in_user_id(), Some(USER_OMDB.id));
     }
 }
 
@@ -351,46 +445,68 @@ enum Kind {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Details {
     /// the actor performing the request
-    actor: Actor,
+    pub actor: Actor,
+    /// When the device token expires. Present only when authenticating via
+    /// a device token. This is a slightly awkward fit but is included here
+    /// because we need to use this to clamp the expiration time when device
+    /// tokens are confirmed using an existing device token.
+    pub device_token_expiration: Option<DateTime<Utc>>,
+    /// ID of the credential used to authenticate (session ID, access token ID,
+    /// or SCIM token ID). Not set for spoof auth or built-in users.
+    pub credential_id: Option<Uuid>,
 }
 
 /// Who is performing an operation
 #[derive(Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
 pub enum Actor {
-    UserBuiltin { user_builtin_id: Uuid },
-    SiloUser { silo_user_id: Uuid, silo_id: Uuid },
+    UserBuiltin { user_builtin_id: BuiltInUserUuid },
+    SiloUser { silo_user_id: SiloUserUuid, silo_id: SiloUuid },
+    Scim { silo_id: SiloUuid },
 }
 
 impl Actor {
-    pub fn actor_id(&self) -> Uuid {
-        match self {
-            Actor::UserBuiltin { user_builtin_id, .. } => *user_builtin_id,
-            Actor::SiloUser { silo_user_id, .. } => *silo_user_id,
-        }
-    }
-
-    pub fn silo_id(&self) -> Option<Uuid> {
+    pub fn silo_id(&self) -> Option<SiloUuid> {
         match self {
             Actor::UserBuiltin { .. } => None,
             Actor::SiloUser { silo_id, .. } => Some(*silo_id),
+            Actor::Scim { silo_id } => Some(*silo_id),
         }
     }
 
-    pub fn silo_user_id(&self) -> Option<Uuid> {
+    pub fn silo_user_id(&self) -> Option<SiloUserUuid> {
         match self {
             Actor::UserBuiltin { .. } => None,
             Actor::SiloUser { silo_user_id, .. } => Some(*silo_user_id),
+            Actor::Scim { .. } => None,
         }
     }
-}
 
-impl From<&Actor> for nexus_db_model::IdentityType {
-    fn from(actor: &Actor) -> nexus_db_model::IdentityType {
-        match actor {
-            Actor::UserBuiltin { .. } => {
-                nexus_db_model::IdentityType::UserBuiltin
-            }
-            Actor::SiloUser { .. } => nexus_db_model::IdentityType::SiloUser,
+    pub fn built_in_user_id(&self) -> Option<BuiltInUserUuid> {
+        match self {
+            Actor::UserBuiltin { user_builtin_id } => Some(*user_builtin_id),
+            Actor::SiloUser { .. } => None,
+            Actor::Scim { .. } => None,
+        }
+    }
+
+    /// Return a generic UUID and db-model IdentityType for use with looking up
+    /// role assignments, or None if a role assignment for this type of Actor is
+    /// invalid.
+    pub fn id_and_type_for_role_assignment(
+        &self,
+    ) -> Option<(Uuid, nexus_db_model::IdentityType)> {
+        match &self {
+            Actor::UserBuiltin { user_builtin_id } => Some((
+                user_builtin_id.into_untyped_uuid(),
+                nexus_db_model::IdentityType::UserBuiltin,
+            )),
+            Actor::SiloUser { silo_user_id, .. } => Some((
+                silo_user_id.into_untyped_uuid(),
+                nexus_db_model::IdentityType::SiloUser,
+            )),
+            // a role assignment for this Actor is invalid, they have a fixed
+            // policy.
+            Actor::Scim { .. } => None,
         }
     }
 }
@@ -414,6 +530,10 @@ impl std::fmt::Debug for Actor {
                 .field("silo_user_id", &silo_user_id)
                 .field("silo_id", &silo_id)
                 .finish_non_exhaustive(),
+            Actor::Scim { silo_id } => f
+                .debug_struct("Actor::Scim")
+                .field("silo_id", &silo_id)
+                .finish_non_exhaustive(),
         }
     }
 }
@@ -422,14 +542,11 @@ impl std::fmt::Debug for Actor {
 #[derive(Clone, Debug)]
 pub struct ConsoleSessionWithSiloId {
     pub console_session: nexus_db_model::ConsoleSession,
-    pub silo_id: Uuid,
+    pub silo_id: SiloUuid,
 }
 
-/// Label for a particular authentication scheme (used in log messages and
-/// internal error messages)
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct SchemeName(&'static str);
-NewtypeDisplay! { () pub struct SchemeName(&'static str); }
+// Re-export SchemeName from nexus-types.
+pub use nexus_types::authn::SchemeName;
 
 /// Describes why authentication failed
 ///

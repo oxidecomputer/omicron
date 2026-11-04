@@ -139,6 +139,22 @@ impl QueryBuilder {
         self
     }
 
+    // [`TrueOrCastError`] exists but requires an expression that evaluates to
+    // sql_type::Bool. This function applies the same pattern but for the
+    // QueryBuilder.
+    pub fn true_or_cast_error<F>(&mut self, condition: F, error: &'static str)
+    where
+        F: FnOnce(&mut QueryBuilder),
+    {
+        self.sql("CAST(IF(");
+        self.sql("(");
+        condition(self);
+        self.sql("),");
+        self.sql("'TRUE', '");
+        self.sql(error);
+        self.sql("') AS BOOL)");
+    }
+
     /// Takes the final boxed query
     pub fn query<T>(self) -> TypedSqlQuery<T> {
         TypedSqlQuery { inner: self.query.unwrap(), _phantom: PhantomData }
@@ -195,3 +211,10 @@ pub async fn expectorate_query_contents<T: QueryFragment<Pg>>(
 
     expectorate::assert_contents(path, &s);
 }
+
+/// Type alias for the SQL type of a selectable expression.
+///
+/// This is useful for the return type of a query built using [`QueryBuilder`].
+pub type SelectableSql<T> = <
+    <T as diesel::Selectable<Pg>>::SelectExpression as diesel::Expression
+>::SqlType;

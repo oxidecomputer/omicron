@@ -6,31 +6,24 @@ progenitor::generate_api!(
     spec = "../../openapi/dns-server/dns-server-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
+    hooks = Expected,
     derives = [schemars::JsonSchema, Clone, Eq, PartialEq],
-    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-        slog::debug!(log, "client request";
-            "method" => %request.method(),
-            "uri" => %request.url(),
-            "body" => ?&request.body(),
-        );
-    }),
-    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-        slog::debug!(log, "client response"; "result" => ?result);
-    }),
     replace = {
-        DnsConfig = internal_dns_types::config::DnsConfig,
-        DnsConfigParams = internal_dns_types::config::DnsConfigParams,
-        DnsConfigZone = internal_dns_types::config::DnsConfigZone,
-        DnsRecord = internal_dns_types::config::DnsRecord,
-        Srv = internal_dns_types::config::Srv,
+        DnsConfig = internal_dns_types_versions::latest::config::DnsConfig,
+        DnsConfigParams = internal_dns_types_versions::latest::config::DnsConfigParams,
+        DnsConfigZone = internal_dns_types_versions::latest::config::DnsConfigZone,
+        DnsRecord = internal_dns_types_versions::latest::config::DnsRecord,
+        Srv = internal_dns_types_versions::latest::config::Srv,
     }
 );
 
-pub type DnsError = crate::Error<crate::types::Error>;
+progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
 
-pub const ERROR_CODE_UPDATE_IN_PROGRESS: &'static str = "UpdateInProgress";
-pub const ERROR_CODE_BAD_UPDATE_GENERATION: &'static str =
-    "BadUpdateGeneration";
+pub use internal_dns_types_versions::latest::config::{
+    ERROR_CODE_BAD_UPDATE_GENERATION, ERROR_CODE_UPDATE_IN_PROGRESS,
+};
+
+pub type DnsError = crate::Error<crate::types::Error>;
 
 /// Returns whether an error from this client should be retried
 pub fn is_retryable(error: &DnsError) -> bool {
@@ -41,8 +34,7 @@ pub fn is_retryable(error: &DnsError) -> bool {
         | DnsError::UnexpectedResponse(_)
         | DnsError::InvalidUpgrade(_)
         | DnsError::ResponseBodyError(_)
-        | DnsError::PreHookError(_)
-        | DnsError::PostHookError(_) => return false,
+        | DnsError::Custom(_) => return false,
         DnsError::ErrorResponse(response_value) => response_value,
     };
 

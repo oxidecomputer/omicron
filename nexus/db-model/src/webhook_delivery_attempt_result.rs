@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use nexus_types::external_api::views;
+use nexus_types::external_api::alert;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
@@ -33,19 +33,19 @@ impl_enum_type!(
 impl WebhookDeliveryAttemptResult {
     pub fn is_failed(&self) -> bool {
         // Use canonical implementation from the API type.
-        views::WebhookDeliveryAttemptResult::from(*self).is_failed()
+        alert::WebhookDeliveryAttemptResult::from(*self).is_failed()
     }
 }
 
 impl fmt::Display for WebhookDeliveryAttemptResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Use canonical format from the API type.
-        views::WebhookDeliveryAttemptResult::from(*self).fmt(f)
+        alert::WebhookDeliveryAttemptResult::from(*self).fmt(f)
     }
 }
 
 impl From<WebhookDeliveryAttemptResult>
-    for views::WebhookDeliveryAttemptResult
+    for alert::WebhookDeliveryAttemptResult
 {
     fn from(result: WebhookDeliveryAttemptResult) -> Self {
         match result {

@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use omicron_common::api::external;
+use nexus_types::external_api::instance;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
@@ -34,7 +34,7 @@ impl fmt::Display for InstanceAutoRestartPolicy {
     }
 }
 
-impl From<InstanceAutoRestartPolicy> for external::InstanceAutoRestartPolicy {
+impl From<InstanceAutoRestartPolicy> for instance::InstanceAutoRestartPolicy {
     fn from(value: InstanceAutoRestartPolicy) -> Self {
         match value {
             InstanceAutoRestartPolicy::Never => Self::Never,
@@ -43,11 +43,11 @@ impl From<InstanceAutoRestartPolicy> for external::InstanceAutoRestartPolicy {
     }
 }
 
-impl From<external::InstanceAutoRestartPolicy> for InstanceAutoRestartPolicy {
-    fn from(value: external::InstanceAutoRestartPolicy) -> Self {
+impl From<instance::InstanceAutoRestartPolicy> for InstanceAutoRestartPolicy {
+    fn from(value: instance::InstanceAutoRestartPolicy) -> Self {
         match value {
-            external::InstanceAutoRestartPolicy::Never => Self::Never,
-            external::InstanceAutoRestartPolicy::BestEffort => Self::BestEffort,
+            instance::InstanceAutoRestartPolicy::Never => Self::Never,
+            instance::InstanceAutoRestartPolicy::BestEffort => Self::BestEffort,
         }
     }
 }

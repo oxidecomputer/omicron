@@ -66,13 +66,14 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
         .blueprint_target_get_current_full(&opctx)
         .await
         .expect("failed to read current target blueprint");
+
     let mut disk_test = DiskTest::new(&cptestctx).await;
     disk_test.add_blueprint_disks(&initial_blueprint).await;
 
     let tmpdir = camino_tempfile::tempdir().expect("failed to create tmpdir");
     // Save the path and prevent the temporary directory from being cleaned up
     // automatically.  We want to be preserve the contents if this test fails.
-    let tmpdir_path = tmpdir.into_path();
+    let tmpdir_path = tmpdir.keep();
     let saved_state1_path = tmpdir_path.join("reconfigurator-state1.json");
     let saved_state2_path = tmpdir_path.join("reconfigurator-state2.json");
     let script1_path = tmpdir_path.join("cmds1");
@@ -100,10 +101,10 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
             );
 
             match result {
-                Ok(None) => Err(CondCheckError::NotYet),
+                Ok(None) => Err(CondCheckError::NotYet { status: None }),
                 Ok(Some(c)) => Ok(c),
                 Err(Error::ServiceUnavailable { .. }) => {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
                 Err(error) => Err(CondCheckError::Failed(error)),
             }
@@ -116,7 +117,7 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
 
     // Assemble state that we can load into reconfigurator-cli.
     let state1 = nexus_reconfigurator_preparation::reconfigurator_state_load(
-        &opctx, datastore,
+        &opctx, datastore, 20,
     )
     .await
     .expect("failed to assemble reconfigurator state");
@@ -127,7 +128,15 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
         .planning_input
         .sled_lookup(SledFilter::Commissioned, sled_id)
         .expect("state1 has initial sled");
-    assert!(!state1.planning_input.service_ip_pool_ranges().is_empty());
+    assert_ne!(
+        state1
+            .planning_input
+            .external_ip_policy()
+            .clone()
+            .into_non_external_dns_ips()
+            .next(),
+        None,
+    );
     assert!(!state1.silo_names.is_empty());
     assert!(!state1.external_dns_zone_names.is_empty());
     // We waited for the first inventory collection already.
@@ -146,52 +155,98 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     // Write a reconfigurator-cli script to load the file, edit the
     // blueprint, and save the entire state to a new file.
     let mut s = String::new();
-    swriteln!(s, "load {} {}", saved_state1_path, collection.id);
-    swriteln!(s, "blueprint-edit {} add-nexus {}", blueprint.id, sled_id);
+    swriteln!(
+        s,
+        "load {} --collection-id {}",
+        saved_state1_path,
+        collection.id
+    );
+    swriteln!(
+        s,
+        "blueprint-edit {} add-nexus {} {}",
+        blueprint.id,
+        sled_id,
+        blueprint.nexus_generation
+    );
     swriteln!(s, "save {}", saved_state2_path);
     std::fs::write(&script1_path, &s)
-        .with_context(|| format!("write {}", &script1_path))
+        .with_context(|| format!("write {}", script1_path))
         .unwrap();
 
     // Run this reconfigurator-cli invocation.
     write_json(&saved_state1_path, &state1).unwrap();
     let exec = Exec::cmd(path_to_cli()).arg(&script1_path);
-    let (exit_status, _, stderr_text) = run_command(exec);
+    let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
+
+    // Save the CLI stdout / stderr.
+    //
+    // The CLI intentionally doesn't bail if any of the steps fail. Record the
+    // output in a file in the tempdir, so that we can see any errors we happen
+    // to catch.
+    let stdout_path1 = tmpdir_path.join("reconfigurator-cli-script1.stdout");
+    let stderr_path1 = tmpdir_path.join("reconfigurator-cli-script1.stderr");
+    for (output, path) in
+        [(&stdout_text, &stdout_path1), (&stdout_text, &stderr_path1)]
+    {
+        println!("writing reconfigurator-cli script1 output to {path}");
+        std::fs::write(&path, &output)
+            .with_context(|| format!("write CLI output to {}", path))
+            .unwrap();
+    }
 
     // Load the new file and find the new blueprint name.
     let state2: UnstableReconfiguratorState =
         read_json(&saved_state2_path).unwrap();
     assert_eq!(state2.blueprints.len(), state1.blueprints.len() + 1);
-    let new_blueprint = state2.blueprints.into_iter().rev().next().unwrap();
+    // Find the new blueprint by its parent (the one we just edited).
+    let new_blueprint = state2
+        .blueprints
+        .into_iter()
+        .find(|b| b.parent_blueprint_id == Some(blueprint.id))
+        .expect("new blueprint should descend from the edited one");
     assert_ne!(new_blueprint.id, blueprint.id);
-
-    // While we're at it, smoke check the new blueprint.
-    assert_eq!(new_blueprint.parent_blueprint_id, Some(blueprint.id));
     assert_eq!(new_blueprint.creator, "reconfigurator-cli");
 
     // Now run reconfigurator-cli again just to save the new blueprint.  This is
     // a little unfortunate but it's hard to avoid if we want to test that
     // blueprint-save works.
     let mut s = String::new();
-    swriteln!(s, "load {} {}", saved_state2_path, collection.id);
+    swriteln!(
+        s,
+        "load {} --collection-id {}",
+        saved_state2_path,
+        collection.id
+    );
     swriteln!(s, "blueprint-save {} {}", new_blueprint.id, new_blueprint_path);
     std::fs::write(&script2_path, &s)
-        .with_context(|| format!("write {}", &script2_path))
+        .with_context(|| format!("write {}", script2_path))
         .unwrap();
     let exec = Exec::cmd(path_to_cli()).arg(&script2_path);
     let (exit_status, _, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
+
+    // Save the output again.
+    let stdout_path2 = tmpdir_path.join("reconfigurator-cli-script2.stdout");
+    let stderr_path2 = tmpdir_path.join("reconfigurator-cli-script2.stderr");
+    for (output, path) in
+        [(&stdout_text, &stdout_path2), (&stdout_text, &stderr_path2)]
+    {
+        println!("writing reconfigurator-cli script2 output to {path}");
+        std::fs::write(&path, &output)
+            .with_context(|| format!("write CLI output to {}", path))
+            .unwrap();
+    }
 
     // Load the blueprint we just wrote.
     let new_blueprint2: Blueprint = read_json(&new_blueprint_path).unwrap();
     assert_eq!(new_blueprint, new_blueprint2);
 
     // Import the new blueprint.
-    let nexus_internal_url =
-        format!("http://{}/", cptestctx.internal_client.bind_address);
+    let nexus_lockstep_url =
+        format!("http://{}/", cptestctx.lockstep_client.bind_address);
     let nexus_client =
-        nexus_client::Client::new(&nexus_internal_url, log.clone());
+        nexus_lockstep_client::Client::new(&nexus_lockstep_url, log.clone());
     nexus_client
         .blueprint_import(&new_blueprint)
         .await
@@ -206,10 +261,12 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
 
     // Set the blueprint as the (disabled) target.
     nexus_client
-        .blueprint_target_set(&nexus_client::types::BlueprintTargetSet {
-            target_id: new_blueprint.id,
-            enabled: false,
-        })
+        .blueprint_target_set(
+            &nexus_lockstep_client::types::BlueprintTargetSet {
+                target_id: new_blueprint.id,
+                enabled: false,
+            },
+        )
         .await
         .context("setting target blueprint")
         .unwrap();
@@ -229,6 +286,10 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
         script1_path,
         script2_path,
         new_blueprint_path,
+        stdout_path1,
+        stderr_path1,
+        stdout_path2,
+        stderr_path2,
     ] {
         std::fs::remove_file(&path)
             .with_context(|| format!("remove {}", path))

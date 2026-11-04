@@ -6,64 +6,56 @@
 
 use crate::app::background::BackgroundTask;
 use anyhow::Context;
-use camino::Utf8DirEntry;
 use camino::Utf8Path;
 use camino_tempfile::Utf8TempDir;
 use camino_tempfile::tempdir_in;
-use camino_tempfile::tempfile_in;
 use futures::FutureExt;
-use futures::StreamExt;
 use futures::future::BoxFuture;
-use futures::stream::FuturesUnordered;
+use internal_dns_resolver::Resolver;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::SledFilter;
-use nexus_types::identity::Asset;
+use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
-use nexus_types::internal_api::background::SupportBundleCollectionReport;
+use nexus_types::support_bundle::SupportBundleSizeLimit;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde_json::json;
-use sha2::{Digest, Sha256};
-use std::future::Future;
+use sha2::Digest;
+use sha2::Sha256;
+use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
+use slog_error_chain::InlineErrorChain;
 use std::io::Write;
+use std::num::NonZeroU64;
 use std::sync::Arc;
+use support_bundle_collection::BundleCollection;
+use support_bundle_collection::BundleInfo;
+use support_bundle_collection::zip::bundle_to_zipfile;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
 use tokio::io::SeekFrom;
+use tokio_util::sync::CancellationToken;
 use tufaceous_artifact::ArtifactHash;
-use zip::ZipArchive;
-use zip::ZipWriter;
-use zip::write::FullFileOptions;
 
-// We use "/var/tmp" to use Nexus' filesystem for temporary storage,
-// rather than "/tmp", which would keep this collected data in-memory.
-const TEMPDIR: &str = "/var/tmp";
+/// We use "/var/tmp" to use Nexus' filesystem for temporary storage,
+/// rather than "/tmp", which would keep this collected data in-memory.
+pub const TEMPDIR: &str = "/var/tmp";
+
+/// The size of piece of a support bundle to transfer to the sled agent
+/// within a single streaming request.
+pub const CHUNK_SIZE: NonZeroU64 = NonZeroU64::new(1024 * 1024 * 1024).unwrap();
 
 fn authz_support_bundle_from_id(id: SupportBundleUuid) -> authz::SupportBundle {
-    authz::SupportBundle::new(
-        authz::FLEET,
-        id,
-        LookupType::ById(id.into_untyped_uuid()),
-    )
-}
-
-// Specifies the data to be collected within the Support Bundle.
-#[derive(Default)]
-struct BundleRequest {
-    // If "false": Skip collecting host-specific info from each sled.
-    skip_sled_info: bool,
+    authz::SupportBundle::new(authz::FLEET, id, LookupType::by_id(id))
 }
 
 // Result of asking a sled agent to clean up a bundle
@@ -83,17 +75,35 @@ enum DatabaseBundleCleanupResult {
 /// The background task responsible for cleaning and collecting support bundles
 pub struct SupportBundleCollector {
     datastore: Arc<DataStore>,
+    resolver: Resolver,
     disable: bool,
     nexus_id: OmicronZoneUuid,
+    transfer_chunk_size: NonZeroU64,
+    size_limit: SupportBundleSizeLimit,
 }
 
 impl SupportBundleCollector {
     pub fn new(
         datastore: Arc<DataStore>,
+        resolver: Resolver,
         disable: bool,
         nexus_id: OmicronZoneUuid,
+        size_limit: SupportBundleSizeLimit,
     ) -> Self {
-        SupportBundleCollector { datastore, disable, nexus_id }
+        SupportBundleCollector {
+            datastore,
+            resolver,
+            disable,
+            nexus_id,
+            transfer_chunk_size: CHUNK_SIZE,
+            size_limit,
+        }
+    }
+
+    #[cfg(test)]
+    fn with_transfer_chunk_size(mut self, size: NonZeroU64) -> Self {
+        self.transfer_chunk_size = size;
+        self
     }
 
     // Tells a sled agent to delete a support bundle
@@ -106,7 +116,7 @@ impl SupportBundleCollector {
         let sled_client = nexus_networking::sled_client(
             &self.datastore,
             &opctx,
-            sled_id.into_untyped_uuid(),
+            sled_id,
             &opctx.log,
         )
         .await?;
@@ -129,12 +139,16 @@ impl SupportBundleCollector {
                 return Ok(SledAgentBundleCleanupResult::Deleted);
             }
             Err(progenitor_client::Error::ErrorResponse(err))
-                if err.status() == http::StatusCode::NOT_FOUND =>
+                if err.status() == http::StatusCode::NOT_FOUND
+                    && err.error_code.as_ref().is_some_and(|code| {
+                        code.contains(NESTED_DATASET_NOT_FOUND)
+                    }) =>
             {
                 warn!(
                     &opctx.log,
                     "SupportBundleCollector could not delete bundle (not found)";
-                    "id" => %bundle.id
+                    "id" => %bundle.id,
+                    "err" => ?err
                 );
 
                 return Ok(SledAgentBundleCleanupResult::NotFound);
@@ -335,8 +349,7 @@ impl SupportBundleCollector {
     async fn collect_bundle(
         &self,
         opctx: &OpContext,
-        request: &BundleRequest,
-    ) -> anyhow::Result<Option<SupportBundleCollectionReport>> {
+    ) -> anyhow::Result<Option<SupportBundleActivationReport>> {
         let pagparams = DataPageParams::max_page();
         let result = self
             .datastore
@@ -373,17 +386,68 @@ impl SupportBundleCollector {
             }
         };
 
-        let collection = BundleCollection {
-            collector: &self,
-            log: opctx.log.new(slog::o!("bundle" => bundle.id.to_string())),
-            opctx,
-            request,
-            bundle: &bundle,
-        };
-
         let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
-        let mut report = collection.collect_bundle_and_store_on_sled().await?;
-        if let Err(err) = self
+        let data_selection = self
+            .datastore
+            .support_bundle_data_selection_get(opctx, &authz_bundle)
+            .await
+            .context("failed to query bundle data selection")?;
+
+        let bundle_log =
+            opctx.log.new(slog::o!("bundle" => bundle.id.to_string()));
+        let collection = Arc::new(BundleCollection::new(
+            self.datastore.clone(),
+            self.resolver.clone(),
+            bundle_log.clone(),
+            opctx.child(std::collections::BTreeMap::new()),
+            data_selection,
+            BundleInfo {
+                id: bundle.id.into(),
+                reason_for_creation: bundle.reason_for_creation.clone(),
+            },
+            self.size_limit,
+        ));
+
+        // Spawn a task that periodically polls the `support_bundle` row's
+        // state. If the bundle has been cancelled (or removed), it cancels
+        // the inner `CancellationToken`, prompting `collect_bundle_locally`
+        // to drain in-flight work and return.
+        //
+        // This is a separate task rather than a top-level
+        // `tokio::select!`: previous designs raced collection against an
+        // async DB check in the cancellation branch body, deadlocking
+        // when the collection branch held a connection pool claim. See
+        // https://github.com/oxidecomputer/omicron/issues/9259.
+        let cancel_task = tokio::spawn({
+            let datastore = self.datastore.clone();
+            let cancel_opctx = opctx.child(std::collections::BTreeMap::new());
+            let token = collection.cancellation_token().clone();
+            let log = bundle_log.clone();
+            let bundle_id = bundle.id;
+            async move {
+                check_for_cancellation(
+                    datastore,
+                    cancel_opctx,
+                    token,
+                    log,
+                    bundle_id.into(),
+                )
+                .await
+            }
+        });
+
+        // Create a temporary directory where we'll store the support bundle
+        // as it's being collected.
+        let dir = tempdir_in(TEMPDIR)?;
+        let collect_result = collection.collect_bundle_locally(&dir).await;
+
+        // Collection is done — stop the cancellation checker.
+        cancel_task.abort();
+        let _ = cancel_task.await;
+
+        let collection = collect_result?;
+        self.store_bundle_on_sled(&bundle_log, opctx, &bundle, dir).await?;
+        let activated_in_db_ok = match self
             .datastore
             .support_bundle_update(
                 &opctx,
@@ -392,15 +456,17 @@ impl SupportBundleCollector {
             )
             .await
         {
-            if matches!(err, Error::InvalidRequest { .. }) {
+            Ok(()) => true,
+            Err(err) if matches!(err, Error::InvalidRequest { .. }) => {
                 info!(
                     &opctx.log,
                     "SupportBundleCollector: Concurrent state change activating bundle";
                     "bundle" => %bundle.id,
                     "err" => ?err,
                 );
-                return Ok(Some(report));
-            } else {
+                false
+            }
+            Err(err) => {
                 warn!(
                     &opctx.log,
                     "SupportBundleCollector: Unexpected error activating bundle";
@@ -409,307 +475,203 @@ impl SupportBundleCollector {
                 );
                 anyhow::bail!("failed to activate bundle: {:#}", err);
             }
-        }
-        report.activated_in_db_ok = true;
-        Ok(Some(report))
-    }
-}
-
-// Wraps up all arguments to perform a single support bundle collection
-struct BundleCollection<'a> {
-    // The task responsible for this collection
-    collector: &'a SupportBundleCollector,
-
-    log: slog::Logger,
-    opctx: &'a OpContext,
-    request: &'a BundleRequest,
-    bundle: &'a SupportBundle,
-}
-
-impl BundleCollection<'_> {
-    // Collect the bundle within Nexus, and store it on a target sled.
-    async fn collect_bundle_and_store_on_sled(
-        &self,
-    ) -> anyhow::Result<SupportBundleCollectionReport> {
-        // Create a temporary directory where we'll store the support bundle
-        // as it's being collected.
-        let dir = tempdir_in(TEMPDIR)?;
-
-        let mut collection = Box::pin(self.collect_bundle_as_file(&dir));
-
-        // We periodically check the state of the support bundle - if a user
-        // explicitly cancels it, we should stop the collection process and
-        // return.
-        let work_duration = tokio::time::Duration::from_secs(5);
-        let mut yield_interval = tokio::time::interval_at(
-            tokio::time::Instant::now() + work_duration,
-            work_duration,
-        );
-
-        let report = loop {
-            tokio::select! {
-                // Timer fired mid-collection - let's check if we should stop.
-                _ = yield_interval.tick() => {
-                    trace!(
-                        &self.log,
-                        "Checking if Bundle Collection cancelled";
-                        "bundle" => %self.bundle.id
-                    );
-
-                    let bundle = self.collector.datastore.support_bundle_get(
-                        &self.opctx,
-                        self.bundle.id.into()
-                    ).await?;
-                    if !matches!(bundle.state, SupportBundleState::Collecting) {
-                        warn!(
-                            &self.log,
-                            "Support Bundle cancelled - stopping collection";
-                            "bundle" => %self.bundle.id,
-                            "state" => ?self.bundle.state
-                        );
-                        anyhow::bail!("Support Bundle Cancelled");
-                    }
-                },
-                // Otherwise, keep making progress on the collection itself.
-                report = &mut collection => {
-                    info!(
-                        &self.log,
-                        "Bundle Collection completed";
-                        "bundle" => %self.bundle.id
-                    );
-                    break report?;
-                },
-            }
         };
+        Ok(Some(SupportBundleActivationReport {
+            collection,
+            activated_in_db_ok,
+        }))
+    }
 
-        // Create the zipfile as a temporary file
-        let mut zipfile = tokio::fs::File::from_std(bundle_to_zipfile(&dir)?);
+    // Zip the collected bundle directory and stream it to the sled-agent
+    // that owns the target zpool/dataset for durable storage.
+    async fn store_bundle_on_sled(
+        &self,
+        log: &slog::Logger,
+        opctx: &OpContext,
+        bundle: &SupportBundle,
+        dir: Utf8TempDir,
+    ) -> anyhow::Result<()> {
+        // Create the zipfile as a temporary file.
+        //
+        // Zipping compresses every file in the bundle, so it runs on a
+        // blocking thread.
+        let zip_log = log.clone();
+        let zipfile = tokio::task::spawn_blocking(move || {
+            bundle_to_zipfile(dir, Utf8Path::new(TEMPDIR), &zip_log)
+        })
+        .await
+        .with_context(|| "Zipping the support bundle panicked")??;
+        let mut zipfile = tokio::fs::File::from_std(zipfile);
+        let total_len = zipfile.metadata().await?.len();
 
-        // Verify the hash locally before we send it over the network
+        // Collect the hash locally before we send it over the network
+        //
+        // We'll use this later during finalization to confirm the bundle
+        // has been stored successfully.
         zipfile.seek(SeekFrom::Start(0)).await?;
         let hash = sha2_hash(&mut zipfile).await?;
 
         // Find the sled where we're storing this bundle.
         let sled_id = self
-            .collector
             .datastore
-            .zpool_get_sled_if_in_service(
-                &self.opctx,
-                self.bundle.zpool_id.into(),
-            )
+            .zpool_get_sled_if_in_service(opctx, bundle.zpool_id.into())
             .await?;
-        let sled_client = nexus_networking::sled_client(
-            &self.collector.datastore,
-            &self.opctx,
-            sled_id.into_untyped_uuid(),
-            &self.log,
-        )
-        .await?;
+        let sled_client =
+            nexus_networking::sled_client(&self.datastore, opctx, sled_id, log)
+                .await?;
 
-        // Stream the zipfile to the sled where it should be kept
-        zipfile.seek(SeekFrom::Start(0)).await?;
-        let file_access = hyper_staticfile::vfs::TokioFileAccess::new(zipfile);
-        let file_stream =
-            hyper_staticfile::util::FileBytesStream::new(file_access);
-        let body =
-            reqwest::Body::wrap(hyper_staticfile::Body::Full(file_stream));
+        let zpool = ZpoolUuid::from(bundle.zpool_id);
+        let dataset = DatasetUuid::from(bundle.dataset_id);
+        let support_bundle = SupportBundleUuid::from(bundle.id);
+
+        // Tell this sled to create the bundle.
+        let creation_result = sled_client
+            .support_bundle_start_creation(&zpool, &dataset, &support_bundle)
+            .await
+            .with_context(|| "Support bundle failed to start creation")?;
+
+        if matches!(
+            creation_result.state,
+            sled_agent_client::types::SupportBundleState::Complete
+        ) {
+            // Early exit case: the bundle was already created -- we must have either
+            // crashed or failed between "finalizing" and "writing to the database that we
+            // finished".
+            info!(log, "Support bundle was already collected"; "bundle" => %bundle.id);
+            return Ok(());
+        }
+        info!(log, "Support bundle creation started"; "bundle" => %bundle.id);
+
+        let mut offset = 0;
+        while offset < total_len {
+            // Stream the zipfile to the sled where it should be kept
+            let mut file = zipfile
+                .try_clone()
+                .await
+                .with_context(|| "Failed to clone zipfile")?;
+            file.seek(SeekFrom::Start(offset)).await.with_context(|| {
+                format!("Failed to seek to offset {offset} / {total_len} within zipfile")
+            })?;
+
+            // Only stream at most "transfer_chunk_size" bytes at once
+            let chunk_size = std::cmp::min(
+                self.transfer_chunk_size.get(),
+                total_len - offset,
+            );
+
+            let limited_file = file.take(chunk_size);
+            let stream = tokio_util::io::ReaderStream::new(limited_file);
+            let body = reqwest::Body::wrap_stream(stream);
+
+            info!(
+                log,
+                "Streaming bundle chunk";
+                "bundle" => %bundle.id,
+                "offset" => offset,
+                "length" => chunk_size,
+            );
+
+            sled_client.support_bundle_transfer(
+                &zpool, &dataset, &support_bundle, offset, body
+            ).await.with_context(|| {
+                format!("Failed to transfer bundle: {chunk_size}@{offset} of {total_len} to sled")
+            })?;
+
+            offset += chunk_size;
+        }
 
         sled_client
-            .support_bundle_create(
-                &ZpoolUuid::from(self.bundle.zpool_id),
-                &DatasetUuid::from(self.bundle.dataset_id),
-                &SupportBundleUuid::from(self.bundle.id),
-                &hash.to_string(),
-                body,
+            .support_bundle_finalize(
+                &zpool,
+                &dataset,
+                &support_bundle,
+                &hash.0.into(),
             )
-            .await?;
+            .await
+            .with_context(|| "Failed to finalize bundle")?;
 
         // Returning from this method should drop all temporary storage
         // allocated locally for this support bundle.
-        Ok(report)
+        Ok(())
     }
+}
 
-    // Perform the work of collecting the support bundle into a temporary directory
-    //
-    // - "dir" is a directory where data can be stored.
-    // - "bundle" is metadata about the bundle being collected.
-    //
-    // If a partial bundle can be collected, it should be returned as
-    // an Ok(SupportBundleCollectionReport). Any failures from this function
-    // will prevent the support bundle from being collected altogether.
-    //
-    // NOTE: The background task infrastructure will periodically check to see
-    // if the bundle has been cancelled by a user while it is being collected.
-    // If that happens, this function will be CANCELLED at an await point.
-    //
-    // As a result, it is important that this function be implemented as
-    // cancel-safe.
-    async fn collect_bundle_as_file(
-        &self,
-        dir: &Utf8TempDir,
-    ) -> anyhow::Result<SupportBundleCollectionReport> {
-        let log = &self.log;
+// Indefinitely poll the database for the bundle's state. Cancels the
+// supplied token when:
+//
+// - The bundle's state is no longer `Collecting` (typically because
+//   the bundle was explicitly cancelled by a user, or because its
+//   backing storage was expunged).
+// - The bundle row no longer exists.
+//
+// The mechanism layer is otherwise oblivious to the bundle lifecycle —
+// this is the management bridge that turns DB state changes into
+// cancellation.
+async fn check_for_cancellation(
+    datastore: Arc<DataStore>,
+    opctx: OpContext,
+    cancellation_token: CancellationToken,
+    log: slog::Logger,
+    bundle_id: SupportBundleUuid,
+) {
+    let work_duration = tokio::time::Duration::from_secs(5);
+    let mut yield_interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + work_duration,
+        work_duration,
+    );
 
-        info!(&log, "Collecting bundle as local file");
-        let mut report =
-            SupportBundleCollectionReport::new(self.bundle.id.into());
+    loop {
+        // Timer fired mid-collection - check if we should stop.
+        yield_interval.tick().await;
+        trace!(
+            log,
+            "Checking if Bundle Collection cancelled";
+            "bundle" => %bundle_id
+        );
 
-        tokio::fs::write(
-            dir.path().join("bundle_id.txt"),
-            self.bundle.id.to_string(),
-        )
-        .await?;
-
-        if let Ok(all_sleds) = self
-            .collector
-            .datastore
-            .sled_list_all_batched(&self.opctx, SledFilter::InService)
-            .await
-        {
-            report.listed_in_service_sleds = true;
-
-            // NOTE: This could be, and probably should be, done concurrently.
-            for sled in &all_sleds {
-                info!(&log, "Collecting bundle info from sled"; "sled" => %sled.id());
-                let sled_path = dir
-                    .path()
-                    .join("rack")
-                    .join(sled.rack_id.to_string())
-                    .join("sled")
-                    .join(sled.id().to_string());
-                tokio::fs::create_dir_all(&sled_path).await?;
-                tokio::fs::write(
-                    sled_path.join("sled.txt"),
-                    format!("{sled:?}"),
-                )
-                .await?;
-
-                if self.request.skip_sled_info {
-                    continue;
-                }
-
-                let Ok(sled_client) = nexus_networking::sled_client(
-                    &self.collector.datastore,
-                    &self.opctx,
-                    sled.id(),
+        match datastore.support_bundle_get(&opctx, bundle_id).await {
+            Ok(SupportBundle {
+                state: SupportBundleState::Collecting, ..
+            }) => {
+                // Bundle still collecting; continue...
+                continue;
+            }
+            Ok(_) => {
+                // Not collecting, for any reason: Time to exit
+                cancellation_token.cancel();
+                return;
+            }
+            Err(Error::ObjectNotFound { .. } | Error::NotFound { .. }) => {
+                cancellation_token.cancel();
+                return;
+            }
+            Err(err) => {
+                warn!(
                     log,
-                )
-                .await
-                else {
-                    tokio::fs::write(
-                        sled_path.join("error.txt"),
-                        "Could not contact sled",
-                    )
-                    .await?;
-                    continue;
-                };
+                    "Database error checking bundle cancellation";
+                    InlineErrorChain::new(&err)
+                );
 
-                // NB: As new sled-diagnostic commands are added they should
-                // be added to this array so that their output can be saved
-                // within the support bundle.
-                let mut diag_cmds = futures::stream::iter([
-                    save_diag_cmd_output_or_error(
-                        &sled_path,
-                        "zoneadm",
-                        sled_client.support_zoneadm_info(),
-                    )
-                    .boxed(),
-                    save_diag_cmd_output_or_error(
-                        &sled_path,
-                        "dladm",
-                        sled_client.support_dladm_info(),
-                    )
-                    .boxed(),
-                    save_diag_cmd_output_or_error(
-                        &sled_path,
-                        "ipadm",
-                        sled_client.support_ipadm_info(),
-                    )
-                    .boxed(),
-                    save_diag_cmd_output_or_error(
-                        &sled_path,
-                        "nvmeadm",
-                        sled_client.support_nvmeadm_info(),
-                    )
-                    .boxed(),
-                    save_diag_cmd_output_or_error(
-                        &sled_path,
-                        "pargs",
-                        sled_client.support_pargs_info(),
-                    )
-                    .boxed(),
-                    save_diag_cmd_output_or_error(
-                        &sled_path,
-                        "pfiles",
-                        sled_client.support_pfiles_info(),
-                    )
-                    .boxed(),
-                    save_diag_cmd_output_or_error(
-                        &sled_path,
-                        "pstack",
-                        sled_client.support_pstack_info(),
-                    )
-                    .boxed(),
-                    save_diag_cmd_output_or_error(
-                        &sled_path,
-                        "zfs",
-                        sled_client.support_zfs_info(),
-                    )
-                    .boxed(),
-                    save_diag_cmd_output_or_error(
-                        &sled_path,
-                        "zpool",
-                        sled_client.support_zpool_info(),
-                    )
-                    .boxed(),
-                ])
-                // Currently we execute up to 10 commands concurrently which
-                // might be doing their own concurrent work, for example
-                // collectiong `pstack` output of every Oxide process that is
-                // found on a sled.
-                .buffer_unordered(10);
-
-                while let Some(result) = diag_cmds.next().await {
-                    // Log that we failed to write the diag command output to a
-                    // file but don't return early as we wish to get as much
-                    // information as we can.
-                    if let Err(e) = result {
-                        error!(
-                            &self.log,
-                            "failed to write diagnostic command output to \
-                            file: {e}"
-                        );
-                    }
-                }
-
-                // For each zone we concurrently fire off a request to its
-                // sled-agent to collect its logs in a zip file and write the
-                // result to the support bundle.
-                let zones = sled_client.support_logs().await?.into_inner();
-                let mut log_futs: FuturesUnordered<_> = zones
-                    .iter()
-                    .map(|zone| {
-                        save_zone_log_zip_or_error(
-                            log,
-                            &sled_client,
-                            zone,
-                            &sled_path,
-                        )
-                    })
-                    .collect();
-
-                while let Some(log_collection_result) = log_futs.next().await {
-                    // We log any errors saving the zip file to disk and
-                    // continue on.
-                    if let Err(e) = log_collection_result {
-                        error!(&self.log, "failed to write logs output: {e}");
-                    }
-                }
+                // If we cannot contact the database, retry later
+                continue;
             }
         }
-
-        Ok(report)
     }
+}
+
+async fn sha2_hash(file: &mut tokio::fs::File) -> anyhow::Result<ArtifactHash> {
+    let mut buf = vec![0u8; 65536];
+    let mut ctx = Sha256::new();
+    loop {
+        let n = file.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        ctx.write_all(&buf[0..n])?;
+    }
+
+    let digest = ctx.finalize();
+    Ok(ArtifactHash(digest.as_slice().try_into()?))
 }
 
 impl BackgroundTask for SupportBundleCollector {
@@ -735,12 +697,11 @@ impl BackgroundTask for SupportBundleCollector {
                 }
             };
 
-            let request = BundleRequest::default();
-            match self.collect_bundle(&opctx, &request).await {
+            match self.collect_bundle(&opctx).await {
                 Ok(report) => collection_report = Some(report),
                 Err(err) => {
                     collection_err =
-                        Some(json!({ "collect_error": err.to_string() }))
+                        Some(json!({ "collect_error": InlineErrorChain::new(err.as_ref()).to_string() }))
                 }
             };
 
@@ -755,237 +716,47 @@ impl BackgroundTask for SupportBundleCollector {
     }
 }
 
-// Takes a directory "dir", and zips the contents into a single zipfile.
-fn bundle_to_zipfile(dir: &Utf8TempDir) -> anyhow::Result<std::fs::File> {
-    let tempfile = tempfile_in(TEMPDIR)?;
-    let mut zip = ZipWriter::new(tempfile);
-
-    recursively_add_directory_to_zipfile(&mut zip, dir.path(), dir.path())?;
-
-    Ok(zip.finish()?)
-}
-
-fn recursively_add_directory_to_zipfile(
-    zip: &mut ZipWriter<std::fs::File>,
-    root_path: &Utf8Path,
-    dir_path: &Utf8Path,
-) -> anyhow::Result<()> {
-    // Readdir might return entries in a non-deterministic order.
-    // Let's sort it for the zipfile, to be nice.
-    let mut entries = dir_path
-        .read_dir_utf8()?
-        .filter_map(Result::ok)
-        .collect::<Vec<Utf8DirEntry>>();
-    entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
-
-    for entry in &entries {
-        // Remove the "/tmp/..." prefix from the path when we're storing it in the
-        // zipfile.
-        let dst = entry.path().strip_prefix(root_path)?;
-
-        let file_type = entry.file_type()?;
-        if file_type.is_file() {
-            let opts = FullFileOptions::default();
-            let src = entry.path();
-
-            zip.start_file_from_path(dst, opts)?;
-            let mut file = std::fs::File::open(&src)?;
-            std::io::copy(&mut file, zip)?;
-        }
-        if file_type.is_dir() {
-            let opts = FullFileOptions::default();
-            zip.add_directory_from_path(dst, opts)?;
-            recursively_add_directory_to_zipfile(zip, root_path, entry.path())?;
-        }
-    }
-    Ok(())
-}
-
-async fn sha2_hash(file: &mut tokio::fs::File) -> anyhow::Result<ArtifactHash> {
-    let mut buf = vec![0u8; 65536];
-    let mut ctx = Sha256::new();
-    loop {
-        let n = file.read(&mut buf).await?;
-        if n == 0 {
-            break;
-        }
-        ctx.write_all(&buf[0..n])?;
-    }
-
-    let digest = ctx.finalize();
-    Ok(ArtifactHash(digest.as_slice().try_into()?))
-}
-
-/// For a given zone, save its service's logs into the provided destination
-/// path. This path should be the location to a per-sled directory that will end
-/// up in the final support bundle zip file.
-async fn save_zone_log_zip_or_error(
-    logger: &slog::Logger,
-    client: &sled_agent_client::Client,
-    zone: &str,
-    path: &Utf8Path,
-) -> anyhow::Result<()> {
-    // In the future when support bundle collection exposes tuning parameters
-    // this can turn into a collection parameter.
-    const DEFAULT_MAX_ROTATED_LOGS: u32 = 5;
-
-    match client.support_logs_download(zone, DEFAULT_MAX_ROTATED_LOGS).await {
-        Ok(res) => {
-            let bytestream = res.into_inner();
-            let output_dir = path.join(format!("logs/{zone}"));
-            let output_file = output_dir.join("logs.zip");
-
-            // Ensure the logs output directory exists.
-            tokio::fs::create_dir_all(&output_dir).await.with_context(
-                || format!("failed to create output directory: {output_dir}"),
-            )?;
-
-            let mut file =
-                tokio::fs::File::create(&output_file).await.with_context(
-                    || format!("failed to create file: {output_file}"),
-                )?;
-
-            let stream = bytestream.into_inner().map(|chunk| {
-                chunk.map_err(|e| std::io::Error::other(e.to_string()))
-            });
-            let mut reader = tokio_util::io::StreamReader::new(stream);
-            let _nbytes = tokio::io::copy(&mut reader, &mut file).await?;
-
-            // Unpack the zip so we don't end up with zip files inside of our
-            // final zip
-            let zipfile = output_file.clone();
-            tokio::task::spawn_blocking(move || {
-                extract_zip_file(&output_dir, &zipfile)
-            })
-            .await
-            .map_err(|join_error| {
-                anyhow::anyhow!(join_error)
-                    .context("unzipping support bundle logs zip panicked")
-            })??;
-
-            // Cleanup the zip file since we no longer need it
-            if let Err(e) = tokio::fs::remove_file(&output_file).await {
-                error!(
-                    logger,
-                    "failed to cleanup temporary logs zip file";
-                    "error" => %e,
-                    "file" => %output_file,
-
-                );
-            }
-        }
-        Err(err) => {
-            tokio::fs::write(
-                path.join(format!("{zone}.logs.err")),
-                err.to_string(),
-            )
-            .await?;
-        }
-    };
-
-    Ok(())
-}
-
-fn extract_zip_file(
-    output_dir: &Utf8Path,
-    zip_file: &Utf8Path,
-) -> Result<(), anyhow::Error> {
-    let mut zip = std::fs::File::open(&zip_file)
-        .with_context(|| format!("failed to open zip file: {zip_file}"))?;
-    let mut archive = ZipArchive::new(&mut zip)?;
-    archive.extract(&output_dir).with_context(|| {
-        format!("failed to extract log zip file to: {output_dir}")
-    })?;
-    Ok(())
-}
-
-/// Run a `sled-dianostics` future and save its output to a corresponding file.
-async fn save_diag_cmd_output_or_error<F, S: serde::Serialize>(
-    path: &Utf8Path,
-    command: &str,
-    future: F,
-) -> anyhow::Result<()>
-where
-    F: Future<
-            Output = Result<
-                sled_agent_client::ResponseValue<S>,
-                sled_agent_client::Error<sled_agent_client::types::Error>,
-            >,
-        > + Send,
-{
-    let result = future.await;
-    match result {
-        Ok(result) => {
-            let output = result.into_inner();
-            let json = serde_json::to_string(&output).with_context(|| {
-                format!("failed to serialize {command} output as json")
-            })?;
-            tokio::fs::write(path.join(format!("{command}.json")), json)
-                .await
-                .with_context(|| {
-                    format!("failed to write output of {command} to file")
-                })?;
-        }
-        Err(err) => {
-            tokio::fs::write(
-                path.join(format!("{command}_err.txt")),
-                err.to_string(),
-            )
-            .await?;
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
 
-    use camino_tempfile::tempdir;
+    use crate::app::support_bundles::SupportBundleQueryType;
+    use http_body_util::BodyExt;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::RendezvousDebugDataset;
     use nexus_db_model::Zpool;
+    use nexus_db_queries::db::datastore::SupportBundleCreateParams;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::fm::ereport::{EreportData, Reporter};
+    use nexus_types::identity::Asset;
+    use nexus_types::internal_api::background::SupportBundleCollectionReport;
+    use nexus_types::internal_api::background::SupportBundleCollectionStep;
+    use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
+    use nexus_types::internal_api::background::SupportBundleEreportStatus;
+    use nexus_types::inventory::SpType;
+    use nexus_types::support_bundle::BundleDataSelection;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::DatasetKind;
-    use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetName;
-    use omicron_common::disk::DatasetsConfig;
-    use omicron_common::disk::SharedDatasetConfig;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::{
-        BlueprintUuid, DatasetUuid, PhysicalDiskUuid, SledUuid,
+        BlueprintUuid, DatasetUuid, EreporterRestartUuid, OmicronZoneUuid,
+        PhysicalDiskUuid, RackUuid, SledUuid,
     };
+    use sled_agent_types::disk::DatasetConfig;
+    use sled_agent_types::disk::SharedDatasetConfig;
+    use sled_agent_types::inventory::ZpoolHealth;
+    use std::collections::BTreeSet;
+    use std::num::NonZeroU64;
+    use support_bundle_collection::SIZE_LIMIT_EXCEEDED_FILE;
+    use support_bundle_collection::perfetto;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
-
-    // Ensure that we can convert a temporary directory into a zipfile
-    #[test]
-    fn test_zipfile_creation() {
-        let dir = tempdir().unwrap();
-
-        std::fs::create_dir_all(dir.path().join("dir-a")).unwrap();
-        std::fs::create_dir_all(dir.path().join("dir-b")).unwrap();
-        std::fs::write(dir.path().join("dir-a").join("file-a"), "some data")
-            .unwrap();
-        std::fs::write(dir.path().join("file-b"), "more data").unwrap();
-
-        let zipfile = bundle_to_zipfile(&dir)
-            .expect("Should have been able to bundle zipfile");
-        let archive = zip::read::ZipArchive::new(zipfile).unwrap();
-
-        // We expect the order to be deterministically alphabetical
-        let mut names = archive.file_names();
-        assert_eq!(names.next(), Some("dir-a/"));
-        assert_eq!(names.next(), Some("dir-a/file-a"));
-        assert_eq!(names.next(), Some("dir-b/"));
-        assert_eq!(names.next(), Some("file-b"));
-        assert_eq!(names.next(), None);
-    }
 
     // If we have not populated any bundles needing cleanup, the cleanup
     // process should succeed with an empty cleanup report.
@@ -993,12 +764,18 @@ mod test {
     async fn test_cleanup_noop(cptestctx: &ControlPlaneTestContext) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
         );
-        let collector =
-            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
+        );
 
         let report = collector
             .cleanup_destroyed_bundles(&opctx)
@@ -1014,16 +791,21 @@ mod test {
     async fn test_collect_noop(cptestctx: &ControlPlaneTestContext) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
         );
-        let collector =
-            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
+        );
 
-        let request = BundleRequest::default();
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should succeed with no bundles");
         assert!(report.is_none());
@@ -1040,29 +822,28 @@ mod test {
             .zpool_insert(
                 opctx,
                 Zpool::new(
-                    Uuid::new_v4(),
-                    sled_id.into_untyped_uuid(),
+                    ZpoolUuid::new_v4(),
+                    sled_id,
                     id,
                     ByteCount::from(0).into(),
                 ),
             )
             .await
             .unwrap();
-        let zpool_id = ZpoolUuid::from_untyped_uuid(zpool.id());
 
         let dataset = datastore
             .debug_dataset_insert_if_not_exists(
                 opctx,
                 RendezvousDebugDataset::new(
                     DatasetUuid::new_v4(),
-                    zpool_id,
+                    zpool.id(),
                     blueprint_id,
                 ),
             )
             .await
             .unwrap()
             .expect("inserted new dataset");
-        (zpool_id, dataset.id())
+        (zpool.id(), dataset.id())
     }
 
     async fn make_disk_in_db(
@@ -1072,19 +853,157 @@ mod test {
         sled_id: SledUuid,
     ) -> PhysicalDiskUuid {
         let id = PhysicalDiskUuid::new_v4();
-        let physical_disk = PhysicalDisk::new(
+        let physical_disk = PhysicalDisk::from_parts(
             id,
             "v".into(),
             format!("s-{i})"),
             "m".into(),
             PhysicalDiskKind::U2,
-            sled_id.into_untyped_uuid(),
+            sled_id,
         );
         datastore
             .physical_disk_insert(&opctx, physical_disk.clone())
             .await
             .unwrap();
         id
+    }
+
+    async fn make_fake_ereports(datastore: &DataStore, opctx: &OpContext) {
+        const SP_SERIAL: &str = "BRM42000069";
+        const HOST_SERIAL: &str = "BRM66600042";
+        const SLED_SLOT: u16 = 8;
+        const GIMLET_PN: &str = "9130000019";
+        // Make some SP ereports...
+        let sp_restart_id = EreporterRestartUuid::new_v4();
+        let time_collected = chrono::Utc::now();
+        let collector_id = OmicronZoneUuid::new_v4();
+        let rack_id = RackUuid::new_v4();
+        datastore.ereports_insert(&opctx, sp_restart_id, time_collected, collector_id, rack_id, Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
+            (ereport_types::Ena(1), EreportData {
+                part_number: Some(GIMLET_PN.to_string()),
+                serial_number: Some(SP_SERIAL.to_string()),
+                class: Some("ereport.fake.whatever".to_string()),
+                report: serde_json::json!({"hello world": true})
+            }),
+            (ereport_types::Ena(2), EreportData {
+                part_number: Some(GIMLET_PN.to_string()),
+                serial_number: Some(SP_SERIAL.to_string()),
+                class: Some("ereport.something.blah".to_string()),
+                report: serde_json::json!({"system_working": "seems to be",})
+            }),
+        ]).await.expect("failed to insert fake SP ereports");
+
+        // Let's do a silly one! No VPD, to make sure that's also
+        // handled correctly.
+        let sp_restart_id2 = EreporterRestartUuid::new_v4();
+        let time_collected = chrono::Utc::now();
+        datastore
+            .ereports_insert(
+                &opctx,
+                sp_restart_id2,
+                time_collected,
+                collector_id,
+                rack_id,
+                Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT },
+                vec![(
+                    ereport_types::Ena(1),
+                    EreportData {
+                        part_number: None,
+                        serial_number: None,
+                        class: Some("ereport.fake.whatever".to_string()),
+                        report: serde_json::json!({"hello_world": true}),
+                    },
+                )],
+            )
+            .await
+            .expect("failed to insert another fake SP ereport");
+
+        // And one from a different serial. N.B. that I made sure the number of
+        // host-OS and SP ereports are different for when we make assertions
+        // about the bundle report.
+        let sp2_restart_id = EreporterRestartUuid::new_v4();
+        let time_collected = chrono::Utc::now();
+        datastore
+            .ereports_insert(
+                &opctx,
+                sp2_restart_id,
+                time_collected,
+                OmicronZoneUuid::new_v4(),
+                rack_id,
+                Reporter::Sp { sp_type: SpType::Switch, slot: 1 },
+                vec![(
+                    ereport_types::Ena(1),
+                    EreportData {
+                        part_number: Some("9130000006".to_string()),
+                        serial_number: Some("BRM41000555".to_string()),
+                        class: Some("ereport.fake.whatever".to_string()),
+                        report: serde_json::json!({"im_a_sidecar": true}),
+                    },
+                )],
+            )
+            .await
+            .expect("failed to insert another fake SP ereport");
+        // And some host OS ones...
+        let sled1_restart_id = EreporterRestartUuid::new_v4();
+        let time_collected = chrono::Utc::now();
+        let collector_id = OmicronZoneUuid::new_v4();
+        datastore
+            .ereports_insert(
+                &opctx,
+                sled1_restart_id,
+                time_collected,
+                collector_id,
+                rack_id,
+                Reporter::HostOs {
+                    sled: SledUuid::new_v4(),
+                    slot: Some(SLED_SLOT),
+                },
+                vec![
+                    (
+                        ereport_types::Ena(1),
+                        EreportData {
+                            serial_number: Some(HOST_SERIAL.to_string()),
+                            part_number: Some(GIMLET_PN.to_string()),
+                            class: Some("ereport.fake.whatever".to_string()),
+                            report: serde_json::json!({"hello_world": true}),
+                        },
+                    ),
+                    (
+                        ereport_types::Ena(2),
+                        EreportData {
+                            serial_number: Some(HOST_SERIAL.to_string()),
+                            part_number: Some(GIMLET_PN.to_string()),
+                            class: Some(
+                                "ereport.fake.whatever.thingy".to_string(),
+                            ),
+                            report: serde_json::json!({"goodbye_world": false}),
+                        },
+                    ),
+                ],
+            )
+            .await
+            .expect("failed to insert fake host OS ereports");
+        let sled2_restart_id = EreporterRestartUuid::new_v4();
+        let time_collected = chrono::Utc::now();
+        datastore
+            .ereports_insert(
+                &opctx,
+                sled2_restart_id,
+                time_collected,
+                OmicronZoneUuid::new_v4(),
+                rack_id,
+                Reporter::HostOs { sled: SledUuid::new_v4(), slot: Some(SLED_SLOT) },
+                vec![
+                    (ereport_types::Ena(1), EreportData {
+                        serial_number: Some(HOST_SERIAL.to_string()),
+                        part_number: Some(GIMLET_PN.to_string()),
+                        class: Some("ereport.something.hostos_related".to_string()),
+                        report: serde_json::json!({"illumos": "very yes", "whatever": 42}),
+                    }),
+                ],
+            )
+            .await
+            .expect("failed to insert another fake host OS ereport");
     }
 
     struct TestDataset {
@@ -1132,45 +1051,32 @@ mod test {
                     zpool_id,
                     disk_id,
                     1 << 40,
+                    ZpoolHealth::Online,
                 );
                 disks.push(Self { zpool_id, dataset_id })
             }
 
-            // Create a configuration for the sled agent consisting of all these
+            // Update the configuration of the sled agent to include all these
             // debug datasets.
-            let datasets = disks
-                .iter()
-                .map(|TestDataset { zpool_id, dataset_id }| {
-                    (
-                        *dataset_id,
-                        DatasetConfig {
-                            id: *dataset_id,
-                            name: DatasetName::new(
-                                ZpoolName::new_external(*zpool_id),
-                                DatasetKind::Debug,
-                            ),
-                            inner: SharedDatasetConfig::default(),
-                        },
-                    )
-                })
-                .collect();
-
-            // Read current sled config generation from zones (this will change
-            // slightly once the simulator knows how to keep the unified config
-            // and be a little less weird)
-            let current_generation =
-                cptestctx.first_sled_agent().omicron_zones_list().generation;
-
-            let dataset_config = DatasetsConfig {
-                generation: current_generation.next(),
-                datasets,
-            };
-
-            let res = cptestctx
+            let mut config = cptestctx
                 .first_sled_agent()
-                .datasets_ensure(dataset_config)
-                .unwrap();
-            assert!(!res.has_error());
+                .omicron_sled_config()
+                .unwrap_or_default();
+            for TestDataset { zpool_id, dataset_id } in &disks {
+                config.datasets.insert_overwrite(DatasetConfig {
+                    id: *dataset_id,
+                    name: DatasetName::new(
+                        ZpoolName::new_external(*zpool_id),
+                        DatasetKind::Debug,
+                    ),
+                    inner: SharedDatasetConfig::default(),
+                });
+            }
+            config.generation = config.generation.next();
+            cptestctx
+                .first_sled_agent()
+                .set_omicron_config(config)
+                .expect("updated sled config");
 
             disks
         }
@@ -1180,6 +1086,7 @@ mod test {
     async fn test_collect_one(cptestctx: &ControlPlaneTestContext) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
@@ -1190,31 +1097,80 @@ mod test {
         let _datasets =
             TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
 
+        // Make up some ereports so that we can test that they're included in
+        // the bundle.
+        make_fake_ereports(&datastore, &opctx).await;
+
         // Assign a bundle to ourselves. We expect to collect it on
         // the next call to "collect_bundle".
         let bundle = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    // NOTE: The support bundle querying interface isn't
+                    // supported on the simulated sled agent (yet?) so we're
+                    // using an empty sled selection.
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
 
-        let collector =
-            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
+        );
 
         // The bundle collection should complete successfully.
-        let request = BundleRequest {
-            // NOTE: The support bundle querying interface isn't supported on
-            // the simulated sled agent (yet?) so we're skipping this step.
-            skip_sled_info: true,
-        };
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle.id.into());
-        assert!(report.listed_in_service_sleds);
+        assert_eq!(report.collection.bundle, bundle.id.into());
+        assert_eq!(report.collection.size_limit_exceeded, None);
+        // Verify that we spawned steps to query sleds and SPs
+        let step_names: Vec<_> =
+            report.collection.steps.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
+        );
+        assert!(
+            step_names
+                .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
+        );
         assert!(report.activated_in_db_ok);
+        let ereport_step = report
+            .collection
+            .steps
+            .iter()
+            .find(|s| s.name == SupportBundleCollectionStep::STEP_EREPORTS)
+            .expect("should have ereports step");
+        assert_eq!(ereport_step.status, SupportBundleCollectionStepStatus::Ok);
+        let ereport_details: SupportBundleEreportStatus =
+            serde_json::from_value(
+                ereport_step
+                    .details
+                    .clone()
+                    .expect("ereports step should have details"),
+            )
+            .expect("ereports step details should deserialize");
+        assert_eq!(
+            ereport_details,
+            SupportBundleEreportStatus {
+                n_collected: 7,
+                n_found: 7,
+                errors: Vec::new(),
+            }
+        );
 
         let observed_bundle = datastore
             .support_bundle_get(&opctx, bundle.id.into())
@@ -1225,16 +1181,379 @@ mod test {
         // If we retry bundle collection, nothing should happen.
         // The bundle has already been collected.
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should be a no-op the second time");
         assert!(report.is_none());
     }
 
     #[nexus_test(server = crate::Server)]
+    async fn test_trace_file_generated(cptestctx: &ControlPlaneTestContext) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        // Before we can create any bundles, we need to create the
+        // space for them to be provisioned.
+        let _datasets =
+            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+
+        // Create a bundle to collect
+        let bundle = datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "For trace file testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
+            )
+            .await
+            .expect("Couldn't allocate a support bundle");
+
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
+        );
+
+        // Collect the bundle
+        let report = collector
+            .collect_bundle(&opctx)
+            .await
+            .expect("Collection should have succeeded")
+            .expect("Should have generated a report");
+
+        // Download the trace file from the bundle
+        let head = false;
+        let range = None;
+        let response = nexus
+            .support_bundle_download(
+                &opctx,
+                bundle.id.into(),
+                SupportBundleQueryType::Path {
+                    file_path: "meta/trace.json".to_string(),
+                },
+                head,
+                range,
+            )
+            .await
+            .expect("Should be able to download trace file");
+
+        // Parse the trace file using our Perfetto structs
+        let body_bytes =
+            response.into_body().collect().await.unwrap().to_bytes();
+        let trace: perfetto::Trace = serde_json::from_slice(&body_bytes)
+            .expect("Trace file should be valid Perfetto JSON");
+
+        // Verify display time unit
+        assert_eq!(
+            trace.display_time_unit, "ms",
+            "Display time unit should be milliseconds"
+        );
+
+        // We should have at least the main collection steps
+        assert!(
+            !trace.trace_events.is_empty(),
+            "Should have at least one trace event"
+        );
+
+        // Verify each event has the expected structure
+        for event in &trace.trace_events {
+            // Verify category
+            assert_eq!(
+                event.cat, "bundle_collection",
+                "Event should have category 'bundle_collection'"
+            );
+            // Verify phase type
+            assert_eq!(event.ph, "X", "Event should be Complete event type");
+            // Verify timestamps are positive
+            assert!(event.ts >= 0, "Event timestamp should be non-negative");
+            assert!(event.dur >= 0, "Event duration should be non-negative");
+            // Verify process and thread IDs are set
+            assert_eq!(event.pid, 1, "All events should have pid=1");
+            assert!(event.tid > 0, "Event thread ID should be positive");
+        }
+
+        // Verify we have the same number of events as steps in the report
+        assert_eq!(
+            trace.trace_events.len(),
+            report.collection.steps.len(),
+            "Number of events should match number of steps"
+        );
+
+        // Verify step names match between report and trace
+        let trace_names: std::collections::HashSet<_> =
+            trace.trace_events.iter().map(|e| e.name.as_str()).collect();
+        let report_names: std::collections::HashSet<_> =
+            report.collection.steps.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(
+            trace_names, report_names,
+            "Trace event names should match report step names"
+        );
+    }
+
+    // Downloads the file at `path` from a collected bundle.
+    async fn download_bundle_file(
+        nexus: &crate::Nexus,
+        opctx: &OpContext,
+        bundle_id: SupportBundleUuid,
+        path: &str,
+    ) -> Result<bytes::Bytes, Error> {
+        let head = false;
+        let range = None;
+        let response = nexus
+            .support_bundle_download(
+                opctx,
+                bundle_id,
+                SupportBundleQueryType::Path { file_path: path.to_string() },
+                head,
+                range,
+            )
+            .await?;
+        Ok(response.into_body().collect().await.unwrap().to_bytes())
+    }
+
+    // A bundle that reaches its size limit is still collected and activated,
+    // with whatever fit, and a record of what didn't.
+    #[nexus_test(server = crate::Server)]
+    async fn test_collect_size_limit_exceeded(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        // Before we can create any bundles, we need to create the
+        // space for them to be provisioned.
+        let _datasets =
+            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+        make_fake_ereports(&datastore, &opctx).await;
+
+        let bundle = datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "For size limit testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
+            )
+            .await
+            .expect("Couldn't allocate a support bundle");
+
+        // Use a limit too small for any of the bundle's data files, so that
+        // the first of them to be written exceeds it.
+        const SIZE_LIMIT_BYTES: u64 = 1;
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+            SupportBundleSizeLimit::new(SIZE_LIMIT_BYTES).unwrap(),
+        );
+
+        let report = collector
+            .collect_bundle(&opctx)
+            .await
+            .expect("Collection should have succeeded")
+            .expect("Should have generated a report");
+        assert!(report.activated_in_db_ok);
+        let observed_bundle = datastore
+            .support_bundle_get(&opctx, bundle.id.into())
+            .await
+            .expect("Bundle should be in the db");
+        assert_eq!(observed_bundle.state, SupportBundleState::Active);
+
+        let exceeded = report
+            .collection
+            .size_limit_exceeded
+            .as_ref()
+            .expect("Bundle should have exceeded its size limit");
+        assert_eq!(exceeded.limit_bytes.to_bytes(), SIZE_LIMIT_BYTES);
+        assert_eq!(exceeded.used_bytes, 0);
+        assert!(!exceeded.refused_paths.is_empty());
+
+        // Running out of space is not a step failure.
+        for step in &report.collection.steps {
+            assert!(
+                !matches!(
+                    step.status,
+                    SupportBundleCollectionStepStatus::Failed(_)
+                ),
+                "step {} failed: {}",
+                step.name,
+                step.status,
+            );
+        }
+
+        // Exactly the steps which stopped are listed as incomplete.
+        let stopped: BTreeSet<_> = report
+            .collection
+            .steps
+            .iter()
+            .filter(|step| {
+                step.status == SupportBundleCollectionStepStatus::Stopped
+            })
+            .map(|step| step.name.clone())
+            .collect();
+        assert!(!stopped.is_empty());
+        assert_eq!(stopped, exceeded.incomplete_steps);
+
+        // The bundle describes what was left out, both for people and in the
+        // report.
+        let marker = download_bundle_file(
+            nexus,
+            &opctx,
+            bundle.id.into(),
+            SIZE_LIMIT_EXCEEDED_FILE,
+        )
+        .await
+        .expect("Should be able to download the size limit marker");
+        let marker = std::str::from_utf8(&marker).unwrap();
+        for path in &exceeded.refused_paths {
+            assert!(
+                marker.contains(path),
+                "marker should name {path}, which was left out: {marker}"
+            );
+        }
+
+        let report_json = download_bundle_file(
+            nexus,
+            &opctx,
+            bundle.id.into(),
+            "meta/report.json",
+        )
+        .await
+        .expect("Should be able to download the report");
+        let bundled_report: SupportBundleCollectionReport =
+            serde_json::from_slice(&report_json)
+                .expect("report.json should deserialize");
+        assert_eq!(bundled_report, report.collection);
+
+        // Data which didn't fit is not in the bundle.
+        download_bundle_file(
+            nexus,
+            &opctx,
+            bundle.id.into(),
+            "reconfigurator_state.json",
+        )
+        .await
+        .expect_err("reconfigurator state should not fit in the bundle");
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_collect_chunked(cptestctx: &ControlPlaneTestContext) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        // Before we can create any bundles, we need to create the
+        // space for them to be provisioned.
+        let _datasets =
+            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+
+        let bundle = datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
+            )
+            .await
+            .expect("Couldn't allocate a support bundle");
+        assert_eq!(bundle.state, SupportBundleState::Collecting);
+
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
+        )
+        .with_transfer_chunk_size(NonZeroU64::new(16).unwrap());
+
+        // The bundle collection should complete successfully.
+        //
+        // We're going to use a really small chunk size here to force the bundle
+        // to get split up.
+        let report = collector
+            .collect_bundle(&opctx)
+            .await
+            .expect("Collection should have succeeded under test")
+            .expect("Collecting the bundle should have generated a report");
+        assert_eq!(report.collection.bundle, bundle.id.into());
+        // Verify that we spawned steps to query sleds and SPs
+        let step_names: Vec<_> =
+            report.collection.steps.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
+        );
+        assert!(
+            step_names
+                .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
+        );
+        assert!(report.activated_in_db_ok);
+
+        let observed_bundle = datastore
+            .support_bundle_get(&opctx, bundle.id.into())
+            .await
+            .expect("Bundle should definitely be in db by this point");
+        assert_eq!(observed_bundle.state, SupportBundleState::Active);
+
+        // Download a file from the bundle, to verify that it was transferred
+        // successfully.
+        let head = false;
+        let range = None;
+        let response = nexus
+            .support_bundle_download(
+                &opctx,
+                observed_bundle.id.into(),
+                SupportBundleQueryType::Path {
+                    file_path: "bundle_id.txt".to_string(),
+                },
+                head,
+                range,
+            )
+            .await
+            .unwrap();
+
+        // Read the body to bytes, then convert to string
+        let body_bytes =
+            response.into_body().collect().await.unwrap().to_bytes();
+        let body_string = String::from_utf8(body_bytes.to_vec()).unwrap();
+
+        // Verify the content matches the bundle ID
+        assert_eq!(body_string, observed_bundle.id.to_string());
+    }
+
+    #[nexus_test(server = crate::Server)]
     async fn test_collect_many(cptestctx: &ControlPlaneTestContext) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
@@ -1247,26 +1566,57 @@ mod test {
 
         // Assign two bundles to ourselves.
         let bundle1 = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         let bundle2 = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
+            )
             .await
             .expect("Couldn't allocate a second support bundle");
 
-        let collector =
-            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
+        );
 
         // Each time we call "collect_bundle", we collect a SINGLE bundle.
-        let request = BundleRequest { skip_sled_info: true };
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle1.id.into());
-        assert!(report.listed_in_service_sleds);
+        assert_eq!(report.collection.bundle, bundle1.id.into());
+        // Verify that we spawned steps to query sleds and SPs
+        let step_names: Vec<_> =
+            report.collection.steps.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
+        );
+        assert!(
+            step_names
+                .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
+        );
         assert!(report.activated_in_db_ok);
 
         // This is observable by checking the state of bundle1 and bundle2:
@@ -1283,12 +1633,21 @@ mod test {
         assert_eq!(observed_bundle.state, SupportBundleState::Collecting);
 
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle2.id.into());
-        assert!(report.listed_in_service_sleds);
+        assert_eq!(report.collection.bundle, bundle2.id.into());
+        // Verify that we spawned steps to query sleds and SPs
+        let step_names: Vec<_> =
+            report.collection.steps.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
+        );
+        assert!(
+            step_names
+                .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
+        );
         assert!(report.activated_in_db_ok);
 
         // After another collection request, we'll see that both bundles have
@@ -1311,6 +1670,7 @@ mod test {
     ) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
@@ -1324,7 +1684,15 @@ mod test {
         // If we delete the bundle before we start collection, we can delete it
         // immediately.
         let bundle = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
@@ -1340,8 +1708,13 @@ mod test {
             .await
             .unwrap();
 
-        let collector =
-            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
+        );
 
         let report = collector
             .cleanup_destroyed_bundles(&opctx)
@@ -1366,6 +1739,7 @@ mod test {
     ) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
@@ -1378,21 +1752,43 @@ mod test {
 
         // We can allocate a support bundle and collect it
         let bundle = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
 
-        let collector =
-            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
-        let request = BundleRequest { skip_sled_info: true };
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
+        );
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle.id.into());
-        assert!(report.listed_in_service_sleds);
+        assert_eq!(report.collection.bundle, bundle.id.into());
+        // Verify that we spawned steps to query sleds and SPs
+        let step_names: Vec<_> =
+            report.collection.steps.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
+        );
+        assert!(
+            step_names
+                .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
+        );
         assert!(report.activated_in_db_ok);
 
         // Cancel the bundle after collection has completed
@@ -1431,6 +1827,7 @@ mod test {
     ) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
@@ -1444,7 +1841,15 @@ mod test {
         // We can allocate a support bundle, though we'll fail it before it gets
         // collected.
         let bundle = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
@@ -1462,8 +1867,13 @@ mod test {
             .await
             .unwrap();
 
-        let collector =
-            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
+        );
 
         let report = collector
             .cleanup_destroyed_bundles(&opctx)
@@ -1491,6 +1901,7 @@ mod test {
     ) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
@@ -1503,20 +1914,33 @@ mod test {
 
         // We can allocate a support bundle and collect it
         let bundle = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
 
-        let collector =
-            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
-        let request = BundleRequest { skip_sled_info: true };
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
+        );
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle.id.into());
+        assert_eq!(report.collection.bundle, bundle.id.into());
 
         // Mark the bundle as "failing" - this should be triggered
         // automatically by the blueprint executor if the corresponding
@@ -1565,6 +1989,7 @@ mod test {
     ) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
@@ -1577,20 +2002,33 @@ mod test {
 
         // We can allocate a support bundle and collect it
         let bundle = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
 
-        let collector =
-            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
-        let request = BundleRequest { skip_sled_info: true };
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
+        );
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle.id.into());
+        assert_eq!(report.collection.bundle, bundle.id.into());
 
         // Mark the bundle as "failing" - this should be triggered
         // automatically by the blueprint executor if the corresponding
@@ -1630,5 +2068,245 @@ mod test {
                 ..Default::default()
             }
         );
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_reconfigurator_state_collected(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        // Before we can create any bundles, we need to create the
+        // space for them to be provisioned.
+        let _datasets =
+            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+
+        // Create a support bundle
+        let bundle = datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "Testing reconfigurator state collection",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
+            )
+            .await
+            .expect("Couldn't allocate a support bundle");
+        assert_eq!(bundle.state, SupportBundleState::Collecting);
+
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
+        );
+
+        // Collect the bundle
+        let report = collector
+            .collect_bundle(&opctx)
+            .await
+            .expect("Collection should have succeeded under test")
+            .expect("Collecting the bundle should have generated a report");
+        assert_eq!(report.collection.bundle, bundle.id.into());
+
+        // Verify bundle is active
+        let observed_bundle = datastore
+            .support_bundle_get(&opctx, bundle.id.into())
+            .await
+            .expect("Bundle should be in db");
+        assert_eq!(observed_bundle.state, SupportBundleState::Active);
+
+        // Download the reconfigurator_state.json file
+        let head = false;
+        let range = None;
+        let response = nexus
+            .support_bundle_download(
+                &opctx,
+                observed_bundle.id.into(),
+                SupportBundleQueryType::Path {
+                    file_path: "reconfigurator_state.json".to_string(),
+                },
+                head,
+                range,
+            )
+            .await
+            .expect("Should be able to download reconfigurator_state.json");
+
+        // Read and parse the JSON
+        let body_bytes =
+            response.into_body().collect().await.unwrap().to_bytes();
+        let body_string = String::from_utf8(body_bytes.to_vec()).unwrap();
+        let state: serde_json::Value =
+            serde_json::from_str(&body_string).expect("Should be valid JSON");
+
+        // Verify the JSON has the expected structure
+        //
+        // We don't really care about the contents that much, we just want to
+        // verify that the UnstableReconfiguratorState object got serialized
+        // at all.
+
+        assert!(
+            !state
+                .get("target_blueprint")
+                .expect("missing target blueprint")
+                .is_null(),
+            "Should have target blueprint"
+        );
+        assert!(
+            !state
+                .get("blueprints")
+                .expect("missing blueprints")
+                .as_array()
+                .expect("blueprints should be an array")
+                .is_empty(),
+            "Should have blueprints"
+        );
+    }
+
+    // Verify that a bundle created with a limited data selection only runs
+    // the corresponding collection steps (others are skipped).
+    #[nexus_test(server = crate::Server)]
+    async fn test_per_bundle_data_selection(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        let _datasets =
+            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+
+        // Create a bundle that only requests reconfigurator state -
+        // everything else should be skipped.
+        let bundle = datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "Testing per-bundle data selection",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::new()
+                        .with_reconfigurator(),
+                },
+            )
+            .await
+            .expect("Couldn't allocate a support bundle");
+        assert_eq!(bundle.state, SupportBundleState::Collecting);
+
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+            SupportBundleSizeLimit::DEFAULT,
+        );
+
+        let report = collector
+            .collect_bundle(&opctx)
+            .await
+            .expect("Collection should have succeeded")
+            .expect("Should have generated a report");
+        assert_eq!(report.collection.bundle, bundle.id.into());
+        assert!(report.activated_in_db_ok);
+
+        // Reconfigurator state should have run successfully.
+        let reconfig_step = report
+            .collection
+            .steps
+            .iter()
+            .find(|s| {
+                s.name == SupportBundleCollectionStep::STEP_RECONFIGURATOR_STATE
+            })
+            .expect("should have reconfigurator state step");
+        assert_eq!(reconfig_step.status, SupportBundleCollectionStepStatus::Ok);
+
+        // Ereports should be skipped since we didn't request them.
+        let ereport_step = report
+            .collection
+            .steps
+            .iter()
+            .find(|s| s.name == SupportBundleCollectionStep::STEP_EREPORTS)
+            .expect("should have ereports step");
+        assert_eq!(
+            ereport_step.status,
+            SupportBundleCollectionStepStatus::Skipped
+        );
+
+        // Sled cubby info should be skipped.
+        let cubby_step = report
+            .collection
+            .steps
+            .iter()
+            .find(|s| {
+                s.name == SupportBundleCollectionStep::STEP_SLED_CUBBY_INFO
+            })
+            .expect("should have sled cubby info step");
+        assert_eq!(
+            cubby_step.status,
+            SupportBundleCollectionStepStatus::Skipped
+        );
+
+        // SP dumps should be skipped.
+        let sp_step = report
+            .collection
+            .steps
+            .iter()
+            .find(|s| {
+                s.name == SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS
+            })
+            .expect("should have SP dumps step");
+        assert_eq!(sp_step.status, SupportBundleCollectionStepStatus::Skipped);
+
+        // Sled queries should be skipped.
+        let sled_step = report
+            .collection
+            .steps
+            .iter()
+            .find(|s| s.name == SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
+            .expect("should have sled query step");
+        assert_eq!(
+            sled_step.status,
+            SupportBundleCollectionStepStatus::Skipped
+        );
+    }
+
+    // Ensure that we can convert a temporary directory into a zipfile
+    #[test]
+    fn test_zipfile_creation() {
+        let dir = camino_tempfile::tempdir().unwrap();
+        let tempdir_for_zip = camino_tempfile::tempdir().unwrap();
+
+        std::fs::create_dir_all(dir.path().join("dir-a")).unwrap();
+        std::fs::create_dir_all(dir.path().join("dir-b")).unwrap();
+        std::fs::write(dir.path().join("dir-a").join("file-a"), "some data")
+            .unwrap();
+        std::fs::write(dir.path().join("file-b"), "more data").unwrap();
+
+        let log = slog::Logger::root(slog::Discard, slog::o!());
+        let zipfile = bundle_to_zipfile(dir, tempdir_for_zip.path(), &log)
+            .expect("Should have been able to bundle zipfile");
+        let archive = zip::read::ZipArchive::new(zipfile).unwrap();
+
+        // We expect the order to be deterministically alphabetical
+        let mut names = archive.file_names();
+        assert_eq!(names.next(), Some("dir-a/"));
+        assert_eq!(names.next(), Some("dir-a/file-a"));
+        assert_eq!(names.next(), Some("dir-b/"));
+        assert_eq!(names.next(), Some("file-b"));
+        assert_eq!(names.next(), None);
     }
 }

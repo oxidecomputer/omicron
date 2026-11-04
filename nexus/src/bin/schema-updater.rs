@@ -14,6 +14,9 @@ use nexus_db_model::AllSchemaVersions;
 use nexus_db_model::SCHEMA_VERSION;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::DatastoreSetupAction;
+use nexus_db_queries::db::datastore::IdentityCheckPolicy;
+use omicron_common::backoff::BackoffError;
 use semver::Version;
 use slog::Drain;
 use slog::Level;
@@ -60,8 +63,11 @@ enum Cmd {
     },
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    oxide_tokio_rt::run(main_impl())
+}
+
+async fn main_impl() -> anyhow::Result<()> {
     let args = Cli::parse();
 
     let decorator = TermDecorator::new().build();
@@ -74,11 +80,19 @@ async fn main() -> anyhow::Result<()> {
     let all_versions = AllSchemaVersions::load(&schema_config.schema_dir)?;
 
     let crdb_cfg = db::Config { url: args.url };
-    let pool = Arc::new(db::Pool::new_single_host(&log, &crdb_cfg));
+    let pool = Arc::new(db::Pool::new_single_host(
+        &log,
+        &crdb_cfg,
+        db::ClaimBacktraceSetting::Capture,
+    ));
 
     // We use the unchecked constructor of the datastore because we
     // don't want to block on someone else applying an upgrade.
-    let datastore = DataStore::new_unchecked(log.clone(), pool);
+    let datastore = DataStore::new_unchecked(
+        log.clone(),
+        pool,
+        omicron_git_version::current(),
+    );
 
     match args.cmd {
         Cmd::List => {
@@ -105,11 +119,43 @@ async fn main() -> anyhow::Result<()> {
         }
         Cmd::Upgrade { version } => {
             println!("Upgrading to {version}");
-            datastore
-                .ensure_schema(&log, version.clone(), Some(&all_versions))
-                .await
-                .map_err(|e| anyhow!(e))?;
-            println!("Upgrade to {version} complete");
+            let checked_action = datastore
+                .check_schema_and_access(
+                    IdentityCheckPolicy::DontCare,
+                    version.clone(),
+                )
+                .await?;
+
+            match checked_action.action() {
+                DatastoreSetupAction::Ready => {
+                    println!("Already at version {version}")
+                }
+                DatastoreSetupAction::Update => {
+                    datastore
+                        .update_schema(checked_action, Some(&all_versions))
+                        .await
+                        .map_err(|e| match e {
+                            BackoffError::Permanent(e)
+                            | BackoffError::Transient { err: e, .. } => e,
+                        })?;
+                    println!("Update to {version} complete");
+                }
+                DatastoreSetupAction::Refuse => {
+                    println!("Refusing to update to version {version}")
+                }
+                DatastoreSetupAction::TryLater
+                | DatastoreSetupAction::NeedsHandoff { .. } => {
+                    // This case should not happen - we supplied
+                    // IdentityCheckPolicy::DontCare, so we should not be told
+                    // to attempt a takeover by a specific Nexus.
+                    println!(
+                        "Refusing to update to version {version}. \
+                         The schema updater tried to ignore the identity check, \
+                         but got a response indicating handoff is needed. \
+                         This is unexpected, and probably a bug"
+                    )
+                }
+            }
         }
     }
     datastore.terminate().await;

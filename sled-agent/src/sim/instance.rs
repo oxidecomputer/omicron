@@ -12,16 +12,16 @@ use async_trait::async_trait;
 use chrono::Utc;
 use nexus_client;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::ResourceType;
-use omicron_common::api::internal::nexus::{SledVmmState, VmmState};
-use omicron_uuid_kinds::{GenericUuid, PropolisUuid};
+use omicron_generation_kinds::Generation;
+use omicron_uuid_kinds::{PropolisKind, TypedUuid};
 use propolis_client::types::{
     InstanceMigrateStatusResponse as PropolisMigrateResponse,
     InstanceMigrationStatus as PropolisMigrationStatus,
     InstanceState as PropolisInstanceState, InstanceStateMonitorResponse,
 };
 use sled_agent_types::instance::VmmStateRequested;
+use sled_agent_types::instance::{SledVmmState, VmmState};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -434,6 +434,7 @@ impl SimInstance {
 
 #[async_trait]
 impl Simulatable for SimInstance {
+    type Id = PropolisKind;
     type CurrentState = SledVmmState;
     type RequestedState = VmmStateRequested;
     type ProducerArgs = ();
@@ -457,7 +458,7 @@ impl Simulatable for SimInstance {
                     current.migration_in.map(|m| m.migration_id),
                 ),
                 last_response: InstanceStateMonitorResponse {
-                    gen: 1,
+                    gen_: 1,
                     state: PropolisInstanceState::Starting,
                     migration: PropolisMigrateResponse {
                         migration_in: None,
@@ -468,14 +469,6 @@ impl Simulatable for SimInstance {
                 destroyed: false,
             })),
         }
-    }
-
-    async fn set_producer(
-        &mut self,
-        _args: Self::ProducerArgs,
-    ) -> Result<(), Error> {
-        // NOTE: Not implemented, yet.
-        Ok(())
     }
 
     fn request_transition(
@@ -490,7 +483,7 @@ impl Simulatable for SimInstance {
     }
 
     fn generation(&self) -> Generation {
-        self.inner.lock().unwrap().state.vmm().gen
+        self.inner.lock().unwrap().state.vmm().generation
     }
 
     fn current(&self) -> Self::CurrentState {
@@ -507,12 +500,12 @@ impl Simulatable for SimInstance {
 
     async fn notify(
         nexus_client: &Arc<NexusClient>,
-        id: &Uuid,
+        id: &TypedUuid<Self::Id>,
         current: Self::CurrentState,
     ) -> Result<(), Error> {
         nexus_client
             .cpapi_instances_put(
-                &PropolisUuid::from_untyped_uuid(*id),
+                id,
                 &nexus_client::types::SledVmmState::from(current),
             )
             .await

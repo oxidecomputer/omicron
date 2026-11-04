@@ -15,15 +15,15 @@
 //!
 //! This background task is responsible for getting locally-stored artifacts
 //! onto sleds, and ensuring all sleds have copies of all artifacts.
-//! `Nexus::updates_put_repository` sends the [`ArtifactsWithPlan`] object to
-//! this task via an [`mpsc`] channel and activates it. Once enough sleds have a
-//! copy of each artifact in an `ArtifactsWithPlan`, the local copy is removed.
+//! `Nexus::updates_put_repository` sends the [`tufaceous::Repository`] object
+//! to this task via an [`mpsc`] channel and activates it. Once enough sleds
+//! have a copy of each artifact in an `Repository`, the local copy is removed.
 //!
 //! # Task flow
 //!
-//! 1. The task moves `ArtifactsWithPlan` objects off the `mpsc` channel and
-//!    into a `Vec` that represents the set of artifacts stored locally in this
-//!    Nexus zone.
+//! 1. The task moves `Repository` objects off the `mpsc` channel and into a
+//!    `Vec` that represents the set of artifacts stored locally in this Nexus
+//!    zone.
 //! 2. The task fetches the artifact configuration (list of artifacts and
 //!    generation number) from CockroachDB.
 //! 3. The task puts the artifact configuration to each sled, and queries
@@ -33,9 +33,9 @@
 //!    artifacts. (This means that the task will always be trying to replicate
 //!    artifacts to that sled until it comes back or is pulled out of service.)
 //! 4. The task builds a list of all artifacts and where they can be found
-//!    (local `ArtifactsWithPlan` and/or sled agents).
-//! 5. If all the artifacts belonging to an `ArtifactsWithPlan` object have
-//!    been replicated to at least `MIN_SLED_REPLICATION` sleds, the task drops
+//!    (local `Repository` and/or sled agents).
+//! 5. If all the artifacts belonging to an `Repository` object have been
+//!    replicated to at least `MIN_SLED_REPLICATION` sleds, the task drops
 //!    the object from its `Vec` (thus cleaning up the local storage of those
 //!    files).
 //! 6. The task generates a list of requests that need to be sent:
@@ -68,27 +68,25 @@ use futures::future::{BoxFuture, FutureExt};
 use futures::stream::{FuturesUnordered, Stream, StreamExt};
 use http::StatusCode;
 use nexus_auth::context::OpContext;
-use nexus_db_queries::db::{
-    DataStore, datastore::SQL_BATCH_SIZE, pagination::Paginator,
-};
+use nexus_db_queries::db::DataStore;
 use nexus_networking::sled_client_from_address;
 use nexus_types::deployment::SledFilter;
+use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::{
     TufArtifactReplicationCounters, TufArtifactReplicationOperation,
     TufArtifactReplicationRequest, TufArtifactReplicationStatus,
 };
-use omicron_common::api::external::Generation;
-use omicron_uuid_kinds::{GenericUuid, SledUuid};
-use rand::seq::SliceRandom;
+use omicron_generation_kinds::ArtifactConfigGeneration;
+use omicron_uuid_kinds::SledUuid;
+use rand::seq::{IndexedRandom, SliceRandom};
 use serde_json::json;
-use sled_agent_client::types::ArtifactConfig;
+use sled_agent_client::ClientInfo as _;
+use sled_agent_types::artifact::ArtifactConfig;
 use slog_error_chain::InlineErrorChain;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
+use tufaceous::{Repository, TargetStream};
 use tufaceous_artifact::ArtifactHash;
-use update_common::artifacts::{
-    ArtifactsWithPlan, ExtractedArtifactDataHandle,
-};
 
 use crate::app::background::BackgroundTask;
 
@@ -112,7 +110,7 @@ struct Sled {
     depot_base_url: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct ArtifactPresence {
     /// The count of this artifact stored on each sled.
     sleds: BTreeMap<SledUuid, u32>,
@@ -125,15 +123,15 @@ struct ArtifactPresence {
 /// equivalent to a wrapper struct.
 #[derive(Debug, Clone)]
 enum ArtifactHandle {
-    Extracted(ExtractedArtifactDataHandle),
+    Extracted(tufaceous::ArtifactHandle),
     #[cfg(test)]
     Fake,
 }
 
 impl ArtifactHandle {
-    async fn file(&self) -> std::io::Result<tokio::fs::File> {
+    async fn stream(&self) -> Result<TargetStream, tufaceous::error::Error> {
         match self {
-            ArtifactHandle::Extracted(handle) => handle.file().await,
+            ArtifactHandle::Extracted(handle) => handle.stream().await,
             #[cfg(test)]
             ArtifactHandle::Fake => unimplemented!(),
         }
@@ -252,7 +250,7 @@ impl<'a> Requests<'a> {
     fn into_stream(
         self,
         log: &'a slog::Logger,
-        generation: Generation,
+        generation: ArtifactConfigGeneration,
     ) -> impl Stream<
         Item = impl Future<Output = TufArtifactReplicationRequest> + use<'a>,
     > + use<'a> {
@@ -325,7 +323,7 @@ impl Request<'_> {
     async fn execute(
         self,
         log: &slog::Logger,
-        generation: Generation,
+        generation: ArtifactConfigGeneration,
         _permit: Option<OwnedSemaphorePermit>,
     ) -> TufArtifactReplicationRequest {
         let err: Option<Box<dyn std::error::Error>> = async {
@@ -333,9 +331,9 @@ impl Request<'_> {
                 Request::Put { sled, handle, hash } => {
                     sled.client
                         .artifact_put(
-                            &hash.to_string(),
+                            &hash.0.into(),
                             &generation,
-                            handle.file().await?,
+                            reqwest::Body::wrap_stream(handle.stream().await?),
                         )
                         .await?;
                 }
@@ -343,7 +341,7 @@ impl Request<'_> {
                     target_sled
                     .client
                     .artifact_copy_from_depot(
-                        &hash.to_string(),
+                        &hash.0.into(),
                         &generation,
                         &sled_agent_client::types::ArtifactCopyFromDepotBody {
                             depot_base_url: source_sled.depot_base_url.clone(),
@@ -405,15 +403,16 @@ impl Request<'_> {
                     }
                 }
             },
-            error: err.map(|err| err.to_string()),
+            error: err
+                .map(|err| InlineErrorChain::new(err.as_ref()).to_string()),
         }
     }
 }
 
 pub struct ArtifactReplication {
     datastore: Arc<DataStore>,
-    local: Vec<ArtifactsWithPlan>,
-    local_rx: mpsc::Receiver<ArtifactsWithPlan>,
+    local: Vec<Arc<Repository>>,
+    local_rx: mpsc::Receiver<Repository>,
     min_sled_replication: usize,
     /// List of recent requests for debugging.
     request_debug_ringbuf: Arc<VecDeque<TufArtifactReplicationRequest>>,
@@ -429,7 +428,7 @@ impl BackgroundTask for ArtifactReplication {
             // Move any received artifacts from `local_rx` to `local`.
             loop {
                 match self.local_rx.try_recv() {
-                    Ok(artifacts) => self.local.push(artifacts),
+                    Ok(artifacts) => self.local.push(Arc::new(artifacts)),
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => {
                         let err = "artifact replication receiver disconnected";
@@ -449,14 +448,23 @@ impl BackgroundTask for ArtifactReplication {
                 Ok(sleds) => sleds,
                 Err(err) => return json!({"error": format!("{err:#}")}),
             };
-            let (config, inventory) = match self
-                .list_artifacts_from_database(opctx)
+            let config = match self
+                .datastore
+                .tuf_list_artifacts_unpruned_batched(opctx)
                 .await
                 .context("failed to list artifacts from database")
             {
                 Ok(inventory) => inventory,
                 Err(err) => return json!({"error": format!("{err:#}")}),
             };
+            let inventory = Inventory(
+                config
+                    .artifacts
+                    .iter()
+                    .copied()
+                    .zip(std::iter::repeat_with(ArtifactPresence::default))
+                    .collect(),
+            );
 
             // Create a channel to receive request ringbuf entries.
             let (ringbuf_tx_owned, mut rx) =
@@ -508,7 +516,7 @@ impl BackgroundTask for ArtifactReplication {
                 );
                 let requests = inventory.into_requests(
                     &sleds,
-                    &mut rand::thread_rng(),
+                    &mut rand::rng(),
                     self.min_sled_replication,
                 );
                 requests
@@ -552,7 +560,7 @@ impl BackgroundTask for ArtifactReplication {
 impl ArtifactReplication {
     pub fn new(
         datastore: Arc<DataStore>,
-        local_rx: mpsc::Receiver<ArtifactsWithPlan>,
+        local_rx: mpsc::Receiver<Repository>,
         min_sled_replication: usize,
     ) -> ArtifactReplication {
         ArtifactReplication {
@@ -572,9 +580,9 @@ impl ArtifactReplication {
             .await?
             .into_iter()
             .map(|sled| Sled {
-                id: SledUuid::from_untyped_uuid(sled.identity.id),
+                id: sled.id(),
                 client: sled_client_from_address(
-                    sled.identity.id,
+                    sled.id(),
                     sled.address(),
                     &opctx.log,
                 ),
@@ -584,37 +592,6 @@ impl ArtifactReplication {
                 ),
             })
             .collect())
-    }
-
-    async fn list_artifacts_from_database(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<(ArtifactConfig, Inventory)> {
-        let generation =
-            self.datastore.update_tuf_generation_get(opctx).await?;
-        let mut inventory = Inventory::default();
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
-        while let Some(p) = paginator.next() {
-            let batch = self
-                .datastore
-                .update_tuf_artifact_list(
-                    opctx,
-                    generation,
-                    &p.current_pagparams(),
-                )
-                .await?;
-            paginator = p.found_batch(&batch, &|a| a.id.into_untyped_uuid());
-            for artifact in batch {
-                inventory.0.entry(artifact.sha256.0).or_insert_with(|| {
-                    ArtifactPresence { sleds: BTreeMap::new(), local: None }
-                });
-            }
-        }
-        let config = ArtifactConfig {
-            generation,
-            artifacts: inventory.0.keys().map(|h| h.to_string()).collect(),
-        };
-        Ok((config, inventory))
     }
 
     /// Put `config` to `sled`, then query `sled` for a list of its artifacts.
@@ -644,7 +621,7 @@ impl ArtifactReplication {
                         "sled" => sled.client.baseurl(),
                         "generation" => &config.generation,
                     );
-                    err.to_string()
+                    InlineErrorChain::new(err).to_string()
                 }),
             })
             .await
@@ -728,7 +705,10 @@ impl ArtifactReplication {
                     "error" => InlineErrorChain::new(&err),
                     "sled" => sled.client.baseurl(),
                 );
-                (ControlFlow::Continue(BTreeMap::new()), Some(err.to_string()))
+                (
+                    ControlFlow::Continue(BTreeMap::new()),
+                    Some(InlineErrorChain::new(&err).to_string()),
+                )
             }
         };
         ringbuf_tx
@@ -744,35 +724,34 @@ impl ArtifactReplication {
     }
 
     /// Fill in the `local` field on the values of `inventory` with any local
-    /// artifacts, while removing the locally-stored `ArtifactsWithPlan` objects
+    /// artifacts, while removing the locally-stored `Repository` objects
     /// once they reach the minimum requirement to be considered replicated.
     fn list_and_clean_up_local_artifacts(
         &mut self,
         log: &slog::Logger,
         inventory: &mut Inventory,
     ) {
-        self.local.retain(|plan| {
-            let mut keep_plan = false;
-            for hash_id in plan.by_id().values().flatten() {
-                if let Some(handle) = plan.get_by_hash(hash_id) {
-                    if let Some(presence) = inventory.0.get_mut(&hash_id.hash) {
-                        presence.local =
-                            Some(ArtifactHandle::Extracted(handle));
-                        if presence.sleds.len() < self.min_sled_replication {
-                            keep_plan = true;
-                        }
+        self.local.retain(|repo| {
+            let mut keep_repo = false;
+            for handle in repo.handles() {
+                if let Some(presence) =
+                    inventory.0.get_mut(&handle.artifact().hash)
+                {
+                    presence.local = Some(ArtifactHandle::Extracted(handle));
+                    if presence.sleds.len() < self.min_sled_replication {
+                        keep_repo = true;
                     }
                 }
             }
-            if !keep_plan {
-                let version = &plan.description().repo.system_version;
+            if !keep_repo {
+                let version = &repo.system_version();
                 info!(
                     log,
                     "Cleaning up local repository";
                     "repo_system_version" => version.to_string(),
                 );
             }
-            keep_plan
+            keep_repo
         })
     }
 }
@@ -782,6 +761,7 @@ mod tests {
     use std::fmt::Write;
 
     use expectorate::assert_contents;
+    use omicron_uuid_kinds::GenericUuid;
     use rand::{Rng, SeedableRng, rngs::StdRng};
 
     use super::*;
@@ -795,7 +775,7 @@ mod tests {
         (0..n)
             .map(|_| Sled {
                 id: SledUuid::from_untyped_uuid(
-                    uuid::Builder::from_random_bytes(rng.gen()).into_uuid(),
+                    uuid::Builder::from_random_bytes(rng.random()).into_uuid(),
                 ),
                 client: sled_agent_client::Client::new(
                     "http://invalid.test",
@@ -893,7 +873,7 @@ mod tests {
         let mut inventory = BTreeMap::new();
         for _ in 0..2 {
             inventory.insert(
-                ArtifactHash(rng.gen()),
+                ArtifactHash(rng.random()),
                 ArtifactPresence {
                     sleds: BTreeMap::new(),
                     local: Some(ArtifactHandle::Fake),
@@ -929,7 +909,7 @@ mod tests {
         let mut inventory = BTreeMap::new();
         for _ in 0..10 {
             inventory.insert(
-                ArtifactHash(rng.gen()),
+                ArtifactHash(rng.random()),
                 ArtifactPresence { sleds: sled_presence.clone(), local: None },
             );
         }
@@ -956,7 +936,7 @@ mod tests {
         let sleds = fake_sleds(4, &mut rng);
         let mut inventory = BTreeMap::new();
         inventory.insert(
-            ArtifactHash(rng.gen()),
+            ArtifactHash(rng.random()),
             ArtifactPresence {
                 sleds: sleds
                     .iter()
@@ -989,7 +969,7 @@ mod tests {
         let sleds = fake_sleds(4, &mut rng);
         let mut inventory = BTreeMap::new();
         inventory.insert(
-            ArtifactHash(rng.gen()),
+            ArtifactHash(rng.random()),
             ArtifactPresence {
                 sleds: sleds.iter().map(|sled| (sled.id, 2)).collect(),
                 local: None,

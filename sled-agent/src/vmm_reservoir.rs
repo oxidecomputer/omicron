@@ -7,6 +7,7 @@
 use illumos_utils::vmm_reservoir;
 use omicron_common::api::external::ByteCount;
 use slog::Logger;
+use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
@@ -14,9 +15,9 @@ use tokio::sync::{broadcast, oneshot};
 
 use sled_hardware::MemoryReservations;
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, SlogInlineError)]
 pub enum Error {
-    #[error("Failed to create reservoir: {0}")]
+    #[error("Failed to create reservoir")]
     Reservoir(#[from] vmm_reservoir::Error),
 
     #[error("Invalid reservoir configuration: {0}")]
@@ -119,7 +120,7 @@ impl VmmReservoirManagerHandle {
     }
 
     /// TODO: We should be able run to tests in VMs that can use the real VmmReservoir
-    #[cfg(all(test, target_os = "illumos"))]
+    #[cfg(test)]
     pub fn stub_for_test() -> Self {
         let (tx, _) = flume::bounded(1);
         let (size_updated_tx, _) = broadcast::channel(1);
@@ -187,7 +188,7 @@ impl VmmReservoirManager {
             }
             Some(mode) => {
                 if let Err(e) = self.set_reservoir_size(mode) {
-                    error!(self.log, "Failed to setup VMM reservoir: {e}");
+                    error!(self.log, "Failed to setup VMM reservoir"; e);
                 }
             }
         }
@@ -199,7 +200,7 @@ impl VmmReservoirManager {
                     let _ = reply_tx.send(Ok(()));
                 }
                 Err(e) => {
-                    error!(self.log, "Failed to setup VMM reservoir: {e}");
+                    error!(self.log, "Failed to setup VMM reservoir"; &e);
                     let _ = reply_tx.send(Err(e));
                 }
             }
@@ -263,12 +264,32 @@ impl VmmReservoirManager {
             );
         }
         info!(self.log, "Setting reservoir size to {reservoir_size} bytes");
-        vmm_reservoir::ReservoirControl::set(reservoir_size)?;
 
-        self.reservoir_size.store(reservoir_size.to_bytes(), Ordering::SeqCst);
+        let actual_size = match vmm_reservoir::ReservoirControl::set(
+            reservoir_size,
+        ) {
+            Ok(()) => reservoir_size,
+            Err(vmm_reservoir::Error::ReservoirError {
+                error,
+                current_size: Some(size),
+            }) => {
+                // TODO: When we hit this error condition we really would like
+                // to keep retrying in the background to get to our intended
+                // size.
+                warn!(
+                    self.log,
+                    "Reservoir resize failed but reservoir is currently at {size} bytes";
+                    InlineErrorChain::new(&error),
+                );
+                size
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        self.reservoir_size.store(actual_size.to_bytes(), Ordering::SeqCst);
         info!(
             self.log,
-            "Finished setting reservoir size to {reservoir_size} bytes"
+            "Finished setting reservoir size to {actual_size} bytes"
         );
         self.size_updated_tx.send(()).unwrap();
 

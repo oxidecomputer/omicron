@@ -2,17 +2,18 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use omicron_common::api::external::Generation;
-use omicron_common::disk::DiskVariant;
-use omicron_uuid_kinds::SledUuid;
-
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use nexus_client::types::SledAgentInfo;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
+use omicron_common::http_client::internal_http_client_builder;
+use omicron_generation_kinds::Generation;
+use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::inventory::SledRole;
 use sled_hardware::HardwareManager;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use tokio::sync::{Notify, broadcast, mpsc, oneshot};
@@ -34,7 +35,7 @@ pub(crate) fn make_nexus_client_with_port(
     resolver: Arc<Resolver>,
     port: u16,
 ) -> NexusClient {
-    let client = reqwest::ClientBuilder::new()
+    let client = internal_http_client_builder()
         .dns_resolver(resolver)
         .build()
         .expect("Failed to build client");
@@ -54,17 +55,6 @@ pub(crate) trait ConvertInto<T>: Sized {
     fn convert(self) -> T;
 }
 
-impl ConvertInto<nexus_client::types::PhysicalDiskKind> for DiskVariant {
-    fn convert(self) -> nexus_client::types::PhysicalDiskKind {
-        use nexus_client::types::PhysicalDiskKind;
-
-        match self {
-            DiskVariant::U2 => PhysicalDiskKind::U2,
-            DiskVariant::M2 => PhysicalDiskKind::M2,
-        }
-    }
-}
-
 impl ConvertInto<nexus_client::types::Baseboard>
     for sled_hardware_types::Baseboard
 {
@@ -73,6 +63,28 @@ impl ConvertInto<nexus_client::types::Baseboard>
             serial: self.identifier().to_string(),
             part: self.model().to_string(),
             revision: self.revision(),
+        }
+    }
+}
+
+impl ConvertInto<nexus_client::types::SledCpuFamily>
+    for sled_hardware_types::SledCpuFamily
+{
+    fn convert(self) -> nexus_client::types::SledCpuFamily {
+        use sled_hardware_types::SledCpuFamily as SharedSledCpuFamily;
+        match self {
+            SharedSledCpuFamily::Unknown => {
+                nexus_client::types::SledCpuFamily::Unknown
+            }
+            SharedSledCpuFamily::AmdMilan => {
+                nexus_client::types::SledCpuFamily::AmdMilan
+            }
+            SharedSledCpuFamily::AmdTurin => {
+                nexus_client::types::SledCpuFamily::AmdTurin
+            }
+            SharedSledCpuFamily::AmdTurinDense => {
+                nexus_client::types::SledCpuFamily::AmdTurinDense
+            }
         }
     }
 }
@@ -261,9 +273,9 @@ impl NexusNotifierTask {
         // Box a function that can return the latest `SledAgentInfo`
         let get_sled_agent_info = Box::new(move |generation| {
             let role = if hardware.is_scrimlet() {
-                nexus_client::types::SledRole::Scrimlet
+                SledRole::Scrimlet
             } else {
-                nexus_client::types::SledRole::Gimlet
+                SledRole::Gimlet
             };
             SledAgentInfo {
                 sa_address: sled_address.to_string(),
@@ -275,6 +287,7 @@ impl NexusNotifierTask {
                     .usable_physical_ram_bytes()
                     .into(),
                 reservoir_size: vmm_reservoir_manager.reservoir_size().into(),
+                cpu_family: hardware.cpu_family().convert(),
                 generation,
                 decommissioned: false,
             }
@@ -529,7 +542,8 @@ impl NexusNotifierTask {
                 self.nexus_known_info = None;
                 warn!(
                     self.log,
-                    "Received Error from Nexus for Get request: {:?}", e
+                    "Received Error from Nexus for Get request";
+                    InlineErrorChain::new(&e),
                 );
             }
             (NexusOp::Put, Err(e)) => {
@@ -537,7 +551,8 @@ impl NexusNotifierTask {
                 self.nexus_known_info = None;
                 warn!(
                     self.log,
-                    "Received Error from Nexus for Put request: {:?}", e
+                    "Received Error from Nexus for Put request";
+                    InlineErrorChain::new(&e),
                 );
             }
         }
@@ -556,8 +571,9 @@ mod test {
 
     use super::*;
     use omicron_common::api::external::{
-        ByteCount, Error, Generation, LookupType, MessagePair, ResourceType,
+        ByteCount, Error, LookupType, MessagePair, ResourceType,
     };
+    use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use sled_hardware_types::Baseboard;
 
@@ -647,13 +663,14 @@ mod test {
             Arc::new(std::sync::Mutex::new(SledAgentInfo {
                 sa_address: sa_address.clone(),
                 repo_depot_port: 0,
-                role: nexus_client::types::SledRole::Gimlet,
+                role: SledRole::Gimlet,
                 baseboard: Baseboard::new_pc("test".into(), "test".into())
                     .convert(),
                 usable_hardware_threads: 16,
                 usable_physical_ram: ByteCount::from(1024 * 1024 * 1024u32)
                     .into(),
                 reservoir_size: ByteCount::from(0u32).into(),
+                cpu_family: nexus_client::types::SledCpuFamily::Unknown,
                 generation: Generation::new(),
                 decommissioned: false,
             }));
@@ -686,7 +703,7 @@ mod test {
                 if status.nexus_known_info.is_some() {
                     Ok(status)
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(2),
@@ -706,7 +723,7 @@ mod test {
                 if !status.has_pending_notification {
                     Ok(status)
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(2),
@@ -738,7 +755,7 @@ mod test {
                 if status.cancelled_pending_notifications == 2 {
                     Ok(status)
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(2),
@@ -772,7 +789,7 @@ mod test {
                 if !status.has_pending_notification {
                     Ok(status)
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(2),
@@ -812,7 +829,7 @@ mod test {
                 {
                     Ok(status)
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(2),
@@ -856,7 +873,7 @@ mod test {
                 {
                     Ok(status)
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(2),
@@ -898,7 +915,7 @@ mod test {
                 {
                     Ok(status)
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(2),

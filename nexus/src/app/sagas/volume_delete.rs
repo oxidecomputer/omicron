@@ -30,6 +30,8 @@ use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::authn;
 use nexus_db_queries::db::datastore::CrucibleResources;
 use nexus_db_queries::db::datastore::FreedCrucibleResources;
+use nexus_types::saga::saga_action_failed;
+use omicron_common::api::external::Error;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
@@ -130,10 +132,10 @@ async fn svd_decrease_crucible_resource_count(
         .soft_delete_volume(params.volume_id)
         .await
         .map_err(|e| {
-            ActionError::action_failed(format!(
+            saga_action_failed(Error::internal_error(&format!(
                 "failed to soft_delete_volume: {:?}",
                 e,
-            ))
+            )))
         })?;
 
     Ok(crucible_resources)
@@ -157,11 +159,11 @@ async fn svd_delete_crucible_regions(
         )
         .await
         .map_err(|e| {
-            ActionError::action_failed(format!(
+            saga_action_failed(Error::internal_error(&format!(
                 "failed to get datasets_and_regions from crucible resources ({:?}): {:?}",
                 crucible_resources_to_delete,
                 e,
-            ))
+            )))
         })?;
 
     osagactx
@@ -169,10 +171,10 @@ async fn svd_delete_crucible_regions(
         .delete_crucible_regions(log, datasets_and_regions.clone())
         .await
         .map_err(|e| {
-            ActionError::action_failed(format!(
+            saga_action_failed(Error::internal_error(&format!(
                 "failed to delete_crucible_regions: {:?}",
                 e,
-            ))
+            )))
         })?;
 
     // Remove DB records
@@ -184,10 +186,10 @@ async fn svd_delete_crucible_regions(
         .regions_hard_delete(log, region_ids_to_delete)
         .await
         .map_err(|e| {
-        ActionError::action_failed(format!(
+        saga_action_failed(Error::internal_error(&format!(
             "failed to regions_hard_delete: {:?}",
             e,
-        ))
+        )))
     })?;
 
     Ok(())
@@ -216,11 +218,11 @@ async fn svd_delete_crucible_running_snapshots(
         )
         .await
         .map_err(|e| {
-            ActionError::action_failed(format!(
+            saga_action_failed(Error::internal_error(&format!(
                 "failed to get datasets_and_snapshots from crucible resources ({:?}): {:?}",
                 crucible_resources_to_delete,
                 e,
-            ))
+            )))
         })?;
 
     osagactx
@@ -228,10 +230,10 @@ async fn svd_delete_crucible_running_snapshots(
         .delete_crucible_running_snapshots(log, datasets_and_snapshots.clone())
         .await
         .map_err(|e| {
-            ActionError::action_failed(format!(
+            saga_action_failed(Error::internal_error(&format!(
                 "failed to delete_crucible_running_snapshots: {:?}",
                 e,
-            ))
+            )))
         })?;
 
     Ok(())
@@ -259,11 +261,11 @@ async fn svd_delete_crucible_snapshots(
         )
         .await
         .map_err(|e| {
-            ActionError::action_failed(format!(
+            saga_action_failed(Error::internal_error(&format!(
                 "failed to get datasets_and_snapshots from crucible resources ({:?}): {:?}",
                 crucible_resources_to_delete,
                 e,
-            ))
+            )))
         })?;
 
     osagactx
@@ -271,10 +273,10 @@ async fn svd_delete_crucible_snapshots(
         .delete_crucible_snapshots(log, datasets_and_snapshots.clone())
         .await
         .map_err(|e| {
-            ActionError::action_failed(format!(
+            saga_action_failed(Error::internal_error(&format!(
                 "failed to delete_crucible_snapshots: {:?}",
                 e,
-            ))
+            )))
         })?;
 
     Ok(())
@@ -297,11 +299,11 @@ async fn svd_delete_crucible_snapshot_records(
         )
         .await
         .map_err(|e| {
-            ActionError::action_failed(format!(
+            saga_action_failed(Error::internal_error(&format!(
                 "failed to get datasets_and_snapshots from crucible resources ({:?}): {:?}",
                 crucible_resources_to_delete,
                 e,
-            ))
+            )))
         })?;
 
     for (_, region_snapshot) in datasets_and_snapshots {
@@ -314,13 +316,13 @@ async fn svd_delete_crucible_snapshot_records(
             )
             .await
             .map_err(|e| {
-                ActionError::action_failed(format!(
+                saga_action_failed(Error::internal_error(&format!(
                     "failed to region_snapshot_remove {} {} {}: {:?}",
                     region_snapshot.dataset_id,
                     region_snapshot.region_id,
                     region_snapshot.snapshot_id,
                     e,
-                ))
+                )))
             })?;
     }
 
@@ -420,10 +422,10 @@ async fn svd_find_freed_crucible_regions(
     let freed_datasets_regions_and_volumes =
         osagactx.datastore().find_deleted_volume_regions().await.map_err(
             |e| {
-                ActionError::action_failed(format!(
+                saga_action_failed(Error::internal_error(&format!(
                     "failed to find_deleted_volume_regions: {:?}",
                     e,
-                ))
+                )))
             },
         )?;
 
@@ -453,10 +455,10 @@ async fn svd_delete_freed_crucible_regions(
             )
             .await
             .map_err(|e| {
-                ActionError::action_failed(format!(
+                saga_action_failed(Error::internal_error(&format!(
                     "failed to delete_crucible_regions: {:?}",
                     e,
-                ))
+                )))
             })?;
 
         // Remove region DB record
@@ -465,20 +467,20 @@ async fn svd_delete_freed_crucible_regions(
             .regions_hard_delete(log, vec![region.id()])
             .await
             .map_err(|e| {
-                ActionError::action_failed(format!(
+                saga_action_failed(Error::internal_error(&format!(
                     "failed to regions_hard_delete: {:?}",
                     e,
-                ))
+                )))
             })?;
     }
 
     for volume_id in &freed_datasets_regions_and_volumes.volumes {
         osagactx.datastore().volume_hard_delete(*volume_id).await.map_err(
             |e| {
-                ActionError::action_failed(format!(
+                saga_action_failed(Error::internal_error(&format!(
                     "failed to volume_hard_delete {}: {:?}",
                     volume_id, e,
-                ))
+                )))
             },
         )?;
     }
@@ -503,10 +505,10 @@ async fn svd_hard_delete_volume_record(
         .get_allocated_regions(params.volume_id)
         .await
         .map_err(|e| {
-            ActionError::action_failed(format!(
+            saga_action_failed(Error::internal_error(&format!(
                 "failed to get_allocated_regions for {}: {:?}",
                 params.volume_id, e,
-            ))
+            )))
         })?;
 
     let log = sagactx.user_data().log();
@@ -528,10 +530,10 @@ async fn svd_hard_delete_volume_record(
 
     osagactx.datastore().volume_hard_delete(params.volume_id).await.map_err(
         |e| {
-            ActionError::action_failed(format!(
+            saga_action_failed(Error::internal_error(&format!(
                 "failed to volume_hard_delete {}: {:?}",
                 params.volume_id, e,
-            ))
+            )))
         },
     )?;
 

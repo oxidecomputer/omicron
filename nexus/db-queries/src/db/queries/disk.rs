@@ -18,7 +18,7 @@ use uuid::Uuid;
 // This is defined here for layering reasons: the main Nexus crate depends on
 // the db-queries crate, so the disk-per-instance limit lives here and Nexus
 // proper re-exports it.
-pub const MAX_DISKS_PER_INSTANCE: u32 = 8;
+pub const MAX_DISKS_PER_INSTANCE: u32 = 12;
 
 /// A wrapper for the query that selects a PCI slot for a newly-attached disk.
 ///

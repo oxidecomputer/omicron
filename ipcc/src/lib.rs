@@ -2,19 +2,18 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
-
 //! An interface to libipcc (inter-processor communications channel) which
 //! currently supports looking up values stored in the SP by key. These
 //! values are variously static, passed from the control plane to the SP
 //! (through MGS) or set from userland via libipcc.
 
 use libipcc::{IpccError, IpccHandle};
+use omicron_uuid_kinds::MupdateUuid;
 use serde::Deserialize;
 use serde::Serialize;
+use slog_error_chain::InlineErrorChain;
 use thiserror::Error;
 use tufaceous_artifact::ArtifactHash;
-use uuid::Uuid;
 
 #[cfg(test)]
 use proptest::arbitrary::any;
@@ -46,8 +45,8 @@ pub struct InstallinatorImageId {
     /// Installinator can send progress and completion messages to all peers it
     /// finds, and any peer that cares about progress can use this ID to match
     /// the progress message with a running recovery.
-    #[cfg_attr(test, strategy(any::<[u8; 16]>().prop_map(Uuid::from_bytes)))]
-    pub update_id: Uuid,
+    #[cfg_attr(test, strategy(any::<[u8; 16]>().prop_map(MupdateUuid::from_bytes)))]
+    pub update_id: MupdateUuid,
     /// SHA-256 hash of the host phase 2 image to fetch.
     pub host_phase_2: ArtifactHash,
     /// SHA-256 hash of the control plane image to fetch.
@@ -89,7 +88,10 @@ impl InstallinatorImageId {
         match ciborium::ser::into_writer(self, &mut out) {
             Ok(()) => out,
             Err(Error::Io(err)) => {
-                unreachable!("i/o error appending to Vec: {err}");
+                unreachable!(
+                    "i/o error appending to Vec: {}",
+                    InlineErrorChain::new(&err)
+                );
             }
             Err(Error::Value(err)) => {
                 unreachable!("failed to serialize an image ID: {err}");
@@ -107,9 +109,10 @@ impl InstallinatorImageId {
         // error string.
         match ciborium::de::from_reader(data) {
             Ok(value) => Ok(value),
-            Err(Error::Io(err)) => {
-                Err(format!("i/o error reading from slice: {err}"))
-            }
+            Err(Error::Io(err)) => Err(format!(
+                "i/o error reading from slice: {}",
+                InlineErrorChain::new(&err)
+            )),
             Err(Error::Syntax(offset)) => {
                 Err(format!("syntax error at offset {offset}"))
             }
@@ -178,6 +181,7 @@ impl Ipcc {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use omicron_uuid_kinds::MupdateUuid;
     use test_strategy::proptest;
 
     #[proptest]
@@ -297,7 +301,7 @@ mod tests {
         ];
 
         let expected = InstallinatorImageId {
-            update_id: Uuid::from_bytes([
+            update_id: MupdateUuid::from_bytes([
                 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80,
             ]),
             host_phase_2: ArtifactHash([

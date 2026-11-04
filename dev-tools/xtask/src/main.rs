@@ -74,7 +74,8 @@ enum Cmds {
 
     /// Manage OpenAPI specifications.
     ///
-    /// For more information, see dev-tools/openapi-manager/README.adoc.
+    /// For more information, see
+    /// <https://github.com/oxidecomputer/dropshot-api-manager>
     Openapi(external::External),
 
     #[cfg(target_os = "illumos")]
@@ -107,6 +108,9 @@ enum Cmds {
         /// substring of its name will be examined for probes.
         filter: Option<String>,
     },
+
+    /// Schema management utilities
+    Schema(external::External),
 }
 
 fn main() -> Result<()> {
@@ -139,7 +143,7 @@ fn main() -> Result<()> {
         Cmds::LsApis(external) => external.exec_bin("ls-apis"),
         Cmds::MgsDev(external) => external.exec_bin("mgs-dev"),
         Cmds::OmicronDev(external) => external.exec_bin("omicron-dev"),
-        Cmds::Openapi(external) => external.exec_bin("openapi-manager"),
+        Cmds::Openapi(external) => external.exec_bin("omicron-dropshot-apis"),
         #[cfg(target_os = "illumos")]
         Cmds::Releng(external) => {
             external.cargo_args(["--release"]).exec_bin("omicron-releng")
@@ -154,6 +158,7 @@ fn main() -> Result<()> {
             anyhow::bail!("this command is only available on illumos");
         }
         Cmds::Probes { filter } => usdt::print_probes(filter),
+        Cmds::Schema(external) => external.exec_bin("schema"),
     }
 }
 

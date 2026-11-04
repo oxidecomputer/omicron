@@ -5,6 +5,7 @@
 //! Model types for external IPs, both for instances and externally-facing
 //! services.
 
+use crate::DbTypedUuid;
 use crate::Name;
 use crate::ServiceNetworkInterface;
 use crate::SqlU16;
@@ -17,26 +18,28 @@ use diesel::Selectable;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::external_ip;
 use nexus_db_schema::schema::floating_ip;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
-use nexus_types::external_api::params;
-use nexus_types::external_api::shared;
-use nexus_types::external_api::shared::ProbeExternalIp;
-use nexus_types::external_api::shared::ProbeExternalIpKind;
-use nexus_types::external_api::views;
-use nexus_types::inventory::SourceNatConfig;
+use nexus_types::external_api::external_ip as external_ip_types;
+use nexus_types::external_api::floating_ip as floating_ip_types;
+use nexus_types::external_api::probe::{ProbeExternalIp, ProbeExternalIpKind};
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadata;
-use omicron_common::api::internal::shared::SourceNatConfigError;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::ProjectKind;
+use omicron_uuid_kinds::ProjectUuid;
+use omicron_uuid_kinds::SiloKind;
+use omicron_uuid_kinds::SiloUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::InstanceExternalIpBody;
+use sled_agent_types::inventory::SourceNatConfigError;
+use sled_agent_types::inventory::SourceNatConfigGeneric;
+use sled_agent_types::inventory::ZoneKind;
 use slog_error_chain::SlogInlineError;
 use std::convert::TryFrom;
 use std::net::IpAddr;
@@ -131,7 +134,7 @@ pub struct ExternalIp {
     pub first_port: SqlU16,
     pub last_port: SqlU16,
     // Only Some(_) for instance Floating IPs
-    pub project_id: Option<Uuid>,
+    pub project_id: Option<DbTypedUuid<ProjectKind>>,
     pub state: IpAttachState,
     pub is_probe: bool,
 }
@@ -170,7 +173,7 @@ impl TryFrom<&'_ ExternalIp> for OmicronZoneExternalIp {
         match row.kind {
             IpKind::SNat => Ok(Self::Snat(OmicronZoneExternalSnatIp {
                 id: ExternalIpUuid::from_untyped_uuid(row.id),
-                snat_cfg: SourceNatConfig::new(
+                snat_cfg: SourceNatConfigGeneric::new(
                     row.ip.ip(),
                     row.first_port.0,
                     row.last_port.0,
@@ -227,17 +230,33 @@ pub struct FloatingIp {
     pub is_service: bool,
     pub parent_id: Option<Uuid>,
     pub ip: IpNetwork,
-    pub project_id: Uuid,
+    pub project_id: DbTypedUuid<ProjectKind>,
 }
 
-impl TryFrom<ExternalIp>
-    for omicron_common::api::internal::shared::SourceNatConfig
-{
+impl FloatingIp {
+    pub fn project_id(&self) -> ProjectUuid {
+        self.project_id.into()
+    }
+}
+
+impl TryFrom<ExternalIp> for SourceNatConfigGeneric {
     type Error = SourceNatConfigError;
 
     fn try_from(eip: ExternalIp) -> Result<Self, Self::Error> {
         Self::new(eip.ip.ip(), eip.first_port.0, eip.last_port.0)
     }
+}
+
+/// The resource an external IP is being allocated for.
+#[derive(Debug, Clone)]
+pub enum IpAllocationTarget {
+    /// A silo-owned external IP: instance SNAT / ephemeral, probe ephemeral, or
+    /// a floating IP. Allocation verifies the pool is still linked to this silo
+    /// and assigned to silos.
+    Silo { silo_id: DbTypedUuid<SiloKind> },
+    /// A system-service external IP, i.e., an Omicron zone. Allocation verifies
+    /// the pool is still assigned to system services.
+    SystemService,
 }
 
 /// An incomplete external IP, used to store state required for issuing the
@@ -249,11 +268,11 @@ pub struct IncompleteExternalIp {
     description: Option<String>,
     time_created: DateTime<Utc>,
     kind: IpKind,
-    is_service: bool,
+    target: IpAllocationTarget,
     is_probe: bool,
     parent_id: Option<Uuid>,
     pool_id: Uuid,
-    project_id: Option<Uuid>,
+    project_id: Option<DbTypedUuid<ProjectKind>>,
     state: IpAttachState,
     // Optional address requesting that a specific IP address be allocated.
     explicit_ip: Option<IpNetwork>,
@@ -266,6 +285,7 @@ impl IncompleteExternalIp {
         id: Uuid,
         instance_id: Uuid,
         pool_id: Uuid,
+        silo_id: SiloUuid,
     ) -> Self {
         let kind = IpKind::SNat;
         Self {
@@ -274,7 +294,7 @@ impl IncompleteExternalIp {
             description: None,
             time_created: Utc::now(),
             kind,
-            is_service: false,
+            target: IpAllocationTarget::Silo { silo_id: silo_id.into() },
             is_probe: false,
             parent_id: Some(instance_id),
             pool_id,
@@ -285,7 +305,7 @@ impl IncompleteExternalIp {
         }
     }
 
-    pub fn for_ephemeral(id: Uuid, pool_id: Uuid) -> Self {
+    pub fn for_ephemeral(id: Uuid, pool_id: Uuid, silo_id: SiloUuid) -> Self {
         let kind = IpKind::Ephemeral;
         Self {
             id,
@@ -293,7 +313,7 @@ impl IncompleteExternalIp {
             description: None,
             time_created: Utc::now(),
             kind,
-            is_service: false,
+            target: IpAllocationTarget::Silo { silo_id: silo_id.into() },
             parent_id: None,
             is_probe: false,
             pool_id,
@@ -308,6 +328,7 @@ impl IncompleteExternalIp {
         id: Uuid,
         instance_id: Uuid,
         pool_id: Uuid,
+        silo_id: SiloUuid,
     ) -> Self {
         let kind = IpKind::Ephemeral;
         Self {
@@ -316,7 +337,7 @@ impl IncompleteExternalIp {
             description: None,
             time_created: Utc::now(),
             kind: IpKind::Ephemeral,
-            is_service: false,
+            target: IpAllocationTarget::Silo { silo_id: silo_id.into() },
             is_probe: true,
             parent_id: Some(instance_id),
             pool_id,
@@ -331,8 +352,9 @@ impl IncompleteExternalIp {
         id: Uuid,
         name: &Name,
         description: &str,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         pool_id: Uuid,
+        silo_id: SiloUuid,
     ) -> Self {
         let kind = IpKind::Floating;
         Self {
@@ -341,11 +363,11 @@ impl IncompleteExternalIp {
             description: Some(description.to_string()),
             time_created: Utc::now(),
             kind,
-            is_service: false,
+            target: IpAllocationTarget::Silo { silo_id: silo_id.into() },
             is_probe: false,
             parent_id: None,
             pool_id,
-            project_id: Some(project_id),
+            project_id: Some(project_id.into()),
             explicit_ip: None,
             explicit_port_range: None,
             state: kind.initial_state(),
@@ -356,9 +378,10 @@ impl IncompleteExternalIp {
         id: Uuid,
         name: &Name,
         description: &str,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         explicit_ip: IpAddr,
         pool_id: Uuid,
+        silo_id: SiloUuid,
     ) -> Self {
         let kind = IpKind::Floating;
         Self {
@@ -367,13 +390,13 @@ impl IncompleteExternalIp {
             description: Some(description.to_string()),
             time_created: Utc::now(),
             kind,
-            is_service: false,
+            target: IpAllocationTarget::Silo { silo_id: silo_id.into() },
             is_probe: false,
             parent_id: None,
             pool_id,
-            project_id: Some(project_id),
+            project_id: Some(project_id.into()),
             explicit_ip: Some(explicit_ip.into()),
-            explicit_port_range: None,
+            explicit_port_range: Some((0, u16::MAX.into())),
             state: kind.initial_state(),
         }
     }
@@ -384,25 +407,19 @@ impl IncompleteExternalIp {
         zone_id: OmicronZoneUuid,
         zone_kind: ZoneKind,
     ) -> Self {
-        let (kind, port_range, name, description, state) = match external_ip {
+        // We'll name this external IP the same as we'll name the NIC
+        // associated with this zone.
+        let name = Some(ServiceNetworkInterface::name(zone_id, zone_kind));
+        let description = Some(zone_kind.report_str().to_string());
+        let (kind, port_range, state) = match external_ip {
             OmicronZoneExternalIp::Floating(_) => {
-                // We'll name this external IP the same as we'll name the NIC
-                // associated with this zone.
-                let name = ServiceNetworkInterface::name(zone_id, zone_kind);
-
                 // Using `IpAttachState::Attached` preserves existing behavior,
                 // `IpKind::Floating.initial_state()` is `::Detached`. If/when
                 // we do more to unify IPs between services and instances, this
                 // probably needs to be addressed.
                 let state = IpAttachState::Attached;
 
-                (
-                    IpKind::Floating,
-                    None,
-                    Some(name),
-                    Some(zone_kind.report_str().to_string()),
-                    state,
-                )
+                (IpKind::Floating, Some((0, u16::MAX.into())), state)
             }
             OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
                 snat_cfg,
@@ -413,10 +430,6 @@ impl IncompleteExternalIp {
                 (
                     kind,
                     Some((first_port.into(), last_port.into())),
-                    // Only floating IPs are allowed to have names and
-                    // descriptions.
-                    None,
-                    None,
                     kind.initial_state(),
                 )
             }
@@ -428,7 +441,7 @@ impl IncompleteExternalIp {
             description,
             time_created: Utc::now(),
             kind,
-            is_service: true,
+            target: IpAllocationTarget::SystemService,
             is_probe: false,
             parent_id: Some(zone_id.into_untyped_uuid()),
             pool_id,
@@ -459,8 +472,21 @@ impl IncompleteExternalIp {
         &self.kind
     }
 
-    pub fn is_service(&self) -> &bool {
-        &self.is_service
+    pub fn is_service(&self) -> bool {
+        match self.target {
+            IpAllocationTarget::Silo { .. } => false,
+            IpAllocationTarget::SystemService => true,
+        }
+    }
+
+    /// The silo that owns this external IP, if it is a silo-owned IP.
+    ///
+    /// Returns `None` for system-service IPs.
+    pub fn silo_id(&self) -> Option<&DbTypedUuid<SiloKind>> {
+        match &self.target {
+            IpAllocationTarget::Silo { silo_id } => Some(silo_id),
+            IpAllocationTarget::SystemService => None,
+        }
     }
 
     pub fn is_probe(&self) -> &bool {
@@ -475,7 +501,7 @@ impl IncompleteExternalIp {
         &self.pool_id
     }
 
-    pub fn project_id(&self) -> &Option<Uuid> {
+    pub fn project_id(&self) -> &Option<DbTypedUuid<ProjectKind>> {
         &self.project_id
     }
 
@@ -504,13 +530,13 @@ impl IpKind {
     }
 }
 
-impl TryFrom<IpKind> for shared::IpKind {
+impl TryFrom<IpKind> for external_ip_types::IpKind {
     type Error = Error;
 
     fn try_from(kind: IpKind) -> Result<Self, Self::Error> {
         match kind {
-            IpKind::Ephemeral => Ok(shared::IpKind::Ephemeral),
-            IpKind::Floating => Ok(shared::IpKind::Floating),
+            IpKind::Ephemeral => Ok(external_ip_types::IpKind::Ephemeral),
+            IpKind::Floating => Ok(external_ip_types::IpKind::Floating),
             _ => Err(Error::internal_error(
                 "SNAT IP addresses should not be exposed in the API",
             )),
@@ -518,7 +544,7 @@ impl TryFrom<IpKind> for shared::IpKind {
     }
 }
 
-impl TryFrom<ExternalIp> for views::ExternalIp {
+impl TryFrom<ExternalIp> for external_ip_types::ExternalIp {
     type Error = Error;
 
     fn try_from(ip: ExternalIp) -> Result<Self, Self::Error> {
@@ -528,12 +554,20 @@ impl TryFrom<ExternalIp> for views::ExternalIp {
             ));
         }
         match ip.kind {
-            IpKind::Floating => Ok(views::ExternalIp::Floating(ip.try_into()?)),
-            IpKind::Ephemeral => {
-                Ok(views::ExternalIp::Ephemeral { ip: ip.ip.ip() })
+            IpKind::Floating => {
+                Ok(external_ip_types::ExternalIp::Floating(ip.try_into()?))
             }
-            IpKind::SNat => Err(Error::internal_error(
-                "SNAT IP addresses should not be exposed in the API",
+            IpKind::Ephemeral => Ok(external_ip_types::ExternalIp::Ephemeral {
+                ip: ip.ip.ip(),
+                ip_pool_id: ip.ip_pool_id,
+            }),
+            IpKind::SNat => Ok(external_ip_types::ExternalIp::SNat(
+                external_ip_types::SNatIp {
+                    ip: ip.ip.ip(),
+                    first_port: u16::from(ip.first_port),
+                    last_port: u16::from(ip.last_port),
+                    ip_pool_id: ip.ip_pool_id,
+                },
             )),
         }
     }
@@ -587,7 +621,7 @@ impl TryFrom<ExternalIp> for FloatingIp {
     }
 }
 
-impl TryFrom<ExternalIp> for views::FloatingIp {
+impl TryFrom<ExternalIp> for floating_ip_types::FloatingIp {
     type Error = Error;
 
     fn try_from(ip: ExternalIp) -> Result<Self, Self::Error> {
@@ -595,7 +629,7 @@ impl TryFrom<ExternalIp> for views::FloatingIp {
     }
 }
 
-impl From<FloatingIp> for views::FloatingIp {
+impl From<FloatingIp> for floating_ip_types::FloatingIp {
     fn from(ip: FloatingIp) -> Self {
         let identity = IdentityMetadata {
             id: ip.identity.id,
@@ -605,11 +639,11 @@ impl From<FloatingIp> for views::FloatingIp {
             time_modified: ip.identity.time_modified,
         };
 
-        views::FloatingIp {
+        floating_ip_types::FloatingIp {
             ip: ip.ip.ip(),
             ip_pool_id: ip.ip_pool_id,
             identity,
-            project_id: ip.project_id,
+            project_id: ip.project_id.into_untyped_uuid(),
             instance_id: ip.parent_id,
         }
     }
@@ -623,8 +657,8 @@ pub struct FloatingIpUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<params::FloatingIpUpdate> for FloatingIpUpdate {
-    fn from(params: params::FloatingIpUpdate) -> Self {
+impl From<floating_ip_types::FloatingIpUpdate> for FloatingIpUpdate {
+    fn from(params: floating_ip_types::FloatingIpUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,

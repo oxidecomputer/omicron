@@ -10,6 +10,11 @@ use omicron_test_utils::dev::seed::{
 };
 use std::io::Write;
 
+#[expect(
+    clippy::disallowed_macros,
+    reason = "this is a tiny binary that doesn't do very much,`tokio::main` \
+        is fine."
+)]
 #[tokio::main]
 async fn main() -> Result<()> {
     // TODO: dropshot is v heavyweight for this, we should be able to pull in a

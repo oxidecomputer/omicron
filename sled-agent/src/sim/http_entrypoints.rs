@@ -10,6 +10,7 @@ use camino::Utf8PathBuf;
 use dropshot::ApiDescription;
 use dropshot::ErrorStatusCode;
 use dropshot::FreeformBody;
+use dropshot::Header;
 use dropshot::HttpError;
 use dropshot::HttpResponseAccepted;
 use dropshot::HttpResponseCreated;
@@ -23,45 +24,81 @@ use dropshot::RequestContext;
 use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use dropshot::endpoint;
-use nexus_sled_agent_shared::inventory::Inventory;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::OmicronSledConfigResult;
-use nexus_sled_agent_shared::inventory::SledRole;
-use omicron_common::api::internal::nexus::DiskRuntimeState;
-use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use omicron_common::api::internal::shared::{
-    ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
+    ResolvedVpcRouteSet, ResolvedVpcRouteState,
 };
-use omicron_common::disk::DatasetsConfig;
-use omicron_common::disk::OmicronPhysicalDisksConfig;
-use range_requests::RequestContextEx;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ZpoolUuid;
+use range_requests::PotentialRange;
 use sled_agent_api::*;
-use sled_agent_types::boot_disk::BootDiskOsWriteStatus;
-use sled_agent_types::boot_disk::BootDiskPathParams;
-use sled_agent_types::boot_disk::BootDiskUpdatePathParams;
-use sled_agent_types::boot_disk::BootDiskWriteStartQueryParams;
+use sled_agent_types::artifact::{
+    ArtifactConfig, ArtifactCopyFromDepotBody, ArtifactCopyFromDepotResponse,
+    ArtifactListResponse, ArtifactPathParam, ArtifactPutResponse,
+    ArtifactQueryParam,
+};
+use sled_agent_types::attached_subnet::AttachedSubnet;
+use sled_agent_types::attached_subnet::AttachedSubnets;
+use sled_agent_types::attached_subnet::VmmSubnetPathParam;
 use sled_agent_types::bootstore::BootstoreStatus;
-use sled_agent_types::disk::DiskEnsureBody;
-use sled_agent_types::early_networking::EarlyNetworkConfig;
+use sled_agent_types::dataset::{
+    LocalStorageDatasetDeleteRequest, LocalStorageDatasetEnsureRequest,
+};
+use sled_agent_types::debug::OperatorSwitchZonePolicy;
+use sled_agent_types::diagnostics::{
+    SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
+};
+use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
-use sled_agent_types::instance::InstanceEnsureBody;
-use sled_agent_types::instance::InstanceExternalIpBody;
-use sled_agent_types::instance::VmmPutStateBody;
-use sled_agent_types::instance::VmmPutStateResponse;
-use sled_agent_types::instance::VmmUnregisterResponse;
+use sled_agent_types::instance::SledVmmState;
+use sled_agent_types::instance::{
+    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
+    VmmIssueDiskSnapshotRequestBody, VmmIssueDiskSnapshotRequestPathParam,
+    VmmIssueDiskSnapshotRequestResponse, VmmPathParam, VmmPutStateBody,
+    VmmPutStateResponse, VmmUnregisterResponse, VpcPathParam,
+};
+use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
+use sled_agent_types::multirack::MultirackJoinServiceStatus;
+use sled_agent_types::probes::ProbeSet;
+use sled_agent_types::rot::{
+    Attestation, CertificateChain, MeasurementLog, Nonce, RotPathParams,
+};
 use sled_agent_types::sled::AddSledRequest;
-use sled_agent_types::time_sync::TimeSync;
-use sled_agent_types::zone_bundle::BundleUtilization;
-use sled_agent_types::zone_bundle::CleanupContext;
-use sled_agent_types::zone_bundle::CleanupCount;
-use sled_agent_types::zone_bundle::ZoneBundleId;
-use sled_agent_types::zone_bundle::ZoneBundleMetadata;
+use sled_agent_types::support_bundle::{
+    RangeRequestHeaders, SupportBundleFilePathParam,
+    SupportBundleFinalizeQueryParams, SupportBundleListPathParam,
+    SupportBundleMetadata, SupportBundlePathParam,
+    SupportBundleTransferQueryParams,
+};
+use sled_agent_types::trust_quorum::{
+    ProxyCommitRequest, ProxyPrepareAndCommitRequest,
+    TrustQuorumCoordinatorStatusResponse, TrustQuorumNetworkConfig,
+    TrustQuorumNetworkConfigResponse,
+};
+use sled_agent_types::zone_bundle::{
+    BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
+    ZoneBundleFilter, ZoneBundleId, ZoneBundleMetadata, ZonePathParam,
+};
+use sled_agent_types_versions::v20;
+use sled_agent_types_versions::v25;
+use sled_agent_types_versions::v26;
+use sled_agent_types_versions::v30;
+use sled_agent_types_versions::v33;
+use sled_agent_types_versions::v39;
+use sled_agent_types_versions::v42;
+use sled_agent_types_versions::v47;
+use sled_agent_types_versions::v48;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use trust_quorum_types::messages::{
+    CommitRequest, LrtqUpgradeMsg, PrepareAndCommitRequest, ReconfigureMsg,
+};
+use trust_quorum_types::status::CommitStatus;
+use trust_quorum_types::status::NodeStatus;
 
 use super::sled_agent::SledAgent;
 
@@ -76,7 +113,6 @@ pub fn api() -> SledApiDescription {
         api.register(instance_poke_post)?;
         api.register(instance_poke_single_step_post)?;
         api.register(instance_post_sim_migration_source)?;
-        api.register(disk_poke_post)?;
         Ok(api)
     }
 
@@ -105,7 +141,7 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseOk<VmmUnregisterResponse>, HttpError> {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
-        Ok(HttpResponseOk(sa.instance_unregister(id).await?))
+        Ok(HttpResponseOk(sa.handle_vmm_unregister_request(id).await?))
     }
 
     async fn vmm_put_state(
@@ -152,22 +188,56 @@ impl SledAgentApi for SledAgentSimImpl {
         Ok(HttpResponseUpdatedNoContent())
     }
 
-    async fn disk_put(
+    async fn vmm_join_multicast_group(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<DiskPathParam>,
-        body: TypedBody<DiskEnsureBody>,
-    ) -> Result<HttpResponseOk<DiskRuntimeState>, HttpError> {
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
-        let disk_id = path_params.into_inner().disk_id;
+        let propolis_id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
-        Ok(HttpResponseOk(
-            sa.disk_ensure(
-                disk_id,
-                body_args.initial_runtime.clone(),
-                body_args.target.clone(),
-            )
-            .await?,
-        ))
+
+        match body_args {
+            InstanceMulticastBody::Join(membership) => {
+                sa.instance_join_multicast_group(propolis_id, &membership)
+                    .await?;
+            }
+            InstanceMulticastBody::Leave(_) => {
+                // This endpoint is for joining - reject leave operations
+                return Err(HttpError::for_bad_request(
+                    None,
+                    "Join endpoint cannot process Leave operations".to_string(),
+                ));
+            }
+        }
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn vmm_leave_multicast_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        let body_args = body.into_inner();
+
+        match body_args {
+            InstanceMulticastBody::Leave(membership) => {
+                sa.instance_leave_multicast_group(propolis_id, &membership)
+                    .await?;
+            }
+            InstanceMulticastBody::Join(_) => {
+                // This endpoint is for leaving - reject join operations
+                return Err(HttpError::for_bad_request(
+                    None,
+                    "Leave endpoint cannot process Join operations".to_string(),
+                ));
+            }
+        }
+
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn artifact_config_get(
@@ -302,29 +372,121 @@ impl SledAgentApi for SledAgentSimImpl {
         Ok(HttpResponseOk(vnics))
     }
 
-    async fn uplink_ensure(
+    async fn write_network_bootstore_config_v48(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v48::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let body = body.into_inner();
+        sa.set_bootstore_network_config(
+            EarlyNetworkConfigEnvelope::from(&body.body)
+                .serialize_to_bootstore_with_generation(body.generation),
+        );
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v47(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v47::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let body = body.into_inner();
+        sa.set_bootstore_network_config(
+            EarlyNetworkConfigEnvelope::from(&body.body)
+                .serialize_to_bootstore_with_generation(body.generation),
+        );
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v42(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v42::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let body = body.into_inner();
+        sa.set_bootstore_network_config(
+            EarlyNetworkConfigEnvelope::from(&body.body)
+                .serialize_to_bootstore_with_generation(body.generation),
+        );
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v39(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v39::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let body = body.into_inner();
+        sa.set_bootstore_network_config(
+            EarlyNetworkConfigEnvelope::from(&body.body)
+                .serialize_to_bootstore_with_generation(body.generation),
+        );
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v33(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v33::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let body = body.into_inner();
+        sa.set_bootstore_network_config(
+            EarlyNetworkConfigEnvelope::from(&body.body)
+                .serialize_to_bootstore_with_generation(body.generation),
+        );
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v30(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v30::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let body = body.into_inner();
+        sa.set_bootstore_network_config(
+            EarlyNetworkConfigEnvelope::from(&body.body)
+                .serialize_to_bootstore_with_generation(body.generation),
+        );
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v26(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v26::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let body = body.into_inner();
+        sa.set_bootstore_network_config(
+            EarlyNetworkConfigEnvelope::from(&body.body)
+                .serialize_to_bootstore_with_generation(body.generation),
+        );
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v25(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v25::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let body = body.into_inner();
+        sa.set_bootstore_network_config(
+            EarlyNetworkConfigEnvelope::from(&body.body)
+                .serialize_to_bootstore_with_generation(body.generation),
+        );
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v20(
         _rqctx: RequestContext<Self::Context>,
-        _body: TypedBody<SwitchPorts>,
+        _body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Ok(HttpResponseUpdatedNoContent())
-    }
-
-    async fn read_network_bootstore_config_cache(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
-        let config =
-            rqctx.context().bootstore_network_config.lock().unwrap().clone();
-        Ok(HttpResponseOk(config))
-    }
-
-    async fn write_network_bootstore_config(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<EarlyNetworkConfig>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let mut config =
-            rqctx.context().bootstore_network_config.lock().unwrap();
-        *config = body.into_inner();
-        Ok(HttpResponseUpdatedNoContent())
+        // Real sled-agent has to support this endpoint for backwards
+        // compatibility during an update; sim-sled-agent doesn't.
+        Err(HttpError::for_bad_request(
+            None,
+            "old bootstore APIs not supported in simulated sled-agent"
+                .to_string(),
+        ))
     }
 
     /// Fetch basic information about this sled
@@ -333,34 +495,20 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseOk<Inventory>, HttpError> {
         let sa = rqctx.context();
         Ok(HttpResponseOk(
-            sa.inventory(rqctx.server.local_addr).map_err(|e| {
+            sa.inventory(rqctx.server.local_addr).await.map_err(|e| {
                 HttpError::for_internal_error(format!("{:#}", e))
             })?,
         ))
     }
 
-    async fn datasets_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<DatasetsConfig>, HttpError> {
-        let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.datasets_config_list()?))
-    }
-
-    async fn omicron_physical_disks_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<OmicronPhysicalDisksConfig>, HttpError> {
-        let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.omicron_physical_disks_list()?))
-    }
-
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<OmicronSledConfig>,
-    ) -> Result<HttpResponseOk<OmicronSledConfigResult>, HttpError> {
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body_args = body.into_inner();
-        let result = sa.set_omicron_config(body_args)?;
-        Ok(HttpResponseOk(result))
+        sa.set_omicron_config(body_args)?;
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn sled_add(
@@ -399,25 +547,68 @@ impl SledAgentApi for SledAgentSimImpl {
         Ok(HttpResponseOk(bundles))
     }
 
-    async fn support_bundle_create(
+    async fn support_bundle_start_creation(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
-        query_params: Query<SupportBundleCreateQueryParams>,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        Ok(HttpResponseCreated(
+            sa.support_bundle_start_creation(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+            )
+            .await?,
+        ))
+    }
+
+    async fn support_bundle_transfer(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleTransferQueryParams>,
         body: StreamingBody,
     ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
         let sa = rqctx.context();
 
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
-        let SupportBundleCreateQueryParams { hash } = query_params.into_inner();
+        let SupportBundleTransferQueryParams { offset } =
+            query_params.into_inner();
 
         Ok(HttpResponseCreated(
-            sa.support_bundle_create(
+            sa.support_bundle_transfer(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                offset,
+                body.into_stream(),
+            )
+            .await?,
+        ))
+    }
+
+    async fn support_bundle_finalize(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleFinalizeQueryParams>,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+        let SupportBundleFinalizeQueryParams { hash } =
+            query_params.into_inner();
+
+        Ok(HttpResponseCreated(
+            sa.support_bundle_finalize(
                 zpool_id,
                 dataset_id,
                 support_bundle_id,
                 hash,
-                body.into_stream(),
             )
             .await?,
         ))
@@ -425,13 +616,17 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         sa.support_bundle_get(
             zpool_id,
             dataset_id,
@@ -444,6 +639,7 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_download_file(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundleFilePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
@@ -453,7 +649,10 @@ impl SledAgentApi for SledAgentSimImpl {
             file,
         } = path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         sa.support_bundle_get(
             zpool_id,
             dataset_id,
@@ -466,13 +665,17 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_index(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         sa.support_bundle_get(
             zpool_id,
             dataset_id,
@@ -485,13 +688,17 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_head(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         sa.support_bundle_head(
             zpool_id,
             dataset_id,
@@ -504,6 +711,7 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_head_file(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundleFilePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
@@ -513,7 +721,10 @@ impl SledAgentApi for SledAgentSimImpl {
             file,
         } = path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         sa.support_bundle_get(
             zpool_id,
             dataset_id,
@@ -526,13 +737,17 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_head_index(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         sa.support_bundle_head(
             zpool_id,
             dataset_id,
@@ -556,6 +771,41 @@ impl SledAgentApi for SledAgentSimImpl {
             .await?;
 
         Ok(HttpResponseDeleted())
+    }
+
+    async fn local_storage_dataset_ensure(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<LocalStorageDatasetEnsureRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+
+        sa.check_local_storage_error()?;
+        sa.ensure_local_storage_dataset(body.into_inner());
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn local_storage_dataset_delete(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<LocalStorageDatasetDeleteRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+
+        let LocalStorageDatasetDeleteRequest {
+            zpool_id,
+            dataset_id,
+            // Ignored for now: dataset uuids will be unique enough to delete
+            // the correct thing
+            encrypted_at_rest: _,
+        } = body.into_inner();
+
+        sa.check_local_storage_error()?;
+        sa.drop_dataset(
+            ZpoolUuid::from_untyped_uuid(zpool_id.into_untyped_uuid()),
+            dataset_id,
+        );
+
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     // --- Unimplemented endpoints ---
@@ -633,47 +883,6 @@ impl SledAgentApi for SledAgentSimImpl {
         method_unimplemented()
     }
 
-    async fn zpools_get(
-        _rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<Zpool>>, HttpError> {
-        method_unimplemented()
-    }
-
-    async fn sled_role_get(
-        _rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<SledRole>, HttpError> {
-        method_unimplemented()
-    }
-
-    async fn timesync_get(
-        _rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<TimeSync>, HttpError> {
-        method_unimplemented()
-    }
-
-    async fn host_os_write_start(
-        _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<BootDiskPathParams>,
-        _query_params: Query<BootDiskWriteStartQueryParams>,
-        _body: StreamingBody,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        method_unimplemented()
-    }
-
-    async fn host_os_write_status_get(
-        _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<BootDiskPathParams>,
-    ) -> Result<HttpResponseOk<BootDiskOsWriteStatus>, HttpError> {
-        method_unimplemented()
-    }
-
-    async fn host_os_write_status_delete(
-        _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<BootDiskUpdatePathParams>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        method_unimplemented()
-    }
-
     async fn sled_identifiers(
         _rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledIdentifiers>, HttpError> {
@@ -745,18 +954,225 @@ impl SledAgentApi for SledAgentSimImpl {
         method_unimplemented()
     }
 
-    async fn support_logs(
+    async fn support_health_check(
         _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
+        method_unimplemented()
+    }
+
+    async fn support_logs(
+        request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
-        // Return an empty zone list for testing.
-        Ok(HttpResponseOk(Default::default()))
+        // Return the zones tests have injected logs for (empty by default).
+        let sa = request_context.context();
+        Ok(HttpResponseOk(sa.support_log_zones()))
     }
 
     async fn support_logs_download(
-        _request_context: RequestContext<Self::Context>,
-        _path_params: Path<SledDiagnosticsLogsDownloadPathParm>,
-        _query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<SledDiagnosticsLogsDownloadPathParam>,
+        query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
+        let sa = request_context.context();
+        let SledDiagnosticsLogsDownloadPathParam { zone } =
+            path_params.into_inner();
+        let SledDiagnosticsLogsDownloadQueryParam {
+            max_rotated,
+            start_time,
+            end_time,
+        } = query_params.into_inner();
+        super::sim_support_logs::serve_zip(
+            sa,
+            &zone,
+            max_rotated,
+            sled_diagnostics::LogTimeWindow {
+                start: start_time,
+                end: end_time,
+            },
+        )
+    }
+
+    async fn debug_operator_switch_zone_policy_get(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<OperatorSwitchZonePolicy>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn debug_operator_switch_zone_policy_put(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<OperatorSwitchZonePolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn probes_put(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<ProbeSet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn trust_quorum_reconfigure(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<ReconfigureMsg>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_upgrade_from_lrtq(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<LrtqUpgradeMsg>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_commit(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<CommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_coordinator_status(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<TrustQuorumCoordinatorStatusResponse>, HttpError>
+    {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_prepare_and_commit(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<PrepareAndCommitRequest>,
+    ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_proxy_commit(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<ProxyCommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_proxy_prepare_and_commit(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<ProxyPrepareAndCommitRequest>,
+    ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_proxy_status(
+        _request_context: RequestContext<Self::Context>,
+        _query_params: Query<BaseboardId>,
+    ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_status(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_network_config_get(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<TrustQuorumNetworkConfigResponse>, HttpError>
+    {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_network_config_put(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<TrustQuorumNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn vmm_put_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<AttachedSubnets>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let id = path_params.into_inner().propolis_id;
+        let subnets = body.into_inner();
+        sa.instance_put_attached_subnets(id, subnets)
+            .await
+            .map(|_| HttpResponseUpdatedNoContent())
+            .map_err(HttpError::from)
+    }
+
+    async fn vmm_delete_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sa = request_context.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        sa.instance_delete_attached_subnets(propolis_id)
+            .await
+            .map(|_| HttpResponseDeleted())
+            .map_err(HttpError::from)
+    }
+
+    async fn vmm_post_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<AttachedSubnet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let id = path_params.into_inner().propolis_id;
+        let subnet = body.into_inner();
+        sa.instance_post_attached_subnet(id, subnet)
+            .await
+            .map(|_| HttpResponseUpdatedNoContent())
+            .map_err(HttpError::from)
+    }
+
+    async fn vmm_delete_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmSubnetPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sa = request_context.context();
+        let VmmSubnetPathParam { propolis_id, subnet } =
+            path_params.into_inner();
+        sa.instance_delete_attached_subnet(propolis_id, subnet)
+            .await
+            .map(|_| HttpResponseDeleted())
+            .map_err(HttpError::from)
+    }
+
+    async fn rot_measurement_log(
+        _request_context: RequestContext<Self::Context>,
+        _path_params: Path<RotPathParams>,
+    ) -> Result<HttpResponseOk<MeasurementLog>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn rot_certificate_chain(
+        _request_context: RequestContext<Self::Context>,
+        _path_params: Path<RotPathParams>,
+    ) -> Result<HttpResponseOk<CertificateChain>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn rot_attest(
+        _request_context: RequestContext<Self::Context>,
+        _path_params: Path<RotPathParams>,
+        _body: TypedBody<Nonce>,
+    ) -> Result<HttpResponseOk<Attestation>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn multirack_join_complete(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn multirack_join_service_status(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<MultirackJoinServiceStatus>, HttpError> {
         method_unimplemented()
     }
 }
@@ -818,19 +1234,5 @@ async fn instance_post_sim_migration_source(
     let sa = rqctx.context();
     let id = path_params.into_inner().propolis_id;
     sa.instance_simulate_migration_source(id, body.into_inner()).await?;
-    Ok(HttpResponseUpdatedNoContent())
-}
-
-#[endpoint {
-    method = POST,
-    path = "/disks/{disk_id}/poke",
-}]
-async fn disk_poke_post(
-    rqctx: RequestContext<Arc<SledAgent>>,
-    path_params: Path<DiskPathParam>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let sa = rqctx.context();
-    let disk_id = path_params.into_inner().disk_id;
-    sa.disk_poke(disk_id).await;
     Ok(HttpResponseUpdatedNoContent())
 }

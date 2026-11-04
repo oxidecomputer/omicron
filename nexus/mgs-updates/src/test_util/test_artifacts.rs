@@ -24,8 +24,8 @@ type InMemoryRepoDepotServerContext = Arc<ArtifactData>;
 ///
 /// `TestArtifacts` does a few things:
 ///
-/// - it creates some specific useful test artifacts: SP images for SimGimlet
-///   and SimSidecar
+/// - it creates some specific useful test artifacts (SP, RoT, RoT bootloader,
+///   and host OS images)
 /// - it provides the hashes and cabooses used for these images
 /// - it serves these images via an in-memory Repo Depot server
 ///
@@ -34,6 +34,11 @@ type InMemoryRepoDepotServerContext = Arc<ArtifactData>;
 pub struct TestArtifacts {
     pub sp_gimlet_artifact_hash: ArtifactHash,
     pub sp_sidecar_artifact_hash: ArtifactHash,
+    pub rot_gimlet_artifact_hash: ArtifactHash,
+    pub rot_sidecar_artifact_hash: ArtifactHash,
+    pub rot_bootloader_gimlet_artifact_hash: ArtifactHash,
+    pub rot_bootloader_sidecar_artifact_hash: ArtifactHash,
+    pub host_phase_1_artifact_hash: ArtifactHash,
     pub artifact_cache: Arc<ArtifactCache>,
     deployed_cabooses: BTreeMap<ArtifactHash, hubtools::Caboose>,
     resolver: FixedResolver,
@@ -52,11 +57,8 @@ impl TestArtifacts {
         let mut builder = HubrisArchiveBuilder::with_fake_image();
         builder.write_caboose(sp_gimlet_artifact_caboose.as_slice()).unwrap();
         let sp_gimlet_artifact = builder.build_to_vec().unwrap();
-        let sp_gimlet_artifact_hash = {
-            let mut digest = sha2::Sha256::default();
-            digest.update(&sp_gimlet_artifact);
-            ArtifactHash(digest.finalize().into())
-        };
+        let sp_gimlet_artifact_hash =
+            ArtifactHash(sha2::Sha256::digest(&sp_gimlet_artifact).into());
 
         // Make an SP update artifact for SimSidecar
         let sp_sidecar_artifact_caboose = CabooseBuilder::default()
@@ -68,16 +70,98 @@ impl TestArtifacts {
         let mut builder = HubrisArchiveBuilder::with_fake_image();
         builder.write_caboose(sp_sidecar_artifact_caboose.as_slice()).unwrap();
         let sp_sidecar_artifact = builder.build_to_vec().unwrap();
-        let sp_sidecar_artifact_hash = {
-            let mut digest = sha2::Sha256::default();
-            digest.update(&sp_sidecar_artifact);
-            ArtifactHash(digest.finalize().into())
-        };
+        let sp_sidecar_artifact_hash =
+            ArtifactHash(sha2::Sha256::digest(&sp_sidecar_artifact).into());
+
+        // Make an RoT update artifact for SimGimlet.
+        let rot_gimlet_artifact_caboose = CabooseBuilder::default()
+            .git_commit("fake-git-commit")
+            .board(SIM_GIMLET_BOARD)
+            .version("0.0.0")
+            .name("fake-name")
+            .build();
+        let mut builder = HubrisArchiveBuilder::with_fake_image();
+        builder.write_caboose(rot_gimlet_artifact_caboose.as_slice()).unwrap();
+        let rot_gimlet_artifact = builder.build_to_vec().unwrap();
+        let rot_gimlet_artifact_hash =
+            ArtifactHash(sha2::Sha256::digest(&rot_gimlet_artifact).into());
+
+        // Make an RoT update artifact for SimSidecar
+        let rot_sidecar_artifact_caboose = CabooseBuilder::default()
+            .git_commit("fake-git-commit")
+            .board(SIM_SIDECAR_BOARD)
+            .version("0.0.0")
+            .name("fake-name")
+            .build();
+        let mut builder = HubrisArchiveBuilder::with_fake_image();
+        builder.write_caboose(rot_sidecar_artifact_caboose.as_slice()).unwrap();
+        let rot_sidecar_artifact = builder.build_to_vec().unwrap();
+        let rot_sidecar_artifact_hash =
+            ArtifactHash(sha2::Sha256::digest(&rot_sidecar_artifact).into());
+
+        // Make an RoT bootloader update artifact for SimGimlet.
+        let rot_bootloader_gimlet_artifact_caboose = CabooseBuilder::default()
+            .git_commit("fake-git-commit")
+            .board(SIM_GIMLET_BOARD)
+            .version("0.0.0")
+            .name("fake-name")
+            .build();
+        let mut builder = HubrisArchiveBuilder::with_fake_image();
+        builder
+            .write_caboose(rot_bootloader_gimlet_artifact_caboose.as_slice())
+            .unwrap();
+        let rot_bootloader_gimlet_artifact = builder.build_to_vec().unwrap();
+        let rot_bootloader_gimlet_artifact_hash = ArtifactHash(
+            sha2::Sha256::digest(&rot_bootloader_gimlet_artifact).into(),
+        );
+
+        // Make an RoT bootloader update artifact for SimSidecar
+        let rot_bootloader_sidecar_artifact_caboose = CabooseBuilder::default()
+            .git_commit("fake-git-commit")
+            .board(SIM_SIDECAR_BOARD)
+            .version("0.0.0")
+            .name("fake-name")
+            .build();
+        let mut builder = HubrisArchiveBuilder::with_fake_image();
+        builder
+            .write_caboose(rot_bootloader_sidecar_artifact_caboose.as_slice())
+            .unwrap();
+        let rot_bootloader_sidecar_artifact = builder.build_to_vec().unwrap();
+        let rot_bootloader_sidecar_artifact_hash = ArtifactHash(
+            sha2::Sha256::digest(&rot_bootloader_sidecar_artifact).into(),
+        );
+
+        // Make a fake host OS phase 1 image. This is not a hubris archive and
+        // does not have a caboose, and in practice is entirely opaque (so we
+        // just use completely bogus data here).
+        let mut host_phase_1_artifact =
+            b"nexus-mgs-updates test phase 1".to_vec();
+
+        // Pad the phase 1 artifact so it's not so small that it uploads in a
+        // single UDP packet to the sp simulator. Real images are 32 MiB, and
+        // "fits in one packet" interferes with our tests that try to step
+        // through the update process and pause at various points, because we
+        // skip from "upload started" to "upload done" without seeing "upload in
+        // progress".
+        host_phase_1_artifact.resize(2048, b'.');
+        let host_phase_1_artifact_hash =
+            ArtifactHash(sha2::Sha256::digest(&host_phase_1_artifact).into());
 
         // Assemble a map of artifact hash to artifact contents.
         let artifact_data = [
             (sp_gimlet_artifact_hash, sp_gimlet_artifact),
             (sp_sidecar_artifact_hash, sp_sidecar_artifact),
+            (rot_gimlet_artifact_hash, rot_gimlet_artifact),
+            (rot_sidecar_artifact_hash, rot_sidecar_artifact),
+            (
+                rot_bootloader_gimlet_artifact_hash,
+                rot_bootloader_gimlet_artifact,
+            ),
+            (
+                rot_bootloader_sidecar_artifact_hash,
+                rot_bootloader_sidecar_artifact,
+            ),
+            (host_phase_1_artifact_hash, host_phase_1_artifact),
         ]
         .into_iter()
         .collect();
@@ -86,6 +170,16 @@ impl TestArtifacts {
         let deployed_cabooses = [
             (sp_gimlet_artifact_hash, sp_gimlet_artifact_caboose),
             (sp_sidecar_artifact_hash, sp_sidecar_artifact_caboose),
+            (rot_gimlet_artifact_hash, rot_gimlet_artifact_caboose),
+            (rot_sidecar_artifact_hash, rot_sidecar_artifact_caboose),
+            (
+                rot_bootloader_gimlet_artifact_hash,
+                rot_bootloader_gimlet_artifact_caboose,
+            ),
+            (
+                rot_bootloader_sidecar_artifact_hash,
+                rot_bootloader_sidecar_artifact_caboose,
+            ),
         ]
         .into_iter()
         .collect();
@@ -99,6 +193,13 @@ impl TestArtifacts {
             .unwrap();
 
             ServerBuilder::new(my_api, Arc::new(artifact_data), log)
+                .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+                    dropshot::ClientSpecifiesVersionInHeader::new(
+                        omicron_common::api::VERSION_HEADER,
+                        repo_depot_api::latest_version(),
+                    )
+                    .min_version(repo_depot_api::oldest_version()),
+                )))
                 .start()
                 .context("failed to create server")?
         };
@@ -115,8 +216,13 @@ impl TestArtifacts {
         Ok(TestArtifacts {
             sp_gimlet_artifact_hash,
             sp_sidecar_artifact_hash,
-            deployed_cabooses,
+            rot_gimlet_artifact_hash,
+            rot_sidecar_artifact_hash,
+            rot_bootloader_gimlet_artifact_hash,
+            rot_bootloader_sidecar_artifact_hash,
+            host_phase_1_artifact_hash,
             artifact_cache,
+            deployed_cabooses,
             resolver,
             repo_depot_server,
         })

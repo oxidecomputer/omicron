@@ -7,12 +7,13 @@
 use crate::addrobj::AddrObject;
 use crate::dladm;
 use camino::Utf8Path;
-use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use opte_ioctl::Error as OpteError;
 use opte_ioctl::OpteHdl;
+use sled_agent_types::inventory::NetworkInterfaceKind;
 use slog::Logger;
 use slog::info;
 use std::net::IpAddr;
+use uuid::Uuid;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -43,14 +44,16 @@ pub enum Error {
     #[error(transparent)]
     ResetLinkpropError(#[from] crate::dladm::ResetLinkpropError),
 
-    #[error("Invalid IP configuration for port")]
-    InvalidPortIpConfig,
-
-    #[error("Tried to release non-existent port ({0}, {1:?})")]
-    ReleaseMissingPort(uuid::Uuid, NetworkInterfaceKind),
+    #[error("Invalid IP configuration for port: {0}")]
+    InvalidPortIpConfig(String),
 
     #[error("Tried to update external IPs on non-existent port ({0}, {1:?})")]
     ExternalIpUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
+
+    #[error(
+        "Tried to update multicast groups on non-existent port ({0}, {1:?})"
+    )]
+    MulticastUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
 
     #[error("Could not find Primary NIC")]
     NoPrimaryNic,
@@ -60,6 +63,14 @@ pub enum Error {
 
     #[error("No matching NIC found for port {0} at slot {1}.")]
     NoNicforPort(String, u32),
+
+    #[error(
+        "Tried to update attached subnets on non-existent port ({0}, {1:?})"
+    )]
+    AttachedSubnetUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
+
+    #[error("Duplicate OPTE port: id={id}, kind={kind:?}")]
+    DuplicateOptePort { id: Uuid, kind: NetworkInterfaceKind },
 }
 
 /// Delete all xde devices on the system.
@@ -141,7 +152,7 @@ pub struct Handle {
 impl Handle {
     /// Construct a new handle to the OPTE kernel driver.
     pub fn new() -> Result<Self, OpteError> {
-        OpteHdl::open(OpteHdl::XDE_CTL).map(|inner| Self { inner })
+        OpteHdl::open().map(|inner| Self { inner })
     }
 }
 

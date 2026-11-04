@@ -4,13 +4,14 @@
 
 //! Operations for creating a system swap device.
 
+use slog_error_chain::InlineErrorChain;
 use std::io::Read;
 use zeroize::Zeroize;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SwapDeviceError {
-    #[error("Error running ZFS command: {0}")]
-    Zfs(illumos_utils::ExecutionError),
+    #[error("Error running ZFS command")]
+    Zfs(#[source] illumos_utils::ExecutionError),
 
     #[error("Error listing swap devices: {0}")]
     ListDevices(String),
@@ -165,7 +166,7 @@ fn create_encrypted_swap_zvol(
         illumos_utils::libc::sysconf(libc::_SC_PAGESIZE).map_err(|e| {
             SwapDeviceError::Misc {
                 msg: "could not access PAGESIZE from sysconf".to_string(),
-                error: e.to_string(),
+                error: InlineErrorChain::new(&e).to_string(),
             }
         })?;
     let mut command = std::process::Command::new(illumos_utils::zfs::ZFS);
@@ -208,18 +209,18 @@ fn create_encrypted_swap_zvol(
         .open("/dev/urandom")
         .map_err(|e| SwapDeviceError::Misc {
             msg: "could not open /dev/urandom".to_string(),
-            error: e.to_string(),
+            error: InlineErrorChain::new(&e).to_string(),
         })?;
     let mut secret = vec![0u8; 32];
     urandom.read_exact(&mut secret).map_err(|e| SwapDeviceError::Misc {
         msg: "could not read from /dev/urandom".to_string(),
-        error: e.to_string(),
+        error: InlineErrorChain::new(&e).to_string(),
     })?;
 
     // Spawn the process, writing the key in through stdin.
     let mut child = cmd.spawn().map_err(|e| SwapDeviceError::Misc {
         msg: format!("failed to spawn `zfs create` for zvol \"{}\"", name),
-        error: e.to_string(),
+        error: InlineErrorChain::new(&e).to_string(),
     })?;
     let mut stdin = child.stdin.take().unwrap();
     let child_log = log.clone();
@@ -240,7 +241,7 @@ fn create_encrypted_swap_zvol(
     let output =
         child.wait_with_output().map_err(|e| SwapDeviceError::Misc {
             msg: "failed to read stdout".to_string(),
-            error: e.to_string(),
+            error: InlineErrorChain::new(&e).to_string(),
         })?;
     hdl.join().unwrap();
 
@@ -261,6 +262,8 @@ fn create_encrypted_swap_zvol(
 
 /// Wrapper functions around swapctl(2) operations
 mod swapctl {
+    use slog_error_chain::InlineErrorChain;
+
     use crate::swap_device::SwapDeviceError;
 
     /// A representation of a swap device, as returned from swapctl(2) SC_LIST
@@ -287,7 +290,7 @@ mod swapctl {
 
     // swapctl(2)
     #[cfg(target_os = "illumos")]
-    extern "C" {
+    unsafe extern "C" {
         fn swapctl(cmd: i32, arg: *mut libc::c_void) -> i32;
     }
 
@@ -298,7 +301,7 @@ mod swapctl {
     // sled agent work on non-illumos targets. So for now, just stub out this
     // piece.
     #[cfg(not(target_os = "illumos"))]
-    fn swapctl(_cmd: i32, _arg: *mut libc::c_void) -> i32 {
+    unsafe fn swapctl(_cmd: i32, _arg: *mut libc::c_void) -> i32 {
         panic!("swapctl(2) only on illumos");
     }
 
@@ -381,7 +384,7 @@ mod swapctl {
             None => std::ptr::null_mut(),
         };
 
-        let res = swapctl(cmd, ptr);
+        let res = unsafe { swapctl(cmd, ptr) };
         if res == -1 {
             return Err(std::io::Error::last_os_error());
         }
@@ -427,8 +430,11 @@ mod swapctl {
         // Unwrap safety: We know this isn't null because we just created it
         let ptr = std::ptr::NonNull::new(&mut list_req).unwrap();
         let n_devices = unsafe {
-            swapctl_cmd(SC_LIST, Some(ptr))
-                .map_err(|e| SwapDeviceError::ListDevices(e.to_string()))?
+            swapctl_cmd(SC_LIST, Some(ptr)).map_err(|e| {
+                SwapDeviceError::ListDevices(
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            })?
         };
 
         let mut devices = Vec::with_capacity(n_devices as usize);
@@ -492,7 +498,7 @@ mod swapctl {
         let res = unsafe {
             swapctl_cmd(SC_ADD, Some(ptr)).map_err(|e| {
                 SwapDeviceError::AddDevice {
-                    msg: e.to_string(),
+                    msg: InlineErrorChain::new(&e).to_string(),
                     path: path_cp,
                     start,
                     length,

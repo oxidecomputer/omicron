@@ -5,15 +5,15 @@
 //! VPC Subnets and their network interfaces
 
 use super::sagas;
-use crate::external_api::params;
 use nexus_auth::authn;
-use nexus_config::MIN_VPC_IPV4_SUBNET_PREFIX;
+use nexus_config::MIN_VPC_IPV4_SUBNET_PREFIX_LENGTH;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::model::VpcSubnet;
+use nexus_types::external_api::vpc;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -30,10 +30,10 @@ impl super::Nexus {
     pub fn vpc_subnet_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        subnet_selector: params::SubnetSelector,
+        subnet_selector: vpc::SubnetSelector,
     ) -> LookupResult<lookup::VpcSubnet<'a>> {
         match subnet_selector {
-            params::SubnetSelector {
+            vpc::SubnetSelector {
                 subnet: NameOrId::Id(id),
                 vpc: None,
                 project: None,
@@ -42,17 +42,17 @@ impl super::Nexus {
                     .vpc_subnet_id(id);
                 Ok(subnet)
             }
-            params::SubnetSelector {
+            vpc::SubnetSelector {
                 subnet: NameOrId::Name(name),
                 vpc: Some(vpc),
                 project,
             } => {
                 let subnet = self
-                    .vpc_lookup(opctx, params::VpcSelector { project, vpc })?
+                    .vpc_lookup(opctx, vpc::VpcSelector { project, vpc })?
                     .vpc_subnet_name_owned(name.into());
                 Ok(subnet)
             }
-            params::SubnetSelector {
+            vpc::SubnetSelector {
                 subnet: NameOrId::Id(_),
                 vpc: _,
                 project: _,
@@ -69,7 +69,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
-        params: &params::VpcSubnetCreate,
+        params: &vpc::VpcSubnetCreate,
     ) -> CreateResult<db::model::VpcSubnet> {
         let (.., authz_vpc, db_vpc) = vpc_lookup.fetch().await?;
         let (.., authz_system_router) =
@@ -90,14 +90,14 @@ impl super::Nexus {
                 "VPC Subnet IPv4 address ranges must be from a private range",
             ));
         }
-        if params.ipv4_block.width() < MIN_VPC_IPV4_SUBNET_PREFIX
+        if params.ipv4_block.width() < MIN_VPC_IPV4_SUBNET_PREFIX_LENGTH
             || params.ipv4_block.width()
                 > self.tunables.max_vpc_ipv4_subnet_prefix
         {
             return Err(external::Error::invalid_request(&format!(
                 "VPC Subnet IPv4 address ranges must have prefix \
                 length between {} and {}, inclusive",
-                MIN_VPC_IPV4_SUBNET_PREFIX,
+                MIN_VPC_IPV4_SUBNET_PREFIX_LENGTH,
                 self.tunables.max_vpc_ipv4_subnet_prefix,
             )));
         }
@@ -161,7 +161,7 @@ impl super::Nexus {
 
         let out = saga_outputs
             .lookup_node_output::<VpcSubnet>("output")
-            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .map_err(|e| Error::internal_error(&format!("{:#}", e)))
             .internal_context("looking up output from vpc create saga")?;
 
         self.vpc_needed_notify_sleds();
@@ -184,7 +184,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         vpc_subnet_lookup: &lookup::VpcSubnet<'_>,
-        params: &params::VpcSubnetUpdate,
+        params: &vpc::VpcSubnetUpdate,
     ) -> UpdateResult<VpcSubnet> {
         let (.., authz_vpc, authz_subnet) =
             vpc_subnet_lookup.lookup_for(authz::Action::Modify).await?;
@@ -213,7 +213,7 @@ impl super::Nexus {
 
         let out = saga_outputs
             .lookup_node_output::<VpcSubnet>("output")
-            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .map_err(|e| Error::internal_error(&format!("{:#}", e)))
             .internal_context("looking up output from vpc update saga")?;
 
         self.vpc_needed_notify_sleds();

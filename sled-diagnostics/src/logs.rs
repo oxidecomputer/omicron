@@ -7,16 +7,25 @@
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
     io::{BufRead, BufReader, Seek, Write},
+    sync::LazyLock,
 };
 
+use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
+use chrono::DateTime;
+use chrono::Utc;
 use fs_err::File;
 use illumos_utils::zfs::{
-    CreateSnapshotError, GetValueError, ListDatasetsError, Snapshot, Zfs,
+    CreateSnapshotError, DestroySnapshotError, GetValueError,
+    ListDatasetsError, Snapshot, Zfs,
 };
 use oxlog::LogFile;
-use rand::{Rng, distributions::Alphanumeric, thread_rng};
+use oxlog::SvcLogs;
+use rand::{Rng, distr::Alphanumeric};
+use regex::Regex;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
 use zip::{result::ZipError, write::FullFileOptions};
 
 // The name of the snapshot created from the zone root filesystem.
@@ -32,6 +41,9 @@ const SLED_DIAGNOSTICS_SNAPSHOT_PREFIX: &'static str = "sled-diagnostics-";
 const SLED_DIAGNOSTICS_ZFS_PROPERTY_NAME: &'static str =
     "oxide:for-sled-diagnostics";
 const SLED_DIAGNOSTICS_ZFS_PROPERTY_VALUE: &'static str = "true";
+
+// The zstd compression level for logs collected into a zip.
+const LOG_ZSTD_LEVEL: i32 = 3;
 
 const fn diagnostics_zfs_properties() -> &'static [(&'static str, &'static str)]
 {
@@ -53,6 +65,9 @@ pub enum LogError {
     Snapshot(#[from] CreateSnapshotError),
 
     #[error(transparent)]
+    ZfsDestroySnapshot(#[from] DestroySnapshotError),
+
+    #[error(transparent)]
     ZfsGetValue(#[from] GetValueError),
 
     #[error(transparent)]
@@ -63,7 +78,7 @@ pub enum LogError {
 }
 
 /// A ZFS snapshot that is taken by the `sled-diagnostics` crate and handles
-/// snapshot deletion on `Drop`.
+/// snapshot deletion on `destroy`
 #[derive(Debug)]
 struct DiagnosticsSnapshot {
     log: Logger,
@@ -71,14 +86,19 @@ struct DiagnosticsSnapshot {
     snapshot: Snapshot,
     /// The mountpoint on disk where this snapshot is mounted.
     snapshot_mountpoint: Utf8PathBuf,
+    /// Whether or not this snapshot has been destroyed
+    destroyed: bool,
 }
 
 impl DiagnosticsSnapshot {
     /// Create a snapshot for a ZFS filesystem
-    fn create(logger: &Logger, filesystem: &str) -> Result<Self, LogError> {
+    async fn create(
+        logger: &Logger,
+        filesystem: &str,
+    ) -> Result<Self, LogError> {
         let snap_name = format!(
             "{SLED_DIAGNOSTICS_SNAPSHOT_PREFIX}{}",
-            thread_rng()
+            rand::rng()
                 .sample_iter(Alphanumeric)
                 .take(12)
                 .map(char::from)
@@ -89,7 +109,8 @@ impl DiagnosticsSnapshot {
             filesystem,
             &snap_name,
             diagnostics_zfs_properties(),
-        )?;
+        )
+        .await?;
 
         let snapshot =
             Snapshot { filesystem: filesystem.to_string(), snap_name };
@@ -105,7 +126,12 @@ impl DiagnosticsSnapshot {
                 logger, &snapshot,
             )?;
 
-        Ok(Self { log: logger.clone(), snapshot, snapshot_mountpoint })
+        Ok(Self {
+            log: logger.clone(),
+            snapshot,
+            snapshot_mountpoint,
+            destroyed: false,
+        })
     }
 
     /// Return the full path to the snapshot directory within the filesystem.
@@ -170,33 +196,49 @@ impl DiagnosticsSnapshot {
                     .join(format!(".zfs/snapshot/{}", snapshot.snap_name))
             })
     }
+
+    async fn destroy(&mut self) -> Result<(), LogError> {
+        if !self.destroyed {
+            Zfs::destroy_snapshot(
+                &self.snapshot.filesystem,
+                &self.snapshot.snap_name,
+            )
+            .await
+            .inspect(|_| {
+                debug!(
+                    self.log,
+                    "destroyed sled-diagnostics ZFS snapshot";
+                    "snapshot" => %self.snapshot
+                );
+            })
+            .inspect_err(|e| {
+                error!(
+                    self.log,
+                    "failed to destroy sled-diagnostics ZFS snapshot";
+                    "snapshot" => %self.snapshot,
+                    e,
+                );
+            })?;
+            self.destroyed = true;
+        }
+        Ok(())
+    }
 }
 
 impl Drop for DiagnosticsSnapshot {
     fn drop(&mut self) {
-        let _ = Zfs::destroy_snapshot(
-            &self.snapshot.filesystem,
-            &self.snapshot.snap_name,
-        )
-        .inspect(|_| {
-            debug!(
-                self.log,
-                "destroyed sled-diagnostics ZFS snapshot";
-                "snapshot" => %self.snapshot
-            );
-        })
-        .inspect_err(|e| {
+        if !self.destroyed {
             error!(
                 self.log,
-                "failed to destroy sled-diagnostics ZFS snapshot";
-                "snapshot" => %self.snapshot,
-                "error" => ?e,
+                "Snapshot dropped without being destroyed";
+                "filesystem" => self.snapshot.filesystem.clone(),
+                "snap_name" => self.snapshot.snap_name.clone(),
             );
-        });
+        }
     }
 }
 
-/// A utility type that keeps track fo `DiagnosticsSnapshot`s keyed off of a
+/// A utility type that keeps track of `DiagnosticsSnapshot`s keyed off of a
 /// ZFS dataset name.
 struct LogSnapshots {
     inner: HashMap<String, DiagnosticsSnapshot>,
@@ -210,19 +252,26 @@ impl LogSnapshots {
     /// For a given log file return the corresponding `DiagnosticsSnapshot` or
     /// create a new one if we have not yet created one for the underlying ZFS
     /// dataset backing this particular file.
-    fn get_or_create(
+    async fn get_or_create(
         &mut self,
         logger: &Logger,
         logfile: &Utf8Path,
     ) -> Result<&DiagnosticsSnapshot, LogError> {
-        let dataset = Zfs::get_dataset_name(logfile.as_str())?;
+        let dataset = Zfs::get_dataset_name(logfile.as_str()).await?;
         let snapshot = match self.inner.entry(dataset.clone()) {
             Entry::Occupied(occupied_entry) => occupied_entry.into_mut(),
-            Entry::Vacant(vacant_entry) => vacant_entry
-                .insert(DiagnosticsSnapshot::create(logger, dataset.as_str())?),
+            Entry::Vacant(vacant_entry) => vacant_entry.insert(
+                DiagnosticsSnapshot::create(logger, dataset.as_str()).await?,
+            ),
         };
 
         Ok(snapshot)
+    }
+
+    async fn destroy(&mut self) {
+        for (_, mut snap) in self.inner.drain() {
+            let _ = snap.destroy().await;
+        }
     }
 }
 
@@ -268,23 +317,24 @@ impl LogsHandle {
     ///
     /// NB: This is a best-effort attempt, any failure to list or delete
     /// snapshots will be logged.
-    pub fn cleanup_snapshots(&self) {
-        let snapshot_list = match Zfs::list_snapshots() {
+    pub async fn cleanup_snapshots(&self) {
+        let snapshot_list = match Zfs::list_snapshots().await {
             Ok(snapshots) => snapshots,
             Err(e) => {
                 error!(
                     self.log,
                     "Failed to list ZFS snapshots when attempting to cleanup \
-                    old sled-diagnostics snapshots: {e}";
+                    old sled-diagnostics snapshots"; e
                 );
 
                 return;
             }
         };
 
-        let diagnostic_snapshots = snapshot_list.into_iter().filter(|snap| {
+        let mut diagnostic_snapshots = Vec::new();
+        for snap in snapshot_list {
             if !snap.snap_name.starts_with(SLED_DIAGNOSTICS_SNAPSHOT_PREFIX) {
-                return false;
+                continue;
             }
 
             // Additionally check for the sled-diagnostics property.
@@ -297,7 +347,9 @@ impl LogsHandle {
                 &name,
                 &[SLED_DIAGNOSTICS_ZFS_PROPERTY_NAME],
                 Some(illumos_utils::zfs::PropertySource::Local),
-            ) {
+            )
+            .await
+            {
                 Ok([value]) => value,
                 Err(e) => {
                     error!(
@@ -305,11 +357,12 @@ impl LogsHandle {
                         "Found a ZFS snapshot with a name reserved for
                         sled diagnostics, but which does not have the \
                         sled-diagnostics-specific property. Bailing out, \
-                        rather than risking deletion of user data: {e}";
+                        rather than risking deletion of user data";
                         "snap_name" => &name,
-                        "property" => SLED_DIAGNOSTICS_ZFS_PROPERTY_VALUE
+                        "property" => SLED_DIAGNOSTICS_ZFS_PROPERTY_VALUE,
+                        InlineErrorChain::new(&e),
                     );
-                    return false;
+                    continue;
                 }
             };
 
@@ -323,16 +376,18 @@ impl LogsHandle {
                     "property" => SLED_DIAGNOSTICS_ZFS_PROPERTY_NAME,
                     "property_value" => value,
                 );
-                return false;
+                continue;
             }
-            true
-        });
+            diagnostic_snapshots.push(snap);
+        }
 
         for snapshot in diagnostic_snapshots {
             match Zfs::destroy_snapshot(
                 &snapshot.filesystem,
                 &snapshot.snap_name,
-            ) {
+            )
+            .await
+            {
                 Ok(_) => debug!(
                     self.log,
                     "destroyed pre-existing sled-diagnostics snapshot";
@@ -340,8 +395,9 @@ impl LogsHandle {
                 ),
                 Err(e) => error!(
                     self.log,
-                    "failed to destroy pre-existing snapshot on cleanup: {e}";
+                    "failed to destroy pre-existing snapshot on cleanup";
                     "snapshot" => %snapshot,
+                    e,
                 ),
             }
         }
@@ -354,24 +410,26 @@ impl LogsHandle {
             .map_err(|e| LogError::OxLog(e))
     }
 
-    fn find_log_in_snapshot(
+    /// Returns where `path` (a log file or directory) is within a snapshot of
+    /// its dataset, creating the snapshot if one doesn't yet exist.
+    async fn path_in_snapshot(
         &self,
         log_snapshots: &mut LogSnapshots,
-        logfile: &Utf8Path,
+        path: &Utf8Path,
     ) -> Result<Utf8PathBuf, LogError> {
         let diagnostics_snapshot =
-            log_snapshots.get_or_create(&self.log, logfile)?;
+            log_snapshots.get_or_create(&self.log, path).await?;
 
         trace!(
             &self.log,
-            "using diagnostics snapshot {} for logfile {}",
+            "using diagnostics snapshot {} for {}",
             diagnostics_snapshot.snapshot,
-            logfile;
+            path;
         );
 
-        // We need to reconstruct where the log file will be based on the
-        // mount point of the snapshot. We do this by figuring out what the
-        // common prefix is between the two paths and then combining with the
+        // We need to reconstruct where the path will be based on the mount
+        // point of the snapshot. We do this by figuring out what the common
+        // prefix is between the two paths and then combining with the
         // ".zfs/snapshot/<SNAP_NAME>" field in the right spot.
         //
         // Example:
@@ -382,125 +440,124 @@ impl LogsHandle {
 
         let mut path_in_snapshot =
             diagnostics_snapshot.snapshot_mountpoint().clone();
-        let prefix_len = logfile
+        let prefix_len = path
             .iter()
             .zip(path_in_snapshot.iter())
             .take_while(|(a, b)| a == b)
             .count();
-        path_in_snapshot.extend(logfile.iter().skip(prefix_len));
+        path_in_snapshot.extend(path.iter().skip(prefix_len));
 
         Ok(path_in_snapshot)
     }
 
-    /// For a given log file:
-    /// - Create a snapshot of the underlying dataset if one doesn't yet exist.
-    /// - Determine the logs path within the snapshot.
-    ///   - In the case of "current" logs, also find all of its rotated
-    ///     variants.
-    /// - Write the logs contents into the provided zip file based on its zone,
-    ///   and service.
+    /// Returns `paths` with each directory replaced by its location within a
+    /// snapshot of its dataset, so that oxlog lists (and dates) a zone's
+    /// logs exactly as they are in the snapshots they're collected from.
+    ///
+    /// Zone datasets are snapshotted before debug datasets. sled-agent's debug
+    /// collector archives a file by copying it into a debug dataset and then
+    /// removing it from the zone, so with this order, a file archived between
+    /// the snapshots is found in both, rather than in neither.
+    ///
+    /// Directories that don't exist are left as they are, since there's
+    /// nothing in them to snapshot.
+    async fn snapshot_paths(
+        &self,
+        log_snapshots: &mut LogSnapshots,
+        paths: oxlog::Paths,
+    ) -> Result<oxlog::Paths, LogError> {
+        let oxlog::Paths { primary, debug, extra } = paths;
+
+        // Zone datasets first...
+        let primary = self.dir_in_snapshot(log_snapshots, primary).await?;
+        let mut extra_in_snapshot = Vec::with_capacity(extra.len());
+        for (extra_dir, dir) in extra {
+            extra_in_snapshot.push((
+                extra_dir,
+                self.dir_in_snapshot(log_snapshots, dir).await?,
+            ));
+        }
+
+        // ...then debug datasets.
+        let mut debug_in_snapshot = Vec::with_capacity(debug.len());
+        for dir in debug {
+            debug_in_snapshot
+                .push(self.dir_in_snapshot(log_snapshots, dir).await?);
+        }
+
+        Ok(oxlog::Paths {
+            primary,
+            debug: debug_in_snapshot,
+            extra: extra_in_snapshot,
+        })
+    }
+
+    async fn dir_in_snapshot(
+        &self,
+        log_snapshots: &mut LogSnapshots,
+        dir: Utf8PathBuf,
+    ) -> Result<Utf8PathBuf, LogError> {
+        if !dir.is_dir() {
+            return Ok(dir);
+        }
+        self.path_in_snapshot(log_snapshots, &dir).await
+    }
+
+    /// Write a log file's contents, as listed within a snapshot (see
+    /// [`Self::snapshot_paths`]), into the provided zip file based on its
+    /// service.
     fn process_logs<W: Write + Seek>(
         &self,
         service: &str,
         zip: &mut zip::ZipWriter<W>,
-        log_snapshots: &mut LogSnapshots,
-        logfile: &Utf8Path,
+        logfile: &LogFile,
         logtype: LogType,
     ) -> Result<(), LogError> {
-        let snapshot_logfile =
-            self.find_log_in_snapshot(log_snapshots, logfile)?;
-
-        if logtype == LogType::Current {
-            // Since we are processing the current log files in a zone we need
-            // to examine the parent directory and find all log files that match
-            // the service. e.g. service.log, service.log.1, ...service.log.n
-            if let Some(parent) = snapshot_logfile.parent() {
-                if let Some(filename) = snapshot_logfile.file_name() {
-                    let (files, errors): (Vec<_>, Vec<_>) =
-                        parent.read_dir_utf8()?.partition(Result::is_ok);
-
-                    for err in errors.into_iter().map(Result::unwrap_err) {
-                        error!(
-                            self.log,
-                            "Failed to read dir ent while processing \
-                            sled-diagnostics current log files";
-                            "error" => %err
-                        );
-                    }
-
-                    // A filter that ensures our logfile matches the correct
-                    // pattern where `filename` is the type of log we are
-                    // looking for such as `oxide-mg-ddm:default.log`.
-                    //
-                    // Valid variants are:
-                    // - `oxide-mg-ddm:default.log`
-                    // - `oxide-mg-ddm:default.log.n`
-                    let is_log_file = |path: &Utf8Path, filename: &str| {
-                        path.file_name()
-                            // Make sure the path starts with our filename or
-                            // is an exact match.
-                            .filter(|fname| fname.starts_with(filename))
-                            .and_then(|fname| Utf8Path::new(fname).extension())
-                            // If we found a match make sure that the file ends
-                            // in ".log" or a number from log rotation.
-                            .map_or(false, |ext| {
-                                ext == "log" || ext.parse::<u64>().is_ok()
-                            })
-                    };
-
-                    for f in files
-                        .into_iter()
-                        .map(Result::unwrap)
-                        .filter(|f| is_log_file(f.path(), filename))
-                    {
-                        let logfile = f.path();
-                        if logfile.is_file() {
-                            write_log_to_zip(
-                                &self.log,
-                                service,
-                                zip,
-                                LogType::Current,
-                                logfile,
-                            )?;
-                        }
-                    }
-                }
-            }
+        if logfile.path.is_file() {
+            write_log_to_zip(
+                &self.log,
+                service,
+                zip,
+                logtype,
+                &logfile.path,
+                logfile.modified,
+            )?;
         } else {
-            match snapshot_logfile.is_file() {
-                true => {
-                    write_log_to_zip(
-                        &self.log,
-                        service,
-                        zip,
-                        logtype,
-                        &snapshot_logfile,
-                    )?;
-                }
-                false => {
-                    error!(
-                        self.log,
-                        "found log file that is not a file, skipping over it \
-                        but this is likely a programming error";
-                        "logfile" => %snapshot_logfile,
-                    );
-                }
-            }
+            error!(
+                self.log,
+                "found log file that is not a file, skipping over it \
+                but this is likely a programming error";
+                "logfile" => %logfile.path,
+            );
         }
 
         Ok(())
     }
 
     /// For a given zone find all of its logs for all of its services and write
-    /// them to a zip file. Additionally include up to `max_rotated` logs in
-    /// the zip file.
+    /// them to a zip file.
+    ///
+    /// Files are filtered by `window` via oxlog's `date_range`, at file
+    /// granularity: oxlog dates each file by its position among the other
+    /// files of the same log (see oxlog's documentation on dating log
+    /// files), and a file that may hold any content from within the window
+    /// is included in full, so the output may contain data from outside the
+    /// window. Rotated logs are additionally limited to `max_rotated` files
+    /// when a count cap is supplied.
     ///
     /// Note that this log retrieval will automatically take and cleanup
-    /// necessary zfs snapshots along the way.
-    pub fn get_zone_logs<W: Write + Seek>(
+    /// necessary zfs snapshots along the way. The logs are listed, dated, and
+    /// read from those snapshots, so the files collected are exactly the
+    /// files dated, even if logs rotate or are archived meanwhile.
+    ///
+    /// NOTE: Cancelling this function may result in leaked log snapshots,
+    /// which will not be removed until "LogsHandle::cleanup_snapshots" is
+    /// invoked.
+    pub async fn get_zone_logs<W: Write + Seek>(
         &self,
         zone: &str,
-        max_rotated: usize,
+        max_rotated: Option<usize>,
+        window: LogTimeWindow,
         writer: &mut W,
     ) -> Result<(), LogError> {
         // We are opting to use oxlog to find logs rather than using a similar
@@ -509,98 +566,121 @@ impl LogsHandle {
         // internal structures like a list of running zones. Instead we operate
         // on all of the log paths that oxlog is capable of discovering via the
         // filesystem directly.
-        let zones = oxlog::Zones::load().map_err(|e| LogError::OxLog(e))?;
-        let zone_logs = zones.zone_logs(
-            zone,
-            oxlog::Filter {
-                current: true,
-                archived: true,
-                extra: true,
-                // This avoids calling stat on every log file found.
-                show_empty: true,
-                date_range: None,
-            },
-        );
+        //
+        // The time window is enforced by oxlog's `date_range` filter, so the
+        // support bundle and the oxlog CLI share one set of semantics.
+        let mut zones = oxlog::Zones::load().map_err(|e| LogError::OxLog(e))?;
+        let filter = oxlog::Filter {
+            current: true,
+            archived: true,
+            extra: true,
+            // This will cause oxlog to call stat on each file resulting
+            // in a sorted order.
+            show_empty: false,
+            date_range: window.to_date_range(),
+        };
 
-        let mut zip = zip::ZipWriter::new(writer);
+        let zip = zip::ZipWriter::new(writer);
 
-        // Hold onto log snapshots so that they can be cleaned up on drop.
+        // Hold onto log snapshots so that they can be cleaned independent of
+        // "result".
+        //
+        // NOTE: This isn't cancel safe - if we drop this future after creating
+        // any number of logs, but before calling "log_snapshots.destroy()",
+        // we'll leak snapshots.
         let mut log_snapshots = LogSnapshots::new();
 
+        let result = async {
+            let zone_logs = match zones.zones.remove(zone) {
+                Some(paths) => {
+                    let paths =
+                        self.snapshot_paths(&mut log_snapshots, paths).await?;
+                    oxlog::Zones {
+                        zones: BTreeMap::from([(zone.to_string(), paths)]),
+                    }
+                    .zone_logs(zone, filter)
+                }
+                None => BTreeMap::new(),
+            };
+            self.get_zone_logs_inner(zone_logs, max_rotated, zip)
+        }
+        .await;
+
+        log_snapshots.destroy().await;
+
+        result
+    }
+
+    fn get_zone_logs_inner<W: Write + Seek>(
+        &self,
+        zone_logs: BTreeMap<String, SvcLogs>,
+        max_rotated: Option<usize>,
+        mut zip: zip::ZipWriter<W>,
+    ) -> Result<(), LogError> {
         for (service, service_logs) in zone_logs {
-            //  - Grab all of the service's SMF logs -
-            if let Some(current) = service_logs.current {
-                self.process_logs(
-                    &service,
-                    &mut zip,
-                    &mut log_snapshots,
-                    &current.path,
-                    LogType::Current,
-                )?;
+            let SmfLogs { in_zone, mut archived } = SmfLogs::new(&service_logs);
+
+            //  - Grab all of the service's SMF logs in the zone -
+
+            // The live file, and any rotated files that have not yet been
+            // archived. Each was dated and filtered by oxlog independently of
+            // the others: when the live file holds nothing from the window,
+            // its rotated files still may.
+            for file in in_zone {
+                self.process_logs(&service, &mut zip, file, LogType::Current)?;
             }
 
             //  - Grab all of the service's archived logs -
 
-            // Oxlog will consider rotated smf logs from `/<ZONE>/var/svc/log/`
-            // as "archived", but we are gathering those up as a part of
-            // "current" log processing. We only care about logs that have made
-            // it explicitly to the debug dataset.
-            let mut archived: Vec<_> = service_logs
-                .archived
-                .into_iter()
-                .filter(|log| log.path.as_str().contains("crypt/debug"))
-                .map(|log| log.path)
-                .collect();
-
             // Since these logs can be spread out across multiple U.2 devices
             // we need to sort them by timestamp.
             archived.sort_by_key(|log| {
-                log.as_str()
+                log.path
+                    .as_str()
                     .rsplit_once(".")
                     .and_then(|(_, date)| date.parse::<u64>().ok())
                     .unwrap_or(0)
             });
 
-            for file in archived.iter().rev().take(max_rotated) {
-                self.process_logs(
-                    &service,
-                    &mut zip,
-                    &mut log_snapshots,
-                    &file,
-                    LogType::Archive,
-                )?;
+            // Apply the count cap only when the caller specified one. With a
+            // time window and no count cap, take everything in the window.
+            let mut to_process: Vec<&LogFile> =
+                archived.into_iter().rev().collect();
+            if let Some(n) = max_rotated {
+                to_process.truncate(n);
+            }
+            for file in to_process {
+                self.process_logs(&service, &mut zip, file, LogType::Archive)?;
             }
 
             //  - Grab all of the service's extra logs -
 
-            // Currently we are only grabbing cockroachdb logs. If other
-            // services contain valuable logs we should add them here.
-            if service == "cockroachdb" {
-                let cockroach_extra_logs =
-                    sort_cockroach_extra_logs(&service_logs.extra);
-                for (_prefix, extra_logs) in cockroach_extra_logs {
-                    // We always want the most current log being written to.
-                    if let Some(log) = extra_logs.current {
-                        self.process_logs(
-                            &service,
-                            &mut zip,
-                            &mut log_snapshots,
-                            log,
-                            LogType::Extra,
-                        )?;
-                    }
+            // Attempt to parse and sort any extra logs we find for a service.
+            let extra_logs = match service.as_str() {
+                // cockroach embeds its rotation status in the name:
+                // "cockroach-health.log" vs
+                // "oach-health.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-01-31T21_43_26Z.011435.log"
+                "cockroachdb" => sort_cockroach_extra_logs(&service_logs.extra),
+                // fall back parser that matches "service.log",
+                // "service.field.n.log", "service.log.1", or
+                // "service.field.n.log.1"
+                _ => sort_extra_logs(&self.log, &service_logs.extra),
+            };
+            for (_, logs) in extra_logs {
+                // We always want the most current log being written to.
+                if let Some(log) = logs.current {
+                    self.process_logs(&service, &mut zip, log, LogType::Extra)?;
+                }
 
-                    // We clamp the number of rotated logs we grab to 5.
-                    for log in extra_logs.rotated.iter().rev().take(max_rotated)
-                    {
-                        self.process_logs(
-                            &service,
-                            &mut zip,
-                            &mut log_snapshots,
-                            log,
-                            LogType::Extra,
-                        )?;
-                    }
+                // Apply the optional count cap to rotated extras, mirroring
+                // the archived-log handling above.
+                let mut rotated: Vec<&LogFile> =
+                    logs.rotated.iter().copied().rev().collect();
+                if let Some(n) = max_rotated {
+                    rotated.truncate(n);
+                }
+                for log in rotated {
+                    self.process_logs(&service, &mut zip, log, LogType::Extra)?;
                 }
             }
         }
@@ -611,12 +691,98 @@ impl LogsHandle {
     }
 }
 
+/// A service's SMF log files, as listed by oxlog, split by where they are
+/// collected from.
+struct SmfLogs<'a> {
+    /// The live file and any rotated files still in the zone (e.g.,
+    /// `oxide-mg-ddm:default.log.0`), collected as "current" logs.
+    in_zone: Vec<&'a LogFile>,
+    /// Files archived to a debug dataset.
+    archived: Vec<&'a LogFile>,
+}
+
+impl<'a> SmfLogs<'a> {
+    fn new(service_logs: &'a SvcLogs) -> Self {
+        // Oxlog considers rotated SMF logs in `/<ZONE>/var/svc/log/` to be
+        // "archived", alongside the ones that have made it to a debug
+        // dataset.
+        let (archived, rotated): (Vec<_>, Vec<_>) = service_logs
+            .archived
+            .iter()
+            .partition(|log| log.path.as_str().contains("crypt/debug"));
+
+        // Rotated files are named `<live file>.<N>`; skip anything else
+        // that oxlog matched as an SMF log file.
+        let is_rotated = |log: &&LogFile| {
+            log.path
+                .file_name()
+                .and_then(|name| name.rsplit_once('.'))
+                .is_some_and(|(name, n)| {
+                    name.ends_with(".log")
+                        && !n.is_empty()
+                        && n.bytes().all(|b| b.is_ascii_digit())
+                })
+        };
+        let in_zone = service_logs
+            .current
+            .iter()
+            .chain(rotated.into_iter().filter(is_rotated))
+            .collect();
+        SmfLogs { in_zone, archived }
+    }
+}
+
+/// Inclusive log-collection time window.
+///
+/// Bundles `start`/`end` into one type so callers can't accidentally swap
+/// them at the call site: the two bounds have the same type and the same
+/// `Option`-ness, and would otherwise be adjacent positional arguments.
+/// `None` on either side means unbounded on that side.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LogTimeWindow {
+    pub start: Option<DateTime<Utc>>,
+    pub end: Option<DateTime<Utc>>,
+}
+
+impl LogTimeWindow {
+    /// Converts to oxlog's `DateRange`, substituting timestamp extremes for
+    /// unbounded sides. Returns `None` for a fully unbounded window so oxlog
+    /// skips filtering entirely.
+    ///
+    /// Note the argument order: `DateRange::new` takes the upper bound
+    /// (`before`) first.
+    fn to_date_range(self) -> Option<oxlog::DateRange> {
+        if self.start.is_none() && self.end.is_none() {
+            return None;
+        }
+        let start =
+            self.start.map(chrono_to_jiff).unwrap_or(jiff::Timestamp::MIN);
+        let end = self.end.map(chrono_to_jiff).unwrap_or(jiff::Timestamp::MAX);
+        Some(oxlog::DateRange::new(end, start))
+    }
+}
+
+fn chrono_to_jiff(ts: DateTime<Utc>) -> jiff::Timestamp {
+    jiff::Timestamp::try_from(std::time::SystemTime::from(ts)).unwrap_or_else(
+        |_| {
+            // Conversion fails only outside jiff's [-9999, 9999] year range;
+            // saturate toward the end we fell off of.
+            if ts.timestamp() < 0 {
+                jiff::Timestamp::MIN
+            } else {
+                jiff::Timestamp::MAX
+            }
+        },
+    )
+}
+
 fn write_log_to_zip<W: Write + Seek>(
     logger: &Logger,
     service: &str,
     zip: &mut zip::ZipWriter<W>,
     logtype: LogType,
     snapshot_logfile: &Utf8Path,
+    mtime: Option<jiff::Timestamp>,
 ) -> Result<(), LogError> {
     let Some(log_name) = snapshot_logfile.file_name() else {
         warn!(
@@ -629,14 +795,28 @@ fn write_log_to_zip<W: Write + Seek>(
     };
 
     let mut src = File::open(&snapshot_logfile)?;
-    let zip_path = format!("{service}/{logtype}/{log_name}");
+
+    let zip_mtime = mtime
+        .and_then(|ts| {
+            let zoned = ts.in_tz("UTC").ok()?;
+            zip::DateTime::try_from(zoned.datetime()).ok()
+        })
+        .unwrap_or_else(zip::DateTime::default);
+
+    let zip_path = format!("{service}/{logtype}/{log_name}.zst");
     zip.start_file_from_path(
         zip_path,
         FullFileOptions::default()
-            .compression_method(zip::CompressionMethod::Zstd)
-            .compression_level(Some(3)),
+            .last_modified_time(zip_mtime)
+            .compression_method(zip::CompressionMethod::Stored)
+            // NB: From the docs
+            // If set to false and the file exceeds the
+            // limit, an I/O error is thrown and the file is aborted. If set to
+            // true, readers will require ZIP64 support and if the file does not
+            // exceed the limit, 20 B are wasted.
+            .large_file(true),
     )?;
-    if let Err(e) = std::io::copy(&mut src, zip) {
+    if let Err(e) = write_zstd(&mut src, zip) {
         // If we fail here the `ZipWriter` is an unknown state and we are forced
         // to bubble up an error.
         zip.abort_file()?;
@@ -645,23 +825,89 @@ fn write_log_to_zip<W: Write + Seek>(
         // are able to grab as many logs as possible for debugging purposes.
         error!(
             logger,
-            "Failed to write service log to zip file: {e}";
+            "Failed to write service log to zip file";
             "service" => %service,
             "log" => %snapshot_logfile,
+            InlineErrorChain::new(e.as_ref())
         );
     };
 
     Ok(())
 }
 
-#[derive(Debug, Default, PartialEq)]
-struct CockroachExtraLog<'a> {
-    current: Option<&'a Utf8Path>,
-    rotated: Vec<&'a Utf8Path>,
+/// Compresses `src` into `dst` as a zstd file.
+///
+/// The frame records the size of `src`, so tools such as `zstd -l` can report
+/// it, and a checksum, as the `zstd` CLI does by default.
+fn write_zstd(src: &mut File, dst: &mut impl Write) -> anyhow::Result<()> {
+    let mut encoder = zstd::Encoder::new(dst, LOG_ZSTD_LEVEL)
+        .context("failed to create zstd encoder")?;
+    encoder.include_checksum(true).context("failed to enable zstd checksum")?;
+    // Logs are read from a snapshot, so their size cannot change while they
+    // are compressed.
+    let src_size =
+        src.metadata().context("failed to read log file metadata")?.len();
+    encoder
+        .set_pledged_src_size(Some(src_size))
+        .context("failed to set zstd pledged source size")?;
+    std::io::copy(src, &mut encoder)
+        .context("failed to copy log contents into zstd encoder")?;
+    encoder.finish().context("failed to finish zstd frame")?;
+    Ok(())
 }
-fn sort_cockroach_extra_logs(
-    logs: &[LogFile],
-) -> HashMap<&str, CockroachExtraLog<'_>> {
+
+/// A log file that is found in oxlog's "extra" bucket of service logs.
+#[derive(Debug, PartialEq)]
+enum ExtraLogKind<'a> {
+    /// The current log being written to e.g. service-a.log
+    Current { name: &'a str, log: &'a LogFile },
+    /// A log file that has been rotated e.g. service-a.log.4
+    Rotated { name: &'a str, log: &'a LogFile },
+}
+
+#[derive(Debug, Default, PartialEq)]
+struct ExtraLogs<'a> {
+    current: Option<&'a LogFile>,
+    rotated: Vec<&'a LogFile>,
+}
+
+fn sort_extra_logs<'a>(
+    logger: &Logger,
+    logs: &'a [LogFile],
+) -> HashMap<&'a str, ExtraLogs<'a>> {
+    let mut res = HashMap::new();
+
+    for log in logs {
+        if let Some(kind) = parse_extra_log(log) {
+            match kind {
+                ExtraLogKind::Current { name, log } => {
+                    let entry: &mut ExtraLogs<'_> =
+                        res.entry(name).or_default();
+                    // We don't expect to stumble upon this unless there's a
+                    // programmer error, in which case we should leave ourselves
+                    // a record of it.
+                    if let Some(old_path) = entry.current {
+                        warn!(
+                            logger,
+                            "found multiple current log files for {name}";
+                            "old" => %old_path.path,
+                            "new" => %log.path,
+                        );
+                    }
+                    entry.current = Some(&log);
+                }
+                ExtraLogKind::Rotated { name, log } => {
+                    let entry = res.entry(name).or_default();
+                    entry.rotated.push(&log);
+                }
+            }
+        }
+    }
+
+    res
+}
+
+fn sort_cockroach_extra_logs(logs: &[LogFile]) -> HashMap<&str, ExtraLogs<'_>> {
     // Known logging paths for cockroachdb:
     // https://www.cockroachlabs.com/docs/stable/logging-overview#logging-destinations
     let cockroach_log_prefix = HashSet::from([
@@ -680,7 +926,7 @@ fn sort_cockroach_extra_logs(
         "cockroach-stderr",
     ]);
 
-    let mut interested: HashMap<&str, CockroachExtraLog<'_>> = HashMap::new();
+    let mut interested: HashMap<&str, ExtraLogs<'_>> = HashMap::new();
     for log in logs {
         let Some(file_name) = log.path.file_name() else {
             continue;
@@ -702,14 +948,60 @@ fn sort_cockroach_extra_logs(
             let entry = interested.entry(prefix).or_default();
 
             if file_name == format!("{prefix}.log") {
-                entry.current = Some(log.path.as_path());
+                entry.current = Some(log);
             } else {
-                entry.rotated.push(log.path.as_path());
+                entry.rotated.push(log);
             }
         }
     }
 
     interested
+}
+
+/// For a provided `LogFile` return an optional `ExtraLog` if it's in a well
+/// formed  logging format consisting of any non whitespace character followed
+/// by any number of none whitespace characters followed by a literal "." that
+/// ends in a single ".log" or ".log.N" where N is a digit desginating log
+/// rotation.
+///
+/// Examples:
+/// - service-1.log
+/// - service-1.log.4
+/// - service-2.stderr.log
+/// - service-2.stderr.log.2
+fn parse_extra_log(logfile: &LogFile) -> Option<ExtraLogKind<'_>> {
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
+        //Regex explanation:
+        // ^                : start of the line
+        // (?:([^.\s]+)     : at least one character that is not whitespace or a
+        //                    "." (capturing: log name)
+        // (?:\.[^.\s]+)*)  : a "." followed by at least one character that is
+        //                    not whitespace or a "." 0 or more times
+        //                    (non capturing)
+        // \.log            : .log
+        // (\.\d+)?         : an optional "." followed by one or more digits
+        //                    (capturing: current | rotated)
+        // $                : end of the line
+        Regex::new(r"^(?:([^.\s]+)(?:\.[^.\s]+)*)\.log(\.\d+)?$").unwrap()
+    });
+
+    let Some(file_name) = logfile.path.file_name() else { return None };
+    RE.captures(file_name).and_then(|c| {
+        // The first capture group is not optional and is the log files name
+        c.get(1).map(|name| {
+            match c.get(2).is_some() {
+                // Capture group 2 means that we have a logfile that
+                // ends in a number e.g. "sled-agent.log.2"
+                true => {
+                    ExtraLogKind::Rotated { name: name.as_str(), log: logfile }
+                }
+                // Otherwise we have found the current log file
+                false => {
+                    ExtraLogKind::Current { name: name.as_str(), log: logfile }
+                }
+            }
+        })
+    })
 }
 
 #[cfg(test)]
@@ -719,6 +1011,78 @@ mod test {
     use camino::Utf8PathBuf;
 
     use super::*;
+
+    #[test]
+    fn test_log_time_window_to_date_range() {
+        let ts = |secs| DateTime::<Utc>::from_timestamp(secs, 0).unwrap();
+        // A file written at a single instant.
+        let file_at_timestamp = |t: jiff::Timestamp| oxlog::LogFile {
+            path: "/t.log".into(),
+            size: None,
+            modified: Some(t),
+            age: Some(oxlog::LogAge { newest_write: t, oldest_write: Some(t) }),
+        };
+        let file_at = |secs| {
+            file_at_timestamp(jiff::Timestamp::from_second(secs).unwrap())
+        };
+
+        // A fully unbounded window applies no filter at all.
+        assert!(LogTimeWindow::default().to_date_range().is_none());
+
+        // Both bounds set: inclusive on both ends. This also pins the
+        // (before, after) argument order of DateRange::new, which positional
+        // arguments would let us silently swap.
+        let range = LogTimeWindow { start: Some(ts(100)), end: Some(ts(200)) }
+            .to_date_range()
+            .unwrap();
+        assert!(file_at(100).in_date_range(&range));
+        assert!(file_at(150).in_date_range(&range));
+        assert!(file_at(200).in_date_range(&range));
+        assert!(!file_at(99).in_date_range(&range));
+        assert!(!file_at(201).in_date_range(&range));
+
+        // One-sided windows leave the other side unbounded.
+        let from = LogTimeWindow { start: Some(ts(100)), end: None }
+            .to_date_range()
+            .unwrap();
+        assert!(file_at(1_000_000_000).in_date_range(&from));
+        assert!(!file_at(99).in_date_range(&from));
+
+        let until = LogTimeWindow { start: None, end: Some(ts(200)) }
+            .to_date_range()
+            .unwrap();
+        assert!(file_at(0).in_date_range(&until));
+        assert!(!file_at(201).in_date_range(&until));
+
+        // Sub-second precision survives the chrono-to-jiff conversion: an
+        // end bound of 200.5s includes a file modified at 200.4s and
+        // excludes one modified at 200.6s.
+        let subsec_end =
+            DateTime::<Utc>::from_timestamp(200, 500_000_000).unwrap();
+        let file_at_nanos = |secs, nanos| {
+            file_at_timestamp(jiff::Timestamp::new(secs, nanos).unwrap())
+        };
+        let subsec = LogTimeWindow { start: None, end: Some(subsec_end) }
+            .to_date_range()
+            .unwrap();
+        assert!(file_at_nanos(200, 400_000_000).in_date_range(&subsec));
+        assert!(!file_at_nanos(200, 600_000_000).in_date_range(&subsec));
+
+        // Bounds outside jiff's representable range saturate toward the end
+        // they fell off of, rather than collapsing the window. chrono
+        // timestamps extend hundreds of thousands of years past jiff's
+        // year-9999 ceiling and year -9999 floor.
+        let far_future =
+            DateTime::<Utc>::from_timestamp(300_000_000_000, 0).unwrap();
+        let far_past =
+            DateTime::<Utc>::from_timestamp(-300_000_000_000, 0).unwrap();
+        let saturated =
+            LogTimeWindow { start: Some(far_past), end: Some(far_future) }
+                .to_date_range()
+                .unwrap();
+        assert!(file_at(0).in_date_range(&saturated));
+        assert!(file_at(1_000_000_000).in_date_range(&saturated));
+    }
 
     #[test]
     fn test_sort_cockroach_extra_logs() {
@@ -735,52 +1099,30 @@ mod test {
             "bogus.log",
             "some/dir"
         ].into_iter().map(|l| {
-                oxlog::LogFile { path: Utf8PathBuf::from(l), size: None, modified: None }
-            }).collect();
+            oxlog::LogFile { path: Utf8PathBuf::from(l), size: None, modified: None, age: None }
+        }).collect();
+        let logs_map: HashMap<_, _> =
+            logs.iter().map(|l| (l.path.as_str(), l)).collect();
 
-        let mut expected: HashMap<&str, CockroachExtraLog> = HashMap::new();
+        let mut expected: HashMap<&str, ExtraLogs<'_>> = HashMap::new();
 
         // cockroach
         expected.entry("cockroach").or_default().current =
-            Some(Utf8Path::new("cockroach.log"));
-        expected
-            .entry("cockroach")
-            .or_default()
-            .rotated
-            .push(Utf8Path::new("cockroach.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-01-31T17_11_45Z.011435.log"));
-        expected
-            .entry("cockroach")
-            .or_default()
-            .rotated
-            .push(Utf8Path::new("cockroach.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-02-01T01_51_51Z.011486.log"));
+            Some(&logs_map["cockroach.log"]);
+        expected.entry("cockroach").or_default().rotated.push(&logs_map["cockroach.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-01-31T17_11_45Z.011435.log"]);
+        expected.entry("cockroach").or_default().rotated.push(&logs_map["cockroach.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-02-01T01_51_51Z.011486.log"]);
 
         // cockroach-health
         expected.entry("cockroach-health").or_default().current =
-            Some(Utf8Path::new("cockroach-health.log"));
-        expected
-            .entry("cockroach-health")
-            .or_default()
-            .rotated
-            .push(Utf8Path::new("cockroach-health.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-01-31T21_43_26Z.011435.log"));
-        expected
-            .entry("cockroach-health")
-            .or_default()
-            .rotated
-            .push(Utf8Path::new("cockroach-health.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-02-01T01_51_53Z.011486.log"));
+            Some(&logs_map["cockroach-health.log"]);
+        expected.entry("cockroach-health").or_default().rotated.push(&logs_map["cockroach-health.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-01-31T21_43_26Z.011435.log"]);
+        expected.entry("cockroach-health").or_default().rotated.push(&logs_map["cockroach-health.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-02-01T01_51_53Z.011486.log"]);
 
         // cockroach-stderr
         expected.entry("cockroach-stderr").or_default().current =
-            Some(Utf8Path::new("cockroach-stderr.log"));
-        expected
-            .entry("cockroach-stderr")
-            .or_default()
-            .rotated
-            .push(Utf8Path::new("cockroach-stderr.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2023-08-30T18_56_19Z.011950.log"));
-        expected
-            .entry("cockroach-stderr")
-            .or_default()
-            .rotated
-            .push(Utf8Path::new("cockroach-stderr.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2023-08-31T02_59_24Z.010479.log"));
+            Some(&logs_map["cockroach-stderr.log"]);
+        expected.entry("cockroach-stderr").or_default().rotated.push(&logs_map["cockroach-stderr.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2023-08-30T18_56_19Z.011950.log"]);
+        expected.entry("cockroach-stderr").or_default().rotated.push(&logs_map["cockroach-stderr.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2023-08-31T02_59_24Z.010479.log"]);
 
         let extra = sort_cockroach_extra_logs(logs.as_slice());
         assert_eq!(
@@ -788,86 +1130,121 @@ mod test {
             "cockroachdb extra logs are properly sorted"
         );
     }
+
+    #[test]
+    fn test_smf_logs_split() {
+        let log = |path: &str| oxlog::LogFile {
+            path: path.into(),
+            size: None,
+            modified: None,
+            age: None,
+        };
+        let zone = "/pool/ext/p/crypt/zone/oxz_switch/root/var/svc/log";
+        let debug = "/pool/ext/p/crypt/debug/oxz_switch";
+        let service_logs = SvcLogs {
+            current: Some(log(&format!("{zone}/oxide-mg-ddm:default.log"))),
+            archived: vec![
+                log(&format!("{zone}/oxide-mg-ddm:default.log.0")),
+                log(&format!("{zone}/oxide-mg-ddm:otther.log.1")),
+                log(&format!("{zone}/oxide-mg-ddm:default.log.foo")),
+                log(&format!("{debug}/oxide-mg-ddm:default.log.1790585101")),
+            ],
+            extra: vec![],
+        };
+
+        let SmfLogs { in_zone, archived } = SmfLogs::new(&service_logs);
+        let names = |logs: Vec<&LogFile>| -> Vec<String> {
+            logs.iter()
+                .map(|l| l.path.file_name().unwrap().to_string())
+                .collect()
+        };
+        assert_eq!(
+            names(in_zone),
+            vec![
+                "oxide-mg-ddm:default.log",
+                "oxide-mg-ddm:default.log.0",
+                "oxide-mg-ddm:otther.log.1",
+            ]
+        );
+        assert_eq!(
+            names(archived),
+            vec!["oxide-mg-ddm:default.log.1790585101"]
+        );
+    }
 }
 
 #[cfg(all(target_os = "illumos", test))]
 mod illumos_tests {
-    use std::collections::BTreeMap;
     use std::io::Read;
 
     use super::*;
 
     use illumos_utils::zfs::ZFS;
-    use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
-    use omicron_common::disk::DatasetsConfig;
-    use omicron_common::disk::SharedDatasetConfig;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::DatasetUuid;
-    use omicron_uuid_kinds::ZpoolUuid;
-    use sled_storage::manager_test_harness::StorageManagerTestHarness;
+    use omicron_uuid_kinds::ExternalZpoolUuid;
+    use sled_agent_types::disk::DatasetConfig;
+    use sled_agent_types::disk::SharedDatasetConfig;
     use tokio::io::AsyncReadExt;
     use tokio::io::AsyncWriteExt;
+    use zfs_test_harness::ZfsTestHarness;
     use zip::ZipArchive;
     use zip::ZipWriter;
 
+    /// Reads a log from the zip, checking that it is stored as a zstd file.
+    fn read_zstd_entry<R: std::io::Read>(
+        entry: zip::read::ZipFile<'_, R>,
+    ) -> String {
+        assert_eq!(
+            entry.compression(),
+            zip::CompressionMethod::Stored,
+            "{} is stored without zip compression",
+            entry.name(),
+        );
+        let mut contents = String::new();
+        zstd::Decoder::new(entry)
+            .unwrap()
+            .read_to_string(&mut contents)
+            .unwrap();
+        contents
+    }
+
     struct SingleU2StorageHarness {
-        storage_test_harness: StorageManagerTestHarness,
-        zpool_id: ZpoolUuid,
+        storage_test_harness: ZfsTestHarness,
+        zpool_id: ExternalZpoolUuid,
     }
 
     impl SingleU2StorageHarness {
         async fn new(log: &Logger) -> Self {
-            let mut harness = StorageManagerTestHarness::new(log).await;
-            harness.handle().key_manager_ready().await;
-            let _raw_internal_disks =
-                harness.add_vdevs(&["m2_left.vdev", "m2_right.vdev"]).await;
-
-            let raw_disks = harness.add_vdevs(&["u2_0.vdev"]).await;
-
-            let config = harness.make_config(1, &raw_disks);
-            let result = harness
-                .handle()
-                .omicron_physical_disks_ensure(config.clone())
-                .await
-                .expect("Failed to ensure disks");
-            assert!(!result.has_error(), "{result:?}");
-
-            let zpool_id = config.disks[0].pool_id;
+            let mut harness = ZfsTestHarness::new(log.clone());
+            harness.add_external_disks(1).await;
+            let zpool_id = harness.all_external_zpool_ids().next().unwrap();
             Self { storage_test_harness: harness, zpool_id }
         }
 
         async fn configure_dataset(&self, kind: DatasetKind) -> Utf8PathBuf {
-            let zpool_name = ZpoolName::new_external(self.zpool_id);
+            let zpool_name = ZpoolName::External(self.zpool_id);
             let dataset_id = DatasetUuid::new_v4();
             let name = DatasetName::new(zpool_name, kind);
-            let mountpoint = name.mountpoint(
-                &self.storage_test_harness.handle().mount_config().root,
-            );
-            let datasets = BTreeMap::from([(
-                dataset_id,
-                DatasetConfig {
+            let mountpoint =
+                name.mountpoint(&self.storage_test_harness.mount_config().root);
+            self.storage_test_harness
+                .ensure_datasets([DatasetConfig {
                     id: dataset_id,
                     name: name.clone(),
                     inner: SharedDatasetConfig::default(),
-                },
-            )]);
-            let config = DatasetsConfig { datasets, ..Default::default() };
-            let status = self
-                .storage_test_harness
-                .handle()
-                .datasets_ensure(config.clone())
+                }])
                 .await
                 .unwrap();
-            assert!(!status.has_error(), "{status:?}");
 
             mountpoint
         }
 
-        async fn cleanup(mut self) {
-            self.storage_test_harness.cleanup().await
+        fn cleanup(mut self) {
+            self.storage_test_harness.cleanup();
         }
     }
 
@@ -894,29 +1271,28 @@ mod illumos_tests {
     }
 
     /// Find all sled-diagnostics created snapshots
-    fn get_sled_diagnostics_snapshots(filesystem: &str) -> Vec<Snapshot> {
-        list_snapshots(filesystem)
-            .into_iter()
-            .filter(|snap| {
-                if !snap.snap_name.starts_with(SLED_DIAGNOSTICS_SNAPSHOT_PREFIX)
-                {
-                    return false;
-                }
-                let name = snap.to_string();
-                if Zfs::get_values(
-                    &name,
-                    &[SLED_DIAGNOSTICS_ZFS_PROPERTY_NAME],
-                    Some(illumos_utils::zfs::PropertySource::Local),
-                )
-                .unwrap()
-                    == [SLED_DIAGNOSTICS_ZFS_PROPERTY_VALUE]
-                {
-                    return true;
-                };
+    async fn get_sled_diagnostics_snapshots(filesystem: &str) -> Vec<Snapshot> {
+        let mut snapshots = Vec::new();
 
-                false
-            })
-            .collect()
+        for snap in list_snapshots(filesystem).into_iter() {
+            if !snap.snap_name.starts_with(SLED_DIAGNOSTICS_SNAPSHOT_PREFIX) {
+                continue;
+            }
+            let name = snap.to_string();
+            if Zfs::get_values(
+                &name,
+                &[SLED_DIAGNOSTICS_ZFS_PROPERTY_NAME],
+                Some(illumos_utils::zfs::PropertySource::Local),
+            )
+            .await
+            .unwrap()
+                == [SLED_DIAGNOSTICS_ZFS_PROPERTY_VALUE]
+            {
+                snapshots.push(snap);
+            };
+        }
+
+        snapshots
     }
 
     #[tokio::test]
@@ -933,8 +1309,7 @@ mod illumos_tests {
                 name: "oxz_switch".to_string(),
             })
             .await;
-        let zfs_filesystem =
-            &ZpoolName::new_external(harness.zpool_id).to_string();
+        let zfs_filesystem = &ZpoolName::External(harness.zpool_id).to_string();
 
         // Make sure an error in this block results in the correct drop ordering
         // for test cleanup
@@ -942,41 +1317,46 @@ mod illumos_tests {
             let mut log_snapshots = LogSnapshots::new();
 
             // Create a new snapshot
-            log_snapshots.get_or_create(&log, &mountpoint).unwrap();
-            let snapshots = get_sled_diagnostics_snapshots(zfs_filesystem);
+            log_snapshots.get_or_create(&log, &mountpoint).await.unwrap();
+            let snapshots =
+                get_sled_diagnostics_snapshots(zfs_filesystem).await;
             assert_eq!(snapshots.len(), 1, "single snapshot created");
 
             // Creating a second snapshot from the same dataset doesn't create a
             // new snapshot
-            log_snapshots.get_or_create(&log, &mountpoint).unwrap();
-            let snapshots = get_sled_diagnostics_snapshots(zfs_filesystem);
+            log_snapshots.get_or_create(&log, &mountpoint).await.unwrap();
+            let snapshots =
+                get_sled_diagnostics_snapshots(zfs_filesystem).await;
             assert_eq!(snapshots.len(), 1, "duplicate snapshots not taken");
 
             // Free all of the log_snapshots
-            drop(log_snapshots);
+            log_snapshots.destroy().await;
 
-            let snapshots = get_sled_diagnostics_snapshots(zfs_filesystem);
+            let snapshots =
+                get_sled_diagnostics_snapshots(zfs_filesystem).await;
             assert!(snapshots.is_empty(), "no snapshots left behind");
 
             // Simulate a crash leaving behind stale snapshots
             let mut log_snapshots = LogSnapshots::new();
-            log_snapshots.get_or_create(&log, &mountpoint).unwrap();
+            log_snapshots.get_or_create(&log, &mountpoint).await.unwrap();
 
             // Don't run the drop handler for any log_snapshots
             std::mem::forget(log_snapshots);
 
-            let snapshots = get_sled_diagnostics_snapshots(zfs_filesystem);
+            let snapshots =
+                get_sled_diagnostics_snapshots(zfs_filesystem).await;
             assert_eq!(snapshots.len(), 1, "single snapshot created");
 
             let handle = LogsHandle::new(log.clone());
-            handle.cleanup_snapshots();
+            handle.cleanup_snapshots().await;
 
-            let snapshots = get_sled_diagnostics_snapshots(zfs_filesystem);
+            let snapshots =
+                get_sled_diagnostics_snapshots(zfs_filesystem).await;
             assert!(snapshots.is_empty(), "all stale snapshots cleaned up");
         }
 
         // Cleanup
-        harness.cleanup().await;
+        harness.cleanup();
         logctx.cleanup_successful();
     }
 
@@ -1002,10 +1382,18 @@ mod illumos_tests {
             ("oxide-mg-ddm:default.log.2", "journey before destination"),
         ];
 
-        let logfile_to_data_unwanted = [
-            ("oxide-mg-ddm:default.log.foo", "some other file"),
+        // A rotated file of another instance of the service is collected
+        // too, even without its live file.
+        let logfile_to_data = [
+            logfile_to_data[0],
+            logfile_to_data[1],
+            logfile_to_data[2],
+            logfile_to_data[3],
             ("oxide-mg-ddm:otther.log.0", "some other file rotated"),
         ];
+
+        let logfile_to_data_unwanted =
+            [("oxide-mg-ddm:default.log.foo", "some other file")];
 
         let logdir = mountpoint.join("var/svc/log");
         fs_err::tokio::create_dir_all(&logdir).await.unwrap();
@@ -1016,6 +1404,12 @@ mod illumos_tests {
             let mut logfile_handle =
                 fs_err::tokio::File::create_new(&logfile).await.unwrap();
             logfile_handle.write_all(data.as_bytes()).await.unwrap();
+
+            // 2025-10-15T00:00:00
+            let mtime = std::time::SystemTime::UNIX_EPOCH
+                + std::time::Duration::from_secs(1760486400);
+            let std_file = logfile_handle.into_std().await.into_file();
+            std_file.set_modified(mtime).unwrap();
         }
 
         // Populate some file with similar names that should be skipped over
@@ -1036,43 +1430,83 @@ mod illumos_tests {
             let zipfile_path = mountpoint.join("test.zip");
             let zipfile = File::create_new(&zipfile_path).unwrap();
             let mut zip = ZipWriter::new(zipfile);
+            // List the logs as get_zone_logs does: through oxlog, within a
+            // snapshot.
+            let zone_logs = list_in_snapshot(
+                &loghandle,
+                &mut log_snapshots,
+                logdir.clone(),
+            )
+            .await;
 
-            loghandle
-                .process_logs(
-                    "mg-ddm",
-                    &mut zip,
-                    &mut log_snapshots,
-                    &mountpoint
-                        .join(format!("var/svc/log/{}", logfile_to_data[0].0)),
-                    LogType::Current,
-                )
-                .unwrap();
+            for file in SmfLogs::new(&zone_logs["mg-ddm"]).in_zone {
+                loghandle
+                    .process_logs("mg-ddm", &mut zip, file, LogType::Current)
+                    .unwrap();
+            }
 
             zip.finish().unwrap();
 
-            // Confirm the zip has our file and data
+            let expected_zip_mtime =
+                zip::DateTime::from_date_and_time(2025, 10, 15, 0, 0, 0)
+                    .unwrap();
+
+            // Confirm the zip has our file and data with the right mtime
             let mut archive =
                 ZipArchive::new(File::open(zipfile_path).unwrap()).unwrap();
             for (name, data) in logfile_to_data {
-                let mut file_in_zip =
-                    archive.by_name(&format!("mg-ddm/current/{name}")).unwrap();
-                let mut contents = String::new();
-                file_in_zip.read_to_string(&mut contents).unwrap();
+                let file_in_zip = archive
+                    .by_name(&format!("mg-ddm/current/{name}.zst"))
+                    .unwrap();
 
+                let mtime = file_in_zip.last_modified().unwrap();
+                assert_eq!(mtime, expected_zip_mtime, "file mtime matches");
+
+                let contents = read_zstd_entry(file_in_zip);
                 assert_eq!(contents.as_str(), data, "log file data matches");
             }
 
             // Confirm the zip did not pick up the unwanted files
             for (name, _) in logfile_to_data_unwanted {
                 let file_in_zip =
-                    archive.by_name(&format!("mg-ddm/current/{name}"));
+                    archive.by_name(&format!("mg-ddm/current/{name}.zst"));
                 assert!(file_in_zip.is_err(), "file should not be in zip");
             }
+            log_snapshots.destroy().await;
         }
 
         // Cleanup
-        harness.cleanup().await;
+        harness.cleanup();
         logctx.cleanup_successful();
+    }
+
+    /// Lists a zone's SMF logs in `logdir` as `get_zone_logs` does: through
+    /// oxlog, within a snapshot.
+    async fn list_in_snapshot(
+        loghandle: &LogsHandle,
+        log_snapshots: &mut LogSnapshots,
+        logdir: Utf8PathBuf,
+    ) -> BTreeMap<String, SvcLogs> {
+        let paths = loghandle
+            .snapshot_paths(
+                log_snapshots,
+                oxlog::Paths { primary: logdir, debug: vec![], extra: vec![] },
+            )
+            .await
+            .unwrap();
+        oxlog::Zones {
+            zones: BTreeMap::from([("oxz_switch".to_string(), paths)]),
+        }
+        .zone_logs(
+            "oxz_switch",
+            oxlog::Filter {
+                current: true,
+                archived: true,
+                extra: false,
+                show_empty: false,
+                date_range: None,
+            },
+        )
     }
 
     #[tokio::test]
@@ -1090,9 +1524,9 @@ mod illumos_tests {
             })
             .await;
 
-        let mgddm_log = "oxide-mg-ddm:default.log";
-        let data1 = "very important log data";
-        let data2 = "changed log data";
+        let live = "oxide-mg-ddm:default.log";
+        let rotated0 = "oxide-mg-ddm:default.log.0";
+        let rotated1 = "oxide-mg-ddm:default.log.1";
 
         let logdir = mountpoint.join("var/svc/log");
         fs_err::tokio::create_dir_all(&logdir).await.unwrap();
@@ -1100,54 +1534,68 @@ mod illumos_tests {
         // Make sure an error in this block results in the correct drop ordering
         // for test cleanup
         {
-            // Write the log data before we take a snapshot
-            let logfile = logdir.join(mgddm_log);
-            let mut logfile_handle =
-                fs_err::tokio::File::create_new(&logfile).await.unwrap();
-            logfile_handle.write_all(data1.as_bytes()).await.unwrap();
+            fs_err::tokio::write(logdir.join(live), "live data").await.unwrap();
+            fs_err::tokio::write(logdir.join(rotated0), "rotated data")
+                .await
+                .unwrap();
 
             let loghandle = LogsHandle::new(log.clone());
             let mut log_snapshots = LogSnapshots::new();
 
-            // Create a snapshot first
-            log_snapshots.get_or_create(&log, &logfile).unwrap();
+            // Snapshot the logs...
+            let zone_logs = list_in_snapshot(
+                &loghandle,
+                &mut log_snapshots,
+                logdir.clone(),
+            )
+            .await;
 
-            // Change the data on disk by truncating the old file first
-            let mut logfile_handle =
-                fs_err::tokio::File::create(&logfile).await.unwrap();
-            logfile_handle.write_all(data2.as_bytes()).await.unwrap();
+            // ...then rotate them on disk, as logadm does: shift the rotated
+            // file, copy the live file to a new one, and truncate it.
+            fs_err::tokio::rename(logdir.join(rotated0), logdir.join(rotated1))
+                .await
+                .unwrap();
+            fs_err::tokio::copy(logdir.join(live), logdir.join(rotated0))
+                .await
+                .unwrap();
+            fs_err::tokio::write(logdir.join(live), "new live data")
+                .await
+                .unwrap();
 
             let zipfile_path = mountpoint.join("test.zip");
             let zipfile = File::create_new(&zipfile_path).unwrap();
             let mut zip = ZipWriter::new(zipfile);
-
-            loghandle
-                .process_logs(
-                    "mg-ddm",
-                    &mut zip,
-                    &mut log_snapshots,
-                    &logfile,
-                    LogType::Current,
-                )
-                .unwrap();
-
+            for file in SmfLogs::new(&zone_logs["mg-ddm"]).in_zone {
+                loghandle
+                    .process_logs("mg-ddm", &mut zip, file, LogType::Current)
+                    .unwrap();
+            }
             zip.finish().unwrap();
 
+            // The zip holds the files as they were in the snapshot, under
+            // their names in the snapshot: not the rotated files on disk.
             let mut archive =
                 ZipArchive::new(File::open(zipfile_path).unwrap()).unwrap();
-            let mut file_in_zip = archive
-                .by_name(&format!("mg-ddm/current/{mgddm_log}"))
-                .unwrap();
-            let mut contents = String::new();
-            file_in_zip.read_to_string(&mut contents).unwrap();
-
-            // Confirm we have the data in the snapshot and not the newly
-            // written data.
-            assert_eq!(contents.as_str(), data1, "log file data matches");
+            for (name, data) in
+                [(live, "live data"), (rotated0, "rotated data")]
+            {
+                let file_in_zip = archive
+                    .by_name(&format!("mg-ddm/current/{name}.zst"))
+                    .unwrap();
+                let contents = read_zstd_entry(file_in_zip);
+                assert_eq!(contents.as_str(), data, "{name} matches snapshot");
+            }
+            assert!(
+                archive
+                    .by_name(&format!("mg-ddm/current/{rotated1}.zst"))
+                    .is_err(),
+                "file rotated after the snapshot should not be in zip"
+            );
+            log_snapshots.destroy().await;
         }
 
         // Cleanup
-        harness.cleanup().await;
+        harness.cleanup();
         logctx.cleanup_successful();
     }
 
@@ -1181,7 +1629,8 @@ mod illumos_tests {
             let loghandle = LogsHandle::new(log.clone());
 
             let snapshot_dendrite_log = loghandle
-                .find_log_in_snapshot(&mut log_snapshots, &logfile)
+                .path_in_snapshot(&mut log_snapshots, &logfile)
+                .await
                 .unwrap();
 
             assert!(
@@ -1195,10 +1644,57 @@ mod illumos_tests {
             let mut contents = String::new();
             snapshot_dendrite_log.read_to_string(&mut contents).await.unwrap();
             assert_eq!(contents.as_str(), data, "log file data matches");
+            log_snapshots.destroy().await;
         }
 
         // Cleanup
-        harness.cleanup().await;
+        harness.cleanup();
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_extra_log_file_regex() {
+        let current = [("foo.log", "foo"), ("foo.bar.baz.log", "foo")];
+        for (log, name) in current {
+            let logfile = LogFile {
+                path: log.parse().unwrap(),
+                size: None,
+                modified: None,
+                age: None,
+            };
+            let res = parse_extra_log(&logfile);
+            assert_eq!(
+                res.unwrap(),
+                ExtraLogKind::Current { name, log: &logfile }
+            );
+        }
+
+        let rotated = [("foo.log.1", "foo"), ("foo.bar.baz.log.1", "foo")];
+        for (log, name) in rotated {
+            let logfile = LogFile {
+                path: log.parse().unwrap(),
+                size: None,
+                modified: None,
+                age: None,
+            };
+            let res = parse_extra_log(&logfile);
+            assert_eq!(
+                res.unwrap(),
+                ExtraLogKind::Rotated { name, log: &logfile }
+            );
+        }
+
+        let invalid =
+            ["foo bar.log.1", "some-cool-log", "log.foo.1", "log.foo"];
+        for log in invalid {
+            let logfile = LogFile {
+                path: log.parse().unwrap(),
+                size: None,
+                modified: None,
+                age: None,
+            };
+            let res = parse_extra_log(&logfile);
+            assert!(res.is_none());
+        }
     }
 }

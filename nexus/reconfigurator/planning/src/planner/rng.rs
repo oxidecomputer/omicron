@@ -41,7 +41,7 @@ pub struct PlannerRng {
 
 impl PlannerRng {
     pub fn from_entropy() -> Self {
-        Self::new_from_parent(StdRng::from_entropy())
+        Self::new_from_parent(StdRng::from_os_rng())
     }
 
     pub fn from_seed<H: Hash>(seed: H) -> Self {

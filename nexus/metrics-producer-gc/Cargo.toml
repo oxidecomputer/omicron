@@ -1,7 +1,7 @@
 [package]
 name = "nexus-metrics-producer-gc"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 
 [lints]
 workspace = true
@@ -26,6 +26,10 @@ uuid.workspace = true
 pq-sys = "*"
 
 omicron-workspace-hack.workspace = true
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true
 
 [dev-dependencies]
 async-bb8-diesel.workspace = true

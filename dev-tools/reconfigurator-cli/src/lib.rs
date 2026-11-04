@@ -4,103 +4,129 @@
 
 //! developer REPL for driving blueprint planning
 
-use anyhow::{Context, anyhow, bail};
-use camino::Utf8PathBuf;
+use anyhow::{Context, anyhow, bail, ensure};
+use camino::{Utf8Path, Utf8PathBuf};
+use chrono::{DateTime, Utc};
 use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
+use daft::Diffable;
+use gateway_types::rot::RotSlot;
+use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use internal_dns_types::diff::DnsDiff;
 use itertools::Itertools;
-use log_capture::LogCapture;
+pub use log_capture::LogCapture;
 use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_blippy::Blippy;
 use nexus_reconfigurator_blippy::BlippyReportSortKey;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
-use nexus_reconfigurator_planning::system::{SledBuilder, SystemDescription};
-use nexus_reconfigurator_simulation::SimState;
-use nexus_reconfigurator_simulation::SimStateBuilder;
-use nexus_reconfigurator_simulation::Simulator;
-use nexus_types::deployment::OmicronZoneNic;
-use nexus_types::deployment::PlanningInput;
-use nexus_types::deployment::SledFilter;
-use nexus_types::deployment::execution;
+use nexus_reconfigurator_planning::system::{
+    RotStateOverrides, SledBuilder, SledInventoryVisibility, SystemDescription,
+};
+use nexus_reconfigurator_simulation::{
+    BlueprintId, CollectionId, DisplayUuidPrefix, GraphRenderOptions,
+    GraphStartingState, ReconfiguratorSimId, ReconfiguratorSimOpId, SimState,
+};
+use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
+use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
+use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
+use nexus_types::deployment::BlueprintMeasurements;
+use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
+use nexus_types::deployment::CockroachDbSettings;
+use nexus_types::deployment::PlannerConfig;
+use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+use nexus_types::deployment::SledUpdateRebootPolicy;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
-use nexus_types::deployment::{BlueprintZoneDisposition, ExpectedVersion};
+use nexus_types::deployment::{BlueprintArtifactVersion, PendingMgsUpdate};
+use nexus_types::deployment::{BlueprintExpungedZoneAccessReason, execution};
+use nexus_types::deployment::{BlueprintSource, SledFilter};
 use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
 };
-use nexus_types::deployment::{BlueprintZoneImageVersion, PendingMgsUpdate};
-use nexus_types::external_api::views::SledPolicy;
-use nexus_types::external_api::views::SledProvisionPolicy;
+use nexus_types::deployment::{ExpectedVersion, ReconfiguratorStateInput};
+use nexus_types::deployment::{OmicronZoneNic, TargetReleaseDescription};
+use nexus_types::deployment::{PendingMgsUpdateSpDetails, PlanningInput};
+use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
+use nexus_types::inventory::CollectionDisplayCliFilter;
+use nexus_types::tuf_repo::TufRepoDescription;
 use omicron_common::address::REPO_DEPOT_PORT;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
 use omicron_common::policy::NEXUS_REDUNDANCY;
+use omicron_common::update::OmicronInstallManifestSource;
+use omicron_generation_kinds::{
+    Generation, NexusGeneration, TargetReleaseGeneration,
+};
 use omicron_repl_utils::run_repl_from_file;
 use omicron_repl_utils::run_repl_on_stdin;
-use omicron_uuid_kinds::BlueprintUuid;
-use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use omicron_uuid_kinds::ReconfiguratorSimUuid;
+use omicron_uuid_kinds::ReconfiguratorSimOpUuid;
+use omicron_uuid_kinds::ReconfiguratorSimStateUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
+use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
+use omicron_uuid_kinds::{CollectionUuid, MupdateUuid};
+use semver::Version;
+use sled_agent_types::disk::M2Slot;
+use sled_agent_types::inventory::ZoneKind;
+use slog_error_chain::InlineErrorChain;
 use std::borrow::Cow;
-use std::collections::BTreeMap;
-use std::fmt::Write;
+use std::collections::BTreeSet;
+use std::convert::Infallible;
+use std::fmt::{self, Write};
 use std::io::IsTerminal;
-use swrite::{SWrite, swriteln};
+use std::num::ParseIntError;
+use std::str::FromStr;
+use std::sync::Arc;
+use swrite::{SWrite, swrite, swriteln};
 use tabled::Tabled;
+use tufaceous::RepositoryLoader;
+use tufaceous::edit::RepositoryEditor;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
 
 mod log_capture;
+pub mod test_utils;
 
 /// REPL state
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct ReconfiguratorSim {
     // The simulator currently being used.
     sim: Simulator,
-    // The current state.
-    current: ReconfiguratorSimUuid,
     // The current system state
     log: slog::Logger,
 }
 
 impl ReconfiguratorSim {
     fn new(log: slog::Logger, seed: Option<String>) -> Self {
-        Self {
-            sim: Simulator::new(&log, seed),
-            current: Simulator::ROOT_ID,
-            log,
-        }
+        Self { sim: Simulator::new(&log, seed), log }
     }
 
     fn current_state(&self) -> &SimState {
         self.sim
-            .get_state(self.current)
+            .get_state(self.sim.current())
             .expect("current state should always exist")
     }
 
     fn commit_and_bump(&mut self, description: String, state: SimStateBuilder) {
-        let new_id = state.commit(description, &mut self.sim);
-        self.current = new_id;
+        state.commit_and_bump(description, &mut self.sim);
     }
 
     fn planning_input(
         &self,
-        parent_blueprint: &Blueprint,
+        parent_blueprint: &Arc<Blueprint>,
     ) -> anyhow::Result<PlanningInput> {
         let state = self.current_state();
         let mut builder = state
             .system()
             .description()
-            .to_planning_input_builder()
+            .to_planning_input_builder(Arc::clone(parent_blueprint))
             .context("generating planning input builder")?;
 
         // The internal and external DNS numbers that go here are supposed to be
@@ -131,20 +157,20 @@ impl ReconfiguratorSim {
         builder.set_internal_dns_version(parent_blueprint.internal_dns_version);
         builder.set_external_dns_version(parent_blueprint.external_dns_version);
 
-        for (_, zone) in parent_blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-        {
-            if let Some((external_ip, nic)) =
-                zone.zone_type.external_networking()
-            {
-                builder
-                    .add_omicron_zone_external_ip(zone.id, external_ip)
-                    .context("adding omicron zone external IP")?;
+        // Handle zone networking setup first
+        for (_, zone) in parent_blueprint.in_service_zones() {
+            if let Some(networking) = zone.zone_type.external_networking() {
+                for external_ip in networking.external_ips() {
+                    builder
+                        .add_omicron_zone_external_ip(zone.id, external_ip)
+                        .context("adding omicron zone external IP")?;
+                }
+                let nic = networking.nic();
                 let nic = OmicronZoneNic {
                     // TODO-cleanup use `TypedUuid` everywhere
                     id: VnicUuid::from_untyped_uuid(nic.id),
                     mac: nic.mac,
-                    ip: nic.ip,
+                    ip: (&nic.ip_config).into(),
                     slot: nic.slot,
                     primary: nic.primary,
                 };
@@ -153,7 +179,193 @@ impl ReconfiguratorSim {
                     .context("adding omicron zone NIC")?;
             }
         }
+
+        // Determine active and not-yet nexus zones (use explicit overrides if available)
+        let active_nexus_zones = if let Some(explicit) =
+            state.config().explicit_active_nexus_zones()
+        {
+            explicit.clone()
+        } else {
+            // Infer from generation
+            let active_nexus_gen =
+                state.config().active_nexus_zone_generation();
+            let mut active_nexus_zones = BTreeSet::new();
+            for (_, zone, nexus) in parent_blueprint.in_service_nexus_zones() {
+                if nexus.nexus_generation == active_nexus_gen {
+                    active_nexus_zones.insert(zone.id);
+                }
+            }
+            active_nexus_zones
+        };
+
+        let not_yet_nexus_zones = if let Some(explicit) =
+            state.config().explicit_not_yet_nexus_zones()
+        {
+            explicit.clone()
+        } else {
+            // Infer from generation
+            let active_nexus_gen =
+                state.config().active_nexus_zone_generation();
+            let mut not_yet_nexus_zones = BTreeSet::new();
+            for (_, zone) in parent_blueprint.in_service_zones() {
+                match &zone.zone_type {
+                    nexus_types::deployment::BlueprintZoneType::Nexus(
+                        nexus,
+                    ) => {
+                        if nexus.nexus_generation > active_nexus_gen {
+                            not_yet_nexus_zones.insert(zone.id);
+                        }
+                    }
+                    _ => (),
+                }
+            }
+            not_yet_nexus_zones
+        };
+
+        if active_nexus_zones.is_empty() {
+            let active_nexus_gen =
+                state.config().active_nexus_zone_generation();
+            bail!(
+                "no Nexus zones found at current active generation \
+                 ({active_nexus_gen})"
+            );
+        }
+
+        builder.set_active_nexus_zones(active_nexus_zones);
+        builder.set_not_yet_nexus_zones(not_yet_nexus_zones);
+
         Ok(builder.build())
+    }
+
+    fn load_example<F>(
+        &mut self,
+        seed: Option<String>,
+        f: F,
+    ) -> anyhow::Result<String>
+    where
+        F: FnOnce(ExampleSystemBuilder) -> anyhow::Result<ExampleSystemBuilder>,
+    {
+        let mut s = String::new();
+        let mut state = self.current_state().to_mut();
+        if !state.system_mut().is_empty() {
+            bail!(
+                "changes made to simulated system: run `wipe system` before \
+                 loading"
+            );
+        }
+
+        // Generate the example system.
+        match seed {
+            Some(seed) => {
+                // In this case, reset the RNG state to the provided seed.
+                swriteln!(s, "setting new RNG seed: {}", seed);
+                state.rng_mut().set_seed(seed);
+            }
+            None => {
+                // In this case, use the existing RNG state.
+                swriteln!(
+                    s,
+                    "using existing RNG state (seed: {})",
+                    state.rng_mut().seed()
+                );
+            }
+        };
+        let rng = state.rng_mut().next_example_rng();
+
+        let builder = f(ExampleSystemBuilder::new_with_rng(&self.log, rng)
+            .nexus_count(
+                state
+                    .config_mut()
+                    .num_nexus()
+                    .map_or(NEXUS_REDUNDANCY, |n| n.into()),
+            ))?;
+
+        let (example, blueprint) = builder.build();
+
+        // Generate the internal and external DNS configs based on the blueprint.
+        let sleds_by_id = make_sleds_by_id(&example.system)?;
+        let blueprint_nexus_generation =
+            blueprint_active_nexus_generation(&blueprint);
+        let internal_dns = blueprint_internal_dns_config(
+            &blueprint,
+            &sleds_by_id,
+            blueprint_nexus_generation,
+            &Default::default(),
+        )?;
+        let external_dns_zone_name =
+            state.config_mut().external_dns_zone_name().to_owned();
+        let external_dns = blueprint_external_dns_config(
+            &blueprint,
+            state.config_mut().silo_names(),
+            external_dns_zone_name,
+            blueprint_nexus_generation,
+        );
+
+        let blueprint_id = blueprint.id;
+        let collection_id = example.collection.id;
+
+        state
+            .system_mut()
+            .load_example(example, blueprint, internal_dns, external_dns)
+            .expect("already checked non-empty state above");
+        self.commit_and_bump(
+            "reconfigurator-cli load-example".to_owned(),
+            state,
+        );
+
+        Ok(format!(
+            "loaded example system with:\n\
+             - collection: {collection_id}\n\
+             - blueprint: {blueprint_id}",
+        ))
+    }
+
+    fn run_planner(
+        &mut self,
+        parent_blueprint_id: BlueprintId,
+        collection_id: CollectionId,
+    ) -> anyhow::Result<String> {
+        let mut state = self.current_state().to_mut();
+        let rng = state.rng_mut().next_planner_rng();
+        let system = state.system_mut();
+
+        let parent_blueprint = {
+            let resolved = system.resolve_blueprint_id(parent_blueprint_id);
+            system.get_blueprint(&resolved)?
+        };
+
+        let collection = {
+            let resolved = system.resolve_collection_id(collection_id)?;
+            system.get_collection(&resolved)?
+        };
+
+        let creator = "reconfigurator-sim";
+        let planning_input = self
+            .planning_input(parent_blueprint)
+            .context("failed to construct planning input")?;
+        let planner = Planner::new_based_on(
+            self.log.clone(),
+            &planning_input,
+            creator,
+            collection,
+            rng,
+        )
+        .context("creating planner")?;
+
+        let blueprint = planner.plan().context("generating blueprint")?;
+        let rv = format!(
+            "generated blueprint {} based on parent blueprint {}\n\
+             blueprint source: {}",
+            blueprint.id, parent_blueprint.id, blueprint.source,
+        );
+        system.add_blueprint(blueprint)?;
+
+        self.commit_and_bump(
+            "reconfigurator-cli blueprint-plan".to_owned(),
+            state,
+        );
+
+        Ok(rv)
     }
 }
 
@@ -203,12 +415,29 @@ fn process_command(
     let cmd_result = match command {
         Commands::SledList => cmd_sled_list(sim),
         Commands::SledAdd(args) => cmd_sled_add(sim, args),
+        Commands::SledRemove(args) => cmd_sled_remove(sim, args),
         Commands::SledShow(args) => cmd_sled_show(sim, args),
+        Commands::SledSet(args) => cmd_sled_set(sim, args),
+        Commands::SledUpdateInstallDataset(args) => {
+            cmd_sled_update_install_dataset(sim, args)
+        }
+        Commands::SledUpdateRot(args) => cmd_sled_update_rot(sim, args),
+        Commands::SledUpdateSp(args) => cmd_sled_update_sp(sim, args),
+        Commands::SledUpdateHostPhase1(args) => {
+            cmd_sled_update_host_phase_1(sim, args)
+        }
+        Commands::SledUpdateHostPhase2(args) => {
+            cmd_sled_update_host_phase_2(sim, args)
+        }
+        Commands::SledUpdateRotBootloader(args) => {
+            cmd_sled_update_rot_bootloader(sim, args)
+        }
         Commands::SiloList => cmd_silo_list(sim),
         Commands::SiloAdd(args) => cmd_silo_add(sim, args),
         Commands::SiloRemove(args) => cmd_silo_remove(sim, args),
         Commands::InventoryList => cmd_inventory_list(sim),
         Commands::InventoryGenerate => cmd_inventory_generate(sim),
+        Commands::InventoryShow(args) => cmd_inventory_show(sim, args),
         Commands::BlueprintList => cmd_blueprint_list(sim),
         Commands::BlueprintBlippy(args) => cmd_blueprint_blippy(sim, args),
         Commands::BlueprintEdit(args) => cmd_blueprint_edit(sim, args),
@@ -216,16 +445,25 @@ fn process_command(
         Commands::BlueprintShow(args) => cmd_blueprint_show(sim, args),
         Commands::BlueprintDiff(args) => cmd_blueprint_diff(sim, args),
         Commands::BlueprintDiffDns(args) => cmd_blueprint_diff_dns(sim, args),
-        Commands::BlueprintDiffInventory(args) => {
-            cmd_blueprint_diff_inventory(sim, args)
-        }
+        Commands::BlueprintHistory(args) => cmd_blueprint_history(sim, args),
         Commands::BlueprintSave(args) => cmd_blueprint_save(sim, args),
+        Commands::BlueprintLoad(args) => cmd_blueprint_load(sim, args),
         Commands::Show => cmd_show(sim),
         Commands::Set(args) => cmd_set(sim, args),
+        Commands::GenerateFakeRepo(args) => cmd_generate_fake_repo(args),
         Commands::Load(args) => cmd_load(sim, args),
         Commands::LoadExample(args) => cmd_load_example(sim, args),
         Commands::FileContents(args) => cmd_file_contents(args),
         Commands::Save(args) => cmd_save(sim, args),
+        Commands::State(StateArgs::Log(args)) => cmd_state_log(sim, args),
+        Commands::State(StateArgs::Switch(args)) => cmd_state_switch(sim, args),
+        Commands::Op(OpArgs::Log(args)) => cmd_op_log(sim, args),
+        Commands::Op(OpArgs::Undo) => cmd_op_undo(sim),
+        Commands::Op(OpArgs::Redo) => cmd_op_redo(sim),
+        Commands::Op(OpArgs::Restore(args)) => cmd_op_restore(sim, args),
+        Commands::Op(OpArgs::Wipe) => cmd_op_wipe(sim),
+        Commands::Undo => cmd_op_undo(sim),
+        Commands::Redo => cmd_op_redo(sim),
         Commands::Wipe(args) => cmd_wipe(sim, args),
     };
 
@@ -251,8 +489,24 @@ enum Commands {
     SledList,
     /// add a new sled
     SledAdd(SledAddArgs),
+    /// remove a sled from the system
+    SledRemove(SledRemoveArgs),
     /// show details about one sled
     SledShow(SledArgs),
+    /// set a value on a sled
+    SledSet(SledSetArgs),
+    /// update the install dataset on a sled, simulating a mupdate
+    SledUpdateInstallDataset(SledUpdateInstallDatasetArgs),
+    /// simulate updating the sled's RoT versions
+    SledUpdateRot(SledUpdateRotArgs),
+    /// simulate updating the sled's RoT Bootloader versions
+    SledUpdateRotBootloader(SledUpdateRotBootloaderArgs),
+    /// simulate updating the sled's SP versions
+    SledUpdateSp(SledUpdateSpArgs),
+    /// simulate updating the sled's host OS phase 1 artifacts
+    SledUpdateHostPhase1(SledUpdateHostPhase1Args),
+    /// simulate updating the sled's host OS phase 2 artifacts
+    SledUpdateHostPhase2(SledUpdateHostPhase2Args),
 
     /// list silos
     SiloList,
@@ -265,6 +519,8 @@ enum Commands {
     InventoryList,
     /// generates an inventory collection from the configured sleds
     InventoryGenerate,
+    /// show details about an inventory collection
+    InventoryShow(InventoryShowArgs),
 
     /// list all blueprints
     BlueprintList,
@@ -280,16 +536,25 @@ enum Commands {
     BlueprintDiff(BlueprintDiffArgs),
     /// show differences between a blueprint and a particular DNS version
     BlueprintDiffDns(BlueprintDiffDnsArgs),
-    /// show differences between a blueprint and an inventory collection
-    BlueprintDiffInventory(BlueprintDiffInventoryArgs),
+    /// print a summary of the history of blueprints
+    ///
+    /// This is similar to `omdb reconfigurator history` in a live system, but
+    /// it walks blueprints directly via their parent blueprint id rather than
+    /// walking the `bp_target` table.
+    BlueprintHistory(BlueprintHistoryArgs),
     /// write one blueprint to a file
     BlueprintSave(BlueprintSaveArgs),
+    /// load one blueprint from a file
+    BlueprintLoad(BlueprintLoadArgs),
 
     /// show system properties
     Show,
     /// set system properties
     #[command(subcommand)]
     Set(SetArgs),
+
+    /// use tufaceous to generate a fake repository
+    GenerateFakeRepo(GenerateFakeRepoArgs),
 
     /// save state to a file
     Save(SaveArgs),
@@ -299,6 +564,16 @@ enum Commands {
     LoadExample(LoadExampleArgs),
     /// show information about what's in a saved file
     FileContents(FileContentsArgs),
+    /// state-related commands
+    #[command(flatten)]
+    State(StateArgs),
+    /// operation log commands (undo, redo, restore)
+    #[command(subcommand)]
+    Op(OpArgs),
+    /// undo the last operation (alias for `op undo`)
+    Undo,
+    /// redo the last undone operation (alias for `op redo`)
+    Redo,
     /// reset the state of the REPL
     Wipe(WipeArgs),
 }
@@ -307,16 +582,293 @@ enum Commands {
 struct SledAddArgs {
     /// id of the new sled
     sled_id: Option<SledUuid>,
+
+    /// number of disks or pools
+    #[clap(short = 'd', long, visible_alias = "npools", default_value_t = SledBuilder::DEFAULT_NPOOLS)]
+    ndisks: u8,
+
+    /// The policy for the sled.
+    #[clap(long, value_enum, default_value_t = SledPolicyOpt::InService)]
+    policy: SledPolicyOpt,
 }
 
 #[derive(Debug, Args)]
 struct SledArgs {
     /// id of the sled
-    sled_id: SledUuid,
+    sled_id: SledOpt,
 
     /// Filter to match sled ID against
     #[clap(short = 'F', long, value_enum, default_value_t = SledFilter::Commissioned)]
     filter: SledFilter,
+}
+
+#[derive(Debug, Args)]
+struct SledSetArgs {
+    /// id of the sled
+    sled_id: SledOpt,
+
+    /// the command to set on the sled
+    #[clap(subcommand)]
+    command: SledSetCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum SledSetCommand {
+    /// set the policy for this sled
+    Policy(SledSetPolicyArgs),
+    /// set the Omicron config for this sled from a blueprint
+    OmicronConfig(SledSetOmicronConfigArgs),
+    #[clap(flatten)]
+    Visibility(SledSetVisibilityCommand),
+    /// set the mupdate override for this sled
+    MupdateOverride(SledSetMupdateOverrideArgs),
+    /// set the number of VMMs this sled's instance manager reports as
+    /// registered (relevant when the sled is being evacuated)
+    RegisteredVmms(SledSetRegisteredVmmsArgs),
+}
+
+#[derive(Debug, Args)]
+struct SledSetRegisteredVmmsArgs {
+    /// the number of registered VMMs to report
+    count: usize,
+}
+
+#[derive(Debug, Args)]
+struct SledSetPolicyArgs {
+    /// the policy to set
+    #[clap(value_enum)]
+    policy: SledPolicyOpt,
+}
+
+#[derive(Debug, Args)]
+struct SledSetOmicronConfigArgs {
+    /// the blueprint to derive the Omicron config from
+    blueprint: BlueprintIdOpt,
+}
+
+#[derive(Debug, Subcommand)]
+enum SledSetVisibilityCommand {
+    /// mark a sled hidden from inventory
+    InventoryHidden,
+    /// mark a sled visible in inventory
+    InventoryVisible,
+}
+
+impl SledSetVisibilityCommand {
+    fn to_visibility(&self) -> SledInventoryVisibility {
+        match self {
+            SledSetVisibilityCommand::InventoryHidden => {
+                SledInventoryVisibility::Hidden
+            }
+            SledSetVisibilityCommand::InventoryVisible => {
+                SledInventoryVisibility::Visible
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum SledPolicyOpt {
+    InService,
+    NonProvisionable,
+    Expunged,
+}
+
+impl fmt::Display for SledPolicyOpt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SledPolicyOpt::InService => write!(f, "in-service"),
+            SledPolicyOpt::NonProvisionable => write!(f, "non-provisionable"),
+            SledPolicyOpt::Expunged => write!(f, "expunged"),
+        }
+    }
+}
+
+impl From<SledPolicyOpt> for SledPolicy {
+    fn from(value: SledPolicyOpt) -> Self {
+        match value {
+            SledPolicyOpt::InService => SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::Provisionable,
+            },
+            SledPolicyOpt::NonProvisionable => SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::NonProvisionable,
+            },
+            SledPolicyOpt::Expunged => SledPolicy::Expunged,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct SledUpdateInstallDatasetArgs {
+    /// id of the sled
+    sled_id: SledOpt,
+
+    #[clap(flatten)]
+    source: SledMupdateSource,
+}
+
+#[derive(Debug, Args)]
+// This makes it so that only one source can be specified.
+struct SledMupdateSource {
+    #[clap(flatten)]
+    valid: SledMupdateValidSource,
+
+    /// set the mupdate source to Installinator with the given ID
+    #[clap(long, requires = "sled-mupdate-valid-source")]
+    mupdate_id: Option<MupdateUuid>,
+
+    /// simulate an error reading the zone manifest
+    #[clap(long, conflicts_with_all = ["sled-mupdate-valid-source", "with_measurement_manifest_error"])]
+    with_manifest_error: bool,
+
+    /// simulate an error reading the measurement manifest
+    #[clap(long, conflicts_with = "with_manifest_error")]
+    with_measurement_manifest_error: bool,
+
+    /// simulate an error validating zones by this artifact ID name
+    ///
+    /// This uses the `artifact_id_name` representation of a zone kind.
+    #[clap(
+        long,
+        value_name = "ARTIFACT_ID_NAME",
+        requires = "sled-mupdate-valid-source"
+    )]
+    with_zone_error: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+#[group(id = "sled-mupdate-valid-source", multiple = false)]
+struct SledMupdateValidSource {
+    /// the TUF repo.zip to simulate the mupdate from
+    #[clap(long)]
+    from_repo: Option<Utf8PathBuf>,
+
+    /// simulate a mupdate to the target release
+    #[clap(long)]
+    to_target_release: bool,
+}
+
+#[derive(Debug, Args)]
+struct SledUpdateRotBootloaderArgs {
+    /// id of the sled
+    sled_id: SledOpt,
+
+    /// sets the version reported for the RoT bootloader stage0 (active) slot
+    #[clap(long, required_unless_present_any = &["stage0_next"])]
+    stage0: Option<ArtifactVersion>,
+
+    /// sets the version reported for the RoT bootloader stage0_next (inactive)
+    /// slot
+    #[clap(long, required_unless_present_any = &["stage0"])]
+    stage0_next: Option<ExpectedVersion>,
+}
+
+#[derive(Debug, Args)]
+struct SledUpdateSpArgs {
+    /// id of the sled
+    sled_id: SledOpt,
+
+    /// sets the version reported for the SP active slot
+    #[clap(long, required_unless_present_any = &["inactive"])]
+    active: Option<ArtifactVersion>,
+
+    /// sets the version reported for the SP inactive slot
+    #[clap(long, required_unless_present_any = &["active"])]
+    inactive: Option<ExpectedVersion>,
+}
+
+#[derive(Debug, Args)]
+struct SledUpdateRotArgs {
+    /// id of the sled
+    sled_id: SledOpt,
+
+    /// sets the version reported for the RoT slot a
+    #[clap(long, required_unless_present_any = &["slot_b"])]
+    slot_a: Option<ExpectedVersion>,
+
+    /// sets the version reported for the RoT slot b
+    #[clap(long, required_unless_present_any = &["slot_a"])]
+    slot_b: Option<ExpectedVersion>,
+
+    /// sets whether we expect the "A" or "B" slot to be active
+    #[clap(long)]
+    active_slot: Option<RotSlot>,
+
+    /// sets the persistent boot preference written into the current
+    /// authoritative CFPA page (ping or pong).
+    #[clap(long)]
+    persistent_boot_preference: Option<RotSlot>,
+
+    /// sets the pending persistent boot preference written into the CFPA
+    /// scratch page that will become the persistent boot preference in the
+    /// authoritative CFPA page upon reboot, unless CFPA update of the
+    /// authoritative page fails for some reason
+    #[clap(long, num_args(0..=1))]
+    pending_persistent_boot_preference: Option<Option<RotSlot>>,
+
+    /// sets the transient boot preference, which overrides persistent
+    /// preference selection for a single boot (unimplemented)
+    #[clap(long, num_args(0..=1),)]
+    transient_boot_preference: Option<Option<RotSlot>>,
+}
+
+#[derive(Debug, Args)]
+struct SledUpdateHostPhase1Args {
+    /// id of the sled
+    sled_id: SledOpt,
+
+    /// sets which phase 1 slot is active
+    #[clap(long, value_parser = parse_m2_slot)]
+    active: Option<M2Slot>,
+
+    /// sets the artifact hash reported for host OS phase 1 slot A
+    #[clap(long)]
+    slot_a: Option<ArtifactHash>,
+
+    /// sets the artifact hash reported for host OS phase 1 slot B
+    #[clap(long)]
+    slot_b: Option<ArtifactHash>,
+}
+
+#[derive(Debug, Args)]
+struct SledUpdateHostPhase2Args {
+    /// id of the sled
+    sled_id: SledOpt,
+
+    /// sets which phase 2 slot is the boot disk
+    #[clap(long, value_parser = parse_m2_slot)]
+    boot_disk: Option<M2Slot>,
+
+    /// sets the artifact hash reported for host OS phase 2 slot A
+    #[clap(long)]
+    slot_a: Option<ArtifactHash>,
+
+    /// sets the artifact hash reported for host OS phase 2 slot B
+    #[clap(long)]
+    slot_b: Option<ArtifactHash>,
+}
+
+#[derive(Debug, Args)]
+struct SledSetMupdateOverrideArgs {
+    #[clap(flatten)]
+    source: SledMupdateOverrideSource,
+}
+
+#[derive(Debug, Args)]
+#[group(id = "sled-mupdate-override-source", required = true, multiple = false)]
+struct SledMupdateOverrideSource {
+    /// the new value of the mupdate override, or "unset"
+    mupdate_override_id: Option<MupdateOverrideUuidOpt>,
+
+    /// simulate an error reading the mupdate override
+    #[clap(long, conflicts_with = "mupdate_override_id")]
+    with_error: bool,
+}
+
+#[derive(Debug, Args)]
+struct SledRemoveArgs {
+    /// id of the sled
+    sled_id: SledOpt,
 }
 
 #[derive(Debug, Args)]
@@ -326,26 +878,34 @@ struct SiloAddRemoveArgs {
 }
 
 #[derive(Debug, Args)]
-struct InventoryArgs {
-    /// id of the inventory collection to use in planning
-    collection_id: CollectionUuid,
+struct InventoryShowArgs {
+    /// id of the inventory collection to show or "latest"
+    collection_id: CollectionIdOpt,
+
+    /// show long strings in their entirety
+    #[clap(long)]
+    show_long_strings: bool,
+
+    #[clap(subcommand)]
+    filter: Option<CollectionDisplayCliFilter>,
 }
 
 #[derive(Debug, Args)]
 struct BlueprintPlanArgs {
-    /// id of the blueprint on which this one will be based
-    parent_blueprint_id: BlueprintUuid,
-    /// id of the inventory collection to use in planning
+    /// id of the blueprint on which this one will be based, "latest", or
+    /// "target"
+    parent_blueprint_id: BlueprintIdOpt,
+    /// id of the inventory collection to use in planning or "latest"
     ///
     /// Must be provided unless there is only one collection in the loaded
     /// state.
-    collection_id: Option<CollectionUuid>,
+    collection_id: Option<CollectionIdOpt>,
 }
 
 #[derive(Debug, Args)]
 struct BlueprintEditArgs {
-    /// id of the blueprint to edit
-    blueprint_id: BlueprintUuid,
+    /// id of the blueprint to edit, "latest", or "target"
+    blueprint_id: BlueprintIdOpt,
     /// "creator" field for the new blueprint
     #[arg(long)]
     creator: Option<String>,
@@ -361,10 +921,31 @@ enum BlueprintEditCommands {
     /// add a Nexus instance to a particular sled
     AddNexus {
         /// sled on which to deploy the new instance
-        sled_id: SledUuid,
+        sled_id: SledOpt,
+
+        /// generation of the new Nexus instance
+        nexus_generation: NexusGeneration,
+
+        /// image source for the new zone
+        ///
+        /// The image source is required if the planning input of the system
+        /// being edited has a TUF repo; otherwise, it will default to the
+        /// install dataset.
+        #[clap(subcommand)]
+        image_source: Option<ImageSourceArgs>,
     },
     /// add a CockroachDB instance to a particular sled
-    AddCockroach { sled_id: SledUuid },
+    AddCockroach {
+        /// sled on which to deploy the new instance
+        sled_id: SledOpt,
+        /// image source for the new zone
+        ///
+        /// The image source is required if the planning input of the system
+        /// being edited has a TUF repo; otherwise, it will default to the
+        /// install dataset.
+        #[clap(subcommand)]
+        image_source: Option<ImageSourceArgs>,
+    },
     /// set the image source for a zone
     SetZoneImage {
         /// id of zone whose image to set
@@ -372,8 +953,47 @@ enum BlueprintEditCommands {
         #[command(subcommand)]
         image_source: ImageSourceArgs,
     },
+    /// set the desired host phase 2 image for an internal disk slot
+    SetHostPhase2 {
+        /// sled to set the field on
+        sled_id: SledOpt,
+        /// internal disk slot
+        #[clap(value_parser = parse_m2_slot)]
+        slot: M2Slot,
+        #[command(subcommand)]
+        phase_2_source: HostPhase2SourceArgs,
+    },
+    /// set the remove_mupdate_override field for a sled
+    SetRemoveMupdateOverride {
+        /// sled to set the field on
+        sled_id: SledOpt,
+
+        /// the UUID to set the field to, or "unset"
+        value: MupdateOverrideUuidOpt,
+    },
+    /// set the update disposition for a sled
+    SetUpdateDisposition {
+        /// sled to set the field on
+        sled_id: SledOpt,
+
+        /// the disposition to set the sled to
+        #[command(subcommand)]
+        command: SledUpdateDispositionTarget,
+    },
+    /// set the minimum generation for which target releases are accepted
+    ///
+    /// At the moment, this just sets the field to the given value. In the
+    /// future, we'll likely want to set this based on the current target
+    /// release generation.
+    #[clap(visible_alias = "set-target-release-min-gen")]
+    SetTargetReleaseMinimumGeneration {
+        /// the minimum target release generation
+        generation: TargetReleaseGeneration,
+    },
     /// expunge a zone
-    ExpungeZone { zone_id: OmicronZoneUuid },
+    ExpungeZones { zone_ids: Vec<OmicronZoneUuid> },
+    /// mark an expunged zone ready for cleanup
+    MarkForCleanup { zone_id: OmicronZoneUuid },
     /// configure an SP update
     SetSpUpdate {
         /// serial number to update
@@ -391,6 +1011,363 @@ enum BlueprintEditCommands {
         /// baseboard serial number whose update to delete
         serial: String,
     },
+    /// debug commands that bypass normal checks
+    ///
+    /// These commands mutate the blueprint directly, bypassing higher-level
+    /// planner checks. They're meant for getting into weird states to test
+    /// against.
+    Debug {
+        #[command(subcommand)]
+        command: BlueprintEditDebugCommands,
+    },
+    /// bumps the blueprint's Nexus generation
+    ///
+    /// This initiates a handoff from the current generation of Nexus zones to
+    /// the next generation of Nexus zones.
+    BumpNexusGeneration,
+    /// make a new blueprint from an existing one without any changes
+    Noop,
+    /// Set a sled's measurements to either `unknown` or `install-dataset`
+    SetMeasurements {
+        /// sled to set the field on
+        sled_id: SledOpt,
+        #[command(subcommand)]
+        command: SledMeasurementTarget,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SledMeasurementTarget {
+    /// Set the blueprint to unknown measurements
+    Unknown,
+    /// Set the blueprint to install dataset
+    InstallDataset,
+    // Unlike Omicron zones we don't have a need for the
+    // `Artifact` kind for now
+}
+
+#[derive(Debug, Subcommand)]
+enum SledUpdateDispositionTarget {
+    /// mark the sled available for provisioning
+    Available,
+    /// mark the sled as evacuating, with the given disruption policy
+    Evacuating {
+        /// the disruption policy to apply while the sled is evacuating
+        #[clap(value_enum)]
+        policy: DisruptionPolicyOpt,
+    },
+}
+
+/// A clap-friendly mirror of [`ReconfiguratorDisruptionPolicy`].
+///
+/// We keep this local to the CLI (rather than deriving `ValueEnum` on the type
+/// itself) so the API type stays free of clap.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum DisruptionPolicyOpt {
+    Terminate,
+    MigrateOrTerminate,
+    MigrateOnly,
+}
+
+impl From<DisruptionPolicyOpt> for ReconfiguratorDisruptionPolicy {
+    fn from(value: DisruptionPolicyOpt) -> Self {
+        match value {
+            DisruptionPolicyOpt::Terminate => Self::Terminate,
+            DisruptionPolicyOpt::MigrateOrTerminate => Self::MigrateOrTerminate,
+            DisruptionPolicyOpt::MigrateOnly => Self::MigrateOnly,
+        }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+enum BlueprintEditDebugCommands {
+    /// remove a sled from the blueprint
+    ///
+    /// This bypasses expungement and decommissioning checks, and simply drops
+    /// the sled from the blueprint.
+    RemoveSled {
+        /// the sled to remove
+        sled: SledOpt,
+    },
+
+    /// Bump a sled's generation number, even if nothing else about the sled has
+    /// changed.
+    ForceSledGenerationBump {
+        /// the sled to bump the sled-agent generation number of
+        sled: SledOpt,
+    },
+}
+
+/// Identifies a sled in a system.
+#[derive(Clone, Debug)]
+enum SledOpt {
+    /// Identifies a sled by its UUID.
+    Uuid(SledUuid),
+    /// Identifies a sled by its serial number.
+    Serial(String),
+}
+
+impl SledOpt {
+    /// Resolves this sled option into a sled UUID.
+    fn to_sled_id(
+        &self,
+        description: &SystemDescription,
+    ) -> anyhow::Result<SledUuid> {
+        match self {
+            SledOpt::Uuid(uuid) => Ok(*uuid),
+            SledOpt::Serial(serial) => description.serial_to_sled_id(&serial),
+        }
+    }
+}
+
+impl FromStr for SledOpt {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // If the sled looks like a UUID, parse it as that.
+        if let Ok(uuid) = s.parse::<SledUuid>() {
+            return Ok(SledOpt::Uuid(uuid));
+        }
+
+        // We treat anything that doesn't parse as a UUID as a serial number.
+        //
+        // Can we do something more intelligent here, like looking for a
+        // particular prefix? In principle, yes, but in reality there are
+        // several different sources of serial numbers:
+        //
+        // * simulated sleds ("serial0", "serial1", ...)
+        // * real sleds ("BRM42220014")
+        // * a4x2 ("g0", "g1", ...)
+        // * single-sled dev deployments
+        //
+        // and possibly more. We could exhaustively enumerate all of them, but
+        // it's easier to assume that if it doesn't look like a UUID, it's a
+        // serial number.
+        Ok(Self::Serial(s.to_owned()))
+    }
+}
+
+#[derive(Clone, Debug)]
+enum BlueprintIdOpt {
+    /// use the target blueprint
+    Target,
+    /// use the latest blueprint sorted by time created
+    Latest,
+    /// use a specific blueprint
+    Id(BlueprintUuid),
+}
+
+impl FromStr for BlueprintIdOpt {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "latest" => Ok(BlueprintIdOpt::Latest),
+            // These values match the ones supported in omdb.
+            "current-target" | "current" | "target" => {
+                Ok(BlueprintIdOpt::Target)
+            }
+            _ => Ok(BlueprintIdOpt::Id(s.parse()?)),
+        }
+    }
+}
+
+impl fmt::Display for BlueprintIdOpt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BlueprintIdOpt::Target => f.write_str("target"),
+            BlueprintIdOpt::Latest => f.write_str("latest"),
+            BlueprintIdOpt::Id(id) => id.fmt(f),
+        }
+    }
+}
+
+impl From<BlueprintIdOpt> for BlueprintId {
+    fn from(value: BlueprintIdOpt) -> Self {
+        match value {
+            BlueprintIdOpt::Latest => BlueprintId::Latest,
+            BlueprintIdOpt::Target => BlueprintId::Target,
+            BlueprintIdOpt::Id(id) => BlueprintId::Id(id),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum CollectionIdOpt {
+    /// use the latest collection sorted by time created
+    Latest,
+    /// use a specific collection
+    Id(CollectionUuid),
+}
+
+impl FromStr for CollectionIdOpt {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "latest" => Ok(CollectionIdOpt::Latest),
+            _ => Ok(CollectionIdOpt::Id(s.parse()?)),
+        }
+    }
+}
+
+impl From<CollectionIdOpt> for CollectionId {
+    fn from(value: CollectionIdOpt) -> Self {
+        match value {
+            CollectionIdOpt::Latest => CollectionId::Latest,
+            CollectionIdOpt::Id(id) => CollectionId::Id(id),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum ReconfiguratorSimStateIdOpt {
+    /// use a specific reconfigurator sim state by full UUID
+    Id(ReconfiguratorSimStateUuid),
+    /// use a reconfigurator sim state by UUID prefix
+    Prefix(String),
+}
+
+impl FromStr for ReconfiguratorSimStateIdOpt {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.parse::<ReconfiguratorSimStateUuid>() {
+            Ok(id) => Ok(ReconfiguratorSimStateIdOpt::Id(id)),
+            Err(_) => Ok(ReconfiguratorSimStateIdOpt::Prefix(s.to_owned())),
+        }
+    }
+}
+
+impl fmt::Display for ReconfiguratorSimStateIdOpt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ReconfiguratorSimStateIdOpt::Id(id) => id.fmt(f),
+            ReconfiguratorSimStateIdOpt::Prefix(prefix) => prefix.fmt(f),
+        }
+    }
+}
+
+impl From<ReconfiguratorSimStateIdOpt> for ReconfiguratorSimId {
+    fn from(value: ReconfiguratorSimStateIdOpt) -> Self {
+        match value {
+            ReconfiguratorSimStateIdOpt::Id(id) => ReconfiguratorSimId::Id(id),
+            ReconfiguratorSimStateIdOpt::Prefix(prefix) => {
+                ReconfiguratorSimId::Prefix(prefix)
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum ReconfiguratorSimOpIdOpt {
+    /// use a specific reconfigurator sim operation by full UUID
+    Id(ReconfiguratorSimOpUuid),
+    /// use a reconfigurator sim operation by UUID prefix
+    Prefix(String),
+}
+
+impl FromStr for ReconfiguratorSimOpIdOpt {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.parse::<ReconfiguratorSimOpUuid>() {
+            Ok(id) => Ok(ReconfiguratorSimOpIdOpt::Id(id)),
+            Err(_) => Ok(ReconfiguratorSimOpIdOpt::Prefix(s.to_owned())),
+        }
+    }
+}
+
+impl fmt::Display for ReconfiguratorSimOpIdOpt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ReconfiguratorSimOpIdOpt::Id(id) => id.fmt(f),
+            ReconfiguratorSimOpIdOpt::Prefix(prefix) => prefix.fmt(f),
+        }
+    }
+}
+
+impl From<ReconfiguratorSimOpIdOpt> for ReconfiguratorSimOpId {
+    fn from(value: ReconfiguratorSimOpIdOpt) -> Self {
+        match value {
+            ReconfiguratorSimOpIdOpt::Id(id) => ReconfiguratorSimOpId::Id(id),
+            ReconfiguratorSimOpIdOpt::Prefix(prefix) => {
+                ReconfiguratorSimOpId::Prefix(prefix)
+            }
+        }
+    }
+}
+
+/// Clap field for an optional mupdate override UUID.
+///
+/// This structure is similar to `Option`, but is specified separately to:
+///
+/// 1. Disable clap's magic around `Option`.
+/// 2. Provide a custom parser.
+///
+/// There are other ways to do both 1 and 2 (e.g. specify the type as
+/// `std::option::Option`), but when combined they're uglier than this.
+#[derive(Clone, Copy, Debug)]
+enum MupdateOverrideUuidOpt {
+    Unset,
+    Set(MupdateOverrideUuid),
+}
+
+impl FromStr for MupdateOverrideUuidOpt {
+    type Err = newtype_uuid::ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "unset" || s == "none" {
+            Ok(MupdateOverrideUuidOpt::Unset)
+        } else {
+            Ok(MupdateOverrideUuidOpt::Set(s.parse::<MupdateOverrideUuid>()?))
+        }
+    }
+}
+
+impl From<MupdateOverrideUuidOpt> for Option<MupdateOverrideUuid> {
+    fn from(value: MupdateOverrideUuidOpt) -> Self {
+        match value {
+            MupdateOverrideUuidOpt::Unset => None,
+            MupdateOverrideUuidOpt::Set(uuid) => Some(uuid),
+        }
+    }
+}
+
+/// Clap field for an optional generation.
+///
+/// This structure is similar to `Option`, but is specified separately to:
+///
+/// 1. Disable clap's magic around `Option`.
+/// 2. Provide a custom parser.
+///
+/// There are other ways to do both 1 and 2 (e.g. specify the type as
+/// `std::option::Option`), but when combined they're uglier than this.
+#[derive(Clone, Copy, Debug)]
+enum GenerationOpt {
+    Unset,
+    Set(Generation),
+}
+
+impl FromStr for GenerationOpt {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "unset" || s == "none" {
+            Ok(Self::Unset)
+        } else {
+            Ok(Self::Set(s.parse::<Generation>()?))
+        }
+    }
+}
+
+impl From<GenerationOpt> for Option<Generation> {
+    fn from(value: GenerationOpt) -> Self {
+        match value {
+            GenerationOpt::Unset => None,
+            GenerationOpt::Set(generation) => Some(generation),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Subcommand)]
@@ -408,10 +1385,64 @@ enum ImageSourceArgs {
     InstallDataset,
     /// the zone image comes from a specific TUF repo artifact
     Artifact {
-        #[clap(value_parser = parse_blueprint_zone_image_version)]
-        version: BlueprintZoneImageVersion,
+        #[clap(value_parser = parse_blueprint_artifact_version)]
+        version: BlueprintArtifactVersion,
         hash: ArtifactHash,
     },
+}
+
+/// Adding a new zone to a blueprint needs to choose an image source for that
+/// zone. Subcommands that add a zone take an optional [`ImageSourceArgs`]
+/// parameter. In the (common in test) case where the planning input has no TUF
+/// repo at all, the new and old TUF repo policy are identical (i.e., "use the
+/// install dataset"), and therefore we have only one logical choice for the
+/// image source for any new zone (the install dataset). If a TUF repo _is_
+/// involved, we have two choices: use the artifact from the newest TUF repo, or
+/// use the artifact from the previous TUF repo policy (which might itself be
+/// another TUF repo, or might be the install dataset).
+fn image_source_unwrap_or(
+    image_source: Option<ImageSourceArgs>,
+    planning_input: &PlanningInput,
+    zone_kind: ZoneKind,
+) -> anyhow::Result<BlueprintZoneImageSource> {
+    if let Some(image_source) = image_source {
+        Ok(image_source.into())
+    } else if planning_input.tuf_repo() == planning_input.old_repo() {
+        planning_input
+            .tuf_repo()
+            .description()
+            .zone_image_source(zone_kind)
+            .context("could not determine image source")
+    } else {
+        let mut options = vec!["`install-dataset`".to_string()];
+        for (name, repo) in [
+            ("previous", planning_input.old_repo()),
+            ("current", planning_input.tuf_repo()),
+        ] {
+            match repo.description().zone_image_source(zone_kind) {
+                // Install dataset is already covered, and if either TUF repo is
+                // missing an artifact of this kind, it's not an option.
+                Ok(BlueprintZoneImageSource::InstallDataset) | Err(_) => (),
+                Ok(BlueprintZoneImageSource::Artifact { version, hash }) => {
+                    let version = match version {
+                        BlueprintArtifactVersion::Available { version } => {
+                            version.to_string()
+                        }
+                        BlueprintArtifactVersion::Unknown => {
+                            "unknown".to_string()
+                        }
+                    };
+                    options.push(format!(
+                        "`artifact {version} {hash}` (from {name} TUF repo)"
+                    ));
+                }
+            }
+        }
+        bail!(
+            "must specify image source for new zone; options: {}",
+            options.join(", ")
+        )
+    }
 }
 
 impl From<ImageSourceArgs> for BlueprintZoneImageSource {
@@ -427,23 +1458,54 @@ impl From<ImageSourceArgs> for BlueprintZoneImageSource {
     }
 }
 
-fn parse_blueprint_zone_image_version(
+#[derive(Debug, Subcommand)]
+enum HostPhase2SourceArgs {
+    /// keep the current phase 2 contents
+    CurrentContents,
+    /// the host phase 2 comes from a specific TUF repo artifact
+    Artifact {
+        #[clap(value_parser = parse_blueprint_artifact_version)]
+        version: BlueprintArtifactVersion,
+        hash: ArtifactHash,
+    },
+}
+
+impl From<HostPhase2SourceArgs> for BlueprintHostPhase2DesiredContents {
+    fn from(value: HostPhase2SourceArgs) -> Self {
+        match value {
+            HostPhase2SourceArgs::CurrentContents => Self::CurrentContents,
+            HostPhase2SourceArgs::Artifact { version, hash } => {
+                Self::Artifact { version, hash }
+            }
+        }
+    }
+}
+
+fn parse_blueprint_artifact_version(
     version: &str,
-) -> Result<BlueprintZoneImageVersion, ArtifactVersionError> {
+) -> Result<BlueprintArtifactVersion, ArtifactVersionError> {
     // Treat the literal string "unknown" as an unknown version.
     if version == "unknown" {
-        return Ok(BlueprintZoneImageVersion::Unknown);
+        return Ok(BlueprintArtifactVersion::Unknown);
     }
 
-    Ok(BlueprintZoneImageVersion::Available {
+    Ok(BlueprintArtifactVersion::Available {
         version: version.parse::<ArtifactVersion>()?,
     })
 }
 
+fn parse_m2_slot(slot: &str) -> anyhow::Result<M2Slot> {
+    match slot {
+        "A" | "a" | "0" => Ok(M2Slot::A),
+        "B" | "b" | "1" => Ok(M2Slot::B),
+        _ => bail!("invalid slot `{slot}` (expected `A` or `B`)"),
+    }
+}
+
 #[derive(Debug, Args)]
 struct BlueprintArgs {
-    /// id of the blueprint
-    blueprint_id: BlueprintUuid,
+    /// id of the blueprint, "latest", or "target"
+    blueprint_id: BlueprintIdOpt,
 }
 
 #[derive(Debug, Args)]
@@ -452,8 +1514,8 @@ struct BlueprintDiffDnsArgs {
     dns_group: CliDnsGroup,
     /// DNS version to diff against
     dns_version: u32,
-    /// id of the blueprint
-    blueprint_id: BlueprintUuid,
+    /// id of the blueprint, "latest", or "target"
+    blueprint_id: BlueprintIdOpt,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -463,44 +1525,237 @@ enum CliDnsGroup {
 }
 
 #[derive(Debug, Args)]
-struct BlueprintDiffInventoryArgs {
-    /// id of the inventory collection
-    collection_id: CollectionUuid,
-    /// id of the blueprint
-    blueprint_id: BlueprintUuid,
+struct BlueprintHistoryArgs {
+    /// how many blueprints worth of history to report
+    #[clap(long, default_value_t = 128)]
+    limit: usize,
+
+    /// also attempt to diff each blueprint
+    #[clap(long, default_value_t = false)]
+    diff: bool,
+
+    /// id of the blueprint to start history from
+    #[clap(default_value_t = BlueprintIdOpt::Target)]
+    blueprint_id: BlueprintIdOpt,
 }
 
 #[derive(Debug, Args)]
 struct BlueprintSaveArgs {
-    /// id of the blueprint
-    blueprint_id: BlueprintUuid,
+    /// id of the blueprint, "latest", or "target"
+    blueprint_id: BlueprintIdOpt,
     /// output file
     filename: Utf8PathBuf,
 }
 
 #[derive(Debug, Args)]
+struct BlueprintLoadArgs {
+    /// input file
+    filename: Utf8PathBuf,
+}
+
+#[derive(Debug, Args)]
 struct BlueprintDiffArgs {
-    /// id of the first blueprint
-    blueprint1_id: BlueprintUuid,
-    /// id of the second blueprint
-    blueprint2_id: BlueprintUuid,
+    /// id of the first blueprint, "latest", or "target"
+    blueprint1_id: BlueprintIdOpt,
+    /// id of the second blueprint, "latest", or "target", or None to mean "the
+    /// parent of blueprint1"
+    blueprint2_id: Option<BlueprintIdOpt>,
 }
 
 #[derive(Debug, Subcommand)]
 enum SetArgs {
+    /// RNG seed for future commands
+    Seed { seed: String },
     /// target number of Nexus instances (for planning)
     NumNexus { num_nexus: u16 },
+    /// specify the generation of Nexus zones that are considered active when
+    /// running the blueprint planner
+    ActiveNexusGen { r#gen: NexusGeneration },
+    /// Control the set of Nexus zones seen as input to the planner
+    NexusZones {
+        #[clap(long, conflicts_with = "active")]
+        active_inferred: bool,
+        #[clap(long, num_args = 0.., required_unless_present = "active_inferred")]
+        active: Vec<OmicronZoneUuid>,
+        #[clap(long, conflicts_with = "not_yet")]
+        not_yet_inferred: bool,
+        #[clap(long, num_args = 0.., required_unless_present = "not_yet_inferred")]
+        not_yet: Vec<OmicronZoneUuid>,
+    },
     /// system's external DNS zone name (suffix)
     ExternalDnsZoneName { zone_name: String },
+    /// system target release
+    TargetRelease {
+        /// TUF repo containing release artifacts
+        filename: Utf8PathBuf,
+    },
+    /// timestamp for ignoring impossible MGS updates
+    IgnoreImpossibleMgsUpdatesSince {
+        since: SetIgnoreImpossibleMgsUpdatesSinceArgs,
+    },
+    /// CockroachDB settings
+    CockroachdbSettings(SetCockroachdbSettingsArgs),
+    /// Planner config settings
+    PlannerConfig(SetPlannerConfigArgs),
+}
+
+#[derive(Debug, Clone)]
+struct SetIgnoreImpossibleMgsUpdatesSinceArgs(DateTime<Utc>);
+
+impl FromStr for SetIgnoreImpossibleMgsUpdatesSinceArgs {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.eq_ignore_ascii_case("now") {
+            return Ok(Self(Utc::now()));
+        }
+        if let Ok(datetime) = humantime::parse_rfc3339(s) {
+            return Ok(Self(datetime.into()));
+        }
+        bail!("invalid timestamp: expected `now` or an RFC3339 timestamp")
+    }
+}
+
+#[derive(Debug, Args)]
+struct SetCockroachdbSettingsArgs {
+    #[clap(flatten)]
+    opts: CockroachdbSettingsOpts,
+}
+
+#[derive(Debug, Clone, Args)]
+#[group(required = true, multiple = true)]
+struct CockroachdbSettingsOpts {
+    /// state fingerprint (a 40-hex-digit hash)
+    #[clap(long)]
+    fingerprint: Option<String>,
+    /// cluster version (e.g. "22.1")
+    #[clap(long)]
+    version: Option<String>,
+    /// cluster.preserve_downgrade_option value (e.g. "22.1", empty string
+    /// means unset)
+    #[clap(long)]
+    preserve_downgrade: Option<String>,
+}
+
+impl CockroachdbSettingsOpts {
+    fn update_if_modified(
+        &self,
+        current: &CockroachDbSettings,
+    ) -> Option<CockroachDbSettings> {
+        let new = CockroachDbSettings {
+            state_fingerprint: self
+                .fingerprint
+                .clone()
+                .unwrap_or_else(|| current.state_fingerprint.clone()),
+            version: self
+                .version
+                .clone()
+                .unwrap_or_else(|| current.version.clone()),
+            preserve_downgrade: self
+                .preserve_downgrade
+                .clone()
+                .unwrap_or_else(|| current.preserve_downgrade.clone()),
+        };
+        (new != *current).then_some(new)
+    }
+}
+
+#[derive(Debug, Args)]
+struct SetPlannerConfigArgs {
+    #[clap(flatten)]
+    opts: PlannerConfigOpts,
+}
+
+#[derive(Debug, Clone, Args)]
+#[group(required = true, multiple = true)]
+struct PlannerConfigOpts {
+    /// sled reboot policy
+    #[clap(long)]
+    sled_update_reboot_policy: Option<SledUpdateRebootPolicyOpt>,
+    /// disruption policy
+    #[clap(long)]
+    disruption_policy: Option<ReconfiguratorDisruptionPolicyOpt>,
+}
+
+impl PlannerConfigOpts {
+    fn update_if_modified(
+        &self,
+        current: &PlannerConfig,
+    ) -> Option<PlannerConfig> {
+        let new = PlannerConfig {
+            sled_update_reboot_policy: self
+                .sled_update_reboot_policy
+                .map(From::from)
+                .unwrap_or_else(|| current.sled_update_reboot_policy),
+            disruption_policy: self
+                .disruption_policy
+                .map(From::from)
+                .unwrap_or_else(|| current.disruption_policy),
+        };
+        (new != *current).then_some(new)
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ReconfiguratorDisruptionPolicyOpt {
+    Terminate,
+    MigrateOrTerminate,
+    MigrateOnly,
+}
+
+impl From<ReconfiguratorDisruptionPolicyOpt>
+    for ReconfiguratorDisruptionPolicy
+{
+    fn from(value: ReconfiguratorDisruptionPolicyOpt) -> Self {
+        match value {
+            ReconfiguratorDisruptionPolicyOpt::Terminate => Self::Terminate,
+            ReconfiguratorDisruptionPolicyOpt::MigrateOrTerminate => {
+                Self::MigrateOrTerminate
+            }
+            ReconfiguratorDisruptionPolicyOpt::MigrateOnly => Self::MigrateOnly,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum SledUpdateRebootPolicyOpt {
+    ImmediateNoEvacuation,
+    Evacuate,
+}
+
+impl From<SledUpdateRebootPolicyOpt> for SledUpdateRebootPolicy {
+    fn from(value: SledUpdateRebootPolicyOpt) -> Self {
+        match value {
+            SledUpdateRebootPolicyOpt::ImmediateNoEvacuation => {
+                Self::ImmediateNoEvacuation
+            }
+            SledUpdateRebootPolicyOpt::Evacuate => Self::Evacuate,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct GenerateFakeRepoArgs {
+    /// System version of generated repository
+    version: Version,
+
+    #[clap(
+        long,
+        // Use help here rather than a doc comment because rustdoc doesn't like
+        // `<` and `>` in help messages.
+        help = "The path to the output [default: repo-<version>.zip]"
+    )]
+    output: Option<Utf8PathBuf>,
 }
 
 #[derive(Debug, Args)]
 struct LoadArgs {
     /// input file
-    filename: Utf8PathBuf,
+    globs: Vec<glob::Pattern>,
 
     /// id of inventory collection to use for sled details
     /// (may be omitted only if the file contains only one collection)
+    #[clap(long)]
     collection_id: Option<CollectionUuid>,
 }
 
@@ -522,13 +1777,47 @@ struct LoadExampleArgs {
     #[clap(short = 'd', long, default_value_t = SledBuilder::DEFAULT_NPOOLS)]
     ndisks_per_sled: u8,
 
-    /// Do not create zones in the example system.
-    #[clap(short = 'Z', long)]
-    no_zones: bool,
-
     /// Do not create entries for disks in the blueprint.
     #[clap(long)]
     no_disks_in_blueprint: bool,
+
+    /// Set a 0-indexed sled's policy
+    #[clap(long, value_name = "INDEX:POLICY")]
+    sled_policy: Vec<LoadExampleSledPolicy>,
+}
+
+#[derive(Clone, Debug)]
+struct LoadExampleSledPolicy {
+    /// The index of the sled to set the policy for.
+    index: usize,
+
+    /// The policy to set.
+    policy: SledPolicy,
+}
+
+impl FromStr for LoadExampleSledPolicy {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (index, policy) = s
+            .split_once(':')
+            .context("invalid format, expected <index>:<policy>")?;
+        let index = index.parse().with_context(|| {
+            format!("error parsing sled index `{index}` as a usize")
+        })?;
+        let policy = SledPolicyOpt::from_str(
+            policy, /* ignore_case */ false,
+        )
+        .map_err(|_message| {
+            // _message is just something like "invalid variant: <value>".
+            // We choose to use our own message instead.
+            anyhow!(
+                "invalid sled policy `{policy}` (possible values: {})",
+                SledPolicyOpt::value_variants().iter().join(", "),
+            )
+        })?;
+        Ok(LoadExampleSledPolicy { index, policy: policy.into() })
+    }
 }
 
 #[derive(Debug, Args)]
@@ -541,6 +1830,84 @@ struct FileContentsArgs {
 struct SaveArgs {
     /// output file
     filename: Utf8PathBuf,
+}
+
+#[derive(Debug, Subcommand)]
+enum StateArgs {
+    /// display a log of simulator states
+    ///
+    /// Shows the history of states from the current state back to the root.
+    Log(StateLogArgs),
+    /// switch to a different state
+    ///
+    /// Changes the current working state to the specified state. All subsequent
+    /// commands will operate from this state.
+    Switch(StateSwitchArgs),
+}
+
+#[derive(Debug, Args)]
+struct StateLogArgs {
+    /// Starting state ID (defaults to current state)
+    #[clap(long)]
+    from: Option<ReconfiguratorSimStateUuid>,
+
+    /// Limit number of states to display
+    #[clap(long, short = 'n', requires = "from")]
+    limit: Option<usize>,
+
+    /// Show changes in each state (verbose mode)
+    #[clap(long, short = 'v')]
+    verbose: bool,
+}
+
+#[derive(Debug, Args)]
+struct StateSwitchArgs {
+    /// The state ID or unique prefix to switch to
+    state_id: ReconfiguratorSimStateIdOpt,
+}
+
+#[derive(Debug, Subcommand)]
+enum OpArgs {
+    /// display the operation log
+    ///
+    /// Shows the history of operations, similar to `jj op log`.
+    Log(OpLogArgs),
+    /// undo the most recent operation
+    ///
+    /// Creates a new restore operation that goes back to the previous state.
+    Undo,
+    /// redo a previously undone operation
+    ///
+    /// Creates a new restore operation that goes forward to a previously
+    /// undone state.
+    Redo,
+    /// restore to a specific operation
+    ///
+    /// Creates a new restore operation that sets the heads to match those
+    /// of the specified operation.
+    Restore(OpRestoreArgs),
+    /// wipe the operation log
+    ///
+    /// Clears all operation history and resets to just the root operation.
+    /// This is the only operation that violates the append-only principle.
+    Wipe,
+}
+
+#[derive(Debug, Args)]
+struct OpLogArgs {
+    /// Limit number of operations to display
+    #[clap(long, short = 'n')]
+    limit: Option<usize>,
+
+    /// Verbose mode: show full UUIDs and heads at each operation
+    #[clap(long, short = 'v')]
+    verbose: bool,
+}
+
+#[derive(Debug, Args)]
+struct OpRestoreArgs {
+    /// The operation ID or unique prefix to restore to
+    operation_id: ReconfiguratorSimOpIdOpt,
 }
 
 #[derive(Debug, Args)]
@@ -603,22 +1970,28 @@ fn cmd_sled_list(
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct Sled {
         id: SledUuid,
+        serial: String,
         nzpools: usize,
         subnet: String,
     }
 
     let state = sim.current_state();
+    let parent_blueprint = state
+        .system()
+        .resolve_and_get_blueprint(BlueprintId::Target)
+        .expect("target blueprint is always present");
     let planning_input = state
         .system()
         .description()
-        .to_planning_input_builder()
+        .to_planning_input_builder(Arc::clone(parent_blueprint))
         .context("failed to generate planning input")?
         .build();
-    let rows = planning_input.all_sled_resources(SledFilter::Commissioned).map(
-        |(sled_id, sled_resources)| Sled {
+    let rows = planning_input.all_sleds(SledFilter::Commissioned).map(
+        |(sled_id, sled_details)| Sled {
             id: sled_id,
-            subnet: sled_resources.subnet.net().to_string(),
-            nzpools: sled_resources.zpools.len(),
+            serial: sled_details.baseboard_id.serial_number.clone(),
+            subnet: sled_details.resources.subnet.net().to_string(),
+            nzpools: sled_details.resources.zpools.len(),
         },
     );
     let table = tabled::Table::new(rows)
@@ -634,14 +2007,45 @@ fn cmd_sled_add(
 ) -> anyhow::Result<Option<String>> {
     let mut state = sim.current_state().to_mut();
     let sled_id = add.sled_id.unwrap_or_else(|| state.rng_mut().next_sled_id());
-    let new_sled = SledBuilder::new().id(sled_id);
-    state.system_mut().description_mut().sled(new_sled)?;
+    let new_sled = SledBuilder::new()
+        .id(sled_id)
+        .npools(add.ndisks)
+        .policy(add.policy.into());
+    let system = state.system_mut();
+    system.description_mut().sled(new_sled)?;
+    // Figure out what serial number this sled was assigned.
+    let added_sled = system
+        .description()
+        .get_sled(sled_id)
+        .expect("we just added this sled");
+    let serial = match added_sled.sp_state() {
+        Some((_, sp_state)) => sp_state.serial_number.clone(),
+        None => "(none)".to_owned(),
+    };
     sim.commit_and_bump(
-        format!("reconfigurator-cli sled-add: {sled_id}"),
+        format!("reconfigurator-cli sled-add: {sled_id} (serial: {serial})"),
         state,
     );
 
-    Ok(Some(format!("added sled {}", sled_id)))
+    Ok(Some(format!("added sled {} (serial: {})", sled_id, serial)))
+}
+
+fn cmd_sled_remove(
+    sim: &mut ReconfiguratorSim,
+    args: SledRemoveArgs,
+) -> anyhow::Result<Option<String>> {
+    let mut state = sim.current_state().to_mut();
+    let system = state.system_mut();
+    let sled_id = args.sled_id.to_sled_id(system.description())?;
+    system
+        .description_mut()
+        .sled_remove(sled_id)
+        .context("failed to remove sled")?;
+    sim.commit_and_bump(
+        format!("reconfigurator-cli sled-remove: {sled_id}"),
+        state,
+    );
+    Ok(Some(format!("removed sled {} from system", sled_id)))
 }
 
 fn cmd_sled_show(
@@ -649,24 +2053,467 @@ fn cmd_sled_show(
     args: SledArgs,
 ) -> anyhow::Result<Option<String>> {
     let state = sim.current_state();
-    let planning_input = state
+    let description = state.system().description();
+    let sled_id = args.sled_id.to_sled_id(description)?;
+    let stage0_version = description.sled_stage0_version(sled_id)?;
+    let stage0_next_version = description.sled_stage0_next_version(sled_id)?;
+    let sp_active_version = description.sled_sp_active_version(sled_id)?;
+    let sp_inactive_version = description.sled_sp_inactive_version(sled_id)?;
+    let rot_active_slot = description.sled_rot_active_slot(sled_id)?;
+    let rot_slot_a_version = description.sled_rot_slot_a_version(sled_id)?;
+    let rot_slot_b_version = description.sled_rot_slot_b_version(sled_id)?;
+    let rot_persistent_boot_preference =
+        description.sled_rot_persistent_boot_preference(sled_id)?;
+    let rot_pending_persistent_boot_preference =
+        description.sled_rot_pending_persistent_boot_preference(sled_id)?;
+    let rot_transient_boot_preference =
+        description.sled_rot_transient_boot_preference(sled_id)?;
+    let parent_blueprint = state
         .system()
-        .description()
-        .to_planning_input_builder()
+        .resolve_and_get_blueprint(BlueprintId::Target)
+        .expect("target blueprint is always present");
+    let planning_input = description
+        .to_planning_input_builder(Arc::clone(parent_blueprint))
         .context("failed to generate planning_input builder")?
         .build();
-    let sled_id = args.sled_id;
-    let sled_resources =
-        &planning_input.sled_lookup(args.filter, sled_id)?.resources;
+    let sled = planning_input.sled_lookup(args.filter, sled_id)?;
+    let sled_resources = &sled.resources;
     let mut s = String::new();
-    swriteln!(s, "sled {}", sled_id);
+    swriteln!(s, "sled {} ({}, {})", sled_id, sled.policy, sled.state);
+    swriteln!(s, "serial {}", sled.baseboard_id.serial_number);
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
+    swriteln!(s, "SP active version: {:?}", sp_active_version);
+    swriteln!(s, "SP inactive version: {:?}", sp_inactive_version);
+    swriteln!(s, "RoT bootloader stage 0 version: {:?}", stage0_version);
+    swriteln!(
+        s,
+        "RoT bootloader stage 0 next version: {:?}",
+        stage0_next_version
+    );
+    swriteln!(s, "RoT active slot: {}", rot_active_slot);
+    swriteln!(s, "RoT slot A version: {:?}", rot_slot_a_version);
+    swriteln!(s, "RoT slot B version: {:?}", rot_slot_b_version);
+    swriteln!(
+        s,
+        "RoT persistent boot preference: {}",
+        rot_persistent_boot_preference
+    );
+    swriteln!(
+        s,
+        "RoT pending persistent boot preference: {:?}",
+        rot_pending_persistent_boot_preference
+    );
+    swriteln!(
+        s,
+        "RoT transient boot preference: {:?}",
+        rot_transient_boot_preference
+    );
     swriteln!(s, "zpools ({}):", sled_resources.zpools.len());
     for (zpool, disk) in &sled_resources.zpools {
         swriteln!(s, "    {:?}", zpool);
         swriteln!(s, "    {:?}", disk);
     }
     Ok(Some(s))
+}
+
+fn cmd_sled_set(
+    sim: &mut ReconfiguratorSim,
+    args: SledSetArgs,
+) -> anyhow::Result<Option<String>> {
+    let mut state = sim.current_state().to_mut();
+    let system = state.system_mut();
+    let sled_id = args.sled_id.to_sled_id(system.description())?;
+
+    match args.command {
+        SledSetCommand::Policy(SledSetPolicyArgs { policy }) => {
+            system.description_mut().sled_set_policy(sled_id, policy.into())?;
+            sim.commit_and_bump(
+                format!(
+                    "reconfigurator-cli sled-set policy: {} to {}",
+                    sled_id, policy
+                ),
+                state,
+            );
+            Ok(Some(format!("set sled {sled_id} policy to {policy}")))
+        }
+        SledSetCommand::OmicronConfig(command) => {
+            let resolved_id =
+                system.resolve_blueprint_id(command.blueprint.into());
+            let blueprint = system.get_blueprint(&resolved_id)?;
+            let sled_cfg =
+                blueprint.sleds.get(&sled_id).with_context(|| {
+                    format!("sled id {sled_id} not found in blueprint")
+                })?;
+            let omicron_sled_cfg =
+                sled_cfg.clone().into_in_service_sled_config();
+            system
+                .description_mut()
+                .sled_set_omicron_config(sled_id, omicron_sled_cfg)?;
+            sim.commit_and_bump(
+                format!(
+                    "reconfigurator-cli sled-set omicron-config: \
+                     {sled_id} from {resolved_id}",
+                ),
+                state,
+            );
+            Ok(Some(format!(
+                "set sled {sled_id} omicron config from {resolved_id}"
+            )))
+        }
+        SledSetCommand::Visibility(command) => {
+            let new = command.to_visibility();
+            let prev = system
+                .description_mut()
+                .sled_set_inventory_visibility(sled_id, new)?;
+            if prev == new {
+                Ok(Some(format!(
+                    "sled {sled_id} inventory visibility was already set to \
+                     {new}, so no changes were performed",
+                )))
+            } else {
+                sim.commit_and_bump(
+                    format!(
+                        "reconfigurator-cli sled-set inventory visibility: {} \
+                         from {} to {}",
+                        sled_id, prev, new,
+                    ),
+                    state,
+                );
+                Ok(Some(format!(
+                    "set sled {sled_id} inventory visibility: {prev} -> {new}"
+                )))
+            }
+        }
+        SledSetCommand::MupdateOverride(SledSetMupdateOverrideArgs {
+            source:
+                SledMupdateOverrideSource { mupdate_override_id, with_error },
+        }) => {
+            let (desc, prev) = if with_error {
+                let prev =
+                    system.description_mut().sled_set_mupdate_override_error(
+                        sled_id,
+                        "reconfigurator-cli simulated mupdate-override error"
+                            .to_owned(),
+                    )?;
+                ("error".to_owned(), prev)
+            } else {
+                let mupdate_override_id =
+                    mupdate_override_id.expect("clap ensures that this is set");
+                let prev = system.description_mut().sled_set_mupdate_override(
+                    sled_id,
+                    mupdate_override_id.into(),
+                )?;
+                let desc = match mupdate_override_id {
+                    MupdateOverrideUuidOpt::Set(id) => id.to_string(),
+                    MupdateOverrideUuidOpt::Unset => "unset".to_owned(),
+                };
+                (desc, prev)
+            };
+
+            let prev_desc = match prev {
+                Ok(Some(id)) => id.to_string(),
+                Ok(None) => "unset".to_owned(),
+                Err(_) => "error".to_owned(),
+            };
+
+            sim.commit_and_bump(
+                format!(
+                    "reconfigurator-cli sled-set-mupdate-override: {}: {} -> {}",
+                    sled_id, prev_desc, desc,
+                ),
+                state,
+            );
+
+            Ok(Some(format!(
+                "set sled {} mupdate override: {} -> {}",
+                sled_id, prev_desc, desc,
+            )))
+        }
+        SledSetCommand::RegisteredVmms(SledSetRegisteredVmmsArgs { count }) => {
+            let description = system.description_mut();
+            let prev = description
+                .sled_instance_manager_status(sled_id)?
+                .num_registered_vmms;
+            description.sled_set_num_registered_vmms(sled_id, count)?;
+            sim.commit_and_bump(
+                format!(
+                    "reconfigurator-cli sled-set registered-vmms: \
+                     {sled_id}: {prev} -> {count}",
+                ),
+                state,
+            );
+            Ok(Some(format!(
+                "set sled {sled_id} registered VMMs: {prev} -> {count}",
+            )))
+        }
+    }
+}
+
+fn cmd_sled_update_install_dataset(
+    sim: &mut ReconfiguratorSim,
+    args: SledUpdateInstallDatasetArgs,
+) -> anyhow::Result<Option<String>> {
+    let description = mupdate_source_to_description(sim, &args.source)?;
+
+    let mut state = sim.current_state().to_mut();
+    let system = state.system_mut();
+    let sled_id = args.sled_id.to_sled_id(system.description())?;
+    system.description_mut().sled_set_zone_manifest(
+        sled_id,
+        description.to_zone_boot_inventory(),
+    )?;
+
+    system.description_mut().sled_set_measurement_manifest(
+        sled_id,
+        description.to_measurement_boot_inventory(),
+    )?;
+
+    sim.commit_and_bump(
+        format!(
+            "reconfigurator-cli sled-update-install-dataset: {}",
+            description.message,
+        ),
+        state,
+    );
+    Ok(Some(format!(
+        "sled {}: install dataset updated: {}",
+        sled_id, description.message
+    )))
+}
+
+fn cmd_sled_update_rot_bootloader(
+    sim: &mut ReconfiguratorSim,
+    args: SledUpdateRotBootloaderArgs,
+) -> anyhow::Result<Option<String>> {
+    let mut labels = Vec::new();
+    if let Some(stage0) = &args.stage0 {
+        labels.push(format!("stage0 -> {}", stage0));
+    }
+    if let Some(stage0_next) = &args.stage0_next {
+        labels.push(format!("stage0_next -> {}", stage0_next));
+    }
+
+    assert!(
+        !labels.is_empty(),
+        "clap configuration requires that at least one argument is specified"
+    );
+
+    let mut state = sim.current_state().to_mut();
+    let system = state.system_mut();
+    let sled_id = args.sled_id.to_sled_id(system.description())?;
+    system.description_mut().sled_update_rot_bootloader_versions(
+        sled_id,
+        args.stage0,
+        args.stage0_next,
+    )?;
+
+    sim.commit_and_bump(
+        format!(
+            "reconfigurator-cli sled-update-rot-bootloader: {}: {}",
+            sled_id,
+            labels.join(", "),
+        ),
+        state,
+    );
+
+    Ok(Some(format!(
+        "set sled {} RoT bootloader versions: {}",
+        sled_id,
+        labels.join(", ")
+    )))
+}
+
+fn cmd_sled_update_sp(
+    sim: &mut ReconfiguratorSim,
+    args: SledUpdateSpArgs,
+) -> anyhow::Result<Option<String>> {
+    let mut labels = Vec::new();
+    if let Some(active) = &args.active {
+        labels.push(format!("active -> {}", active));
+    }
+    if let Some(inactive) = &args.inactive {
+        labels.push(format!("inactive -> {}", inactive));
+    }
+
+    assert!(
+        !labels.is_empty(),
+        "clap configuration requires that at least one argument is specified"
+    );
+
+    let mut state = sim.current_state().to_mut();
+    let system = state.system_mut();
+    let sled_id = args.sled_id.to_sled_id(system.description())?;
+    system.description_mut().sled_update_sp_versions(
+        sled_id,
+        args.active,
+        args.inactive,
+    )?;
+
+    sim.commit_and_bump(
+        format!(
+            "reconfigurator-cli sled-update-sp: {}: {}",
+            sled_id,
+            labels.join(", "),
+        ),
+        state,
+    );
+
+    Ok(Some(format!("set sled {} SP versions: {}", sled_id, labels.join(", "))))
+}
+
+fn cmd_sled_update_rot(
+    sim: &mut ReconfiguratorSim,
+    args: SledUpdateRotArgs,
+) -> anyhow::Result<Option<String>> {
+    let mut labels = Vec::new();
+
+    if let Some(slot_a) = &args.slot_a {
+        labels.push(format!("slot a -> {}", slot_a));
+    }
+    if let Some(slot_b) = &args.slot_b {
+        labels.push(format!("slot b -> {}", slot_b));
+    }
+    if let Some(active_slot) = &args.active_slot {
+        labels.push(format!("active slot -> {}", active_slot));
+    }
+
+    if let Some(persistent_boot_preference) = &args.persistent_boot_preference {
+        labels.push(format!(
+            "persistent boot preference -> {}",
+            persistent_boot_preference
+        ));
+    }
+
+    if let Some(pending_persistent_boot_preference) =
+        &args.pending_persistent_boot_preference
+    {
+        labels.push(format!(
+            "pending persistent boot preference -> {:?}",
+            pending_persistent_boot_preference
+        ));
+    }
+    if let Some(transient_boot_preference) = &args.transient_boot_preference {
+        labels.push(format!(
+            "transient boot preference -> {:?}",
+            transient_boot_preference
+        ));
+    }
+
+    assert!(
+        !labels.is_empty(),
+        "clap configuration requires that at least one argument is specified"
+    );
+
+    let mut state = sim.current_state().to_mut();
+    let system = state.system_mut();
+    let sled_id = args.sled_id.to_sled_id(system.description())?;
+    system.description_mut().sled_update_rot_versions(
+        sled_id,
+        RotStateOverrides {
+            active_slot_override: args.active_slot,
+            slot_a_version_override: args.slot_a,
+            slot_b_version_override: args.slot_b,
+            persistent_boot_preference_override: args
+                .persistent_boot_preference,
+            pending_persistent_boot_preference_override: args
+                .pending_persistent_boot_preference,
+            transient_boot_preference_override: args.transient_boot_preference,
+        },
+    )?;
+
+    sim.commit_and_bump(
+        format!(
+            "reconfigurator-cli sled-update-rot: {sled_id}: {}",
+            labels.join(", "),
+        ),
+        state,
+    );
+
+    Ok(Some(format!("set sled {sled_id} RoT settings: {}", labels.join(", "))))
+}
+
+fn cmd_sled_update_host_phase_1(
+    sim: &mut ReconfiguratorSim,
+    args: SledUpdateHostPhase1Args,
+) -> anyhow::Result<Option<String>> {
+    let SledUpdateHostPhase1Args { sled_id, active, slot_a, slot_b } = args;
+
+    let mut labels = Vec::new();
+    if let Some(active) = active {
+        labels.push(format!("active -> {active:?}"));
+    }
+    if let Some(slot_a) = slot_a {
+        labels.push(format!("A -> {slot_a}"));
+    }
+    if let Some(slot_b) = slot_b {
+        labels.push(format!("B -> {slot_b}"));
+    }
+    if labels.is_empty() {
+        bail!("sled-update-host-phase1 called with no changes");
+    }
+
+    let mut state = sim.current_state().to_mut();
+    let system = state.system_mut();
+    let sled_id = sled_id.to_sled_id(system.description())?;
+    system
+        .description_mut()
+        .sled_update_host_phase_1_artifacts(sled_id, active, slot_a, slot_b)?;
+
+    sim.commit_and_bump(
+        format!(
+            "reconfigurator-cli sled-update-host-phase1: {sled_id}: {}",
+            labels.join(", "),
+        ),
+        state,
+    );
+
+    Ok(Some(format!(
+        "set sled {} host phase 1 details: {}",
+        sled_id,
+        labels.join(", ")
+    )))
+}
+
+fn cmd_sled_update_host_phase_2(
+    sim: &mut ReconfiguratorSim,
+    args: SledUpdateHostPhase2Args,
+) -> anyhow::Result<Option<String>> {
+    let SledUpdateHostPhase2Args { sled_id, boot_disk, slot_a, slot_b } = args;
+
+    let mut labels = Vec::new();
+    if let Some(boot_disk) = boot_disk {
+        labels.push(format!("boot_disk -> {boot_disk:?}"));
+    }
+    if let Some(slot_a) = slot_a {
+        labels.push(format!("A -> {slot_a}"));
+    }
+    if let Some(slot_b) = slot_b {
+        labels.push(format!("B -> {slot_b}"));
+    }
+    if labels.is_empty() {
+        bail!("sled-update-host-phase2 called with no changes");
+    }
+
+    let mut state = sim.current_state().to_mut();
+    let system = state.system_mut();
+    let sled_id = sled_id.to_sled_id(system.description())?;
+    system.description_mut().sled_update_host_phase_2_artifacts(
+        sled_id, boot_disk, slot_a, slot_b,
+    )?;
+
+    sim.commit_and_bump(
+        format!(
+            "reconfigurator-cli sled-update-host-phase2: {sled_id}: {}",
+            labels.join(", "),
+        ),
+        state,
+    );
+
+    Ok(Some(format!(
+        "set sled {} host phase 2 details: {}",
+        sled_id,
+        labels.join(", ")
+    )))
 }
 
 fn cmd_inventory_list(
@@ -721,6 +2568,24 @@ fn cmd_inventory_generate(
     Ok(Some(rv))
 }
 
+fn cmd_inventory_show(
+    sim: &mut ReconfiguratorSim,
+    args: InventoryShowArgs,
+) -> anyhow::Result<Option<String>> {
+    let state = sim.current_state();
+    let system = state.system();
+    let resolved = system.resolve_collection_id(args.collection_id.into())?;
+    let collection = system.get_collection(&resolved)?;
+
+    let mut display = collection.display();
+    if let Some(filter) = &args.filter {
+        display.apply_cli_filter(filter);
+    }
+    display.show_long_strings(args.show_long_strings);
+
+    Ok(Some(display.to_string()))
+}
+
 fn cmd_blueprint_list(
     sim: &mut ReconfiguratorSim,
 ) -> anyhow::Result<Option<String>> {
@@ -742,12 +2607,12 @@ fn cmd_blueprint_list(
     let mut rows = state.system().all_blueprints().collect::<Vec<_>>();
     rows.sort_unstable_by_key(|blueprint| blueprint.time_created);
     let rows = rows.into_iter().map(|blueprint| {
-        let (is_target, enabled) = match target_blueprint {
-            Some(t) if t.target_id == blueprint.id => {
-                let enabled = if t.enabled { "yes" } else { "no" };
-                ("*", enabled)
-            }
-            _ => ("", ""),
+        let (is_target, enabled) = if target_blueprint.target_id == blueprint.id
+        {
+            let enabled = if target_blueprint.enabled { "yes" } else { "no" };
+            ("*", enabled)
+        } else {
+            ("", "")
         };
         BlueprintRow {
             is_target,
@@ -775,9 +2640,14 @@ fn cmd_blueprint_blippy(
     args: BlueprintArgs,
 ) -> anyhow::Result<Option<String>> {
     let state = sim.current_state();
-    let blueprint = state.system().get_blueprint(args.blueprint_id)?;
-    let report =
-        Blippy::new(&blueprint).into_report(BlippyReportSortKey::Severity);
+    let resolved_id =
+        state.system().resolve_blueprint_id(args.blueprint_id.into());
+    let blueprint = state.system().get_blueprint(&resolved_id)?;
+    let planning_input = sim
+        .planning_input(blueprint)
+        .context("failed to construct planning input")?;
+    let report = Blippy::new(&blueprint, &planning_input)
+        .into_report(BlippyReportSortKey::Severity);
     Ok(Some(format!("{}", report.display())))
 }
 
@@ -785,20 +2655,19 @@ fn cmd_blueprint_plan(
     sim: &mut ReconfiguratorSim,
     args: BlueprintPlanArgs,
 ) -> anyhow::Result<Option<String>> {
-    let mut state = sim.current_state().to_mut();
-    let rng = state.rng_mut().next_planner_rng();
-    let system = state.system_mut();
+    let state = sim.current_state();
+    let system = state.system();
 
-    let parent_blueprint_id = args.parent_blueprint_id;
-    let collection_id = args.collection_id;
-    let parent_blueprint = system.get_blueprint(parent_blueprint_id)?;
-    let collection = match collection_id {
-        Some(collection_id) => system.get_collection(collection_id)?,
+    let parent_blueprint_id = args.parent_blueprint_id.into();
+    let collection_id = match args.collection_id {
+        Some(collection_id) => collection_id.into(),
         None => {
             let mut all_collections_iter = system.all_collections();
             match all_collections_iter.len() {
                 0 => bail!("cannot plan blueprint with no loaded collections"),
-                1 => all_collections_iter.next().expect("iter length is 1"),
+                1 => CollectionId::Id(
+                    all_collections_iter.next().expect("iter length is 1").id,
+                ),
                 _ => bail!(
                     "blueprint-plan: must specify collection ID (one of {:?})",
                     all_collections_iter.map(|c| c.id).join(", ")
@@ -807,30 +2676,7 @@ fn cmd_blueprint_plan(
         }
     };
 
-    let creator = "reconfigurator-sim";
-    let planning_input = sim
-        .planning_input(parent_blueprint)
-        .context("failed to construct planning input")?;
-    let planner = Planner::new_based_on(
-        sim.log.clone(),
-        parent_blueprint,
-        &planning_input,
-        creator,
-        collection,
-    )
-    .context("creating planner")?
-    .with_rng(rng);
-
-    let blueprint = planner.plan().context("generating blueprint")?;
-    let rv = format!(
-        "generated blueprint {} based on parent blueprint {}",
-        blueprint.id, parent_blueprint_id,
-    );
-    system.add_blueprint(blueprint)?;
-
-    sim.commit_and_bump("reconfigurator-cli blueprint-plan".to_owned(), state);
-
-    Ok(Some(rv))
+    sim.run_planner(parent_blueprint_id, collection_id).map(Some)
 }
 
 fn cmd_blueprint_edit(
@@ -841,8 +2687,8 @@ fn cmd_blueprint_edit(
     let rng = state.rng_mut().next_planner_rng();
     let system = state.system_mut();
 
-    let blueprint_id = args.blueprint_id;
-    let blueprint = system.get_blueprint(blueprint_id)?;
+    let resolved_id = system.resolve_blueprint_id(args.blueprint_id.into());
+    let blueprint = system.get_blueprint(&resolved_id)?;
     let creator = args.creator.as_deref().unwrap_or("reconfigurator-cli");
     let planning_input = sim
         .planning_input(blueprint)
@@ -856,32 +2702,122 @@ fn cmd_blueprint_edit(
         .map(|c| c.clone())
         .unwrap_or_else(|| CollectionBuilder::new("sim").build());
 
-    let mut builder = BlueprintBuilder::new_based_on(
-        &sim.log,
-        blueprint,
-        &planning_input,
-        &latest_collection,
-        creator,
-    )
-    .context("creating blueprint builder")?;
-    builder.set_rng(rng);
+    let mut builder =
+        BlueprintBuilder::new_based_on(&sim.log, blueprint, creator, rng)
+            .context("creating blueprint builder")?;
+
+    // We're acting as the planner here, so we need to update the builder for
+    // any static changes in the input (e.g., new sleds, new DNS versions, ...).
+    Planner::update_builder_from_planning_input(&mut builder, &planning_input);
 
     if let Some(comment) = args.comment {
         builder.comment(comment);
     }
 
     let label = match args.edit_command {
-        BlueprintEditCommands::AddNexus { sled_id } => {
+        BlueprintEditCommands::AddNexus {
+            sled_id,
+            image_source,
+            nexus_generation,
+        } => {
+            let sled_id = sled_id.to_sled_id(system.description())?;
+            let image_source = image_source_unwrap_or(
+                image_source,
+                &planning_input,
+                ZoneKind::Nexus,
+            )?;
+            let external_ip = ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                planning_input.external_ip_policy(),
+            )
+            .context("failed to construct external networking allocator")?
+            .for_new_nexus()
+            .context("failed to pick an external IP for Nexus")?;
+            let nexus_config = planning_input
+                .external_service_networking_policy()
+                .operator_nexus_config();
             builder
-                .sled_add_zone_nexus(sled_id)
+                .sled_add_zone_nexus(
+                    sled_id,
+                    image_source,
+                    external_ip,
+                    nexus_generation,
+                    &nexus_config,
+                )
                 .context("failed to add Nexus zone")?;
             format!("added Nexus zone to sled {}", sled_id)
         }
-        BlueprintEditCommands::AddCockroach { sled_id } => {
+        BlueprintEditCommands::AddCockroach { sled_id, image_source } => {
+            let sled_id = sled_id.to_sled_id(system.description())?;
+            let image_source = image_source_unwrap_or(
+                image_source,
+                &planning_input,
+                ZoneKind::CockroachDb,
+            )?;
             builder
-                .sled_add_zone_cockroachdb(sled_id)
+                .sled_add_zone_cockroachdb(sled_id, image_source)
                 .context("failed to add CockroachDB zone")?;
             format!("added CockroachDB zone to sled {}", sled_id)
+        }
+        BlueprintEditCommands::BumpNexusGeneration => {
+            let current_generation = builder.nexus_generation();
+            let current_max = blueprint.in_service_nexus_zones().fold(
+                current_generation,
+                |current_max, (_sled_id, _zone_config, nexus_config)| {
+                    std::cmp::max(nexus_config.nexus_generation, current_max)
+                },
+            );
+            ensure!(
+                current_max > current_generation,
+                "cannot bump blueprint generation (currently \
+                 {current_generation}) past highest deployed Nexus \
+                 generation (currently {current_max})",
+            );
+            let next = current_generation.next();
+            builder.set_nexus_generation(next);
+            format!("nexus generation: {current_generation} -> {next}")
+        }
+        BlueprintEditCommands::SetRemoveMupdateOverride { sled_id, value } => {
+            let sled_id = sled_id.to_sled_id(system.description())?;
+            builder
+                .sled_set_remove_mupdate_override(sled_id, value.into())
+                .context("failed to set remove_mupdate_override")?;
+            match value {
+                MupdateOverrideUuidOpt::Unset => {
+                    "unset remove_mupdate_override".to_owned()
+                }
+                MupdateOverrideUuidOpt::Set(uuid) => {
+                    format!("set remove_mupdate_override to {uuid}")
+                }
+            }
+        }
+        BlueprintEditCommands::SetUpdateDisposition { sled_id, command } => {
+            let sled_id = sled_id.to_sled_id(system.description())?;
+            let kind = match command {
+                SledUpdateDispositionTarget::Available => {
+                    BlueprintSledUpdateDispositionKind::Available
+                }
+                SledUpdateDispositionTarget::Evacuating { policy } => {
+                    BlueprintSledUpdateDispositionKind::Evacuating {
+                        policy: policy.into(),
+                    }
+                }
+            };
+            builder
+                .sled_set_update_disposition_kind(sled_id, kind)
+                .context("failed to set update disposition")?;
+            format!("set sled {sled_id} update disposition kind to {kind}")
+        }
+        BlueprintEditCommands::SetTargetReleaseMinimumGeneration {
+            generation,
+        } => {
+            builder
+                .set_target_release_minimum_generation(
+                    blueprint.target_release_minimum_generation,
+                    generation,
+                )
+                .context("failed to set target release minimum generation")?;
+            format!("set target release minimum generation to {generation}")
         }
         BlueprintEditCommands::SetZoneImage { zone_id, image_source } => {
             let sled_id = sled_with_zone(&builder, &zone_id)?;
@@ -895,12 +2831,41 @@ fn cmd_blueprint_edit(
                 .context("failed to set image source")?;
             rv
         }
-        BlueprintEditCommands::ExpungeZone { zone_id } => {
+        BlueprintEditCommands::SetHostPhase2 {
+            sled_id,
+            slot,
+            phase_2_source,
+        } => {
+            let sled_id = sled_id.to_sled_id(system.description())?;
+            let source =
+                BlueprintHostPhase2DesiredContents::from(phase_2_source);
+            let rv = format!(
+                "set sled {sled_id} host phase 2 slot {slot:?} source to \
+                 {source}\n\
+                 warn: no validation is done on the requested source"
+            );
+            builder
+                .sled_set_host_phase_2_slot(sled_id, slot, source)
+                .context("failed to set host phase 2 source")?;
+            rv
+        }
+        BlueprintEditCommands::ExpungeZones { zone_ids } => {
+            let mut rv = String::new();
+            for zone_id in zone_ids {
+                let sled_id = sled_with_zone(&builder, &zone_id)?;
+                builder.sled_expunge_zone(sled_id, zone_id).with_context(
+                    || format!("failed to expunge zone {zone_id}"),
+                )?;
+                swriteln!(rv, "expunged zone {zone_id} from sled {sled_id}");
+            }
+            rv
+        }
+        BlueprintEditCommands::MarkForCleanup { zone_id } => {
             let sled_id = sled_with_zone(&builder, &zone_id)?;
             builder
-                .sled_expunge_zone(sled_id, zone_id)
-                .context("failed to expunge zone")?;
-            format!("expunged zone {zone_id} from sled {sled_id}")
+                .sled_mark_expunged_zone_ready_for_cleanup(sled_id, zone_id)
+                .context("failed to mark zone ready for cleanup")?;
+            format!("marked zone {zone_id} ready for cleanup")
         }
         BlueprintEditCommands::SetSpUpdate {
             serial,
@@ -920,10 +2885,10 @@ fn cmd_blueprint_edit(
                 SpUpdateComponent::Sp {
                     expected_active_version,
                     expected_inactive_version,
-                } => PendingMgsUpdateDetails::Sp {
+                } => PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
                     expected_active_version,
                     expected_inactive_version,
-                },
+                }),
             };
 
             let artifact_version = ArtifactVersion::new(version)
@@ -932,7 +2897,7 @@ fn cmd_blueprint_edit(
             let update = PendingMgsUpdate {
                 baseboard_id: baseboard_id.clone(),
                 sp_type: sp.sp_type,
-                slot_id: u32::from(sp.sp_slot),
+                slot_id: sp.sp_slot,
                 details,
                 artifact_hash,
                 artifact_version,
@@ -956,22 +2921,45 @@ fn cmd_blueprint_edit(
             builder.pending_mgs_update_delete(baseboard_id);
             format!("deleted configured update for serial {serial}")
         }
+        BlueprintEditCommands::SetMeasurements { sled_id, command } => {
+            let sled_id = sled_id.to_sled_id(system.description())?;
+            builder.sled_set_measurements(
+                sled_id,
+                match command {
+                    SledMeasurementTarget::InstallDataset => {
+                        BlueprintMeasurements::InstallDataset
+                    }
+                    SledMeasurementTarget::Unknown => {
+                        BlueprintMeasurements::Unknown
+                    }
+                },
+            )?;
+            format!("set sled measurements to '{command:?}' {sled_id}")
+        }
+
+        BlueprintEditCommands::Debug {
+            command: BlueprintEditDebugCommands::RemoveSled { sled },
+        } => {
+            let sled_id = sled.to_sled_id(system.description())?;
+            builder.debug_sled_remove(sled_id)?;
+            format!("debug: removed sled {sled_id} from blueprint")
+        }
+        BlueprintEditCommands::Debug {
+            command:
+                BlueprintEditDebugCommands::ForceSledGenerationBump { sled },
+        } => {
+            let sled_id = sled.to_sled_id(system.description())?;
+            builder.debug_sled_force_generation_bump(sled_id)?;
+            format!("debug: forced sled {sled_id} generation bump")
+        }
+        BlueprintEditCommands::Noop => "noop".to_owned(),
     };
 
-    let mut new_blueprint = builder.build();
-
-    // Normally `builder.build()` would construct the cockroach fingerprint
-    // based on what we read from CRDB and put into the planning input, but
-    // since we don't have a CRDB we had to make something up for our planning
-    // input's CRDB fingerprint. In the absense of a better alternative, we'll
-    // just copy our parent's CRDB fingerprint and carry it forward.
-    new_blueprint
-        .cockroachdb_fingerprint
-        .clone_from(&blueprint.cockroachdb_fingerprint);
+    let new_blueprint = builder.build(BlueprintSource::ReconfiguratorCliEdit);
 
     let rv = format!(
-        "blueprint {} created from blueprint {}: {}",
-        new_blueprint.id, blueprint_id, label
+        "blueprint {} created from {}: {}",
+        new_blueprint.id, resolved_id, label
     );
     system.add_blueprint(new_blueprint)?;
 
@@ -985,9 +2973,12 @@ fn sled_with_zone(
 ) -> anyhow::Result<SledUuid> {
     let mut parent_sled_id = None;
 
-    for sled_id in builder.sled_ids_with_zones() {
+    for sled_id in builder.current_commissioned_sleds() {
         if builder
-            .current_sled_zones(sled_id, BlueprintZoneDisposition::any)
+            .current_in_service_and_expunged_sled_zones(
+                sled_id,
+                BlueprintExpungedZoneAccessReason::ReconfiguratorCli,
+            )
             .any(|z| z.id == *zone_id)
         {
             parent_sled_id = Some(sled_id);
@@ -1004,7 +2995,8 @@ fn cmd_blueprint_show(
     args: BlueprintArgs,
 ) -> anyhow::Result<Option<String>> {
     let state = sim.current_state();
-    let blueprint = state.system().get_blueprint(args.blueprint_id)?;
+    let blueprint =
+        state.system().resolve_and_get_blueprint(args.blueprint_id.into())?;
     Ok(Some(format!("{}", blueprint.display())))
 }
 
@@ -1014,11 +3006,32 @@ fn cmd_blueprint_diff(
 ) -> anyhow::Result<Option<String>> {
     let mut rv = String::new();
     let blueprint1_id = args.blueprint1_id;
-    let blueprint2_id = args.blueprint2_id;
 
     let state = sim.current_state();
-    let blueprint1 = state.system().get_blueprint(blueprint1_id)?;
-    let blueprint2 = state.system().get_blueprint(blueprint2_id)?;
+    let blueprint =
+        state.system().resolve_and_get_blueprint(blueprint1_id.into())?;
+    let (blueprint1, blueprint2) = if let Some(blueprint2_arg) =
+        args.blueprint2_id
+    {
+        // Two blueprint ids were provided.  Diff from the first to the second.
+        let blueprint1 = blueprint;
+        let blueprint2 =
+            state.system().resolve_and_get_blueprint(blueprint2_arg.into())?;
+        (blueprint1, blueprint2)
+    } else if let Some(parent_id) = blueprint.parent_blueprint_id {
+        // Only one blueprint id was provided.  Diff from that blueprint's
+        // parent to the blueprint.
+        let blueprint1 = state
+            .system()
+            .resolve_and_get_blueprint(BlueprintId::Id(parent_id))?;
+        let blueprint2 = blueprint;
+        (blueprint1, blueprint2)
+    } else {
+        bail!(
+            "`blueprint2_id` was not specified and blueprint1 has no \
+             parent blueprint"
+        );
+    };
 
     let sled_diff = blueprint2.diff_since_blueprint(&blueprint1);
     swriteln!(rv, "{}", sled_diff.display());
@@ -1027,14 +3040,26 @@ fn cmd_blueprint_diff(
     // each blueprint.  To do that we need to construct a list of sleds suitable
     // for the executor.
     let sleds_by_id = make_sleds_by_id(state.system().description())?;
+
+    // It's tricky to figure out which active Nexus generation number to use
+    // when diff'ing blueprints.  What's currently active might be wholly
+    // different from what's here.  (Imagine generation 7 is active and these
+    // blueprints are from Nexus generation 4.)  What's most likely useful is
+    // picking the Nexus generation of the blueprint itself.
+    let blueprint1_active_nexus_generation =
+        blueprint_active_nexus_generation(&blueprint1);
+    let blueprint2_active_nexus_generation =
+        blueprint_active_nexus_generation(&blueprint2);
     let internal_dns_config1 = blueprint_internal_dns_config(
         &blueprint1,
         &sleds_by_id,
+        blueprint1_active_nexus_generation,
         &Default::default(),
     )?;
     let internal_dns_config2 = blueprint_internal_dns_config(
         &blueprint2,
         &sleds_by_id,
+        blueprint2_active_nexus_generation,
         &Default::default(),
     )?;
     let dns_diff = DnsDiff::new(&internal_dns_config1, &internal_dns_config2)
@@ -1046,11 +3071,13 @@ fn cmd_blueprint_diff(
         &blueprint1,
         state.config().silo_names(),
         external_dns_zone_name.to_owned(),
+        blueprint1_active_nexus_generation,
     );
     let external_dns_config2 = blueprint_external_dns_config(
         &blueprint2,
         state.config().silo_names(),
         external_dns_zone_name.to_owned(),
+        blueprint2_active_nexus_generation,
     );
     let dns_diff = DnsDiff::new(&external_dns_config1, &external_dns_config2)
         .context("failed to assemble external DNS diff")?;
@@ -1061,27 +3088,27 @@ fn cmd_blueprint_diff(
 
 fn make_sleds_by_id(
     system: &SystemDescription,
-) -> Result<BTreeMap<SledUuid, execution::Sled>, anyhow::Error> {
+) -> Result<IdOrdMap<execution::Sled>, anyhow::Error> {
     let collection = system
         .to_collection_builder()
         .context(
             "unexpectedly failed to create collection for current set of sleds",
         )?
         .build();
-    let sleds_by_id: BTreeMap<_, _> = collection
+    let sleds_by_id: IdOrdMap<_> = collection
         .sled_agents
         .iter()
-        .map(|(sled_id, sled_agent_info)| {
+        .map(|sa| {
             let sled = execution::Sled::new(
-                *sled_id,
+                sa.sled_id,
                 SledPolicy::InService {
                     provision_policy: SledProvisionPolicy::Provisionable,
                 },
-                sled_agent_info.sled_agent_address,
+                sa.sled_agent_address,
                 REPO_DEPOT_PORT,
-                sled_agent_info.sled_role,
+                sa.sled_role,
             );
-            (*sled_id, sled)
+            sled
         })
         .collect();
     Ok(sleds_by_id)
@@ -1096,7 +3123,8 @@ fn cmd_blueprint_diff_dns(
     let blueprint_id = args.blueprint_id;
 
     let state = sim.current_state();
-    let blueprint = state.system().get_blueprint(blueprint_id)?;
+    let blueprint =
+        state.system().resolve_and_get_blueprint(blueprint_id.into())?;
 
     let existing_dns_config = match dns_group {
         CliDnsGroup::Internal => {
@@ -1107,12 +3135,15 @@ fn cmd_blueprint_diff_dns(
         }
     };
 
+    let blueprint_active_generation =
+        blueprint_active_nexus_generation(&blueprint);
     let blueprint_dns_zone = match dns_group {
         CliDnsGroup::Internal => {
             let sleds_by_id = make_sleds_by_id(state.system().description())?;
             blueprint_internal_dns_config(
                 blueprint,
                 &sleds_by_id,
+                blueprint_active_generation,
                 &Default::default(),
             )?
         }
@@ -1120,6 +3151,7 @@ fn cmd_blueprint_diff_dns(
             blueprint,
             state.config().silo_names(),
             state.config().external_dns_zone_name().to_owned(),
+            blueprint_active_generation,
         ),
     };
 
@@ -1129,20 +3161,90 @@ fn cmd_blueprint_diff_dns(
     Ok(Some(dns_diff.to_string()))
 }
 
-fn cmd_blueprint_diff_inventory(
+// This command looks a lot like `omdb reconfigurator history`, but it differs
+// in some ways that often don't matter but are worth knowing about:
+//
+// 1. It's reading the history of blueprints based on their parent ids.  `omdb
+//    reconfigurator history` reads the `bp_target` table.  These are generally
+//    equivalent, except that the `omdb` command sees entries for blueprints
+//    being enabled and disabled and the times that that happened.  This command
+//    doesn't know that.
+//
+// 2. Relatedly, this command prints the creation time of the blueprint, not
+//    when it was made the target.  These are generally very close in time but
+//    they're not the same thing.
+fn cmd_blueprint_history(
     sim: &mut ReconfiguratorSim,
-    args: BlueprintDiffInventoryArgs,
+    args: BlueprintHistoryArgs,
 ) -> anyhow::Result<Option<String>> {
-    let collection_id = args.collection_id;
-    let blueprint_id = args.blueprint_id;
+    let BlueprintHistoryArgs { limit, diff, blueprint_id } = args;
 
     let state = sim.current_state();
-    let _collection = state.system().get_collection(collection_id)?;
-    let _blueprint = state.system().get_blueprint(blueprint_id)?;
-    // See https://github.com/oxidecomputer/omicron/issues/7242
-    // let diff = blueprint.diff_since_collection(&collection);
-    // Ok(Some(diff.display().to_string()))
-    bail!("Not Implemented")
+    let system = state.system();
+    let resolved_id = system.resolve_blueprint_id(blueprint_id.into());
+    let mut blueprint = system.get_blueprint(&resolved_id)?;
+
+    // We want to print the output in logical order, but in order to construct
+    // the output, we need to walk in reverse-logical order.  To do this, we'll
+    // assemble the output as we go and then print it in reverse order.
+    //
+    // Although we're sort of printing a table, we use strings rather than a
+    // table in case we're in `diff` mode.  In that case, we want to print
+    // details with each "row" that don't go in the table itself.
+    let mut entries = Vec::new();
+
+    while entries.len() < limit {
+        let mut entry = String::new();
+        swriteln!(
+            entry,
+            "{} {} {}",
+            humantime::format_rfc3339_millis(blueprint.time_created.into()),
+            blueprint.id,
+            blueprint.comment
+        );
+        let new_blueprint = blueprint;
+        let Some(parent_blueprint_id) = &blueprint.parent_blueprint_id else {
+            // We reached the initial blueprint.
+            entries.push(entry);
+            break;
+        };
+
+        blueprint = match system
+            .resolve_and_get_blueprint(BlueprintId::Id(*parent_blueprint_id))
+        {
+            Ok(b) => b,
+            Err(error) => {
+                swriteln!(
+                    entry,
+                    "error walking back from blueprint {} to parent {}: {}",
+                    blueprint.id,
+                    parent_blueprint_id,
+                    InlineErrorChain::new(&error)
+                );
+                entries.push(entry);
+                break;
+            }
+        };
+
+        if diff {
+            let diff = new_blueprint.diff_since_blueprint(&blueprint);
+            swriteln!(entry, "{}", diff.display());
+        }
+
+        entries.push(entry);
+    }
+
+    if entries.len() == limit {
+        entries.push(String::from("... (earlier history omitted)\n"));
+    }
+
+    let mut output = String::new();
+    swriteln!(output, "{:24} {:36}", "TIME", "BLUEPRINT");
+    for entry in entries.iter().rev() {
+        swrite!(output, "{entry}");
+    }
+
+    Ok(Some(output))
 }
 
 fn cmd_blueprint_save(
@@ -1152,14 +3254,37 @@ fn cmd_blueprint_save(
     let blueprint_id = args.blueprint_id;
 
     let state = sim.current_state();
-    let blueprint = state.system().get_blueprint(blueprint_id)?;
+    let resolved_id = state.system().resolve_blueprint_id(blueprint_id.into());
+    let blueprint = state.system().get_blueprint(&resolved_id)?;
 
     let output_path = &args.filename;
     let output_str = serde_json::to_string_pretty(&blueprint)
         .context("serializing blueprint")?;
     std::fs::write(&output_path, &output_str)
         .with_context(|| format!("write {:?}", output_path))?;
-    Ok(Some(format!("saved blueprint {} to {:?}", blueprint_id, output_path)))
+    Ok(Some(format!("saved {} to {:?}", resolved_id, output_path)))
+}
+
+fn cmd_blueprint_load(
+    sim: &mut ReconfiguratorSim,
+    args: BlueprintLoadArgs,
+) -> anyhow::Result<Option<String>> {
+    let filename = args.filename;
+    let blueprint: Blueprint = {
+        let contents = std::fs::read(&filename)
+            .with_context(|| format!("failed to read {filename}"))?;
+        serde_json::from_slice(&contents).with_context(|| {
+            format!("failed to parse {filename} as a blueprint")
+        })?
+    };
+    let blueprint_id = blueprint.id;
+
+    let mut state = sim.current_state().to_mut();
+    let system = state.system_mut();
+    system.add_blueprint(blueprint).context("failed to load blueprint")?;
+    sim.commit_and_bump("reconfigurator-cli blueprint-load".to_owned(), state);
+
+    Ok(Some(format!("loaded blueprint {blueprint_id} from {filename}")))
 }
 
 fn cmd_save(
@@ -1180,6 +3305,99 @@ fn cmd_save(
     )))
 }
 
+fn cmd_state_log(
+    sim: &mut ReconfiguratorSim,
+    args: StateLogArgs,
+) -> anyhow::Result<Option<String>> {
+    let StateLogArgs { from, limit, verbose } = args;
+
+    let starting_state = if let Some(start) = from {
+        GraphStartingState::State { start, limit }
+    } else {
+        GraphStartingState::None
+    };
+
+    let options = GraphRenderOptions::new(sim.sim.current())
+        .with_verbose(verbose)
+        .with_starting_state(starting_state);
+
+    let output = sim.sim.render_graph(&options);
+
+    Ok(Some(output))
+}
+
+fn cmd_state_switch(
+    sim: &mut ReconfiguratorSim,
+    args: StateSwitchArgs,
+) -> anyhow::Result<Option<String>> {
+    let state = sim.sim.resolve_and_get_state(args.state_id.into())?;
+    let target_id = state.id();
+    // Need to grab the generation and description here because switch_state
+    // below requires mutable access.
+    let generation = state.generation();
+    let description = state.description().to_owned();
+
+    sim.sim.switch_state(target_id)?;
+
+    Ok(Some(format!(
+        "switched to state {} (generation {}): {}",
+        target_id, generation, description,
+    )))
+}
+
+fn cmd_op_log(
+    sim: &mut ReconfiguratorSim,
+    args: OpLogArgs,
+) -> anyhow::Result<Option<String>> {
+    let output = sim.sim.render_operation_graph(args.limit, args.verbose);
+    Ok(Some(output))
+}
+
+fn cmd_op_undo(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
+    sim.sim.operation_undo()?;
+
+    let current_op = sim.sim.operation_current();
+    Ok(Some(format!(
+        "created operation {}: {}",
+        DisplayUuidPrefix::new(current_op.id(), false),
+        current_op.description(false)
+    )))
+}
+
+fn cmd_op_redo(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
+    sim.sim.operation_redo()?;
+
+    let current_op = sim.sim.operation_current();
+    Ok(Some(format!(
+        "created operation {}: {}",
+        DisplayUuidPrefix::new(current_op.id(), false),
+        current_op.description(false)
+    )))
+}
+
+fn cmd_op_restore(
+    sim: &mut ReconfiguratorSim,
+    args: OpRestoreArgs,
+) -> anyhow::Result<Option<String>> {
+    let target_op =
+        sim.sim.resolve_and_get_operation(args.operation_id.into())?;
+    let target_id = target_op.id();
+    let description = target_op.description(false);
+
+    sim.sim.operation_restore(target_id)?;
+
+    Ok(Some(format!(
+        "created operation {}: {}",
+        DisplayUuidPrefix::new(target_id, false),
+        description
+    )))
+}
+
+fn cmd_op_wipe(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
+    sim.sim.operation_wipe();
+    Ok(Some("wiped operation log".to_string()))
+}
+
 fn cmd_wipe(
     sim: &mut ReconfiguratorSim,
     args: WipeArgs,
@@ -1191,7 +3409,7 @@ fn cmd_wipe(
             state.config_mut().wipe();
             state.rng_mut().reset_state();
             format!(
-                "- wiped system, reconfigurator-sim config, and RNG state\n
+                "- wiped system, reconfigurator-sim config, and RNG state\n\
                  - reset seed to {}",
                 state.rng_mut().seed()
             )
@@ -1229,20 +3447,7 @@ fn cmd_wipe(
 fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
     let mut s = String::new();
     let state = sim.current_state();
-    do_print_properties(&mut s, state);
-    swriteln!(
-        s,
-        "target number of Nexus instances: {}",
-        state
-            .config()
-            .num_nexus()
-            .map_or_else(|| "default".to_owned(), |n| n.to_string())
-    );
-    Ok(Some(s))
-}
 
-// TODO: consider moving this to a method on `SimState`.
-fn do_print_properties(s: &mut String, state: &SimState) {
     swriteln!(
         s,
         "configured external DNS zone name: {}",
@@ -1278,6 +3483,86 @@ fn do_print_properties(s: &mut String, state: &SimState) {
             .collect::<Vec<_>>()
             .join(", "),
     );
+    swriteln!(
+        s,
+        "target number of Nexus instances: {}",
+        state
+            .config()
+            .num_nexus()
+            .map_or_else(|| "default".to_owned(), |n| n.to_string())
+    );
+
+    let target_release = state.system().description().target_release();
+    match target_release.description() {
+        TargetReleaseDescription::TufRepo(tuf_desc) => {
+            swriteln!(
+                s,
+                "target release (generation {}): {} ({})",
+                target_release.target_release_generation,
+                tuf_desc.system_version,
+                tuf_desc.file_name
+            );
+            for artifact in &tuf_desc.artifacts {
+                swriteln!(
+                    s,
+                    "    artifact: {} {} version {}",
+                    artifact.hash,
+                    artifact.display_tags(),
+                    artifact.version
+                );
+            }
+        }
+        TargetReleaseDescription::Initial => {
+            swriteln!(
+                s,
+                "target release (generation {}): unset",
+                target_release.target_release_generation,
+            );
+        }
+    }
+
+    // Show nexus zone state information
+    swriteln!(
+        s,
+        "active nexus zone generation: {}",
+        state.config().active_nexus_zone_generation()
+    );
+
+    if let Some(zones) = state.config().explicit_active_nexus_zones() {
+        swriteln!(
+            s,
+            "explicit active nexus zones ({}): {}",
+            zones.len(),
+            zones.iter().map(|z| z.to_string()).collect::<Vec<_>>().join(", ")
+        );
+    } else {
+        swriteln!(s, "active nexus zones: inferred from generation");
+    }
+
+    if let Some(zones) = state.config().explicit_not_yet_nexus_zones() {
+        swriteln!(
+            s,
+            "explicit not-yet nexus zones ({}): {}",
+            zones.len(),
+            zones.iter().map(|z| z.to_string()).collect::<Vec<_>>().join(", ")
+        );
+    } else {
+        swriteln!(s, "not-yet nexus zones: inferred from generation");
+    }
+
+    swriteln!(s, "cockroachdb settings:");
+    swrite!(
+        s,
+        "{}",
+        state.system().description().get_cockroachdb_settings().display()
+    );
+
+    swriteln!(s, "planner config:");
+    // No need for swriteln! here because .display() adds its own newlines at
+    // the end.
+    swrite!(s, "{}", state.system().description().planner_config().display());
+
+    Ok(Some(s))
 }
 
 fn cmd_set(
@@ -1286,6 +3571,12 @@ fn cmd_set(
 ) -> anyhow::Result<Option<String>> {
     let mut state = sim.current_state().to_mut();
     let rv = match args {
+        SetArgs::Seed { seed } => {
+            // In this case, reset the RNG state to the provided seed.
+            let rv = format!("new RNG seed: {seed}");
+            state.rng_mut().set_seed(seed);
+            rv
+        }
         SetArgs::NumNexus { num_nexus } => {
             let rv = format!(
                 "target number of Nexus zones: {:?} -> {}",
@@ -1296,7 +3587,52 @@ fn cmd_set(
             state
                 .system_mut()
                 .description_mut()
-                .target_nexus_zone_count(usize::from(num_nexus));
+                .set_target_nexus_zone_count(usize::from(num_nexus));
+            rv
+        }
+        SetArgs::ActiveNexusGen { r#gen } => {
+            let rv =
+                format!("will use active Nexus zones from generation {gen}");
+            state.config_mut().set_active_nexus_zone_generation(r#gen);
+            rv
+        }
+        SetArgs::NexusZones {
+            active_inferred,
+            active,
+            not_yet_inferred,
+            not_yet,
+        } => {
+            use std::collections::BTreeSet;
+            let mut rv = String::new();
+            if active_inferred {
+                rv.push_str("inferring active nexus zones from generation");
+                state.config_mut().set_explicit_active_nexus_zones(None);
+            } else {
+                let zone_set: BTreeSet<_> = active.into_iter().collect();
+                let count = zone_set.len();
+                rv.push_str(&format!(
+                    "set {} explicit active Nexus zones",
+                    count
+                ));
+                state
+                    .config_mut()
+                    .set_explicit_active_nexus_zones(Some(zone_set));
+            }
+            rv.push_str(", ");
+            if not_yet_inferred {
+                rv.push_str("inferring not-yet nexus zones from generation");
+                state.config_mut().set_explicit_not_yet_nexus_zones(None);
+            } else {
+                let zone_set: BTreeSet<_> = not_yet.into_iter().collect();
+                let count = zone_set.len();
+                rv.push_str(&format!(
+                    "set {} explicit not-yet Nexus zones",
+                    count
+                ));
+                state
+                    .config_mut()
+                    .set_explicit_not_yet_nexus_zones(Some(zone_set));
+            }
             rv
         }
         SetArgs::ExternalDnsZoneName { zone_name } => {
@@ -1308,10 +3644,180 @@ fn cmd_set(
             state.config_mut().set_external_dns_zone_name(zone_name);
             rv
         }
+        SetArgs::TargetRelease { filename } => {
+            let description =
+                extract_tuf_repo_description(&sim.log, &filename)?;
+            state.system_mut().description_mut().set_target_release(
+                TargetReleaseDescription::TufRepo(description),
+            );
+            format!("set target release based on {}", filename)
+        }
+        SetArgs::IgnoreImpossibleMgsUpdatesSince { since } => {
+            state
+                .system_mut()
+                .description_mut()
+                .set_ignore_impossible_mgs_updates_since(since.0);
+            format!(
+                "ignoring impossible MGS updates since {}",
+                humantime::format_rfc3339_millis(since.0.into())
+            )
+        }
+        SetArgs::CockroachdbSettings(args) => {
+            let current = state
+                .system_mut()
+                .description()
+                .get_cockroachdb_settings()
+                .clone();
+            if let Some(new) = args.opts.update_if_modified(&current) {
+                let rv = format!(
+                    "cockroachdb settings updated:\n{}",
+                    current.diff(&new).display()
+                );
+                state
+                    .system_mut()
+                    .description_mut()
+                    .set_cockroachdb_settings(new);
+                rv
+            } else {
+                format!(
+                    "no changes to cockroachdb settings:\n{}",
+                    current.display()
+                )
+            }
+        }
+        SetArgs::PlannerConfig(args) => {
+            let current = state.system_mut().description().planner_config();
+            if let Some(new) = args.opts.update_if_modified(&current) {
+                let rv = format!(
+                    "planner config updated:\n{}",
+                    current.diff(&new).display()
+                );
+                state.system_mut().description_mut().set_planner_config(new);
+                rv
+            } else {
+                format!("no changes to planner config:\n{}", current.display())
+            }
+        }
     };
 
     sim.commit_and_bump(format!("reconfigurator-cli set: {}", rv), state);
     Ok(Some(rv))
+}
+
+fn extract_tuf_repo_description(
+    logger: &slog::Logger,
+    archive_path: &Utf8Path,
+) -> anyhow::Result<TufRepoDescription> {
+    let repo = oxide_tokio_rt::run(
+        RepositoryLoader::new()
+            .unsafe_blindly_trust_repo()
+            .compute_archive_sha256(true)
+            .load_zip_path(archive_path.to_owned(), logger),
+    )?;
+    Ok(TufRepoDescription {
+        artifacts: repo.artifacts().clone(),
+        metadata: repo.metadata().clone(),
+        system_version: repo.system_version().clone(),
+        hash: ArtifactHash(
+            *repo
+                .archive_sha256()
+                .expect("tufaceous should have calculated hash"),
+        ),
+        file_name: archive_path
+            .file_name()
+            .expect("path to opened file must have a file name")
+            .to_owned(),
+    })
+}
+
+/// Converts a mupdate source to a TUF repo description.
+fn mupdate_source_to_description(
+    sim: &ReconfiguratorSim,
+    source: &SledMupdateSource,
+) -> anyhow::Result<SimTufRepoDescription> {
+    let manifest_source = match source.mupdate_id {
+        Some(mupdate_id) => {
+            OmicronInstallManifestSource::Installinator { mupdate_id }
+        }
+        None => OmicronInstallManifestSource::SledAgent,
+    };
+    if let Some(repo_path) = &source.valid.from_repo {
+        let description = extract_tuf_repo_description(&sim.log, repo_path)?;
+        let mut sim_source = SimTufRepoSource::new(
+            description,
+            // We might consider having these be different for testing purposes
+            // but for now having them be the same is fine
+            manifest_source,
+            manifest_source,
+            format!("from repo at {repo_path}"),
+        )?;
+        sim_source.simulate_zone_errors(&source.with_zone_error)?;
+        if source.with_measurement_manifest_error {
+            sim_source.simulate_measurement_error(
+                "simulated error with measurement manifest",
+            );
+        }
+        Ok(SimTufRepoDescription::new(sim_source))
+    } else if source.valid.to_target_release {
+        let description = sim
+            .current_state()
+            .system()
+            .description()
+            .target_release()
+            .description();
+        match description {
+            TargetReleaseDescription::Initial => {
+                bail!(
+                    "cannot mupdate zones without a target release \
+                     (use `set target-release` or --from-repo)"
+                )
+            }
+            TargetReleaseDescription::TufRepo(desc) => {
+                let mut sim_source = SimTufRepoSource::new(
+                    desc.clone(),
+                    manifest_source,
+                    manifest_source,
+                    "to target release".to_owned(),
+                )?;
+                sim_source.simulate_zone_errors(&source.with_zone_error)?;
+                if source.with_measurement_manifest_error {
+                    sim_source.simulate_measurement_error(
+                        "simulated error with measurement manifest",
+                    );
+                }
+                Ok(SimTufRepoDescription::new(sim_source))
+            }
+        }
+    } else if source.with_manifest_error {
+        Ok(SimTufRepoDescription::new_error(
+            "simulated error obtaining zone manifest".to_owned(),
+        ))
+    } else {
+        bail!("an update source must be specified")
+    }
+}
+
+fn cmd_generate_fake_repo(
+    args: GenerateFakeRepoArgs,
+) -> anyhow::Result<Option<String>> {
+    oxide_tokio_rt::run(async {
+        let output_path = args.output.unwrap_or_else(|| {
+            // This is relative to the current directory.
+            format!("repo-{}.zip", args.version).into()
+        });
+        RepositoryEditor::fake(args.version.clone())?
+            .finish()
+            .await?
+            .generate_root()
+            .sign()
+            .await?
+            .write_zip_file(&output_path, chrono::Utc::now())
+            .await?;
+        Ok(Some(format!(
+            "created {} for system version {}",
+            output_path, args.version
+        )))
+    })
 }
 
 fn read_file(
@@ -1336,20 +3842,64 @@ fn cmd_load(
         );
     }
 
-    let input_path = args.filename;
     let collection_id = args.collection_id;
-    let loaded = read_file(&input_path)?;
 
-    let result = state.load_serialized(loaded, collection_id)?;
+    let mut inputs = Vec::new();
+    for pattern in args.globs {
+        // Work around the lack of rust-lang/glob#148: there is no way to
+        // iterate the paths matching a compiled `Pattern`.  We have to pass the
+        // underlying string to `glob::glob` and have it compile the pattern
+        // again.  It would be very surprising to get an error here since we
+        // have already parsed the string as a pattern before.
+        let paths = glob::glob(pattern.as_str())
+            .with_context(|| format!("parsing glob pattern {pattern:?}"))?;
+        for maybe_path in paths {
+            let input_path = maybe_path.with_context(|| {
+                format!("error globbing pattern {pattern:?}")
+            })?;
+            let input_path = Utf8PathBuf::from_path_buf(input_path).map_err(
+                |input_path| {
+                    anyhow!(
+                        "path was not valid UTF-8: {:?}",
+                        input_path.display()
+                    )
+                },
+            )?;
+            let file = std::fs::File::open(&input_path)
+                .with_context(|| format!("open {:?}", input_path))?;
+            let bufread = std::io::BufReader::new(file);
+            let input = ReconfiguratorStateInput {
+                label: input_path.as_str().to_owned(),
+                reader: bufread,
+            };
+            inputs.push(input);
+        }
+    }
+
+    let mut s = String::new();
+    let count = inputs.len();
+    let plural = if count == 1 { "" } else { "s" };
+    let loaded = UnstableReconfiguratorState::read_series(inputs)
+        .with_context(|| format!("loading {count} input{plural}"))?;
+    for warning in loaded.warnings {
+        swriteln!(s, "  {}", warning);
+    }
+    if count > 1 {
+        swriteln!(s, "latest of {count} file{plural}: {}", loaded.latest);
+    }
+
+    let result = state.load_serialized(loaded.state, collection_id)?;
 
     sim.commit_and_bump(
-        format!("reconfigurator-sim: load {:?}", input_path),
+        format!("reconfigurator-sim: load {count} file{plural}",),
         state,
     );
 
-    let mut s = String::new();
-
-    swriteln!(s, "loaded data from {:?}", input_path);
+    if count == 1 {
+        swriteln!(s, "loaded data from {:?}", loaded.latest);
+    } else {
+        swriteln!(s, "loaded data from {count} files");
+    }
 
     if !result.warnings.is_empty() {
         swriteln!(s, "warnings:");
@@ -1380,78 +3930,21 @@ fn cmd_load_example(
     sim: &mut ReconfiguratorSim,
     args: LoadExampleArgs,
 ) -> anyhow::Result<Option<String>> {
-    let mut s = String::new();
-    let mut state = sim.current_state().to_mut();
-    if !state.system_mut().is_empty() {
-        bail!(
-            "changes made to simulated system: run `wipe system` before \
-             loading"
-        );
-    }
-
-    // Generate the example system.
-    match args.seed {
-        Some(seed) => {
-            // In this case, reset the RNG state to the provided seed.
-            swriteln!(s, "setting new RNG seed: {}", seed);
-            state.rng_mut().set_seed(seed);
-        }
-        None => {
-            // In this case, use the existing RNG state.
-            swriteln!(
-                s,
-                "using existing RNG state (seed: {})",
-                state.rng_mut().seed()
-            );
-        }
-    };
-    let rng = state.rng_mut().next_example_rng();
-
-    let (example, blueprint) =
-        ExampleSystemBuilder::new_with_rng(&sim.log, rng)
+    sim.load_example(args.seed, |builder| {
+        let mut builder = builder
             .nsleds(args.nsleds)
             .ndisks_per_sled(args.ndisks_per_sled)
-            .nexus_count(
-                state
-                    .config_mut()
-                    .num_nexus()
-                    .map_or(NEXUS_REDUNDANCY, |n| n.into()),
-            )
             .external_dns_count(3)
             .context("invalid external DNS zone count")?
-            .create_zones(!args.no_zones)
-            .create_disks_in_blueprint(!args.no_disks_in_blueprint)
-            .build();
-
-    // Generate the internal and external DNS configs based on the blueprint.
-    let sleds_by_id = make_sleds_by_id(&example.system)?;
-    let internal_dns = blueprint_internal_dns_config(
-        &blueprint,
-        &sleds_by_id,
-        &Default::default(),
-    )?;
-    let external_dns_zone_name =
-        state.config_mut().external_dns_zone_name().to_owned();
-    let external_dns = blueprint_external_dns_config(
-        &blueprint,
-        state.config_mut().silo_names(),
-        external_dns_zone_name,
-    );
-
-    let blueprint_id = blueprint.id;
-    let collection_id = example.collection.id;
-
-    state
-        .system_mut()
-        .load_example(example, blueprint, internal_dns, external_dns)
-        .expect("already checked non-empty state above");
-    sim.commit_and_bump("reconfigurator-cli load-example".to_owned(), state);
-
-    Ok(Some(format!(
-        "loaded example system with:\n\
-         - collection: {collection_id}\n\
-         - blueprint: {blueprint_id}",
-    )))
+            .create_disks_in_blueprint(!args.no_disks_in_blueprint);
+        for sled_policy in args.sled_policy {
+            builder = builder
+                .with_sled_policy(sled_policy.index, sled_policy.policy)
+                .context("setting sled policy")?;
+        }
+        Ok(builder)
+    })
+    .map(Some)
 }
 
 fn cmd_file_contents(args: FileContentsArgs) -> anyhow::Result<Option<String>> {
@@ -1501,4 +3994,31 @@ fn cmd_file_contents(args: FileContentsArgs) -> anyhow::Result<Option<String>> {
     );
 
     Ok(Some(s))
+}
+
+/// Returns the "active Nexus generation" to use for a historical blueprint
+/// (i.e., a blueprint that may not have been generated or executed against the
+/// current simulated state).  This is used for `blueprint-diff`, for example,
+/// which avoids assuming anything about the simulated state in comparing the
+/// two blueprints.
+///
+/// In general, the active Nexus generation for a blueprint is not well-defined.
+/// We cannot know what the active Nexus generation was at some point in the
+/// past.  But we do know that it's one of these two values:
+///
+/// - `blueprint.nexus_generation - 1`, if this blueprint was created as part
+///   of an upgrade, starting with the point where the Nexus handoff was
+///   initiated (inclusive) and ending with the first blueprint after the
+///   handoff (exclusive).  In most cases, this means that this is the single
+///   blueprint during an upgrade that triggered the handoff.
+/// - `blueprint.nexus_generation` otherwise (which includes all other
+///   blueprints that are created during an upgrade and all blueprints created
+///   outside of an upgrade).
+///
+/// This implementation always returns `blueprint.nexus_generation`.  In the
+/// second case above, this is always correct.  In the first case, this is
+/// basically equivalent to assuming that the Nexus handoff had happened
+/// instantaneously when the blueprint was created.
+fn blueprint_active_nexus_generation(blueprint: &Blueprint) -> NexusGeneration {
+    blueprint.nexus_generation
 }

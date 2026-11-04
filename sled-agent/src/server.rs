@@ -7,13 +7,16 @@
 use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
+use crate::bootstrap::MultirackJoinAccessor;
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::nexus::make_nexus_client;
 use crate::services::ServiceManager;
 use internal_dns_resolver::Resolver;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -34,12 +37,14 @@ impl Server {
     }
 
     /// Starts a SledAgent server
-    pub async fn start(
+    pub(crate) async fn start(
         config: &Config,
         log: Logger,
         request: StartSledAgentRequest,
         long_running_tasks_handles: LongRunningTaskHandles,
+        config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
         services: ServiceManager,
+        multirack_join_accessor: MultirackJoinAccessor,
     ) -> Result<Server, String> {
         info!(log, "setting up sled agent server");
 
@@ -61,21 +66,30 @@ impl Server {
             request,
             services,
             long_running_tasks_handles,
+            config_reconciler_spawn_token,
+            multirack_join_accessor,
         )
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| InlineErrorChain::new(&e).to_string())?;
 
         let dropshot_config = dropshot::ConfigDropshot {
             bind_address: SocketAddr::V6(sled_address),
             ..config.dropshot.clone()
         };
         let dropshot_log = log.new(o!("component" => "dropshot (SledAgent)"));
+
         let http_server =
             dropshot::ServerBuilder::new(http_api(), sled_agent, dropshot_log)
                 .config(dropshot_config)
+                .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+                    dropshot::ClientSpecifiesVersionInHeader::new(
+                        omicron_common::api::VERSION_HEADER,
+                        sled_agent_api::latest_version(),
+                    )
+                    .min_version(sled_agent_api::oldest_version()),
+                )))
                 .start()
                 .map_err(|error| format!("initializing server: {}", error))?;
-
         Ok(Server { http_server })
     }
 

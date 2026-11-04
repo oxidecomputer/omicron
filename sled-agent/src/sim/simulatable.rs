@@ -5,11 +5,12 @@
 use crate::nexus::NexusClient;
 use async_trait::async_trait;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::ResourceType;
+use omicron_generation_kinds::Generation;
+use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::TypedUuidKind;
 use std::fmt;
 use std::sync::Arc;
-use uuid::Uuid;
 
 /// Describes Oxide API objects that can be simulated here in the sled agent
 ///
@@ -51,6 +52,12 @@ use uuid::Uuid;
 /// the `notify()` function.
 #[async_trait]
 pub trait Simulatable: fmt::Debug + Send + Sync {
+    /// The typed UUID kind that identifies instances of this simulated object.
+    ///
+    /// [`SimCollection`](super::collection::SimCollection)'s map is keyed on
+    /// [`TypedUuid`]`<Self::Id>`.
+    type Id: TypedUuidKind;
+
     /// Represents a possible current runtime state of the simulated object.
     /// For an Instance, you might think of the state as "starting" or "running",
     /// etc., although in practice it's likely an object that includes this as
@@ -71,12 +78,6 @@ pub trait Simulatable: fmt::Debug + Send + Sync {
 
     /// Creates a new Simulatable object.
     fn new(current: Self::CurrentState) -> Self;
-
-    /// Sets the producer based on the provided arguments.
-    async fn set_producer(
-        &mut self,
-        args: Self::ProducerArgs,
-    ) -> Result<(), Error>;
 
     /// Requests that the simulated object transition to a new target.
     ///
@@ -114,7 +115,7 @@ pub trait Simulatable: fmt::Debug + Send + Sync {
     /// the object identified by `id`.
     async fn notify(
         nexus_client: &Arc<NexusClient>,
-        id: &Uuid,
+        id: &TypedUuid<Self::Id>,
         current: Self::CurrentState,
     ) -> Result<(), Error>;
 

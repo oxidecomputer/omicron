@@ -4,18 +4,16 @@
 
 //! Server API for bootstrap-related functionality.
 
-use super::BootstrapError;
 use super::RssAccessError;
-use super::config::BOOTSTRAP_AGENT_HTTP_PORT;
-use super::http_entrypoints;
-use super::views::SledAgentResponse;
-use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
-use crate::bootstrap::http_entrypoints::BootstrapServerContext;
+use super::http_entrypoints_lockstep;
+use super::http_entrypoints_lockstep::BootstrapServerContext;
 use crate::bootstrap::maghemite;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
 use crate::bootstrap::pumpkind;
-use crate::bootstrap::rack_ops::RssAccess;
-use crate::bootstrap::secret_retriever::LrtqOrHardcodedSecretRetriever;
+use crate::bootstrap::rack_ops::{MultirackJoinAccessor, RssAccess};
+use crate::bootstrap::secret_retriever::{
+    HardcodedSecretRetriever, TqOrLrtqSecretRetriever,
+};
 use crate::bootstrap::sprockets_server::SprocketsServer;
 use crate::config::Config as SledConfig;
 use crate::config::ConfigError;
@@ -25,29 +23,31 @@ use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
-use cancel_safe_futures::TryStreamExt;
 use dropshot::HttpServer;
-use futures::StreamExt;
 use illumos_utils::dladm;
 use illumos_utils::zfs;
 use illumos_utils::zone;
-use illumos_utils::zone::Api;
-use illumos_utils::zone::Zones;
-use omicron_common::ledger;
-use omicron_common::ledger::Ledger;
+use omicron_common::address::BOOTSTRAP_AGENT_LOCKSTEP_PORT;
+use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_ddm_admin_client::DdmError;
 use omicron_ddm_admin_client::types::EnableStatsRequest;
+use omicron_ledger as ledger;
+use omicron_ledger::Ledger;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackInitUuid;
-use sled_agent_types::rack_init::RackInitializeRequest;
+use sled_agent_bootstrap_common::sprockets::SledAgentResponse;
+use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
+use sled_agent_config_reconciler::InternalDisksReceiver;
+use sled_agent_rack_setup::RackInitializeRequestParams;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_hardware::underlay;
 use sled_storage::dataset::CONFIG_DATASET;
-use sled_storage::manager::StorageHandle;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::io;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -131,8 +131,8 @@ pub enum StartError {
     #[error("Failed to enable ipv6-forwarding")]
     EnableIpv6Forwarding(#[from] illumos_utils::ExecutionError),
 
-    #[error("Incorrect binary packaging: {0}")]
-    IncorrectBuildPackaging(&'static str),
+    #[error("Failed to detect switch hardware")]
+    DetectSwitch(#[source] sled_hardware::SwitchDetectError),
 
     #[error("Failed to start HardwareManager: {0}")]
     StartHardwareManager(String),
@@ -152,21 +152,26 @@ pub enum StartError {
     #[error("Failed to bind sprocket server")]
     BindSprocketsServer(#[source] io::Error),
 
-    #[error("Failed to initialize lrtq node as learner: {0}")]
-    FailedLearnerInit(bootstore::NodeRequestError),
+    #[error("Failed to initialize lrtq node as learner")]
+    FailedLearnerInit(#[source] bootstore::NodeRequestError),
 }
 
 /// Server for the bootstrap agent.
 ///
 /// Wraps an inner tokio task that handles low-level operations like
-/// initializating and resetting this sled (and starting / stopping the
+/// initializing and resetting this sled (and starting / stopping the
 /// sled-agent server).
 pub struct Server {
     inner_task: JoinHandle<()>,
-    bootstrap_http_server: HttpServer<BootstrapServerContext>,
+    // The lockstep server shares the same context as bootstrap_http_server.
+    // We hold this handle to keep the server running; the actual rack
+    // initialization calls go through bootstrap_http_server.app_private().
+    #[allow(dead_code)]
+    lockstep_http_server: HttpServer<BootstrapServerContext>,
 }
 
 impl Server {
+    /// The entry point to the bootstrap server
     pub async fn start(config: SledConfig) -> Result<Self, StartError> {
         // Do all initial setup that we can do even before we start listening
         // for and handling hardware updates (e.g., discovery if we're a
@@ -180,12 +185,15 @@ impl Server {
             service_manager,
             long_running_task_handles,
             sled_agent_started_tx,
+            config_reconciler_spawn_token,
         } = BootstrapAgentStartup::run(config).await?;
 
         // Do we have a StartSledAgentRequest stored in the ledger?
-        let paths =
-            sled_config_paths(&long_running_task_handles.storage_manager)
-                .await?;
+        let internal_disks_rx = long_running_task_handles
+            .config_reconciler
+            .internal_disks_rx()
+            .clone();
+        let paths = sled_config_paths(&internal_disks_rx).await?;
         let maybe_ledger =
             Ledger::<StartSledAgentRequest>::new(&startup_log, paths).await;
 
@@ -195,27 +203,31 @@ impl Server {
         // below.
         let rss_access = RssAccess::new(maybe_ledger.is_some());
 
-        // Create a channel for requesting sled reset. We use a channel depth
-        // of 1: if there's a pending sled reset request, there's no need to
-        // enqueue another, and we can send back an HTTP busy.
-        let (sled_reset_tx, sled_reset_rx) = mpsc::channel(1);
+        // Provide a mechanism for multirack join requests to be completed by sled-agent.
+        let multirack_join_accessor =
+            MultirackJoinAccessor::new(rss_access.clone());
 
         // Start the bootstrap dropshot server.
         let bootstrap_context = BootstrapServerContext {
             base_log: base_log.clone(),
             global_zone_bootstrap_ip,
-            storage_manager: long_running_task_handles.storage_manager.clone(),
+            internal_disks_rx,
             bootstore_node_handle: long_running_task_handles.bootstore.clone(),
-            baseboard: long_running_task_handles.hardware_manager.baseboard(),
             rss_access,
-            updates: config.updates.clone(),
-            sled_reset_tx,
-            sprockets: config.sprockets.clone(),
+            sprockets_config: config.sprockets.clone(),
+            trust_quorum_handle: long_running_task_handles.trust_quorum.clone(),
+            measurements: long_running_task_handles.measurements.clone(),
+            scrimlet_reconcilers: Arc::clone(
+                &long_running_task_handles.scrimlet_reconcilers,
+            ),
         };
-        let bootstrap_http_server = start_dropshot_server(bootstrap_context)?;
 
-        // Start the currently-misnamed sprockets server, which listens for raw
-        // TCP connections (which should ultimately be secured via sprockets).
+        // Start the lockstep dropshot server for rack initialization.
+        let lockstep_http_server =
+            start_lockstep_dropshot_server(bootstrap_context)?;
+
+        // Create a channel for proxying sled-initialization requests that land
+        // in the sprockets server to our bootstrap agent `Inner` task.
         let (sled_init_tx, sled_init_rx) = mpsc::channel(1);
 
         // We don't bother to wrap this bind in a
@@ -230,6 +242,7 @@ impl Server {
                 0,
             ),
             sled_init_tx,
+            long_running_task_handles.measurements.clone(),
             config.sprockets.clone(),
             &base_log,
         )
@@ -244,27 +257,27 @@ impl Server {
                 &config,
                 start_sled_agent_request,
                 long_running_task_handles.clone(),
+                config_reconciler_spawn_token,
                 service_manager.clone(),
+                multirack_join_accessor.clone(),
                 &base_log,
                 &startup_log,
             )
             .await?;
 
-            // Give the HardwareMonitory access to the `SledAgent`
+            // Give the HardwareMonitor access to the `SledAgent`
             let sled_agent = sled_agent_server.sled_agent();
             sled_agent_started_tx
                 .send(sled_agent.clone())
                 .map_err(|_| ())
                 .expect("Failed to send to StorageMonitor");
 
-            // For cold boot specifically, we now need to load the services
-            // we're responsible for, while continuing to handle hardware
-            // notifications. This cannot fail: we retry indefinitely until
-            // we're done loading services.
-            sled_agent.load_services().await;
             SledAgentState::ServerStarted(sled_agent_server)
         } else {
-            SledAgentState::Bootstrapping(Some(sled_agent_started_tx))
+            SledAgentState::Bootstrapping(Some(BootstrappingDependencies {
+                sled_agent_started_tx,
+                config_reconciler_spawn_token,
+            }))
         };
 
         // Spawn our inner task that handles any future hardware updates and any
@@ -274,22 +287,22 @@ impl Server {
             config,
             state,
             sled_init_rx,
-            sled_reset_rx,
             long_running_task_handles,
             service_manager,
             _sprockets_server_handle: sprockets_server_handle,
             base_log,
+            multirack_join_accessor,
         };
         let inner_task = tokio::spawn(inner.run());
 
-        Ok(Self { inner_task, bootstrap_http_server })
+        Ok(Self { inner_task, lockstep_http_server })
     }
 
     pub fn start_rack_initialize(
         &self,
-        request: RackInitializeRequest,
+        request: RackInitializeRequestParams,
     ) -> Result<RackInitUuid, RssAccessError> {
-        self.bootstrap_http_server.app_private().start_rack_initialize(request)
+        self.lockstep_http_server.app_private().start_rack_initialize(request)
     }
 
     pub async fn wait_for_finish(self) -> Result<(), String> {
@@ -306,9 +319,14 @@ impl Server {
 // bootstrap server).
 enum SledAgentState {
     // We're still in the bootstrapping phase, waiting for a sled-agent request.
-    Bootstrapping(Option<oneshot::Sender<SledAgent>>),
+    Bootstrapping(Option<BootstrappingDependencies>),
     // ... or the sled agent server is running.
     ServerStarted(SledAgentServer),
+}
+
+struct BootstrappingDependencies {
+    sled_agent_started_tx: oneshot::Sender<SledAgent>,
+    config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -322,7 +340,7 @@ pub enum SledAgentServerStartError {
     #[error("Failed to commit sled agent request to ledger")]
     CommitToLedger(#[from] ledger::Error),
 
-    #[error("Failed to initialize this lrtq node as a learner: {0}")]
+    #[error("Failed to initialize this lrtq node as a learner")]
     FailedLearnerInit(#[from] bootstore::NodeRequestError),
 }
 
@@ -350,7 +368,9 @@ async fn start_sled_agent(
     config: &SledConfig,
     request: StartSledAgentRequest,
     long_running_task_handles: LongRunningTaskHandles,
+    config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
     service_manager: ServiceManager,
+    multirack_join_accessor: MultirackJoinAccessor,
     base_log: &Logger,
     log: &Logger,
 ) -> Result<SledAgentServer, SledAgentServerStartError> {
@@ -360,17 +380,22 @@ async fn start_sled_agent(
     // all the changes we've made (e.g., initializing LRTQ, informing the
     // storage manager about keys, advertising prefixes, ...).
 
-    // Initialize the secret retriever used by the `KeyManager`
+    // Configure the secret retriever used by the `KeyManager`
     if request.body.use_trust_quorum {
-        info!(log, "KeyManager: using lrtq secret retriever");
+        info!(log, "KeyManager: using TQ/LRTQ secret retriever");
         let salt = request.hash_rack_id();
-        LrtqOrHardcodedSecretRetriever::init_lrtq(
-            salt,
-            long_running_task_handles.bootstore.clone(),
-        )
+        long_running_task_handles.secret_retriever.init(
+            TqOrLrtqSecretRetriever::new(
+                salt,
+                long_running_task_handles.trust_quorum.clone(),
+                long_running_task_handles.bootstore.clone(),
+            ),
+        );
     } else {
         info!(log, "KeyManager: using hardcoded secret retriever");
-        LrtqOrHardcodedSecretRetriever::init_hardcoded();
+        long_running_task_handles
+            .secret_retriever
+            .init(HardcodedSecretRetriever::new());
     }
 
     if request.body.use_trust_quorum && request.body.is_lrtq_learner {
@@ -386,15 +411,12 @@ async fn start_sled_agent(
         }
     }
 
-    // Inform the storage service that the key manager is available
-    long_running_task_handles.storage_manager.key_manager_ready().await;
-
     // Inform our DDM reconciler of our underlay subnet and the information it
     // needs for maghemite to enable Oximeter stats.
     let ddm_reconciler = service_manager.ddm_reconciler();
     ddm_reconciler.set_underlay_subnet(request.body.subnet);
     ddm_reconciler.enable_stats(EnableStatsRequest {
-        rack_id: request.body.rack_id,
+        rack_id: request.body.rack_id.into_untyped_uuid(),
         sled_id: request.body.id.into_untyped_uuid(),
     });
 
@@ -404,7 +426,9 @@ async fn start_sled_agent(
         base_log.clone(),
         request.clone(),
         long_running_task_handles.clone(),
+        config_reconciler_spawn_token,
         service_manager,
+        multirack_join_accessor,
     )
     .await
     .map_err(SledAgentServerStartError::FailedStartingServer)?;
@@ -413,8 +437,10 @@ async fn start_sled_agent(
 
     // Record this request so the sled agent can be automatically
     // initialized on the next boot.
-    let paths =
-        sled_config_paths(&long_running_task_handles.storage_manager).await?;
+    let paths = sled_config_paths(
+        long_running_task_handles.config_reconciler.internal_disks_rx(),
+    )
+    .await?;
 
     let mut ledger = Ledger::new_with(&log, paths, request);
     ledger.commit().await?;
@@ -426,21 +452,22 @@ async fn start_sled_agent(
 // https://github.com/oxidecomputer/usdt/issues/133; remove this once that issue
 // is addressed.
 #[allow(clippy::result_large_err)]
-fn start_dropshot_server(
+fn start_lockstep_dropshot_server(
     context: BootstrapServerContext,
 ) -> Result<HttpServer<BootstrapServerContext>, StartError> {
     let mut dropshot_config = dropshot::ConfigDropshot::default();
     dropshot_config.default_request_body_max_bytes = 1024 * 1024;
     dropshot_config.bind_address = SocketAddr::V6(SocketAddrV6::new(
         context.global_zone_bootstrap_ip,
-        BOOTSTRAP_AGENT_HTTP_PORT,
+        BOOTSTRAP_AGENT_LOCKSTEP_PORT,
         0,
         0,
     ));
-    let dropshot_log =
-        context.base_log.new(o!("component" => "dropshot (BootstrapAgent)"));
+    let dropshot_log = context
+        .base_log
+        .new(o!("component" => "dropshot (BootstrapAgentLockstep)"));
     let http_server = dropshot::ServerBuilder::new(
-        http_entrypoints::api(),
+        http_entrypoints_lockstep::api(),
         context,
         dropshot_log,
     )
@@ -468,12 +495,11 @@ impl From<MissingM2Paths> for SledAgentServerStartError {
 }
 
 async fn sled_config_paths(
-    storage: &StorageHandle,
+    internal_disks_rx: &InternalDisksReceiver,
 ) -> Result<Vec<Utf8PathBuf>, MissingM2Paths> {
-    let resources = storage.get_latest_disks().await;
-    let paths: Vec<_> = resources
-        .all_m2_mountpoints(CONFIG_DATASET)
-        .into_iter()
+    let paths: Vec<_> = internal_disks_rx
+        .current()
+        .all_config_datasets()
         .map(|p| p.join(SLED_AGENT_REQUEST_FILE))
         .collect();
 
@@ -490,42 +516,20 @@ struct Inner {
         StartSledAgentRequest,
         oneshot::Sender<Result<SledAgentResponse, String>>,
     )>,
-    sled_reset_rx: mpsc::Receiver<oneshot::Sender<Result<(), BootstrapError>>>,
     long_running_task_handles: LongRunningTaskHandles,
     service_manager: ServiceManager,
     _sprockets_server_handle: JoinHandle<()>,
     base_log: Logger,
+    multirack_join_accessor: MultirackJoinAccessor,
 }
 
 impl Inner {
     async fn run(mut self) {
         let log = self.base_log.new(o!("component" => "SledAgentMain"));
-        loop {
-            tokio::select! {
-                // Cancel-safe per the docs on `mpsc::Receiver::recv()`.
-                Some((request, response_tx)) = self.sled_init_rx.recv() => {
-                    self.handle_start_sled_agent_request(
-                        request,
-                        response_tx,
-                        &log,
-                    ).await;
-                }
-
-                // Cancel-safe per the docs on `mpsc::Receiver::recv()`.
-                Some(response_tx) = self.sled_reset_rx.recv() => {
-                    // Try to reset the sled, but do not exit early on error.
-                    let result = async {
-                        self.uninstall_zones().await?;
-                        self.uninstall_sled_local_config().await?;
-                        self.uninstall_networking(&log).await?;
-                        self.uninstall_storage(&log).await?;
-                        Ok::<(), BootstrapError>(())
-                    }
-                    .await;
-
-                    _ = response_tx.send(result);
-                }
-            }
+        while let Some((request, response_tx)) = self.sled_init_rx.recv().await
+        {
+            self.handle_start_sled_agent_request(request, response_tx, &log)
+                .await;
         }
     }
 
@@ -536,7 +540,7 @@ impl Inner {
         log: &Logger,
     ) {
         match &mut self.state {
-            SledAgentState::Bootstrapping(sled_agent_started_tx) => {
+            SledAgentState::Bootstrapping(deps) => {
                 let request_id = request.body.id.into_untyped_uuid();
 
                 // Extract from options to satisfy the borrow checker.
@@ -545,14 +549,18 @@ impl Inner {
                 // we explicitly unwrap here, and panic on error below.
                 //
                 // See https://github.com/oxidecomputer/omicron/issues/4494
-                let sled_agent_started_tx =
-                    sled_agent_started_tx.take().unwrap();
+                let BootstrappingDependencies {
+                    sled_agent_started_tx,
+                    config_reconciler_spawn_token,
+                } = deps.take().unwrap();
 
                 let response = match start_sled_agent(
                     &self.config,
                     request,
                     self.long_running_task_handles.clone(),
+                    config_reconciler_spawn_token,
                     self.service_manager.clone(),
+                    self.multirack_join_accessor.clone(),
                     &self.base_log,
                     &log,
                 )
@@ -572,8 +580,15 @@ impl Inner {
                     Err(err) => {
                         // This error is unrecoverable, and if returned we'd
                         // end up in maintenance mode anyway.
-                        error!(log, "Failed to start sled agent: {err:#}");
-                        panic!("Failed to start sled agent: {err:#}");
+                        error!(
+                            log,
+                            "Failed to start sled agent: {}",
+                            InlineErrorChain::new(&err)
+                        );
+                        panic!(
+                            "Failed to start sled agent: {}",
+                            InlineErrorChain::new(&err)
+                        );
                     }
                 };
                 _ = response_tx.send(response);
@@ -583,8 +598,8 @@ impl Inner {
                 let initial = server.sled_agent().start_request();
                 let response = if initial != &request {
                     Err(format!(
-                        "Sled Agent already running: 
-                        initital request = {:?}, 
+                        "Sled Agent already running:
+                        initital request = {:?},
                         current request: {:?}",
                         initial, request
                     ))
@@ -599,101 +614,6 @@ impl Inner {
             }
         }
     }
-
-    // Uninstall all oxide zones (except the switch zone)
-    async fn uninstall_zones(&self) -> Result<(), BootstrapError> {
-        const CONCURRENCY_CAP: usize = 32;
-        futures::stream::iter(Zones::real_api().get().await?)
-            .map(Ok::<_, anyhow::Error>)
-            // Use for_each_concurrent_then_try to delete as much as possible.
-            // We only return one error though -- hopefully that's enough to
-            // signal to the caller that this failed.
-            .for_each_concurrent_then_try(CONCURRENCY_CAP, |zone| async move {
-                if zone.name() != "oxz_switch" {
-                    Zones::real_api().halt_and_remove(zone.name()).await?;
-                }
-                Ok(())
-            })
-            .await
-            .map_err(BootstrapError::Cleanup)?;
-        Ok(())
-    }
-
-    async fn uninstall_sled_local_config(&self) -> Result<(), BootstrapError> {
-        let config_dirs = self
-            .long_running_task_handles
-            .storage_manager
-            .get_latest_disks()
-            .await
-            .all_m2_mountpoints(CONFIG_DATASET)
-            .into_iter();
-
-        for dir in config_dirs {
-            for entry in dir.read_dir_utf8().map_err(|err| {
-                BootstrapError::Io { message: format!("Deleting {dir}"), err }
-            })? {
-                let entry = entry.map_err(|err| BootstrapError::Io {
-                    message: format!("Deleting {dir}"),
-                    err,
-                })?;
-
-                let path = entry.path();
-                let file_type =
-                    entry.file_type().map_err(|err| BootstrapError::Io {
-                        message: format!("Deleting {path}"),
-                        err,
-                    })?;
-
-                if file_type.is_dir() {
-                    tokio::fs::remove_dir_all(path).await
-                } else {
-                    tokio::fs::remove_file(path).await
-                }
-                .map_err(|err| BootstrapError::Io {
-                    message: format!("Deleting {path}"),
-                    err,
-                })?;
-            }
-        }
-        Ok(())
-    }
-
-    async fn uninstall_networking(
-        &self,
-        log: &Logger,
-    ) -> Result<(), BootstrapError> {
-        // NOTE: This is very similar to the invocations
-        // in "sled_hardware::cleanup::cleanup_networking_resources",
-        // with a few notable differences:
-        //
-        // - We can't remove bootstrap-related networking -- this operation
-        // is performed via a request on the bootstrap network.
-        // - We avoid deleting addresses using the chelsio link. Removing
-        // these addresses would delete "cxgbe0/ll", and could render
-        // the sled inaccessible via a local interface.
-
-        sled_hardware::cleanup::delete_underlay_addresses(&log)
-            .map_err(BootstrapError::Cleanup)?;
-        sled_hardware::cleanup::delete_omicron_vnics(&log)
-            .await
-            .map_err(BootstrapError::Cleanup)?;
-        illumos_utils::opte::delete_all_xde_devices(&log)?;
-        Ok(())
-    }
-
-    async fn uninstall_storage(
-        &self,
-        log: &Logger,
-    ) -> Result<(), BootstrapError> {
-        let datasets = zfs::get_all_omicron_datasets_for_delete()
-            .map_err(BootstrapError::ZfsDatasetsList)?;
-        for dataset in &datasets {
-            info!(log, "Removing dataset: {dataset}");
-            zfs::Zfs::destroy_dataset(dataset)?;
-        }
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -701,10 +621,10 @@ mod tests {
     use super::*;
     use omicron_common::address::Ipv6Subnet;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use sled_agent_types::sled::StartSledAgentRequestBody;
     use std::net::Ipv6Addr;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn start_sled_agent_request_serialization() {
@@ -717,7 +637,7 @@ mod tests {
             schema_version: 1,
             body: StartSledAgentRequestBody {
                 id: SledUuid::new_v4(),
-                rack_id: Uuid::new_v4(),
+                rack_id: RackUuid::new_v4(),
                 use_trust_quorum: false,
                 is_lrtq_learner: false,
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),

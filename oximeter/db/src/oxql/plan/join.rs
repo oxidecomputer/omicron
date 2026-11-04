@@ -4,8 +4,6 @@
 
 //! OxQL query plan node for joining tables.
 
-// Copyright 2024 Oxide Computer Company
-
 use crate::oxql::plan::plan::TableOpData;
 use crate::oxql::plan::plan::TableOpInput;
 use crate::oxql::schema::TableSchema;

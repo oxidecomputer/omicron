@@ -2,6 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+// We only use rustdoc for internal documentation, including private items, so
+// it's expected that we'll have links to private items in the docs.
+#![allow(rustdoc::private_intra_doc_links)]
+
 //! Facilities for working with the Omicron database
 
 pub use nexus_auth::authn;

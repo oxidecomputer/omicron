@@ -8,21 +8,24 @@ use crate::addrobj::{
     AddrObject, DHCP_ADDROBJ_NAME, IPV4_STATIC_ADDROBJ_NAME,
     IPV6_STATIC_ADDROBJ_NAME,
 };
+#[cfg(target_os = "illumos")]
+use crate::contract;
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
-use crate::opte::{Port, PortTicket};
-use crate::zone::AddressRequest;
+use crate::opte::{Port, PortInfo};
 use crate::zone::Zones;
-use crate::zpool::{PathInPool, ZpoolOrRamdisk};
+use crate::zone::{AddressRequest, ROUTE};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use debug_ignore::DebugIgnore;
 use ipnetwork::IpNetwork;
-use omicron_common::backoff;
+use omicron_common::address::{AZ_PREFIX_LENGTH, Ipv6Subnet};
+use omicron_common::resolvable_files::ResolvableFileSource;
 use omicron_uuid_kinds::OmicronZoneUuid;
 pub use oxlog::is_oxide_smf_log_file;
 use slog::{Logger, error, info, o, warn};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use slog_error_chain::SlogInlineError;
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 #[cfg(target_os = "illumos")]
 use std::sync::OnceLock;
@@ -41,7 +44,7 @@ pub enum ServiceError {
 
 /// Errors returned from [`RunningZone::run_cmd`].
 #[derive(thiserror::Error, Debug)]
-#[error("Error running command in zone '{zone}': {err}")]
+#[error("Error running command in zone '{zone}'")]
 pub struct RunCommandError {
     zone: String,
     #[source]
@@ -51,7 +54,7 @@ pub struct RunCommandError {
 /// Errors returned from [`RunningZone::boot`].
 #[derive(thiserror::Error, Debug)]
 pub enum BootError {
-    #[error("Error booting zone: {0}")]
+    #[error("Error booting zone")]
     Booting(#[from] crate::zone::AdmError),
 
     #[error("Zone booted, but timed out waiting for {service} in {zone}")]
@@ -60,19 +63,20 @@ pub enum BootError {
     #[error("Zone booted, but failed to find zone ID for zone {zone}")]
     NoZoneId { zone: String },
 
-    #[error("Zone booted, but running a command experienced an error: {0}")]
+    #[error("Zone booted, but running a command experienced an error")]
     RunCommandError(#[from] RunCommandError),
 }
 
 /// Errors returned from [`RunningZone::ensure_address`].
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, SlogInlineError)]
 pub enum EnsureAddressError {
     #[error(
-        "Failed ensuring address {request:?} in {zone}: could not construct addrobj name: {err}"
+        "Failed ensuring address {request:?} in {zone}: could not construct addrobj name"
     )]
     AddrObject {
         request: AddressRequest,
         zone: String,
+        #[source]
         err: crate::addrobj::ParseError,
     },
 
@@ -80,13 +84,7 @@ pub enum EnsureAddressError {
     EnsureAddressError(#[from] crate::zone::EnsureAddressError),
 
     #[error(transparent)]
-    GetAddressesError(#[from] crate::zone::GetAddressesError),
-
-    #[error("Failed ensuring link-local address in {zone}: {err}")]
-    LinkLocal { zone: String, err: crate::ExecutionError },
-
-    #[error("Failed to find non-link-local address in {zone}")]
-    NoDhcpV6Addr { zone: String },
+    OptePortSetup(#[from] crate::zone::OptePortSetupError),
 
     #[error(
         "Cannot allocate bootstrap {address} in {zone}: missing bootstrap vnic"
@@ -97,10 +95,6 @@ pub enum EnsureAddressError {
         "Failed ensuring address in {zone}: missing opte port ({port_idx})"
     )]
     MissingOptePort { zone: String, port_idx: usize },
-
-    // TODO-remove(#2931): See comment in `ensure_address_for_port`
-    #[error(transparent)]
-    OpteGatewayConfig(#[from] RunCommandError),
 }
 
 #[cfg(target_os = "illumos")]
@@ -111,7 +105,7 @@ pub fn ensure_contract_reaper(log: &Logger) {
     info!(log, "Ensuring contract reaper thread");
     REAPER_THREAD.get_or_init(|| {
         let log = log.new(o!("component" => "ContractReaper"));
-        std::thread::spawn(move || zenter::contract_reaper(log))
+        std::thread::spawn(move || contract::process_contract_reaper(log))
     });
 }
 
@@ -124,214 +118,12 @@ pub fn ensure_contract_reaper(log: &Logger) {
 // inside a non-global zone.
 #[cfg(target_os = "illumos")]
 mod zenter {
-    use libc::ctid_t;
     use libc::zoneid_t;
-    use slog::{Logger, debug, error};
     use std::ffi::c_int;
-    use std::ffi::c_uint;
-    use std::ffi::c_void;
-    use std::ffi::{CStr, CString};
-    use std::process;
-    use std::thread;
-    use std::time::Duration;
-
-    #[allow(non_camel_case_types)]
-    type ct_evthdl_t = *mut c_void;
-
-    #[link(name = "contract")]
-    extern "C" {
-        fn ct_tmpl_set_critical(fd: c_int, events: c_uint) -> c_int;
-        fn ct_tmpl_set_informative(fd: c_int, events: c_uint) -> c_int;
-        fn ct_pr_tmpl_set_fatal(fd: c_int, events: c_uint) -> c_int;
-        fn ct_pr_tmpl_set_param(fd: c_int, params: c_uint) -> c_int;
-        fn ct_tmpl_activate(fd: c_int) -> c_int;
-        fn ct_tmpl_clear(fd: c_int) -> c_int;
-        fn ct_ctl_abandon(fd: c_int) -> c_int;
-        fn ct_event_read_critical(fd: c_int, ev: *mut ct_evthdl_t) -> c_int;
-        fn ct_event_get_type(ev: ct_evthdl_t) -> u64;
-        fn ct_event_get_ctid(ev: ct_evthdl_t) -> ctid_t;
-        fn ct_event_free(ev: ct_evthdl_t);
-    }
 
     #[link(name = "c")]
-    extern "C" {
+    unsafe extern "C" {
         pub fn zone_enter(zid: zoneid_t) -> c_int;
-    }
-
-    // This thread watches for critical events coming from all process
-    // contracts held by sled-agent, and reaps (abandons) contracts which
-    // become empty. Process contracts are used in conjunction with
-    // zone_enter() in order to run commands within non-global zones, and
-    // the contracts used for this come from templates that define becoming
-    // empty as a critical event.
-    pub fn contract_reaper(log: Logger) {
-        const EVENT_PATH: &'static [u8] = b"/system/contract/process/pbundle";
-        const CT_PR_EV_EMPTY: u64 = 1;
-
-        let cpath = CString::new(EVENT_PATH).unwrap();
-        let fd = unsafe { libc::open(cpath.as_ptr(), libc::O_RDONLY) };
-
-        if fd < 0 {
-            panic!(
-                "Could not open {:?}: {}",
-                cpath,
-                std::io::Error::last_os_error()
-            );
-        }
-
-        loop {
-            let mut ev: ct_evthdl_t = std::ptr::null_mut();
-            let evp: *mut ct_evthdl_t = &mut ev;
-            // The event endpoint was not opened as non-blocking, so
-            // ct_event_read_critical(3CONTRACT) will block until a new
-            // critical event is available on the channel.
-            match unsafe { ct_event_read_critical(fd, evp) } {
-                0 => {
-                    let typ = unsafe { ct_event_get_type(ev) };
-                    if typ == CT_PR_EV_EMPTY {
-                        let ctid = unsafe { ct_event_get_ctid(ev) };
-                        match abandon_contract(ctid) {
-                            Err(e) => error!(
-                                &log,
-                                "Failed to abandon contract {}: {}", ctid, e
-                            ),
-                            Ok(_) => {
-                                debug!(&log, "Abandoned contract {}", ctid)
-                            }
-                        }
-                    }
-                    unsafe { ct_event_free(ev) };
-                }
-                err => {
-                    // ct_event_read_critical(3CONTRACT) does not state any
-                    // error values for this function if the file descriptor
-                    // was not opened non-blocking, but inspection of the
-                    // library code shows that various errnos could be returned
-                    // in situations such as failure to allocate memory. In
-                    // those cases, log a message and pause to avoid entering a
-                    // tight loop if the problem persists.
-                    error!(
-                        &log,
-                        "Unexpected response from contract event channel: {}",
-                        std::io::Error::from_raw_os_error(err)
-                    );
-                    thread::sleep(Duration::from_secs(1));
-                }
-            }
-        }
-    }
-
-    #[derive(thiserror::Error, Debug)]
-    pub enum AbandonContractError {
-        #[error("Error opening file {file}: {error}")]
-        Open { file: String, error: std::io::Error },
-
-        #[error("Error abandoning contract {ctid}: {error}")]
-        Abandon { ctid: ctid_t, error: std::io::Error },
-
-        #[error("Error closing file {file}: {error}")]
-        Close { file: String, error: std::io::Error },
-    }
-
-    pub fn abandon_contract(ctid: ctid_t) -> Result<(), AbandonContractError> {
-        let path = format!("/proc/{}/contracts/{}/ctl", process::id(), ctid);
-
-        let cpath = CString::new(path.clone()).unwrap();
-        let fd = unsafe { libc::open(cpath.as_ptr(), libc::O_WRONLY) };
-        if fd < 0 {
-            return Err(AbandonContractError::Open {
-                file: path,
-                error: std::io::Error::last_os_error(),
-            });
-        }
-        let ret = unsafe { ct_ctl_abandon(fd) };
-        if ret != 0 {
-            unsafe { libc::close(fd) };
-            return Err(AbandonContractError::Abandon {
-                ctid,
-                error: std::io::Error::from_raw_os_error(ret),
-            });
-        }
-        if unsafe { libc::close(fd) } != 0 {
-            return Err(AbandonContractError::Close {
-                file: path,
-                error: std::io::Error::last_os_error(),
-            });
-        }
-
-        Ok(())
-    }
-
-    // A Rust wrapper around the process contract template.
-    #[derive(Debug)]
-    pub struct Template {
-        fd: c_int,
-    }
-
-    impl Drop for Template {
-        fn drop(&mut self) {
-            self.clear();
-            // Ignore any error, since printing may interfere with `slog`'s
-            // structured output.
-            unsafe { libc::close(self.fd) };
-        }
-    }
-
-    impl Template {
-        const TEMPLATE_PATH: &'static [u8] =
-            b"/system/contract/process/template\0";
-
-        // Constants related to how the contract below is managed. See
-        // `usr/src/uts/common/sys/contract/process.h` in the illumos sources
-        // for details.
-
-        // Contract has become empty.
-        const CT_PR_EV_EMPTY: c_uint = 0x1;
-        // Process experienced an uncorrectable error.
-        const CT_PR_EV_HWERR: c_uint = 0x20;
-        // Only kill process group on fatal errors.
-        const CT_PR_PGRPONLY: c_uint = 0x04;
-        // Automatically detach inherited contracts.
-        const CT_PR_REGENT: c_uint = 0x08;
-
-        pub fn new() -> Result<Self, crate::ExecutionError> {
-            let path = CStr::from_bytes_with_nul(Self::TEMPLATE_PATH).unwrap();
-            let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDWR) };
-            if fd < 0 {
-                let err = std::io::Error::last_os_error();
-                return Err(crate::ExecutionError::ContractFailure { err });
-            }
-
-            // Initialize the contract template.
-            //
-            // Nothing is inherited, we do not allow the contract to be
-            // orphaned, and the only event which is delivered is EV_EMPTY,
-            // indicating that the contract has become empty. These events are
-            // consumed by contract_reaper() above.
-            //
-            // See illumos sources in `usr/src/cmd/zlogin/zlogin.c` in the
-            // implementation of `init_template()` for details.
-            if unsafe { ct_tmpl_set_critical(fd, Self::CT_PR_EV_EMPTY) } != 0
-                || unsafe { ct_tmpl_set_informative(fd, 0) } != 0
-                || unsafe { ct_pr_tmpl_set_fatal(fd, Self::CT_PR_EV_HWERR) }
-                    != 0
-                || unsafe {
-                    ct_pr_tmpl_set_param(
-                        fd,
-                        Self::CT_PR_PGRPONLY | Self::CT_PR_REGENT,
-                    )
-                } != 0
-                || unsafe { ct_tmpl_activate(fd) } != 0
-            {
-                let err = std::io::Error::last_os_error();
-                return Err(crate::ExecutionError::ContractFailure { err });
-            }
-            Ok(Self { fd })
-        }
-
-        pub fn clear(&self) {
-            unsafe { ct_tmpl_clear(self.fd) };
-        }
     }
 }
 
@@ -356,9 +148,9 @@ impl RunningZone {
         self.inner.root()
     }
 
-    /// Returns the zpool on which the filesystem path has been placed.
-    pub fn root_zpool(&self) -> &ZpoolOrRamdisk {
-        &self.inner.zonepath.pool
+    /// Returns the zone's image path.
+    pub fn image_path(&self) -> &Utf8Path {
+        &self.inner.image_path
     }
 
     /// Return the name of a bootstrap VNIC in the zone, if any.
@@ -415,10 +207,11 @@ impl RunningZone {
                 err: crate::ExecutionError::NotRunning,
             });
         };
-        let template =
-            std::sync::Arc::new(zenter::Template::new().map_err(|err| {
-                RunCommandError { zone: self.name().to_string(), err }
-            })?);
+        let template = std::sync::Arc::new(
+            contract::Template::new(contract::ContractType::Process).map_err(
+                |err| RunCommandError { zone: self.name().to_string(), err },
+            )?,
+        );
         let tmpl = std::sync::Arc::clone(&template);
         let mut command = std::process::Command::new(crate::PFEXEC);
         let logger = self.inner.log.clone();
@@ -508,6 +301,12 @@ impl RunningZone {
         Ok(running_zone)
     }
 
+    /// Create a fake running zone for use in tests.
+    #[cfg(feature = "testing")]
+    pub fn fake_boot(zone_id: i32, zone: InstalledZone) -> Self {
+        RunningZone { id: Some(zone_id), inner: zone }
+    }
+
     pub async fn ensure_address(
         &self,
         addrtype: AddressRequest,
@@ -535,7 +334,8 @@ impl RunningZone {
                 err,
             })?;
         let network =
-            Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
+            Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)
+                .await?;
         Ok(network)
     }
 
@@ -543,150 +343,68 @@ impl RunningZone {
         &self,
         name: &str,
         port_idx: usize,
-    ) -> Result<IpNetwork, EnsureAddressError> {
+    ) -> Result<(), EnsureAddressError> {
         info!(self.inner.log, "Ensuring address for OPTE port");
+
         let port = self.opte_ports().nth(port_idx).ok_or_else(|| {
             EnsureAddressError::MissingOptePort {
                 zone: self.inner.name.clone(),
                 port_idx,
             }
         })?;
-        let addrobj = AddrObject::new(port.name(), name).map_err(|err| {
-            EnsureAddressError::AddrObject {
-                request: AddressRequest::Dhcp,
-                zone: self.inner.name.clone(),
-                err,
-            }
-        })?;
         let zone = Some(self.inner.name.as_ref());
-        if let IpAddr::V4(gateway) = port.gateway().ip() {
-            let addr =
-                Zones::ensure_address(zone, &addrobj, AddressRequest::Dhcp)?;
-            // TODO-remove(#2931): OPTE's DHCP "server" returns the list of routes
-            // to add via option 121 (Classless Static Route). The illumos DHCP
-            // client currently does not support this option, so we add the routes
-            // manually here.
-            let gateway_ip = gateway.to_string();
-            let private_ip = addr.ip();
-            self.run_cmd(&[
-                "/usr/sbin/route",
-                "add",
-                "-host",
-                &gateway_ip,
-                &private_ip.to_string(),
-                "-interface",
-                "-ifp",
-                port.name(),
-            ])?;
-            self.run_cmd(&[
-                "/usr/sbin/route",
-                "add",
-                "-inet",
-                "default",
-                &gateway_ip,
-            ])?;
-            Ok(addr)
-        } else {
-            // If the port is using IPv6 addressing we still want it to use
-            // DHCP(v6) which requires first creating a link-local address.
-            Zones::ensure_has_link_local_v6_address(zone, &addrobj).map_err(
-                |err| EnsureAddressError::LinkLocal {
-                    zone: self.inner.name.clone(),
-                    err,
-                },
-            )?;
-
-            // Unlike DHCPv4, there's no blocking `ipadm` call we can
-            // make as it just happens in the background. So we just poll
-            // until we find a non link-local address.
-            backoff::retry_notify(
-                backoff::retry_policy_local(),
-                || async {
-                    // Grab all the address on the addrobj. There should
-                    // always be at least one (the link-local we added)
-                    let addrs = Zones::get_all_addresses(zone, &addrobj)
-                        .map_err(|e| {
-                            backoff::BackoffError::permanent(
-                                EnsureAddressError::from(e),
-                            )
-                        })?;
-
-                    // Ipv6Addr::is_unicast_link_local is sadly not stable
-                    let is_ll =
-                        |ip: Ipv6Addr| (ip.segments()[0] & 0xffc0) == 0xfe80;
-
-                    // Look for a non link-local addr
-                    addrs
-                        .into_iter()
-                        .find(|addr| match addr {
-                            IpNetwork::V6(ip) => !is_ll(ip.ip()),
-                            _ => false,
-                        })
-                        .ok_or_else(|| {
-                            backoff::BackoffError::transient(
-                                EnsureAddressError::NoDhcpV6Addr {
-                                    zone: self.inner.name.clone(),
-                                },
-                            )
-                        })
-                },
-                |error, delay| {
-                    slog::debug!(
-                        self.inner.log,
-                        "No non link-local address yet (retrying in {:?})",
-                        delay;
-                        "error" => ?error
-                    );
-                },
+        if let Some((gateway_ip, private_ip)) = port.gateway_and_private_ipv4()
+        {
+            let v4_name = format!("{}4", name);
+            let addrobj =
+                AddrObject::new(port.name(), &v4_name).map_err(|err| {
+                    EnsureAddressError::AddrObject {
+                        request: AddressRequest::Dhcp,
+                        zone: self.inner.name.clone(),
+                        err,
+                    }
+                })?;
+            Zones::configure_opte_ipv4_port(
+                zone,
+                &addrobj,
+                *gateway_ip,
+                *private_ip,
             )
-            .await
+            .await?;
         }
+        if port.ipv6_addr().is_some() {
+            let v6_name = format!("{}6", name);
+            let addrobj =
+                AddrObject::new(port.name(), &v6_name).map_err(|err| {
+                    EnsureAddressError::AddrObject {
+                        request: AddressRequest::Dhcp,
+                        zone: self.inner.name.clone(),
+                        err,
+                    }
+                })?;
+            Zones::configure_opte_ipv6_port(zone, &addrobj, &self.inner.log)
+                .await?;
+        }
+        Ok(())
     }
 
-    pub fn add_default_route(
+    pub fn add_underlay_route(
         &self,
         gateway: Ipv6Addr,
     ) -> Result<(), RunCommandError> {
+        // Route to the underlay AZ's /48 by deriving it from the gateway IP.
+        let underlay_az: Ipv6Subnet<AZ_PREFIX_LENGTH> =
+            Ipv6Subnet::new(gateway);
         self.run_cmd([
-            "/usr/sbin/route",
+            ROUTE,
             "add",
             "-inet6",
-            "default",
+            &underlay_az.to_string(),
             "-inet6",
             &gateway.to_string(),
-        ])?;
-        Ok(())
-    }
-
-    pub fn add_default_route4(
-        &self,
-        gateway: Ipv4Addr,
-    ) -> Result<(), RunCommandError> {
-        self.run_cmd([
-            "/usr/sbin/route",
-            "add",
-            "default",
-            &gateway.to_string(),
-        ])?;
-        Ok(())
-    }
-
-    pub fn add_bootstrap_route(
-        &self,
-        bootstrap_prefix: u16,
-        gz_bootstrap_addr: Ipv6Addr,
-        zone_vnic_name: &str,
-    ) -> Result<(), RunCommandError> {
-        let args = [
-            "/usr/sbin/route",
-            "add",
-            "-inet6",
-            &format!("{bootstrap_prefix:x}::/16"),
-            &gz_bootstrap_addr.to_string(),
             "-ifp",
-            zone_vnic_name,
-        ];
-        self.run_cmd(args)?;
+            self.inner.control_vnic.name(),
+        ])?;
         Ok(())
     }
 
@@ -695,10 +413,14 @@ impl RunningZone {
         self.inner.opte_ports()
     }
 
-    /// Remove the OPTE ports on this zone from the port manager.
-    pub fn release_opte_ports(&mut self) {
-        for (_, ticket) in self.inner.opte_ports.drain(..) {
-            ticket.release();
+    pub fn opte_port_info(&self) -> impl Iterator<Item = PortInfo> {
+        self.inner.opte_port_info()
+    }
+
+    /// Remove the OPTE ports in this zone from the system.
+    pub fn delete_opte_ports(&mut self) {
+        for p in self.inner.opte_ports.drain(..) {
+            drop(p);
         }
     }
 
@@ -832,6 +554,14 @@ impl Drop for RunningZone {
             let log = self.inner.log.clone();
             let name = self.name().to_string();
             let zones_api = self.inner.zones_api.clone();
+
+            // Take the OPTE ports and move them into the scope of the spawned
+            // task below, where we'll drop them _after_ the zone is removed.
+            // The order matters, because deleting the ports while the zone owns
+            // them will return `EBUSY`. See
+            // https://github.com/oxidecomputer/omicron/issues/7726#issuecomment-2702320286
+            // and the surrounding thread for context.
+            let opte_ports = std::mem::take(&mut self.inner.opte_ports);
             tokio::task::spawn(async move {
                 match zones_api.halt_and_remove_logged(&log, &name).await {
                     Ok(()) => {
@@ -841,6 +571,7 @@ impl Drop for RunningZone {
                         warn!(log, "Failed to stop zone: {}", e)
                     }
                 }
+                drop(opte_ports);
             });
         }
     }
@@ -877,9 +608,12 @@ pub enum InstallZoneError {
         err: crate::zone::AdmError,
     },
 
-    #[error("Failed to find zone image '{image}' from {paths:?}")]
-    ImageNotFound { image: String, paths: Vec<Utf8PathBuf> },
-
+    #[error(
+        "Failed to find zone image '{}' from {:?}",
+        file_source.file_name,
+        file_source.search_paths,
+    )]
+    ImageNotFound { file_source: ResolvableFileSource },
     #[error("Attempted to call install() on underspecified ZoneBuilder")]
     IncompleteBuilder,
 }
@@ -889,7 +623,10 @@ pub struct InstalledZone {
     log: Logger,
 
     // Filesystem path of the zone
-    zonepath: PathInPool,
+    zonepath: Utf8PathBuf,
+
+    // The path to the zone's image source.
+    image_path: Utf8PathBuf,
 
     // Name of the Zone.
     name: String,
@@ -901,7 +638,7 @@ pub struct InstalledZone {
     bootstrap_vnic: Option<Link>,
 
     // OPTE devices for the guest network interfaces
-    opte_ports: Vec<(Port, PortTicket)>,
+    opte_ports: Vec<Port>,
 
     // Physical NICs possibly provisioned to the zone.
     links: Vec<Link>,
@@ -913,23 +650,6 @@ pub struct InstalledZone {
 impl InstalledZone {
     /// The path to the zone's root filesystem (i.e., `/`), within zonepath.
     pub const ROOT_FS_PATH: &'static str = "root";
-
-    /// Returns the name of a zone, based on the base zone name plus any unique
-    /// identifying info.
-    ///
-    /// The zone name is based on:
-    /// - A unique Oxide prefix ("oxz_")
-    /// - The name of the zone type being hosted (e.g., "nexus")
-    /// - An optional, zone-unique UUID
-    ///
-    /// This results in a zone name which is distinct across different zpools,
-    /// but stable and predictable across reboots.
-    pub fn get_zone_name(
-        zone_type: &str,
-        unique_name: Option<OmicronZoneUuid>,
-    ) -> String {
-        crate::zone::zone_name(zone_type, unique_name)
-    }
 
     /// Get the name of the bootstrap VNIC in the zone, if any.
     pub fn get_bootstrap_vnic_name(&self) -> Option<&str> {
@@ -948,7 +668,7 @@ impl InstalledZone {
 
     /// Returns the filesystem path to the zonepath
     pub fn zonepath(&self) -> &Utf8Path {
-        &self.zonepath.path
+        &self.zonepath
     }
 
     pub fn site_profile_xml_path(&self) -> Utf8PathBuf {
@@ -959,12 +679,17 @@ impl InstalledZone {
 
     /// Returns references to the OPTE ports for this zone.
     pub fn opte_ports(&self) -> impl Iterator<Item = &Port> {
-        self.opte_ports.iter().map(|(port, _)| port)
+        self.opte_ports.iter()
+    }
+
+    /// Returns references to the OPTE port info for this zone.
+    pub fn opte_port_info(&self) -> impl Iterator<Item = PortInfo> {
+        self.opte_ports.iter().map(|p| p.info().clone())
     }
 
     /// Returns the filesystem path to the zone's root in the GZ.
     pub fn root(&self) -> Utf8PathBuf {
-        self.zonepath.path.join(Self::ROOT_FS_PATH)
+        self.zonepath.join(Self::ROOT_FS_PATH)
     }
 
     /// Return a reference to the links for this zone.
@@ -1002,12 +727,12 @@ impl ZoneBuilderFactory {
 
     /// For use in unit tests that don't require actual zone creation to occur.
     pub fn fake(
-        temp_dir: Option<&String>,
+        temp_dir: Option<&str>,
         zones_api: Arc<dyn crate::zone::Api>,
     ) -> Self {
         let temp_dir = match temp_dir {
             Some(dir) => Utf8PathBuf::from(dir),
-            None => Utf8TempDir::new().unwrap().into_path(),
+            None => Utf8TempDir::new().unwrap().keep(),
         };
         Self {
             fake_cfg: Some(FakeZoneBuilderConfig {
@@ -1040,13 +765,9 @@ pub struct ZoneBuilder<'a> {
     /// Allocates the NIC used for control plane communication.
     underlay_vnic_allocator: Option<&'a VnicAllocator<Etherstub>>,
     /// Filesystem path at which the installed zone will reside.
-    zone_root_path: Option<PathInPool>,
-    /// The directories that will be searched for the image tarball for the
-    /// provided zone type ([`Self::with_zone_type`]).
-    zone_image_paths: Option<&'a [Utf8PathBuf]>,
-    /// The file name of the zone image to search for in [`Self::zone_image_paths`].
-    /// If unset, defaults to `{zone_type}.tar.gz`.
-    zone_image_file_name: Option<&'a str>,
+    zone_root_path: Option<Utf8PathBuf>,
+    /// The file source.
+    file_source: Option<&'a ResolvableFileSource>,
     /// The name of the type of zone being created (e.g. "propolis-server")
     zone_type: Option<&'a str>,
     /// Unique ID of the instance of the zone being created. (optional)
@@ -1064,7 +785,7 @@ pub struct ZoneBuilder<'a> {
     /// Device nodes to pass through to the zone.
     devices: Option<&'a [zone::Device]>,
     /// OPTE devices for the guest network interfaces.
-    opte_ports: Option<Vec<(Port, PortTicket)>>,
+    opte_ports: Option<Vec<Port>>,
     /// NIC to use for creating a bootstrap address on the switch zone.
     // actually optional (as above)
     bootstrap_vnic: Option<Link>,
@@ -1098,29 +819,17 @@ impl<'a> ZoneBuilder<'a> {
     }
 
     /// Filesystem path at which the installed zone will reside.
-    pub fn with_zone_root_path(mut self, root_path: PathInPool) -> Self {
+    pub fn with_zone_root_path(mut self, root_path: Utf8PathBuf) -> Self {
         self.zone_root_path = Some(root_path);
         self
     }
 
-    /// The directories that will be searched for the image tarball for the
-    /// provided zone type ([`Self::with_zone_type`]).
-    pub fn with_zone_image_paths(
+    /// The file name and image source.
+    pub fn with_file_source(
         mut self,
-        image_paths: &'a [Utf8PathBuf],
+        file_source: &'a ResolvableFileSource,
     ) -> Self {
-        self.zone_image_paths = Some(image_paths);
-        self
-    }
-
-    /// The file name of the zone image to search for in the zone image
-    /// paths ([`Self::with_zone_image_paths`]). If unset, defaults to
-    /// `{zone_type}.tar.gz`.
-    pub fn with_zone_image_file_name(
-        mut self,
-        image_file_name: &'a str,
-    ) -> Self {
-        self.zone_image_file_name = Some(image_file_name);
+        self.file_source = Some(file_source);
         self
     }
 
@@ -1161,7 +870,7 @@ impl<'a> ZoneBuilder<'a> {
     }
 
     /// OPTE devices for the guest network interfaces.
-    pub fn with_opte_ports(mut self, ports: Vec<(Port, PortTicket)>) -> Self {
+    pub fn with_opte_ports(mut self, ports: Vec<Port>) -> Self {
         self.opte_ports = Some(ports);
         self
     }
@@ -1186,7 +895,7 @@ impl<'a> ZoneBuilder<'a> {
     }
 
     // (used in unit tests)
-    fn fake_install(mut self) -> Result<InstalledZone, InstallZoneError> {
+    async fn fake_install(mut self) -> Result<InstalledZone, InstallZoneError> {
         let zones_api = self.zones_api.take().unwrap();
         let zone = self
             .zone_type
@@ -1196,23 +905,25 @@ impl<'a> ZoneBuilder<'a> {
             .underlay_vnic_allocator
             .ok_or(InstallZoneError::IncompleteBuilder)?
             .new_control(None)
+            .await
             .map_err(move |err| InstallZoneError::CreateVnic { zone, err })?;
         let fake_cfg = self.fake_cfg.unwrap();
         let temp_dir = fake_cfg.temp_dir;
         (|| {
-            let full_zone_name = InstalledZone::get_zone_name(
-                self.zone_type?,
+            let zone_type = self.zone_type?;
+            let full_zone_name = crate::zone::zone_name(
+                zone_type,
                 self.unique_name,
             );
-            let mut zonepath = self.zone_root_path?;
-            zonepath.path = temp_dir
+            let zonepath = temp_dir
                 .join(
-                    zonepath.path.strip_prefix("/").unwrap()
+                    self.zone_root_path?.strip_prefix("/").unwrap()
                 )
                 .join(&full_zone_name);
             let iz = InstalledZone {
                 log: self.log?,
                 zonepath,
+                image_path: Utf8PathBuf::from(format!("/fake/image/path/{zone_type}.tar.gz")),
                 name: full_zone_name,
                 control_vnic,
                 bootstrap_vnic: self.bootstrap_vnic,
@@ -1233,15 +944,14 @@ impl<'a> ZoneBuilder<'a> {
     /// parameter was not provided.
     pub async fn install(mut self) -> Result<InstalledZone, InstallZoneError> {
         if self.fake_cfg.is_some() {
-            return self.fake_install();
+            return self.fake_install().await;
         }
 
         let Self {
             log: Some(log),
             underlay_vnic_allocator: Some(underlay_vnic_allocator),
             zone_root_path: Some(mut zone_root_path),
-            zone_image_paths: Some(zone_image_paths),
-            zone_image_file_name,
+            file_source: Some(file_source),
             zone_type: Some(zone_type),
             unique_name,
             datasets: Some(datasets),
@@ -1258,39 +968,31 @@ impl<'a> ZoneBuilder<'a> {
             return Err(InstallZoneError::IncompleteBuilder);
         };
 
-        let control_vnic =
-            underlay_vnic_allocator.new_control(None).map_err(|err| {
-                InstallZoneError::CreateVnic {
-                    zone: zone_type.to_string(),
-                    err,
-                }
+        let control_vnic = underlay_vnic_allocator
+            .new_control(None)
+            .await
+            .map_err(|err| InstallZoneError::CreateVnic {
+                zone: zone_type.to_string(),
+                err,
             })?;
 
-        let full_zone_name =
-            InstalledZone::get_zone_name(zone_type, unique_name);
+        let full_zone_name = crate::zone::zone_name(zone_type, unique_name);
 
-        // Looks for the image within `zone_image_path`, in order.
-        let image_file_name = match zone_image_file_name {
-            Some(image) => image,
-            None => &format!("{}.tar.gz", zone_type),
-        };
-        let zone_image_path = zone_image_paths
+        // Look for the image within `file_source.search_paths`, in order.
+        let zone_image_path = file_source
+            .search_paths
             .iter()
             .find_map(|image_path| {
-                let path = image_path.join(image_file_name);
+                let path = image_path.join(&file_source.file_name);
                 if path.exists() { Some(path) } else { None }
             })
             .ok_or_else(|| InstallZoneError::ImageNotFound {
-                image: image_file_name.to_string(),
-                paths: zone_image_paths
-                    .iter()
-                    .map(|p| p.to_path_buf())
-                    .collect(),
+                file_source: file_source.clone(),
             })?;
 
         let mut net_device_names: Vec<String> = opte_ports
             .iter()
-            .map(|(port, _)| port.name().to_string())
+            .map(|port| port.name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
             .chain(bootstrap_vnic.as_ref().map(|vnic| vnic.name().to_string()))
             .chain(links.iter().map(|nic| nic.name().to_string()))
@@ -1303,7 +1005,7 @@ impl<'a> ZoneBuilder<'a> {
         net_device_names.sort();
         net_device_names.dedup();
 
-        zone_root_path.path = zone_root_path.path.join(&full_zone_name);
+        zone_root_path.push(&full_zone_name);
 
         let zones_api = self.zones_api.take().unwrap();
         zones_api
@@ -1328,6 +1030,7 @@ impl<'a> ZoneBuilder<'a> {
         Ok(InstalledZone {
             log: log.new(o!("zone" => full_zone_name.clone())),
             zonepath: zone_root_path,
+            image_path: zone_image_path,
             name: full_zone_name,
             control_vnic,
             bootstrap_vnic,
@@ -1350,6 +1053,32 @@ pub fn is_oxide_smf_service(fmri: impl AsRef<str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::is_oxide_smf_service;
+    use crate::dladm::Etherstub;
+    use crate::fakes::zone::Zones;
+    use crate::link::VnicAllocator;
+    use crate::opte::Handle;
+    use crate::opte::PortCreateParams;
+    use crate::opte::PortManager;
+    use crate::running_zone::RunningZone;
+    use crate::running_zone::ZoneBuilderFactory;
+    use camino_tempfile::Utf8TempDir;
+    use omicron_common::api::external::MacAddr;
+    use omicron_common::api::external::Vni;
+    use omicron_common::api::internal::shared::PrivateIpConfig;
+    use omicron_common::api::internal::shared::PrivateIpv4Config;
+    use omicron_test_utils::dev::poll::CondCheckError;
+    use omicron_test_utils::dev::poll::wait_for_condition;
+    use omicron_uuid_kinds::OmicronZoneUuid;
+    use oxide_vpc::api::DhcpCfg;
+    use oxnet::Ipv4Net;
+    use sled_agent_types::instance::ExternalIpConfig;
+    use sled_agent_types::inventory::NetworkInterface;
+    use sled_agent_types::inventory::NetworkInterfaceKind;
+    use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
+    use std::time::Duration;
+    use tokio::time::timeout;
+    use uuid::Uuid;
 
     #[test]
     fn test_is_oxide_smf_service() {
@@ -1357,5 +1086,148 @@ mod tests {
         assert!(is_oxide_smf_service("svc:/system/illumos/blah:default"));
         assert!(!is_oxide_smf_service("svc:/system/blah:default"));
         assert!(!is_oxide_smf_service("svc:/not/oxide/blah:default"));
+    }
+
+    #[tokio::test]
+    async fn running_zone_drop_also_drops_opte_ports() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "running_zone_drop_also_drops_opte_ports",
+        );
+        let xde_handle = Handle::new().unwrap();
+        xde_handle.set_xde_underlay("net0", "net1").unwrap();
+        let vnic_source = Etherstub("teststub".to_string());
+        let vnic_alloc = VnicAllocator::new(
+            "testvnic",
+            vnic_source,
+            crate::fakes::dladm::Dladm::new(),
+        );
+        let tempdir = Utf8TempDir::with_prefix("running-zone-drops-opte-ports")
+            .expect("created a temporary dir");
+
+        let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
+        let key = (
+            Uuid::new_v4(),
+            NetworkInterfaceKind::Instance { id: Uuid::new_v4() },
+        );
+        let port = manager
+            .create_port(PortCreateParams {
+                nic: &NetworkInterface {
+                    id: key.0,
+                    kind: key.1,
+                    name: "net0".parse().unwrap(),
+                    ip_config: PrivateIpConfig::V4(
+                        PrivateIpv4Config::new(
+                            Ipv4Addr::new(10, 0, 0, 10),
+                            Ipv4Net::new(Ipv4Addr::new(10, 0, 0, 0), 24)
+                                .unwrap(),
+                        )
+                        .unwrap(),
+                    ),
+                    mac: MacAddr("a8:40:25:01:01:77".parse().unwrap()),
+                    vni: Vni::try_from(777).unwrap(),
+                    primary: true,
+                    slot: 0,
+                },
+                external_ips: &ExternalIpConfig { v4: None, v6: None },
+                firewall_rules: &[],
+                dhcp_config: DhcpCfg {
+                    hostname: None,
+                    host_domain: None,
+                    domain_search_list: vec![],
+                    dns4_servers: vec![],
+                    dns6_servers: vec![],
+                },
+                attached_subnets: vec![],
+                mtu: None,
+            })
+            .expect("Failed to create port");
+        let port_name = port.name().to_string();
+
+        // Build a zone with these OPTE ports.
+        let (zones, mut halt_ctl) = Zones::new_with_halt_control();
+        let factory =
+            ZoneBuilderFactory::fake(Some(tempdir.path().as_str()), zones);
+        let zone_type = "tester";
+        let zone_uuid = OmicronZoneUuid::new_v4();
+        let expected_zone_name = format!("oxz_{zone_type}_{zone_uuid}");
+        let installed_zone = factory
+            .builder()
+            .with_zone_type(zone_type)
+            .with_unique_name(zone_uuid)
+            .with_zone_root_path("/test-root".into())
+            .with_underlay_vnic_allocator(&vnic_alloc)
+            .with_log(logctx.log.clone())
+            .with_opte_ports(vec![port])
+            .with_links(vec![])
+            .install()
+            .await
+            .expect("Should have installed zone");
+        let zone = RunningZone::boot(installed_zone).await.unwrap();
+
+        // Drop the zone, which will eventually call its instrumented halt
+        // method.
+        drop(zone);
+
+        // Check that it's this zone which started halting.
+        let zname = timeout(Duration::from_secs(30), halt_ctl.halt_started())
+            .await
+            .expect("timed out waiting for zone to halt")
+            .expect("should have gotten a zone name");
+        assert_eq!(zname, expected_zone_name);
+
+        // The port should still appear in the full list at the "driver", as we
+        // haven't completed the zone halt and thus deleted the actual XDE
+        // devices.
+        assert!(
+            manager.contains_key(&key),
+            "PortManager should still have the OPTE port data, as we \
+            haven't halted the zone yet",
+        );
+        assert!(
+            xde_handle.state().lock().unwrap().ports.contains_key(&port_name),
+            "OPTE kernel driver should still have the actual OPTE ports, \
+            as we haven't halted the zone yet",
+        );
+
+        // Release the zone to finish halting.
+        halt_ctl.release();
+
+        // Now it should really be gone from the handle.
+        wait_for_condition(
+            || async {
+                let exists = xde_handle
+                    .state()
+                    .lock()
+                    .unwrap()
+                    .ports
+                    .contains_key(&port_name);
+                if exists {
+                    Err(CondCheckError::<()>::NotYet { status: None })
+                } else {
+                    Ok(())
+                }
+            },
+            &Duration::from_millis(100),
+            &Duration::from_secs(10),
+        )
+        .await
+        .expect("should have removed the port from the driver");
+
+        // At this point, the ports should be gone, which means they should have
+        // also been removed from the manager's map.
+        assert!(
+            !manager.contains_key(&key),
+            "Dropping the zone should have dropped the port, \
+            which removes the port from the manager's map."
+        );
+
+        // And from the driver state.
+        assert!(
+            !xde_handle.state().lock().unwrap().ports.contains_key(&port_name),
+            "OPTE kernel driver should not have the actual OPTE ports, \
+            as we've completely halted the zone",
+        );
+
+        logctx.cleanup_successful();
     }
 }

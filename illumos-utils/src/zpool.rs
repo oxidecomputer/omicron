@@ -4,9 +4,14 @@
 
 //! Utilities for managing Zpools.
 
-use crate::{ExecutionError, PFEXEC, execute};
-use camino::{Utf8Path, Utf8PathBuf};
+use crate::{ExecutionError, PFEXEC, execute_async};
+use camino::Utf8Path;
+use sled_agent_types::inventory::ZpoolHealth;
+use sled_agent_types::inventory::ZpoolHealthParseError;
+use slog_error_chain::SlogInlineError;
+use std::num::ParseIntError;
 use std::str::FromStr;
+use tokio::process::Command;
 
 pub use omicron_common::zpool_name::ZpoolName;
 
@@ -15,82 +20,58 @@ const ZPOOL: &str = "/usr/sbin/zpool";
 pub const ZPOOL_MOUNTPOINT_ROOT: &str = "/";
 
 #[derive(thiserror::Error, Debug, PartialEq, Eq)]
-#[error("Failed to parse output: {0}")]
-pub struct ParseError(String);
+pub enum ZpoolInfoParseError {
+    #[error(transparent)]
+    ZpoolHealth(#[from] ZpoolHealthParseError),
+    #[error("zpool list output: missing field `{0}`")]
+    MissingField(&'static str),
+    #[error("zpool list output: failed to parse field `{field}`")]
+    IntegerField {
+        field: &'static str,
+        #[source]
+        err: ParseIntError,
+    },
+}
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, SlogInlineError)]
 pub enum Error {
-    #[error("Zpool execution error: {0}")]
+    #[error("Zpool execution error")]
     Execution(#[from] crate::ExecutionError),
 
     #[error(transparent)]
-    Parse(#[from] ParseError),
+    Parse(#[from] ZpoolInfoParseError),
 
     #[error("No Zpools found")]
     NoZpools,
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to create zpool: {err}")]
+#[error("Failed to create zpool")]
 pub struct CreateError {
     #[from]
     err: Error,
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to destroy zpool: {err}")]
+#[error("Failed to destroy zpool")]
 pub struct DestroyError {
     #[from]
     err: Error,
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to list zpools: {err}")]
+#[error("Failed to list zpools")]
 pub struct ListError {
     #[from]
     err: Error,
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to get info for zpool '{name}': {err}")]
+#[error("Failed to get info for zpool '{name}'")]
 pub struct GetInfoError {
     name: String,
     #[source]
     err: Error,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ZpoolHealth {
-    /// The device is online and functioning.
-    Online,
-    /// One or more components are degraded or faulted, but sufficient
-    /// replicas exist to continue functioning.
-    Degraded,
-    /// One or more components are degraded or faulted, and insufficient
-    /// replicas exist to continue functioning.
-    Faulted,
-    /// The device was explicitly taken offline by "zpool offline".
-    Offline,
-    /// The device was physically removed.
-    Removed,
-    /// The device could not be opened.
-    Unavailable,
-}
-
-impl FromStr for ZpoolHealth {
-    type Err = ParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "ONLINE" => Ok(ZpoolHealth::Online),
-            "DEGRADED" => Ok(ZpoolHealth::Degraded),
-            "FAULTED" => Ok(ZpoolHealth::Faulted),
-            "OFFLINE" => Ok(ZpoolHealth::Offline),
-            "REMOVED" => Ok(ZpoolHealth::Removed),
-            "UNAVAIL" => Ok(ZpoolHealth::Unavailable),
-            _ => Err(ParseError(format!("Unrecognized zpool 'health': {}", s))),
-        }
-    }
 }
 
 /// Describes a Zpool.
@@ -140,16 +121,13 @@ impl ZpoolInfo {
 }
 
 impl FromStr for ZpoolInfo {
-    type Err = ParseError;
+    type Err = ZpoolInfoParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // Lambda helpers for error handling.
-        let expected_field = |name| {
-            ParseError(format!("Missing '{}' value in zpool list output", name))
-        };
-        let failed_to_parse = |name, err| {
-            ParseError(format!("Failed to parse field '{}': {}", name, err))
-        };
+        let expected_field = |name| ZpoolInfoParseError::MissingField(name);
+        let failed_to_parse =
+            |field, err| ZpoolInfoParseError::IntegerField { field, err };
 
         let mut values = s.trim().split_whitespace();
         let name =
@@ -178,54 +156,36 @@ impl FromStr for ZpoolInfo {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum ZpoolOrRamdisk {
-    Zpool(ZpoolName),
-    Ramdisk,
-}
-
-/// A path which exists within a pool.
-///
-/// By storing these types together, it's possible to answer
-/// whether or not a path exists on a particular device.
-// Technically we could re-derive the pool name from the path,
-// but that involves some string parsing, and honestly I'd just
-// Rather Not.
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct PathInPool {
-    pub pool: ZpoolOrRamdisk,
-    pub path: Utf8PathBuf,
-}
-
 /// Wraps commands for interacting with ZFS pools.
 pub struct Zpool(());
 
 /// Describes the API for interfacing with zpools
 ///
 /// This is a trait so that it can be faked out for tests.
+#[async_trait::async_trait]
 pub trait Api: Send + Sync {
-    fn create(
+    async fn create(
         &self,
         name: &ZpoolName,
         vdev: &Utf8Path,
     ) -> Result<(), CreateError> {
-        let mut cmd = std::process::Command::new(PFEXEC);
+        let mut cmd = Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
         cmd.arg(ZPOOL).args(["create", "-o", "ashift=12"]);
         cmd.arg(&name.to_string());
         cmd.arg(vdev);
-        execute(&mut cmd).map_err(Error::from)?;
+        execute_async(&mut cmd).await.map_err(Error::from)?;
 
         // Ensure that this zpool has the encryption feature enabled
-        let mut cmd = std::process::Command::new(PFEXEC);
+        let mut cmd = Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
         cmd.arg(ZPOOL)
             .arg("set")
             .arg("feature@encryption=enabled")
             .arg(&name.to_string());
-        execute(&mut cmd).map_err(Error::from)?;
+        execute_async(&mut cmd).await.map_err(Error::from)?;
 
         Ok(())
     }
@@ -238,23 +198,23 @@ impl Zpool {
         Self(())
     }
 
-    pub fn destroy(name: &ZpoolName) -> Result<(), DestroyError> {
-        let mut cmd = std::process::Command::new(PFEXEC);
+    pub async fn destroy(name: &ZpoolName) -> Result<(), DestroyError> {
+        let mut cmd = Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
         cmd.arg(ZPOOL).arg("destroy");
         cmd.arg(&name.to_string());
-        execute(&mut cmd).map_err(Error::from)?;
+        execute_async(&mut cmd).await.map_err(Error::from)?;
         Ok(())
     }
 
-    pub fn import(name: &ZpoolName) -> Result<(), Error> {
-        let mut cmd = std::process::Command::new(PFEXEC);
+    pub async fn import(name: &ZpoolName) -> Result<(), Error> {
+        let mut cmd = Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
         cmd.arg(ZPOOL).arg("import").arg("-f");
         cmd.arg(&name.to_string());
-        match execute(&mut cmd) {
+        match execute_async(&mut cmd).await {
             Ok(_) => Ok(()),
             Err(ExecutionError::CommandFailure(err_info)) => {
                 // I'd really prefer to match on a specific error code, but the
@@ -272,34 +232,34 @@ impl Zpool {
         }
     }
 
-    pub fn export(name: &ZpoolName) -> Result<(), Error> {
-        let mut cmd = std::process::Command::new(PFEXEC);
+    pub async fn export(name: &ZpoolName) -> Result<(), Error> {
+        let mut cmd = Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
         cmd.arg(ZPOOL).arg("export").arg(&name.to_string());
-        execute(&mut cmd)?;
+        execute_async(&mut cmd).await?;
 
         Ok(())
     }
 
     /// `zpool set failmode=continue <name>`
-    pub fn set_failmode_continue(name: &ZpoolName) -> Result<(), Error> {
-        let mut cmd = std::process::Command::new(PFEXEC);
+    pub async fn set_failmode_continue(name: &ZpoolName) -> Result<(), Error> {
+        let mut cmd = Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
         cmd.arg(ZPOOL)
             .arg("set")
             .arg("failmode=continue")
             .arg(&name.to_string());
-        execute(&mut cmd)?;
+        execute_async(&mut cmd).await?;
         Ok(())
     }
 
-    pub fn list() -> Result<Vec<ZpoolName>, ListError> {
-        let mut command = std::process::Command::new(ZPOOL);
+    pub async fn list() -> Result<Vec<ZpoolName>, ListError> {
+        let mut command = Command::new(ZPOOL);
         let cmd = command.args(&["list", "-Hpo", "name"]);
 
-        let output = execute(cmd).map_err(Error::from)?;
+        let output = execute_async(cmd).await.map_err(Error::from)?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let zpool = stdout
             .lines()
@@ -308,9 +268,24 @@ impl Zpool {
         Ok(zpool)
     }
 
+    pub async fn list_with_info() -> Result<Vec<ZpoolInfo>, ListError> {
+        let mut command = Command::new(ZPOOL);
+        let cmd =
+            command.args(&["list", "-Hpo", "name,size,allocated,free,health"]);
+
+        let output = execute_async(cmd).await.map_err(Error::from)?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        let zpools = stdout
+            .lines()
+            .filter_map(|line| line.parse::<ZpoolInfo>().ok())
+            .collect();
+        Ok(zpools)
+    }
+
     #[cfg_attr(test, allow(dead_code))]
-    pub fn get_info(name: &str) -> Result<ZpoolInfo, GetInfoError> {
-        let mut command = std::process::Command::new(ZPOOL);
+    pub async fn get_info(name: &str) -> Result<ZpoolInfo, GetInfoError> {
+        let mut command = Command::new(ZPOOL);
         let cmd = command.args(&[
             "list",
             "-Hpo",
@@ -318,7 +293,7 @@ impl Zpool {
             name,
         ]);
 
-        let output = execute(cmd).map_err(|err| GetInfoError {
+        let output = execute_async(cmd).await.map_err(|err| GetInfoError {
             name: name.to_string(),
             err: err.into(),
         })?;
@@ -365,11 +340,9 @@ mod test {
 
         // Similar to the prior test case, just omit "health".
         let input = format!("{} {} {} {}", name, size, allocated, free);
-        let result: Result<ZpoolInfo, ParseError> = input.parse();
+        let result = input.parse::<ZpoolInfo>();
 
-        let expected_err = ParseError(
-            "Missing 'health' value in zpool list output".to_owned(),
-        );
+        let expected_err = ZpoolInfoParseError::MissingField("health");
         assert_eq!(result.unwrap_err(), expected_err,);
     }
 }

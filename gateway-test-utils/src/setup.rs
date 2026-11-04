@@ -2,10 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
-
 use camino::Utf8Path;
-use dropshot::test_util::ClientTestContext;
+use camino::Utf8PathBuf;
 use dropshot::test_util::LogContext;
 use gateway_messages::SpPort;
 use omicron_gateway::MgsArguments;
@@ -14,10 +12,11 @@ use omicron_gateway::SwitchPortConfig;
 pub use omicron_gateway::metrics::MetricsConfig;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_uuid_kinds::RackUuid;
 use qorb::resolver::AllBackends;
 use qorb::resolver::Resolver;
 use qorb::resolvers::fixed::FixedResolver;
-use slog::o;
+use slog_error_chain::InlineErrorChain;
 use sp_sim::SimRack;
 use sp_sim::SimulatedSp;
 use std::collections::HashSet;
@@ -32,10 +31,13 @@ use uuid::Uuid;
 // TODO this exact value is copy/pasted from `nexus/test-utils` - should we
 // import it or have our own?
 const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
+pub const DEFAULT_SP_SIM_CONFIG: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/configs/sp_sim_config.test.toml");
 
 pub struct GatewayTestContext {
-    pub client: ClientTestContext,
+    pub client: gateway_client::Client,
     pub server: omicron_gateway::Server,
+    port: u16,
     pub simrack: SimRack,
     pub logctx: LogContext,
     pub gateway_id: Uuid,
@@ -44,11 +46,8 @@ pub struct GatewayTestContext {
 }
 
 impl GatewayTestContext {
-    pub fn client(&self) -> gateway_client::Client {
-        gateway_client::Client::new(
-            &self.client.url("/").to_string(),
-            self.logctx.log.new(slog::o!("component" => "MgsClient")),
-        )
+    pub fn address(&self) -> SocketAddrV6 {
+        SocketAddrV6::new(Ipv6Addr::LOCALHOST, self.port, 0, 0)
     }
 
     pub fn mgs_backends(&self) -> watch::Receiver<AllBackends> {
@@ -62,24 +61,28 @@ impl GatewayTestContext {
     }
 }
 
-pub fn load_test_config() -> (omicron_gateway::Config, sp_sim::Config) {
+pub fn load_test_config(
+    sp_sim_config_file: Utf8PathBuf,
+) -> (omicron_gateway::Config, sp_sim::Config) {
     // The test configs are located relative to the directory this file is in.
     // TODO: embed these with include_str! instead?
     let manifest_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"));
-    let server_config_file_path = manifest_dir.join("configs/config.test.toml");
-    let server_config =
-        match omicron_gateway::Config::from_file(&server_config_file_path) {
-            Ok(config) => config,
-            Err(e) => panic!("failed to load MGS config: {e}"),
-        };
+    let config_path = manifest_dir.join("configs/config.test.toml");
+    let server_config = omicron_gateway::Config::from_file(&config_path)
+        .unwrap_or_else(|e| {
+            panic!(
+                "failed to load MGS config from {config_path}: {}",
+                InlineErrorChain::new(&e)
+            )
+        });
 
-    let sp_sim_config_file_path =
-        manifest_dir.join("configs/sp_sim_config.test.toml");
-    let sp_sim_config =
-        match sp_sim::Config::from_file(&sp_sim_config_file_path) {
-            Ok(config) => config,
-            Err(e) => panic!("failed to load SP simulator config: {e}"),
-        };
+    let sp_sim_config = match sp_sim::Config::from_file(sp_sim_config_file) {
+        Ok(config) => config,
+        Err(e) => panic!(
+            "failed to load SP simulator config: {}",
+            InlineErrorChain::new(&e)
+        ),
+    };
     (server_config, sp_sim_config)
 }
 
@@ -87,7 +90,52 @@ pub async fn test_setup(
     test_name: &str,
     sp_port: SpPort,
 ) -> GatewayTestContext {
-    let (server_config, sp_sim_config) = load_test_config();
+    let (server_config, sp_sim_config) =
+        load_test_config(DEFAULT_SP_SIM_CONFIG.into());
+    test_setup_with_config(
+        test_name,
+        sp_port,
+        server_config,
+        &sp_sim_config,
+        None,
+    )
+    .await
+}
+
+pub async fn test_setup_metrics_disabled(
+    test_name: &str,
+    sp_port: SpPort,
+) -> GatewayTestContext {
+    let (mut server_config, sp_sim_config) =
+        load_test_config(DEFAULT_SP_SIM_CONFIG.into());
+    match server_config.metrics.as_mut() {
+        Some(cfg) => {
+            cfg.disabled = true;
+        }
+        None => {
+            server_config.metrics =
+                Some(MetricsConfig { disabled: true, ..Default::default() });
+        }
+    }
+    test_setup_with_config(
+        test_name,
+        sp_port,
+        server_config,
+        &sp_sim_config,
+        None,
+    )
+    .await
+}
+
+pub async fn test_setup_local_reset_disabled(
+    test_name: &str,
+    sp_port: SpPort,
+) -> GatewayTestContext {
+    let (mut server_config, sp_sim_config) =
+        load_test_config(DEFAULT_SP_SIM_CONFIG.into());
+    for description in server_config.switch.location.description.iter_mut() {
+        description.allow_local_sp_reset = false;
+    }
     test_setup_with_config(
         test_name,
         sp_port,
@@ -103,7 +151,11 @@ fn expected_location(
     sp_port: SpPort,
 ) -> String {
     let config = &config.switch.location;
-    let mut locations = config.names.iter().cloned().collect::<HashSet<_>>();
+    let mut locations = config
+        .description
+        .iter()
+        .map(|d| d.name.as_str())
+        .collect::<HashSet<_>>();
 
     for determination in &config.determination {
         let refined = match sp_port {
@@ -111,11 +163,11 @@ fn expected_location(
             SpPort::Two => &determination.sp_port_2,
         };
 
-        locations.retain(|name| refined.contains(name));
+        locations.retain(|name| refined.iter().any(|s| s == name));
     }
 
     assert_eq!(locations.len(), 1);
-    locations.into_iter().next().unwrap()
+    locations.into_iter().next().unwrap().to_string()
 }
 
 pub async fn test_setup_with_config(
@@ -149,16 +201,25 @@ pub async fn test_setup_with_config(
         // assume that matches whether we end up as `switch0` or `switch1`
         let target_sp =
             port_description.location.get(&expected_location).unwrap();
-        let sp_addr = match target_sp.typ {
+        let (sp_addr, sp_ereport_addr) = match target_sp.typ {
             SpType::Switch => {
-                simrack.sidecars[target_sp.slot].local_addr(sp_port)
+                let switch = &simrack.sidecars[usize::from(target_sp.slot)];
+                (switch.local_addr(sp_port), switch.local_ereport_addr(sp_port))
             }
-            SpType::Sled => simrack.gimlets[target_sp.slot].local_addr(sp_port),
-            SpType::Power => todo!(),
+            SpType::Sled => {
+                let sled = &simrack.gimlets[usize::from(target_sp.slot)];
+                (sled.local_addr(sp_port), sled.local_ereport_addr(sp_port))
+            }
+            SpType::Power => {
+                let psc = &simrack.pscs[usize::from(target_sp.slot)];
+                (psc.local_addr(sp_port), psc.local_ereport_addr(sp_port))
+            }
         };
         match &mut port_description.config {
-            SwitchPortConfig::Simulated { addr, .. } => {
+            SwitchPortConfig::Simulated { addr, ereport_addr, .. } => {
                 *addr = sp_addr.unwrap();
+                *ereport_addr =
+                    sp_ereport_addr.expect("no ereport addr configured");
             }
             SwitchPortConfig::SwitchZoneInterface { .. } => {
                 panic!("test config using `switch-zone-interface` config")
@@ -167,7 +228,7 @@ pub async fn test_setup_with_config(
     }
 
     // Start gateway server
-    let rack_id = Some(Uuid::parse_str(RACK_UUID).unwrap());
+    let rack_id = Some(RACK_UUID.parse::<RackUuid>().unwrap());
     let gateway_id = Uuid::new_v4();
     let args = MgsArguments { id: gateway_id, addresses, rack_id };
     let server = omicron_gateway::Server::start(
@@ -210,7 +271,7 @@ pub async fn test_setup_with_config(
                 }) {
                 Ok(())
             } else {
-                Err(CondCheckError::NotYet)
+                Err(CondCheckError::NotYet { status: None })
             };
             future::ready(result)
         },
@@ -231,9 +292,9 @@ pub async fn test_setup_with_config(
         .dropshot_server_for_address(localhost_port_0)
         .unwrap()
         .local_addr();
-    let client = ClientTestContext::new(
-        server_addr,
-        log.new(o!("component" => "client test context")),
+    let client = gateway_client::Client::new(
+        &format!("http://{server_addr}"),
+        logctx.log.new(slog::o!("component" => "MgsClient")),
     );
 
     let mut resolver = FixedResolver::new(std::iter::once(server_addr));
@@ -242,6 +303,7 @@ pub async fn test_setup_with_config(
     GatewayTestContext {
         client,
         server,
+        port: server_addr.port(),
         simrack,
         logctx,
         gateway_id,

@@ -1,8 +1,11 @@
 #!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-2.0-opte-0.35"
+#: target = "lab-3.0-opte-0.44"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-*.log*",
 #:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log*",
@@ -33,6 +36,10 @@ _exit_trap() {
 	local status=$?
 	set +o errexit
 
+	# Restore the override opteadm from /tmp before debug-evidence
+	# collection runs, in case anything earlier in this trap or any
+	# downstream tooling has overwritten the installed binary. The
+	# /tmp copy is saved by the OPTE_COMMIT install block below.
 	if [[ "x$OPTE_COMMIT" != "x" ]]; then
 		pfexec cp /tmp/opteadm /opt/oxide/opte/bin/opteadm
 	fi
@@ -134,19 +141,6 @@ z_swadm () {
 	pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm $@
 }
 
-# only set this if you want to override the version of opte/xde installed by the
-# install_opte.sh script
-OPTE_COMMIT=""
-if [[ "x$OPTE_COMMIT" != "x" ]]; then
-	curl  -sSfOL https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/module/$OPTE_COMMIT/xde
-	pfexec rem_drv xde || true
-	pfexec mv xde /kernel/drv/amd64/xde
-	pfexec add_drv xde || true
-	curl  -sSfOL https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/release/$OPTE_COMMIT/opteadm
-	chmod +x opteadm
-	cp opteadm /tmp/opteadm
-	pfexec mv opteadm /opt/oxide/opte/bin/opteadm
-fi
 
 #
 # XXX work around 14537 (UFS should not allow directories to be unlinked) which
@@ -197,6 +191,24 @@ ptime -m tar xvzf /input/package/work/package.tar.gz
 # shellcheck source=/dev/null
 source .github/buildomat/ci-env.sh
 
+# Source the OPTE override (if any) from the canonical location and apply it.
+#
+# When set, download the xde driver and opteadm directly from buildomat and
+# swap them in. The deploy target is a ramdisk image without pkg(5), so we
+# use rem_drv/add_drv instead of the p5p approach used by install_opte.sh
+# and releng.
+source tools/opte_version_override
+if [[ "x$OPTE_COMMIT" != "x" ]]; then
+	curl -sSfOL "https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/module/$OPTE_COMMIT/xde"
+	pfexec rem_drv xde || true
+	pfexec mv xde /kernel/drv/amd64/xde
+	pfexec add_drv xde || true
+	curl -sSfOL "https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/release/$OPTE_COMMIT/opteadm"
+	chmod +x opteadm
+	cp opteadm /tmp/opteadm
+	pfexec mv opteadm /opt/oxide/opte/bin/opteadm
+fi
+
 # Ask buildomat for the range of extra addresses that we're allowed to use, and
 # break them up into the ranges we need.
 
@@ -246,7 +258,15 @@ routeadm -e ipv4-forwarding -u
 PXA_START="$EXTRA_IP_START"
 PXA_END="$EXTRA_IP_END"
 
-pfexec zpool create -f scratch c1t1d0 c2t1d0
+# Enumerate the names of NVMe devices on on which one might place a zpool.
+#
+# N.B. that it is fine to do use "every NVMe device on the box" since this
+# script only runs on buildomat workers which do not have any disks used for
+# storing anything persistently, and which are PXE-booted...so we're not gonna
+# clobber anything that anyone might have cared about on sock and buskin, at
+# least.
+DISKS=( $(pfexec nvmeadm list -p -o disk) )
+pfexec zpool create -f scratch "${DISKS[@]}"
 
 ptime -m \
     pfexec ./target/release/xtask virtual-hardware \
@@ -280,11 +300,9 @@ EXTERNAL_DNS_DOMAIN="$(sed -n 's/external_dns_zone_name = "\(.*\)"/\1/p' pkg/con
 sed -i~ "
 	/^external_dns_ips/c\\
 external_dns_ips = [ \"$DNS_IP1\", \"$DNS_IP2\" ]
-	/^\\[\\[internal_services_ip_pool_ranges/,/^\$/ {
-		/^first/c\\
-first = \"$SERVICE_IP_POOL_START\"
-		/^last/c\\
-last = \"$SERVICE_IP_POOL_END\"
+	/^\\[\\[service_ip_pools/,/^\$/ {
+		/^ranges =/c\\
+ranges = \\[ { first = \"$SERVICE_IP_POOL_START\", last = \"$SERVICE_IP_POOL_END\" } \\]
 	}
 	/^infra_ip_first/c\\
 infra_ip_first = \"$UPLINK_IP\"
@@ -294,7 +312,7 @@ infra_ip_last = \"$UPLINK_IP\"
 		/^routes/c\\
 routes = \\[{nexthop = \"$GATEWAY_IP\", destination = \"0.0.0.0/0\"}\\]
 		/^addresses/c\\
-addresses = \\[{address = \"$UPLINK_IP/24\"} \\]
+addresses = \\[{address = {type = \"static\", ip_net = \"$UPLINK_IP/24\"} }\\]
 	}
 " pkg/config-rss.toml
 diff -u pkg/config-rss.toml{~,} || true
@@ -343,7 +361,7 @@ E2E_TLS_CERT="/opt/oxide/sled-agent/pkg/initial-tls-cert.pem"
 #
 pfexec mkdir -p /usr/oxide
 pfexec curl -sSfL -o /usr/oxide/oxide \
-	http://catacomb.eng.oxide.computer:12346/oxide-v0.1.1
+	http://catacomb.eng.oxide.computer:12346/oxide-v2025112000
 pfexec chmod +x /usr/oxide/oxide
 
 curl -sSfL -o debian-11-genericcloud-amd64.raw \
@@ -357,12 +375,13 @@ curl -sSfL -o debian-11-genericcloud-amd64.raw \
 OMICRON_NO_UNINSTALL=1 \
     ptime -m pfexec ./target/release/omicron-package -t test install
 
-# Wait for switch zone to come up
+# Wait for switch zone to come up. This normally takes 24-36 seconds (see
+# #11453), so leave plenty of headroom.
 retry=0
-until curl --head --silent -o /dev/null "http://[fd00:1122:3344:101::2]:12224/"
+until curl --max-time 1 --head --silent --show-error -o /dev/null "http://[fd00:1122:3344:101::2]:12224/"
 do
-	if [[ $retry -gt 30 ]]; then
-		echo "Failed to reach switch zone after 30 seconds"
+	if [[ $retry -gt 300 ]]; then
+		echo "Failed to reach switch zone after 300 attempts"
 		exit 1
 	fi
 	sleep 1
@@ -414,6 +433,22 @@ until grep "Handoff to Nexus is complete" /var/svc/log/oxide-sled-agent:default.
 done
 echo "Waited for handoff: ${retry}s"
 
+# Wait for at least one collection. We check for "greater than 1" line of output
+# because we always get the table header; 2 or more lines indicate 1 or more
+# collections.
+retry=0
+INVENTORY_COLLECTION_COUNT=$(pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db inventory collections list | wc -l)
+until [[ "${INVENTORY_COLLECTION_COUNT}" -gt 1 ]]; do
+	if [[ $retry -gt 300 ]]; then
+		echo "Failed to wait for inventory collection after 300 seconds"
+		exit 1
+	fi
+	sleep 1
+	retry=$((retry + 1))
+	INVENTORY_COLLECTION_COUNT=$(pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db inventory collections list | wc -l)
+done
+echo "Waited for inventory collection: ${retry}s"
+
 # Wait for the number of expected U2 zpools
 retry=0
 ACTUAL_ZPOOL_COUNT=$(pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db zpool list -i | wc -l)
@@ -428,6 +463,13 @@ do
 	retry=$((retry + 1))
 	ACTUAL_ZPOOL_COUNT=$(pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db zpool list -i | wc -l)
 done
+
+# Confirm we can use `omdb` in the switch zone to fetch the `omdb` that's
+# shipped in the Nexus zone, and that we can use that fetched `omdb`
+# successfully.
+pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb nexus fetch-omdb /tmp/fetched-omdb
+pfexec zlogin oxz_switch /tmp/fetched-omdb db inventory collections list
+echo "Confirmed switch zone omdb can fetch a usable omdb from Nexus"
 
 # The bootstrap command creates a disk, so before that: adjust the control plane
 # storage buffer to 0 as the virtual hardware only creates 20G pools

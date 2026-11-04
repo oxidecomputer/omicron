@@ -4,8 +4,6 @@
 
 //! An AST node apply limiting timeseries operations.
 
-// Copyright 2024 Oxide Computer Company
-
 use anyhow::Error;
 use oxql_types::Table;
 use std::{fmt, num::NonZeroUsize};

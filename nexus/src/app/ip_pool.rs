@@ -4,17 +4,29 @@
 
 //! IP Pools, collections of external IP addresses for guest instances
 
-use crate::external_api::params;
-use crate::external_api::shared::IpRange;
 use ipnetwork::IpNetwork;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
+use nexus_db_model::IpPool;
+use nexus_db_model::IpPoolAssignment;
+use nexus_db_model::IpPoolType;
+use nexus_db_model::IpPoolUpdate;
+use nexus_db_model::IpVersion;
 use nexus_db_queries::authz;
 use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::model::Name;
+use nexus_types::external_api::ip_pool;
 use nexus_types::identity::Resource;
+use omicron_common::address::{
+    IPV4_LINK_LOCAL_MULTICAST_SUBNET, IPV4_SSM_SUBNET,
+    IPV6_INTERFACE_LOCAL_MULTICAST_LAST, IPV6_INTERFACE_LOCAL_MULTICAST_SUBNET,
+    IPV6_LINK_LOCAL_MULTICAST_LAST, IPV6_LINK_LOCAL_MULTICAST_SUBNET,
+    IPV6_RESERVED_SCOPE_MULTICAST_LAST, IPV6_RESERVED_SCOPE_MULTICAST_SUBNET,
+    IPV6_SSM_SUBNET, Ipv4Range, Ipv6Range, UNDERLAY_MULTICAST_SUBNET,
+    UNDERLAY_MULTICAST_SUBNET_LAST,
+};
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -23,27 +35,132 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
-use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_uuid_kinds::GenericUuid;
 use ref_cast::RefCast;
 use std::matches;
+use std::num::NonZeroU32;
 use uuid::Uuid;
 
-/// Helper to make it easier to 404 on attempts to manipulate internal pools
-fn not_found_from_lookup(pool_lookup: &lookup::IpPool<'_>) -> Error {
-    match pool_lookup {
-        lookup::IpPool::Name(_, name) => {
-            Error::not_found_by_name(ResourceType::IpPool, &name)
+/// Validate multicast-specific constraints for IP ranges.
+///
+/// Rejects reserved or special-use addresses that Dendrite would reject:
+///
+/// - IPv4: link-local (224.0.0.0/24), ASM/SSM boundary spanning
+/// - IPv6: reserved-scope (ff00::/16), interface-local (ff01::/16),
+///   link-local (ff02::/16), underlay (ff04::/64), ASM/SSM boundary spanning
+///
+/// The underlay prefix (ff04::/64) is reserved for internal external→underlay
+/// mapping via `UNDERLAY_MULTICAST_SUBNET`. This prefix is static for
+/// consistency across racks. External pools may use other admin-local
+/// prefixes (e.g., `ff04:0:0:1::/64`) or other scopes (e.g., `ff05::/16`).
+///
+/// Validates early so operators get immediate feedback rather than errors
+/// when allocating addresses later.
+fn validate_multicast_range(range: &ip_pool::IpRange) -> Result<(), Error> {
+    // These restrictions match the validation performed by Dendrite DPD
+    // management (see dendrite/dpd/src/mcast/validate.rs).
+    match range {
+        ip_pool::IpRange::V4(v4_range) => {
+            let first = v4_range.first_address();
+            let last = v4_range.last_address();
+
+            // Reject IPv4 ranges that intersect reserved subnets
+            {
+                // link-local (224.0.0.0/24)
+                let reserved = Ipv4Range {
+                    first: IPV4_LINK_LOCAL_MULTICAST_SUBNET.addr(),
+                    last: IPV4_LINK_LOCAL_MULTICAST_SUBNET
+                        .broadcast()
+                        .expect("valid IPv4 subnet"),
+                };
+                if v4_range.overlaps(&reserved) {
+                    return Err(Error::invalid_request(
+                        "Cannot add IPv4 link-local multicast range \
+                         (224.0.0.0/24) to IP pool",
+                    ));
+                }
+            }
+
+            // Validate range doesn't span ASM/SSM boundary
+            let first_is_ssm = IPV4_SSM_SUBNET.contains(first);
+            let last_is_ssm = IPV4_SSM_SUBNET.contains(last);
+
+            if first_is_ssm != last_is_ssm {
+                return Err(Error::invalid_request(
+                    "IP range cannot span ASM and SSM address spaces",
+                ));
+            }
         }
-        lookup::IpPool::OwnedName(_, name) => {
-            Error::not_found_by_name(ResourceType::IpPool, &name)
+        ip_pool::IpRange::V6(v6_range) => {
+            let first = v6_range.first_address();
+            let last = v6_range.last_address();
+
+            // Reject IPv6 ranges that intersect reserved subnets
+            {
+                // reserved-scope (ff00::/16)
+                let reserved = Ipv6Range {
+                    first: IPV6_RESERVED_SCOPE_MULTICAST_SUBNET.addr(),
+                    last: IPV6_RESERVED_SCOPE_MULTICAST_LAST,
+                };
+                if v6_range.overlaps(&reserved) {
+                    return Err(Error::invalid_request(
+                        "Cannot add IPv6 reserved-scope multicast range \
+                         (ff00::/16) to IP pool",
+                    ));
+                }
+
+                // interface-local (ff01::/16)
+                let reserved = Ipv6Range {
+                    first: IPV6_INTERFACE_LOCAL_MULTICAST_SUBNET.addr(),
+                    last: IPV6_INTERFACE_LOCAL_MULTICAST_LAST,
+                };
+                if v6_range.overlaps(&reserved) {
+                    return Err(Error::invalid_request(
+                        "Cannot add IPv6 interface-local multicast range \
+                         (ff01::/16) to IP pool",
+                    ));
+                }
+
+                // link-local (ff02::/16)
+                let reserved = Ipv6Range {
+                    first: IPV6_LINK_LOCAL_MULTICAST_SUBNET.addr(),
+                    last: IPV6_LINK_LOCAL_MULTICAST_LAST,
+                };
+                if v6_range.overlaps(&reserved) {
+                    return Err(Error::invalid_request(
+                        "Cannot add IPv6 link-local multicast range \
+                         (ff02::/16) to IP pool",
+                    ));
+                }
+
+                // underlay multicast (ff04::/64, reserved for internal use)
+                let underlay = Ipv6Range {
+                    first: UNDERLAY_MULTICAST_SUBNET.addr(),
+                    last: UNDERLAY_MULTICAST_SUBNET_LAST,
+                };
+                if v6_range.overlaps(&underlay) {
+                    return Err(Error::invalid_request(
+                        "Cannot add IPv6 underlay multicast range \
+                         (ff04::/64) to IP pool - reserved for internal use",
+                    ));
+                }
+            }
+
+            // Validate range doesn't span ASM/SSM boundary
+            let first_is_ssm = IPV6_SSM_SUBNET.contains(first);
+            let last_is_ssm = IPV6_SSM_SUBNET.contains(last);
+
+            if first_is_ssm != last_is_ssm {
+                return Err(Error::invalid_request(
+                    "IP range cannot span ASM and SSM address spaces",
+                ));
+            }
         }
-        lookup::IpPool::PrimaryKey(_, id) => {
-            Error::not_found_by_id(ResourceType::IpPool, &id)
-        }
-        lookup::IpPool::Error(_, error) => error.to_owned(),
     }
+
+    Ok(())
 }
 
 impl super::Nexus {
@@ -69,16 +186,30 @@ impl super::Nexus {
     pub(crate) async fn ip_pool_create(
         &self,
         opctx: &OpContext,
-        pool_params: &params::IpPoolCreate,
-    ) -> CreateResult<db::model::IpPool> {
-        let pool = db::model::IpPool::new(&pool_params.identity);
+        pool_params: &ip_pool::IpPoolCreate,
+    ) -> CreateResult<IpPool> {
+        let ip_version = pool_params.ip_version.into();
+
+        let assignment = pool_params.assignment.into();
+        let pool = match pool_params.pool_type {
+            ip_pool::IpPoolType::Unicast => {
+                IpPool::new(&pool_params.identity, ip_version, assignment)
+            }
+            ip_pool::IpPoolType::Multicast => IpPool::new_multicast(
+                &pool_params.identity,
+                ip_version,
+                assignment,
+            ),
+        };
+
         self.db_datastore.ip_pool_create(opctx, pool).await
     }
 
-    /// List IP pools in current silo
+    /// List IP pools visible to the current silo, with optional filtering.
     pub(crate) async fn current_silo_ip_pool_list(
         &self,
         opctx: &OpContext,
+        filter: &ip_pool::IpPoolFilter,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<(db::model::IpPool, db::model::IpPoolResource)> {
         let authz_silo =
@@ -89,7 +220,33 @@ impl super::Nexus {
         // silo children
         opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
 
-        self.db_datastore.silo_ip_pool_list(opctx, &authz_silo, pagparams).await
+        self.db_datastore
+            .silo_ip_pool_list(
+                opctx,
+                &authz_silo,
+                filter.ip_version.map(Into::into),
+                filter.pool_type.map(Into::into),
+                pagparams,
+            )
+            .await
+    }
+
+    /// List all operator-visible IP pools, with optional filtering.
+    pub(crate) async fn ip_pools_list_operator(
+        &self,
+        opctx: &OpContext,
+        filter: &ip_pool::SystemIpPoolFilter,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<db::model::IpPool> {
+        self.db_datastore
+            .ip_pools_list_paginated(
+                opctx,
+                filter.assignment.map(Into::into),
+                filter.ip_version.map(Into::into),
+                filter.pool_type.map(Into::into),
+                pagparams,
+            )
+            .await
     }
 
     /// Look up linked pool by name or ID. 404 on pools that exist but aren't
@@ -156,21 +313,19 @@ impl super::Nexus {
         opctx
             .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
             .await?;
-        self.db_datastore.silo_ip_pool_list(opctx, &authz_silo, pagparams).await
+        self.db_datastore
+            .silo_ip_pool_list(opctx, &authz_silo, None, None, pagparams)
+            .await
     }
 
     pub(crate) async fn ip_pool_link_silo(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        silo_link: &params::IpPoolLinkSilo,
+        silo_link: &ip_pool::IpPoolLinkSilo,
     ) -> CreateResult<db::model::IpPoolResource> {
         let (authz_pool,) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
-
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
-            return Err(not_found_from_lookup(pool_lookup));
-        }
 
         let (authz_silo,) = self
             .silo_lookup(&opctx, silo_link.silo.clone())?
@@ -179,10 +334,10 @@ impl super::Nexus {
         self.db_datastore
             .ip_pool_link_silo(
                 opctx,
-                db::model::IpPoolResource {
+                db::model::IncompleteIpPoolResource {
                     ip_pool_id: authz_pool.id(),
                     resource_type: db::model::IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: silo_link.is_default,
                 },
             )
@@ -198,10 +353,6 @@ impl super::Nexus {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
-            return Err(not_found_from_lookup(pool_lookup));
-        }
-
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -215,14 +366,10 @@ impl super::Nexus {
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
         silo_lookup: &lookup::Silo<'_>,
-        update: &params::IpPoolSiloUpdate,
+        update: &ip_pool::IpPoolSiloUpdate,
     ) -> CreateResult<db::model::IpPoolResource> {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
-
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
-            return Err(not_found_from_lookup(pool_lookup));
-        }
 
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Modify).await?;
@@ -237,14 +384,6 @@ impl super::Nexus {
             .await
     }
 
-    pub(crate) async fn ip_pools_list(
-        &self,
-        opctx: &OpContext,
-        pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<db::model::IpPool> {
-        self.db_datastore.ip_pools_list(opctx, pagparams).await
-    }
-
     pub(crate) async fn ip_pool_delete(
         &self,
         opctx: &OpContext,
@@ -253,10 +392,6 @@ impl super::Nexus {
         let (.., authz_pool, db_pool) =
             pool_lookup.fetch_for(authz::Action::Delete).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
-            return Err(not_found_from_lookup(pool_lookup));
-        }
-
         self.db_datastore.ip_pool_delete(opctx, &authz_pool, &db_pool).await
     }
 
@@ -264,18 +399,14 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        updates: &params::IpPoolUpdate,
+        updates: &ip_pool::IpPoolUpdate,
     ) -> UpdateResult<db::model::IpPool> {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
-            return Err(not_found_from_lookup(pool_lookup));
-        }
+        let updates_db = IpPoolUpdate::from(updates.clone());
 
-        self.db_datastore
-            .ip_pool_update(opctx, &authz_pool, updates.clone().into())
-            .await
+        self.db_datastore.ip_pool_update(opctx, &authz_pool, updates_db).await
     }
 
     pub(crate) async fn ip_pool_list_ranges(
@@ -287,10 +418,6 @@ impl super::Nexus {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::ListChildren).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
-            return Err(not_found_from_lookup(pool_lookup));
-        }
-
         self.db_datastore
             .ip_pool_list_ranges(opctx, &authz_pool, pagparams)
             .await
@@ -300,59 +427,158 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        range: &IpRange,
+        range: &ip_pool::IpRange,
     ) -> UpdateResult<db::model::IpPoolRange> {
-        let (.., authz_pool, _db_pool) =
+        let (.., authz_pool, db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
-            return Err(not_found_from_lookup(pool_lookup));
+        // Validate uniformity and pool type constraints.
+        // Extract first/last addresses once and reuse for all validation checks.
+        match range {
+            ip_pool::IpRange::V4(v4_range) => {
+                let first = v4_range.first_address();
+                let last = v4_range.last_address();
+                let first_is_multicast = first.is_multicast();
+                let last_is_multicast = last.is_multicast();
+
+                // Ensure range doesn't span multicast/unicast boundary
+                if first_is_multicast != last_is_multicast {
+                    return Err(Error::invalid_request(
+                        "IP range cannot span multicast and unicast address spaces",
+                    ));
+                }
+
+                // Validate pool type matches range type
+                match db_pool.pool_type {
+                    IpPoolType::Multicast => {
+                        if !first_is_multicast {
+                            return Err(Error::invalid_request(
+                                "Cannot add unicast address range to multicast IP pool",
+                            ));
+                        }
+                        validate_multicast_range(range)?;
+                    }
+                    IpPoolType::Unicast => {
+                        if first_is_multicast {
+                            return Err(Error::invalid_request(
+                                "Cannot add multicast address range to unicast IP pool",
+                            ));
+                        }
+                    }
+                }
+            }
+            ip_pool::IpRange::V6(v6_range) => {
+                let first = v6_range.first_address();
+                let last = v6_range.last_address();
+                let first_is_multicast = first.is_multicast();
+                let last_is_multicast = last.is_multicast();
+
+                // Ensure range doesn't span multicast/unicast boundary
+                if first_is_multicast != last_is_multicast {
+                    return Err(Error::invalid_request(
+                        "IP range cannot span multicast and unicast address spaces",
+                    ));
+                }
+
+                // Validate pool type matches range type
+                match db_pool.pool_type {
+                    IpPoolType::Multicast => {
+                        if !first_is_multicast {
+                            return Err(Error::invalid_request(
+                                "Cannot add unicast address range to multicast IP pool",
+                            ));
+                        }
+                        validate_multicast_range(range)?;
+                    }
+                    IpPoolType::Unicast => {
+                        if first_is_multicast {
+                            return Err(Error::invalid_request(
+                                "Cannot add multicast address range to unicast IP pool",
+                            ));
+                        }
+                    }
+                }
+            }
         }
 
-        // Disallow V6 ranges until IPv6 is fully supported by the networking
-        // subsystem. Instead of changing the API to reflect that (making this
-        // endpoint inconsistent with the rest) and changing it back when we
-        // add support, we accept them at the API layer and error here. It
-        // would be nice if we could do it in the datastore layer, but we'd
-        // have no way of creating IPv6 ranges for the purpose of testing IP
-        // pool utilization.
-        if matches!(range, IpRange::V6(_)) {
-            return Err(Error::invalid_request(
-                "IPv6 ranges are not allowed yet",
-            ));
-        }
+        self.db_datastore
+            .ip_pool_add_range(opctx, &authz_pool, &db_pool, range)
+            .await
+    }
 
-        self.db_datastore.ip_pool_add_range(opctx, &authz_pool, range).await
+    pub(crate) async fn ip_pool_assign(
+        &self,
+        opctx: &OpContext,
+        pool_lookup: &lookup::IpPool<'_>,
+        assignment: ip_pool::IpPoolAssignment,
+    ) -> UpdateResult<db::model::IpPool> {
+        let (.., authz_pool, db_pool) =
+            pool_lookup.fetch_for(authz::Action::Modify).await?;
+        let db_assignment = IpPoolAssignment::from(assignment);
+        self.db_datastore
+            .ip_pool_assign(opctx, &authz_pool, &db_pool, db_assignment)
+            .await
     }
 
     pub(crate) async fn ip_pool_delete_range(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        range: &IpRange,
+        range: &ip_pool::IpRange,
     ) -> DeleteResult {
         let (.., authz_pool, _db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
-            return Err(not_found_from_lookup(pool_lookup));
-        }
-
         self.db_datastore.ip_pool_delete_range(opctx, &authz_pool, range).await
     }
 
-    // The "ip_pool_service_..." functions look up IP pools for Oxide service usage,
-    // rather than for VMs.
+    // TODO-cleanup:
     //
-    // TODO(https://github.com/oxidecomputer/omicron/issues/1276): Should be
-    // accessed via AZ UUID, probably.
+    // Remove the service-specific methods when the HTTP endpoints they back
+    // are also removed.
+
+    // Resolve the single system-service IP pool of the given version backing
+    // the deprecated `ip-pools-service` endpoints. These endpoints predate
+    // support for more than one service pool per IP version and can't express
+    // which they mean. So at this point, we require exactly one, and return an
+    // error if that's not the case. This can only really happen if the client
+    // is using mixed API versions: a new one to create a second pool, and the
+    // old one to manipulate them. That should be really unlikely, but also
+    // point the user to the new API version if they do happen to land here.
+    async fn ip_pool_service_single(
+        &self,
+        opctx: &OpContext,
+        version: IpVersion,
+    ) -> LookupResult<(authz::IpPool, db::model::IpPool)> {
+        // Fetch up to two, so we can distinguish none / one / more-than-one.
+        let mut pools = self
+            .db_datastore
+            .ip_pools_service_lookup_by_version(
+                opctx,
+                version,
+                NonZeroU32::new(2).unwrap(),
+            )
+            .await?;
+        if pools.len() > 1 {
+            return Err(Error::invalid_request(
+                "more than one system-service IP pool of the requested IP \
+                 version exists; update the client to manage these pools",
+            ));
+        }
+        let pool = pools.pop().ok_or_else(|| {
+            Error::non_resourcetype_not_found(
+                "no system-service IP pool of the requested IP version",
+            )
+        })?;
+        Ok((pool.authz_pool, pool.db_pool))
+    }
 
     pub(crate) async fn ip_pool_service_fetch(
         &self,
         opctx: &OpContext,
     ) -> LookupResult<db::model::IpPool> {
         let (authz_pool, db_pool) =
-            self.db_datastore.ip_pools_service_lookup(opctx).await?;
+            self.ip_pool_service_single(opctx, IpVersion::V4).await?;
         opctx.authorize(authz::Action::Read, &authz_pool).await?;
         Ok(db_pool)
     }
@@ -363,7 +589,7 @@ impl super::Nexus {
         pagparams: &DataPageParams<'_, IpNetwork>,
     ) -> ListResultVec<db::model::IpPoolRange> {
         let (authz_pool, ..) =
-            self.db_datastore.ip_pools_service_lookup(opctx).await?;
+            self.ip_pool_service_single(opctx, IpVersion::V4).await?;
         opctx.authorize(authz::Action::Read, &authz_pool).await?;
         self.db_datastore
             .ip_pool_list_ranges(opctx, &authz_pool, pagparams)
@@ -373,34 +599,327 @@ impl super::Nexus {
     pub(crate) async fn ip_pool_service_add_range(
         &self,
         opctx: &OpContext,
-        range: &IpRange,
+        range: &ip_pool::IpRange,
     ) -> UpdateResult<db::model::IpPoolRange> {
-        let (authz_pool, ..) =
-            self.db_datastore.ip_pools_service_lookup(opctx).await?;
+        let (authz_pool, db_pool) =
+            self.ip_pool_service_single(opctx, range.version().into()).await?;
         opctx.authorize(authz::Action::Modify, &authz_pool).await?;
-        // Disallow V6 ranges until IPv6 is fully supported by the networking
-        // subsystem. Instead of changing the API to reflect that (making this
-        // endpoint inconsistent with the rest) and changing it back when we
-        // add support, we accept them at the API layer and error here. It
-        // would be nice if we could do it in the datastore layer, but we'd
-        // have no way of creating IPv6 ranges for the purpose of testing IP
-        // pool utilization.
-        if matches!(range, IpRange::V6(_)) {
+
+        // IPv6 ranges are supported, but only through the current
+        // `/v1/system/ip-pools` endpoints. This deprecated service-pool
+        // endpoint is still IPv4-only, so we reject V6 ranges.
+        if matches!(range, ip_pool::IpRange::V6(_)) {
             return Err(Error::invalid_request(
                 "IPv6 ranges are not allowed yet",
             ));
         }
-        self.db_datastore.ip_pool_add_range(opctx, &authz_pool, range).await
+
+        // Validate uniformity and pool type constraints.
+        // Extract first/last addresses once and reuse for all validation checks.
+        match range {
+            ip_pool::IpRange::V4(v4_range) => {
+                let first = v4_range.first_address();
+                let last = v4_range.last_address();
+                let first_is_multicast = first.is_multicast();
+                let last_is_multicast = last.is_multicast();
+
+                // Ensure range doesn't span multicast/unicast boundary
+                if first_is_multicast != last_is_multicast {
+                    return Err(Error::invalid_request(
+                        "IP range cannot span multicast and unicast address spaces",
+                    ));
+                }
+
+                // Validate pool type matches range type
+                match db_pool.pool_type {
+                    IpPoolType::Multicast => {
+                        if !first_is_multicast {
+                            return Err(Error::invalid_request(
+                                "Cannot add unicast address range to multicast IP pool",
+                            ));
+                        }
+                        validate_multicast_range(range)?;
+                    }
+                    IpPoolType::Unicast => {
+                        if first_is_multicast {
+                            return Err(Error::invalid_request(
+                                "Cannot add multicast address range to unicast IP pool",
+                            ));
+                        }
+                    }
+                }
+            }
+            ip_pool::IpRange::V6(v6_range) => {
+                let first = v6_range.first_address();
+                let last = v6_range.last_address();
+                let first_is_multicast = first.is_multicast();
+                let last_is_multicast = last.is_multicast();
+
+                // Ensure range doesn't span multicast/unicast boundary
+                if first_is_multicast != last_is_multicast {
+                    return Err(Error::invalid_request(
+                        "IP range cannot span multicast and unicast address spaces",
+                    ));
+                }
+
+                // Validate pool type matches range type
+                match db_pool.pool_type {
+                    IpPoolType::Multicast => {
+                        if !first_is_multicast {
+                            return Err(Error::invalid_request(
+                                "Cannot add unicast address range to multicast IP pool",
+                            ));
+                        }
+                        validate_multicast_range(range)?;
+                    }
+                    IpPoolType::Unicast => {
+                        if first_is_multicast {
+                            return Err(Error::invalid_request(
+                                "Cannot add multicast address range to unicast IP pool",
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        self.db_datastore
+            .ip_pool_add_range(opctx, &authz_pool, &db_pool, range)
+            .await
     }
 
     pub(crate) async fn ip_pool_service_delete_range(
         &self,
         opctx: &OpContext,
-        range: &IpRange,
+        range: &ip_pool::IpRange,
     ) -> DeleteResult {
-        let (authz_pool, ..) =
-            self.db_datastore.ip_pools_service_lookup(opctx).await?;
+        // The range already lives in a specific pool; resolve it by a contained
+        // address rather than assuming a single service pool.
+        let (authz_pool, ..) = self
+            .db_datastore
+            .ip_pool_fetch_containing_address_for_services(
+                opctx,
+                range.first_address(),
+            )
+            .await?;
         opctx.authorize(authz::Action::Modify, &authz_pool).await?;
         self.db_datastore.ip_pool_delete_range(opctx, &authz_pool, range).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_db_queries::db::pub_test_utils::helpers::create_service_ip_pool;
+    use nexus_test_utils_macros::nexus_test;
+    use omicron_common::address::IpRange;
+    use omicron_common::address::Ipv4Range;
+    use slog::o;
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    // The deprecated `ip-pools-service` range endpoints resolve "the" service
+    // pool by IP version. With exactly one such pool they behave as before.
+    // With more than one, they can no longer tell which pool the caller means
+    // and must fail rather than guess.
+    #[nexus_test(server = crate::Server)]
+    async fn test_ip_pool_service_add_range_requires_single_pool(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = nexus_db_queries::context::OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            datastore.clone(),
+        );
+
+        // Test context has exactly one IPv4 service pool, so the API should
+        // work fine in this case.
+        let range = IpRange::V4(
+            Ipv4Range::new(
+                "203.0.113.10".parse().unwrap(),
+                "203.0.113.20".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        nexus
+            .ip_pool_service_add_range(&opctx, &range)
+            .await
+            .expect("add range succeeds with a single service pool");
+
+        // Create a second IPv4 system-service pool. The deprecated path can no
+        // longer disambiguate, so it fails rather than guessing.
+        create_service_ip_pool(
+            &opctx,
+            datastore,
+            "oxide-service-pool-v4",
+            omicron_common::api::external::IpVersion::V4,
+        )
+        .await;
+        let v4_service_pools = datastore
+            .ip_pools_service_lookup_by_version(
+                &opctx,
+                IpVersion::V4,
+                NonZeroU32::new(3).unwrap(),
+            )
+            .await
+            .expect("listed v4 system-service pools");
+        assert_eq!(
+            v4_service_pools.len(),
+            2,
+            "expected exactly two IPv4 system-service pools",
+        );
+
+        let range2 = IpRange::V4(
+            Ipv4Range::new(
+                "203.0.113.30".parse().unwrap(),
+                "203.0.113.40".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        let err = nexus
+            .ip_pool_service_add_range(&opctx, &range2)
+            .await
+            .expect_err("add range fails with more than one service pool");
+        assert!(
+            err.to_string().contains("more than one system-service IP pool"),
+            "unexpected error: {err}",
+        );
+    }
+
+    // IPv6 underlay validation tests
+
+    #[test]
+    fn test_validate_multicast_rejects_underlay_ipv6_range() {
+        // ff04::/64 is reserved for underlay multicast
+        let underlay_range = IpRange::V6(
+            Ipv6Range::new(
+                Ipv6Addr::new(0xff04, 0, 0, 0, 0, 0, 0, 1),
+                Ipv6Addr::new(0xff04, 0, 0, 0, 0, 0, 0, 0xff),
+            )
+            .unwrap(),
+        );
+        let result = validate_multicast_range(&underlay_range);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("underlay"),
+            "Error should mention underlay: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_multicast_rejects_full_underlay_subnet() {
+        // The entire ff04::/64 should be rejected
+        let full_underlay = IpRange::V6(
+            Ipv6Range::new(
+                Ipv6Addr::new(0xff04, 0, 0, 0, 0, 0, 0, 0),
+                Ipv6Addr::new(0xff04, 0, 0, 0, 0xffff, 0xffff, 0xffff, 0xffff),
+            )
+            .unwrap(),
+        );
+        let result = validate_multicast_range(&full_underlay);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_multicast_allows_other_admin_scoped_subnets() {
+        // ff04:0:0:1::/64 is within ff04::/16 but not in the underlay /64
+        let other_admin_subnet = IpRange::V6(
+            Ipv6Range::new(
+                Ipv6Addr::new(0xff04, 0, 0, 1, 0, 0, 0, 1),
+                Ipv6Addr::new(0xff04, 0, 0, 1, 0, 0, 0, 0xff),
+            )
+            .unwrap(),
+        );
+        let result = validate_multicast_range(&other_admin_subnet);
+        assert!(
+            result.is_ok(),
+            "ff04:0:0:1::/64 should be allowed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_multicast_rejects_range_overlapping_underlay() {
+        // Range that spans from outside underlay into it
+        let overlapping = IpRange::V6(
+            Ipv6Range::new(
+                Ipv6Addr::new(0xff04, 0, 0, 0, 0, 0, 0, 0x100),
+                Ipv6Addr::new(0xff04, 0, 0, 1, 0, 0, 0, 0x100),
+            )
+            .unwrap(),
+        );
+        // This starts inside ff04::/64 and extends beyond it
+        let result = validate_multicast_range(&overlapping);
+        assert!(
+            result.is_err(),
+            "Range overlapping underlay should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_multicast_allows_site_local_ipv6() {
+        // ff05::/16 (site-local scope) should be allowed
+        let site_local = IpRange::V6(
+            Ipv6Range::new(
+                Ipv6Addr::new(0xff05, 0, 0, 0, 0, 0, 0, 1),
+                Ipv6Addr::new(0xff05, 0, 0, 0, 0, 0, 0, 0xff),
+            )
+            .unwrap(),
+        );
+        let result = validate_multicast_range(&site_local);
+        assert!(
+            result.is_ok(),
+            "Site-local ff05:: should be allowed: {result:?}"
+        );
+    }
+
+    // IPv4 validation tests
+
+    #[test]
+    fn test_validate_multicast_rejects_link_local_ipv4() {
+        // 224.0.0.0/24 is reserved (link-local)
+        let link_local = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 0, 0, 1),
+                Ipv4Addr::new(224, 0, 0, 10),
+            )
+            .unwrap(),
+        );
+        let result = validate_multicast_range(&link_local);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("link-local"));
+    }
+
+    #[test]
+    fn test_validate_multicast_allows_valid_ipv4_asm() {
+        // 224.1.0.0/24 is valid ASM
+        let valid_asm = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 1, 0, 1),
+                Ipv4Addr::new(224, 1, 0, 255),
+            )
+            .unwrap(),
+        );
+        let result = validate_multicast_range(&valid_asm);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_multicast_rejects_asm_ssm_spanning_range() {
+        // Range spanning from ASM (224.x-231.x) to SSM (232.x)
+        // SSM subnet is 232.0.0.0/8
+        let spanning = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(231, 255, 255, 1),
+                Ipv4Addr::new(232, 0, 0, 10),
+            )
+            .unwrap(),
+        );
+        let result = validate_multicast_range(&spanning);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("ASM and SSM"));
     }
 }

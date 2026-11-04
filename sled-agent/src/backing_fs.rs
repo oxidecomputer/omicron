@@ -27,21 +27,21 @@ use illumos_utils::zfs::{
     SizeDetails, Zfs,
 };
 use omicron_common::api::external::ByteCount;
-use omicron_common::disk::CompressionAlgorithm;
+use sled_agent_types::disk::CompressionAlgorithm;
 use std::io;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BackingFsError {
-    #[error("Error administering service: {0}")]
+    #[error("Error administering service")]
     Adm(#[from] smf::AdmError),
 
-    #[error("Error retrieving dataset property: {0}")]
+    #[error("Error retrieving dataset property")]
     DatasetProperty(#[from] GetValueError),
 
-    #[error("Error initializing dataset: {0}")]
+    #[error("Error initializing dataset")]
     Mount(#[from] EnsureDatasetError),
 
-    #[error("Failed to ensure subdirectory {0}")]
+    #[error("Failed to ensure subdirectory")]
     EnsureSubdir(#[from] io::Error),
 }
 
@@ -118,7 +118,7 @@ const BACKINGFS: [BackingFs; BACKINGFS_COUNT] =
 /// Ensure that the backing filesystems are mounted.
 /// If the underlying dataset for a backing fs does not exist on the specified
 /// boot disk then it will be created.
-pub(crate) fn ensure_backing_fs(
+pub(crate) async fn ensure_backing_fs(
     log: &slog::Logger,
     boot_zpool_name: &illumos_utils::zpool::ZpoolName,
 ) -> Result<(), BackingFsError> {
@@ -153,7 +153,8 @@ pub(crate) fn ensure_backing_fs(
             size_details,
             id: None,
             additional_options: None,
-        })?;
+        })
+        .await?;
 
         // Check if a ZFS filesystem is already mounted on bfs.mountpoint by
         // retrieving the ZFS `mountpoint` property and comparing it. This
@@ -164,6 +165,7 @@ pub(crate) fn ensure_backing_fs(
         // filesystem mounted there - most likely we are running with a non-ZFS
         // root, such as when net booted during CI.
         if Zfs::get_value(&bfs.mountpoint, "mountpoint")
+            .await
             .unwrap_or("not-zfs".to_string())
             == bfs.mountpoint
         {
@@ -182,7 +184,7 @@ pub(crate) fn ensure_backing_fs(
 
         info!(log, "Mounting {} on {}", dataset, mountpoint);
 
-        Zfs::mount_overlay_dataset(&dataset)?;
+        Zfs::mount_overlay_dataset(&dataset).await?;
 
         if let Some(subdirs) = bfs.subdirs {
             for dir in subdirs {

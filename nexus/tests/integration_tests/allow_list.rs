@@ -7,7 +7,7 @@
 use dropshot::test_util::ClientTestContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::{params, views};
+use nexus_types::external_api::system::{AllowList, AllowListUpdate};
 use omicron_common::api::external::AllowedSourceIps;
 use oxnet::IpNet;
 use std::net::IpAddr;
@@ -22,7 +22,7 @@ const URL: &str = "/v1/system/networking/allow-list";
 async fn test_allow_list(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     // We should start with the default of any.
-    let list: views::AllowList = NexusRequest::object_get(client, URL)
+    let list: AllowList = NexusRequest::object_get(client, URL)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -43,11 +43,10 @@ async fn test_allow_list(cptestctx: &ControlPlaneTestContext) {
         client: &ClientTestContext,
         allowed_ips: AllowedSourceIps,
     ) {
-        let new_list =
-            params::AllowListUpdate { allowed_ips: allowed_ips.clone() };
+        let new_list = AllowListUpdate { allowed_ips: allowed_ips.clone() };
 
         // PUT the list, which returns it, and ensure we get back what we set.
-        let list: views::AllowList =
+        let list: AllowList =
             NexusRequest::object_put(client, URL, Some(&new_list))
                 .authn_as(AuthnMode::PrivilegedUser)
                 .execute()
@@ -61,7 +60,7 @@ async fn test_allow_list(cptestctx: &ControlPlaneTestContext) {
         );
 
         // GET it as well.
-        let get_list: views::AllowList = NexusRequest::object_get(client, URL)
+        let get_list: AllowList = NexusRequest::object_get(client, URL)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
             .await
@@ -105,7 +104,7 @@ async fn test_allow_list(cptestctx: &ControlPlaneTestContext) {
     let addrs = vec![IpNet::host_net(IpAddr::from(Ipv4Addr::new(1, 1, 1, 1)))];
     let allowed_ips = AllowedSourceIps::try_from(addrs.clone())
         .expect("Expected a valid IP list");
-    let new_list = params::AllowListUpdate { allowed_ips: allowed_ips.clone() };
+    let new_list = AllowListUpdate { allowed_ips: allowed_ips.clone() };
     let err: dropshot::HttpErrorResponseBody =
         NexusRequest::expect_failure_with_body(
             client,

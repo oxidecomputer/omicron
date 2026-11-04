@@ -8,6 +8,7 @@ use super::{
 };
 use crate::app::sagas::ActionError;
 use nexus_db_queries::authn;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -97,7 +98,7 @@ async fn siu_destroyed_release_sled_resources(
                 _ => Err(err),
             }
         })
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 async fn siu_destroyed_mark_vmm_deleted(
@@ -122,5 +123,5 @@ async fn siu_destroyed_mark_vmm_deleted(
         .vmm_mark_deleted(&opctx, &vmm_id)
         .await
         .map(|_| ())
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }

@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{Generation, Ipv6Net, Name, VpcFirewallRule, VpcSubnet};
+use crate::DbTypedUuid;
 use crate::Vni;
 use crate::collection::DatastoreCollectionConfig;
 use chrono::{DateTime, Utc};
@@ -10,11 +11,13 @@ use db_macros::Resource;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{vpc, vpc_firewall_rule, vpc_subnet};
 use nexus_defaults as defaults;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::vpc as vpc_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use omicron_common::api::external::Ipv6NetExt;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ProjectKind;
+use omicron_uuid_kinds::ProjectUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
@@ -34,7 +37,7 @@ pub struct Vpc {
     #[diesel(embed)]
     identity: VpcIdentity,
 
-    pub project_id: Uuid,
+    pub project_id: DbTypedUuid<ProjectKind>,
     pub system_router_id: Uuid,
     pub vni: Vni,
     pub ipv6_prefix: Ipv6Net,
@@ -48,11 +51,17 @@ pub struct Vpc {
     pub subnet_gen: Generation,
 }
 
-impl From<Vpc> for views::Vpc {
+impl Vpc {
+    pub fn project_id(&self) -> ProjectUuid {
+        self.project_id.into()
+    }
+}
+
+impl From<Vpc> for vpc_types::Vpc {
     fn from(vpc: Vpc) -> Self {
         Self {
             identity: vpc.identity(),
-            project_id: vpc.project_id,
+            project_id: vpc.project_id.into_untyped_uuid(),
             system_router_id: vpc.system_router_id,
             ipv6_prefix: *vpc.ipv6_prefix,
             dns_name: vpc.dns_name.0,
@@ -67,7 +76,7 @@ impl From<Vpc> for views::Vpc {
 #[derive(Clone, Debug)]
 pub struct IncompleteVpc {
     pub identity: VpcIdentity,
-    pub project_id: Uuid,
+    pub project_id: DbTypedUuid<ProjectKind>,
     pub system_router_id: Uuid,
     pub vni: Vni,
     pub ipv6_prefix: IpNetwork,
@@ -79,9 +88,9 @@ pub struct IncompleteVpc {
 impl IncompleteVpc {
     pub fn new(
         vpc_id: Uuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         system_router_id: Uuid,
-        params: params::VpcCreate,
+        params: vpc_types::VpcCreate,
     ) -> Result<Self, external::Error> {
         let identity = VpcIdentity::new(vpc_id, params.identity);
         let ipv6_prefix = oxnet::IpNet::from(match params.ipv6_prefix {
@@ -100,7 +109,7 @@ impl IncompleteVpc {
         .into();
         Ok(Self {
             identity,
-            project_id,
+            project_id: project_id.into(),
             system_router_id,
             vni: Vni(external::Vni::random()),
             ipv6_prefix,
@@ -134,8 +143,8 @@ pub struct VpcUpdate {
     pub dns_name: Option<Name>,
 }
 
-impl From<params::VpcUpdate> for VpcUpdate {
-    fn from(params: params::VpcUpdate) -> Self {
+impl From<vpc_types::VpcUpdate> for VpcUpdate {
+    fn from(params: vpc_types::VpcUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,

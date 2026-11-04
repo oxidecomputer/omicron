@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use omicron_common::api::external;
+use nexus_types::external_api::instance;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
@@ -30,16 +30,28 @@ impl_enum_type!(
     Vmm => b"vmm"
     Failed => b"failed"
     Destroyed => b"destroyed"
+    SledEvacuating => b"sled_evacuating"
 );
 
 impl InstanceState {
     /// Instance states where there is not currently a VMM incarnating this
     /// instance, but might be in the future.
+    //
+    // This constant is used to specify the states in which an instance is
+    // allowed to have changes applied to it (e.g. updating cpu/memory). So, at
+    // first glance, it would seem that `InstanceState::SledEvacuating` also
+    // belongs here, as an instance in this state does not have a VMM either.
+    // The caveat here is that when the instance is in this state, the instance
+    // is being restarted. There is a high chance of a race between the user
+    // applying an update to the instance and the system starting a saga to
+    // start this instance again. For now, we play it safe and do not allow
+    // changes to an instance while in this state. In the future, if we feel
+    // safe, we may want to change this.
     pub const NOT_INCARNATED_STATES: &'static [InstanceState] =
         &[InstanceState::NoVmm, InstanceState::Creating, InstanceState::Failed];
 
-    pub fn state(&self) -> external::InstanceState {
-        external::InstanceState::from(*self)
+    pub fn state(&self) -> instance::InstanceState {
+        instance::InstanceState::from(*self)
     }
 
     pub fn label(&self) -> &'static str {
@@ -49,6 +61,7 @@ impl InstanceState {
             InstanceState::Vmm => "VMM",
             InstanceState::Failed => "failed",
             InstanceState::Destroyed => "destroyed",
+            InstanceState::SledEvacuating => "sled_evacuating",
         }
     }
 
@@ -62,15 +75,16 @@ impl fmt::Display for InstanceState {
     }
 }
 
-impl From<InstanceState> for omicron_common::api::external::InstanceState {
+impl From<InstanceState> for instance::InstanceState {
     fn from(value: InstanceState) -> Self {
-        use omicron_common::api::external::InstanceState as Output;
+        use instance::InstanceState as Output;
         match value {
             InstanceState::Creating => Output::Creating,
             InstanceState::NoVmm => Output::Stopped,
             InstanceState::Vmm => Output::Running,
             InstanceState::Failed => Output::Failed,
             InstanceState::Destroyed => Output::Destroyed,
+            InstanceState::SledEvacuating => Output::Rebooting,
         }
     }
 }

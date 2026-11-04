@@ -2,31 +2,31 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::error::Error as _;
+use std::fmt::Write;
 use std::sync::Arc;
 
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::ensure;
 use camino::Utf8PathBuf;
 use chrono::Duration;
 use chrono::Timelike;
 use chrono::Utc;
 use fs_err::tokio as fs;
-use fs_err::tokio::File;
 use omicron_zone_package::config::Config;
 use semver::Version;
-use sha2::Digest;
-use sha2::Sha256;
 use slog::Logger;
-use tokio::io::AsyncReadExt;
-use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::KnownArtifactKind;
-use tufaceous_lib::Key;
-use tufaceous_lib::assemble::ArtifactManifest;
-use tufaceous_lib::assemble::DeserializedArtifactData;
-use tufaceous_lib::assemble::DeserializedArtifactSource;
-use tufaceous_lib::assemble::DeserializedControlPlaneZoneSource;
-use tufaceous_lib::assemble::DeserializedManifest;
-use tufaceous_lib::assemble::OmicronRepoAssembler;
+use tufaceous::RepositoryLoader;
+use tufaceous_artifact_v1::ArtifactVersion;
+use tufaceous_artifact_v1::KnownArtifactKind;
+use tufaceous_lib_v1::Key;
+use tufaceous_lib_v1::assemble::ArtifactManifest;
+use tufaceous_lib_v1::assemble::DeserializedArtifactData;
+use tufaceous_lib_v1::assemble::DeserializedArtifactSource;
+use tufaceous_lib_v1::assemble::DeserializedControlPlaneZoneSource;
+use tufaceous_lib_v1::assemble::DeserializedManifest;
+use tufaceous_lib_v1::assemble::OmicronRepoAssembler;
 
 pub(crate) async fn build_tuf_repo(
     logger: Logger,
@@ -34,7 +34,11 @@ pub(crate) async fn build_tuf_repo(
     version: Version,
     package_manifest: Arc<Config>,
     extra_manifest: Option<Utf8PathBuf>,
+    threads: usize,
 ) -> Result<()> {
+    let repo_path = output_dir.join("repo-v1-deprecated.zip");
+    let sha256_path = output_dir.join("repo-v1-deprecated.zip.sha256.txt");
+
     // We currently go about this somewhat strangely; the old release
     // engineering process produced a Tufaceous manifest, and (the now very many
     // copies of) the TUF repo download-and-unpack script we use expects to be
@@ -111,6 +115,7 @@ pub(crate) async fn build_tuf_repo(
                 .join(format!("{}.tar.gz", package)),
         });
     }
+
     manifest.artifacts.insert(
         KnownArtifactKind::ControlPlane,
         vec![DeserializedArtifactData {
@@ -119,13 +124,6 @@ pub(crate) async fn build_tuf_repo(
             source: DeserializedArtifactSource::CompositeControlPlane { zones },
         }],
     );
-
-    // Serialize the manifest out.
-    fs::write(
-        output_dir.join("manifest.toml"),
-        toml::to_string_pretty(&manifest)?.into_bytes(),
-    )
-    .await?;
 
     // Convert the manifest.
     let manifest = ArtifactManifest::from_deserialized(&output_dir, manifest)?;
@@ -139,26 +137,35 @@ pub(crate) async fn build_tuf_repo(
         manifest,
         keys,
         expiry,
-        output_dir.join("repo.zip"),
+        true,
+        repo_path.clone(),
     )
     .build()
     .await?;
-    // Generate the checksum file.
-    let mut hasher = Sha256::new();
-    let mut buf = [0; 8192];
-    let mut file = File::open(output_dir.join("repo.zip")).await?;
-    loop {
-        let n = file.read(&mut buf).await?;
-        if n == 0 {
-            break;
+
+    // Load and check the repository with Tufaceous v2
+    let repo = RepositoryLoader::new()
+        .v1_compatibility(true)
+        .unsafe_blindly_trust_repo()
+        .compute_archive_sha256(true)
+        .load_zip_path(repo_path.clone(), &logger)
+        .await?;
+    let sha256 =
+        *repo.archive_sha256().context("archive sha256 was not calculated")?;
+    fs::write(sha256_path, format!("{}\n", hex::encode(sha256))).await?;
+
+    repo.verify_targets(threads).await?;
+
+    let mut problems = String::new();
+    for problem in repo.check_problems().await? {
+        write!(&mut problems, "\n- {problem}")?;
+        let mut source = problem.source();
+        while let Some(s) = source {
+            write!(&mut problems, ": {s}")?;
+            source = s.source();
         }
-        hasher.update(&buf[..n]);
     }
-    fs::write(
-        output_dir.join("repo.zip.sha256.txt"),
-        format!("{}\n", hex::encode(&hasher.finalize())),
-    )
-    .await?;
+    ensure!(problems.is_empty(), "found compatibility problems:{problems}",);
 
     Ok(())
 }

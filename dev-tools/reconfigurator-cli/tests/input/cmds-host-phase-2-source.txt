@@ -1,0 +1,23 @@
+# Load example system
+
+load-example --nsleds 1
+
+# Set slot A
+blueprint-edit latest set-host-phase2 serial0 A artifact 1.0.0 3a9607047b03ccaab6d222249d890e93ca51b94ad631c7ca38be74cba60802ff
+blueprint-diff latest
+
+# Set slot B
+blueprint-edit latest set-host-phase2 serial0 B artifact 2.0.0 044d45ad681b44e89c10e056cabdedf19fd8b1e54bc95e6622bcdd23f16bc8f2
+blueprint-diff latest
+
+blueprint-show latest
+
+# Restore A to "current contents"
+blueprint-edit latest set-host-phase2 serial0 A current-contents
+blueprint-diff latest
+
+# Restore B to "current contents"
+blueprint-edit latest set-host-phase2 serial0 B current-contents
+blueprint-diff latest
+
+blueprint-show latest

@@ -39,7 +39,7 @@ Diesel auto-generates types which allow callers to construct SQL expressions.
 These types, however, must map to the underlying database to be useful.
 
 We make use of the https://docs.diesel.rs/master/diesel/macro.table.html[table macro]
-within link:schema.rs[schema.rs] to define these tables and their
+within link:../../../db-schema/src/schema.rs[schema.rs] to define these tables and their
 corresponding SQL types. These types are then accessible within the `schema`
 module.
 
@@ -50,7 +50,7 @@ deletions - Diesel can operate on explicit columns or a structure which maps to
 a group of columns.
 
 Many of these structures - representing the data model - are stored within
-link:model.rs[model.rs], where they also have helper conversions from/into types
+link:../../../db-model/src[nexus-db-model], where they also have helper conversions from/into types
 which are used outside the database (such as in the HTTP API).
 
 Diesel provides some derive macros worth knowing about:

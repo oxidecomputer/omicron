@@ -4,8 +4,6 @@
 
 //! Main entry point to run an `oximeter` server in the control plane.
 
-// Copyright 2023 Oxide Computer Company
-
 use anyhow::{Context, anyhow};
 use clap::Parser;
 use omicron_common::cmd::CmdError;
@@ -109,9 +107,8 @@ fn parse_log_level(s: &str) -> Result<Level, String> {
     s.parse().map_err(|_| "Invalid log level".to_string())
 }
 
-#[tokio::main]
-async fn main() {
-    if let Err(cmd_error) = do_run().await {
+fn main() {
+    if let Err(cmd_error) = oxide_tokio_rt::run(do_run()) {
         fatal(cmd_error);
     }
 }
@@ -142,6 +139,7 @@ async fn do_run() -> Result<(), CmdError> {
                 &args,
                 nexus_server.local_addr(),
                 clickhouse,
+                oximeter_collector::default_refresh_interval(),
             )
             .await
             .unwrap()

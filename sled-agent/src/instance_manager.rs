@@ -4,8 +4,8 @@
 
 //! API for controlling multiple instances on a sled.
 
+use crate::instance;
 use crate::instance::Instance;
-use crate::instance::VmmStateOwner;
 use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClient;
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
@@ -17,34 +17,79 @@ use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::ZoneBuilderFactory;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
-use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_uuid_kinds::PropolisUuid;
+use oxnet::IpNet;
+use sled_agent_config_reconciler::AvailableDatasetsReceiver;
+use sled_agent_config_reconciler::CurrentlyManagedZpoolsReceiver;
+use sled_agent_config_reconciler::UpdateDispositionReceiver;
+use sled_agent_types::attached_subnet::AttachedSubnet;
+use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::instance::*;
-use sled_storage::manager::StorageHandle;
-use sled_storage::resources::AllDisks;
+use sled_agent_types::inventory::InstanceManagerStatus;
 use slog::Logger;
-use std::collections::{BTreeMap, HashSet};
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
+mod jobs;
+
+use self::jobs::CanEnsureVmm;
+use self::jobs::InstanceManagerJobsStatusReceiver;
+use self::jobs::Jobs;
+
 // The depth of the request queue for the instance manager.
 const QUEUE_SIZE: usize = 256;
 
+/// Reasons we may reject VMM registration requests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VmmRegistrationDisallowedReason {
+    /// We haven't yet loaded our sled config, so we don't know whether we're
+    /// available for new VMMs or are still in the evacuating state from an
+    /// update.
+    ConfigNotYetLoaded,
+    /// This sled is being evacuated for an update.
+    SledEvacuating,
+}
+
+impl VmmRegistrationDisallowedReason {
+    fn error_display(&self) -> &'static str {
+        match self {
+            VmmRegistrationDisallowedReason::ConfigNotYetLoaded => {
+                "sled config not yet loaded"
+            }
+            VmmRegistrationDisallowedReason::SledEvacuating => {
+                "sled evacuating for update"
+            }
+        }
+    }
+
+    pub(crate) fn http_error_code(&self) -> &'static str {
+        const SLED_CONFIG_NOT_YET_LOADED: &str = "SLED_CONFIG_NOT_YET_LOADED";
+        const SLED_EVACUATING: &str = "SLED_EVACUATING";
+
+        match self {
+            VmmRegistrationDisallowedReason::ConfigNotYetLoaded => {
+                SLED_CONFIG_NOT_YET_LOADED
+            }
+            VmmRegistrationDisallowedReason::SledEvacuating => SLED_EVACUATING,
+        }
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Instance error: {0}")]
+    #[error("Instance error")]
     Instance(#[from] crate::instance::Error),
 
     #[error("VMM with ID {0} not found")]
     NoSuchVmm(PropolisUuid),
 
-    #[error("OPTE port management error: {0}")]
+    #[error("OPTE port management error")]
     Opte(#[from] illumos_utils::opte::Error),
 
-    #[error("Cannot find data link: {0}")]
+    #[error("Cannot find data link")]
     Underlay(#[from] sled_hardware::underlay::Error),
 
     #[error("Zone bundle error")]
@@ -60,16 +105,20 @@ pub enum Error {
 
     #[error("Instance Manager dropped our request")]
     RequestDropped(#[from] oneshot::error::RecvError),
+
+    #[error("new VMM registrations not allowed: {}", .0.error_display())]
+    VmmRegistrationDisallowed(VmmRegistrationDisallowedReason),
 }
 
 pub(crate) struct InstanceManagerServices {
     pub nexus_client: NexusClient,
     pub vnic_allocator: VnicAllocator<Etherstub>,
     pub port_manager: PortManager,
-    pub storage: StorageHandle,
     pub zone_bundler: ZoneBundler,
     pub zone_builder_factory: ZoneBuilderFactory,
     pub metrics_queue: MetricsRequestQueue,
+    pub available_datasets_rx: AvailableDatasetsReceiver,
+    pub currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
 }
 
 // Describes the internals of the "InstanceManager", though most of the
@@ -85,6 +134,14 @@ struct InstanceManagerInternal {
 /// All instances currently running on the sled.
 pub struct InstanceManager {
     inner: Arc<InstanceManagerInternal>,
+
+    // Receiver that allows us to report on the current status of `Jobs`,
+    // including both whether we're rejecting new VMM registrations and how many
+    // VMM registrations currently exist.
+    //
+    // Reconfigurator uses this information to determine when this sled is done
+    // being evacuated for update.
+    jobs_status_rx: InstanceManagerJobsStatusReceiver,
 }
 
 impl InstanceManager {
@@ -95,21 +152,25 @@ impl InstanceManager {
         nexus_client: NexusClient,
         vnic_allocator: VnicAllocator<Etherstub>,
         port_manager: PortManager,
-        storage: StorageHandle,
+        currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
+        available_datasets_rx: AvailableDatasetsReceiver,
         zone_bundler: ZoneBundler,
         vmm_reservoir_manager: VmmReservoirManagerHandle,
         metrics_queue: MetricsRequestQueue,
+        update_disposition_rx: UpdateDispositionReceiver,
     ) -> Result<InstanceManager, Error> {
         Self::new_inner(
             log,
             nexus_client,
             vnic_allocator,
             port_manager,
-            storage,
+            currently_managed_zpools_rx,
+            available_datasets_rx,
             zone_bundler,
             ZoneBuilderFactory::new(),
             vmm_reservoir_manager,
             metrics_queue,
+            update_disposition_rx,
         )
     }
 
@@ -123,30 +184,35 @@ impl InstanceManager {
         nexus_client: NexusClient,
         vnic_allocator: VnicAllocator<Etherstub>,
         port_manager: PortManager,
-        storage: StorageHandle,
+        currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
+        available_datasets_rx: AvailableDatasetsReceiver,
         zone_bundler: ZoneBundler,
         zone_builder_factory: ZoneBuilderFactory,
         vmm_reservoir_manager: VmmReservoirManagerHandle,
         metrics_queue: MetricsRequestQueue,
+        mut update_disposition_rx: UpdateDispositionReceiver,
     ) -> Result<InstanceManager, Error> {
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
         let (terminate_tx, terminate_rx) = mpsc::unbounded_channel();
 
         let log = log.new(o!("component" => "InstanceManager"));
+        let jobs = Jobs::new(update_disposition_rx.current_and_update());
+        let jobs_status_rx = jobs.status_receiver();
         let runner = InstanceManagerRunner {
             log: log.clone(),
             rx,
             terminate_tx,
             terminate_rx,
             nexus_client,
-            jobs: BTreeMap::new(),
+            jobs,
             vnic_allocator,
             port_manager,
-            storage_generation: None,
-            storage,
+            currently_managed_zpools_rx,
+            available_datasets_rx,
             zone_bundler,
             zone_builder_factory,
             metrics_queue,
+            update_disposition_rx,
         };
 
         let runner_handle =
@@ -158,7 +224,14 @@ impl InstanceManager {
                 vmm_reservoir_manager,
                 runner_handle,
             }),
+            jobs_status_rx,
         })
+    }
+
+    pub fn status(&self) -> InstanceManagerStatus {
+        // For now, the only meaningful status we report to inventory is the
+        // status of our `jobs` map.
+        self.jobs_status_rx.read()
     }
 
     pub async fn ensure_registered(
@@ -194,7 +267,14 @@ impl InstanceManager {
             })
             .await
             .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
-        rx.await?
+        let updated_runtime = match rx.await? {
+            // No VMM with the requested `propolis_id` was found, so send an
+            // empty state back.
+            None => None,
+            // We got the instance terminator, wait for it to complete.
+            Some(terminator) => Some(terminator.terminated().await),
+        };
+        Ok(VmmUnregisterResponse { updated_runtime })
     }
 
     pub async fn ensure_state(
@@ -298,6 +378,44 @@ impl InstanceManager {
         rx.await?
     }
 
+    pub async fn join_multicast_group(
+        &self,
+        propolis_id: PropolisUuid,
+        multicast_body: &InstanceMulticastBody,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::JoinMulticastGroup {
+                propolis_id,
+                multicast_body: multicast_body.clone(),
+                tx,
+            })
+            .await
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
+
+        rx.await?
+    }
+
+    pub async fn leave_multicast_group(
+        &self,
+        propolis_id: PropolisUuid,
+        multicast_body: &InstanceMulticastBody,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::LeaveMulticastGroup {
+                propolis_id,
+                multicast_body: multicast_body.clone(),
+                tx,
+            })
+            .await
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
+
+        rx.await?
+    }
+
     /// Returns the last-set size of the reservoir
     pub fn reservoir_size(&self) -> ByteCount {
         self.inner.vmm_reservoir_manager.reservoir_size()
@@ -316,18 +434,75 @@ impl InstanceManager {
         rx.await?
     }
 
-    /// Marks instances failed unless they're using storage from `disks`.
-    ///
-    /// This function looks for transient zone filesystem usage on expunged
-    /// zpools.
-    pub async fn use_only_these_disks(
+    /// Update the set of attached subnets for an instance.
+    pub(crate) async fn set_attached_subnets(
         &self,
-        disks: AllDisks,
+        propolis_id: PropolisUuid,
+        subnets: AttachedSubnets,
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         self.inner
             .tx
-            .send(InstanceManagerRequest::OnlyUseDisks { disks, tx })
+            .send(InstanceManagerRequest::SetAttachedSubnets {
+                propolis_id,
+                subnets,
+                tx,
+            })
+            .await
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
+        rx.await?
+    }
+
+    /// Delete the set of attached subnets for an instance.
+    pub(crate) async fn clear_attached_subnets(
+        &self,
+        propolis_id: PropolisUuid,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::ClearAttachedSubnets {
+                propolis_id,
+                tx,
+            })
+            .await
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
+        rx.await?
+    }
+
+    /// Attach a subnet to an instance.
+    pub(crate) async fn attach_subnet(
+        &self,
+        propolis_id: PropolisUuid,
+        subnet: AttachedSubnet,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::AttachSubnet {
+                propolis_id,
+                subnet,
+                tx,
+            })
+            .await
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
+        rx.await?
+    }
+
+    /// Detach a subnet from an instance
+    pub(crate) async fn detach_subnet(
+        &self,
+        propolis_id: PropolisUuid,
+        subnet: IpNet,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::DetachSubnet {
+                propolis_id,
+                subnet,
+                tx,
+            })
             .await
             .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
         rx.await?
@@ -355,7 +530,11 @@ enum InstanceManagerRequest {
     },
     EnsureUnregistered {
         propolis_id: PropolisUuid,
-        tx: oneshot::Sender<Result<VmmUnregisterResponse, Error>>,
+        // The response to the `EnsureUnregistered` request is either the
+        // instance's `Terminator`, which can be used to await the completion of
+        // the termination request, or `None`, if no VMM with the targeted
+        // `propolis_id` exists.
+        tx: oneshot::Sender<Option<Arc<instance::Terminator>>>,
     },
     EnsureState {
         propolis_id: PropolisUuid,
@@ -382,12 +561,37 @@ enum InstanceManagerRequest {
     RefreshExternalIps {
         tx: oneshot::Sender<Result<(), Error>>,
     },
+    JoinMulticastGroup {
+        propolis_id: PropolisUuid,
+        multicast_body: InstanceMulticastBody,
+        tx: oneshot::Sender<Result<(), Error>>,
+    },
+    LeaveMulticastGroup {
+        propolis_id: PropolisUuid,
+        multicast_body: InstanceMulticastBody,
+        tx: oneshot::Sender<Result<(), Error>>,
+    },
     GetState {
         propolis_id: PropolisUuid,
         tx: oneshot::Sender<Result<SledVmmState, Error>>,
     },
-    OnlyUseDisks {
-        disks: AllDisks,
+    SetAttachedSubnets {
+        propolis_id: PropolisUuid,
+        subnets: AttachedSubnets,
+        tx: oneshot::Sender<Result<(), Error>>,
+    },
+    ClearAttachedSubnets {
+        propolis_id: PropolisUuid,
+        tx: oneshot::Sender<Result<(), Error>>,
+    },
+    AttachSubnet {
+        propolis_id: PropolisUuid,
+        subnet: AttachedSubnet,
+        tx: oneshot::Sender<Result<(), Error>>,
+    },
+    DetachSubnet {
+        propolis_id: PropolisUuid,
+        subnet: IpNet,
         tx: oneshot::Sender<Result<(), Error>>,
     },
 }
@@ -422,15 +626,21 @@ struct InstanceManagerRunner {
     // instance, we could avoid the methods within "instance.rs" that panic
     // if the Propolis client hasn't been initialized.
     /// A mapping from a Propolis ID to the [Instance] that Propolis incarnates.
-    jobs: BTreeMap<PropolisUuid, Instance>,
+    jobs: Jobs,
 
     vnic_allocator: VnicAllocator<Etherstub>,
     port_manager: PortManager,
-    storage_generation: Option<Generation>,
-    storage: StorageHandle,
+    currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
+    available_datasets_rx: AvailableDatasetsReceiver,
     zone_bundler: ZoneBundler,
     zone_builder_factory: ZoneBuilderFactory,
     metrics_queue: MetricsRequestQueue,
+
+    // Watch channel receiver which notifies us if this sled is available for
+    // VMM registration, or is in the process of being evacuated for an update.
+    // If it is evacuating, we should reject new VMM registrations while
+    // continuing to allow operations on existing VMMs.
+    update_disposition_rx: UpdateDispositionReceiver,
 }
 
 impl InstanceManagerRunner {
@@ -457,7 +667,26 @@ impl InstanceManagerRunner {
                             break;
                         },
                     }
-                },
+                }
+
+                // If our update disposition has changed, notify `self.jobs`
+                // of the new value.
+                result = self.update_disposition_rx.changed_value() => {
+                    match result {
+                        Ok(disposition) => {
+                            self.jobs.set_update_disposition(disposition);
+                        }
+                        Err(_) => {
+                            warn!(
+                                self.log,
+                                "InstanceManager's 'update disposition' \
+                                 channel closed; shutting down",
+                            );
+                            break;
+                        }
+                    }
+                }
+
                 request = self.rx.recv() => {
                     let request_variant = request.as_ref().map(|r| r.to_string());
                     let result = match request {
@@ -486,6 +715,12 @@ impl InstanceManagerRunner {
                         },
                         Some(RefreshExternalIps { tx }) => {
                             self.refresh_external_ips(tx)
+                        },
+                        Some(JoinMulticastGroup { propolis_id, multicast_body, tx }) => {
+                            self.join_multicast_group(tx, propolis_id, &multicast_body)
+                        },
+                        Some(LeaveMulticastGroup { propolis_id, multicast_body, tx }) => {
+                            self.leave_multicast_group(tx, propolis_id, &multicast_body)
                         }
                         Some(GetState { propolis_id, tx }) => {
                             // TODO(eliza): it could potentially be nice to
@@ -495,10 +730,18 @@ impl InstanceManagerRunner {
                             // the state...
                             self.get_instance_state(tx, propolis_id)
                         },
-                        Some(OnlyUseDisks { disks, tx } ) => {
-                            self.use_only_these_disks(disks).await;
-                            tx.send(Ok(())).map_err(|_| Error::FailedSendClientClosed)
-                        },
+                        Some(SetAttachedSubnets { propolis_id, subnets, tx }) => {
+                            self.set_attached_subnets(tx, propolis_id, subnets)
+                        }
+                        Some(ClearAttachedSubnets { propolis_id, tx }) =>{
+                            self.clear_attached_subnets(tx, propolis_id)
+                        }
+                        Some(AttachSubnet { propolis_id, subnet, tx }) => {
+                            self.attach_subnet(tx, propolis_id, subnet)
+                        }
+                        Some(DetachSubnet { propolis_id, subnet, tx }) =>{
+                            self.detach_subnet(tx, propolis_id, subnet)
+                        }
                         None => {
                             warn!(self.log, "InstanceManager's request channel closed; shutting down");
                             break;
@@ -510,7 +753,7 @@ impl InstanceManagerRunner {
                             self.log,
                             "Error handling request";
                             "request" => request_variant.unwrap(),
-                            "err" => ?err
+                            InlineErrorChain::new(&err)
                         );
                     }
                 }
@@ -568,8 +811,8 @@ impl InstanceManagerRunner {
             "metadata" => ?metadata,
         );
 
-        let instance = {
-            if let Some(existing_instance) = self.jobs.get(&propolis_id) {
+        let instance = match self.jobs.can_ensure_vmm(propolis_id) {
+            CanEnsureVmm::Exists(existing_instance) => {
                 if instance_id != existing_instance.id() {
                     info!(&self.log,
                           "Propolis ID already used by another instance";
@@ -588,7 +831,8 @@ impl InstanceManagerRunner {
                     );
                     existing_instance
                 }
-            } else {
+            }
+            CanEnsureVmm::CanRegister(registration_slot) => {
                 info!(&self.log,
                       "registering new instance";
                       "instance_id" => %instance_id,
@@ -607,10 +851,13 @@ impl InstanceManagerRunner {
                     nexus_client: self.nexus_client.clone(),
                     vnic_allocator: self.vnic_allocator.clone(),
                     port_manager: self.port_manager.clone(),
-                    storage: self.storage.clone(),
                     zone_bundler: self.zone_bundler.clone(),
                     zone_builder_factory: self.zone_builder_factory.clone(),
                     metrics_queue: self.metrics_queue.clone(),
+                    available_datasets_rx: self.available_datasets_rx.clone(),
+                    currently_managed_zpools_rx: self
+                        .currently_managed_zpools_rx
+                        .clone(),
                 };
 
                 let state = crate::instance::InstanceInitialState {
@@ -631,9 +878,27 @@ impl InstanceManagerRunner {
                     sled_identifiers,
                     metadata,
                 )?;
-                let _old = self.jobs.insert(propolis_id, instance);
-                assert!(_old.is_none());
-                &self.jobs.get(&propolis_id).unwrap()
+                registration_slot.insert(instance)
+            }
+            CanEnsureVmm::CannotRegister(reason) => {
+                // The VMM doesn't already exist, but we must disallow new
+                // registrations.
+                //
+                // This should be unusual but not impossible: this means Nexus
+                // placed a VMM on this sled (which it should only do if the
+                // sled's update disposition is "available") but we can't
+                // service that request because in the time between when Nexus
+                // placed the instance and we received this request, our update
+                // disposition changed to "evacuating".
+                warn!(
+                    &self.log,
+                    "rejecting new VMM registration";
+                    "instance_id" => %instance_id,
+                    "propolis_id" => %propolis_id,
+                    "migration_id" => ?migration_id,
+                    "reason" => reason.error_display(),
+                );
+                return Err(Error::VmmRegistrationDisallowed(reason));
             }
         };
         let (tx, rx) = oneshot::channel();
@@ -646,19 +911,20 @@ impl InstanceManagerRunner {
     /// zone is rudely terminated.
     fn ensure_unregistered(
         &mut self,
-        tx: oneshot::Sender<Result<VmmUnregisterResponse, Error>>,
+        tx: oneshot::Sender<Option<Arc<instance::Terminator>>>,
         propolis_id: PropolisUuid,
     ) -> Result<(), Error> {
-        // If the instance does not exist, we response immediately.
+        // If the instance does not exist, we respond immediately.
         let Some(instance) = self.get_propolis(propolis_id) else {
-            tx.send(Ok(VmmUnregisterResponse { updated_runtime: None }))
-                .map_err(|_| Error::FailedSendClientClosed)?;
+            tx.send(None).map_err(|_| Error::FailedSendClientClosed)?;
             return Ok(());
         };
 
-        // Otherwise, we pipeline the request, and send it to the instance,
-        // where it can receive an appropriate response.
-        instance.terminate(tx, VmmStateOwner::Nexus)?;
+        // Otherwise, request that the instance terminate, and send back the
+        // terminator so that the caller can wait for the instance to finish
+        // terminating.
+        let terminator = instance.request_termination(&self.log).clone();
+        tx.send(Some(terminator)).map_err(|_| Error::FailedSendClientClosed)?;
         Ok(())
     }
 
@@ -726,7 +992,7 @@ impl InstanceManagerRunner {
         tx: oneshot::Sender<Result<(), Error>>,
     ) -> Result<(), Error> {
         let mut channels = vec![];
-        for (_, instance) in &self.jobs {
+        for (_, instance) in self.jobs.iter() {
             let (tx, rx_new) = oneshot::channel();
             instance.refresh_external_ips(tx)?;
             channels.push(rx_new);
@@ -746,6 +1012,48 @@ impl InstanceManagerRunner {
         Ok(())
     }
 
+    fn join_multicast_group(
+        &self,
+        tx: oneshot::Sender<Result<(), Error>>,
+        propolis_id: PropolisUuid,
+        multicast_body: &InstanceMulticastBody,
+    ) -> Result<(), Error> {
+        let Some(instance) = self.get_propolis(propolis_id) else {
+            return Err(Error::NoSuchVmm(propolis_id));
+        };
+
+        match multicast_body {
+            InstanceMulticastBody::Join(membership) => {
+                instance.join_multicast_group(tx, membership)?;
+            }
+            InstanceMulticastBody::Leave(membership) => {
+                instance.leave_multicast_group(tx, membership)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn leave_multicast_group(
+        &self,
+        tx: oneshot::Sender<Result<(), Error>>,
+        propolis_id: PropolisUuid,
+        multicast_body: &InstanceMulticastBody,
+    ) -> Result<(), Error> {
+        let Some(instance) = self.get_propolis(propolis_id) else {
+            return Err(Error::NoSuchVmm(propolis_id));
+        };
+
+        match multicast_body {
+            InstanceMulticastBody::Join(membership) => {
+                instance.join_multicast_group(tx, membership)?;
+            }
+            InstanceMulticastBody::Leave(membership) => {
+                instance.leave_multicast_group(tx, membership)?;
+            }
+        }
+        Ok(())
+    }
+
     fn get_instance_state(
         &self,
         tx: oneshot::Sender<Result<SledVmmState, Error>>,
@@ -760,57 +1068,51 @@ impl InstanceManagerRunner {
         Ok(())
     }
 
-    async fn use_only_these_disks(&mut self, disks: AllDisks) {
-        // Consider the generation number on the incoming request to avoid
-        // applying old requests.
-        let requested_generation = *disks.generation();
-        if let Some(last_gen) = self.storage_generation {
-            if last_gen >= requested_generation {
-                // This request looks old, ignore it.
-                info!(self.log, "use_only_these_disks: Ignoring request";
-                    "last_gen" => ?last_gen, "requested_gen" => ?requested_generation);
-                return;
-            }
-        }
-        self.storage_generation = Some(requested_generation);
-        info!(self.log, "use_only_these_disks: Processing new request";
-            "gen" => ?requested_generation);
+    fn set_attached_subnets(
+        &self,
+        tx: oneshot::Sender<Result<(), Error>>,
+        propolis_id: PropolisUuid,
+        subnets: AttachedSubnets,
+    ) -> Result<(), Error> {
+        let Some(instance) = self.get_propolis(propolis_id) else {
+            return Err(Error::NoSuchVmm(propolis_id));
+        };
+        instance.set_attached_subnets(tx, subnets).map_err(Error::from)
+    }
 
-        let u2_set: HashSet<_> = disks.all_u2_zpools().into_iter().collect();
+    fn clear_attached_subnets(
+        &self,
+        tx: oneshot::Sender<Result<(), Error>>,
+        propolis_id: PropolisUuid,
+    ) -> Result<(), Error> {
+        let Some(instance) = self.get_propolis(propolis_id) else {
+            return Err(Error::NoSuchVmm(propolis_id));
+        };
+        instance.clear_attached_subnets(tx).map_err(Error::from)
+    }
 
-        let mut to_remove = vec![];
-        for (id, instance) in self.jobs.iter() {
-            // If we can read the filesystem pool, consider it. Otherwise, move
-            // on, to prevent blocking the cleanup of other instances.
-            // TODO(eliza): clone each instance and spawn a task to handle it,
-            // so that a single misbehaving instance cannot block the instance
-            // manager's run loop...
-            let (tx, rx) = oneshot::channel();
-            // This will fail if the tx has been dropped, which we just...don't do.
-            let _ = instance.get_filesystem_zpool(tx);
-            let Ok(Ok(Some(filesystem_pool))) = rx.await else {
-                info!(self.log, "use_only_these_disks: Cannot read filesystem pool"; "instance_id" => ?id);
-                continue;
-            };
-            if !u2_set.contains(&filesystem_pool) {
-                to_remove.push(*id);
-            }
-        }
+    fn attach_subnet(
+        &self,
+        tx: oneshot::Sender<Result<(), Error>>,
+        propolis_id: PropolisUuid,
+        subnet: AttachedSubnet,
+    ) -> Result<(), Error> {
+        let Some(instance) = self.get_propolis(propolis_id) else {
+            return Err(Error::NoSuchVmm(propolis_id));
+        };
+        instance.attach_subnet(tx, subnet).map_err(Error::from)
+    }
 
-        for id in to_remove {
-            info!(self.log, "use_only_these_disks: Removing instance"; "instance_id" => ?id);
-            if let Some(instance) = self.jobs.remove(&id) {
-                let (tx, rx) = oneshot::channel();
-                if let Err(e) = instance.terminate(tx, VmmStateOwner::Runner) {
-                    warn!(self.log, "use_only_these_disks: Failed to request instance removal"; "err" => ?e);
-                    continue;
-                }
-
-                if let Err(e) = rx.await {
-                    warn!(self.log, "use_only_these_disks: Failed while removing instance"; "err" => ?e);
-                }
-            }
-        }
+    fn detach_subnet(
+        &self,
+        tx: oneshot::Sender<Result<(), Error>>,
+        propolis_id: PropolisUuid,
+        subnet: IpNet,
+    ) -> Result<(), Error> {
+        let Some(instance) = self.get_propolis(propolis_id) else {
+            return Err(Error::NoSuchVmm(propolis_id));
+        };
+        instance.detach_subnet(tx, subnet).map_err(Error::from)
     }
 }
 
@@ -830,7 +1132,7 @@ impl InstanceTicket {
         InstanceTicket { id, terminate_tx: Some(terminate_tx) }
     }
 
-    #[cfg(all(test, target_os = "illumos"))]
+    #[cfg(test)]
     pub(crate) fn new_without_manager_for_test(id: PropolisUuid) -> Self {
         Self { id, terminate_tx: None }
     }

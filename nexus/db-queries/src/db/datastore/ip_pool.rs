@@ -7,39 +7,52 @@
 use super::DataStore;
 use super::SQL_BATCH_SIZE;
 use crate::authz;
+use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::datastore::SERVICE_IP_POOL_NAME;
 use crate::db::identity::Resource;
-use crate::db::model::ExternalIp;
+use crate::db::model::IncompleteIpPoolResource;
 use crate::db::model::IpKind;
 use crate::db::model::IpPool;
+use crate::db::model::IpPoolAssignment;
 use crate::db::model::IpPoolRange;
 use crate::db::model::IpPoolResource;
 use crate::db::model::IpPoolResourceType;
+use crate::db::model::IpPoolType;
 use crate::db::model::IpPoolUpdate;
 use crate::db::model::Name;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
+use crate::db::raw_query_builder::QueryBuilder;
+use crate::db::raw_query_builder::SelectableSql;
+use crate::db::raw_query_builder::TypedSqlQuery;
+use crate::db::true_or_cast_error::matches_sentinel;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
+use diesel::AggregateExpressionMethods;
+use diesel::dsl::count;
 use diesel::prelude::*;
+use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
+use diesel::sql_types;
 use ipnetwork::IpNetwork;
 use nexus_db_errors::ErrorHandler;
-use nexus_db_errors::OptionalError;
-use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
 use nexus_db_lookup::DbConnection;
-use nexus_db_lookup::LookupPath;
 use nexus_db_model::InternetGateway;
 use nexus_db_model::InternetGatewayIpPool;
+use nexus_db_model::IpVersion;
 use nexus_db_model::Project;
 use nexus_db_model::Vpc;
-use nexus_types::external_api::shared::IpRange;
+use nexus_db_schema::enums::IpKindEnum;
+use nexus_db_schema::enums::IpPoolAssignmentEnum;
+use nexus_types::silo::INTERNAL_SILO_ID;
+use omicron_common::address::IpRange;
+use omicron_common::address::{IPV4_SSM_SUBNET, IPV6_SSM_SUBNET};
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -52,52 +65,202 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloUuid;
 use ref_cast::RefCast;
+use std::collections::HashSet;
+use std::net::IpAddr;
+use std::num::NonZeroU32;
 use uuid::Uuid;
 
-pub struct IpsAllocated {
-    pub ipv4: i64,
-    pub ipv6: i64,
+/// Helper type with both an authz IP Pool and the actual DB record.
+#[derive(Debug, Clone)]
+pub struct ServiceIpPool {
+    pub authz_pool: authz::IpPool,
+    pub db_pool: IpPool,
 }
 
-pub struct IpsCapacity {
-    pub ipv4: u32,
-    pub ipv6: u128,
+/// Helper type with all system services IP Pools, split by IP version.
+#[derive(Debug, Clone)]
+pub struct ServiceIpPools {
+    pub ipv4: Vec<ServiceIpPool>,
+    pub ipv6: Vec<ServiceIpPool>,
+}
+
+impl ServiceIpPools {
+    /// Return any one system-service pool, regardless of IP version.
+    pub fn any_pool(&self) -> Option<&ServiceIpPool> {
+        self.ipv4.first().or_else(|| self.ipv6.first())
+    }
+}
+
+/// Default unicast IP pools linked to the current silo, keyed by IP version.
+/// Each field is `None` if no default of that version is linked to the silo.
+#[derive(Debug, Clone, Default)]
+pub struct DefaultIpPools {
+    pub v4: Option<(authz::IpPool, IpPool)>,
+    pub v6: Option<(authz::IpPool, IpPool)>,
+}
+
+// Error message emitted when a user attempts to link an IP Pool and a Silo,
+// but the pool is assigned for system services use, or vice versa.
+const BAD_SILO_LINK_ERROR: &str = "IP Pools cannot be both linked to Silos \
+    and assigned for system services use.";
+
+// Error message emitted when a user attempts to unlink an IP Pool from a Silo
+// while the pool has external IP addresses or multicast groups allocated
+// from it.
+const POOL_HAS_IPS_ERROR: &str =
+    "IP addresses from this pool are in use in the linked silo";
+
+// Error message emitted when a user attempts to reassign the last IP Pool
+// assigned for system services use.
+const REASSIGN_LAST_POOL_ERROR: &str = "Cannot reassign the last IP Pool \
+    assigned for system services use. Create and assign at least one more \
+    IP Pool before reassigning this one.";
+
+// Error message emitted when a user attempts to delete the last IP Pool
+// assigned for system services use.
+const DELETE_LAST_POOL_ERROR: &str = "Cannot delete the last IP Pool \
+    assigned for system services use. Create and assign at least one more \
+    IP Pool before deleting this one.";
+
+// Error message emitted when a user attempts to assign a pool from system
+// serivces to silos, and that pool is currently assigned to a specific external
+// service, e.g., Nexus.
+const ASSIGNED_TO_EXTERNAL_SERVICE_ERROR: &str = "Cannot reassign an IP \
+    Pool for silos, while it is assigned to a specific external service. \
+    Unassign it first, and try again.";
+
+/// Check if pool selection has an IP version conflict.
+///
+/// When `ip_version` is not specified and multiple pools exist with different
+/// IP versions, returns an error asking the caller to specify which version.
+fn check_ip_version_conflict(
+    pools: &[IpPool],
+    ip_version: Option<IpVersion>,
+    pool_type: IpPoolType,
+) -> Result<(), Error> {
+    if ip_version.is_none()
+        && pools.iter().map(|p| p.ip_version).collect::<HashSet<_>>().len() > 1
+    {
+        return Err(Error::invalid_request(format!(
+            "Multiple default {pool_type} IP pools exist with different \
+             IP versions. Please specify ip_version (v4 or v6) or \
+             provide an explicit pool."
+        )));
+    }
+    Ok(())
 }
 
 impl DataStore {
+    /// List IP Pools by their assignment, IP version, and pool type.
+    pub async fn ip_pools_list_paginated(
+        &self,
+        opctx: &OpContext,
+        assignment: Option<IpPoolAssignment>,
+        version: Option<IpVersion>,
+        pool_type: Option<IpPoolType>,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<IpPool> {
+        use nexus_db_schema::schema::ip_pool;
+        opctx
+            .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
+            .await?;
+        let mut query = match pagparams {
+            PaginatedBy::Id(by_id) => {
+                paginated(ip_pool::table, ip_pool::id, by_id)
+            }
+            PaginatedBy::Name(by_name) => paginated(
+                ip_pool::table,
+                ip_pool::name,
+                &by_name.map_name(|n| Name::ref_cast(n)),
+            ),
+        };
+        query = match assignment {
+            Some(a) => query.filter(ip_pool::assignment.eq(a)),
+            None => query,
+        };
+        query = match version {
+            Some(ver) => query.filter(ip_pool::ip_version.eq(ver)),
+            None => query,
+        };
+        query = match pool_type {
+            Some(pt) => query.filter(ip_pool::pool_type.eq(pt)),
+            None => query,
+        };
+        query
+            .filter(ip_pool::time_deleted.is_null())
+            .select(IpPool::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     /// List IP Pools
+    ///
+    /// This returns the pools available for external customer use.
     pub async fn ip_pools_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<IpPool> {
-        use nexus_db_schema::schema::ip_pool;
-
-        opctx
-            .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
-            .await?;
-        match pagparams {
-            PaginatedBy::Id(pagparams) => {
-                paginated(ip_pool::table, ip_pool::id, pagparams)
-            }
-            PaginatedBy::Name(pagparams) => paginated(
-                ip_pool::table,
-                ip_pool::name,
-                &pagparams.map_name(|n| Name::ref_cast(n)),
-            ),
-        }
-        .filter(ip_pool::name.ne(SERVICE_IP_POOL_NAME))
-        .filter(ip_pool::time_deleted.is_null())
-        .select(IpPool::as_select())
-        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+        self.ip_pools_list_paginated(
+            opctx,
+            Some(IpPoolAssignment::Silos),
+            None,
+            None,
+            pagparams,
+        )
         .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List Multicast IP Pools (external silos)
+    pub async fn ip_pools_list_multicast(
+        &self,
+        opctx: &OpContext,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<IpPool> {
+        self.ip_pools_list_paginated(
+            opctx,
+            Some(IpPoolAssignment::Silos),
+            None,
+            Some(IpPoolType::Multicast),
+            pagparams,
+        )
+        .await
+    }
+
+    /// List Unicast IP Pools (external silos)
+    pub async fn ip_pools_list_unicast(
+        &self,
+        opctx: &OpContext,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<IpPool> {
+        self.ip_pools_list_paginated(
+            opctx,
+            Some(IpPoolAssignment::Silos),
+            None,
+            Some(IpPoolType::Unicast),
+            pagparams,
+        )
+        .await
     }
 
     /// Look up whether the given pool is available to users in the current
     /// silo, i.e., whether there is an entry in the association table linking
     /// the pool with that silo
+    //
+    // TODO-correctness: This seems difficult to use without TOCTOU issues. It's
+    // currently used to ensure there's a link between a Silo and an IP Pool
+    // when allocating an external address for an instance in that Silo. But
+    // that works by checking that the link exists, and then in a separate
+    // query, allocating an address out of it. Suppose the silo was unlinked
+    // after this check, but before the external address allocation query ran.
+    // Then one could end up with an address from an unlinked IP Pool, which
+    // seems wrong.
+    //
+    // See https://github.com/oxidecomputer/omicron/issues/8992
     pub async fn ip_pool_fetch_link(
         &self,
         opctx: &OpContext,
@@ -115,7 +278,10 @@ impl DataStore {
             .filter(
                 ip_pool_resource::resource_type
                     .eq(IpPoolResourceType::Silo)
-                    .and(ip_pool_resource::resource_id.eq(authz_silo.id())),
+                    .and(
+                        ip_pool_resource::resource_id
+                            .eq(authz_silo.id().into_untyped_uuid()),
+                    ),
             )
             .filter(ip_pool::id.eq(ip_pool_id))
             .filter(ip_pool::time_deleted.is_null())
@@ -127,14 +293,20 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Look up the default IP pool for the current silo. If there is no default
-    /// at silo scope, fall back to the next level up, namely the fleet default.
-    /// There should always be a default pool at the fleet level, though this
-    /// query can theoretically fail if someone is able to delete that pool or
-    /// make another one the default and delete that.
-    pub async fn ip_pools_fetch_default(
+    /// Look up the default IP pool for the current silo by pool type.
+    ///
+    /// Allows specifying the pool type (unicast or multicast) and optionally
+    /// the IP version. For fetching all default unicast pools across all IP
+    /// versions, see [`Self::ip_pools_fetch_all_unicast_defaults`].
+    ///
+    /// If `ip_version` is `None` and there are multiple default pools of
+    /// different IP versions, this returns an error asking the caller to
+    /// specify which version. If there's only one default pool, it is returned.
+    async fn ip_pools_fetch_default_by_type(
         &self,
         opctx: &OpContext,
+        pool_type: IpPoolType,
+        ip_version: Option<IpVersion>,
     ) -> LookupResult<(authz::IpPool, IpPool)> {
         use nexus_db_schema::schema::ip_pool;
         use nexus_db_schema::schema::ip_pool_resource;
@@ -150,27 +322,40 @@ impl DataStore {
         //     .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
         //     .await?;
 
-        let lookup_type =
-            LookupType::ByOther("default IP pool for current silo".to_string());
+        let lookup_type = LookupType::ByOther(format!(
+            "default {} IP{} pool for current silo",
+            pool_type,
+            ip_version.map(|v| v.to_string()).unwrap_or_else(String::new),
+        ));
 
-        ip_pool::table
+        let mut query = ip_pool::table
             .inner_join(ip_pool_resource::table)
             .filter(
                 ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
             )
-            .filter(ip_pool_resource::resource_id.eq(authz_silo_id))
+            .filter(
+                ip_pool_resource::resource_id
+                    .eq(authz_silo_id.into_untyped_uuid()),
+            )
             .filter(ip_pool_resource::is_default.eq(true))
             .filter(ip_pool::time_deleted.is_null())
-            // Order by most specific first so we get the most specific.
-            // resource_type is an enum in the DB and therefore gets its order
-            // from the definition; it's not lexicographic. So correctness here
-            // relies on the types being most-specific-first in the definition.
-            // There are tests for this.
+            // Filter by pool type
+            .filter(ip_pool::pool_type.eq(pool_type))
+            .into_boxed();
+
+        // Filter by IP version if specified
+        if let Some(version) = ip_version {
+            query = query.filter(ip_pool::ip_version.eq(version));
+        }
+
+        // Order by most specific first so we get the most specific.
+        // resource_type is an enum in the DB and therefore gets its order
+        // from the definition; it's not lexicographic. So correctness here
+        // relies on the types being most-specific-first in the definition.
+        let pools: Vec<IpPool> = query
             .order(ip_pool_resource::resource_type.asc())
             .select(IpPool::as_select())
-            .first_async::<IpPool>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_lookup(
@@ -178,23 +363,458 @@ impl DataStore {
                     ResourceType::IpPool,
                     &lookup_type,
                 )
-            })
-            .map(|ip_pool| {
+            })?;
+
+        check_ip_version_conflict(&pools, ip_version, pool_type)?;
+
+        match pools.into_iter().next() {
+            None => Err(Error::ObjectNotFound {
+                type_name: ResourceType::IpPool,
+                lookup_type,
+            }),
+            Some(ip_pool) => {
                 let authz_pool =
                     authz::IpPool::new(authz::FLEET, ip_pool.id(), lookup_type);
-                (authz_pool, ip_pool)
-            })
+                Ok((authz_pool, ip_pool))
+            }
+        }
     }
 
-    /// Look up IP pool intended for internal services by its well-known name.
+    /// Look up any IP pool by pool type linked to the caller's silo.
     ///
-    /// This method may require an index by Availability Zone in the future.
-    pub async fn ip_pools_service_lookup(
+    /// Prefers the default pool if one exists. If no default exists, falls
+    /// back to any linked pool, selecting alphabetically by name (arbitrary
+    /// tie-breaker, not semantically meaningful). Returns an error if no pool
+    /// of the given type is linked to the caller's silo.
+    ///
+    /// If `ip_version` is `None` and there are multiple pools of different IP
+    /// versions, returns an error asking the caller to specify which version.
+    ///
+    /// Note: For multicast pools, this method does not distinguish between
+    /// ASM (224/4) and SSM (232/8) pools.
+    /// - For SSM multicast groups (with `source_ips`), use
+    ///   [`Self::ip_pools_fetch_ssm_multicast`] to ensure an SSM-range pool is
+    ///   selected.
+    /// - For ASM multicast groups (no `source_ips`), use
+    ///   [`Self::ip_pools_fetch_asm_multicast`] to ensure an ASM-range pool is
+    ///   selected when no explicit pool or IP is provided.
+    async fn ip_pools_fetch_any_by_type(
         &self,
         opctx: &OpContext,
+        pool_type: IpPoolType,
+        ip_version: Option<IpVersion>,
     ) -> LookupResult<(authz::IpPool, IpPool)> {
-        let name = SERVICE_IP_POOL_NAME.parse().unwrap();
-        LookupPath::new(&opctx, self).ip_pool_name(&Name(name)).fetch().await
+        use nexus_db_schema::schema::ip_pool;
+        use nexus_db_schema::schema::ip_pool_resource;
+
+        let authz_silo_id = opctx.authn.silo_required()?.id();
+        let lookup_type = LookupType::ByOther(format!(
+            "{pool_type} IP pool for current silo"
+        ));
+
+        // Find any pool of the given type linked to the caller's silo,
+        // preferring default pools
+        let mut query = ip_pool::table
+            .inner_join(ip_pool_resource::table)
+            .filter(
+                ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
+            )
+            .filter(
+                ip_pool_resource::resource_id
+                    .eq(authz_silo_id.into_untyped_uuid()),
+            )
+            .filter(ip_pool::time_deleted.is_null())
+            .filter(ip_pool::pool_type.eq(pool_type))
+            .into_boxed();
+
+        // Filter by IP version if specified
+        if let Some(version) = ip_version {
+            query = query.filter(ip_pool::ip_version.eq(version));
+        }
+
+        let pools: Vec<IpPool> = query
+            .order((ip_pool_resource::is_default.desc(), ip_pool::name.asc()))
+            .select(IpPool::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_lookup(
+                    e,
+                    ResourceType::IpPool,
+                    &lookup_type,
+                )
+            })?;
+
+        check_ip_version_conflict(&pools, ip_version, pool_type)?;
+
+        match pools.into_iter().next() {
+            None => Err(Error::ObjectNotFound {
+                type_name: ResourceType::IpPool,
+                lookup_type,
+            }),
+            Some(ip_pool) => {
+                let authz_pool =
+                    authz::IpPool::new(authz::FLEET, ip_pool.id(), lookup_type);
+                Ok((authz_pool, ip_pool))
+            }
+        }
+    }
+
+    /// Look up all system services IP Pools, split by IP version.
+    pub async fn ip_pools_service_lookup_both_versions(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<ServiceIpPools> {
+        use nexus_db_schema::schema::ip_pool;
+
+        opctx
+            .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
+            .await?;
+
+        let pools: Vec<IpPool> = ip_pool::table
+            .filter(ip_pool::time_deleted.is_null())
+            .filter(ip_pool::assignment.eq(IpPoolAssignment::SystemServices))
+            .select(IpPool::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let mut ipv4 = Vec::new();
+        let mut ipv6 = Vec::new();
+        for db_pool in pools {
+            let id = db_pool.id();
+            let authz_pool =
+                authz::IpPool::new(authz::FLEET, id, LookupType::ById(id));
+            let service_pool = ServiceIpPool { authz_pool, db_pool };
+            if service_pool.db_pool.ip_version == IpVersion::V4 {
+                ipv4.push(service_pool);
+            } else {
+                ipv6.push(service_pool);
+            }
+        }
+        Ok(ServiceIpPools { ipv4, ipv6 })
+    }
+
+    /// Look up the system-service IP pools of a single IP version.
+    ///
+    /// Returns every pool assigned to system services with the given IP
+    /// version, up to `limit`.
+    pub async fn ip_pools_service_lookup_by_version(
+        &self,
+        opctx: &OpContext,
+        ip_version: IpVersion,
+        limit: NonZeroU32,
+    ) -> LookupResult<Vec<ServiceIpPool>> {
+        let pagparams = PaginatedBy::Id(DataPageParams {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit,
+        });
+        let pools = self
+            .ip_pools_list_paginated(
+                opctx,
+                Some(IpPoolAssignment::SystemServices),
+                Some(ip_version),
+                None,
+                &pagparams,
+            )
+            .await?;
+        Ok(pools
+            .into_iter()
+            .map(|db_pool| {
+                let id = db_pool.id();
+                let authz_pool =
+                    authz::IpPool::new(authz::FLEET, id, LookupType::ById(id));
+                ServiceIpPool { authz_pool, db_pool }
+            })
+            .collect())
+    }
+
+    /// Fetch all default unicast IP pools for the current silo, one per IP
+    /// version. Returns a [`DefaultIpPools`] where each version field is
+    /// `Some` if a default pool of that version is linked to the silo, or
+    /// `None` if no default of that version is linked.
+    pub async fn ip_pools_fetch_all_unicast_defaults(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<DefaultIpPools, Error> {
+        use nexus_db_schema::schema::ip_pool;
+        use nexus_db_schema::schema::ip_pool_resource;
+
+        let authz_silo_id = opctx.authn.silo_required()?.id();
+
+        let pools: Vec<IpPool> = ip_pool::table
+            .inner_join(ip_pool_resource::table)
+            .filter(
+                ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
+            )
+            .filter(
+                ip_pool_resource::resource_id
+                    .eq(authz_silo_id.into_untyped_uuid()),
+            )
+            .filter(ip_pool_resource::is_default.eq(true))
+            .filter(ip_pool::time_deleted.is_null())
+            .filter(ip_pool::pool_type.eq(IpPoolType::Unicast))
+            .select(IpPool::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_lookup(
+                    e,
+                    ResourceType::IpPool,
+                    &LookupType::ByOther(
+                        "default unicast IP pools for current silo".into(),
+                    ),
+                )
+            })?;
+
+        let mut result = DefaultIpPools::default();
+        for pool in pools {
+            let version = pool.ip_version;
+            let authz_pool = authz::IpPool::new(
+                authz::FLEET,
+                pool.id(),
+                LookupType::ById(pool.id()),
+            );
+            let prev = match version {
+                IpVersion::V4 => result.v4.replace((authz_pool, pool)),
+                IpVersion::V6 => result.v6.replace((authz_pool, pool)),
+            };
+
+            // NOTE: This is also essentially a check that there are no more
+            // than 2 linked pools, since we'd fail if we have already set the
+            // field for any particular version.
+            if prev.is_some() {
+                return Err(Error::internal_error(&format!(
+                    "found multiple default {:?} unicast pools for silo {}",
+                    version, authz_silo_id,
+                )));
+            }
+        }
+        Ok(result)
+    }
+
+    /// Fetch the default IP Pool for the current silo of the provided version.
+    pub async fn ip_pools_fetch_default_by_version(
+        &self,
+        opctx: &OpContext,
+        ip_version: IpVersion,
+    ) -> LookupResult<(authz::IpPool, IpPool)> {
+        // Default to unicast pools (existing behavior), no version preference
+        self.ip_pools_fetch_default_by_type(
+            opctx,
+            IpPoolType::Unicast,
+            Some(ip_version),
+        )
+        .await
+    }
+
+    /// Pool resolution for allocation by pool type.
+    ///
+    /// If a pool is provided, validate it's linked to this silo and is of the
+    /// correct type. If no pool is provided, fetch the default pool of the
+    /// specified type for this silo. Once the pool is resolved (by either
+    /// method) do an auth check. Then return the pool.
+    ///
+    /// If `ip_version` is provided and no pool is specified, the default pool
+    /// lookup will be filtered to that version. If both IPv4 and IPv6 default
+    /// pools exist and `ip_version` is None, an error is returned.
+    pub async fn resolve_pool_for_allocation(
+        &self,
+        opctx: &OpContext,
+        pool: Option<authz::IpPool>,
+        pool_type: IpPoolType,
+        ip_version: Option<IpVersion>,
+    ) -> LookupResult<(authz::IpPool, IpVersion)> {
+        use nexus_db_schema::schema::ip_pool;
+
+        let (authz_pool, pool_version) = match pool {
+            Some(authz_pool) => {
+                // We intentionally skip checking the silo / pool link here.
+                // That's now done in the `NextExternalIp` allocation query
+                // itself, which has a CTE arm that ensures the link exists. We
+                // do still fetch the pool to validate its type and IP version.
+                let pool_record = {
+                    ip_pool::table
+                        .filter(ip_pool::id.eq(authz_pool.id()))
+                        .filter(ip_pool::time_deleted.is_null())
+                        .select(IpPool::as_select())
+                        .first_async::<IpPool>(
+                            &*self.pool_connection_authorized(opctx).await?,
+                        )
+                        .await
+                        .map_err(|_| authz_pool.not_found())?
+                };
+
+                // Verify it's the correct pool type
+                if pool_record.pool_type != pool_type {
+                    return Err(Error::invalid_request(&format!(
+                        "Pool '{}' is not a {pool_type} pool (type: {})",
+                        pool_record.identity.name, pool_record.pool_type
+                    )));
+                }
+
+                (authz_pool, pool_record.ip_version)
+            }
+            // If no pool specified, find a pool of the specified type.
+            //
+            // For multicast pools, use `ip_pools_fetch_any_by_type` which
+            // prefers the default but falls back to any linked pool (selecting
+            // alphabetically by name if multiple exist).
+            //
+            // For unicast pools, require the default pool (existing behavior).
+            None => {
+                let (authz_pool, pool_record) = match pool_type {
+                    IpPoolType::Multicast => {
+                        self.ip_pools_fetch_any_by_type(
+                            opctx, pool_type, ip_version,
+                        )
+                        .await?
+                    }
+                    IpPoolType::Unicast => {
+                        self.ip_pools_fetch_default_by_type(
+                            opctx, pool_type, ip_version,
+                        )
+                        .await?
+                    }
+                };
+                (authz_pool, pool_record.ip_version)
+            }
+        };
+        opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
+        Ok((authz_pool, pool_version))
+    }
+
+    /// Find the IP pool containing a specific IP address.
+    ///
+    /// This searches all pools linked to the current silo for a range
+    /// containing the given IP address. Since IP pool ranges cannot overlap,
+    /// at most one pool can contain any given address.
+    ///
+    /// NOTE: This also authorizes the CreateChild action on the pool.
+    pub async fn ip_pool_fetch_containing_address_in_current_silo(
+        &self,
+        opctx: &OpContext,
+        ip: IpAddr,
+        pool_type: IpPoolType,
+    ) -> LookupResult<authz::IpPool> {
+        let silo_id = opctx.authn.silo_required()?.id();
+        self.lookup_ip_pool_containing_address_on_connection(
+            opctx,
+            &*self.pool_connection_authorized(opctx).await?,
+            ip,
+            pool_type,
+            Some(silo_id),
+        )
+        .await
+        .map(|(authz, _db)| authz)
+    }
+
+    /// Fetch the IP Pool assigned to services containing the provided address.
+    pub async fn ip_pool_fetch_containing_address_for_services(
+        &self,
+        opctx: &OpContext,
+        ip: IpAddr,
+    ) -> LookupResult<(authz::IpPool, IpPool)> {
+        self.ip_pool_fetch_containing_address_for_services_on_connection(
+            opctx,
+            &*self.pool_connection_authorized(opctx).await?,
+            ip,
+        )
+        .await
+    }
+
+    pub(crate) async fn ip_pool_fetch_containing_address_for_services_on_connection(
+        &self,
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        ip: IpAddr,
+    ) -> LookupResult<(authz::IpPool, IpPool)> {
+        self.lookup_ip_pool_containing_address_on_connection(
+            opctx,
+            conn,
+            ip,
+            // System services always use unicast addresses today.
+            IpPoolType::Unicast,
+            // And have no linked silo.
+            None,
+        )
+        .await
+    }
+
+    async fn lookup_ip_pool_containing_address_on_connection(
+        &self,
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        ip: IpAddr,
+        pool_type: IpPoolType,
+        silo_id: Option<SiloUuid>,
+    ) -> LookupResult<(authz::IpPool, IpPool)> {
+        use nexus_db_schema::schema::ip_pool;
+        use nexus_db_schema::schema::ip_pool_range;
+        use nexus_db_schema::schema::ip_pool_resource;
+        let ip_network: IpNetwork = ip.into();
+        let ip_version =
+            if ip.is_ipv4() { IpVersion::V4 } else { IpVersion::V6 };
+        let mut query = ip_pool_range::table
+            .inner_join(
+                ip_pool::table.on(ip_pool::id
+                    .eq(ip_pool_range::ip_pool_id)
+                    .and(ip_pool::time_deleted.is_null())),
+            )
+            .into_boxed();
+
+        // We need to ensure the pool is linked to the provided silo, if it's
+        // Some(_). We can do that with an inner join, but that's difficult to
+        // express in Diesel. Instead, use a subquery that returns FALSE if
+        // there's no such link.
+        //
+        // NOTE: We don't do this at all for system services, and instead check
+        // that the pool itself is assigned for services.
+        if let Some(silo_id) = silo_id {
+            query = query.filter(diesel::dsl::exists(
+                ip_pool_resource::table.filter(
+                    ip_pool_resource::ip_pool_id
+                        .eq(ip_pool::id)
+                        .and(
+                            ip_pool_resource::resource_type
+                                .eq(IpPoolResourceType::Silo),
+                        )
+                        .and(
+                            ip_pool_resource::resource_id
+                                .eq(silo_id.into_untyped_uuid()),
+                        ),
+                ),
+            ));
+        } else {
+            query = query.filter(
+                ip_pool::assignment.eq(IpPoolAssignment::SystemServices),
+            );
+        }
+        let pool = query
+            .filter(ip_pool_range::time_deleted.is_null())
+            .filter(ip_pool_range::first_address.le(ip_network))
+            .filter(ip_pool_range::last_address.ge(ip_network))
+            .filter(ip_pool::pool_type.eq(pool_type))
+            .filter(ip_pool::ip_version.eq(ip_version))
+            .select(IpPool::as_select())
+            .first_async::<IpPool>(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_lookup(
+                    e,
+                    ResourceType::IpPool,
+                    &LookupType::ByCompositeId(format!(
+                        "{pool_type:?} containing address {ip}",
+                    )),
+                )
+            })?;
+
+        let lookup_type = LookupType::ByName(pool.name().to_string());
+        let authz_pool =
+            authz::IpPool::new(authz::FLEET, pool.id(), lookup_type);
+        opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
+        Ok((authz_pool, pool))
     }
 
     /// Creates a new IP pool.
@@ -203,16 +823,24 @@ impl DataStore {
         opctx: &OpContext,
         pool: IpPool,
     ) -> CreateResult<IpPool> {
-        use nexus_db_schema::schema::ip_pool::dsl;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        Self::ip_pool_create_on_connection(&conn, opctx, pool).await
+    }
+
+    pub(crate) async fn ip_pool_create_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        opctx: &OpContext,
+        pool: IpPool,
+    ) -> CreateResult<IpPool> {
         opctx
             .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
             .await?;
+        use nexus_db_schema::schema::ip_pool::dsl;
         let pool_name = pool.name().as_str().to_string();
-
         diesel::insert_into(dsl::ip_pool)
             .values(pool)
             .returning(IpPool::as_returning())
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .get_result_async(conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel(
@@ -222,12 +850,17 @@ impl DataStore {
             })
     }
 
+    /// Delete an IP Pool, and any links between it an any Silos.
+    ///
+    /// This fails if there are still IP Ranges in the pool, or if we're
+    /// deleting the last pool assigned for system services use.
     pub async fn ip_pool_delete(
         &self,
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
         db_pool: &IpPool,
     ) -> DeleteResult {
+        use nexus_db_schema::schema::external_service_ip_pool;
         use nexus_db_schema::schema::ip_pool::dsl;
         use nexus_db_schema::schema::ip_pool_range;
         use nexus_db_schema::schema::ip_pool_resource;
@@ -251,6 +884,41 @@ impl DataStore {
             ));
         }
 
+        // Verify the pool is not assigned to any external service. A concurrent
+        // assignment is caught separately by the `rcgen` check on the delete
+        // below, since assigning a pool to a service bumps its `rcgen`.
+        let assignment =
+            external_service_ip_pool::dsl::external_service_ip_pool
+                .filter(
+                    external_service_ip_pool::dsl::ip_pool_id
+                        .eq(authz_pool.id()),
+                )
+                .select(external_service_ip_pool::dsl::ip_pool_id)
+                .limit(1)
+                .first_async::<Uuid>(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+        if assignment.is_some() {
+            return Err(Error::invalid_request(
+                "IP Pool cannot be deleted while it is assigned to a service",
+            ));
+        }
+
+        // Add a small subquery, if needed, to ensure that we don't delete this
+        // IP Pool if it's the last system-services pool. There has to always be at
+        // least one of these.
+        let enough_system_services_pools =
+            if matches!(db_pool.assignment, IpPoolAssignment::Silos) {
+                diesel::dsl::sql::<sql_types::Bool>("TRUE")
+            } else {
+                diesel::dsl::sql::<sql_types::Bool>(
+                    &count_system_services_pools_subquery(db_pool.assignment),
+                )
+            };
+
         // Delete the pool, conditional on the rcgen not having changed. This
         // protects the delete from occuring if clients created a new IP range
         // in between the above check for children and this query.
@@ -259,14 +927,21 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_pool.id()))
             .filter(dsl::rcgen.eq(db_pool.rcgen))
+            .filter(enough_system_services_pools)
             .set(dsl::time_deleted.eq(now))
             .execute_async(&*conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(
+            .map_err(|e| match e {
+                DieselError::DatabaseError(
+                    DatabaseErrorKind::Unknown,
+                    ref info,
+                ) if info.message().ends_with("invalid bool value") => {
+                    Error::invalid_request(DELETE_LAST_POOL_ERROR)
+                }
+                _ => public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_pool),
-                )
+                ),
             })?;
 
         if updated_rows == 0 {
@@ -287,31 +962,6 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(())
-    }
-
-    /// Check whether the pool is internal by checking that it exists and is
-    /// associated with the internal silo
-    pub async fn ip_pool_is_internal(
-        &self,
-        opctx: &OpContext,
-        authz_pool: &authz::IpPool,
-    ) -> LookupResult<bool> {
-        use nexus_db_schema::schema::ip_pool;
-
-        ip_pool::table
-            .filter(ip_pool::id.eq(authz_pool.id()))
-            .filter(ip_pool::name.eq(SERVICE_IP_POOL_NAME))
-            .filter(ip_pool::time_deleted.is_null())
-            .select(ip_pool::id)
-            .first_async::<Uuid>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .optional()
-            // if there is a result, the pool is associated with the internal silo,
-            // which makes it the internal pool
-            .map(|result| Ok(result.is_some()))
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
     }
 
     pub async fn ip_pool_update(
@@ -338,53 +988,155 @@ impl DataStore {
             })
     }
 
-    pub async fn ip_pool_allocated_count(
+    /// Reserve an IP Pool for a specific use.
+    pub async fn ip_pool_assign(
         &self,
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
-    ) -> Result<IpsAllocated, Error> {
-        opctx.authorize(authz::Action::Read, authz_pool).await?;
-
-        use diesel::dsl::sql;
-        use diesel::sql_types::BigInt;
-        use nexus_db_schema::schema::external_ip;
-
-        let (ipv4, ipv6) = external_ip::table
-            .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
-            .filter(external_ip::time_deleted.is_null())
-            // need to do distinct IP because SNAT IPs are shared between
-            // multiple instances, and each gets its own row in the table
-            .select((
-                sql::<BigInt>(
-                    "count(distinct ip) FILTER (WHERE family(ip) = 4)",
-                ),
-                sql::<BigInt>(
-                    "count(distinct ip) FILTER (WHERE family(ip) = 6)",
-                ),
-            ))
-            .first_async::<(i64, i64)>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+        db_pool: &IpPool,
+        assignment: IpPoolAssignment,
+    ) -> UpdateResult<IpPool> {
+        if db_pool.assignment == assignment {
+            return Err(Error::invalid_request(format!(
+                "IP Pool already has assignment '{}'",
+                assignment,
+            )));
+        }
+        assign_ip_pool_query(db_pool, assignment)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        Ok(IpsAllocated { ipv4, ipv6 })
+            .map_err(|e| match e {
+                DieselError::NotFound => Error::invalid_request(
+                    "update failed due to concurrent modification",
+                ),
+                DieselError::DatabaseError(
+                    DatabaseErrorKind::Unknown,
+                    ref info,
+                ) => {
+                    let message = info.message();
+                    if matches_sentinel(&e, &[BAD_SILO_LINK_SENTINEL]).is_some()
+                    {
+                        Error::invalid_request(BAD_SILO_LINK_ERROR)
+                    } else if matches_sentinel(
+                        &e,
+                        &[ASSIGNED_TO_EXTERNAL_SERVICE_SENTINEL],
+                    )
+                    .is_some()
+                    {
+                        Error::invalid_request(
+                            ASSIGNED_TO_EXTERNAL_SERVICE_ERROR,
+                        )
+                    } else if message.contains("division by zero") {
+                        Error::invalid_request(POOL_HAS_IPS_ERROR)
+                    } else if message.starts_with("could not parse")
+                        && message.contains("as type int")
+                    {
+                        Error::invalid_request(REASSIGN_LAST_POOL_ERROR)
+                    } else {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    }
+                }
+                _ => public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_pool),
+                ),
+            })
     }
 
-    pub async fn ip_pool_total_capacity(
+    /// Return the number of IPs allocated from and the capacity of the provided
+    /// IP Pool.
+    pub async fn ip_pool_utilization(
         &self,
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
-    ) -> Result<IpsCapacity, Error> {
+    ) -> Result<(i64, u128), Error> {
         opctx.authorize(authz::Action::Read, authz_pool).await?;
         opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let (allocated, ranges) = self
+            .transaction_retry_wrapper("ip_pool_utilization")
+            .transaction(&conn, |conn| async move {
+                let allocated = self
+                    .ip_pool_allocated_count_on_connection(&conn, authz_pool)
+                    .await?;
+                let ranges = self
+                    .ip_pool_list_ranges_batched_on_connection(
+                        &conn, authz_pool,
+                    )
+                    .await?;
+                Ok((allocated, ranges))
+            })
+            .await
+            .map_err(|e| match &e {
+                DieselError::NotFound => public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_pool),
+                ),
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
+            })?;
+        let capacity = Self::accumulate_ip_range_sizes(ranges)?;
+        Ok((allocated, capacity))
+    }
 
+    /// Return the total number of IPs allocated from the provided pool.
+    #[cfg(test)]
+    async fn ip_pool_allocated_count(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+    ) -> Result<i64, Error> {
+        opctx.authorize(authz::Action::Read, authz_pool).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.ip_pool_allocated_count_on_connection(&conn, authz_pool)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    async fn ip_pool_allocated_count_on_connection(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        authz_pool: &authz::IpPool,
+    ) -> Result<i64, DieselError> {
+        use nexus_db_schema::schema::external_ip;
+        external_ip::table
+            .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
+            .filter(external_ip::time_deleted.is_null())
+            .select(count(external_ip::ip).aggregate_distinct())
+            .first_async::<i64>(conn)
+            .await
+    }
+
+    /// Return the total capacity of the provided pool.
+    #[cfg(test)]
+    async fn ip_pool_total_capacity(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+    ) -> Result<u128, Error> {
+        opctx.authorize(authz::Action::Read, authz_pool).await?;
+        opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.ip_pool_list_ranges_batched_on_connection(&conn, authz_pool)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_pool),
+                )
+            })
+            .and_then(Self::accumulate_ip_range_sizes)
+    }
+
+    async fn ip_pool_list_ranges_batched_on_connection(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        authz_pool: &authz::IpPool,
+    ) -> Result<Vec<(IpNetwork, IpNetwork)>, DieselError> {
         use nexus_db_schema::schema::ip_pool_range;
-
-        let ranges = ip_pool_range::table
+        ip_pool_range::table
             .filter(ip_pool_range::ip_pool_id.eq(authz_pool.id()))
             .filter(ip_pool_range::time_deleted.is_null())
-            .select(IpPoolRange::as_select())
+            .select((ip_pool_range::first_address, ip_pool_range::last_address))
             // This is a rare unpaginated DB query, which means we are
             // vulnerable to a resource exhaustion attack in which someone
             // creates a very large number of ranges in order to make this
@@ -394,30 +1146,28 @@ impl DataStore {
             // than 10,000 ranges in a pool, we will undercount, but I have a
             // hard time seeing that as a practical problem.
             .limit(10000)
-            .get_results_async::<IpPoolRange>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .get_results_async::<(IpNetwork, IpNetwork)>(conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_pool),
-                )
-            })?;
-
-        let mut ipv4: u32 = 0;
-        let mut ipv6: u128 = 0;
-
-        for range in &ranges {
-            let r = IpRange::from(range);
-            match r {
-                IpRange::V4(r) => ipv4 += r.len(),
-                IpRange::V6(r) => ipv6 += r.len(),
-            }
-        }
-        Ok(IpsCapacity { ipv4, ipv6 })
     }
 
+    fn accumulate_ip_range_sizes(
+        ranges: Vec<(IpNetwork, IpNetwork)>,
+    ) -> Result<u128, Error> {
+        let mut count: u128 = 0;
+        for range in ranges.into_iter() {
+            let first = range.0.ip();
+            let last = range.1.ip();
+            let r = IpRange::try_from((first, last))
+                .map_err(|e| Error::internal_error(e.as_str()))?;
+            match r {
+                IpRange::V4(r) => count += u128::from(r.len()),
+                IpRange::V6(r) => count += r.len(),
+            }
+        }
+        Ok(count)
+    }
+
+    /// List Silos linked to the given IP Pool.
     pub async fn ip_pool_silo_list(
         &self,
         opctx: &OpContext,
@@ -438,7 +1188,6 @@ impl DataStore {
         .filter(ip_pool::id.eq(authz_pool.id()))
         .filter(ip_pool::time_deleted.is_null())
         .filter(silo::time_deleted.is_null())
-        .filter(silo::discoverable.eq(true))
         .select(IpPoolResource::as_select())
         .load_async::<IpPoolResource>(
             &*self.pool_connection_authorized(opctx).await?,
@@ -447,18 +1196,22 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// List IP Pools linked to the given Silo.
+    ///
     /// Returns (IpPool, IpPoolResource) so we can know in the calling code
     /// whether the pool is default for the silo
     pub async fn silo_ip_pool_list(
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
+        ip_version: Option<IpVersion>,
+        pool_type: Option<IpPoolType>,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<(IpPool, IpPoolResource)> {
         use nexus_db_schema::schema::ip_pool;
         use nexus_db_schema::schema::ip_pool_resource;
 
-        match pagparams {
+        let mut query = match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(ip_pool::table, ip_pool::id, pagparams)
             }
@@ -467,52 +1220,105 @@ impl DataStore {
                 ip_pool::name,
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
-        }
-        .inner_join(ip_pool_resource::table)
-        .filter(ip_pool_resource::resource_id.eq(authz_silo.id()))
-        .filter(ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo))
-        .filter(ip_pool::time_deleted.is_null())
-        .select(<(IpPool, IpPoolResource)>::as_select())
-        .load_async(&*self.pool_connection_authorized(opctx).await?)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        };
+        query = match ip_version {
+            Some(v) => query.filter(ip_pool::ip_version.eq(v)),
+            None => query,
+        };
+        query = match pool_type {
+            Some(pt) => query.filter(ip_pool::pool_type.eq(pt)),
+            None => query,
+        };
+        query
+            .inner_join(ip_pool_resource::table)
+            .filter(
+                ip_pool_resource::resource_id
+                    .eq(authz_silo.id().into_untyped_uuid()),
+            )
+            .filter(
+                ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
+            )
+            .filter(ip_pool::assignment.eq(IpPoolAssignment::Silos))
+            .filter(ip_pool::time_deleted.is_null())
+            .select(<(IpPool, IpPoolResource)>::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Insert a link between an IP Pool and a Silo.
     pub async fn ip_pool_link_silo(
         &self,
         opctx: &OpContext,
-        ip_pool_resource: IpPoolResource,
+        ip_pool_resource: IncompleteIpPoolResource,
     ) -> CreateResult<IpPoolResource> {
-        use nexus_db_schema::schema::ip_pool_resource::dsl;
+        if ip_pool_resource.resource_id == INTERNAL_SILO_ID.into_untyped_uuid()
+        {
+            return Err(Error::invalid_request(
+                "IP Pools should not be linked to the internal Oxide silo. \
+                    Assign the Pool for system services use instead.",
+            ));
+        }
         opctx
             .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
             .await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
+        let result: IpPoolResource =
+            link_ip_pool_to_external_silo_query(&ip_pool_resource)
+                .get_result_async(&*conn)
+                .await
+                .map_err(|e| {
+                    match e {
+                        DieselError::DatabaseError(
+                            DatabaseErrorKind::UniqueViolation,
+                            _,
+                        ) => public_error_from_diesel(
+                            e,
+                            ErrorHandler::Conflict(
+                                ResourceType::IpPoolResource,
+                                &format!(
+                                    "ip_pool_id: {}, resource_id: {}, resource_type: {:?}",
+                                    ip_pool_resource.ip_pool_id,
+                                    ip_pool_resource.resource_id,
+                                    ip_pool_resource.resource_type,
+                                ),
+                            ),
+                        ),
+                        // Handle intentional sentinel-based errors in the query.
+                        DieselError::DatabaseError(
+                            DatabaseErrorKind::Unknown,
+                            ref info,
+                        ) => match extract_uuid_cast_sentinel(info.message()) {
+                            Some(BAD_SILO_LINK_SENTINEL) => {
+                                Error::invalid_request(BAD_SILO_LINK_ERROR)
+                            }
+                            Some(IP_POOL_DELETED_SENTINEL) => {
+                                Error::not_found_by_id(
+                                    ResourceType::IpPool,
+                                    &ip_pool_resource.ip_pool_id,
+                                )
+                            }
+                            Some(SILO_DELETED_SENTINEL) => {
+                                Error::not_found_by_id(
+                                    ResourceType::Silo,
+                                    &ip_pool_resource.resource_id,
+                                )
+                            }
+                            _ => public_error_from_diesel(e, ErrorHandler::Server),
+                        }
+                        _ => public_error_from_diesel(e, ErrorHandler::Server),
+                    }
+                })?;
 
-        let result = diesel::insert_into(dsl::ip_pool_resource)
-            .values(ip_pool_resource.clone())
-            .get_result_async(&*conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::IpPoolResource,
-                        &format!(
-                            "ip_pool_id: {:?}, resource_id: {:?}, resource_type: {:?}",
-                            ip_pool_resource.ip_pool_id,
-                            ip_pool_resource.resource_id,
-                            ip_pool_resource.resource_type,
-                        )
-                    ),
-                )
-            })?;
-
-        if ip_pool_resource.is_default {
+        // Only link default gateway for unicast pools (not multicast pools).
+        // Internet gateways are used for unicast traffic routing, not multicast.
+        if ip_pool_resource.is_default
+            && result.pool_type == IpPoolType::Unicast
+        {
             self.link_default_gateway(
                 opctx,
-                ip_pool_resource.resource_id,
+                SiloUuid::from_untyped_uuid(ip_pool_resource.resource_id),
                 ip_pool_resource.ip_pool_id,
                 &conn,
             )
@@ -522,10 +1328,22 @@ impl DataStore {
         Ok(result)
     }
 
+    // Links the default internet gateway for all VPCs in a silo to the given
+    // IP pool.
+    //
+    // This is only applicable to unicast pools, where as multicast
+    // traffic uses DPD/switch-level forwarding rather than internet gateway
+    // routing.
+    //
+    // TODO-correctness: This seems like it should be in a transaction. At
+    // least, the nested-loops can mostly be re-expressed as a join between the
+    // silos, projects, vpcs, and Internet gateway tables.
+    //
+    // See https://github.com/oxidecomputer/omicron/issues/8992.
     async fn link_default_gateway(
         &self,
         opctx: &OpContext,
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         ip_pool_id: Uuid,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> UpdateResult<()> {
@@ -536,7 +1354,7 @@ impl DataStore {
 
         let projects = project_dsl::project
             .filter(project_dsl::time_deleted.is_null())
-            .filter(project_dsl::silo_id.eq(silo_id))
+            .filter(project_dsl::silo_id.eq(to_db_typed_uuid(silo_id)))
             .select(Project::as_select())
             .load_async(conn)
             .await
@@ -545,7 +1363,7 @@ impl DataStore {
         for project in &projects {
             let vpcs = vpc_dsl::vpc
                 .filter(vpc_dsl::time_deleted.is_null())
-                .filter(vpc_dsl::project_id.eq(project.id()))
+                .filter(vpc_dsl::project_id.eq(to_db_typed_uuid(project.id())))
                 .select(Vpc::as_select())
                 .load_async(conn)
                 .await
@@ -615,10 +1433,14 @@ impl DataStore {
         Ok(())
     }
 
+    // TODO-correctness: This should probably be in a transaction, collecting
+    // all the Internet gateway IDs via a JOIN and then soft-deleting them all.
+    //
+    // See https://github.com/oxidecomputer/omicron/issues/8992.
     async fn unlink_ip_pool_gateway(
         &self,
         opctx: &OpContext,
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         ip_pool_id: Uuid,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> UpdateResult<()> {
@@ -629,7 +1451,7 @@ impl DataStore {
 
         let projects = project_dsl::project
             .filter(project_dsl::time_deleted.is_null())
-            .filter(project_dsl::silo_id.eq(silo_id))
+            .filter(project_dsl::silo_id.eq(to_db_typed_uuid(silo_id)))
             .select(Project::as_select())
             .load_async(conn)
             .await
@@ -638,7 +1460,7 @@ impl DataStore {
         for project in &projects {
             let vpcs = vpc_dsl::vpc
                 .filter(vpc_dsl::time_deleted.is_null())
-                .filter(vpc_dsl::project_id.eq(project.id()))
+                .filter(vpc_dsl::project_id.eq(to_db_typed_uuid(project.id())))
                 .select(Vpc::as_select())
                 .load_async(conn)
                 .await
@@ -677,6 +1499,12 @@ impl DataStore {
         Ok(())
     }
 
+    /// Set or unset a pool as the default for a silo.
+    ///
+    /// A silo can have at most one default pool per combination of pool type
+    /// (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4
+    /// default pools total. When setting a pool as default, only the existing
+    /// default with the same (pool_type, ip_version) will be demoted.
     pub async fn ip_pool_set_default(
         &self,
         opctx: &OpContext,
@@ -684,6 +1512,8 @@ impl DataStore {
         authz_silo: &authz::Silo,
         is_default: bool,
     ) -> UpdateResult<IpPoolResource> {
+        use diesel::dsl::exists;
+        use nexus_db_schema::schema::ip_pool::dsl as pool_dsl;
         use nexus_db_schema::schema::ip_pool_resource::dsl;
 
         opctx.authorize(authz::Action::Modify, authz_ip_pool).await?;
@@ -694,211 +1524,110 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        // if we're making is_default false, we can just do that without
-        // checking any other stuff
         if !is_default {
-            let updated_link = diesel::update(dsl::ip_pool_resource)
-                .filter(dsl::resource_id.eq(silo_id))
+            // Simple case: just unset the default flag.
+            return diesel::update(dsl::ip_pool_resource)
+                .filter(dsl::resource_id.eq(silo_id.into_untyped_uuid()))
                 .filter(dsl::ip_pool_id.eq(ip_pool_id))
                 .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
+                .filter(exists(
+                    pool_dsl::ip_pool
+                        .filter(pool_dsl::id.eq(ip_pool_id))
+                        .filter(pool_dsl::time_deleted.is_null())
+                        .select(pool_dsl::id),
+                ))
                 .set(dsl::is_default.eq(false))
                 .returning(IpPoolResource::as_returning())
                 .get_result_async(&*conn)
                 .await
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "Transaction error: {:?}",
-                        e
-                    ))
-                })?;
-            return Ok(updated_link);
+                .map_err(|e| match e {
+                    DieselError::NotFound => {
+                        LookupType::ByCompositeId(format!(
+                            "ip_pool_id: {}, silo_id: {}",
+                            ip_pool_id, silo_id,
+                        ))
+                        .into_not_found(ResourceType::IpPoolResource)
+                    }
+                    e => public_error_from_diesel(e, ErrorHandler::Server),
+                });
         }
 
-        // Errors returned from the below transactions.
-        #[derive(Debug)]
-        enum IpPoolResourceUpdateError {
-            FailedToUnsetDefault(DieselError),
-        }
-        type TxnError = TransactionError<IpPoolResourceUpdateError>;
-
-        let err = OptionalError::new();
-
+        // Setting as default: demote any existing default for the same
+        // (silo, pool_type, ip_version), then promote this one.
         self.transaction_retry_wrapper("ip_pool_set_default")
             .transaction(&conn, |conn| {
-                let err = err.clone();
                 async move {
-                    // note this is matching the specified silo, but could be any pool
-                    let existing_default_for_silo = dsl::ip_pool_resource
+                    // Read this link to get its pool_type and ip_version, and
+                    // revalidate that the parent pool is still live. This is
+                    // only possible during the narrow window in a concurrent
+                    // pool delete after the pool has been soft-deleted but
+                    // before its link rows have been removed.
+                    let link = dsl::ip_pool_resource
+                        .inner_join(
+                            pool_dsl::ip_pool
+                                .on(pool_dsl::id.eq(dsl::ip_pool_id)),
+                        )
+                        .filter(dsl::ip_pool_id.eq(ip_pool_id))
+                        .filter(
+                            dsl::resource_id.eq(silo_id.into_untyped_uuid()),
+                        )
                         .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
-                        .filter(dsl::resource_id.eq(silo_id))
-                        .filter(dsl::is_default.eq(true))
+                        .filter(pool_dsl::time_deleted.is_null())
                         .select(IpPoolResource::as_select())
                         .get_result_async(&conn)
-                        .await;
+                        .await?;
 
-                    // if there is an existing default, we need to unset it before we can
-                    // set the new default
-                    if let Ok(existing_default) = existing_default_for_silo {
-                        // if the pool we're making default is already default for this
-                        // silo, don't error: just noop
-                        if existing_default.ip_pool_id == ip_pool_id {
-                            return Ok(existing_default);
-                        }
-
-                        let unset_default =
-                            diesel::update(dsl::ip_pool_resource)
-                                .filter(
-                                    dsl::resource_id
-                                        .eq(existing_default.resource_id),
-                                )
-                                .filter(
-                                    dsl::ip_pool_id
-                                        .eq(existing_default.ip_pool_id),
-                                )
-                                .filter(
-                                    dsl::resource_type
-                                        .eq(existing_default.resource_type),
-                                )
-                                .set(dsl::is_default.eq(false))
-                                .execute_async(&conn)
-                                .await;
-                        if let Err(e) = unset_default {
-                            return Err(err.bail(TxnError::CustomError(
-                                IpPoolResourceUpdateError::FailedToUnsetDefault(
-                                    e,
-                                ),
-                            )));
-                        }
+                    // Already default — no-op.
+                    if link.is_default {
+                        return Ok(link);
                     }
 
-                    let updated_link = diesel::update(dsl::ip_pool_resource)
-                        .filter(dsl::resource_id.eq(silo_id))
-                        .filter(dsl::ip_pool_id.eq(ip_pool_id))
-                        .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
-                        .set(dsl::is_default.eq(true))
-                        .returning(IpPoolResource::as_returning())
-                        .get_result_async(&conn)
-                        .await?;
-                    Ok(updated_link)
-                }
-            })
-            .await
-            .map_err(|e| match err.take() {
-                Some(TxnError::CustomError(
-                    IpPoolResourceUpdateError::FailedToUnsetDefault(err),
-                )) => public_error_from_diesel(err, ErrorHandler::Server),
-                Some(TxnError::Database(err)) => {
-                    public_error_from_diesel(err, ErrorHandler::Server)
-                }
-                None => {
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::NotFoundByLookup(
-                            ResourceType::IpPoolResource,
-                            // TODO: would be nice to put the actual names and/or ids in
-                            // here but LookupType on each of the two silos doesn't have
-                            // a nice to_string yet or a way of composing them
-                            LookupType::ByCompositeId(
-                                "(pool, silo)".to_string(),
-                            ),
-                        ),
+                    // Demote any existing default for same
+                    // (silo, pool_type, ip_version).
+                    diesel::update(
+                        dsl::ip_pool_resource
+                            .filter(
+                                dsl::resource_id
+                                    .eq(silo_id.into_untyped_uuid()),
+                            )
+                            .filter(
+                                dsl::resource_type.eq(IpPoolResourceType::Silo),
+                            )
+                            .filter(dsl::pool_type.eq(link.pool_type))
+                            .filter(dsl::ip_version.eq(link.ip_version))
+                            .filter(dsl::is_default.eq(true)),
                     )
+                    .set(dsl::is_default.eq(false))
+                    .execute_async(&conn)
+                    .await?;
+
+                    // Promote this one.
+                    diesel::update(
+                        dsl::ip_pool_resource
+                            .filter(dsl::ip_pool_id.eq(ip_pool_id))
+                            .filter(
+                                dsl::resource_id
+                                    .eq(silo_id.into_untyped_uuid()),
+                            )
+                            .filter(
+                                dsl::resource_type.eq(IpPoolResourceType::Silo),
+                            ),
+                    )
+                    .set(dsl::is_default.eq(true))
+                    .returning(IpPoolResource::as_returning())
+                    .get_result_async(&conn)
+                    .await
                 }
             })
-    }
-
-    /// Ephemeral and snat IPs are associated with a silo through an instance,
-    /// so in order to see if there are any such IPs outstanding in the given
-    /// silo, we have to join IP -> Instance -> Project -> Silo
-    async fn ensure_no_instance_ips_outstanding(
-        &self,
-        opctx: &OpContext,
-        authz_pool: &authz::IpPool,
-        authz_silo: &authz::Silo,
-    ) -> Result<(), Error> {
-        use nexus_db_schema::schema::external_ip;
-        use nexus_db_schema::schema::instance;
-        use nexus_db_schema::schema::project;
-
-        let existing_ips = external_ip::table
-            .inner_join(
-                instance::table
-                    .on(external_ip::parent_id.eq(instance::id.nullable())),
-            )
-            .inner_join(project::table.on(instance::project_id.eq(project::id)))
-            .filter(external_ip::is_service.eq(false))
-            .filter(external_ip::parent_id.is_not_null())
-            .filter(external_ip::time_deleted.is_null())
-            .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
-            // important, floating IPs are handled separately
-            .filter(external_ip::kind.eq(IpKind::Ephemeral).or(external_ip::kind.eq(IpKind::SNat)))
-            .filter(instance::time_deleted.is_null())
-            // we have to join through IPs to instances to projects to get the silo ID
-            .filter(project::silo_id.eq(authz_silo.id()))
-            .select(ExternalIp::as_select())
-            .limit(1)
-            .load_async::<ExternalIp>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
             .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error checking for outstanding IPs before deleting IP pool association to resource: {:?}",
-                    e
+            .map_err(|e| match e {
+                DieselError::NotFound => LookupType::ByCompositeId(format!(
+                    "ip_pool_id: {}, silo_id: {}",
+                    ip_pool_id, silo_id,
                 ))
-            })?;
-
-        if !existing_ips.is_empty() {
-            return Err(Error::invalid_request(
-                "IP addresses from this pool are in use in the linked silo",
-            ));
-        }
-
-        Ok(())
-    }
-
-    /// Floating IPs are associated with a silo through a project, so this one
-    /// is a little simpler than ephemeral. We join IP -> Project -> Silo.
-    async fn ensure_no_floating_ips_outstanding(
-        &self,
-        opctx: &OpContext,
-        authz_pool: &authz::IpPool,
-        authz_silo: &authz::Silo,
-    ) -> Result<(), Error> {
-        use nexus_db_schema::schema::external_ip;
-        use nexus_db_schema::schema::project;
-
-        let existing_ips = external_ip::table
-            .inner_join(project::table.on(external_ip::project_id.eq(project::id.nullable())))
-            .filter(external_ip::is_service.eq(false))
-            .filter(external_ip::time_deleted.is_null())
-            // all floating IPs have a project
-            .filter(external_ip::project_id.is_not_null())
-            .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
-            .filter(external_ip::kind.eq(IpKind::Floating))
-            // we have to join through IPs to projects to get the silo ID
-            .filter(project::silo_id.eq(authz_silo.id()))
-            .filter(project::time_deleted.is_null())
-            .select(ExternalIp::as_select())
-            .limit(1)
-            .load_async::<ExternalIp>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error checking for outstanding IPs before deleting IP pool association to resource: {:?}",
-                    e
-                ))
-            })?;
-
-        if !existing_ips.is_empty() {
-            return Err(Error::invalid_request(
-                "IP addresses from this pool are in use in the linked silo",
-            ));
-        }
-
-        Ok(())
+                .into_not_found(ResourceType::IpPoolResource),
+                e => public_error_from_diesel(e, ErrorHandler::Server),
+            })
     }
 
     /// Delete IP pool assocation with resource unless there are outstanding
@@ -909,33 +1638,44 @@ impl DataStore {
         authz_pool: &authz::IpPool,
         authz_silo: &authz::Silo,
     ) -> DeleteResult {
-        use nexus_db_schema::schema::ip_pool_resource;
-
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
         opctx.authorize(authz::Action::Modify, authz_silo).await?;
 
-        // We can only delete the association if there are no IPs allocated
-        // from this pool in the associated resource.
-        self.ensure_no_instance_ips_outstanding(opctx, authz_pool, authz_silo)
-            .await?;
-        self.ensure_no_floating_ips_outstanding(opctx, authz_pool, authz_silo)
-            .await?;
+        if authz_silo.id() == INTERNAL_SILO_ID {
+            return Err(Error::internal_error(
+                "Cannot unlink an IP Pool assigned for system services. \
+                    Use the `assignment` column instead.",
+            ));
+        }
 
         let conn = self.pool_connection_authorized(opctx).await?;
+        unlink_ip_pool_from_external_silo_query(
+            authz_pool.id(),
+            authz_silo.id(),
+        )
+        .execute_async(&*conn)
+        .await
+        .map_err(|e| match e {
+            DieselError::DatabaseError(
+                DatabaseErrorKind::Unknown,
+                ref info,
+            ) => {
+                let msg = info.message();
+                // Intentional bool-parsing error, which we use to detect
+                // when there are still external IPs in the Silo.
+                if msg.contains("could not parse")
+                    && msg.ends_with("invalid bool value")
+                {
+                    Error::invalid_request(POOL_HAS_IPS_ERROR)
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            }
+            _ => public_error_from_diesel(e, ErrorHandler::Server),
+        })?;
 
-        diesel::delete(ip_pool_resource::table)
-            .filter(ip_pool_resource::ip_pool_id.eq(authz_pool.id()))
-            .filter(ip_pool_resource::resource_id.eq(authz_silo.id()))
-            .execute_async(&*conn)
-            .await
-            .map(|_rows_deleted| ())
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error deleting IP pool association to resource: {:?}",
-                    e
-                ))
-            })?;
-
+        // TODO-correctness: We probably want to do this in the same transaction
+        // as above. See https://github.com/oxidecomputer/omicron/issues/8992.
         self.unlink_ip_pool_gateway(
             opctx,
             authz_silo.id(),
@@ -982,7 +1722,10 @@ impl DataStore {
     ) -> ListResultVec<IpPoolRange> {
         opctx.check_complex_operations_allowed()?;
         let mut ip_ranges = Vec::new();
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let batch = self
                 .ip_pool_list_ranges(opctx, &authz_pool, &p.current_pagparams())
@@ -1000,11 +1743,14 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
+        pool: &IpPool,
         range: &IpRange,
     ) -> CreateResult<IpPoolRange> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        Self::ip_pool_add_range_on_connection(&conn, opctx, authz_pool, range)
-            .await
+        Self::ip_pool_add_range_on_connection(
+            &conn, opctx, authz_pool, pool, range,
+        )
+        .await
     }
 
     /// Variant of [Self::ip_pool_add_range] which may be called from a
@@ -1013,11 +1759,42 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
+        pool: &IpPool,
         range: &IpRange,
     ) -> CreateResult<IpPoolRange> {
         use nexus_db_schema::schema::ip_pool_range::dsl;
         opctx.authorize(authz::Action::CreateChild, authz_pool).await?;
+
+        // Sanity check that the provided DB and authz pools match.
+        if pool.id() != authz_pool.id() {
+            return Err(Error::internal_error(&format!(
+                "DB and authz IP Pool object IDs must match, but \
+                DB ID is '{}' and authz ID is '{}'",
+                pool.id(),
+                authz_pool.id(),
+            )));
+        }
+
+        // First ensure the IP range matches the IP version of the pool.
         let pool_id = authz_pool.id();
+        if pool.ip_version != range.version().into() {
+            return Err(Error::invalid_request(format!(
+                "Cannot add IP{} address range to \
+                IP{} pool with ID \"{}\"",
+                range.version(),
+                pool.ip_version,
+                pool_id,
+            )));
+        }
+
+        // For multicast pools, validate ASM/SSM separation
+        if pool.pool_type == IpPoolType::Multicast {
+            Self::validate_multicast_pool_range_consistency_on_conn(
+                conn, authz_pool, range,
+            )
+            .await?;
+        }
+
         let new_range = IpPoolRange::new(range, pool_id);
         let filter_subquery = FilterOverlappingIpRanges { range: new_range };
         let insert_query =
@@ -1041,7 +1818,7 @@ impl DataStore {
                         Error::invalid_request(
                             format!(
                                 "The provided IP range {}-{} overlaps with \
-                            an existing range",
+                            an existing IP pool range or subnet pool member",
                                 range.first_address(),
                                 range.last_address(),
                             )
@@ -1063,6 +1840,7 @@ impl DataStore {
     ) -> DeleteResult {
         use nexus_db_schema::schema::external_ip;
         use nexus_db_schema::schema::ip_pool_range::dsl;
+        use nexus_db_schema::schema::multicast_group;
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
 
         let pool_id = authz_pool.id();
@@ -1113,6 +1891,23 @@ impl DataStore {
             ));
         }
 
+        // Find multicast groups allocated out of this pool and range.
+        let has_multicast_groups = diesel::dsl::select(diesel::dsl::exists(
+            multicast_group::table
+                .filter(multicast_group::dsl::ip_pool_id.eq(pool_id))
+                .filter(multicast_group::dsl::ip_pool_range_id.eq(range_id))
+                .filter(multicast_group::dsl::time_deleted.is_null()),
+        ))
+        .get_result_async::<bool>(&*conn)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        if has_multicast_groups {
+            return Err(Error::invalid_request(
+                "IP pool ranges cannot be deleted while \
+                    multicast groups are allocated from them",
+            ));
+        }
+
         // Delete the range, conditional on the rcgen not having changed. This
         // protects the delete from occuring if clients allocated a new external
         // IP address in between the above check for children and this query.
@@ -1136,26 +1931,824 @@ impl DataStore {
             ))
         }
     }
+
+    /// Validate that a new range being added to a multicast pool is consistent
+    /// with existing ranges in the pool, i.e., that we don't mix ASM and SSM
+    /// ranges in the same pool.
+    ///
+    /// This validation is at the DB layer (rather than the app layer) because
+    /// it requires checking existing ranges within a transaction to prevent
+    /// race conditions.
+    ///
+    /// Note: Reserved range validation (link-local, admin-scoped, etc.)
+    /// is done at the app layer in `validate_multicast_range` since those
+    /// checks are stateless.
+    ///
+    /// Takes in a connection so it can be called from within a
+    /// transaction context.
+    async fn validate_multicast_pool_range_consistency_on_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        authz_pool: &authz::IpPool,
+        range: &IpRange,
+    ) -> Result<(), Error> {
+        use nexus_db_schema::schema::ip_pool_range::dsl;
+
+        let new_range_is_ssm = match range {
+            IpRange::V4(v4_range) => {
+                let first = v4_range.first_address();
+                IPV4_SSM_SUBNET.contains(first)
+            }
+            IpRange::V6(v6_range) => {
+                let first = v6_range.first_address();
+                IPV6_SSM_SUBNET.contains(first)
+            }
+        };
+
+        // Query existing ranges within THIS pool only
+        let existing_ranges: Vec<IpPoolRange> = dsl::ip_pool_range
+            .filter(dsl::ip_pool_id.eq(authz_pool.id()))
+            .filter(dsl::time_deleted.is_null())
+            .get_results_async(conn)
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "Failed to fetch existing IP pool ranges: {}",
+                    e
+                ))
+            })?;
+
+        // Check if any existing range conflicts with the new range type
+        for existing_range in &existing_ranges {
+            let existing_is_ssm = match &existing_range.first_address {
+                IpNetwork::V4(net) => IPV4_SSM_SUBNET.contains(net.network()),
+                IpNetwork::V6(net) => IPV6_SSM_SUBNET.contains(net.network()),
+            };
+
+            // If we have a mix of ASM and SSM within this pool, reject
+            if new_range_is_ssm != existing_is_ssm {
+                let new_type = if new_range_is_ssm { "SSM" } else { "ASM" };
+                let existing_type = if existing_is_ssm { "SSM" } else { "ASM" };
+                return Err(Error::invalid_request(&format!(
+                    "Cannot mix {new_type} and {existing_type} ranges in the same multicast pool"
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Determine whether a multicast IP pool is SSM (true) or ASM (false).
+    /// Assumes pools are range-consistent (validated on range insertion).
+    pub async fn multicast_pool_is_ssm(
+        &self,
+        opctx: &OpContext,
+        pool_id: Uuid,
+    ) -> LookupResult<bool> {
+        use nexus_db_schema::schema::ip_pool_range::dsl;
+
+        // Fetch any active range for the pool. Validation at insert time
+        // guarantees consistency across ranges in a multicast pool.
+        let range = dsl::ip_pool_range
+            .filter(dsl::ip_pool_id.eq(pool_id))
+            .filter(dsl::time_deleted.is_null())
+            .select(IpPoolRange::as_select())
+            .first_async::<IpPoolRange>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let Some(range) = range else {
+            return Err(Error::insufficient_capacity(
+                "No IP ranges available in multicast pool",
+                "multicast pool has no active ranges",
+            ));
+        };
+
+        let is_ssm = match range.first_address {
+            IpNetwork::V4(net) => IPV4_SSM_SUBNET.contains(net.network()),
+            IpNetwork::V6(net) => IPV6_SSM_SUBNET.contains(net.network()),
+        };
+
+        Ok(is_ssm)
+    }
+
+    /// Look up an SSM multicast pool linked to the caller's silo.
+    ///
+    /// Per [RFC 4607], Source-Specific Multicast (SSM) addresses (IPv4 232/8,
+    /// IPv6 ff3x::/32) are used when source IPs are specified. This method
+    /// finds pools with ranges in these SSM address spaces, which is required
+    /// when creating a multicast group with `source_ips` but without an
+    /// explicit pool or IP address.
+    ///
+    /// Prefers the default pool if one exists. If no default exists, falls
+    /// back to any linked SSM pool, selecting alphabetically by name (arbitrary
+    /// tie-breaker).
+    ///
+    /// If `ip_version` is `None` and there are multiple SSM pools with
+    /// different IP versions, returns an error asking the caller to specify
+    /// which version.
+    ///
+    /// [RFC 4607]: https://datatracker.ietf.org/doc/html/rfc4607
+    pub async fn ip_pools_fetch_ssm_multicast(
+        &self,
+        opctx: &OpContext,
+        ip_version: Option<IpVersion>,
+    ) -> LookupResult<(authz::IpPool, IpPool)> {
+        use nexus_db_schema::schema::ip_pool;
+        use nexus_db_schema::schema::ip_pool_range;
+        use nexus_db_schema::schema::ip_pool_resource;
+
+        let authz_silo_id = opctx.authn.silo_required()?.id();
+        let lookup_type =
+            LookupType::ByOther("SSM multicast pool for current silo".into());
+
+        // We need to find multicast pools with SSM ranges.
+        // SSM ranges are: IPv4 232.0.0.0/8, IPv6 ff3x::/32
+        let mut query = ip_pool::table
+            .inner_join(ip_pool_resource::table)
+            .inner_join(
+                ip_pool_range::table
+                    .on(ip_pool_range::ip_pool_id.eq(ip_pool::id)),
+            )
+            .filter(
+                ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
+            )
+            .filter(
+                ip_pool_resource::resource_id
+                    .eq(authz_silo_id.into_untyped_uuid()),
+            )
+            .filter(ip_pool::time_deleted.is_null())
+            .filter(ip_pool_range::time_deleted.is_null())
+            .filter(ip_pool::pool_type.eq(IpPoolType::Multicast))
+            .into_boxed();
+
+        // Filter by IP version if specified
+        if let Some(version) = ip_version {
+            query = query.filter(ip_pool::ip_version.eq(version));
+        }
+
+        let pools: Vec<(IpPool, IpPoolRange, bool)> = query
+            // Prefer default pool, then alphabetically by name
+            .order((ip_pool_resource::is_default.desc(), ip_pool::name.asc()))
+            .select((
+                IpPool::as_select(),
+                IpPoolRange::as_select(),
+                ip_pool_resource::is_default,
+            ))
+            .load_async::<(IpPool, IpPoolRange, bool)>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // Collect all SSM pools (deduplicating by pool ID)
+        let mut ssm_pools: Vec<IpPool> = Vec::new();
+        let mut seen_pool_ids = HashSet::new();
+        for (pool, range, _is_default) in pools {
+            let is_ssm = match range.first_address {
+                IpNetwork::V4(net) => IPV4_SSM_SUBNET.contains(net.network()),
+                IpNetwork::V6(net) => IPV6_SSM_SUBNET.contains(net.network()),
+            };
+
+            if is_ssm && seen_pool_ids.insert(pool.id()) {
+                ssm_pools.push(pool);
+            }
+        }
+
+        // If `ip_version` was not specified and we have multiple SSM pools of
+        // different IP versions, return an error asking the caller to specify
+        // which version.
+        if ip_version.is_none() && ssm_pools.len() > 1 {
+            let has_v4 =
+                ssm_pools.iter().any(|p| p.ip_version == IpVersion::V4);
+            let has_v6 =
+                ssm_pools.iter().any(|p| p.ip_version == IpVersion::V6);
+            if has_v4 && has_v6 {
+                return Err(Error::invalid_request(
+                    "Multiple SSM multicast IP pools exist with different \
+                     IP versions. Please specify ip_version (v4 or v6) or \
+                     provide an explicit pool.",
+                ));
+            }
+        }
+
+        match ssm_pools.into_iter().next() {
+            None => Err(public_error_from_diesel_lookup(
+                DieselError::NotFound,
+                ResourceType::IpPool,
+                &lookup_type,
+            )),
+            Some(pool) => {
+                let authz_pool =
+                    authz::IpPool::new(authz::FLEET, pool.id(), lookup_type);
+                Ok((authz_pool, pool))
+            }
+        }
+    }
+
+    /// Look up an ASM multicast pool linked to the caller's silo.
+    ///
+    /// ASM (Any-Source Multicast) addresses are multicast ranges that are not
+    /// in the SSM spaces (IPv4 232/8, IPv6 ff3x::/32). This method finds pools
+    /// with ranges outside those SSM address spaces. Use this when creating a
+    /// multicast group without `source_ips` and without an explicit pool or IP
+    /// address, to ensure an ASM-range pool is selected.
+    ///
+    /// Prefers the default pool if one exists. If no default exists, falls
+    /// back to any linked ASM pool, selecting alphabetically by name
+    /// (arbitrary tie-breaker).
+    ///
+    /// If `ip_version` is `None` and there are multiple ASM pools with different
+    /// IP versions, returns an error asking the caller to specify which version.
+    pub async fn ip_pools_fetch_asm_multicast(
+        &self,
+        opctx: &OpContext,
+        ip_version: Option<IpVersion>,
+    ) -> LookupResult<(authz::IpPool, IpPool)> {
+        use nexus_db_schema::schema::ip_pool;
+        use nexus_db_schema::schema::ip_pool_range;
+        use nexus_db_schema::schema::ip_pool_resource;
+
+        let authz_silo_id = opctx.authn.silo_required()?.id();
+        let lookup_type =
+            LookupType::ByOther("ASM multicast pool for current silo".into());
+
+        let mut query = ip_pool::table
+            .inner_join(ip_pool_resource::table)
+            .inner_join(
+                ip_pool_range::table
+                    .on(ip_pool_range::ip_pool_id.eq(ip_pool::id)),
+            )
+            .filter(
+                ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
+            )
+            .filter(
+                ip_pool_resource::resource_id
+                    .eq(authz_silo_id.into_untyped_uuid()),
+            )
+            .filter(ip_pool::time_deleted.is_null())
+            .filter(ip_pool_range::time_deleted.is_null())
+            .filter(ip_pool::pool_type.eq(IpPoolType::Multicast))
+            .into_boxed();
+
+        // Filter by IP version if specified
+        if let Some(version) = ip_version {
+            query = query.filter(ip_pool::ip_version.eq(version));
+        }
+
+        let pools: Vec<(IpPool, IpPoolRange, bool)> = query
+            // Prefer default pool, then alphabetically by name
+            .order((ip_pool_resource::is_default.desc(), ip_pool::name.asc()))
+            .select((
+                IpPool::as_select(),
+                IpPoolRange::as_select(),
+                ip_pool_resource::is_default,
+            ))
+            .load_async::<(IpPool, IpPoolRange, bool)>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // Collect all ASM pools (deduplicating by pool ID)
+        let mut asm_pools: Vec<IpPool> = Vec::new();
+        let mut seen_pool_ids = HashSet::new();
+        for (pool, range, _is_default) in pools {
+            let is_ssm = match range.first_address {
+                IpNetwork::V4(net) => IPV4_SSM_SUBNET.contains(net.network()),
+                IpNetwork::V6(net) => IPV6_SSM_SUBNET.contains(net.network()),
+            };
+
+            if !is_ssm && seen_pool_ids.insert(pool.id()) {
+                asm_pools.push(pool);
+            }
+        }
+
+        // If `ip_version` was not specified and we have multiple ASM pools of
+        // different IP versions, return an error asking the caller to specify
+        // which version.
+        if ip_version.is_none() && asm_pools.len() > 1 {
+            let has_v4 =
+                asm_pools.iter().any(|p| p.ip_version == IpVersion::V4);
+            let has_v6 =
+                asm_pools.iter().any(|p| p.ip_version == IpVersion::V6);
+            if has_v4 && has_v6 {
+                return Err(Error::invalid_request(
+                    "Multiple ASM multicast IP pools exist with different \
+                     IP versions. Please specify ip_version (v4 or v6) or \
+                     provide an explicit pool.",
+                ));
+            }
+        }
+
+        match asm_pools.into_iter().next() {
+            None => Err(public_error_from_diesel_lookup(
+                DieselError::NotFound,
+                ResourceType::IpPool,
+                &lookup_type,
+            )),
+            Some(pool) => {
+                let authz_pool =
+                    authz::IpPool::new(authz::FLEET, pool.id(), lookup_type);
+                Ok((authz_pool, pool))
+            }
+        }
+    }
+}
+
+// Sentinel we try to cast as a UUID in the database, when linking a
+// system-services pool to a silo, or trying to assign a silo-linked pool for
+// system services use.
+const BAD_SILO_LINK_SENTINEL: &str = "bad-link-type";
+
+// Sentinel we try to cast as a UUID in the database when the IP Pool is
+// deleted between selecting it and trying to insert the link.
+const IP_POOL_DELETED_SENTINEL: &str = "ip-pool-deleted";
+
+// Sentinel we try to cast as a UUID in the database when the Silo is deleted
+// between selecting it and trying to insert the link.
+const SILO_DELETED_SENTINEL: &str = "silo-deleted";
+
+// Sentinel we try to cast as an integer when trying to reassign the last
+// system-services pool of a given type.
+const LAST_POOL_SENTINEL: &str = "last-pool";
+
+// Sentinel we try to cast as a bool when a user attempts to assign a pool from
+// system serivces to silos, and that pool is currently assigned to a specific
+// external service, e.g., Nexus.
+const ASSIGNED_TO_EXTERNAL_SERVICE_SENTINEL: &str = "assigned-to-services";
+
+/// Extract the sentinel string from a UUID cast error message.
+///
+/// When our SQL queries intentionally fail a UUID cast to signal an error
+/// condition, CRDB returns an error like `uuid: incorrect UUID length: <sentinel>`.
+/// This function extracts the sentinel so we can match on it.
+fn extract_uuid_cast_sentinel(msg: &str) -> Option<&str> {
+    const PREFIX: &str = "uuid: incorrect UUID length: ";
+    msg.rsplit_once(PREFIX).map(|(_, sentinel)| sentinel)
+}
+
+// Query to conditionally link an IP Pool to an external customer Silo.
+//
+// This method returns a SQL query to conditionally insert a link between an IP
+// Pool and a Silo. It maintains the invariant that a pool is assigned for
+// system services XOR linked to customer silos. It also checks that the pool
+// and silo still exist when the query is run.
+//
+// See `tests/output/ip_pool_external_silo_link.sql` for the full generated SQL.
+fn link_ip_pool_to_external_silo_query(
+    ip_pool_resource: &IncompleteIpPoolResource,
+) -> TypedSqlQuery<SelectableSql<IpPoolResource>> {
+    let mut builder = QueryBuilder::new();
+    // `ip_pool` CTE: select the pool by ID, ensuring it still exists.
+    // Fail with a 'bad-link-type' sentinel (via CAST-to-UUID trick) if
+    // the pool is assigned for system services rather than silos.
+    // Also selects pool_type and ip_version for denormalization into
+    // ip_pool_resource (needed for a partial index constraint on defaults).
+    builder
+        .sql("WITH ip_pool AS (SELECT CAST(IF(assignment != ")
+        .param()
+        .bind::<IpPoolAssignmentEnum, _>(IpPoolAssignment::Silos)
+        .sql(", '")
+        .sql(BAD_SILO_LINK_SENTINEL)
+        .sql("', ")
+        .param()
+        .bind::<sql_types::Text, _>(ip_pool_resource.ip_pool_id.to_string())
+        .sql(") AS UUID) AS id, pool_type, ip_version FROM ip_pool WHERE id = ")
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool_resource.ip_pool_id)
+        .sql(" AND time_deleted IS NULL), ");
+
+    // `silo` CTE: select the silo by ID, ensuring it still exists.
+    builder
+        .sql("silo AS (SELECT id FROM silo WHERE id = ")
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool_resource.resource_id)
+        .sql(" AND time_deleted IS NULL) ");
+
+    // Use COALESCE(CAST(id AS STRING), '<sentinel>') to detect missing
+    // pool/silo: if the CTE returned no rows the LEFT JOIN produces NULL,
+    // COALESCE substitutes the sentinel, and CAST-to-UUID fails at runtime
+    // with a recognizable error message.
+    builder
+        .sql(
+            "INSERT INTO ip_pool_resource (\
+                ip_pool_id, \
+                resource_type, \
+                resource_id, \
+                is_default, \
+                pool_type, \
+                ip_version\
+            ) SELECT CAST(COALESCE(CAST(ip.id AS STRING), '",
+        )
+        .sql(IP_POOL_DELETED_SENTINEL)
+        .sql("') AS UUID), ")
+        .param()
+        .bind::<nexus_db_schema::enums::IpPoolResourceTypeEnum, _>(
+            ip_pool_resource.resource_type,
+        )
+        .sql(", CAST(COALESCE(CAST(s.id AS STRING), '")
+        .sql(SILO_DELETED_SENTINEL)
+        .sql("') AS UUID), ")
+        .param()
+        .bind::<sql_types::Bool, _>(ip_pool_resource.is_default)
+        .sql(
+            ", ip.pool_type, ip.ip_version \
+            FROM (SELECT 1) AS dummy \
+            LEFT JOIN ip_pool AS ip ON TRUE \
+            LEFT JOIN silo AS s ON TRUE \
+            RETURNING *",
+        );
+    builder.query()
+}
+
+// Query to conditionally unlink an IP Pool from an external / customer Silo.
+//
+// This deletes the link iff there are no remaining instance external IPs or
+// floating IPs in the Silo. Multicast groups aren't silo-scoped at the row
+// level (they're explicitly cross-silo), so we additionally block unlinking
+// while any remain (groups in the deleting state still hold their pool IP),
+// mirroring `ip_pool_delete_range`. A group allocated from this pool by any
+// silo blocks unlinking from every silo linked to the pool.
+//
+// The full query is:
+//
+// ```
+// -- This CTE returns one row if there are any external IPs attached to
+// -- instances in any projects in the Silo.
+// WITH instance_ips AS (
+//   SELECT 1
+//   FROM external_ip
+//   INNER JOIN instance ON external_ip.parent_id = instance.id
+//   INNER JOIN project ON instance.project_id = project.id
+//   WHERE
+//       external_ip.is_service = FALSE AND
+//       external_ip.parent_id IS NOT NULL AND
+//       external_ip.time_deleted IS NULL AND
+//       external_ip.ip_pool_id = $1 AND
+//       external_ip.kind != 'floating' AND
+//       instance.time_deleted IS NULL AND
+//       project.silo_id = $2
+//   LIMIT 1
+// ),
+// -- This CTE returns one row if there are any Floating IPs in the Silo,
+// -- whether they're attached or not.
+// floating_ips AS (
+//   SELECT 1
+//   FROM external_ip
+//   INNER JOIN project ON external_ip.project_id = project.id
+//   WHERE
+//       external_ip.is_service = FALSE AND
+//       external_ip.time_deleted IS NULL AND
+//       external_ip.project_id IS NOT NULL AND
+//       external_ip.ip_pool_id = $3 AND
+//       external_ip.kind = 'floating' AND
+//       project.silo_id = $4 AND
+//       project.time_deleted IS NULL
+//   LIMIT 1
+// ),
+// -- This CTE returns one row if any multicast groups are allocated out of
+// -- the pool. Groups are cross-silo by design, so the existence check is
+// -- not silo-scoped.
+// multicast_groups AS (
+//   SELECT 1
+//   FROM multicast_group
+//   WHERE
+//       multicast_group.time_deleted IS NULL AND
+//       multicast_group.ip_pool_id = $5
+//   LIMIT 1
+// )
+// -- Delete the requested link by primary key, but conditionally.
+// DELETE FROM ip_pool_resource
+// WHERE
+//   ip_pool_id = $6 AND
+//   resource_type = 'silo' AND
+//   resource_id = $7 AND
+//   -- If there are any allocations, this generates an error casting
+//   -- 'has-allocs' to a boolean, which we detect and handle.
+//   CAST(IF(EXISTS(
+//      SELECT 1 FROM instance_ips
+//      UNION ALL
+//      SELECT 1 FROM floating_ips
+//      UNION ALL
+//      SELECT 1 FROM multicast_groups
+//  ), 'has-allocs', 'true') AS BOOL)
+// ```
+fn unlink_ip_pool_from_external_silo_query(
+    ip_pool_id: Uuid,
+    silo_id: SiloUuid,
+) -> TypedSqlQuery<()> {
+    let mut builder = QueryBuilder::new();
+    builder
+        .sql(
+            "WITH instance_ips AS (\
+    SELECT 1 \
+    FROM external_ip \
+    INNER JOIN instance ON external_ip.parent_id = instance.id \
+    INNER JOIN project ON instance.project_id = project.id \
+    WHERE \
+        external_ip.is_service = FALSE AND \
+        external_ip.parent_id IS NOT NULL AND \
+        external_ip.time_deleted IS NULL AND \
+        external_ip.ip_pool_id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool_id)
+        .sql(" AND external_ip.kind != ")
+        .param()
+        .bind::<IpKindEnum, _>(IpKind::Floating)
+        .sql(" AND instance.time_deleted IS NULL AND project.silo_id = ")
+        .param()
+        .bind::<sql_types::Uuid, _>(silo_id.into_untyped_uuid())
+        .sql(
+            " LIMIT 1), floating_ips AS (\
+        SELECT 1 \
+        FROM external_ip \
+        INNER JOIN project ON external_ip.project_id = project.id \
+        WHERE \
+            external_ip.is_service = FALSE AND \
+            external_ip.time_deleted IS NULL AND \
+            external_ip.project_id IS NOT NULL AND \
+            external_ip.ip_pool_id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool_id)
+        .sql(" AND external_ip.kind = ")
+        .param()
+        .bind::<IpKindEnum, _>(IpKind::Floating)
+        .sql(" AND project.silo_id = ")
+        .param()
+        .bind::<sql_types::Uuid, _>(silo_id.into_untyped_uuid())
+        .sql(
+            " AND project.time_deleted IS NULL LIMIT 1), \
+            multicast_groups AS (\
+        SELECT 1 \
+        FROM multicast_group \
+        WHERE \
+            multicast_group.time_deleted IS NULL AND \
+            multicast_group.ip_pool_id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool_id)
+        .sql(
+            " LIMIT 1) \
+            DELETE FROM ip_pool_resource \
+            WHERE ip_pool_id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool_id)
+        .sql(" AND resource_type = ")
+        .param()
+        .bind::<nexus_db_schema::enums::IpPoolResourceTypeEnum, _>(
+            IpPoolResourceType::Silo,
+        )
+        .sql(" AND resource_id = ")
+        .param()
+        .bind::<sql_types::Uuid, _>(silo_id.into_untyped_uuid())
+        .sql(
+            " AND \
+            CAST(IF(\
+                EXISTS(\
+                    SELECT 1 FROM instance_ips \
+                    UNION ALL \
+                    SELECT 1 FROM floating_ips \
+                    UNION ALL \
+                    SELECT 1 FROM multicast_groups\
+                ), \
+                'has-allocs', \
+                'true'\
+            ) AS BOOL)",
+        );
+    builder.query()
+}
+
+// Generate a small helper subquery which fails with a bool-cast error if there
+// are fewer than 2 IP Pools with the given assignment. It must be for system services.
+fn count_system_services_pools_subquery(
+    assignment: IpPoolAssignment,
+) -> String {
+    assert!(!matches!(assignment, IpPoolAssignment::Silos));
+    format!(
+        "CAST(IF(\
+        (SELECT COUNT(1) \
+             FROM ip_pool \
+             WHERE time_deleted IS NULL AND assignment = '{}' LIMIT 2\
+        ) >= 2, \
+        'true', \
+        '{}') \
+        AS BOOL)",
+        assignment, LAST_POOL_SENTINEL,
+    )
+}
+
+// Conditionally reassign an IP Pool.
+//
+// # Panics
+//
+// Panics if the current and new assignment are the same.
+fn assign_ip_pool_query(
+    pool: &IpPool,
+    assignment: IpPoolAssignment,
+) -> TypedSqlQuery<SelectableSql<IpPool>> {
+    assert_ne!(pool.assignment, assignment);
+    match pool.assignment {
+        IpPoolAssignment::Silos => {
+            reassign_silo_ip_pool_query(pool, assignment)
+        }
+        IpPoolAssignment::SystemServices => {
+            reassign_system_services_ip_pool_query(pool, assignment)
+        }
+    }
+}
+
+// Query to conditionally reassign an IP Pool that is currently assigned for
+// silo use.
+//
+// Checks that the pool is not currently linked to any silos first. Note that
+// this means there cannot be any silo-specific resources using the pool.
+fn reassign_silo_ip_pool_query(
+    ip_pool: &IpPool,
+    new_assignment: IpPoolAssignment,
+) -> TypedSqlQuery<SelectableSql<IpPool>> {
+    let mut builder = QueryBuilder::new();
+    builder
+        .sql("UPDATE ip_pool SET assignment = ")
+        .param()
+        .bind::<IpPoolAssignmentEnum, _>(new_assignment)
+        .sql(", time_modified = NOW() WHERE id = ")
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool.id())
+        .sql(" AND time_deleted IS NULL AND assignment = ")
+        .param()
+        .bind::<IpPoolAssignmentEnum, _>(ip_pool.assignment)
+        .sql(
+            " AND CAST(IF(EXISTS(\
+                SELECT 1 \
+                FROM ip_pool_resource \
+                WHERE ip_pool_id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool.id())
+        .sql(" LIMIT 1), '")
+        .sql(BAD_SILO_LINK_SENTINEL)
+        // NOTE: We do need to list all the columns here, _in the struct field
+        // order_.
+        //
+        // This is an unfortunate side-effect of the `QueryBuilder` interface.
+        // That uses diesel's `Queryable` trait, which selects columns in the
+        // database schema order. That's intentional. The usual
+        // `QueryableByName` trait is not used, because there can be duplicate
+        // column names in the complex queries we use the builder for.
+        //
+        // But deserializing by tuple assumes the Rust type's fields match the
+        // order of the columns, which may not be true and introduces a brittle
+        // coupling in any case. There are other, type-safe, ways around this,
+        // but they require a lot of boilerplate. We already have tests that
+        // will catch any change to the column ordering or types, since the
+        // query here will fail with deserialization errors. This is a
+        // reasonable tradeoff at this point.
+        .sql(
+            "', 'TRUE') AS BOOL) RETURNING \
+            id, name, description, time_created, time_modified, \
+            time_deleted, ip_version, rcgen, assignment, pool_type",
+        );
+    builder.query()
+}
+
+// Query to conditionally reassign an IP Pool that is currently assigned for
+// system services use.
+//
+// Checks that:
+//
+// - There are no external IPs in use by Oxide resources.
+// - There is at least one other system-services pool of the same assignment.
+fn reassign_system_services_ip_pool_query(
+    ip_pool: &IpPool,
+    new_assignment: IpPoolAssignment,
+) -> TypedSqlQuery<SelectableSql<IpPool>> {
+    let mut builder = QueryBuilder::new();
+    builder
+        .sql("UPDATE ip_pool SET assignment = ")
+        .param()
+        .bind::<IpPoolAssignmentEnum, _>(new_assignment)
+        .sql(", time_modified = NOW() WHERE id = ")
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool.id())
+        .sql(" AND time_deleted IS NULL AND assignment = ")
+        .param()
+        .bind::<IpPoolAssignmentEnum, _>(ip_pool.assignment)
+        // Generate div-by-zero error if there are IPs
+        .sql(
+            " AND (\
+            SELECT CAST(IF(EXISTS(\
+                SELECT 1 \
+                FROM external_ip \
+                WHERE ip_pool_id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool.id())
+        .sql(
+            " AND \
+            external_ip.is_service AND \
+            time_deleted IS NULL \
+            LIMIT 1\
+        ), 1/0, 1) AS BOOL))",
+        )
+        // Generate bool-cast error if the pool is currently assigned to a
+        // specific external service like Nexus.
+        .sql(
+            " AND CAST(IF(EXISTS(\
+            SELECT 1 \
+            FROM external_service_ip_pool \
+            WHERE ip_pool_id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool.id())
+        .sql("), '")
+        .sql(ASSIGNED_TO_EXTERNAL_SERVICE_SENTINEL)
+        .sql("', 'TRUE') AS BOOL)")
+        // Generate int-cast error if this is the last pool of this assignment.
+        .sql(
+            " AND CAST(IF(\
+                (SELECT COUNT(1) \
+                    FROM ip_pool \
+                    WHERE time_deleted IS NULL \
+                    AND assignment = ",
+        )
+        .param()
+        .bind::<IpPoolAssignmentEnum, _>(ip_pool.assignment)
+        .sql(
+            " \
+                LIMIT 2\
+                ) >= 2, \
+            '1', ",
+        )
+        .param()
+        .bind::<sql_types::Text, _>(LAST_POOL_SENTINEL)
+        // NOTE: See comment above about explicit column ordering.
+        .sql(
+            ") AS INT) = 1 RETURNING \
+            id, name, description, time_created, time_modified, \
+            time_deleted, ip_version, rcgen, assignment, pool_type",
+        );
+    builder.query()
 }
 
 #[cfg(test)]
 mod test {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     use std::num::NonZeroU32;
 
     use crate::authz;
-    use crate::db::model::{
-        IpPool, IpPoolResource, IpPoolResourceType, Project,
+    use crate::db::datastore::external_ip::FloatingIpAllocation;
+    use crate::db::datastore::ip_pool::{
+        ASSIGNED_TO_EXTERNAL_SERVICE_ERROR, BAD_SILO_LINK_ERROR,
+        DELETE_LAST_POOL_ERROR, POOL_HAS_IPS_ERROR, REASSIGN_LAST_POOL_ERROR,
+        assign_ip_pool_query, link_ip_pool_to_external_silo_query,
+        unlink_ip_pool_from_external_silo_query,
     };
+    use crate::db::explain::ExplainableAsync as _;
+    use crate::db::model::to_db_typed_uuid;
+    use crate::db::model::{
+        IncompleteIpPoolResource, IpPool, IpPoolResource, IpPoolResourceType,
+        Project,
+    };
+    use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::create_service_ip_pool;
+    use crate::db::raw_query_builder::expectorate_query_contents;
     use assert_matches::assert_matches;
-    use nexus_types::external_api::params;
+    use async_bb8_diesel::AsyncRunQueryDsl as _;
+    use diesel::{
+        ExpressionMethods as _, QueryDsl as _, SelectableHelper as _,
+    };
+    use nexus_db_lookup::LookupPath;
+    use nexus_db_model::{
+        ExternalServiceKind, InternetGatewayIpPool, IpPoolAssignment,
+        IpPoolIdentity, IpPoolType, IpVersion,
+    };
+    use nexus_types::deployment::{
+        OmicronZoneExternalFloatingIp, OmicronZoneExternalIp,
+    };
+    use nexus_types::external_api::project;
+    use nexus_types::external_api::subnet_pool::{
+        SubnetPoolCreate, SubnetPoolMemberAdd,
+    };
     use nexus_types::identity::Resource;
+    use nexus_types::silo::INTERNAL_SILO_ID;
     use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
     use omicron_common::api::external::http_pagination::PaginatedBy;
     use omicron_common::api::external::{
         DataPageParams, Error, IdentityMetadataCreateParams, LookupType,
     };
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::SiloUuid;
+    use omicron_uuid_kinds::{
+        ExternalIpUuid, GenericUuid as _, OmicronZoneUuid,
+    };
+    use sled_agent_types::inventory::ZoneKind;
 
     #[tokio::test]
     async fn test_default_ip_pools() {
@@ -1163,9 +2756,12 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // we start out with no default pool, so we expect not found
-        let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
-        assert_matches!(error, Error::ObjectNotFound { .. });
+        // we start out with no default pools
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
+            .await
+            .expect("Should fetch default pools");
+        assert!(pools.v4.is_none() && pools.v6.is_none());
 
         let pagparams_id = DataPageParams {
             marker: None,
@@ -1183,7 +2779,7 @@ mod test {
         let authz_silo = opctx.authn.silo_required().unwrap();
 
         let silo_pools = datastore
-            .silo_ip_pool_list(&opctx, &authz_silo, &pagbyid)
+            .silo_ip_pool_list(&opctx, &authz_silo, None, None, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 0);
@@ -1197,7 +2793,10 @@ mod test {
             description: "".to_string(),
         };
         let pool1_for_silo = datastore
-            .ip_pool_create(&opctx, IpPool::new(&identity))
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(&identity, IpVersion::V4, IpPoolAssignment::Silos),
+            )
             .await
             .expect("Failed to create IP pool");
 
@@ -1208,12 +2807,12 @@ mod test {
             .expect("Should list IP pools");
         assert_eq!(all_pools.len(), 1);
         let silo_pools = datastore
-            .silo_ip_pool_list(&opctx, &authz_silo, &pagbyid)
+            .silo_ip_pool_list(&opctx, &authz_silo, None, None, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 0);
 
-        // make default should fail when there is no link yet
+        // Make default should fail when there is no link yet
         let authz_pool = authz::IpPool::new(
             authz::FLEET,
             pool1_for_silo.id(),
@@ -1226,25 +2825,27 @@ mod test {
         assert_matches!(error, Error::ObjectNotFound { .. });
 
         // now link to silo
-        let link_body = IpPoolResource {
+        let link_body = IncompleteIpPoolResource {
             ip_pool_id: pool1_for_silo.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: silo_id,
+            resource_id: silo_id.into_untyped_uuid(),
             is_default: false,
         };
         datastore
-            .ip_pool_link_silo(&opctx, link_body.clone())
+            .ip_pool_link_silo(&opctx, link_body)
             .await
             .expect("Failed to associate IP pool with silo");
 
-        // because that one was not a default, when we ask for the silo default
-        // pool, we still get nothing
-        let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
-        assert_matches!(error, Error::ObjectNotFound { .. });
+        // because that one was not a default, we still get no defaults
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
+            .await
+            .expect("Should fetch default pools");
+        assert!(pools.v4.is_none() && pools.v6.is_none());
 
         // now it shows up in the silo list
         let silo_pools = datastore
-            .silo_ip_pool_list(&opctx, &authz_silo, &pagbyid)
+            .silo_ip_pool_list(&opctx, &authz_silo, None, None, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 1);
@@ -1270,12 +2871,15 @@ mod test {
             .await
             .expect("Should be able to make pool default again");
 
-        // now when we ask for the default pool again, we get that one
-        let (authz_pool1_for_silo, ip_pool) = datastore
-            .ip_pools_fetch_default(&opctx)
+        // now when we ask for the default pools again, we get that one as v4
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
             .await
-            .expect("Failed to get silo's default IP pool");
+            .expect("Failed to get silo's default IP pools");
+        let (authz_pool1_for_silo, ip_pool) =
+            pools.v4.expect("Expected v4 default pool");
         assert_eq!(ip_pool.name().as_str(), "pool1-for-silo");
+        assert!(pools.v6.is_none(), "Expected no v6 default pool");
 
         // and we can't create a second default pool for the silo
         let identity = IdentityMetadataCreateParams {
@@ -1283,38 +2887,77 @@ mod test {
             description: "".to_string(),
         };
         let second_silo_default = datastore
-            .ip_pool_create(&opctx, IpPool::new(&identity))
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(&identity, IpVersion::V4, IpPoolAssignment::Silos),
+            )
             .await
             .expect("Failed to create pool");
         let err = datastore
             .ip_pool_link_silo(
                 &opctx,
-                IpPoolResource {
+                IncompleteIpPoolResource {
                     ip_pool_id: second_silo_default.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: silo_id,
+                    resource_id: silo_id.into_untyped_uuid(),
                     is_default: true,
                 },
             )
             .await
-            .expect_err("Failed to fail to set a second default pool for silo");
+            .expect_err("Should fail: already have a default for this silo");
         assert_matches!(err, Error::ObjectAlreadyExists { .. });
 
         // now remove the association and we should get nothing again
         let authz_silo =
-            authz::Silo::new(authz::Fleet, silo_id, LookupType::ById(silo_id));
+            authz::Silo::new(authz::Fleet, silo_id, LookupType::by_id(silo_id));
+        let q =
+            nexus_db_schema::schema::ip_pool_resource::dsl::ip_pool_resource
+                .select(IpPoolResource::as_select())
+                .filter(
+                    nexus_db_schema::schema::ip_pool_resource::dsl::resource_id
+                        .eq(authz_silo.id().into_untyped_uuid()),
+                )
+                .get_results_async(
+                    &*datastore
+                        .pool_connection_authorized(opctx)
+                        .await
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+        println!("{q:#?}");
         datastore
             .ip_pool_unlink_silo(&opctx, &authz_pool1_for_silo, &authz_silo)
             .await
             .expect("Failed to unlink IP pool from silo");
 
-        // no default
-        let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
-        assert_matches!(error, Error::ObjectNotFound { .. });
+        let q =
+            nexus_db_schema::schema::ip_pool_resource::dsl::ip_pool_resource
+                .select(IpPoolResource::as_select())
+                .filter(
+                    nexus_db_schema::schema::ip_pool_resource::dsl::resource_id
+                        .eq(authz_silo.id().into_untyped_uuid()),
+                )
+                .get_results_async(
+                    &*datastore
+                        .pool_connection_authorized(opctx)
+                        .await
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+        println!("{q:#?}");
+
+        // no defaults after unlinking
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
+            .await
+            .expect("Should fetch default pools");
+        assert!(pools.v4.is_none() && pools.v6.is_none());
 
         // and silo pools list is empty again
         let silo_pools = datastore
-            .silo_ip_pool_list(&opctx, &authz_silo, &pagbyid)
+            .silo_ip_pool_list(&opctx, &authz_silo, None, None, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 0);
@@ -1323,74 +2966,23 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    // We're breaking out the utilization tests for IPv4 and IPv6 pools, since
+    // pools only contain one version.
     #[tokio::test]
-    async fn test_internal_ip_pool() {
-        let logctx = dev::test_setup_log("test_internal_ip_pool");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        // confirm internal pool appears as internal
-        let (authz_pool, _pool) =
-            datastore.ip_pools_service_lookup(&opctx).await.unwrap();
-
-        let is_internal =
-            datastore.ip_pool_is_internal(&opctx, &authz_pool).await;
-        assert_eq!(is_internal, Ok(true));
-
-        // another random pool should not be considered internal
-        let identity = IdentityMetadataCreateParams {
-            name: "other-pool".parse().unwrap(),
-            description: "".to_string(),
-        };
-        let other_pool = datastore
-            .ip_pool_create(&opctx, IpPool::new(&identity))
-            .await
-            .expect("Failed to create IP pool");
-
-        let authz_other_pool = authz::IpPool::new(
-            authz::FLEET,
-            other_pool.id(),
-            LookupType::ById(other_pool.id()),
-        );
-        let is_internal =
-            datastore.ip_pool_is_internal(&opctx, &authz_other_pool).await;
-        assert_eq!(is_internal, Ok(false));
-
-        // now link it to the current silo, and it is still not internal
-        let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
-            ip_pool_id: other_pool.id(),
-            resource_type: IpPoolResourceType::Silo,
-            resource_id: silo_id,
-            is_default: true,
-        };
-        datastore
-            .ip_pool_link_silo(&opctx, link)
-            .await
-            .expect("Failed to make IP pool default for silo");
-
-        let is_internal =
-            datastore.ip_pool_is_internal(&opctx, &authz_other_pool).await;
-        assert_eq!(is_internal, Ok(false));
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_ip_pool_utilization() {
-        let logctx = dev::test_setup_log("test_ip_utilization");
+    async fn test_ipv4_ip_pool_utilization() {
+        let logctx = dev::test_setup_log("test_ipv4_ip_pool_utilization");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let authz_silo = opctx.authn.silo_required().unwrap();
         let project = Project::new(
             authz_silo.id(),
-            params::ProjectCreate {
+            project::ProjectCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "my-project".parse().unwrap(),
                     description: "".to_string(),
                 },
+                defaults: None,
             },
         );
         let (.., project) =
@@ -1402,7 +2994,10 @@ mod test {
             description: "".to_string(),
         };
         let pool = datastore
-            .ip_pool_create(&opctx, IpPool::new(&identity))
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(&identity, IpVersion::V4, IpPoolAssignment::Silos),
+            )
             .await
             .expect("Failed to create IP pool");
         let authz_pool = authz::IpPool::new(
@@ -1416,18 +3011,17 @@ mod test {
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips.ipv4, 0);
-        assert_eq!(max_ips.ipv6, 0);
+        assert_eq!(max_ips, 0);
 
         let range = IpRange::V4(
             Ipv4Range::new(
-                std::net::Ipv4Addr::new(10, 0, 0, 1),
-                std::net::Ipv4Addr::new(10, 0, 0, 5),
+                Ipv4Addr::new(10, 0, 0, 1),
+                Ipv4Addr::new(10, 0, 0, 5),
             )
             .unwrap(),
         );
         datastore
-            .ip_pool_add_range(&opctx, &authz_pool, &range)
+            .ip_pool_add_range(&opctx, &authz_pool, &pool, &range)
             .await
             .expect("Could not add range");
 
@@ -1436,13 +3030,12 @@ mod test {
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips.ipv4, 5);
-        assert_eq!(max_ips.ipv6, 0);
+        assert_eq!(max_ips, 5);
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: authz_silo.id(),
+            resource_id: authz_silo.id().into_untyped_uuid(),
             is_default: true,
         };
         datastore
@@ -1454,15 +3047,20 @@ mod test {
             .ip_pool_allocated_count(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(ip_count.ipv4, 0);
-        assert_eq!(ip_count.ipv6, 0);
+        assert_eq!(ip_count, 0);
 
         let identity = IdentityMetadataCreateParams {
             name: "my-ip".parse().unwrap(),
             description: "".to_string(),
         };
+        // Allocate from default pool (no explicit pool or IP version)
         let ip = datastore
-            .allocate_floating_ip(&opctx, project.id(), identity, None, None)
+            .allocate_floating_ip(
+                &opctx,
+                project.id(),
+                identity,
+                FloatingIpAllocation::Auto { pool: None, ip_version: None },
+            )
             .await
             .expect("Could not allocate floating IP");
         assert_eq!(ip.ip.to_string(), "10.0.0.1/32");
@@ -1471,49 +3069,139 @@ mod test {
             .ip_pool_allocated_count(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(ip_count.ipv4, 1);
-        assert_eq!(ip_count.ipv6, 0);
+        assert_eq!(ip_count, 1);
 
         // allocating one has nothing to do with total capacity
         let max_ips = datastore
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips.ipv4, 5);
-        assert_eq!(max_ips.ipv6, 0);
+        assert_eq!(max_ips, 5);
 
-        let ipv6_range = IpRange::V6(
-            Ipv6Range::new(
-                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
-                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 1, 20),
-            )
-            .unwrap(),
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ipv6_ip_pool_utilization() {
+        let logctx = dev::test_setup_log("test_ipv6_ip_pool_utilization");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+        let project = Project::new(
+            authz_silo.id(),
+            project::ProjectCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "my-project".parse().unwrap(),
+                    description: "".to_string(),
+                },
+                defaults: None,
+            },
         );
-        datastore
-            .ip_pool_add_range(&opctx, &authz_pool, &ipv6_range)
-            .await
-            .expect("Could not add range");
+        let (.., project) =
+            datastore.project_create(&opctx, project).await.unwrap();
 
-        // now test with additional v6 range
+        // create an IP pool for the silo, add a range to it, and link it to the silo
+        let identity = IdentityMetadataCreateParams {
+            name: "my-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(&identity, IpVersion::V6, IpPoolAssignment::Silos),
+            )
+            .await
+            .expect("Failed to create IP pool");
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            pool.id(),
+            LookupType::ById(pool.id()),
+        );
+        let link = IncompleteIpPoolResource {
+            ip_pool_id: pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: authz_silo.id().into_untyped_uuid(),
+            is_default: true,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Could not link pool to silo");
+
+        // capacity of zero because there are no ranges
         let max_ips = datastore
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips.ipv4, 5);
-        assert_eq!(max_ips.ipv6, 11 + 65536);
+        assert_eq!(max_ips, 0);
+
+        // Add an IPv6 range
+        let ipv6_range = IpRange::V6(
+            Ipv6Range::new(
+                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
+                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 1, 20),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &pool, &ipv6_range)
+            .await
+            .expect("Could not add range");
+        let max_ips = datastore
+            .ip_pool_total_capacity(&opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(max_ips, 11 + 65536);
+
+        let ip_count = datastore
+            .ip_pool_allocated_count(&opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(ip_count, 0);
+
+        let identity = IdentityMetadataCreateParams {
+            name: "my-ip".parse().unwrap(),
+            description: "".to_string(),
+        };
+        // Allocate from default pool (no explicit pool or IP version)
+        let ip = datastore
+            .allocate_floating_ip(
+                &opctx,
+                project.id(),
+                identity,
+                FloatingIpAllocation::Auto { pool: None, ip_version: None },
+            )
+            .await
+            .expect("Could not allocate floating IP");
+        assert_eq!(ip.ip.to_string(), "fd00::a/128");
+
+        let ip_count = datastore
+            .ip_pool_allocated_count(&opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(ip_count, 1);
+
+        // allocating one has nothing to do with total capacity
+        let max_ips = datastore
+            .ip_pool_total_capacity(&opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(max_ips, 11 + 65536);
 
         // add a giant range for fun
         let ipv6_range = IpRange::V6(
             Ipv6Range::new(
-                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 1, 21),
-                std::net::Ipv6Addr::new(
+                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 1, 21),
+                Ipv6Addr::new(
                     0xfd00, 0, 0, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
                 ),
             )
             .unwrap(),
         );
         datastore
-            .ip_pool_add_range(&opctx, &authz_pool, &ipv6_range)
+            .ip_pool_add_range(&opctx, &authz_pool, &pool, &ipv6_range)
             .await
             .expect("Could not add range");
 
@@ -1521,8 +3209,3305 @@ mod test {
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips.ipv4, 5);
-        assert_eq!(max_ips.ipv6, 1208925819614629174706166);
+        assert_eq!(max_ips, 1208925819614629174706166);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_cannot_insert_range_in_pool_with_different_ip_version() {
+        let logctx = dev::test_setup_log(
+            "cannot_insert_range_in_pool_with_different_ip_version",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // IP pool versions, and ranges of the opposite version.
+        let versions = [IpVersion::V4, IpVersion::V6];
+        let ranges = [
+            IpRange::V6(
+                Ipv6Range::new(
+                    Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 1, 21),
+                    Ipv6Addr::new(
+                        0xfd00, 0, 0, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+                    ),
+                )
+                .unwrap(),
+            ),
+            IpRange::V4(
+                Ipv4Range::new(
+                    Ipv4Addr::new(10, 0, 0, 1),
+                    Ipv4Addr::new(10, 0, 0, 5),
+                )
+                .unwrap(),
+            ),
+        ];
+
+        for (version, range) in versions.into_iter().zip(ranges) {
+            // Create the pool
+            let identity = IdentityMetadataCreateParams {
+                name: format!("ip{version}-pool-for-silo").parse().unwrap(),
+                description: "".to_string(),
+            };
+            let pool = datastore
+                .ip_pool_create(
+                    &opctx,
+                    IpPool::new(&identity, version, IpPoolAssignment::Silos),
+                )
+                .await
+                .expect("Failed to create IP pool");
+            let authz_pool = authz::IpPool::new(
+                authz::FLEET,
+                pool.id(),
+                LookupType::ById(pool.id()),
+            );
+
+            // Ensure we cannot insert a range of the other version.
+            let res = datastore
+                .ip_pool_add_range(&opctx, &authz_pool, &pool, &range)
+                .await;
+            assert!(
+                res.is_err(),
+                "Should have failed to insert an IP{} range in a IP{} pool",
+                range.version(),
+                version,
+            );
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_multicast_ip_pool_basic_operations() {
+        let logctx =
+            dev::test_setup_log("test_multicast_ip_pool_basic_operations");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a multicast IP pool
+        let identity = IdentityMetadataCreateParams {
+            name: "multicast-pool".parse().unwrap(),
+            description: "Test multicast IP pool".to_string(),
+        };
+        let pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &identity,
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create multicast IP pool");
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+        let link = IncompleteIpPoolResource {
+            ip_pool_id: pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: authz_silo.id().into_untyped_uuid(),
+            is_default: true,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Failed to link IP pool to silo");
+
+        // Verify it's marked as multicast
+        assert_eq!(pool.pool_type, IpPoolType::Multicast);
+
+        // Test multicast-specific listing
+        let pagparams_id = DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        };
+        let pagbyid = PaginatedBy::Id(pagparams_id);
+
+        let multicast_pools = datastore
+            .ip_pools_list_multicast(&opctx, &pagbyid)
+            .await
+            .expect("Should list multicast IP pools");
+        assert_eq!(multicast_pools.len(), 1);
+        assert_eq!(multicast_pools[0].id(), pool.id());
+
+        // Regular pool listing should also include it
+        let all_pools = datastore
+            .ip_pools_list(&opctx, &pagbyid)
+            .await
+            .expect("Should list all IP pools");
+        assert_eq!(all_pools.len(), 1);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_multicast_ip_pool_default_by_type() {
+        let logctx =
+            dev::test_setup_log("test_multicast_ip_pool_default_by_type");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        // Initially no default multicast pool
+        let error = datastore
+            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Multicast, None)
+            .await
+            .unwrap_err();
+        assert_matches!(error, Error::ObjectNotFound { .. });
+
+        // Create and link a multicast pool as default
+        let identity = IdentityMetadataCreateParams {
+            name: "default-multicast-pool".parse().unwrap(),
+            description: "Default multicast pool".to_string(),
+        };
+        let pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &identity,
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create multicast IP pool");
+
+        let link = IncompleteIpPoolResource {
+            ip_pool_id: pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: authz_silo.id().into_untyped_uuid(),
+            is_default: true,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should link multicast pool to silo");
+
+        // Now should find the default multicast pool
+        let default_pool = datastore
+            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Multicast, None)
+            .await
+            .expect("Should find default multicast pool");
+        assert_eq!(default_pool.1.id(), pool.id());
+        assert_eq!(default_pool.1.pool_type, IpPoolType::Multicast);
+
+        // Regular unicast default should be empty (no unicast pool)
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
+            .await
+            .expect("Should fetch unicast defaults");
+        assert!(pools.v4.is_none() && pools.v6.is_none());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_multicast_ip_pool_fetch_any_by_type() {
+        let logctx =
+            dev::test_setup_log("test_multicast_ip_pool_fetch_any_by_type");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        // Initially no multicast pool at all
+        let error = datastore
+            .ip_pools_fetch_any_by_type(&opctx, IpPoolType::Multicast, None)
+            .await
+            .unwrap_err();
+        assert_matches!(error, Error::ObjectNotFound { .. });
+
+        // Create and link a multicast pool with `is_default=false`
+        let identity = IdentityMetadataCreateParams {
+            name: "non-default-multicast-pool".parse().unwrap(),
+            description: "Non-default multicast pool".to_string(),
+        };
+        let pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &identity,
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create multicast IP pool");
+
+        let link = IncompleteIpPoolResource {
+            ip_pool_id: pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: authz_silo.id().into_untyped_uuid(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should link multicast pool to silo");
+
+        // `fetch_default_by_type` should fail (no default)
+        let error = datastore
+            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Multicast, None)
+            .await
+            .unwrap_err();
+        assert_matches!(error, Error::ObjectNotFound { .. });
+
+        // But `fetch_any_by_type` should succeed
+        let found_pool = datastore
+            .ip_pools_fetch_any_by_type(&opctx, IpPoolType::Multicast, None)
+            .await
+            .expect("Should find non-default multicast pool");
+        assert_eq!(found_pool.1.id(), pool.id());
+        assert_eq!(found_pool.1.pool_type, IpPoolType::Multicast);
+
+        // Create another pool and mark it as default
+        let default_identity = IdentityMetadataCreateParams {
+            name: "default-multicast-pool".parse().unwrap(),
+            description: "Default multicast pool".to_string(),
+        };
+        let default_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &default_identity,
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create default multicast IP pool");
+
+        let default_link = IncompleteIpPoolResource {
+            ip_pool_id: default_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: authz_silo.id().into_untyped_uuid(),
+            is_default: true, // This one is the default
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, default_link)
+            .await
+            .expect("Could not link default multicast pool to silo");
+
+        // Now `fetch_any_by_type` should prefer the default pool
+        let found_pool = datastore
+            .ip_pools_fetch_any_by_type(&opctx, IpPoolType::Multicast, None)
+            .await
+            .expect("Should find default multicast pool");
+        assert_eq!(found_pool.1.id(), default_pool.id());
+        assert_eq!(
+            found_pool.1.identity.name.to_string(),
+            "default-multicast-pool"
+        );
+
+        // Case: Silo-scoped multicast pool lookup
+        // Verify that multicast pools require linking: a user from a silo
+        // that is not linked to the pool should not find it.
+        // Pool linking is the mechanism of access control for multicast.
+
+        // Create an opctx for a completely different silo (random UUID)
+        let other_silo_id = SiloUuid::new_v4();
+        let other_silo_user_id = omicron_uuid_kinds::SiloUserUuid::new_v4();
+        let other_silo_authn = crate::authn::Context::for_test_user(
+            other_silo_user_id,
+            other_silo_id,
+            // Use same authn policy - the key thing is the silo_id differs
+            crate::authn::SiloAuthnPolicy::try_from(
+                &*nexus_db_fixed_data::silo::DEFAULT_SILO,
+            )
+            .unwrap(),
+        );
+        let other_silo_opctx = opctx.child_with_authn(other_silo_authn);
+
+        // This user is from a silo that has no pool links, so they should
+        // not find the multicast pool (pool linking controls access)
+        let multicast_error = datastore
+            .ip_pools_fetch_any_by_type(
+                &other_silo_opctx,
+                IpPoolType::Multicast,
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert_matches!(
+            multicast_error,
+            Error::ObjectNotFound { .. },
+            "Multicast pools require linking - unlinked silo should not find pool"
+        );
+
+        // Same for unicast - pools are silo-scoped
+        let unicast_error = datastore
+            .ip_pools_fetch_any_by_type(
+                &other_silo_opctx,
+                IpPoolType::Unicast,
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert_matches!(
+            unicast_error,
+            Error::ObjectNotFound { .. },
+            "Unicast pools also require linking"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Test that `ip_pools_fetch_any_by_type` correctly filters by IP version
+    /// and returns an error when multiple IP versions exist without specifying one.
+    #[tokio::test]
+    async fn test_ip_pools_fetch_any_by_type_ip_version_filtering() {
+        let logctx = dev::test_setup_log(
+            "test_ip_pools_fetch_any_by_type_ip_version_filtering",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        // Create and link an IPv4 multicast pool
+        let v4_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &IdentityMetadataCreateParams {
+                        name: "multicast-v4-pool".parse().unwrap(),
+                        description: "IPv4 multicast pool".to_string(),
+                    },
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create IPv4 multicast pool");
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: v4_pool.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id().into_untyped_uuid(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link IPv4 pool");
+
+        // Create and link an IPv6 multicast pool
+        let v6_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &IdentityMetadataCreateParams {
+                        name: "multicast-v6-pool".parse().unwrap(),
+                        description: "IPv6 multicast pool".to_string(),
+                    },
+                    IpVersion::V6,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create IPv6 multicast pool");
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: v6_pool.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id().into_untyped_uuid(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link IPv6 pool");
+
+        // With ip_version=None and both V4/V6 pools, this should return an error
+        // asking to specify the IP version on conflict
+        let error = datastore
+            .ip_pools_fetch_any_by_type(&opctx, IpPoolType::Multicast, None)
+            .await
+            .expect_err("Should fail with ip_version conflict");
+        assert!(
+            error.to_string().contains("IP versions"),
+            "Expected IP version conflict error, got: {error}"
+        );
+
+        // With ip_version=V4, should return the IPv4 pool
+        let found_v4 = datastore
+            .ip_pools_fetch_any_by_type(
+                &opctx,
+                IpPoolType::Multicast,
+                Some(IpVersion::V4),
+            )
+            .await
+            .expect("Should find IPv4 pool");
+        assert_eq!(found_v4.1.id(), v4_pool.id());
+        assert_eq!(found_v4.1.ip_version, IpVersion::V4);
+
+        // With ip_version=V6, should return the IPv6 pool
+        let found_v6 = datastore
+            .ip_pools_fetch_any_by_type(
+                &opctx,
+                IpPoolType::Multicast,
+                Some(IpVersion::V6),
+            )
+            .await
+            .expect("Should find IPv6 pool");
+        assert_eq!(found_v6.1.id(), v6_pool.id());
+        assert_eq!(found_v6.1.ip_version, IpVersion::V6);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_multicast_ip_pool_ranges() {
+        let logctx = dev::test_setup_log("test_multicast_ip_pool_ranges");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create IPv4 multicast IP pool
+        let ipv4_identity = IdentityMetadataCreateParams {
+            name: "multicast-ipv4-pool".parse().unwrap(),
+            description: "Test IPv4 multicast IP pool".to_string(),
+        };
+        let ipv4_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &ipv4_identity,
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create IPv4 multicast IP pool");
+
+        let authz_ipv4_pool = authz::IpPool::new(
+            authz::FLEET,
+            ipv4_pool.id(),
+            LookupType::ById(ipv4_pool.id()),
+        );
+
+        // Add IPv4 multicast range (224.0.0.0/4)
+        let ipv4_range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 1, 1, 1),
+                Ipv4Addr::new(224, 1, 1, 10),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(
+                &opctx,
+                &authz_ipv4_pool,
+                &ipv4_pool,
+                &ipv4_range,
+            )
+            .await
+            .expect("Could not add IPv4 multicast range");
+
+        // Create IPv6 multicast IP pool
+        let ipv6_identity = IdentityMetadataCreateParams {
+            name: "multicast-ipv6-pool".parse().unwrap(),
+            description: "Test IPv6 multicast IP pool".to_string(),
+        };
+        let ipv6_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &ipv6_identity,
+                    IpVersion::V6,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create IPv6 multicast IP pool");
+
+        let authz_ipv6_pool = authz::IpPool::new(
+            authz::FLEET,
+            ipv6_pool.id(),
+            LookupType::ById(ipv6_pool.id()),
+        );
+
+        // Add IPv6 multicast range using site-local scope (ff05::/16)
+        // Note: ff00::/16, ff01::/16, ff02::/16 are reserved
+        let ipv6_range = IpRange::V6(
+            Ipv6Range::new(
+                Ipv6Addr::new(0xff05, 0, 0, 0, 0, 0, 0, 1),
+                Ipv6Addr::new(0xff05, 0, 0, 0, 0, 0, 0, 10),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(
+                &opctx,
+                &authz_ipv6_pool,
+                &ipv6_pool,
+                &ipv6_range,
+            )
+            .await
+            .expect("Could not add IPv6 multicast range");
+
+        // Check IPv4 pool capacity
+        let ipv4_capacity = datastore
+            .ip_pool_total_capacity(&opctx, &authz_ipv4_pool)
+            .await
+            .unwrap();
+        assert_eq!(ipv4_capacity, 10); // 224.1.1.1 to 224.1.1.10
+
+        // Check IPv6 pool capacity
+        let ipv6_capacity = datastore
+            .ip_pool_total_capacity(&opctx, &authz_ipv6_pool)
+            .await
+            .unwrap();
+        assert_eq!(ipv6_capacity, 10); // ff01::1 to ff01::a
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Verify ASM pool selection selects pools whose ranges are not SSM
+    /// (e.g., IPv4 224/4 but not 232/8), and does not confuse alphabetical
+    /// ordering or the presence of SSM pools.
+    #[tokio::test]
+    async fn test_ip_pools_fetch_asm_multicast() {
+        let logctx = dev::test_setup_log("test_ip_pools_fetch_asm_multicast");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        // Initially no ASM pool (should fail)
+        let error = datastore
+            .ip_pools_fetch_asm_multicast(&opctx, None)
+            .await
+            .unwrap_err();
+        assert_matches!(error, Error::ObjectNotFound { .. });
+
+        // Create SSM pool first with a name that would sort first if chosen
+        let ssm_identity = IdentityMetadataCreateParams {
+            name: "a-ssm-multicast-pool".parse().unwrap(),
+            description: "SSM multicast pool".to_string(),
+        };
+        let ssm_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &ssm_identity,
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create SSM multicast IP pool");
+
+        let authz_ssm_pool = authz::IpPool::new(
+            authz::FLEET,
+            ssm_pool.id(),
+            LookupType::ById(ssm_pool.id()),
+        );
+
+        // Add SSM range (232.x.x.x)
+        let ssm_range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(232, 2, 2, 2),
+                Ipv4Addr::new(232, 2, 2, 20),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_ssm_pool, &ssm_pool, &ssm_range)
+            .await
+            .expect("Could not add SSM multicast range");
+
+        // Link SSM pool to silo
+        let ssm_link = IncompleteIpPoolResource {
+            ip_pool_id: ssm_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: authz_silo.id().into_untyped_uuid(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, ssm_link)
+            .await
+            .expect("Should link SSM pool to silo");
+
+        // With only SSM pool linked, ASM lookup should still fail
+        let error = datastore
+            .ip_pools_fetch_asm_multicast(&opctx, None)
+            .await
+            .unwrap_err();
+        assert_matches!(error, Error::ObjectNotFound { .. });
+
+        // Create ASM pool and link
+        let asm_identity = IdentityMetadataCreateParams {
+            name: "zzz-asm-multicast-pool".parse().unwrap(),
+            description: "ASM multicast pool".to_string(),
+        };
+        let asm_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &asm_identity,
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create ASM multicast IP pool");
+
+        let authz_asm_pool = authz::IpPool::new(
+            authz::FLEET,
+            asm_pool.id(),
+            LookupType::ById(asm_pool.id()),
+        );
+
+        // Add ASM range (224.x.x.x)
+        let asm_range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 3, 3, 3),
+                Ipv4Addr::new(224, 3, 3, 15),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_asm_pool, &asm_pool, &asm_range)
+            .await
+            .expect("Could not add ASM multicast range");
+
+        // Link ASM pool to silo
+        let asm_link = IncompleteIpPoolResource {
+            ip_pool_id: asm_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: authz_silo.id().into_untyped_uuid(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, asm_link)
+            .await
+            .expect("Should link ASM pool to silo");
+
+        // ASM fetcher should now return the ASM pool
+        let (_, found_pool) = datastore
+            .ip_pools_fetch_asm_multicast(&opctx, None)
+            .await
+            .expect("Should find ASM multicast pool");
+        assert_eq!(found_pool.id(), asm_pool.id());
+        assert_eq!(
+            found_pool.identity.name.to_string(),
+            "zzz-asm-multicast-pool"
+        );
+
+        // Test V4/V6 conflict: Create an IPv6 ASM pool. When both V4 and V6
+        // pools exist without specifying an `ip_version`, an error should be
+        // returned.
+        let asm_v6_identity = IdentityMetadataCreateParams {
+            name: "aaa-asm-ipv6-multicast-pool".parse().unwrap(),
+            description: "ASM IPv6 multicast pool".to_string(),
+        };
+        let asm_v6_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &asm_v6_identity,
+                    IpVersion::V6,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create ASM IPv6 multicast pool");
+
+        let authz_asm_v6_pool = authz::IpPool::new(
+            authz::FLEET,
+            asm_v6_pool.id(),
+            LookupType::ById(asm_v6_pool.id()),
+        );
+
+        // Add IPv6 ASM range (ff0e::/16 is ASM, not ff3x::/32 which is SSM)
+        let asm_v6_range = IpRange::V6(
+            Ipv6Range::new(
+                "ff0e::1".parse().unwrap(),
+                "ff0e::10".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(
+                &opctx,
+                &authz_asm_v6_pool,
+                &asm_v6_pool,
+                &asm_v6_range,
+            )
+            .await
+            .expect("Should add ASM IPv6 multicast range");
+
+        // Link IPv6 ASM pool to silo
+        let asm_v6_link = IncompleteIpPoolResource {
+            ip_pool_id: asm_v6_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: authz_silo.id().into_untyped_uuid(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, asm_v6_link)
+            .await
+            .expect("Should link ASM IPv6 pool to silo");
+
+        // ASM fetcher should fail when both V4 and V6 default pools exist
+        // without specifying `ip_version`
+        let error = datastore
+            .ip_pools_fetch_asm_multicast(&opctx, None)
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("Multiple ASM multicast IP pools"),
+            "Expected V4/V6 conflict error, got: {error}"
+        );
+
+        // But specifying `ip_version` should work
+        let (_, found_v4_pool) = datastore
+            .ip_pools_fetch_asm_multicast(&opctx, Some(IpVersion::V4))
+            .await
+            .expect("Should find ASM V4 pool when ip_version specified");
+        assert_eq!(found_v4_pool.id(), asm_pool.id());
+
+        let (_, found_v6_pool) = datastore
+            .ip_pools_fetch_asm_multicast(&opctx, Some(IpVersion::V6))
+            .await
+            .expect("Should find ASM V6 pool when ip_version specified");
+        assert_eq!(found_v6_pool.id(), asm_v6_pool.id());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Verify SSM pool selection selects pools whose ranges are SSM (232/8),
+    /// and does not get confused with alphabetical ordering or the presence of
+    /// ASM pools.
+    #[tokio::test]
+    async fn test_ip_pools_fetch_ssm_multicast() {
+        let logctx = dev::test_setup_log("test_ip_pools_fetch_ssm_multicast");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        // Initially no SSM pool -> should fail
+        let error = datastore
+            .ip_pools_fetch_ssm_multicast(&opctx, None)
+            .await
+            .unwrap_err();
+        assert_matches!(error, Error::ObjectNotFound { .. });
+
+        // Create ASM pool with name that comes first alphabetically
+        // ASM uses 224.x.x.x range
+        let asm_identity = IdentityMetadataCreateParams {
+            name: "aaa-asm-multicast-pool".parse().unwrap(),
+            description: "ASM multicast pool".to_string(),
+        };
+        let asm_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &asm_identity,
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create ASM multicast IP pool");
+
+        let authz_asm_pool = authz::IpPool::new(
+            authz::FLEET,
+            asm_pool.id(),
+            LookupType::ById(asm_pool.id()),
+        );
+
+        // Add ASM range (224.x.x.x)
+        let asm_range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 1, 1, 1),
+                Ipv4Addr::new(224, 1, 1, 10),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_asm_pool, &asm_pool, &asm_range)
+            .await
+            .expect("Could not add ASM multicast range");
+
+        // Link ASM pool to silo
+        let asm_link = IncompleteIpPoolResource {
+            ip_pool_id: asm_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: authz_silo.id().into_untyped_uuid(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, asm_link)
+            .await
+            .expect("Should link ASM multicast pool to silo");
+
+        // Even with ASM pool linked, fetch_ssm should still fail (no SSM pool)
+        let error = datastore
+            .ip_pools_fetch_ssm_multicast(&opctx, None)
+            .await
+            .unwrap_err();
+        assert_matches!(error, Error::ObjectNotFound { .. });
+
+        // Create SSM pool with name that comes after alphabetical ordering
+        // SSM uses 232.x.x.x range
+        let ssm_identity = IdentityMetadataCreateParams {
+            name: "zzz-ssm-multicast-pool".parse().unwrap(),
+            description: "SSM multicast pool".to_string(),
+        };
+        let ssm_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &ssm_identity,
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create SSM multicast IP pool");
+
+        let authz_ssm_pool = authz::IpPool::new(
+            authz::FLEET,
+            ssm_pool.id(),
+            LookupType::ById(ssm_pool.id()),
+        );
+
+        // Add SSM range (232.x.x.x)
+        let ssm_range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(232, 1, 1, 1),
+                Ipv4Addr::new(232, 1, 1, 10),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_ssm_pool, &ssm_pool, &ssm_range)
+            .await
+            .expect("Could not add SSM multicast range");
+
+        // Link SSM pool to silo
+        let ssm_link = IncompleteIpPoolResource {
+            ip_pool_id: ssm_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: authz_silo.id().into_untyped_uuid(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, ssm_link)
+            .await
+            .expect("Should link SSM multicast pool to silo");
+
+        // `ip_pools_fetch_ssm_multicast` should succeed and return the SSM pool
+        let (_, found_pool) = datastore
+            .ip_pools_fetch_ssm_multicast(&opctx, None)
+            .await
+            .expect("Should find SSM multicast pool");
+        assert_eq!(found_pool.id(), ssm_pool.id());
+        assert_eq!(
+            found_pool.identity.name.to_string(),
+            "zzz-ssm-multicast-pool"
+        );
+
+        // Test V4/V6 conflict: Create an IPv6 SSM pool. When both V4 and V6
+        // pools exist without specifying an `ip_version`, an error should be
+        // returned.
+        let ssm_v6_identity = IdentityMetadataCreateParams {
+            name: "aaa-ssm-ipv6-multicast-pool".parse().unwrap(),
+            description: "SSM IPv6 multicast pool".to_string(),
+        };
+        let ssm_v6_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &ssm_v6_identity,
+                    IpVersion::V6,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create SSM IPv6 multicast pool");
+
+        let authz_ssm_v6_pool = authz::IpPool::new(
+            authz::FLEET,
+            ssm_v6_pool.id(),
+            LookupType::ById(ssm_v6_pool.id()),
+        );
+
+        // Add IPv6 SSM range (ff3x::/32 is SSM per RFC 4607)
+        let ssm_v6_range = IpRange::V6(
+            Ipv6Range::new(
+                "ff3e::1".parse().unwrap(),
+                "ff3e::10".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(
+                &opctx,
+                &authz_ssm_v6_pool,
+                &ssm_v6_pool,
+                &ssm_v6_range,
+            )
+            .await
+            .expect("Should add SSM IPv6 multicast range");
+
+        // Link IPv6 SSM pool to silo
+        let ssm_v6_link = IncompleteIpPoolResource {
+            ip_pool_id: ssm_v6_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: authz_silo.id().into_untyped_uuid(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, ssm_v6_link)
+            .await
+            .expect("Should link SSM IPv6 pool to silo");
+
+        // SSM fetcher should fail when both V4 and V6 pools exist
+        // without specifying `ip_version`
+        let error = datastore
+            .ip_pools_fetch_ssm_multicast(&opctx, None)
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("Multiple SSM multicast IP pools"),
+            "Expected V4/V6 conflict error, got: {error}"
+        );
+
+        // But specifying `ip_version` should work
+        let (_, found_v4_pool) = datastore
+            .ip_pools_fetch_ssm_multicast(&opctx, Some(IpVersion::V4))
+            .await
+            .expect("Should find SSM V4 pool when ip_version specified");
+        assert_eq!(found_v4_pool.id(), ssm_pool.id());
+
+        let (_, found_v6_pool) = datastore
+            .ip_pools_fetch_ssm_multicast(&opctx, Some(IpVersion::V6))
+            .await
+            .expect("Should find SSM V6 pool when ip_version specified");
+        assert_eq!(found_v6_pool.id(), ssm_v6_pool.id());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn paginate_ip_pools_by_assignment() {
+        let logctx = dev::test_setup_log("paginate_ip_pools_by_assignment");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Insert a bunch of pools, not linked to any silo, and so assigned for
+        // silo use.
+        const N_POOLS: usize = 20;
+        let mut customer_pools = Vec::with_capacity(N_POOLS);
+        for i in 0..N_POOLS {
+            // Create the pool
+            let identity = IdentityMetadataCreateParams {
+                name: format!("ip-pool-{i}").parse().unwrap(),
+                description: "".to_string(),
+            };
+            let pool = datastore
+                .ip_pool_create(
+                    opctx,
+                    IpPool::new(
+                        &identity,
+                        IpVersion::V4,
+                        IpPoolAssignment::Silos,
+                    ),
+                )
+                .await
+                .expect("Failed to create IP pool");
+            customer_pools.push(pool);
+        }
+        customer_pools.sort_by_key(|pool| pool.id());
+
+        // Create a bunch which _are_ assigned for system services use.
+        let mut oxide_pools = Vec::with_capacity(N_POOLS);
+        for i in 0..N_POOLS {
+            // Create the pool
+            let identity = IdentityMetadataCreateParams {
+                name: format!("oxide-ip-pool-{i}").parse().unwrap(),
+                description: "".to_string(),
+            };
+            let pool = datastore
+                .ip_pool_create(
+                    opctx,
+                    IpPool::new(
+                        &identity,
+                        IpVersion::V4,
+                        IpPoolAssignment::SystemServices,
+                    ),
+                )
+                .await
+                .expect("Failed to create IP pool");
+            oxide_pools.push(pool);
+        }
+        oxide_pools.sort_by_key(|pool| pool.id());
+        assert_eq!(oxide_pools.len(), N_POOLS);
+
+        let fetch_paginated = |assignment| async move {
+            let mut found = Vec::with_capacity(N_POOLS);
+            let mut paginator = Paginator::new(
+                NonZeroU32::new(5).unwrap(),
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(page) = paginator.next() {
+                let batch = datastore
+                    .ip_pools_list_paginated(
+                        opctx,
+                        Some(assignment),
+                        None,
+                        None,
+                        &PaginatedBy::Id(page.current_pagparams()),
+                    )
+                    .await
+                    .expect("Should be able to list pools with pagination");
+                paginator = page.found_batch(&batch, &|pool| pool.id());
+                found.extend(batch.into_iter());
+            }
+            found
+        };
+
+        // Paginate all the customer/silo pools.
+        let customer_pools_found =
+            fetch_paginated(IpPoolAssignment::Silos).await;
+        assert_eq!(customer_pools.len(), customer_pools_found.len());
+        assert_eq!(customer_pools, customer_pools_found);
+
+        // Paginate all those assigned for system services use. These are
+        // exactly the pools we created above; the test datastore has no other
+        // system-service pools.
+        let oxide_reserved_found =
+            fetch_paginated(IpPoolAssignment::SystemServices).await;
+        assert_eq!(oxide_pools.len(), oxide_reserved_found.len());
+        assert_eq!(oxide_pools, oxide_reserved_found);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Ensure we have the right query contents.
+    #[tokio::test]
+    async fn expectorate_insert_ip_pool_external_silo_link() {
+        let res = IncompleteIpPoolResource {
+            ip_pool_id: uuid::uuid!("aaa84fbd-85a5-4fcb-b34f-23b7e56145c7"),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: INTERNAL_SILO_ID.into_untyped_uuid(),
+            is_default: false,
+        };
+        let query = link_ip_pool_to_external_silo_query(&res);
+        expectorate_query_contents(
+            &query,
+            "tests/output/ip_pool_external_silo_link.sql",
+        )
+        .await;
+    }
+
+    // Explain the SQL query inserting an IP Pool link to a customer silo
+    #[tokio::test]
+    async fn can_explain_link_ip_pool_to_silo_query() {
+        let logctx =
+            dev::test_setup_log("can_explain_link_ip_pool_to_silo_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let res = IncompleteIpPoolResource {
+            ip_pool_id: uuid::uuid!("aaa84fbd-85a5-4fcb-b34f-23b7e56145c7"),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: INTERNAL_SILO_ID.into_untyped_uuid(),
+            is_default: false,
+        };
+
+        let query = link_ip_pool_to_external_silo_query(&res);
+        let _ = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_link_system_services_pool_to_silo() {
+        let logctx =
+            dev::test_setup_log("cannot_link_system_services_pool_to_silo");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create the pool
+        let identity = IdentityMetadataCreateParams {
+            name: "internal-ip-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(
+                opctx,
+                IpPool::new(
+                    &identity,
+                    IpVersion::V4,
+                    IpPoolAssignment::SystemServices,
+                ),
+            )
+            .await
+            .expect("Failed to create IP pool");
+
+        // We should fail to link it to some other silo now.
+        let link = IncompleteIpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: uuid::uuid!("cfb16a9d-764e-4c5d-8d0d-cf737885b84a"),
+            is_default: false,
+        };
+        let res = datastore.ip_pool_link_silo(&opctx, link).await;
+        let Err(Error::InvalidRequest { message }) = &res else {
+            panic!(
+                "Expected to fail linking an assigned for system services \
+                IP Pool to an external Silo, found: {res:#?}",
+            );
+        };
+        assert_eq!(message.external_message(), BAD_SILO_LINK_ERROR);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_assign_externally_linked_pool_to_system_services() {
+        let logctx = dev::test_setup_log(
+            "cannot_assign_externally_linked_pool_to_system_services",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create the pool, assigned for silo use.
+        let identity = IdentityMetadataCreateParams {
+            name: "external-ip-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(
+                opctx,
+                IpPool::new(&identity, IpVersion::V4, IpPoolAssignment::Silos),
+            )
+            .await
+            .expect("Failed to create IP pool");
+
+        // Link to an external silo.
+        let external_link = IncompleteIpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: nexus_types::silo::DEFAULT_SILO_ID.into_untyped_uuid(),
+            is_default: false,
+        };
+        let _ = datastore
+            .ip_pool_link_silo(&opctx, external_link)
+            .await
+            .expect("Should be able to link unlinked pool to default silo");
+
+        // We should fail to assign it for system services use now.
+        let (authz_pool, db_pool) = LookupPath::new(opctx, datastore)
+            .ip_pool_id(ip_pool.id())
+            .fetch_for(authz::Action::Modify)
+            .await
+            .unwrap();
+        let res = datastore
+            .ip_pool_assign(
+                opctx,
+                &authz_pool,
+                &db_pool,
+                IpPoolAssignment::SystemServices,
+            )
+            .await;
+        let Err(Error::InvalidRequest { message }) = &res else {
+            panic!(
+                "Expected to fail delegating an IP Pool \
+                when it's already linked to an external silo, found {res:#?}"
+            );
+        };
+        assert_eq!(message.external_message(), BAD_SILO_LINK_ERROR);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Ensure that we fail to link to a silo that is deleted.
+    #[tokio::test]
+    async fn cannot_link_pool_to_deleted_silo() {
+        let logctx = dev::test_setup_log("cannot_link_pool_to_deleted_silo");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create the pool
+        let identity = IdentityMetadataCreateParams {
+            name: "external-ip-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(
+                opctx,
+                IpPool::new(&identity, IpVersion::V4, IpPoolAssignment::Silos),
+            )
+            .await
+            .expect("Failed to create IP pool");
+
+        // Delete the silo, directly to avoid a bunch of machinery.
+        use nexus_db_schema::schema::silo::dsl;
+        let c = diesel::update(
+            dsl::silo
+                .find(to_db_typed_uuid(nexus_types::silo::DEFAULT_SILO_ID)),
+        )
+        .set(dsl::time_deleted.eq(diesel::dsl::now))
+        .execute_async(
+            &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+        )
+        .await
+        .expect("Should be able to soft-delete silo");
+        assert_eq!(c, 1, "Should have deleted something");
+
+        // Now try link to it.
+        let external_link = IncompleteIpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: nexus_types::silo::DEFAULT_SILO_ID.into_untyped_uuid(),
+            is_default: false,
+        };
+        let err = datastore
+            .ip_pool_link_silo(&opctx, external_link)
+            .await
+            .expect_err("Should have failed to link IP Pool to deleted Silo");
+        assert_matches!(err, Error::ObjectNotFound { .. });
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Ensure that we fail to link a deleted pool to a silo.
+    #[tokio::test]
+    async fn cannot_link_silo_to_deleted_pool() {
+        let logctx = dev::test_setup_log("cannot_link_silo_to_deleted_pool");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create the pool
+        let identity = IdentityMetadataCreateParams {
+            name: "external-ip-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(
+                opctx,
+                IpPool::new(&identity, IpVersion::V4, IpPoolAssignment::Silos),
+            )
+            .await
+            .expect("Failed to create IP pool");
+
+        // Delete the pool, directly to avoid a bunch of machinery.
+        use nexus_db_schema::schema::ip_pool::dsl;
+        let c = diesel::update(dsl::ip_pool.find(ip_pool.id()))
+            .set(dsl::time_deleted.eq(diesel::dsl::now))
+            .execute_async(
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+            )
+            .await
+            .expect("Should be able to soft-delete IP Pool");
+        assert_eq!(c, 1, "Should have deleted something");
+
+        // Now try link to it.
+        let external_link = IncompleteIpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: nexus_types::silo::DEFAULT_SILO_ID.into_untyped_uuid(),
+            is_default: false,
+        };
+        let err = datastore
+            .ip_pool_link_silo(&opctx, external_link)
+            .await
+            .expect_err("Should have failed to link deleted IP Pool to Silo");
+        assert_matches!(err, Error::ObjectNotFound { .. });
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // This is probably very hard to reproduce reliably in an integration test:
+    // the real delete path soft-deletes the pool and then removes link rows in
+    // the next statement, so the buggy behavior depends on hitting that narrow
+    // inter-statement window.
+    #[tokio::test]
+    async fn cannot_set_deleted_pool_as_default_even_if_link_exists() {
+        let logctx = dev::test_setup_log(
+            "cannot_set_deleted_pool_as_default_even_if_link_exists",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let identity = IdentityMetadataCreateParams {
+            name: "external-ip-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(
+                opctx,
+                IpPool::new(&identity, IpVersion::V4, IpPoolAssignment::Silos),
+            )
+            .await
+            .expect("Failed to create IP pool");
+
+        let link = IncompleteIpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: nexus_types::silo::DEFAULT_SILO_ID.into_untyped_uuid(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should be able to link pool to default silo");
+
+        use nexus_db_schema::schema::ip_pool::dsl as pool_dsl;
+        let c = diesel::update(pool_dsl::ip_pool.find(ip_pool.id()))
+            .set(pool_dsl::time_deleted.eq(diesel::dsl::now))
+            .execute_async(
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+            )
+            .await
+            .expect("Should be able to soft-delete IP Pool");
+        assert_eq!(c, 1, "Should have deleted something");
+
+        use nexus_db_schema::schema::ip_pool_resource::dsl as resource_dsl;
+        let links: Vec<IpPoolResource> = resource_dsl::ip_pool_resource
+            .filter(resource_dsl::ip_pool_id.eq(ip_pool.id()))
+            .select(IpPoolResource::as_select())
+            .load_async(
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+            )
+            .await
+            .expect("Should still have link rows for deleted pool");
+        assert_eq!(links.len(), 1);
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            ip_pool.id(),
+            LookupType::ById(ip_pool.id()),
+        );
+        let authz_silo = authz::Silo::new(
+            authz::Fleet,
+            nexus_types::silo::DEFAULT_SILO_ID,
+            LookupType::by_id(nexus_types::silo::DEFAULT_SILO_ID),
+        );
+        let err = datastore
+            .ip_pool_set_default(&opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect_err(
+                "Should not be able to set default on a deleted pool link",
+            );
+        assert_matches!(err, Error::ObjectNotFound { .. });
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_unset_deleted_pool_default_even_if_link_exists() {
+        let logctx = dev::test_setup_log(
+            "cannot_unset_deleted_pool_default_even_if_link_exists",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let identity = IdentityMetadataCreateParams {
+            name: "external-ip-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(
+                opctx,
+                IpPool::new(&identity, IpVersion::V4, IpPoolAssignment::Silos),
+            )
+            .await
+            .expect("Failed to create IP pool");
+
+        let link = IncompleteIpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: nexus_types::silo::DEFAULT_SILO_ID.into_untyped_uuid(),
+            is_default: true,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should be able to link pool to default silo");
+
+        use nexus_db_schema::schema::ip_pool::dsl as pool_dsl;
+        let c = diesel::update(pool_dsl::ip_pool.find(ip_pool.id()))
+            .set(pool_dsl::time_deleted.eq(diesel::dsl::now))
+            .execute_async(
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+            )
+            .await
+            .expect("Should be able to soft-delete IP Pool");
+        assert_eq!(c, 1, "Should have deleted something");
+
+        use nexus_db_schema::schema::ip_pool_resource::dsl as resource_dsl;
+        let links: Vec<IpPoolResource> = resource_dsl::ip_pool_resource
+            .filter(resource_dsl::ip_pool_id.eq(ip_pool.id()))
+            .select(IpPoolResource::as_select())
+            .load_async(
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+            )
+            .await
+            .expect("Should still have link rows for deleted pool");
+        assert_eq!(links.len(), 1);
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            ip_pool.id(),
+            LookupType::ById(ip_pool.id()),
+        );
+        let authz_silo = authz::Silo::new(
+            authz::Fleet,
+            nexus_types::silo::DEFAULT_SILO_ID,
+            LookupType::by_id(nexus_types::silo::DEFAULT_SILO_ID),
+        );
+        let err = datastore
+            .ip_pool_set_default(&opctx, &authz_pool, &authz_silo, false)
+            .await
+            .expect_err(
+                "Should not be able to unset default on a deleted pool link",
+            );
+        assert_matches!(err, Error::ObjectNotFound { .. });
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test that we can have separate default pools for IPv4 and IPv6 unicast.
+    // This verifies that the unique index on (resource_id, pool_type, ip_version)
+    // allows multiple defaults when they differ by ip_version.
+    #[tokio::test]
+    async fn test_separate_v4_v6_unicast_default_pools() {
+        use nexus_db_schema::schema::ip_pool_resource;
+
+        let logctx =
+            dev::test_setup_log("test_separate_v4_v6_unicast_default_pools");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let silo_id = opctx.authn.silo_required().unwrap().id();
+
+        // Create an IPv4 unicast pool
+        let v4_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &IdentityMetadataCreateParams {
+                        name: "unicast-v4-pool".parse().unwrap(),
+                        description: "IPv4 unicast pool".to_string(),
+                    },
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create IPv4 unicast pool");
+        assert_eq!(v4_pool.pool_type, IpPoolType::Unicast);
+        assert_eq!(v4_pool.ip_version, IpVersion::V4);
+
+        // Link IPv4 pool as default
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: v4_pool.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: silo_id.into_untyped_uuid(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link IPv4 pool as default");
+
+        // Create an IPv6 unicast pool
+        let v6_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &IdentityMetadataCreateParams {
+                        name: "unicast-v6-pool".parse().unwrap(),
+                        description: "IPv6 unicast pool".to_string(),
+                    },
+                    IpVersion::V6,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create IPv6 unicast pool");
+        assert_eq!(v6_pool.pool_type, IpPoolType::Unicast);
+        assert_eq!(v6_pool.ip_version, IpVersion::V6);
+
+        // Link IPv6 pool as default (should work because it's a different
+        // IP version than the V4 default)
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: v6_pool.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: silo_id.into_untyped_uuid(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link IPv6 pool as default (different ip_version)");
+
+        // Verify both defaults exist by querying the pool resource table
+        let defaults: Vec<IpPoolResource> = ip_pool_resource::table
+            .filter(
+                ip_pool_resource::resource_id.eq(silo_id.into_untyped_uuid()),
+            )
+            .filter(ip_pool_resource::is_default.eq(true))
+            .select(IpPoolResource::as_select())
+            .load_async(
+                &*datastore.pool_connection_authorized(&opctx).await.unwrap(),
+            )
+            .await
+            .expect("Should query defaults");
+
+        assert_eq!(defaults.len(), 2, "Should have both V4 and V6 defaults");
+        assert!(defaults.iter().any(|d| d.ip_version == IpVersion::V4));
+        assert!(defaults.iter().any(|d| d.ip_version == IpVersion::V6));
+
+        // Now create another V4 pool and try to make it default
+        let v4_pool2 = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &IdentityMetadataCreateParams {
+                        name: "unicast-v4-pool-2".parse().unwrap(),
+                        description: "Second IPv4 unicast pool".to_string(),
+                    },
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create second IPv4 pool");
+
+        // Trying to link as default should fail, as we already have a V4 default
+        //
+        // `ip_pool_link_silo` doesn't do unset/set; `ip_pool_set_default` does
+        let err = datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: v4_pool2.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: silo_id.into_untyped_uuid(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect_err("Should fail: already have V4 default");
+        assert_matches!(err, Error::ObjectAlreadyExists { .. });
+
+        // Link it as non-default should work
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: v4_pool2.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: silo_id.into_untyped_uuid(),
+                    is_default: false,
+                },
+            )
+            .await
+            .expect("Should link as non-default");
+
+        // Now use `set_default` to make the second V4 pool the default
+        let authz_v4_pool2 = authz::IpPool::new(
+            authz::FLEET,
+            v4_pool2.id(),
+            LookupType::ById(v4_pool2.id()),
+        );
+        let authz_silo =
+            authz::Silo::new(authz::Fleet, silo_id, LookupType::by_id(silo_id));
+        datastore
+            .ip_pool_set_default(&opctx, &authz_v4_pool2, &authz_silo, true)
+            .await
+            .expect("Should set second V4 pool as default");
+
+        // Verify: V6 default should still exist, V4 default should now be pool2
+        let defaults: Vec<IpPoolResource> = ip_pool_resource::table
+            .filter(
+                ip_pool_resource::resource_id.eq(silo_id.into_untyped_uuid()),
+            )
+            .filter(ip_pool_resource::is_default.eq(true))
+            .select(IpPoolResource::as_select())
+            .load_async(
+                &*datastore.pool_connection_authorized(&opctx).await.unwrap(),
+            )
+            .await
+            .expect("Should query defaults");
+
+        assert_eq!(defaults.len(), 2, "Should still have 2 defaults");
+        let v4_default =
+            defaults.iter().find(|d| d.ip_version == IpVersion::V4).unwrap();
+        let v6_default =
+            defaults.iter().find(|d| d.ip_version == IpVersion::V6).unwrap();
+        assert_eq!(v4_default.ip_pool_id, v4_pool2.id());
+        assert_eq!(v6_default.ip_pool_id, v6_pool.id());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test that multiple default pools can exist per silo when they have
+    // different (pool_type, ip_version) combinations. A silo can have up to
+    // 4 default pools: unicast v4, unicast v6, multicast v4, multicast v6.
+    #[tokio::test]
+    async fn test_multiple_default_pools_per_silo() {
+        use nexus_db_schema::schema::ip_pool_resource;
+
+        let logctx =
+            dev::test_setup_log("test_multiple_default_pools_per_silo");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let silo_id = opctx.authn.silo_required().unwrap().id();
+
+        // Create all 4 pool types
+        let unicast_v4 = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &IdentityMetadataCreateParams {
+                        name: "unicast-v4".parse().unwrap(),
+                        description: "Unicast IPv4".to_string(),
+                    },
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Create unicast v4");
+
+        let unicast_v6 = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &IdentityMetadataCreateParams {
+                        name: "unicast-v6".parse().unwrap(),
+                        description: "Unicast IPv6".to_string(),
+                    },
+                    IpVersion::V6,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Create unicast v6");
+
+        let multicast_v4 = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &IdentityMetadataCreateParams {
+                        name: "multicast-v4".parse().unwrap(),
+                        description: "Multicast IPv4".to_string(),
+                    },
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Create multicast v4");
+
+        let multicast_v6 = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &IdentityMetadataCreateParams {
+                        name: "multicast-v6".parse().unwrap(),
+                        description: "Multicast IPv6".to_string(),
+                    },
+                    IpVersion::V6,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Create multicast v6");
+
+        // Link all 4 as defaults, each has unique (pool_type, ip_version) combo
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: unicast_v4.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: silo_id.into_untyped_uuid(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Link unicast v4");
+
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: unicast_v6.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: silo_id.into_untyped_uuid(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Link unicast v6");
+
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: multicast_v4.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: silo_id.into_untyped_uuid(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Link multicast v4");
+
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: multicast_v6.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: silo_id.into_untyped_uuid(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Link multicast v6");
+
+        // Verify we have 4 default pools
+        let defaults: Vec<IpPoolResource> = ip_pool_resource::table
+            .filter(
+                ip_pool_resource::resource_id.eq(silo_id.into_untyped_uuid()),
+            )
+            .filter(ip_pool_resource::is_default.eq(true))
+            .select(IpPoolResource::as_select())
+            .load_async(
+                &*datastore.pool_connection_authorized(&opctx).await.unwrap(),
+            )
+            .await
+            .expect("Query defaults");
+
+        assert_eq!(defaults.len(), 4);
+
+        // Should have 2 unicast and 2 multicast
+        assert_eq!(
+            defaults
+                .iter()
+                .filter(|d| d.pool_type == IpPoolType::Unicast)
+                .count(),
+            2
+        );
+        assert_eq!(
+            defaults
+                .iter()
+                .filter(|d| d.pool_type == IpPoolType::Multicast)
+                .count(),
+            2
+        );
+
+        // Should have 2 V4 and 2 V6
+        assert_eq!(
+            defaults.iter().filter(|d| d.ip_version == IpVersion::V4).count(),
+            2
+        );
+        assert_eq!(
+            defaults.iter().filter(|d| d.ip_version == IpVersion::V6).count(),
+            2
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test that only unicast pools link to the default gateway, not multicast.
+    // This verifies the gateway linking logic in `ip_pool_link_silo`.
+    #[tokio::test]
+    async fn test_gateway_linking_unicast_only() {
+        use nexus_db_schema::schema::internet_gateway_ip_pool;
+
+        let logctx = dev::test_setup_log("test_gateway_linking_unicast_only");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        // Create a multicast pool and make it default
+        let mcast_identity = IdentityMetadataCreateParams {
+            name: "multicast-default".parse().unwrap(),
+            description: "Default multicast pool".to_string(),
+        };
+        let multicast_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &mcast_identity,
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create multicast pool");
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: multicast_pool.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id().into_untyped_uuid(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link multicast pool");
+
+        // Check that no gateway links were created for the multicast pool
+        let mcast_gateway_links: Vec<InternetGatewayIpPool> =
+            internet_gateway_ip_pool::table
+                .filter(
+                    internet_gateway_ip_pool::ip_pool_id
+                        .eq(multicast_pool.id()),
+                )
+                .filter(internet_gateway_ip_pool::time_deleted.is_null())
+                .select(InternetGatewayIpPool::as_select())
+                .load_async(
+                    &*datastore
+                        .pool_connection_authorized(&opctx)
+                        .await
+                        .unwrap(),
+                )
+                .await
+                .expect("Should query gateway links");
+
+        assert!(
+            mcast_gateway_links.is_empty(),
+            "Multicast pools should *not* create internet gateway links"
+        );
+
+        // Create a unicast pool and make it default
+        let unicast_identity = IdentityMetadataCreateParams {
+            name: "unicast-default".parse().unwrap(),
+            description: "Default unicast pool".to_string(),
+        };
+        let unicast_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &unicast_identity,
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create unicast pool");
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: unicast_pool.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id().into_untyped_uuid(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link unicast pool");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test that ip_pools_fetch_all_unicast_defaults only returns unicast pools,
+    // even when multicast default pools also exist. This is important because
+    // ephemeral and floating IPs should only come from unicast pools.
+    #[tokio::test]
+    async fn test_fetch_default_returns_unicast_not_multicast() {
+        let logctx = dev::test_setup_log(
+            "test_fetch_default_returns_unicast_not_multicast",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let silo_id = opctx.authn.silo_required().unwrap().id();
+
+        // Create and link a multicast pool as default FIRST
+        let multicast_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &IdentityMetadataCreateParams {
+                        name: "multicast-default".parse().unwrap(),
+                        description: "Multicast default pool".to_string(),
+                    },
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Create multicast pool");
+
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: multicast_pool.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: silo_id.into_untyped_uuid(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Link multicast pool");
+
+        // At this point, only multicast default exists; unicast defaults should be empty
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
+            .await
+            .expect("Should fetch defaults");
+        assert!(pools.v4.is_none() && pools.v6.is_none());
+
+        // Now create and link a unicast pool as default
+        let unicast_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &IdentityMetadataCreateParams {
+                        name: "unicast-default".parse().unwrap(),
+                        description: "Unicast default pool".to_string(),
+                    },
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Create unicast pool");
+
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: unicast_pool.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: silo_id.into_untyped_uuid(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Link unicast pool");
+
+        // Now fetch should return the unicast pool as v4, not multicast
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
+            .await
+            .expect("Should find unicast default");
+        let (_, default_pool) = pools.v4.expect("Expected v4 default pool");
+        assert_eq!(default_pool.id(), unicast_pool.id());
+        assert_eq!(default_pool.pool_type, IpPoolType::Unicast);
+        assert!(pools.v6.is_none(), "Expected no v6 default pool");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Test that fetching default pool returns ip_version conflict error
+    /// when both IPv4 and IPv6 defaults exist without specifying version.
+    #[tokio::test]
+    async fn test_default_pool_ipv4_ipv6_conflict() {
+        let logctx =
+            dev::test_setup_log("test_default_pool_ipv4_ipv6_conflict");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        // Create IPv6 pool first (to ensure ordering isn't just insertion order)
+        let identity_ipv6 = IdentityMetadataCreateParams {
+            name: "unicast-ipv6-pool".parse().unwrap(),
+            description: "Unicast IPv6 pool".to_string(),
+        };
+        let unicast_ipv6 = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &identity_ipv6,
+                    IpVersion::V6,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create unicast IPv6 pool");
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: unicast_ipv6.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id().into_untyped_uuid(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link unicast IPv6");
+
+        // Create IPv4 pool second
+        let identity_ipv4 = IdentityMetadataCreateParams {
+            name: "unicast-ipv4-pool".parse().unwrap(),
+            description: "Unicast IPv4 pool".to_string(),
+        };
+        let unicast_ipv4 = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &identity_ipv4,
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create unicast IPv4 pool");
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: unicast_ipv4.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id().into_untyped_uuid(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link unicast IPv4");
+
+        // Fetch default without `ip_version`. This should fail since both V4
+        // and V6 defaults exist
+        let error = datastore
+            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Unicast, None)
+            .await
+            .expect_err("Should fail when both V4 and V6 defaults exist");
+        assert!(
+            error.to_string().contains("Multiple"),
+            "Expected V4/V6 conflict error, got: {error}"
+        );
+
+        // But ip_pools_fetch_all_unicast_defaults should return both pools
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
+            .await
+            .expect("Should return both defaults without error");
+        assert_eq!(
+            pools.v4.expect("the IPv4 pool to be populated").1.id(),
+            unicast_ipv4.id()
+        );
+        assert_eq!(
+            pools.v6.expect("the IPv6 pool to be populated").1.id(),
+            unicast_ipv6.id()
+        );
+
+        // Test explicit ip_version preference
+        let (_, v6_pool) = datastore
+            .ip_pools_fetch_default_by_type(
+                &opctx,
+                IpPoolType::Unicast,
+                Some(IpVersion::V6),
+            )
+            .await
+            .expect("Should find IPv6 pool when explicitly requested");
+        assert_eq!(
+            v6_pool.id(),
+            unicast_ipv6.id(),
+            "Should return IPv6 pool when ip_version=V6"
+        );
+
+        let (_, v4_pool) = datastore
+            .ip_pools_fetch_default_by_type(
+                &opctx,
+                IpPoolType::Unicast,
+                Some(IpVersion::V4),
+            )
+            .await
+            .expect("Should find IPv4 pool when explicitly requested");
+        assert_eq!(
+            v4_pool.id(),
+            unicast_ipv4.id(),
+            "Should return IPv4 pool when ip_version=V4"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Test that default pool lookups correctly handle V4/V6 ordering when both
+    /// defaults exist. An error should returned unless an explicit IP version
+    /// is explicitly specified.
+    #[tokio::test]
+    async fn test_default_pool_ipv4_ipv6_ordering() {
+        let logctx =
+            dev::test_setup_log("test_default_pool_ipv4_ipv6_ordering");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        // Create IPv6 pool first (to ensure ordering isn't just insertion order)
+        let identity_ipv6 = IdentityMetadataCreateParams {
+            name: "unicast-ipv6-pool".parse().unwrap(),
+            description: "Unicast IPv6 pool".to_string(),
+        };
+        let unicast_ipv6 = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &identity_ipv6,
+                    IpVersion::V6,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create unicast IPv6 pool");
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: unicast_ipv6.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id().into_untyped_uuid(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link unicast IPv6");
+
+        // Create IPv4 pool second
+        let identity_ipv4 = IdentityMetadataCreateParams {
+            name: "unicast-ipv4-pool".parse().unwrap(),
+            description: "Unicast IPv4 pool".to_string(),
+        };
+        let unicast_ipv4 = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &identity_ipv4,
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create unicast IPv4 pool");
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: unicast_ipv4.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id().into_untyped_uuid(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link unicast IPv4");
+
+        // Fetch default without `ip_version`. This should fail since both V4
+        // and V6 defaults exist
+        let error = datastore
+            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Unicast, None)
+            .await
+            .expect_err("Should fail when both V4 and V6 defaults exist");
+        assert!(
+            error.to_string().contains("Multiple"),
+            "Expected V4/V6 conflict error, got: {error}"
+        );
+
+        // But ip_pools_fetch_all_unicast_defaults should return both pools
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
+            .await
+            .expect("Should return both defaults without error");
+        assert_eq!(
+            pools.v4.expect("the IPv4 pool to be populated").1.id(),
+            unicast_ipv4.id()
+        );
+        assert_eq!(
+            pools.v6.expect("the IPv6 pool to be populated").1.id(),
+            unicast_ipv6.id()
+        );
+
+        // Test explicit ip_version preference
+        let (_, v6_pool) = datastore
+            .ip_pools_fetch_default_by_type(
+                &opctx,
+                IpPoolType::Unicast,
+                Some(IpVersion::V6),
+            )
+            .await
+            .expect("Should find IPv6 pool when explicitly requested");
+        assert_eq!(
+            v6_pool.id(),
+            unicast_ipv6.id(),
+            "Should return IPv6 pool when ip_version=V6"
+        );
+
+        let (_, v4_pool) = datastore
+            .ip_pools_fetch_default_by_type(
+                &opctx,
+                IpPoolType::Unicast,
+                Some(IpVersion::V4),
+            )
+            .await
+            .expect("Should find IPv4 pool when explicitly requested");
+        assert_eq!(
+            v4_pool.id(),
+            unicast_ipv4.id(),
+            "Should return IPv4 pool when ip_version=V4"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test that a silo can have only an IPv6 default pool
+    #[tokio::test]
+    async fn test_ipv6_only_default_pool() {
+        let logctx = dev::test_setup_log("test_ipv6_only_default_pool");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let silo_id = opctx.authn.silo_required().unwrap().id();
+
+        // Create only an IPv6 pool
+        let v6_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &IdentityMetadataCreateParams {
+                        name: "v6-only".parse().unwrap(),
+                        description: "IPv6 only pool".to_string(),
+                    },
+                    IpVersion::V6,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Create v6");
+
+        // Link as default
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: v6_pool.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: silo_id.into_untyped_uuid(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Link v6");
+
+        // Should be able to fetch the v6 default
+        let pools = datastore
+            .ip_pools_fetch_all_unicast_defaults(&opctx)
+            .await
+            .expect("Fetch defaults");
+        let (_, default_pool) = pools.v6.expect("Expected v6 default pool");
+        assert_eq!(default_pool.id(), v6_pool.id());
+        assert_eq!(default_pool.ip_version, IpVersion::V6);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test that denormalized pool_type and ip_version in ip_pool_resource
+    // match the source ip_pool table
+    #[tokio::test]
+    async fn test_denormalized_columns_consistency() {
+        use nexus_db_schema::schema::ip_pool_resource;
+
+        let logctx =
+            dev::test_setup_log("test_denormalized_columns_consistency");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let silo_id = opctx.authn.silo_required().unwrap().id();
+
+        // Create pools with different types and versions
+        let unicast_v4 = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &IdentityMetadataCreateParams {
+                        name: "test-unicast-v4".parse().unwrap(),
+                        description: "Test unicast V4".to_string(),
+                    },
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Create unicast v4");
+
+        let unicast_v6 = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &IdentityMetadataCreateParams {
+                        name: "test-unicast-v6".parse().unwrap(),
+                        description: "Test unicast V6".to_string(),
+                    },
+                    IpVersion::V6,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Create unicast v6");
+
+        // Link both pools
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: unicast_v4.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: silo_id.into_untyped_uuid(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Link unicast v4");
+
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: unicast_v6.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: silo_id.into_untyped_uuid(),
+                    is_default: false,
+                },
+            )
+            .await
+            .expect("Link unicast v6");
+
+        // Query ip_pool_resource and verify denormalized columns match
+        let resources: Vec<IpPoolResource> = ip_pool_resource::table
+            .filter(
+                ip_pool_resource::resource_id.eq(silo_id.into_untyped_uuid()),
+            )
+            .select(IpPoolResource::as_select())
+            .load_async(
+                &*datastore.pool_connection_authorized(&opctx).await.unwrap(),
+            )
+            .await
+            .expect("Query resources");
+
+        // Find the unicast V4 resource
+        let v4_resource = resources
+            .iter()
+            .find(|r| r.ip_pool_id == unicast_v4.id())
+            .expect("Find v4 resource");
+        assert_eq!(v4_resource.pool_type, IpPoolType::Unicast);
+        assert_eq!(v4_resource.ip_version, IpVersion::V4);
+        assert_eq!(v4_resource.pool_type, unicast_v4.pool_type);
+        assert_eq!(v4_resource.ip_version, unicast_v4.ip_version);
+
+        // Find the unicast V6 resource
+        let v6_resource = resources
+            .iter()
+            .find(|r| r.ip_pool_id == unicast_v6.id())
+            .expect("Find v6 resource");
+        assert_eq!(v6_resource.pool_type, IpPoolType::Unicast);
+        assert_eq!(v6_resource.ip_version, IpVersion::V6);
+        assert_eq!(v6_resource.pool_type, unicast_v6.pool_type);
+        assert_eq!(v6_resource.ip_version, unicast_v6.ip_version);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn can_explain_unlink_ip_pool_from_external_silo_query() {
+        let logctx = dev::test_setup_log(
+            "can_explain_unlink_ip_pool_from_external_silo_query",
+        );
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let ip_pool_id = uuid::uuid!("aaa84fbd-85a5-4fcb-b34f-23b7e56145c7");
+        let silo_id = nexus_types::silo::DEFAULT_SILO_ID;
+        let query =
+            unlink_ip_pool_from_external_silo_query(ip_pool_id, silo_id);
+        let _ = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_delete_last_system_services_ip_pool() {
+        let logctx =
+            dev::test_setup_log("cannot_delete_last_system_services_ip_pool");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create the v4 and v6 system-service pools we exercise below.
+        let ipv4 = create_service_ip_pool(
+            opctx,
+            datastore,
+            "oxide-service-pool-v4",
+            IpVersion::V4.into(),
+        )
+        .await;
+        let ipv6 = create_service_ip_pool(
+            opctx,
+            datastore,
+            "oxide-service-pool-v6",
+            IpVersion::V6.into(),
+        )
+        .await;
+
+        // We should be able to delete one of these.
+        let _ = datastore
+            .ip_pool_delete(opctx, &ipv4.authz_pool, &ipv4.db_pool)
+            .await
+            .expect(
+                "Should be able to delete assigned for system services \
+                IP Pool when at least one remains",
+            );
+
+        // Check there's only one left.
+        let pagparams = &PaginatedBy::Id(DataPageParams {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit: 100.try_into().unwrap(),
+        });
+        let l = datastore
+            .ip_pools_list_paginated(
+                opctx,
+                Some(IpPoolAssignment::SystemServices),
+                None,
+                None,
+                &pagparams,
+            )
+            .await
+            .unwrap();
+        assert_eq!(l.len(), 1);
+
+        // We should _not_ be able to delete the other now, because there's only
+        // one left.
+        let res = datastore
+            .ip_pool_delete(opctx, &ipv6.authz_pool, &ipv6.db_pool)
+            .await;
+
+        let Err(Error::InvalidRequest { message }) = &res else {
+            panic!(
+                "Should not be able to delete assigned for system services \
+                IP Pool when only one remains, found {res:#?}"
+            );
+        };
+        assert_eq!(message.external_message(), DELETE_LAST_POOL_ERROR);
+
+        let l = datastore
+            .ip_pools_list_paginated(
+                opctx,
+                Some(IpPoolAssignment::SystemServices),
+                None,
+                None,
+                &pagparams,
+            )
+            .await
+            .unwrap();
+        assert_eq!(l.len(), 1);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_assign_last_system_services_ip_pool_to_silos() {
+        let logctx = dev::test_setup_log(
+            "cannot_assign_last_system_services_ip_pool_to_silos",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create the v4 and v6 system-service pools we exercise below.
+        let ipv4 = create_service_ip_pool(
+            opctx,
+            datastore,
+            "oxide-service-pool-v4",
+            IpVersion::V4.into(),
+        )
+        .await;
+        let ipv6 = create_service_ip_pool(
+            opctx,
+            datastore,
+            "oxide-service-pool-v6",
+            IpVersion::V6.into(),
+        )
+        .await;
+
+        // We should be able to assign one of these for silo use.
+        let _ = datastore
+            .ip_pool_assign(
+                opctx,
+                &ipv4.authz_pool,
+                &ipv4.db_pool,
+                IpPoolAssignment::Silos,
+            )
+            .await
+            .expect(
+                "Should be able to assign to silos IP Pool \
+                when at least one assigned for system services pool remains",
+            );
+
+        // Check there's only one left.
+        let pagparams = &PaginatedBy::Id(DataPageParams {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit: 100.try_into().unwrap(),
+        });
+        let l = datastore
+            .ip_pools_list_paginated(
+                opctx,
+                Some(IpPoolAssignment::SystemServices),
+                None,
+                None,
+                &pagparams,
+            )
+            .await
+            .unwrap();
+        assert_eq!(l.len(), 1);
+
+        // We should _not_ be able to assign the other for silo use now,
+        // because there's only one left for system services use.
+        let res = datastore
+            .ip_pool_assign(
+                opctx,
+                &ipv6.authz_pool,
+                &ipv6.db_pool,
+                IpPoolAssignment::Silos,
+            )
+            .await;
+        let Err(Error::InvalidRequest { message }) = &res else {
+            panic!(
+                "Should not be able to assign to silos an \
+                assigned for system services IP Pool when only one remains, \
+                found {res:#?}"
+            );
+        };
+        assert_eq!(message.external_message(), REASSIGN_LAST_POOL_ERROR);
+
+        let l = datastore
+            .ip_pools_list_paginated(
+                opctx,
+                Some(IpPoolAssignment::SystemServices),
+                None,
+                None,
+                &pagparams,
+            )
+            .await
+            .unwrap();
+        assert_eq!(l.len(), 1);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_assign_ip_pool_to_silos_with_outstanding_external_ips() {
+        let logctx = dev::test_setup_log(
+            "cannot_assign_ip_pool_to_silos_with_outstanding_external_ips",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create the v4 system-service pool, add a range, allocate an external
+        // IP. Also create a v6 pool so that reassigning the v4 pool for silo
+        // use is allowed at the end (more than one system-service pool remains).
+        let ipv4 = create_service_ip_pool(
+            opctx,
+            datastore,
+            "oxide-service-pool-v4",
+            IpVersion::V4.into(),
+        )
+        .await;
+        create_service_ip_pool(
+            opctx,
+            datastore,
+            "oxide-service-pool-v6",
+            IpVersion::V6.into(),
+        )
+        .await;
+        let ip_range = IpRange::V4(Ipv4Range {
+            first: Ipv4Addr::new(1, 1, 1, 1),
+            last: Ipv4Addr::new(1, 1, 1, 10),
+        });
+        datastore
+            .ip_pool_add_range(
+                opctx,
+                &ipv4.authz_pool,
+                &ipv4.db_pool,
+                &ip_range,
+            )
+            .await
+            .unwrap();
+
+        // Create an IP for an Omicron zone.
+        let eip = datastore
+            .external_ip_allocate_omicron_zone(
+                opctx,
+                OmicronZoneUuid::from_untyped_uuid(uuid::uuid!(
+                    "b7b641d6-f52c-4fd5-b5a5-66ac3918c8b4"
+                )),
+                ZoneKind::BoundaryNtp,
+                OmicronZoneExternalIp::Floating(
+                    OmicronZoneExternalFloatingIp {
+                        id: ExternalIpUuid::from_untyped_uuid(uuid::uuid!(
+                            "4a7f86aa-5cab-42dd-afa5-7eee6304cb8c"
+                        )),
+                        ip: ip_range.first_address(),
+                    },
+                ),
+            )
+            .await
+            .expect("Should be able to create zone external IP");
+
+        // Should not be able to assign to silos the IPv4 pool now, since
+        // we've got an address in use.
+        let res = datastore
+            .ip_pool_assign(
+                opctx,
+                &ipv4.authz_pool,
+                &ipv4.db_pool,
+                IpPoolAssignment::Silos,
+            )
+            .await;
+        let Err(Error::InvalidRequest { message }) = &res else {
+            panic!(
+                "Should not be able to assign to silos internal \
+                IP Pool when an address is in use, found {res:#?}"
+            );
+        };
+        assert_eq!(message.external_message(), POOL_HAS_IPS_ERROR);
+
+        // Delete the address, and now we can assign the pool for silo use.
+        let _ = datastore
+            .deallocate_external_ip(opctx, eip.id)
+            .await
+            .expect("Should be able to delete external IP");
+        let _ = datastore.ip_pool_assign(
+            opctx,
+            &ipv4.authz_pool,
+            &ipv4.db_pool,
+            IpPoolAssignment::Silos,
+        ).await
+            .expect(
+                "Should be able to delete internal IP Pool when more than one remains, \
+                after deleting external IP address"
+            );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn can_explain_assign_ip_pool_to_silos_query() {
+        let logctx =
+            dev::test_setup_log("can_explain_assign_ip_pool_to_silos_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let ip_pool = IpPool {
+            identity: IpPoolIdentity::new(
+                uuid::uuid!("93fea64d-5d0a-4cc6-8f94-7c527ee640a9"),
+                IdentityMetadataCreateParams {
+                    name: "some-pool".parse().unwrap(),
+                    description: String::new(),
+                },
+            ),
+            ip_version: IpVersion::V4,
+            pool_type: IpPoolType::Unicast,
+            rcgen: 0,
+            assignment: IpPoolAssignment::Silos,
+        };
+        let query =
+            assign_ip_pool_query(&ip_pool, IpPoolAssignment::SystemServices);
+        let _ = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn expectorate_assign_ip_pool_to_silos_query() {
+        let ip_pool = IpPool {
+            identity: IpPoolIdentity::new(
+                uuid::uuid!("93fea64d-5d0a-4cc6-8f94-7c527ee640a9"),
+                IdentityMetadataCreateParams {
+                    name: "some-pool".parse().unwrap(),
+                    description: String::new(),
+                },
+            ),
+            ip_version: IpVersion::V4,
+            pool_type: IpPoolType::Unicast,
+            rcgen: 0,
+            assignment: IpPoolAssignment::Silos,
+        };
+        let query =
+            assign_ip_pool_query(&ip_pool, IpPoolAssignment::SystemServices);
+        expectorate_query_contents(
+            &query,
+            "tests/output/assign_ip_pool_to_silos.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn can_explain_assign_ip_pool_to_system_services_query() {
+        let logctx = dev::test_setup_log(
+            "can_explain_assign_ip_pool_to_system_services_query",
+        );
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let ip_pool = IpPool {
+            identity: IpPoolIdentity::new(
+                uuid::uuid!("93fea64d-5d0a-4cc6-8f94-7c527ee640a9"),
+                IdentityMetadataCreateParams {
+                    name: "some-pool".parse().unwrap(),
+                    description: String::new(),
+                },
+            ),
+            ip_version: IpVersion::V4,
+            pool_type: IpPoolType::Unicast,
+            rcgen: 0,
+            assignment: IpPoolAssignment::SystemServices,
+        };
+        let query = assign_ip_pool_query(&ip_pool, IpPoolAssignment::Silos);
+        let _ = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn expectorate_assign_ip_pool_to_system_services_query() {
+        let ip_pool = IpPool {
+            identity: IpPoolIdentity::new(
+                uuid::uuid!("93fea64d-5d0a-4cc6-8f94-7c527ee640a9"),
+                IdentityMetadataCreateParams {
+                    name: "some-pool".parse().unwrap(),
+                    description: String::new(),
+                },
+            ),
+            ip_version: IpVersion::V4,
+            pool_type: IpPoolType::Unicast,
+            rcgen: 0,
+            assignment: IpPoolAssignment::SystemServices,
+        };
+        let query = assign_ip_pool_query(&ip_pool, IpPoolAssignment::Silos);
+        expectorate_query_contents(
+            &query,
+            "tests/output/assign_ip_pool_to_system_services.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_ip_pool_fetch_containing_address() {
+        let logctx =
+            dev::test_setup_log("test_ip_pool_fetch_containing_address");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        // Create a unicast pool with an IPv4 range
+        let identity = IdentityMetadataCreateParams {
+            name: "unicast-pool".parse().unwrap(),
+            description: "Test unicast IP pool".to_string(),
+        };
+        let pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(&identity, IpVersion::V4, IpPoolAssignment::Silos),
+            )
+            .await
+            .expect("Should create unicast IP pool");
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            pool.id(),
+            LookupType::ById(pool.id()),
+        );
+
+        // Link pool to silo
+        let link = IncompleteIpPoolResource {
+            ip_pool_id: pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: authz_silo.id().into_untyped_uuid(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should link pool to silo");
+
+        // Add range 10.0.0.0 - 10.0.0.255
+        let range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(10, 0, 0, 0),
+                Ipv4Addr::new(10, 0, 0, 255),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &pool, &range)
+            .await
+            .expect("Should add range to pool");
+
+        // Case: IP within range should find the pool
+        let ip_in_range = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 100));
+        let result = datastore
+            .ip_pool_fetch_containing_address_in_current_silo(
+                &opctx,
+                ip_in_range,
+                IpPoolType::Unicast,
+            )
+            .await
+            .expect("Should find pool containing 10.0.0.100");
+        assert_eq!(result.id(), pool.id());
+
+        // Case: IP at range boundaries should find the pool
+        let ip_start = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0));
+        let result = datastore
+            .ip_pool_fetch_containing_address_in_current_silo(
+                &opctx,
+                ip_start,
+                IpPoolType::Unicast,
+            )
+            .await
+            .expect("Should find pool containing 10.0.0.0");
+        assert_eq!(result.id(), pool.id());
+
+        let ip_end = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 255));
+        let result = datastore
+            .ip_pool_fetch_containing_address_in_current_silo(
+                &opctx,
+                ip_end,
+                IpPoolType::Unicast,
+            )
+            .await
+            .expect("Should find pool containing 10.0.0.255");
+        assert_eq!(result.id(), pool.id());
+
+        // Case: IP outside range should return NotFound error
+        let ip_outside = IpAddr::V4(Ipv4Addr::new(10, 1, 0, 1));
+        let result = datastore
+            .ip_pool_fetch_containing_address_in_current_silo(
+                &opctx,
+                ip_outside,
+                IpPoolType::Unicast,
+            )
+            .await;
+        assert!(
+            result.is_err(),
+            "Should not find pool for IP outside all ranges"
+        );
+
+        // Case: Wrong pool type should return NotFound error
+        let result = datastore
+            .ip_pool_fetch_containing_address_in_current_silo(
+                &opctx,
+                ip_in_range,
+                IpPoolType::Multicast,
+            )
+            .await;
+        assert!(
+            result.is_err(),
+            "Should not find unicast pool when asking for multicast"
+        );
+
+        // Create a multicast pool to verify pool type filtering works both ways
+        let mcast_identity = IdentityMetadataCreateParams {
+            name: "multicast-pool".parse().unwrap(),
+            description: "Test multicast IP pool".to_string(),
+        };
+        let mcast_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &mcast_identity,
+                    IpVersion::V4,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create multicast IP pool");
+
+        let authz_mcast_pool = authz::IpPool::new(
+            authz::FLEET,
+            mcast_pool.id(),
+            LookupType::ById(mcast_pool.id()),
+        );
+
+        // Link multicast pool to silo
+        let mcast_link = IncompleteIpPoolResource {
+            ip_pool_id: mcast_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: authz_silo.id().into_untyped_uuid(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, mcast_link)
+            .await
+            .expect("Should link multicast pool to silo");
+
+        // Add multicast range 239.0.0.0 - 239.0.0.255
+        let mcast_range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(239, 0, 0, 0),
+                Ipv4Addr::new(239, 0, 0, 255),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(
+                &opctx,
+                &authz_mcast_pool,
+                &mcast_pool,
+                &mcast_range,
+            )
+            .await
+            .expect("Should add multicast range to pool");
+
+        // Case: Multicast IP should find the multicast pool
+        let mcast_ip = IpAddr::V4(Ipv4Addr::new(239, 0, 0, 50));
+        let result = datastore
+            .ip_pool_fetch_containing_address_in_current_silo(
+                &opctx,
+                mcast_ip,
+                IpPoolType::Multicast,
+            )
+            .await
+            .expect("Should find multicast pool containing 239.0.0.50");
+        assert_eq!(result.id(), mcast_pool.id());
+
+        // Case: Multicast IP should not be found when asking for unicast
+        let result = datastore
+            .ip_pool_fetch_containing_address_in_current_silo(
+                &opctx,
+                mcast_ip,
+                IpPoolType::Unicast,
+            )
+            .await;
+        assert!(
+            result.is_err(),
+            "Should not find multicast pool when asking for unicast"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ip_pool_fetch_containing_address_for_services() {
+        let logctx = dev::test_setup_log(
+            "test_ip_pool_fetch_containing_address_for_services",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a pool assigned to system services. Note that we deliberately
+        // do not link it to a silo: system-services pools have no silo link,
+        // which is exactly the branch this method exercises.
+        let identity = IdentityMetadataCreateParams {
+            name: "service-pool".parse().unwrap(),
+            description: "Test system-services IP pool".to_string(),
+        };
+        let pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &identity,
+                    IpVersion::V4,
+                    IpPoolAssignment::SystemServices,
+                ),
+            )
+            .await
+            .expect("Should create system-services IP pool");
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            pool.id(),
+            LookupType::ById(pool.id()),
+        );
+
+        // Add a range to the pool.
+        let range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(10, 0, 0, 0),
+                Ipv4Addr::new(10, 0, 0, 255),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &pool, &range)
+            .await
+            .expect("Should add range to pool");
+
+        // Pick an address from that range and confirm the lookup finds our
+        // pool.
+        let ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 100));
+        let (found_authz, found_pool) = datastore
+            .ip_pool_fetch_containing_address_for_services(&opctx, ip)
+            .await
+            .expect("Should find system-services pool containing 10.0.0.100");
+        assert_eq!(found_authz.id(), pool.id());
+        assert_eq!(found_pool.id(), pool.id());
+
+        // An address outside the range should not be found.
+        let ip_outside = IpAddr::V4(Ipv4Addr::new(10, 1, 0, 1));
+        let result = datastore
+            .ip_pool_fetch_containing_address_for_services(&opctx, ip_outside)
+            .await;
+        assert!(
+            result.is_err(),
+            "Should not find a pool for an address outside all ranges"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_insert_ip_pool_range_which_overlaps_subnet_pool_member() {
+        let logctx = dev::test_setup_log(
+            "cannot_insert_ip_pool_range_which_overlaps_subnet_pool_member",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // First create a Subnet Pool and member.
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V6.into(),
+        };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create external subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+        let _member = datastore
+            .add_subnet_pool_member(
+                opctx,
+                &authz_pool,
+                &db_pool,
+                &SubnetPoolMemberAdd {
+                    subnet: "fd00::/48".parse().unwrap(),
+                    min_prefix_length: None,
+                    max_prefix_length: None,
+                },
+            )
+            .await
+            .expect("able to create subnet pool member");
+
+        // Next create an IP Pool and try to insert an overlapping range.
+        let identity = IdentityMetadataCreateParams {
+            name: "test-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(&identity, IpVersion::V6, IpPoolAssignment::Silos),
+            )
+            .await
+            .expect("Failed to create IP pool");
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            pool.id(),
+            LookupType::ById(pool.id()),
+        );
+        let range = IpRange::V6(
+            Ipv6Range::new(
+                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
+                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
+            )
+            .unwrap(),
+        );
+        let err = datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &pool, &range)
+            .await
+            .expect_err(
+                "should fail to insert IP Pool range that overlaps \
+                subnet Pool member",
+            );
+        let Error::InvalidRequest { message } = &err else {
+            panic!("Expected InvalidRequest, found {err:#?}");
+        };
+        assert_eq!(
+            message.external_message(),
+            format!(
+                "The provided IP range {}-{} overlaps with an existing \
+                IP pool range or subnet pool member",
+                range.first_address(),
+                range.last_address(),
+            ),
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_assign_ip_pool_to_silos_while_assigned_to_services() {
+        let logctx = dev::test_setup_log(
+            "cannot_assign_ip_pool_to_silos_while_assigned_to_services",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create the v4 system-service pool, add a range, and assign it to an
+        // external service. Also create a v6 pool so that reassigning the v4
+        // pool for silo use is allowed at the end (more than one
+        // system-service pool remains).
+        let ipv4 = create_service_ip_pool(
+            opctx,
+            datastore,
+            "oxide-service-pool-v4",
+            IpVersion::V4.into(),
+        )
+        .await;
+        let ipv6 = create_service_ip_pool(
+            opctx,
+            datastore,
+            "oxide-service-pool-v6",
+            IpVersion::V6.into(),
+        )
+        .await;
+        let ip_range = IpRange::V4(Ipv4Range {
+            first: Ipv4Addr::new(1, 1, 1, 1),
+            last: Ipv4Addr::new(1, 1, 1, 10),
+        });
+        datastore
+            .ip_pool_add_range(
+                opctx,
+                &ipv4.authz_pool,
+                &ipv4.db_pool,
+                &ip_range,
+            )
+            .await
+            .unwrap();
+
+        // Assign both to Nexus.
+        datastore
+            .external_service_ip_pool_assign(
+                opctx,
+                ExternalServiceKind::Nexus,
+                &ipv4.authz_pool,
+            )
+            .await
+            .expect("Should be able to assign pool to Nexus");
+        datastore
+            .external_service_ip_pool_assign(
+                opctx,
+                ExternalServiceKind::Nexus,
+                &ipv6.authz_pool,
+            )
+            .await
+            .expect("Should be able to assign pool to Nexus");
+
+        // Should not be able to assign the IPv4 pool to silos now, since
+        // it's assigned for use by Nexus.
+        let res = datastore
+            .ip_pool_assign(
+                opctx,
+                &ipv4.authz_pool,
+                &ipv4.db_pool,
+                IpPoolAssignment::Silos,
+            )
+            .await;
+        let Err(Error::InvalidRequest { message }) = &res else {
+            panic!(
+                "Should not be able to assign to silos internal \
+                IP Pool when assigned to Nexus, found {res:#?}"
+            );
+        };
+        assert_eq!(
+            message.external_message(),
+            ASSIGNED_TO_EXTERNAL_SERVICE_ERROR
+        );
+
+        // Unassign it, and now we can assign the pool for silo use.
+        let _ = datastore
+            .external_service_ip_pool_unassign(
+                opctx,
+                ExternalServiceKind::Nexus,
+                &ipv4.authz_pool,
+            )
+            .await
+            .expect("Should be able to unassign IP Pool");
+        let _ = datastore.ip_pool_assign(
+            opctx,
+            &ipv4.authz_pool,
+            &ipv4.db_pool,
+            IpPoolAssignment::Silos,
+        ).await
+            .expect(
+                "Should be able to delete internal IP Pool when more than one remains, \
+                after unassigning it from Nexus"
+            );
 
         db.terminate().await;
         logctx.cleanup_successful();

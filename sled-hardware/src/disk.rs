@@ -6,12 +6,14 @@ use camino::{Utf8Path, Utf8PathBuf};
 use illumos_utils::fstyp::Fstyp;
 use illumos_utils::zpool::Api;
 use illumos_utils::zpool::Zpool;
-use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::DiskVariant;
 use slog::Logger;
 use slog::{info, warn};
+use slog_error_chain::SlogInlineError;
 
 cfg_if::cfg_if! {
     if #[cfg(target_os = "illumos")] {
@@ -21,12 +23,20 @@ cfg_if::cfg_if! {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, SlogInlineError)]
 pub enum PooledDiskError {
-    #[error("Cannot open {path} due to {error}")]
-    IoError { path: Utf8PathBuf, error: std::io::Error },
-    #[error("Failed to open partition at {path} due to {error}")]
-    Gpt { path: Utf8PathBuf, error: anyhow::Error },
+    #[error("Cannot open {path}")]
+    IoError {
+        path: Utf8PathBuf,
+        #[source]
+        error: std::io::Error,
+    },
+    #[error("Failed to open partition at {path}")]
+    Gpt {
+        path: Utf8PathBuf,
+        #[source]
+        error: anyhow::Error,
+    },
     #[error("Unexpected partition layout at {path}: {why}")]
     BadPartitionLayout { path: Utf8PathBuf, why: String },
     #[error("Requested partition {partition:?} not found on device {path}")]
@@ -43,14 +53,16 @@ pub enum PooledDiskError {
     ZpoolDoesNotExist,
     #[error(transparent)]
     ZpoolCreate(#[from] illumos_utils::zpool::CreateError),
-    #[error("Cannot import zpool: {0}")]
-    ZpoolImport(illumos_utils::zpool::Error),
+    #[error("Cannot import zpool")]
+    ZpoolImport(#[source] illumos_utils::zpool::Error),
     #[error("Cannot format {path}: missing a '/dev' path")]
     CannotFormatMissingDevPath { path: Utf8PathBuf },
     #[error("Formatting M.2 devices is not yet implemented")]
     CannotFormatM2NotImplemented,
     #[error(transparent)]
     NvmeFormatAndResize(#[from] NvmeFormattingError),
+    #[error("synthetic disks do not have a devfs path")]
+    SyntheticDiskNoDevfsPath,
 }
 
 /// A partition (or 'slice') of a disk.
@@ -274,7 +286,6 @@ impl UnparsedDisk {
 pub struct PooledDisk {
     pub paths: DiskPaths,
     pub slot: i64,
-    pub variant: DiskVariant,
     pub identity: DiskIdentity,
     pub is_boot_disk: bool,
     pub partitions: Vec<Partition>,
@@ -286,7 +297,7 @@ pub struct PooledDisk {
 
 impl PooledDisk {
     /// Create a new PooledDisk
-    pub fn new(
+    pub async fn new(
         log: &Logger,
         unparsed_disk: UnparsedDisk,
         zpool_id: Option<ZpoolUuid>,
@@ -297,7 +308,8 @@ impl PooledDisk {
         // Ensure the GPT has the right format. This does not necessarily
         // mean that the partitions are populated with the data we need.
         let partitions =
-            ensure_partition_layout(&log, &paths, variant, identity, zpool_id)?;
+            ensure_partition_layout(&log, &paths, variant, identity, zpool_id)
+                .await?;
 
         // Find the path to the zpool which exists on this disk.
         //
@@ -310,14 +322,13 @@ impl PooledDisk {
         )?;
 
         let zpool_name =
-            ensure_zpool_exists(log, variant, &zpool_path, zpool_id)?;
-        ensure_zpool_imported(log, &zpool_name)?;
-        ensure_zpool_failmode_is_continue(log, &zpool_name)?;
+            ensure_zpool_exists(log, variant, &zpool_path, zpool_id).await?;
+        ensure_zpool_imported(log, &zpool_name).await?;
+        ensure_zpool_failmode_is_continue(log, &zpool_name).await?;
 
         Ok(Self {
             paths: unparsed_disk.paths,
             slot: unparsed_disk.slot,
-            variant: unparsed_disk.variant,
             identity: unparsed_disk.identity,
             is_boot_disk: unparsed_disk.is_boot_disk,
             partitions,
@@ -329,23 +340,23 @@ impl PooledDisk {
 
 /// Checks if the zpool exists, but makes no modifications,
 /// and does not attempt to import the zpool.
-pub fn check_if_zpool_exists(
+pub async fn check_if_zpool_exists(
     zpool_path: &Utf8Path,
 ) -> Result<ZpoolName, PooledDiskError> {
-    let zpool_name = match Fstyp::get_zpool(&zpool_path) {
+    let zpool_name = match Fstyp::get_zpool(&zpool_path).await {
         Ok(zpool_name) => zpool_name,
         Err(_) => return Err(PooledDiskError::ZpoolDoesNotExist),
     };
     Ok(zpool_name)
 }
 
-pub fn ensure_zpool_exists(
+pub async fn ensure_zpool_exists(
     log: &Logger,
     variant: DiskVariant,
     zpool_path: &Utf8Path,
     zpool_id: Option<ZpoolUuid>,
 ) -> Result<ZpoolName, PooledDiskError> {
-    let zpool_name = match Fstyp::get_zpool(&zpool_path) {
+    let zpool_name = match Fstyp::get_zpool(&zpool_path).await {
         Ok(zpool_name) => {
             if let Some(expected) = zpool_id {
                 info!(log, "Checking that UUID in storage matches request"; "expected" => ?expected);
@@ -393,30 +404,30 @@ pub fn ensure_zpool_exists(
                 DiskVariant::M2 => ZpoolName::new_internal(id),
                 DiskVariant::U2 => ZpoolName::new_external(id),
             };
-            Zpool::real_api().create(&zpool_name, &zpool_path)?;
+            Zpool::real_api().create(&zpool_name, &zpool_path).await?;
             zpool_name
         }
     };
-    Zpool::import(&zpool_name).map_err(|e| {
-        warn!(log, "Failed to import zpool {zpool_name}: {e}");
+    Zpool::import(&zpool_name).await.map_err(|e| {
+        warn!(log, "Failed to import zpool {zpool_name}"; &e);
         PooledDiskError::ZpoolImport(e)
     })?;
 
     Ok(zpool_name)
 }
 
-pub fn ensure_zpool_imported(
+pub async fn ensure_zpool_imported(
     log: &Logger,
     zpool_name: &ZpoolName,
 ) -> Result<(), PooledDiskError> {
-    Zpool::import(&zpool_name).map_err(|e| {
-        warn!(log, "Failed to import zpool {zpool_name}: {e}");
+    Zpool::import(&zpool_name).await.map_err(|e| {
+        warn!(log, "Failed to import zpool {zpool_name}"; &e);
         PooledDiskError::ZpoolImport(e)
     })?;
     Ok(())
 }
 
-pub fn ensure_zpool_failmode_is_continue(
+pub async fn ensure_zpool_failmode_is_continue(
     log: &Logger,
     zpool_name: &ZpoolName,
 ) -> Result<(), PooledDiskError> {
@@ -427,10 +438,10 @@ pub fn ensure_zpool_failmode_is_continue(
     // actively harmful to try to wait for it to come back; we'll be waiting
     // forever and get stuck. We'd rather get the errors so we can deal with
     // them ourselves.
-    Zpool::set_failmode_continue(&zpool_name).map_err(|e| {
+    Zpool::set_failmode_continue(&zpool_name).await.map_err(|e| {
         warn!(
             log,
-            "Failed to set failmode=continue on zpool {zpool_name}: {e}"
+            "Failed to set failmode=continue on zpool {zpool_name}"; &e
         );
         PooledDiskError::ZpoolImport(e)
     })?;

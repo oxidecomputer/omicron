@@ -16,6 +16,8 @@ use std::{
     path::Path,
 };
 
+use super::PidFilter;
+
 const CT_ALL: &str = "/system/contract/all";
 // Most Oxide services
 const OXIDE_FMRI: &str = "svc:/oxide/";
@@ -27,7 +29,7 @@ const CTD_ALL: i32 = 2;
 type ct_stathdl_t = *mut c_void;
 
 #[link(name = "contract")]
-extern "C" {
+unsafe extern "C" {
     fn ct_status_read(
         fd: c_int,
         detail: c_int,
@@ -153,7 +155,10 @@ impl ContractStatus {
     }
 }
 
-pub fn find_oxide_pids(log: &Logger) -> Result<BTreeSet<i32>, ContractError> {
+pub fn find_oxide_pids(
+    log: &Logger,
+    pid_filter: PidFilter,
+) -> Result<BTreeSet<i32>, ContractError> {
     let mut pids = BTreeSet::new();
     let ents = fs::read_dir(CT_ALL)?;
     for ct in ents {
@@ -176,7 +181,12 @@ pub fn find_oxide_pids(log: &Logger) -> Result<BTreeSet<i32>, ContractError> {
         let fmri_owned = status.get_fmri()?.unwrap_or_default();
         let fmri = fmri_owned.to_string_lossy();
         if fmri.starts_with(OXIDE_FMRI) || fmri.starts_with(ILLUMOS_FMRI) {
-            pids.extend(status.get_members()?);
+            let members = status
+                .get_members()?
+                .iter()
+                .copied()
+                .filter(|pid| pid_filter.should_include_pid(*pid));
+            pids.extend(members);
         }
     }
 

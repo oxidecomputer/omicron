@@ -38,6 +38,8 @@ pub enum AnySqlType {
     DateTime,
     Enum(SqlEnum),
     Float4(f32),
+    Int1(i8),
+    Int2(i16),
     Int4(i32),
     Int8(i64),
     Json(serde_json::value::Value),
@@ -66,6 +68,18 @@ impl From<SqlEnum> for AnySqlType {
 impl From<f32> for AnySqlType {
     fn from(value: f32) -> Self {
         Self::Float4(value)
+    }
+}
+
+impl From<i8> for AnySqlType {
+    fn from(value: i8) -> Self {
+        Self::Int1(value)
+    }
+}
+
+impl From<i16> for AnySqlType {
+    fn from(value: i16) -> Self {
+        Self::Int2(value)
     }
 }
 
@@ -133,6 +147,12 @@ impl<'a> tokio_postgres::types::FromSql<'a> for AnySqlType {
         }
         if Uuid::accepts(ty) {
             return Ok(AnySqlType::Uuid(Uuid::from_sql(ty, raw)?));
+        }
+        if i8::accepts(ty) {
+            return Ok(AnySqlType::Int1(i8::from_sql(ty, raw)?));
+        }
+        if i16::accepts(ty) {
+            return Ok(AnySqlType::Int2(i16::from_sql(ty, raw)?));
         }
         if i32::accepts(ty) {
             return Ok(AnySqlType::Int4(i32::from_sql(ty, raw)?));

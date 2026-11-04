@@ -2,12 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
-// Copyright 2024 Oxide Computer Company
 
 //! Packets sent from the server.
 
-use crate::client::query_summary::IoCount;
-use crate::client::query_summary::IoSummary;
 use crate::native::block::Block;
 use crate::native::block::DataType;
 use std::fmt;
@@ -19,7 +16,7 @@ use std::time::Duration;
 /// insert data, the server responds with a description of all the columns in
 /// the table, which the client is supposed to use to verify the data block
 /// being inserted.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct ColumnDescription {
     /// The name of the column.
     pub name: String,
@@ -33,7 +30,7 @@ pub struct ColumnDescription {
 }
 
 /// Details about the default values for a column.
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, serde::Serialize)]
 pub struct ColumnDefaults {
     /// The column has a default expression, like `DEFAULT 'foo'`.
     pub has_default: bool,
@@ -46,7 +43,7 @@ pub struct ColumnDefaults {
 }
 
 /// A packet sent from the ClickHouse server to the client.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub enum Packet {
     /// The initial handshake packet, announcing the server.
     ///
@@ -98,7 +95,7 @@ impl Packet {
 }
 
 /// The initial packet from the server to the client, announcing itself.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct Hello {
     /// The name of the server.
     pub name: String,
@@ -126,7 +123,7 @@ pub struct Hello {
 /// Rules about password complexity.
 ///
 /// We don't use this, but it exists in server Hello packets.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct PasswordComplexityRule {
     pub pattern: String,
     pub exception: String,
@@ -136,7 +133,7 @@ pub struct PasswordComplexityRule {
 pub const REVISION: u64 = 54465;
 
 /// Describes an exception the server caught during query processing.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct Exception {
     /// The integer code of the exception.
     pub code: i32,
@@ -179,7 +176,7 @@ impl Exception {
 /// As the server runs large queries, it may send these periodically. They are
 /// always deltas, and need to be summed on the client to understand the current
 /// or total progress of the query.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize)]
 pub struct Progress {
     pub rows_read: u64,
     pub bytes_read: u64,
@@ -190,11 +187,14 @@ pub struct Progress {
     pub query_time: Duration,
 }
 
-impl From<Progress> for IoSummary {
+impl From<Progress> for oxql_types::IoSummary {
     fn from(value: Progress) -> Self {
-        IoSummary {
-            read: IoCount { bytes: value.bytes_read, rows: value.rows_read },
-            written: IoCount {
+        oxql_types::IoSummary {
+            read: oxql_types::IoCount {
+                bytes: value.bytes_read,
+                rows: value.rows_read,
+            },
+            written: oxql_types::IoCount {
                 bytes: value.bytes_written,
                 rows: value.rows_written,
             },
@@ -214,7 +214,7 @@ impl core::ops::Add for Progress {
                 .saturating_add(rhs.total_rows_to_read),
             total_bytes_to_read: self
                 .total_bytes_to_read
-                .saturating_add(rhs.total_rows_to_read),
+                .saturating_add(rhs.total_bytes_to_read),
             rows_written: self.rows_written.saturating_add(rhs.rows_written),
             bytes_written: self.bytes_written.saturating_add(rhs.bytes_written),
             query_time: self.query_time.saturating_add(rhs.query_time),
@@ -232,7 +232,7 @@ impl core::ops::AddAssign for Progress {
                 .saturating_add(rhs.total_rows_to_read),
             total_bytes_to_read: self
                 .total_bytes_to_read
-                .saturating_add(rhs.total_rows_to_read),
+                .saturating_add(rhs.total_bytes_to_read),
             rows_written: self.rows_written.saturating_add(rhs.rows_written),
             bytes_written: self.bytes_written.saturating_add(rhs.bytes_written),
             query_time: self.query_time.saturating_add(rhs.query_time),
@@ -241,7 +241,7 @@ impl core::ops::AddAssign for Progress {
 }
 
 /// Profiling information sent at the end of a query.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
 pub struct ProfileInfo {
     /// Total number of rows accessed.
     pub n_rows: u64,

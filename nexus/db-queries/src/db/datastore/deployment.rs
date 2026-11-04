@@ -9,15 +9,18 @@ use crate::context::OpContext;
 use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
+use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
+use crate::db::raw_query_builder::QueryBuilder;
+use crate::db::raw_query_builder::TypedSqlQuery;
 use anyhow::Context;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::AsyncSimpleConnection;
 use chrono::DateTime;
 use chrono::Utc;
-use clickhouse_admin_types::{KeeperId, ServerId};
+use clickhouse_admin_types::keeper::KeeperId;
+use clickhouse_admin_types::server::ServerId;
 use core::future::Future;
 use core::pin::Pin;
-use diesel::BoolExpressionMethods;
-use diesel::Column;
 use diesel::ExpressionMethods;
 use diesel::Insertable;
 use diesel::IntoSql;
@@ -25,22 +28,21 @@ use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
 use diesel::OptionalExtension;
 use diesel::QueryDsl;
-use diesel::RunQueryDsl;
+use diesel::Table;
 use diesel::expression::SelectableHelper;
-use diesel::pg::Pg;
-use diesel::query_builder::AstPass;
-use diesel::query_builder::QueryFragment;
-use diesel::query_builder::QueryId;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use diesel::sql_types;
+use diesel::sql_types::Nullable;
 use futures::FutureExt;
-use id_map::IdMap;
+use iddqd::IdOrdMap;
+use ipnetwork::Ipv6Network;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
+use nexus_db_model::ArtifactHash;
 use nexus_db_model::Blueprint as DbBlueprint;
 use nexus_db_model::BpClickhouseClusterConfig;
 use nexus_db_model::BpClickhouseKeeperZoneIdToNodeId;
@@ -48,36 +50,84 @@ use nexus_db_model::BpClickhouseServerZoneIdToNodeId;
 use nexus_db_model::BpOmicronDataset;
 use nexus_db_model::BpOmicronPhysicalDisk;
 use nexus_db_model::BpOmicronZone;
+use nexus_db_model::BpOmicronZoneExternalIp;
 use nexus_db_model::BpOmicronZoneNic;
 use nexus_db_model::BpOximeterReadPolicy;
+use nexus_db_model::BpPendingMgsUpdateComponent;
+use nexus_db_model::BpPendingMgsUpdateHostPhase1;
+use nexus_db_model::BpPendingMgsUpdateRot;
+use nexus_db_model::BpPendingMgsUpdateRotBootloader;
+use nexus_db_model::BpPendingMgsUpdateSp;
+use nexus_db_model::BpSingleMeasurement;
 use nexus_db_model::BpSledMetadata;
 use nexus_db_model::BpTarget;
-use nexus_db_model::TufArtifact;
+use nexus_db_model::DbArtifactVersion;
+use nexus_db_model::DbBpSledMeasurements;
+use nexus_db_model::DbTypedUuid;
+use nexus_db_model::DebugLogBlueprintPlanning;
+use nexus_db_model::HwBaseboardId;
+use nexus_db_model::HwM2Slot;
+use nexus_db_model::HwRotSlot;
+use nexus_db_model::Ipv6Addr;
+use nexus_db_model::SpMgsSlot;
+use nexus_db_model::SpType;
+use nexus_db_model::SqlU16;
+use nexus_db_model::SqlU32;
+use nexus_db_model::TufArtifactFile;
 use nexus_db_model::to_db_typed_uuid;
+use nexus_db_schema::enums::HwM2SlotEnum;
+use nexus_db_schema::enums::HwRotSlotEnum;
+use nexus_db_schema::enums::SpTypeEnum;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintArtifactMeasurements;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
+use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintMetadata;
+use nexus_types::deployment::BlueprintSingleMeasurement;
 use nexus_types::deployment::BlueprintSledConfig;
+use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
+use nexus_types::deployment::ExpectedVersion;
+use nexus_types::deployment::LastAllocatedSubnetIpOffset;
 use nexus_types::deployment::OximeterReadMode;
+use nexus_types::deployment::PendingMgsUpdate;
+use nexus_types::deployment::PendingMgsUpdateDetails;
+use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
+use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
+use nexus_types::deployment::PendingMgsUpdateRotDetails;
+use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::deployment::ZoneRunningStatus;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Generation;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_generation_kinds::Generation;
+use omicron_uuid_kinds::BlueprintKind;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::TypedUuid;
+use sled_hardware_types::BaseboardId;
+use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
-use tufaceous_artifact::KnownArtifactKind;
+use std::collections::BTreeSet;
+use std::num::NonZeroU32;
+use std::num::NonZeroUsize;
+use std::sync::Arc;
+use thiserror::Error;
 use uuid::Uuid;
 
 mod external_networking;
+
+pub use external_networking::ExternalServiceNetworkingConfig;
 
 impl DataStore {
     /// List blueprints
@@ -173,7 +223,7 @@ impl DataStore {
             })
             .await
             .map_err(|e| match err.take() {
-                Some(txn_error) => txn_error.into(),
+                Some(txn_error) => txn_error.into_public_ignore_retries(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
             })?;
         Ok(r)
@@ -203,11 +253,57 @@ impl DataStore {
         let sled_metadatas = blueprint
             .sleds
             .iter()
-            .map(|(&sled_id, sled)| BpSledMetadata {
-                blueprint_id: blueprint_id.into(),
-                sled_id: sled_id.into(),
-                sled_state: sled.state.into(),
-                sled_agent_generation: sled.sled_agent_generation.into(),
+            .map(|(&sled_id, sled)| {
+                let (
+                    update_disposition_generation,
+                    update_availability,
+                    update_disruption_policy,
+                ) = BpSledMetadata::update_disposition_columns(
+                    sled.update_disposition,
+                );
+                BpSledMetadata {
+                    blueprint_id: blueprint_id.into(),
+                    sled_id: sled_id.into(),
+                    sled_state: sled.state.into(),
+                    update_disposition_generation,
+                    update_availability,
+                    update_disruption_policy,
+                    sled_agent_generation: sled.sled_agent_generation.into(),
+                    remove_mupdate_override: sled
+                        .remove_mupdate_override
+                        .map(|id| id.into()),
+                    host_phase_2_desired_slot_a: sled
+                        .host_phase_2
+                        .slot_a
+                        .artifact_hash()
+                        .map(ArtifactHash),
+                    host_phase_2_desired_slot_b: sled
+                        .host_phase_2
+                        .slot_b
+                        .artifact_hash()
+                        .map(ArtifactHash),
+                    subnet: Ipv6Network::from(sled.subnet).into(),
+                    last_allocated_ip_subnet_offset: sled
+                        .last_allocated_ip_subnet_offset
+                        .into_u16()
+                        .into(),
+
+                    measurements: (&sled.measurements).into(),
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let measurements = blueprint
+            .sleds
+            .iter()
+            .flat_map(|(sled_id, sled)| {
+                sled.measurements.iter().map(move |measurement| {
+                    BpSingleMeasurement::new(
+                        blueprint_id,
+                        *sled_id,
+                        measurement,
+                    )
+                })
             })
             .collect::<Vec<_>>();
 
@@ -253,6 +349,15 @@ impl DataStore {
                 })
             })
             .collect::<Result<Vec<BpOmicronZoneNic>, _>>()?;
+        let omicron_zone_external_ips = blueprint
+            .sleds
+            .values()
+            .flat_map(|sled| {
+                sled.zones.iter().flat_map(|zone| {
+                    BpOmicronZoneExternalIp::for_zone(blueprint_id, zone)
+                })
+            })
+            .collect::<Vec<BpOmicronZoneExternalIp>>();
 
         let clickhouse_tables: Option<(_, _, _)> = if let Some(config) =
             &blueprint.clickhouse_cluster_config
@@ -317,101 +422,222 @@ impl DataStore {
         #[allow(clippy::disallowed_methods)]
         self.transaction_non_retry_wrapper("blueprint_insert")
             .transaction(&conn, |conn| async move {
-            // Insert the row for the blueprint.
-            {
-                use nexus_db_schema::schema::blueprint::dsl;
-                let _: usize = diesel::insert_into(dsl::blueprint)
-                    .values(row_blueprint)
+                // Insert the row for the blueprint.
+                {
+                    use nexus_db_schema::schema::blueprint::dsl;
+                    let _: usize = diesel::insert_into(dsl::blueprint)
+                        .values(row_blueprint)
+                        .execute_async(&conn)
+                        .await?;
+                }
+
+                // Insert all the sled states for this blueprint.
+                {
+                    // Skip formatting this line to prevent rustfmt bailing out.
+                    #[rustfmt::skip]
+                    use nexus_db_schema::schema::bp_sled_metadata::dsl
+                        as sled_metadata;
+
+                    let _ =
+                        diesel::insert_into(sled_metadata::bp_sled_metadata)
+                            .values(sled_metadatas)
+                            .execute_async(&conn)
+                            .await?;
+                }
+
+                // Insert all measurements for this blueprint.
+                {
+                    // Skip formatting this line to prevent rustfmt bailing out.
+                    #[rustfmt::skip]
+                    use nexus_db_schema::schema::bp_single_measurements::dsl
+                        as single_measurement;
+                    let _ = diesel::insert_into(
+                        single_measurement::bp_single_measurements,
+                    )
+                    .values(measurements)
                     .execute_async(&conn)
                     .await?;
-            }
+                }
 
-            // Insert all the sled states for this blueprint.
-            {
-                use nexus_db_schema::schema::bp_sled_metadata::dsl as sled_metadata;
 
-                let _ = diesel::insert_into(sled_metadata::bp_sled_metadata)
-                    .values(sled_metadatas)
-                    .execute_async(&conn)
-                    .await?;
-            }
-
-            // Insert all physical disks for this blueprint.
-            {
-                use nexus_db_schema::schema::bp_omicron_physical_disk::dsl as omicron_disk;
-                let _ = diesel::insert_into(omicron_disk::bp_omicron_physical_disk)
+                // Insert all physical disks for this blueprint.
+                {
+                    // Skip formatting this line to prevent rustfmt bailing out.
+                    #[rustfmt::skip]
+                    use nexus_db_schema::schema::bp_omicron_physical_disk::dsl
+                        as omicron_disk;
+                    let _ = diesel::insert_into(
+                        omicron_disk::bp_omicron_physical_disk,
+                    )
                     .values(omicron_physical_disks)
                     .execute_async(&conn)
                     .await?;
-            }
+                }
 
-            // Insert all datasets for this blueprint.
-            {
-                use nexus_db_schema::schema::bp_omicron_dataset::dsl as omicron_dataset;
-                let _ = diesel::insert_into(omicron_dataset::bp_omicron_dataset)
+                // Insert all datasets for this blueprint.
+                {
+                    // Skip formatting this line to prevent rustfmt bailing out.
+                    #[rustfmt::skip]
+                    use nexus_db_schema::schema::bp_omicron_dataset::dsl
+                        as omicron_dataset;
+                    let _ = diesel::insert_into(
+                        omicron_dataset::bp_omicron_dataset,
+                    )
                     .values(omicron_datasets)
                     .execute_async(&conn)
                     .await?;
-            }
+                }
 
-            // Insert all the Omicron zones for this blueprint.
-            {
-                use nexus_db_schema::schema::bp_omicron_zone::dsl as omicron_zone;
-                let _ = diesel::insert_into(omicron_zone::bp_omicron_zone)
-                    .values(omicron_zones)
-                    .execute_async(&conn)
-                    .await?;
-            }
-
-            {
-                use nexus_db_schema::schema::bp_omicron_zone_nic::dsl as omicron_zone_nic;
-                let _ =
-                    diesel::insert_into(omicron_zone_nic::bp_omicron_zone_nic)
-                        .values(omicron_zone_nics)
+                // Insert all the Omicron zones for this blueprint.
+                {
+                    // Skip formatting this line to prevent rustfmt bailing out.
+                    #[rustfmt::skip]
+                    use nexus_db_schema::schema::bp_omicron_zone::dsl
+                        as omicron_zone;
+                    let _ = diesel::insert_into(omicron_zone::bp_omicron_zone)
+                        .values(omicron_zones)
                         .execute_async(&conn)
                         .await?;
-            }
+                }
 
-            // Insert all clickhouse cluster related tables if necessary
-            if let Some((clickhouse_cluster_config, keepers, servers)) = clickhouse_tables {
                 {
-                    use nexus_db_schema::schema::bp_clickhouse_cluster_config::dsl;
-                    let _ = diesel::insert_into(dsl::bp_clickhouse_cluster_config)
-                    .values(clickhouse_cluster_config)
+                    // Skip formatting this line to prevent rustfmt bailing out.
+                    #[rustfmt::skip]
+                    use nexus_db_schema::schema::bp_omicron_zone_nic::dsl
+                        as omicron_zone_nic;
+                    let _ = diesel::insert_into(
+                        omicron_zone_nic::bp_omicron_zone_nic,
+                    )
+                    .values(omicron_zone_nics)
                     .execute_async(&conn)
                     .await?;
                 }
-                {
-                    use nexus_db_schema::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
-                    let _ = diesel::insert_into(dsl::bp_clickhouse_keeper_zone_id_to_node_id)
-                    .values(keepers)
-                    .execute_async(&conn)
-                    .await?;
-                }
-                {
-                    use nexus_db_schema::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
-                    let _ = diesel::insert_into(dsl::bp_clickhouse_server_zone_id_to_node_id)
-                    .values(servers)
-                    .execute_async(&conn)
-                    .await?;
-                }
-            }
 
-            // Insert oximeter read policy for this blueprint
-            {
-                use nexus_db_schema::schema::bp_oximeter_read_policy::dsl;
-                let _ =
-                    diesel::insert_into(dsl::bp_oximeter_read_policy)
+                {
+                    // Skip formatting this line to prevent rustfmt bailing out.
+                    #[rustfmt::skip]
+                    use nexus_db_schema::schema::
+                        bp_omicron_zone_external_ip::dsl
+                        as omicron_zone_external_ip;
+                    let _ = diesel::insert_into(
+                        omicron_zone_external_ip::bp_omicron_zone_external_ip,
+                    )
+                    .values(omicron_zone_external_ips)
+                    .execute_async(&conn)
+                    .await?;
+                }
+
+                // Insert all clickhouse cluster related tables if necessary
+                if let Some((clickhouse_cluster_config, keepers, servers)) =
+                    clickhouse_tables
+                {
+                    {
+                        // Skip formatting this line to prevent rustfmt bailing
+                        // out.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_clickhouse_cluster_config::dsl;
+                        let _ = diesel::insert_into(
+                            dsl::bp_clickhouse_cluster_config,
+                        )
+                        .values(clickhouse_cluster_config)
+                        .execute_async(&conn)
+                        .await?;
+                    }
+                    {
+                        // Skip formatting this line to prevent rustfmt bailing
+                        // out.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_clickhouse_keeper_zone_id_to_node_id::dsl;
+                        let _ = diesel::insert_into(
+                            dsl::bp_clickhouse_keeper_zone_id_to_node_id,
+                        )
+                        .values(keepers)
+                        .execute_async(&conn)
+                        .await?;
+                    }
+                    {
+                        // Skip formatting this line to prevent rustfmt bailing
+                        // out.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_clickhouse_server_zone_id_to_node_id::dsl;
+                        let _ = diesel::insert_into(
+                            dsl::bp_clickhouse_server_zone_id_to_node_id,
+                        )
+                        .values(servers)
+                        .execute_async(&conn)
+                        .await?;
+                    }
+                }
+
+                // Insert oximeter read policy for this blueprint
+                {
+                    use nexus_db_schema::schema::bp_oximeter_read_policy::dsl;
+                    let _ = diesel::insert_into(dsl::bp_oximeter_read_policy)
                         .values(oximeter_read_policy)
                         .execute_async(&conn)
                         .await?;
-            }
+                }
 
-            Ok(())
+                // Insert pending MGS updates for this blueprint.
+                for update in &blueprint.pending_mgs_updates {
+                    insert_pending_mgs_update(
+                        &conn,
+                        update,
+                        blueprint_id,
+                        &opctx.log,
+                    )
+                    .await?;
+                }
 
-        })
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+                // Serialize and insert a debug log for the planning report
+                // created with this blueprint, if we have one.
+                if let BlueprintSource::Planner(report) = &blueprint.source {
+                    match DebugLogBlueprintPlanning::new(
+                        blueprint_id,
+                        report.clone(),
+                        &self.git_version,
+                    ) {
+                        Ok(debug_log) => {
+                            use nexus_db_schema::schema::debug_log_blueprint_planning::dsl;
+                            let _ = diesel::insert_into(
+                                dsl::debug_log_blueprint_planning
+                            )
+                                .values(debug_log)
+                                .execute_async(&conn)
+                                .await?;
+                        }
+                        Err(err) => {
+                            // This isn't a fatal error - we've already inserted
+                            // the production-meaningful blueprint content. Not
+                            // being able to log the debug version of the report
+                            // isn't great, but blocking real blueprint
+                            // insertion on debug logging issues seems worse.
+                            error!(
+                                self.log,
+                                "could not serialize blueprint planning report";
+                                InlineErrorChain::new(&err),
+                            );
+                        }
+
+                    }
+                }
+
+                Ok(())
+            })
+            .await
+            .map_err(|e| match e {
+                InsertTxnError::Diesel(e) => {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+                e @ InsertTxnError::BadInsertCount { .. } => {
+                    // This variant is always an internal error and has no
+                    // causes so we don't need to use InlineErrorChain here.
+                    Error::internal_error(&e.to_string())
+                }
+            })?;
 
         info!(
             &opctx.log,
@@ -420,6 +646,59 @@ impl DataStore {
         );
 
         Ok(())
+    }
+
+    /// Check whether the given blueprint limit has been reached.
+    ///
+    /// This (necessarily) does a full table scan on the blueprint table up to
+    /// the limit, so `limit` must be relatively small to avoid performance
+    /// issues. Experimentally, on a Gimlet, a limit of a few thousand takes
+    /// under 20ms.
+    pub async fn check_blueprint_limit_reached(
+        &self,
+        opctx: &OpContext,
+        limit: u64,
+    ) -> Result<crate::db::IsLimitReached, Error> {
+        use nexus_db_schema::schema::blueprint::dsl;
+
+        // The "full" table scan below is treated as a complex operation. (This
+        // should only be called from the blueprint planner background task,
+        // for which complex operations are allowed.)
+        opctx.check_complex_operations_allowed()?;
+        opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
+        let limit_query = crate::db::check_if_limit_reached::LimitQuery::new(
+            dsl::blueprint,
+            limit,
+        )?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper("blueprint_count")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let limit_query = limit_query.clone();
+                async move {
+                    // We need this to call the COUNT(*) query below. But note
+                    // that this isn't really a "full" table scan; the number of
+                    // rows scanned is limited by the LIMIT clause.
+                    conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+                    // Rather than doing a full table scan, we use a LIMIT
+                    // clause to limit the number of rows returned.
+                    let result = limit_query
+                        .check_if_limit_reached_async(&conn)
+                        .await
+                        .map_err(|e| e.into_diesel(&err))?;
+
+                    Ok(result)
+                }
+            })
+            .await
+            .map_err(|e| match err.take() {
+                Some(err) => err.into_public_ignore_retries(),
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })
     }
 
     /// Read a complete blueprint from the database
@@ -433,64 +712,42 @@ impl DataStore {
         let blueprint_id =
             BlueprintUuid::from_untyped_uuid(authz_blueprint.id());
 
-        // Read the metadata from the primary blueprint row, and ensure that it
-        // exists.
-        let (
-            parent_blueprint_id,
-            internal_dns_version,
-            external_dns_version,
-            cockroachdb_fingerprint,
-            cockroachdb_setting_preserve_downgrade,
-            time_created,
-            creator,
-            comment,
-        ) = {
-            use nexus_db_schema::schema::blueprint::dsl;
+        // ================================================================
+        // STAGE 1: Load all raw database rows
+        //
+        // In this stage, we load data from the database but defer all parsing
+        // and validation. This is critical for handling concurrent deletes
+        // correctly: if we validate as we load, we may encounter validation
+        // errors when reading a partially deleted blueprint.
+        //
+        // By deferring validation until after we confirm the blueprint exists,
+        // we can return "not found" instead of any parsing errors from
+        // reading a torn blueprint.
+        // ================================================================
 
-            let Some(blueprint) = dsl::blueprint
-                .filter(dsl::id.eq(to_db_typed_uuid(blueprint_id)))
-                .select(DbBlueprint::as_select())
-                .get_result_async(&*conn)
-                .await
-                .optional()
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?
-            else {
-                return Err(authz_blueprint.not_found());
-            };
-
-            (
-                blueprint.parent_blueprint_id.map(From::from),
-                *blueprint.internal_dns_version,
-                *blueprint.external_dns_version,
-                blueprint.cockroachdb_fingerprint,
-                blueprint.cockroachdb_setting_preserve_downgrade,
-                blueprint.time_created,
-                blueprint.creator,
-                blueprint.comment,
-            )
-        };
-        let cockroachdb_setting_preserve_downgrade =
-            CockroachDbPreserveDowngrade::from_optional_string(
-                &cockroachdb_setting_preserve_downgrade,
-            )
-            .map_err(|_| {
-                Error::internal_error(&format!(
-                    "unrecognized cluster version {:?}",
-                    cockroachdb_setting_preserve_downgrade
-                ))
-            })?;
-
-        // Load the sled metadata for this blueprint. We use this to prime our
-        // primary map of sled configs, but we leave the zones / disks /
-        // datasets maps empty (to be filled in when we query those tables
-        // below).
-        let mut sled_configs: BTreeMap<SledUuid, BlueprintSledConfig> = {
+        // Load sled metadata rows
+        //
+        // (sled metadata, slot A version, slot B version)
+        let raw_sled_metadata: Vec<(
+            BpSledMetadata,
+            Option<DbArtifactVersion>,
+            Option<DbArtifactVersion>,
+        )> = {
             use nexus_db_schema::schema::bp_sled_metadata::dsl;
+            use nexus_db_schema::schema::tuf_artifact_file::dsl as tuf_artifact_file_dsl;
 
-            let mut sled_configs = BTreeMap::new();
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            let (tuf1, tuf2) = diesel::alias!(
+                nexus_db_schema::schema::tuf_artifact_file
+                    as tuf_artifact_file_1,
+                nexus_db_schema::schema::tuf_artifact_file
+                    as tuf_artifact_file_2,
+            );
+
+            let mut rows = Vec::new();
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::bp_sled_metadata,
@@ -498,43 +755,51 @@ impl DataStore {
                     &p.current_pagparams(),
                 )
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
-                .select(BpSledMetadata::as_select())
-                .load_async(&*conn)
+                // Left join against the tuf_artifact table twice (once for each
+                // host slot) in case the artifact is missing from the table,
+                // which is non-fatal.
+                .left_join(
+                    tuf1.on(tuf1
+                        .field(tuf_artifact_file_dsl::sha256)
+                        .nullable()
+                        .eq(dsl::host_phase_2_desired_slot_a)),
+                )
+                .left_join(
+                    tuf2.on(tuf2
+                        .field(tuf_artifact_file_dsl::sha256)
+                        .nullable()
+                        .eq(dsl::host_phase_2_desired_slot_b)),
+                )
+                .select((
+                    BpSledMetadata::as_select(),
+                    tuf1.fields(tuf_artifact_file_dsl::version).nullable(),
+                    tuf2.fields(tuf_artifact_file_dsl::version).nullable(),
+                ))
+                .load_async::<(
+                    BpSledMetadata,
+                    Option<DbArtifactVersion>,
+                    Option<DbArtifactVersion>,
+                )>(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
-                paginator = p.found_batch(&batch, &|s| s.sled_id);
-
-                for s in batch {
-                    let config = BlueprintSledConfig {
-                        state: s.sled_state.into(),
-                        sled_agent_generation: *s.sled_agent_generation,
-                        disks: IdMap::new(),
-                        datasets: IdMap::new(),
-                        zones: IdMap::new(),
-                    };
-                    let old = sled_configs.insert(s.sled_id.into(), config);
-                    bail_unless!(
-                        old.is_none(),
-                        "found duplicate sled ID in bp_sled_metadata: {}",
-                        s.sled_id
-                    );
-                }
+                paginator = p.found_batch(&batch, &|(s, _, _)| s.sled_id);
+                rows.extend(batch);
             }
-            sled_configs
+            rows
         };
 
-        // Assemble a mutable map of all the NICs found, by NIC id.  As we
-        // match these up with the corresponding zone below, we'll remove items
-        // from this set.  That way we can tell if the same NIC was used twice
-        // or not used at all.
-        let mut omicron_zone_nics = {
+        // Load zone NIC rows
+        let raw_zone_nics: Vec<BpOmicronZoneNic> = {
             use nexus_db_schema::schema::bp_omicron_zone_nic::dsl;
 
-            let mut omicron_zone_nics = BTreeMap::new();
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            let mut rows = Vec::new();
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::bp_omicron_zone_nic,
@@ -550,27 +815,50 @@ impl DataStore {
                 })?;
 
                 paginator = p.found_batch(&batch, &|n| n.id);
-
-                for n in batch {
-                    let nic_id = n.id;
-                    let old = omicron_zone_nics.insert(nic_id, n);
-                    bail_unless!(
-                        old.is_none(),
-                        "found duplicate NIC ID in bp_omicron_zone_nic: {}",
-                        nic_id,
-                    );
-                }
+                rows.extend(batch);
             }
-
-            omicron_zone_nics
+            rows
         };
 
-        // Load all the zones for each sled.
-        {
-            use nexus_db_schema::schema::bp_omicron_zone::dsl;
-            use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+        // Load zone external IP rows
+        let raw_zone_external_ips: Vec<BpOmicronZoneExternalIp> = {
+            use nexus_db_schema::schema::bp_omicron_zone_external_ip::dsl;
 
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            let mut rows = Vec::new();
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_omicron_zone_external_ip,
+                    dsl::external_ip_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                .select(BpOmicronZoneExternalIp::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+                paginator = p.found_batch(&batch, &|r| r.external_ip_id);
+                rows.extend(batch);
+            }
+            rows
+        };
+
+        // Load zone rows
+        let raw_zones: Vec<(BpOmicronZone, Option<TufArtifactFile>)> = {
+            use nexus_db_schema::schema::bp_omicron_zone::dsl;
+            use nexus_db_schema::schema::tuf_artifact_file::dsl as tuf_artifact_file_dsl;
+
+            let mut rows = Vec::new();
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 // `paginated` implicitly orders by our `id`, which is also
                 // handy for testing: the zones are always consistently ordered
@@ -581,87 +869,39 @@ impl DataStore {
                 )
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
                 // Left join in case the artifact is missing from the
-                // tuf_artifact table, which is non-fatal.
+                // tuf_artifact_file table, which is non-fatal.
                 .left_join(
-                    tuf_artifact_dsl::tuf_artifact.on(tuf_artifact_dsl::kind
-                        .eq(KnownArtifactKind::Zone.to_string())
-                        .and(
-                            tuf_artifact_dsl::sha256
-                                .nullable()
-                                .eq(dsl::image_artifact_sha256),
-                        )),
+                    tuf_artifact_file_dsl::tuf_artifact_file.on(
+                        tuf_artifact_file_dsl::sha256
+                            .nullable()
+                            .eq(dsl::image_artifact_sha256),
+                    ),
                 )
                 .select((
                     BpOmicronZone::as_select(),
-                    Option::<TufArtifact>::as_select(),
+                    Option::<TufArtifactFile>::as_select(),
                 ))
-                .load_async::<(BpOmicronZone, Option<TufArtifact>)>(&*conn)
+                .load_async::<(BpOmicronZone, Option<TufArtifactFile>)>(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
                 paginator = p.found_batch(&batch, &|(z, _)| z.id);
-
-                for (z, artifact) in batch {
-                    let nic_row = z
-                        .bp_nic_id
-                        .map(|id| {
-                            // This error means that we found a row in
-                            // bp_omicron_zone that references a NIC by id but
-                            // there's no corresponding row in
-                            // bp_omicron_zone_nic with that id.  This should be
-                            // impossible and reflects either a bug or database
-                            // corruption.
-                            omicron_zone_nics.remove(&id).ok_or_else(|| {
-                                Error::internal_error(&format!(
-                                    "zone {:?}: expected to find NIC {:?}, \
-                                     but didn't",
-                                    z.id, z.bp_nic_id
-                                ))
-                            })
-                        })
-                        .transpose()?;
-                    let sled_id = SledUuid::from(z.sled_id);
-                    let zone_id = z.id;
-                    let sled_config =
-                        sled_configs.get_mut(&sled_id).ok_or_else(|| {
-                            // This error means that we found a row in
-                            // bp_omicron_zone with no associated record in
-                            // bp_sled_omicron_zones.  This should be
-                            // impossible and reflects either a bug or database
-                            // corruption.
-                            Error::internal_error(&format!(
-                                "zone {zone_id}: unknown sled: {sled_id}",
-                            ))
-                        })?;
-                    let zone = z
-                        .into_blueprint_zone_config(nic_row, artifact)
-                        .with_context(|| {
-                            format!("zone {zone_id}: parse from database")
-                        })
-                        .map_err(|e| {
-                            Error::internal_error(&format!(
-                                "{:#}",
-                                e.to_string()
-                            ))
-                        })?;
-                    sled_config.zones.insert(zone);
-                }
+                rows.extend(batch);
             }
-        }
-
-        bail_unless!(
-            omicron_zone_nics.is_empty(),
-            "found extra Omicron zone NICs: {:?}",
-            omicron_zone_nics.keys()
-        );
+            rows
+        };
 
         // Load all the physical disks for each sled.
-        {
+        let raw_disks: Vec<BpOmicronPhysicalDisk> = {
             use nexus_db_schema::schema::bp_omicron_physical_disk::dsl;
 
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            let mut rows = Vec::new();
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 // `paginated` implicitly orders by our `id`, which is also
                 // handy for testing: the physical disks are always consistently ordered
@@ -679,37 +919,20 @@ impl DataStore {
                 })?;
 
                 paginator = p.found_batch(&batch, &|d| d.id);
-
-                for d in batch {
-                    let sled_config = sled_configs
-                        .get_mut(&d.sled_id.into())
-                        .ok_or_else(|| {
-                        // This error means that we found a row in
-                        // bp_omicron_physical_disk with no associated
-                        // record in bp_sled_omicron_physical_disks.  This
-                        // should be impossible and reflects either a bug or
-                        // database corruption.
-                        Error::internal_error(&format!(
-                            "disk {}: unknown sled: {}",
-                            d.id, d.sled_id
-                        ))
-                    })?;
-                    let disk_id = d.id;
-                    sled_config.disks.insert(d.try_into().map_err(|e| {
-                        Error::internal_error(&format!(
-                            "Cannot convert BpOmicronPhysicalDisk {}: {e}",
-                            disk_id
-                        ))
-                    })?);
-                }
+                rows.extend(batch);
             }
-        }
+            rows
+        };
 
         // Load all the datasets for each sled
-        {
+        let raw_datasets: Vec<BpOmicronDataset> = {
             use nexus_db_schema::schema::bp_omicron_dataset::dsl;
 
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            let mut rows = Vec::new();
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 // `paginated` implicitly orders by our `id`, which is also
                 // handy for testing: the datasets are always consistently ordered
@@ -727,38 +950,16 @@ impl DataStore {
                 })?;
 
                 paginator = p.found_batch(&batch, &|d| d.id);
-
-                for d in batch {
-                    let sled_config = sled_configs
-                        .get_mut(&d.sled_id.into())
-                        .ok_or_else(|| {
-                        // This error means that we found a row in
-                        // bp_omicron_dataset with no associated record in
-                        // bp_sled_omicron_datasets.  This should be
-                        // impossible and reflects either a bug or database
-                        // corruption.
-                        Error::internal_error(&format!(
-                            "dataset {}: unknown sled: {}",
-                            d.id, d.sled_id
-                        ))
-                    })?;
-
-                    let dataset_id = d.id;
-                    sled_config.datasets.insert(d.try_into().map_err(|e| {
-                        Error::internal_error(&format!(
-                            "Cannot parse dataset {}: {e}",
-                            dataset_id
-                        ))
-                    })?);
-                }
+                rows.extend(batch);
             }
-        }
+            rows
+        };
 
         // Load our `ClickhouseClusterConfig` if it exists
-        let clickhouse_cluster_config: Option<ClickhouseClusterConfig> = {
+        let raw_clickhouse_config: Option<BpClickhouseClusterConfig> = {
             use nexus_db_schema::schema::bp_clickhouse_cluster_config::dsl;
 
-            let res = dsl::bp_clickhouse_cluster_config
+            dsl::bp_clickhouse_cluster_config
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
                 .select(BpClickhouseClusterConfig::as_select())
                 .get_result_async(&*conn)
@@ -766,110 +967,602 @@ impl DataStore {
                 .optional()
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+        };
+
+        // Load clickhouse keepers and servers if config exists
+        let (raw_clickhouse_keepers, raw_clickhouse_servers) =
+            if raw_clickhouse_config.is_some() {
+                let keepers: Vec<BpClickhouseKeeperZoneIdToNodeId> = {
+                    use nexus_db_schema::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
+                    let mut rows = Vec::new();
+                    let mut paginator = Paginator::new(
+                        SQL_BATCH_SIZE,
+                        dropshot::PaginationOrder::Ascending,
+                    );
+                    while let Some(p) = paginator.next() {
+                        let batch = paginated(
+                            dsl::bp_clickhouse_keeper_zone_id_to_node_id,
+                            dsl::omicron_zone_id,
+                            &p.current_pagparams(),
+                        )
+                        .filter(
+                            dsl::blueprint_id
+                                .eq(to_db_typed_uuid(blueprint_id)),
+                        )
+                        .select(BpClickhouseKeeperZoneIdToNodeId::as_select())
+                        .load_async(&*conn)
+                        .await
+                        .map_err(|e| {
+                            public_error_from_diesel(e, ErrorHandler::Server)
+                        })?;
+
+                        paginator =
+                            p.found_batch(&batch, &|k| k.omicron_zone_id);
+                        rows.extend(batch);
+                    }
+                    rows
+                };
+
+                let servers: Vec<BpClickhouseServerZoneIdToNodeId> = {
+                    use nexus_db_schema::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
+                    let mut rows = Vec::new();
+                    let mut paginator = Paginator::new(
+                        SQL_BATCH_SIZE,
+                        dropshot::PaginationOrder::Ascending,
+                    );
+                    while let Some(p) = paginator.next() {
+                        let batch = paginated(
+                            dsl::bp_clickhouse_server_zone_id_to_node_id,
+                            dsl::omicron_zone_id,
+                            &p.current_pagparams(),
+                        )
+                        .filter(
+                            dsl::blueprint_id
+                                .eq(to_db_typed_uuid(blueprint_id)),
+                        )
+                        .select(BpClickhouseServerZoneIdToNodeId::as_select())
+                        .load_async(&*conn)
+                        .await
+                        .map_err(|e| {
+                            public_error_from_diesel(e, ErrorHandler::Server)
+                        })?;
+
+                        paginator =
+                            p.found_batch(&batch, &|s| s.omicron_zone_id);
+                        rows.extend(batch);
+                    }
+                    rows
+                };
+
+                (keepers, servers)
+            } else {
+                (Vec::new(), Vec::new())
+            };
+
+        // Load oximeter read policy
+        let raw_oximeter_policy: Option<BpOximeterReadPolicy> = {
+            use nexus_db_schema::schema::bp_oximeter_read_policy::dsl;
+
+            dsl::bp_oximeter_read_policy
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                .select(BpOximeterReadPolicy::as_select())
+                .get_result_async(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+        };
+
+        // Load all pending MGS update rows
+        let raw_pending_rot_bootloader: Vec<BpPendingMgsUpdateRotBootloader> = {
+            use nexus_db_schema::schema::bp_pending_mgs_update_rot_bootloader::dsl;
+
+            let mut rows = Vec::new();
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_pending_mgs_update_rot_bootloader,
+                    dsl::hw_baseboard_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                .select(BpPendingMgsUpdateRotBootloader::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
-            match res {
+                paginator = p.found_batch(&batch, &|d| d.hw_baseboard_id);
+                rows.extend(batch);
+            }
+            rows
+        };
+
+        // Load all pending RoT updates.
+        let raw_pending_rot: Vec<BpPendingMgsUpdateRot> = {
+            use nexus_db_schema::schema::bp_pending_mgs_update_rot::dsl;
+
+            let mut rows = Vec::new();
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_pending_mgs_update_rot,
+                    dsl::hw_baseboard_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                .select(BpPendingMgsUpdateRot::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+                paginator = p.found_batch(&batch, &|d| d.hw_baseboard_id);
+                rows.extend(batch);
+            }
+            rows
+        };
+
+        // Load all pending SP updates.
+        let raw_pending_sp: Vec<BpPendingMgsUpdateSp> = {
+            use nexus_db_schema::schema::bp_pending_mgs_update_sp::dsl;
+
+            let mut rows = Vec::new();
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_pending_mgs_update_sp,
+                    dsl::hw_baseboard_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                .select(BpPendingMgsUpdateSp::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+                paginator = p.found_batch(&batch, &|d| d.hw_baseboard_id);
+                rows.extend(batch);
+            }
+            rows
+        };
+
+        // Load all pending host_phase_1 updates.
+        let raw_pending_host_phase_1: Vec<BpPendingMgsUpdateHostPhase1> = {
+            #[rustfmt::skip]
+            use nexus_db_schema::schema::bp_pending_mgs_update_host_phase_1::dsl;
+
+            let mut rows = Vec::new();
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_pending_mgs_update_host_phase_1,
+                    dsl::hw_baseboard_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                .select(BpPendingMgsUpdateHostPhase1::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+                paginator = p.found_batch(&batch, &|d| d.hw_baseboard_id);
+                rows.extend(batch);
+            }
+            rows
+        };
+
+        // Collect the unique baseboard ids referenced by pending updates.
+        let baseboard_id_ids: BTreeSet<_> = raw_pending_sp
+            .iter()
+            .map(|s| s.hw_baseboard_id)
+            .chain(raw_pending_rot.iter().map(|s| s.hw_baseboard_id))
+            .chain(raw_pending_rot_bootloader.iter().map(|s| s.hw_baseboard_id))
+            .chain(raw_pending_host_phase_1.iter().map(|s| s.hw_baseboard_id))
+            .collect();
+
+        // Fetch the corresponding baseboard records.
+        let baseboards_by_id: BTreeMap<_, _> = {
+            use nexus_db_schema::schema::hw_baseboard_id::dsl;
+
+            let mut bbs = BTreeMap::new();
+
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::hw_baseboard_id,
+                    dsl::id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::id.eq_any(baseboard_id_ids.clone()))
+                .select(HwBaseboardId::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| row.id);
+                bbs.extend(
+                    batch
+                        .into_iter()
+                        .map(|bb| (bb.id, Arc::new(BaseboardId::from(bb)))),
+                );
+            }
+
+            bbs
+        };
+
+        let raw_measurements: Vec<(
+            BpSingleMeasurement,
+            Option<TufArtifactFile>,
+        )> = {
+            use nexus_db_schema::schema::bp_single_measurements::dsl;
+            use nexus_db_schema::schema::tuf_artifact_file::dsl as tuf_artifact_file_dsl;
+
+            let mut rows = Vec::new();
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_single_measurements,
+                    dsl::image_artifact_sha256,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                // Left join in case the artifact is missing from the
+                // tuf_artifact table, which is non-fatal.
+                .left_join(
+                    tuf_artifact_file_dsl::tuf_artifact_file
+                        .on(tuf_artifact_file_dsl::sha256
+                            .eq(dsl::image_artifact_sha256)),
+                )
+                .select((
+                    BpSingleMeasurement::as_select(),
+                    Option::<TufArtifactFile>::as_select(),
+                ))
+                .load_async::<(BpSingleMeasurement, Option<TufArtifactFile>)>(
+                    &*conn,
+                )
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator =
+                    p.found_batch(&batch, &|(z, _)| z.image_artifact_sha256);
+                rows.extend(batch);
+            }
+            rows
+        };
+
+        // ================================================================
+        // STAGE 2: Check if blueprint exists
+        //
+        // We read the blueprint metadata row AFTER loading all child data
+        // but BEFORE validation. If the blueprint has been concurrently
+        // deleted, the top-level row will be missing.
+        //
+        // In this case, we return "not found" rather than proceeding with
+        // validation that would fail on incomplete data.
+        // ================================================================
+
+        let blueprint_row: DbBlueprint = {
+            use nexus_db_schema::schema::blueprint::dsl;
+
+            let Some(blueprint) = dsl::blueprint
+                .filter(dsl::id.eq(to_db_typed_uuid(blueprint_id)))
+                .select(DbBlueprint::as_select())
+                .get_result_async(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+            else {
+                return Err(authz_blueprint.not_found());
+            };
+
+            blueprint
+        };
+
+        // ================================================================
+        // STAGE 3: Parse and validate all loaded data
+        //
+        // At this point, we know the blueprint exists (wasn't deleted).
+        // Any validation errors from here indicate real database
+        // corruption, not a torn read from concurrent deletion.
+        // ================================================================
+
+        let mut omicron_measurements: BTreeMap<
+            SledUuid,
+            BTreeSet<BlueprintSingleMeasurement>,
+        > = BTreeMap::new();
+        for (m, artifact) in raw_measurements {
+            omicron_measurements
+                .entry(m.sled_id.into())
+                .or_default()
+                .insert(m.to_measurement(artifact));
+        }
+
+        // Parse sled metadata into BlueprintSledConfig map
+        let mut sled_configs: BTreeMap<SledUuid, BlueprintSledConfig> =
+            BTreeMap::new();
+        for (s, slot_a_version, slot_b_version) in raw_sled_metadata {
+            let subnet = s.subnet().map_err(|e| {
+                Error::internal_error(InlineErrorChain::new(&*e).to_string())
+            })?;
+            let last_allocated_ip_subnet_offset =
+                LastAllocatedSubnetIpOffset::new(
+                    *s.last_allocated_ip_subnet_offset,
+                );
+            let measurements = match (
+                omicron_measurements.remove(&s.sled_id.into()),
+                s.measurements,
+            ) {
+                // There were measurements in the database and we expect this
+                (Some(m), DbBpSledMeasurements::Artifacts) => {
+                    BlueprintMeasurements::Artifacts {
+                        artifacts: BlueprintArtifactMeasurements::new(m)
+                            .ok_or(Error::internal_error(&format!(
+                                "sled {} has an empty measurement set",
+                                s.sled_id
+                            )))?,
+                    }
+                }
+                // There were no measurements, we expect this for both these cases
+                (None, DbBpSledMeasurements::InstallDataset) => {
+                    BlueprintMeasurements::InstallDataset
+                }
+                (None, DbBpSledMeasurements::Unknown) => {
+                    BlueprintMeasurements::Unknown
+                }
+                // The rest of these are inconsistent and we have a bug somewhere
+                (Some(_), DbBpSledMeasurements::InstallDataset)
+                | (Some(_), DbBpSledMeasurements::Unknown) => {
+                    return Err(Error::internal_error(&format!(
+                        "Found entries for sled {} when there should be none",
+                        s.sled_id
+                    )));
+                }
+                (None, DbBpSledMeasurements::Artifacts) => {
+                    return Err(Error::internal_error(&format!(
+                        "Missing measurements for sled {}",
+                        s.sled_id
+                    )));
+                }
+            };
+            let update_disposition = s.update_disposition().map_err(|e| {
+                Error::internal_error(InlineErrorChain::new(&*e).to_string())
+            })?;
+            let config = BlueprintSledConfig {
+                state: s.sled_state.into(),
+                update_disposition,
+                subnet,
+                sled_agent_generation: s.sled_agent_generation.into(),
+                last_allocated_ip_subnet_offset,
+                disks: IdOrdMap::new(),
+                datasets: IdOrdMap::new(),
+                zones: IdOrdMap::new(),
+                remove_mupdate_override: s
+                    .remove_mupdate_override
+                    .map(|id| id.into()),
+                host_phase_2: s.host_phase_2(slot_a_version, slot_b_version),
+                measurements,
+            };
+            let old = sled_configs.insert(s.sled_id.into(), config);
+            bail_unless!(
+                old.is_none(),
+                "found duplicate sled ID in bp_sled_metadata: {}",
+                s.sled_id
+            );
+        }
+
+        // Assemble a mutable map of all the NICs found, by NIC id.  As we
+        // match these up with the corresponding zone below, we'll remove items
+        // from this set.  That way we can tell if the same NIC was used twice
+        // or not used at all.
+        let mut omicron_zone_nics: BTreeMap<_, _> = BTreeMap::new();
+        for n in raw_zone_nics {
+            let nic_id = n.id;
+            let old = omicron_zone_nics.insert(nic_id, n);
+            bail_unless!(
+                old.is_none(),
+                "found duplicate NIC ID in bp_omicron_zone_nic: {}",
+                nic_id,
+            );
+        }
+
+        // Assemble a mutable map of all the external IPs found, grouped by zone
+        // id.  A zone may have more than one, so we collect them into a `Vec`.
+        // As we match these up with each zone below, we remove entries, so we
+        // can tell if any external IP references a zone that doesn't exist.
+        let mut omicron_zone_external_ips: BTreeMap<_, Vec<_>> =
+            BTreeMap::new();
+        for ip in raw_zone_external_ips {
+            omicron_zone_external_ips.entry(ip.zone_id).or_default().push(ip);
+        }
+
+        // Process zones: match NICs, validate sled references, parse
+        for (z, artifact) in raw_zones {
+            let nic_row = z
+                .bp_nic_id
+                .map(|id| {
+                    // This error means that we found a row in
+                    // bp_omicron_zone that references a NIC by id but
+                    // there's no corresponding row in
+                    // bp_omicron_zone_nic with that id.  This should be
+                    // impossible and reflects either a bug or database
+                    // corruption.
+                    omicron_zone_nics.remove(&id).ok_or_else(|| {
+                        Error::internal_error(&format!(
+                            "zone {:?}: expected to find NIC {:?}, \
+                             but didn't",
+                            z.id, z.bp_nic_id
+                        ))
+                    })
+                })
+                .transpose()?;
+            let sled_id = SledUuid::from(z.sled_id);
+            let zone_id = z.id;
+            let external_ip_rows =
+                omicron_zone_external_ips.remove(&zone_id).unwrap_or_default();
+            let sled_config =
+                sled_configs.get_mut(&sled_id).ok_or_else(|| {
+                    // This error means that we found a row in
+                    // bp_omicron_zone with no associated record in
+                    // bp_sled_omicron_zones.  This should be
+                    // impossible and reflects either a bug or database
+                    // corruption.
+                    Error::internal_error(&format!(
+                        "zone {zone_id}: unknown sled: {sled_id}",
+                    ))
+                })?;
+            let zone = z
+                .into_blueprint_zone_config(nic_row, artifact, external_ip_rows)
+                .with_context(|| format!("zone {zone_id}: parse from database"))
+                .map_err(|e| Error::internal_error(&format!("{e:#}")))?;
+            sled_config.zones.insert_unique(zone).map_err(|e| {
+                Error::internal_error(&format!(
+                    "duplicate zone ID found, but \
+                     database guarantees uniqueness: {}",
+                    InlineErrorChain::new(&e),
+                ))
+            })?;
+        }
+
+        // Validate no extra NICs remain
+        bail_unless!(
+            omicron_zone_nics.is_empty(),
+            "found extra Omicron zone NICs: {:?}",
+            omicron_zone_nics.keys()
+        );
+
+        // Validate no external IPs remain
+        bail_unless!(
+            omicron_zone_external_ips.is_empty(),
+            "found external IPs for unknown Omicron zones: {:?}",
+            omicron_zone_external_ips.keys()
+        );
+
+        // Process disks: validate sled references, parse
+        for d in raw_disks {
+            let sled_config =
+                sled_configs.get_mut(&d.sled_id.into()).ok_or_else(|| {
+                    // This error means that we found a row in
+                    // bp_omicron_physical_disk with no associated
+                    // record in bp_sled_omicron_physical_disks.  This
+                    // should be impossible and reflects either a bug or
+                    // database corruption.
+                    Error::internal_error(&format!(
+                        "disk {}: unknown sled: {}",
+                        d.id, d.sled_id
+                    ))
+                })?;
+            let disk_id = d.id;
+            let disk = d.try_into().map_err(|e| {
+                Error::internal_error(&format!(
+                    "Cannot convert BpOmicronPhysicalDisk {}: {e}",
+                    disk_id
+                ))
+            })?;
+            sled_config.disks.insert_unique(disk).map_err(|e| {
+                Error::internal_error(&format!(
+                    "duplicate disk ID found, but \
+                     database guarantees uniqueness: {}",
+                    InlineErrorChain::new(&e),
+                ))
+            })?;
+        }
+
+        // Process datasets: validate sled references, parse
+        for d in raw_datasets {
+            let sled_config =
+                sled_configs.get_mut(&d.sled_id.into()).ok_or_else(|| {
+                    // This error means that we found a row in
+                    // bp_omicron_dataset with no associated record in
+                    // bp_sled_omicron_datasets.  This should be
+                    // impossible and reflects either a bug or database
+                    // corruption.
+                    Error::internal_error(&format!(
+                        "dataset {}: unknown sled: {}",
+                        d.id, d.sled_id
+                    ))
+                })?;
+
+            let dataset_id = d.id;
+            let dataset = d.try_into().map_err(|e| {
+                Error::internal_error(&format!(
+                    "Cannot parse dataset {}: {e}",
+                    dataset_id
+                ))
+            })?;
+            sled_config.datasets.insert_unique(dataset).map_err(|e| {
+                Error::internal_error(&format!(
+                    "duplicate dataset ID found, but \
+                     database guarantees uniqueness: {}",
+                    InlineErrorChain::new(&e),
+                ))
+            })?;
+        }
+
+        // Process clickhouse cluster config
+        let clickhouse_cluster_config: Option<ClickhouseClusterConfig> =
+            match raw_clickhouse_config {
                 None => None,
                 Some(bp_config) => {
-                    // Load our clickhouse keeper configs for the given blueprint
-                    let keepers: BTreeMap<OmicronZoneUuid, KeeperId> = {
-                        use nexus_db_schema::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
-                        let mut keepers = BTreeMap::new();
-                        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
-                        while let Some(p) = paginator.next() {
-                            let batch = paginated(
-                                dsl::bp_clickhouse_keeper_zone_id_to_node_id,
-                                dsl::omicron_zone_id,
-                                &p.current_pagparams(),
-                            )
-                            .filter(
-                                dsl::blueprint_id
-                                    .eq(to_db_typed_uuid(blueprint_id)),
-                            )
-                            .select(
-                                BpClickhouseKeeperZoneIdToNodeId::as_select(),
-                            )
-                            .load_async(&*conn)
-                            .await
-                            .map_err(|e| {
-                                public_error_from_diesel(
-                                    e,
-                                    ErrorHandler::Server,
-                                )
-                            })?;
+                    // Parse keepers
+                    let mut keepers: BTreeMap<OmicronZoneUuid, KeeperId> =
+                        BTreeMap::new();
+                    for k in raw_clickhouse_keepers {
+                        let keeper_id = KeeperId(
+                            u64::try_from(k.keeper_id).map_err(|_| {
+                                Error::internal_error(&format!(
+                                    "keeper id is negative: {}",
+                                    k.keeper_id
+                                ))
+                            })?,
+                        );
+                        keepers.insert(k.omicron_zone_id.into(), keeper_id);
+                    }
 
-                            paginator =
-                                p.found_batch(&batch, &|k| k.omicron_zone_id);
-
-                            for k in batch {
-                                let keeper_id = KeeperId(
-                                    u64::try_from(k.keeper_id).map_err(
-                                        |_| {
-                                            Error::internal_error(&format!(
-                                                "keeper id is negative: {}",
-                                                k.keeper_id
-                                            ))
-                                        },
-                                    )?,
-                                );
-                                keepers.insert(
-                                    k.omicron_zone_id.into(),
-                                    keeper_id,
-                                );
-                            }
-                        }
-                        keepers
-                    };
-
-                    // Load our clickhouse server configs for the given blueprint
-                    let servers: BTreeMap<OmicronZoneUuid, ServerId> = {
-                        use nexus_db_schema::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
-                        let mut servers = BTreeMap::new();
-                        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
-                        while let Some(p) = paginator.next() {
-                            let batch = paginated(
-                                dsl::bp_clickhouse_server_zone_id_to_node_id,
-                                dsl::omicron_zone_id,
-                                &p.current_pagparams(),
-                            )
-                            .filter(
-                                dsl::blueprint_id
-                                    .eq(to_db_typed_uuid(blueprint_id)),
-                            )
-                            .select(
-                                BpClickhouseServerZoneIdToNodeId::as_select(),
-                            )
-                            .load_async(&*conn)
-                            .await
-                            .map_err(|e| {
-                                public_error_from_diesel(
-                                    e,
-                                    ErrorHandler::Server,
-                                )
-                            })?;
-
-                            paginator =
-                                p.found_batch(&batch, &|s| s.omicron_zone_id);
-
-                            for s in batch {
-                                let server_id = ServerId(
-                                    u64::try_from(s.server_id).map_err(
-                                        |_| {
-                                            Error::internal_error(&format!(
-                                                "server id is negative: {}",
-                                                s.server_id
-                                            ))
-                                        },
-                                    )?,
-                                );
-                                servers.insert(
-                                    s.omicron_zone_id.into(),
-                                    server_id,
-                                );
-                            }
-                        }
-                        servers
-                    };
+                    // Parse servers
+                    let mut servers: BTreeMap<OmicronZoneUuid, ServerId> =
+                        BTreeMap::new();
+                    for s in raw_clickhouse_servers {
+                        let server_id = ServerId(
+                            u64::try_from(s.server_id).map_err(|_| {
+                                Error::internal_error(&format!(
+                                    "server id is negative: {}",
+                                    s.server_id
+                                ))
+                            })?,
+                        );
+                        servers.insert(s.omicron_zone_id.into(), server_id);
+                    }
 
                     Some(ClickhouseClusterConfig {
                         generation: bp_config.generation.into(),
@@ -895,54 +1588,105 @@ impl DataStore {
                         cluster_secret: bp_config.cluster_secret,
                         highest_seen_keeper_leader_committed_log_index:
                             u64::try_from(
-                                bp_config.highest_seen_keeper_leader_committed_log_index,
+                                bp_config
+                                    .highest_seen_keeper_leader_committed_log_index,
                             )
                             .map_err(|_| {
                                 Error::internal_error(&format!(
-                                    "max server id is negative: {}",
-                                    bp_config.highest_seen_keeper_leader_committed_log_index
+                                    "keeper committed log index is negative: {}",
+                                    bp_config
+                                        .highest_seen_keeper_leader_committed_log_index
                                 ))
                             })?,
                         keepers,
                         servers,
                     })
                 }
-            }
-        };
+            };
 
-        let (oximeter_read_version, oximeter_read_mode) = {
-            use nexus_db_schema::schema::bp_oximeter_read_policy::dsl;
-
-            let res = dsl::bp_oximeter_read_policy
-                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
-                .select(BpOximeterReadPolicy::as_select())
-                .get_result_async(&*conn)
-                .await
-                .optional()
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-
-            match res {
-                // If policy is empty, we can safely assume we are at version 1 which defaults
-                // to reading from a single node installation
+        // Process oximeter read policy
+        let (oximeter_read_version, oximeter_read_mode) =
+            match raw_oximeter_policy {
+                // If policy is empty, we can safely assume we are at version 1
+                // which defaults to reading from a single node installation
                 None => (Generation::new(), OximeterReadMode::SingleNode),
                 Some(p) => (
                     Generation::from(p.version),
                     OximeterReadMode::from(p.oximeter_read_mode),
                 ),
-            }
-        };
+            };
+
+        // Process pending MGS updates
+        let mut pending_mgs_updates = PendingMgsUpdates::new();
+        for row in raw_pending_rot_bootloader {
+            process_update_row(
+                row,
+                &baseboards_by_id,
+                &mut pending_mgs_updates,
+                &blueprint_id,
+            )?;
+        }
+        for row in raw_pending_rot {
+            process_update_row(
+                row,
+                &baseboards_by_id,
+                &mut pending_mgs_updates,
+                &blueprint_id,
+            )?;
+        }
+        for row in raw_pending_sp {
+            process_update_row(
+                row,
+                &baseboards_by_id,
+                &mut pending_mgs_updates,
+                &blueprint_id,
+            )?;
+        }
+        for row in raw_pending_host_phase_1 {
+            process_update_row(
+                row,
+                &baseboards_by_id,
+                &mut pending_mgs_updates,
+                &blueprint_id,
+            )?;
+        }
+
+        // Parse blueprint row fields
+        let parent_blueprint_id =
+            blueprint_row.parent_blueprint_id.map(From::from);
+        let internal_dns_version = *blueprint_row.internal_dns_version;
+        let external_dns_version = *blueprint_row.external_dns_version;
+        let target_release_minimum_generation =
+            blueprint_row.target_release_minimum_generation.into();
+        let nexus_generation = blueprint_row.nexus_generation.into();
+        let external_networking_generation =
+            *blueprint_row.external_networking_generation;
+        let cockroachdb_fingerprint = blueprint_row.cockroachdb_fingerprint;
+        let cockroachdb_setting_preserve_downgrade =
+            CockroachDbPreserveDowngrade::from_optional_string(
+                &blueprint_row.cockroachdb_setting_preserve_downgrade,
+            )
+            .map_err(|_| {
+                Error::internal_error(&format!(
+                    "unrecognized cluster version {:?}",
+                    blueprint_row.cockroachdb_setting_preserve_downgrade
+                ))
+            })?;
+        let time_created = blueprint_row.time_created;
+        let creator = blueprint_row.creator;
+        let comment = blueprint_row.comment;
+        let source = BlueprintSource::from(blueprint_row.source);
 
         Ok(Blueprint {
             id: blueprint_id,
-            // TODO these need to be serialized to the database.
-            // See oxidecomputer/omicron#7981.
-            pending_mgs_updates: PendingMgsUpdates::new(),
+            pending_mgs_updates,
             sleds: sled_configs,
             parent_blueprint_id,
             internal_dns_version,
             external_dns_version,
+            target_release_minimum_generation,
+            nexus_generation,
+            external_networking_generation,
             cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade,
             clickhouse_cluster_config,
@@ -951,6 +1695,7 @@ impl DataStore {
             time_created,
             creator,
             comment,
+            source,
         })
     }
 
@@ -973,152 +1718,339 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
 
-        let (
+        // Helper to pack and unpack all the counts of rows we delete in the
+        // transaction below (exclusively used for logging).
+        struct NumRowsDeleted {
+            nblueprints: usize,
+            nsled_metadata: usize,
+            nphysical_disks: usize,
+            ndatasets: usize,
+            nzones: usize,
+            nnics: usize,
+            nexternal_ips: usize,
+            nclickhouse_cluster_configs: usize,
+            nclickhouse_keepers: usize,
+            nclickhouse_servers: usize,
+            noximeter_policy: usize,
+            npending_mgs_updates_sp: usize,
+            npending_mgs_updates_rot: usize,
+            npending_mgs_updates_rot_bootloader: usize,
+            npending_mgs_updates_host_phase_1: usize,
+            ndebug_log_planning_report: usize,
+        }
+
+        let NumRowsDeleted {
             nblueprints,
             nsled_metadata,
             nphysical_disks,
             ndatasets,
             nzones,
             nnics,
+            nexternal_ips,
             nclickhouse_cluster_configs,
             nclickhouse_keepers,
             nclickhouse_servers,
-        ) = self.transaction_retry_wrapper("blueprint_delete")
+            noximeter_policy,
+            npending_mgs_updates_sp,
+            npending_mgs_updates_rot,
+            npending_mgs_updates_rot_bootloader,
+            npending_mgs_updates_host_phase_1,
+            ndebug_log_planning_report,
+        } = self
+            .transaction_retry_wrapper("blueprint_delete")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                // Ensure that blueprint we're about to delete is not the
-                // current target.
-                let current_target = Self::blueprint_current_target_only(&conn)
-                    .await
-                    .map_err(|txn_err| txn_err.into_diesel(&err))?;
+                    // Ensure that blueprint we're about to delete is not the
+                    // current target.
+                    let current_target =
+                        Self::blueprint_current_target_only(&conn)
+                            .await
+                            .map_err(|txn_err| txn_err.into_diesel(&err))?;
 
-                if current_target.target_id == blueprint_id {
-                    return Err(err.bail(TransactionError::CustomError(
-                        Error::conflict(format!(
-                            "blueprint {blueprint_id} is the \
+                    if current_target.target_id == blueprint_id {
+                        return Err(err.bail(TransactionError::CustomError(
+                            Error::conflict(format!(
+                                "blueprint {blueprint_id} is the \
                              current target and cannot be deleted",
-                        )),
-                    )));
-                }
+                            )),
+                        )));
+                    }
 
-                // Remove the record describing the blueprint itself.
-                let nblueprints = {
-                    use nexus_db_schema::schema::blueprint::dsl;
-                    diesel::delete(
-                        dsl::blueprint.filter(dsl::id.eq(to_db_typed_uuid(blueprint_id))),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                    // Remove the record describing the blueprint itself.
+                    let nblueprints =
+                        {
+                            use nexus_db_schema::schema::blueprint::dsl;
+                            diesel::delete(dsl::blueprint.filter(
+                                dsl::id.eq(to_db_typed_uuid(blueprint_id)),
+                            ))
+                            .execute_async(&conn)
+                            .await?
+                        };
 
-                // Bail out if this blueprint didn't exist; there won't be
-                // references to it in any of the remaining tables either, since
-                // deletion always goes through this transaction.
-                if nblueprints == 0 {
-                    return Err(err.bail(TransactionError::CustomError(
-                        authz_blueprint.not_found(),
-                    )));
-                }
+                    // Bail out if this blueprint didn't exist; there won't be
+                    // references to it in any of the remaining tables either,
+                    // since deletion always goes through this transaction.
+                    if nblueprints == 0 {
+                        return Err(err.bail(TransactionError::CustomError(
+                            authz_blueprint.not_found(),
+                        )));
+                    }
 
-                // Remove rows associated with sled metadata.
-                let nsled_metadata = {
-                    use nexus_db_schema::schema::bp_sled_metadata::dsl;
-                    diesel::delete(
-                        dsl::bp_sled_metadata
-                            .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                    // Remove rows associated with sled metadata.
+                    let nsled_metadata = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_sled_metadata::dsl;
+                        diesel::delete(
+                            dsl::bp_sled_metadata.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
-                // Remove rows associated with Omicron physical disks
-                let nphysical_disks = {
-                    use nexus_db_schema::schema::bp_omicron_physical_disk::dsl;
-                    diesel::delete(
-                        dsl::bp_omicron_physical_disk
-                            .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                    // Remove rows associated with Omicron physical disks
+                    let nphysical_disks = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_omicron_physical_disk::dsl;
+                        diesel::delete(
+                            dsl::bp_omicron_physical_disk.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
-                // Remove rows associated with Omicron datasets
-                let ndatasets = {
-                    use nexus_db_schema::schema::bp_omicron_dataset::dsl;
-                    diesel::delete(
-                        dsl::bp_omicron_dataset
-                            .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                    // Remove rows associated with Omicron datasets
+                    let ndatasets = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_omicron_dataset::dsl;
+                        diesel::delete(
+                            dsl::bp_omicron_dataset.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
-                // Remove rows associated with Omicron zones
-                let nzones = {
-                    use nexus_db_schema::schema::bp_omicron_zone::dsl;
-                    diesel::delete(
-                        dsl::bp_omicron_zone
-                            .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                    // Remove rows associated with Omicron zones
+                    let nzones = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_omicron_zone::dsl;
+                        diesel::delete(
+                            dsl::bp_omicron_zone.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
-                let nnics = {
-                    use nexus_db_schema::schema::bp_omicron_zone_nic::dsl;
-                    diesel::delete(
-                        dsl::bp_omicron_zone_nic
-                            .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                    let nnics = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_omicron_zone_nic::dsl;
+                        diesel::delete(
+                            dsl::bp_omicron_zone_nic.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
-                let nclickhouse_cluster_configs = {
-                    use nexus_db_schema::schema::bp_clickhouse_cluster_config::dsl;
-                    diesel::delete(
-                        dsl::bp_clickhouse_cluster_config
-                            .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                    let nexternal_ips = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_omicron_zone_external_ip::dsl;
+                        diesel::delete(
+                            dsl::bp_omicron_zone_external_ip.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
-                let nclickhouse_keepers = {
-                    use nexus_db_schema::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
-                    diesel::delete(dsl::bp_clickhouse_keeper_zone_id_to_node_id
-                            .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                    let nclickhouse_cluster_configs = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_clickhouse_cluster_config::dsl;
+                        diesel::delete(
+                            dsl::bp_clickhouse_cluster_config.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
-                let nclickhouse_servers = {
-                    use nexus_db_schema::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
-                    diesel::delete(dsl::bp_clickhouse_server_zone_id_to_node_id
-                            .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                    let nclickhouse_keepers = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_clickhouse_keeper_zone_id_to_node_id::dsl;
+                        diesel::delete(
+                            dsl::bp_clickhouse_keeper_zone_id_to_node_id
+                                .filter(
+                                    dsl::blueprint_id
+                                        .eq(to_db_typed_uuid(blueprint_id)),
+                                ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
-                Ok((
-                    nblueprints,
-                    nsled_metadata,
-                    nphysical_disks,
-                    ndatasets,
-                    nzones,
-                    nnics,
-                    nclickhouse_cluster_configs,
-                    nclickhouse_keepers,
-                    nclickhouse_servers,
-                ))
+                    let nclickhouse_servers = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_clickhouse_server_zone_id_to_node_id::dsl;
+                        diesel::delete(
+                            dsl::bp_clickhouse_server_zone_id_to_node_id
+                                .filter(
+                                    dsl::blueprint_id
+                                        .eq(to_db_typed_uuid(blueprint_id)),
+                                ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    let noximeter_policy = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_oximeter_read_policy::dsl;
+                        diesel::delete(
+                            dsl::bp_oximeter_read_policy.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    let npending_mgs_updates_sp = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_pending_mgs_update_sp::dsl;
+                        diesel::delete(
+                            dsl::bp_pending_mgs_update_sp.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    let npending_mgs_updates_rot = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_pending_mgs_update_rot::dsl;
+                        diesel::delete(
+                            dsl::bp_pending_mgs_update_rot.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    let npending_mgs_updates_rot_bootloader = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_pending_mgs_update_rot_bootloader::dsl;
+                        diesel::delete(
+                            dsl::bp_pending_mgs_update_rot_bootloader.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    let npending_mgs_updates_host_phase_1 = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_pending_mgs_update_host_phase_1::dsl;
+                        diesel::delete(
+                            dsl::bp_pending_mgs_update_host_phase_1.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    let ndebug_log_planning_report = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            debug_log_blueprint_planning::dsl;
+                        diesel::delete(
+                            dsl::debug_log_blueprint_planning.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    Ok(NumRowsDeleted {
+                        nblueprints,
+                        nsled_metadata,
+                        nphysical_disks,
+                        ndatasets,
+                        nzones,
+                        nnics,
+                        nexternal_ips,
+                        nclickhouse_cluster_configs,
+                        nclickhouse_keepers,
+                        nclickhouse_servers,
+                        noximeter_policy,
+                        npending_mgs_updates_sp,
+                        npending_mgs_updates_rot,
+                        npending_mgs_updates_rot_bootloader,
+                        npending_mgs_updates_host_phase_1,
+                        ndebug_log_planning_report,
+                    })
                 }
             })
             .await
             .map_err(|e| match err.take() {
-                Some(err) => err.into(),
+                Some(err) => err.into_public_ignore_retries(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
             })?;
 
@@ -1130,9 +2062,18 @@ impl DataStore {
             "ndatasets" => ndatasets,
             "nzones" => nzones,
             "nnics" => nnics,
+            "nexternal_ips" => nexternal_ips,
             "nclickhouse_cluster_configs" => nclickhouse_cluster_configs,
             "nclickhouse_keepers" => nclickhouse_keepers,
-            "nclickhouse_servers" => nclickhouse_servers
+            "nclickhouse_servers" => nclickhouse_servers,
+            "noximeter_policy" => noximeter_policy,
+            "npending_mgs_updates_sp" => npending_mgs_updates_sp,
+            "npending_mgs_updates_rot" => npending_mgs_updates_rot,
+            "npending_mgs_updates_rot_bootloader" =>
+            npending_mgs_updates_rot_bootloader,
+            "npending_mgs_updates_host_phase_1" =>
+            npending_mgs_updates_host_phase_1,
+            "ndebug_log_planning_report" => ndebug_log_planning_report,
         );
 
         Ok(())
@@ -1237,25 +2178,32 @@ impl DataStore {
                 self.ensure_zone_external_networking_deallocated_on_connection(
                     &conn,
                     &opctx.log,
+                    // TODO-correctness Currently the planner _does not wait_
+                    // for zones using external IPs to be ready for cleanup
+                    // before reassigning the external IP to a new zone, so we
+                    // have to deallocate IPs for both "ready for cleanup" and
+                    // "not ready for cleanup" zones. We should fix the planner,
+                    // at which point we can operate on only "ready for cleanup"
+                    // zones here.
+                    //
+                    // <https://github.com/oxidecomputer/omicron/issues/9506>
                     blueprint
-                        .all_omicron_zones(|disposition| {
-                            !disposition.is_in_service()
-                        })
+                        .expunged_zones(
+                            ZoneRunningStatus::Any,
+                            BlueprintExpungedZoneAccessReason
+                                ::DeallocateExternalNetworkingResources
+                        )
                         .map(|(_sled_id, zone)| zone),
                 )
                 .await
-                .map_err(|e| err.bail(e.into()))?;
+                .map_err(|e| err.bail(e))?;
                 self.ensure_zone_external_networking_allocated_on_connection(
                     &conn,
                     opctx,
-                    blueprint
-                        .all_omicron_zones(|disposition| {
-                            disposition.is_in_service()
-                        })
-                        .map(|(_sled_id, zone)| zone),
+                    blueprint.in_service_zones().map(|(_sled_id, zone)| zone),
                 )
                 .await
-                .map_err(|e| err.bail(e.into()))?;
+                .map_err(|e| err.bail(e))?;
 
                 Ok(())
             }
@@ -1263,7 +2211,7 @@ impl DataStore {
         .await
         .map_err(|e| {
             if let Some(err) = err.take() {
-                err.into()
+                err.into_public_ignore_retries()
             } else {
                 public_error_from_diesel(e, ErrorHandler::Server)
             }
@@ -1297,16 +2245,16 @@ impl DataStore {
             .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
             .await?;
 
-        let query = InsertTargetQuery {
-            target_id: target.target_id,
-            enabled: target.enabled,
-            time_made_target: target.time_made_target,
-        };
-
-        query
-            .execute_async(conn)
-            .await
-            .map_err(|e| Error::from(query.decode_error(e)))?;
+        insert_target_query(
+            target.target_id,
+            target.enabled,
+            target.time_made_target,
+        )
+        .execute_async(conn)
+        .await
+        .map_err(|e| {
+            Error::from(decode_target_insert_error(target.target_id, e))
+        })?;
 
         Ok(())
     }
@@ -1322,7 +2270,7 @@ impl DataStore {
     // could reconsider this and make `blueprint_target_set_current` accept
     // blueprints where either their own or their parent is the current
     // blueprint, although this would require some rework in the nontrivial
-    // `InsertTargetQuery` CTE.
+    // `insert_target_query` CTE.
     pub async fn blueprint_target_set_current_enabled(
         &self,
         opctx: &OpContext,
@@ -1414,7 +2362,9 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let target = Self::blueprint_current_target_only(&conn).await?;
+        let target = Self::blueprint_current_target_only(&conn)
+            .await
+            .map_err(|err| err.into_public_ignore_retries())?;
 
         // The blueprint for the current target cannot be deleted while it is
         // the current target, but it's possible someone else (a) made a new
@@ -1444,7 +2394,9 @@ impl DataStore {
     ) -> Result<BlueprintTarget, Error> {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        Self::blueprint_current_target_only(&conn).await.map_err(|e| e.into())
+        Self::blueprint_current_target_only(&conn)
+            .await
+            .map_err(|e| e.into_public_ignore_retries())
     }
 
     // Helper to fetch the current blueprint target (without fetching the entire
@@ -1474,6 +2426,838 @@ impl DataStore {
 
         Ok(current_target.into())
     }
+
+    /// List a page of rows from `bp_target`
+    ///
+    /// Generally, only the last `bp_target` row is meaningful.  You only want
+    /// this if you're explicitly looking at history for debugging, cleanup,
+    /// etc.
+    pub async fn bp_target_list_page(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, SqlU32>,
+    ) -> ListResultVec<BpTarget> {
+        opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
+
+        use nexus_db_schema::schema::bp_target::dsl;
+        paginated(dsl::bp_target, dsl::version, pagparams)
+            .select(BpTarget::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Fetch information about most recent target blueprints to determine which
+    /// former target blueprints can be deleted while keeping `nkeep` distinct
+    /// blueprint ids in the database for debugging purposes
+    ///
+    /// In practice, pruning what this function determines to be pruneable
+    /// should ensure that the database is left with the most recent `nkeep`
+    /// distinct blueprints as long as it had at least `nkeep` blueprints in it
+    /// to begin with.  This includes systems where the blueprint pruner has
+    /// been responsible for deleting the most recent round of blueprints and
+    /// `bp_target` rows.  However, if for some reason some of the `nkeep`
+    /// blueprint ids correspond to blueprints that are missing but earlier ones
+    /// are not, then when the caller prunes the blueprints that this function
+    /// reports are pruneable, there will be fewer than `nkeep` blueprints left.
+    /// This can happen if someone ran `omdb nexus blueprints delete` to delete
+    /// individual blueprints that had previously been targets or if someone
+    /// used `omdb reconfigurator archive` with a limit that didn't allow it to
+    /// prune from the start of the table.  None of this has any impact on the
+    /// system.  It just means we'd have less debugging data still in the
+    /// database than we'd want in that case.  (As of recent releases, we should
+    /// still have debugging data archived from the debug dropbox.)
+    // This could arguably live in the pruner itself, which could build it atop
+    // a public `bp_target_list_page`.  It lives here instead because it goes
+    // with `bp_target_delete_up_to`, and that _can't_ be built atop a
+    // comparably safe interface.
+    pub async fn bp_target_determine_pruneable(
+        &self,
+        opctx: &OpContext,
+        nkeep: NonZeroUsize,
+    ) -> Result<BpTargetPruneable, Error> {
+        self.bp_target_determine_pruneable_batched(opctx, nkeep, SQL_BATCH_SIZE)
+            .await
+    }
+
+    /// Implementation of `bp_target_determine_pruneable()` that allows the
+    /// caller to control the size of each database page
+    ///
+    /// This exists so that tests can exercise the paging behavior without
+    /// creating thousands of rows.
+    async fn bp_target_determine_pruneable_batched(
+        &self,
+        opctx: &OpContext,
+        nkeep: NonZeroUsize,
+        batch_size: NonZeroU32,
+    ) -> Result<BpTargetPruneable, Error> {
+        opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
+        let nkeep = nkeep.get();
+
+        // There are lots of ways to do this.  We'll do it by paging backwards
+        // through the table until we identify `nkeep` distinct blueprints.
+        //
+        // Alternative considered: take MAX(version) and subtract `nkeep`.  This
+        // is easy to do, but might result in keeping fewer blueprints if some
+        // of those rows just involve having enabled or disabled the target.
+        // It's uncommon to enable/disable the target, so this matters most when
+        // `nkeep` is small.  It could also be *very* wrong if for whatever
+        // reason somebody has already removed rows near the end of the table.
+        // This too should be impossible, but there's no need to rely on it.
+        //
+        // Alternative considered: have the database tell us the version that's
+        // `nkeep` rows from the end.  e.g., something like
+        //
+        //   SELECT version FROM bp_target \
+        //       ORDER BY version DESC OFFSET `nkeep`
+        //
+        // That query is somewhat expensive (well, proportional to `nkeep`) and
+        // still has the problem of not keeping enough blueprints if some of
+        // these rows correspond to just enabling/disabling the current target.
+        //
+        // By comparison, the approach we pick here is just a paginated scan (no
+        // exotic SQL), each query's cost is proportional to the page size
+        // (rather than `nkeep`), and it allows us to keep the right number of
+        // distinct blueprints.
+
+        let mut nscanned = 0;
+        let mut blueprint_ids_to_keep: BTreeSet<BlueprintUuid> =
+            BTreeSet::new();
+        let mut paginator =
+            Paginator::new(batch_size, dropshot::PaginationOrder::Descending);
+        let mut last_version_seen = None;
+        let mut latest_target_id = None;
+
+        while let Some(p) = paginator.next() {
+            let records_batch = self
+                .bp_target_list_page(opctx, &p.current_pagparams())
+                .await
+                .internal_context("fetching page of bp_target rows")?;
+            paginator =
+                p.found_batch(&records_batch, &|m: &BpTarget| m.version);
+            for row in records_batch {
+                nscanned += 1;
+                let blueprint_id = BlueprintUuid::from(row.blueprint_id);
+                if latest_target_id.is_none() {
+                    latest_target_id = Some(blueprint_id);
+                }
+
+                // This is pretty subtle: we don't want to stop as soon as we
+                // find the Nth distinct blueprint id.  That's because if we
+                // keep going, we might find more rows that refer to the same
+                // blueprint id (if someone toggled the enabled/disabled bit).
+                // If we stopped here, the caller would see those rows and
+                // erroneously determine they could prune this blueprint, but we
+                // were counting on it being one of the ones being kept.
+                //
+                // Instead, we need to go far enough back to see a different
+                // blueprint id.
+                if blueprint_ids_to_keep.len() >= nkeep
+                    && !blueprint_ids_to_keep.contains(&row.blueprint_id.into())
+                {
+                    // unwrap(): `nkeep` is non-zero, so we cannot get here
+                    // until we have processed at least one row, and processing
+                    // a row sets both of these.
+                    let version = last_version_seen.unwrap();
+                    let target_id = latest_target_id.unwrap();
+                    return Ok(BpTargetPruneable {
+                        nscanned,
+                        nfound: blueprint_ids_to_keep.len(),
+                        keep: KeepWhat::StartingFromVersion(version),
+                        target_id,
+                    });
+                }
+
+                blueprint_ids_to_keep.insert(row.blueprint_id.into());
+                last_version_seen = Some(*row.version);
+            }
+        }
+
+        Ok(BpTargetPruneable {
+            nscanned,
+            nfound: blueprint_ids_to_keep.len(),
+            keep: KeepWhat::All,
+            target_id: latest_target_id.ok_or_else(|| {
+                // This should be impossible since we always have a target.
+                Error::internal_error("no bp_target rows found")
+            })?,
+        })
+    }
+
+    /// Delete `bp_target` rows not newer than the specified version
+    ///
+    /// The caller should have already deleted the corresponding blueprints (or
+    /// they will likely be leaked, since there will be no other way to find
+    /// them and know that they're pruneable).
+    ///
+    /// The caller must have previously used `bp_target_determine_pruneable()`
+    /// to figure out what can be safely pruned and supply that here.
+    pub async fn bp_target_delete_up_to(
+        &self,
+        opctx: &OpContext,
+        pruneable: &BpTargetPruneable,
+        version: u32,
+    ) -> Result<usize, Error> {
+        opctx
+            .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
+            .await?;
+
+        match pruneable.keep {
+            KeepWhat::All => {
+                return Err(Error::internal_error(
+                    "cannot delete from bp_targets when determination \
+                     was to keep all rows",
+                ));
+            }
+            KeepWhat::StartingFromVersion(v) => {
+                if version >= v {
+                    return Err(Error::internal_error(&format!(
+                        "cannot delete up to bp_target version {version} \
+                         when determination was to keep starting at version \
+                         {v}"
+                    )));
+                }
+            }
+        }
+
+        // Although the Rust interface makes it hard to invoke this in a way
+        // that would prune the last rows in the table, since the consequences
+        // would be so dire, we use a transaction to ensure that we're not
+        // doing that.
+        let conn = self.pool_connection_authorized(&opctx).await?;
+        let err = OptionalError::new();
+        let ndeleted = self
+            .transaction_retry_wrapper("bp_target_delete")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    use nexus_db_schema::schema::bp_target::dsl;
+                    let latest_version: SqlU32 = dsl::bp_target
+                        .select(dsl::version)
+                        .order_by(dsl::version.desc())
+                        .limit(1)
+                        .first_async(&conn)
+                        .await?;
+
+                    let err = err.clone();
+                    if version >= *latest_version {
+                        return Err(err.bail(Error::internal_error(
+                            "cannot delete latest bp_target row",
+                        )));
+                    }
+
+                    let ndeleted = diesel::delete(
+                        dsl::bp_target.filter(dsl::version.le(SqlU32(version))),
+                    )
+                    .execute_async(&conn)
+                    .await?;
+
+                    Ok(ndeleted)
+                }
+            })
+            .await
+            .map_err(|e| match err.take() {
+                Some(inside_error) => inside_error,
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })?;
+
+        Ok(ndeleted)
+    }
+}
+
+/// Summarizes the most recent rows of the `bp_target` table
+#[derive(Debug)]
+pub struct BpTargetPruneable {
+    /// how many rows we scanned (starting at the end of the table)
+    pub nscanned: usize,
+    /// how many distinct blueprint ids we found
+    pub nfound: usize,
+    /// which rows to keep
+    keep: KeepWhat,
+    /// id of the latest target blueprint
+    target_id: BlueprintUuid,
+}
+
+impl BpTargetPruneable {
+    pub fn keep(&self) -> &KeepWhat {
+        &self.keep
+    }
+
+    pub fn target_id(&self) -> TypedUuid<BlueprintKind> {
+        self.target_id
+    }
+}
+
+/// Describes which versions in `bp_target` to keep, based on how many were
+/// requested to be kept and what we actually found in the table
+#[derive(Debug, Eq, PartialEq)]
+pub enum KeepWhat {
+    /// Keep everything because there aren't more than the requested number
+    All,
+    /// Keep only rows after (and including) the provided version
+    StartingFromVersion(u32),
+}
+
+// Helper for reporting "should never happen" errors while inserting blueprints.
+#[derive(Debug, Error)]
+enum InsertTxnError {
+    #[error("database error")]
+    Diesel(#[from] DieselError),
+
+    #[error(
+        "aborting transaction after unexpectedly inserting {count} rows \
+         for baseboard {baseboard_id:?} into {table_name}"
+    )]
+    BadInsertCount {
+        table_name: &'static str,
+        baseboard_id: Arc<BaseboardId>,
+        count: usize,
+    },
+}
+
+// Insert pending MGS updates for service processors for this blueprint.  These
+// include foreign keys into the hw_baseboard_id table that we don't have handy.
+// To achieve this, we use the same pattern used during inventory insertion:
+//
+//   INSERT INTO bp_pending_mgs_update_sp
+//       SELECT
+//           id
+//           [other column values as literals]
+//         FROM hw_baseboard_id
+//         WHERE part_number = ... AND serial_number = ...;
+//
+// This way, we don't need to know the id.  The database looks it up for us as
+// it does the INSERT.
+//
+// For each SP component (SP, RoT, RoT bootloader) we will be inserting to a
+// different table: bp_pending_mgs_update_sp, bp_pending_mgs_update_rot, or
+// bp_pending_mgs_update_rot_bootloader.
+async fn insert_pending_mgs_update(
+    conn: &async_bb8_diesel::Connection<DbConnection>,
+    update: &PendingMgsUpdate,
+    blueprint_id: BlueprintUuid,
+    log: &Logger,
+) -> Result<(), InsertTxnError> {
+    match &update.details {
+        PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
+            expected_active_version,
+            expected_inactive_version,
+        }) => {
+            let db_blueprint_id = DbTypedUuid::from(blueprint_id)
+                .into_sql::<diesel::sql_types::Uuid>();
+            let db_sp_type =
+                SpType::from(update.sp_type).into_sql::<SpTypeEnum>();
+            let db_slot_id = SpMgsSlot::from(SqlU16::from(update.slot_id))
+                .into_sql::<diesel::sql_types::Int4>();
+            let db_artifact_hash = ArtifactHash::from(update.artifact_hash)
+                .into_sql::<diesel::sql_types::Text>();
+            let db_artifact_version =
+                DbArtifactVersion::from(update.artifact_version.clone())
+                    .into_sql::<diesel::sql_types::Text>();
+            let db_expected_version =
+                DbArtifactVersion::from(expected_active_version.clone())
+                    .into_sql::<diesel::sql_types::Text>();
+            let db_expected_inactive_version =
+                match expected_inactive_version {
+                    ExpectedVersion::NoValidVersion => None,
+                    ExpectedVersion::Version(v) => {
+                        Some(DbArtifactVersion::from(v.clone()))
+                    }
+                }
+                .into_sql::<Nullable<diesel::sql_types::Text>>();
+
+            use nexus_db_schema::schema::hw_baseboard_id::dsl as baseboard_dsl;
+            // Skip formatting to prevent rustfmt bailing out.
+            #[rustfmt::skip]
+            use nexus_db_schema::schema::bp_pending_mgs_update_sp::dsl
+                as update_dsl;
+            let selection = nexus_db_schema::schema::hw_baseboard_id::table
+                .select((
+                    db_blueprint_id,
+                    baseboard_dsl::id,
+                    db_sp_type,
+                    db_slot_id,
+                    db_artifact_hash,
+                    db_artifact_version,
+                    db_expected_version,
+                    db_expected_inactive_version,
+                ))
+                .filter(
+                    baseboard_dsl::part_number
+                        .eq(update.baseboard_id.part_number.clone()),
+                )
+                .filter(
+                    baseboard_dsl::serial_number
+                        .eq(update.baseboard_id.serial_number.clone()),
+                );
+            let count =
+                diesel::insert_into(update_dsl::bp_pending_mgs_update_sp)
+                    .values(selection)
+                    .into_columns((
+                        update_dsl::blueprint_id,
+                        update_dsl::hw_baseboard_id,
+                        update_dsl::sp_type,
+                        update_dsl::sp_slot,
+                        update_dsl::artifact_sha256,
+                        update_dsl::artifact_version,
+                        update_dsl::expected_active_version,
+                        update_dsl::expected_inactive_version,
+                    ))
+                    .execute_async(conn)
+                    .await?;
+            if count != 1 {
+                // This should be impossible in practice. We will insert however
+                // many rows matched the `baseboard_id` parts of the query
+                // above. It can't be more than one 1 because we've filtered on
+                // a pair of columns that are unique together. It could only be
+                // 0 if the baseboard id had never been seen before in an
+                // inventory collection.  But in that case, how did we manage to
+                // construct a blueprint with it?
+                //
+                // This could happen in the test suite or with
+                // `reconfigurator-cli`, which both let you create any blueprint
+                // you like. In the test suite, the test just has to deal with
+                // this behaviour (e.g., by inserting an inventory collection
+                // containing this SP). With `reconfigurator-cli`, this amounts
+                // to user error.
+                error!(log,
+                    "blueprint insertion: unexpectedly tried to insert wrong \
+                     number of rows into bp_pending_mgs_update_sp \
+                     (aborting transaction)";
+                    "count" => count,
+                    &update.baseboard_id,
+                );
+                return Err(InsertTxnError::BadInsertCount {
+                    table_name: "bp_pending_mgs_update_sp",
+                    count,
+                    baseboard_id: update.baseboard_id.clone(),
+                });
+            }
+
+            // This statement is just here to force a compilation error if the
+            // set of columns in `bp_pending_mgs_update_sp` changes because that
+            // will affect the correctness of the above statement.
+            //
+            // If you're here because of a compile error, you might be changing
+            // the `bp_pending_mgs_update_sp` table. Update the statement below
+            // and be sure to update the code above, too!
+            let (
+                _blueprint_id,
+                _hw_baseboard_id,
+                _sp_type,
+                _sp_slot,
+                _artifact_sha256,
+                _artifact_version,
+                _expected_active_version,
+                _expected_inactive_version,
+            ) = update_dsl::bp_pending_mgs_update_sp::all_columns();
+        }
+        PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
+            expected_active_slot,
+            expected_inactive_version,
+            expected_persistent_boot_preference,
+            expected_pending_persistent_boot_preference,
+            expected_transient_boot_preference,
+        }) => {
+            let db_blueprint_id = DbTypedUuid::from(blueprint_id)
+                .into_sql::<diesel::sql_types::Uuid>();
+            let db_sp_type =
+                SpType::from(update.sp_type).into_sql::<SpTypeEnum>();
+            let db_slot_id = SpMgsSlot::from(SqlU16::from(update.slot_id))
+                .into_sql::<diesel::sql_types::Int4>();
+            let db_artifact_hash = ArtifactHash::from(update.artifact_hash)
+                .into_sql::<diesel::sql_types::Text>();
+            let db_artifact_version =
+                DbArtifactVersion::from(update.artifact_version.clone())
+                    .into_sql::<diesel::sql_types::Text>();
+            let db_expected_active_slot =
+                HwRotSlot::from(*expected_active_slot.slot())
+                    .into_sql::<HwRotSlotEnum>();
+            let db_expected_active_version =
+                DbArtifactVersion::from(expected_active_slot.version())
+                    .into_sql::<diesel::sql_types::Text>();
+            let db_expected_inactive_version =
+                match expected_inactive_version {
+                    ExpectedVersion::NoValidVersion => None,
+                    ExpectedVersion::Version(v) => {
+                        Some(DbArtifactVersion::from(v.clone()))
+                    }
+                }
+                .into_sql::<Nullable<diesel::sql_types::Text>>();
+            let db_expected_persistent_boot_preference =
+                HwRotSlot::from(*expected_persistent_boot_preference)
+                    .into_sql::<HwRotSlotEnum>();
+            let db_expected_pending_persistent_boot_preference =
+                expected_pending_persistent_boot_preference
+                    .map(|p| HwRotSlot::from(p))
+                    .into_sql::<Nullable<HwRotSlotEnum>>();
+            let db_expected_transient_boot_preference =
+                expected_transient_boot_preference
+                    .map(|p| HwRotSlot::from(p))
+                    .into_sql::<Nullable<HwRotSlotEnum>>();
+
+            use nexus_db_schema::schema::hw_baseboard_id::dsl as baseboard_dsl;
+            // Skip formatting to prevent rustfmt bailing out.
+            #[rustfmt::skip]
+            use nexus_db_schema::schema::bp_pending_mgs_update_rot::dsl
+                as update_dsl;
+            let selection = nexus_db_schema::schema::hw_baseboard_id::table
+                .select((
+                    db_blueprint_id,
+                    baseboard_dsl::id,
+                    db_sp_type,
+                    db_slot_id,
+                    db_artifact_hash,
+                    db_artifact_version,
+                    db_expected_active_slot,
+                    db_expected_active_version,
+                    db_expected_inactive_version,
+                    db_expected_persistent_boot_preference,
+                    db_expected_pending_persistent_boot_preference,
+                    db_expected_transient_boot_preference,
+                ))
+                .filter(
+                    baseboard_dsl::part_number
+                        .eq(update.baseboard_id.part_number.clone()),
+                )
+                .filter(
+                    baseboard_dsl::serial_number
+                        .eq(update.baseboard_id.serial_number.clone()),
+                );
+            let count =
+                diesel::insert_into(update_dsl::bp_pending_mgs_update_rot)
+                    .values(selection)
+                    .into_columns((
+                        update_dsl::blueprint_id,
+                        update_dsl::hw_baseboard_id,
+                        update_dsl::sp_type,
+                        update_dsl::sp_slot,
+                        update_dsl::artifact_sha256,
+                        update_dsl::artifact_version,
+                        update_dsl::expected_active_slot,
+                        update_dsl::expected_active_version,
+                        update_dsl::expected_inactive_version,
+                        update_dsl::expected_persistent_boot_preference,
+                        update_dsl::expected_pending_persistent_boot_preference,
+                        update_dsl::expected_transient_boot_preference,
+                    ))
+                    .execute_async(conn)
+                    .await?;
+            if count != 1 {
+                // As with `PendingMgsUpdateDetails::Sp`, this should be
+                // impossible in practice.
+                error!(log,
+                    "blueprint insertion: unexpectedly tried to insert wrong \
+                     number of rows into bp_pending_mgs_update_rot \
+                     (aborting transaction)";
+                    "count" => count,
+                    &update.baseboard_id,
+                );
+                return Err(InsertTxnError::BadInsertCount {
+                    table_name: "bp_pending_mgs_update_rot",
+                    count,
+                    baseboard_id: update.baseboard_id.clone(),
+                });
+            }
+
+            // This statement is just here to force a compilation error if the
+            // set of columns in `bp_pending_mgs_update_rot` changes because
+            // that will affect the correctness of the above statement.
+            //
+            // If you're here because of a compile error, you might be changing
+            // the `bp_pending_mgs_update_rot` table. Update the statement below
+            // and be sure to update the code above, too!
+            let (
+                _blueprint_id,
+                _hw_baseboard_id,
+                _sp_type,
+                _sp_slot,
+                _artifact_sha256,
+                _artifact_version,
+                _expected_active_slot,
+                _expected_active_version,
+                _expected_inactive_version,
+                _expected_persistent_boot_preference,
+                _expected_pending_persistent_boot_preference,
+                _expected_transient_boot_preference,
+            ) = update_dsl::bp_pending_mgs_update_rot::all_columns();
+        }
+        PendingMgsUpdateDetails::RotBootloader(
+            PendingMgsUpdateRotBootloaderDetails {
+                expected_stage0_version,
+                expected_stage0_next_version,
+            },
+        ) => {
+            let db_blueprint_id = DbTypedUuid::from(blueprint_id)
+                .into_sql::<diesel::sql_types::Uuid>();
+            let db_sp_type =
+                SpType::from(update.sp_type).into_sql::<SpTypeEnum>();
+            let db_slot_id = SpMgsSlot::from(SqlU16::from(update.slot_id))
+                .into_sql::<diesel::sql_types::Int4>();
+            let db_artifact_hash = ArtifactHash::from(update.artifact_hash)
+                .into_sql::<diesel::sql_types::Text>();
+            let db_artifact_version =
+                DbArtifactVersion::from(update.artifact_version.clone())
+                    .into_sql::<diesel::sql_types::Text>();
+            let db_expected_stage0_version =
+                DbArtifactVersion::from(expected_stage0_version.clone())
+                    .into_sql::<diesel::sql_types::Text>();
+            let db_expected_stage0_next_version =
+                match expected_stage0_next_version {
+                    ExpectedVersion::NoValidVersion => None,
+                    ExpectedVersion::Version(v) => {
+                        Some(DbArtifactVersion::from(v.clone()))
+                    }
+                }
+                .into_sql::<Nullable<diesel::sql_types::Text>>();
+
+            use nexus_db_schema::schema::hw_baseboard_id::dsl as baseboard_dsl;
+            // Skip formatting to prevent rustfmt bailing out.
+            #[rustfmt::skip]
+            use nexus_db_schema::schema::bp_pending_mgs_update_rot_bootloader::dsl
+                as update_dsl;
+            let selection = nexus_db_schema::schema::hw_baseboard_id::table
+                .select((
+                    db_blueprint_id,
+                    baseboard_dsl::id,
+                    db_sp_type,
+                    db_slot_id,
+                    db_artifact_hash,
+                    db_artifact_version,
+                    db_expected_stage0_version,
+                    db_expected_stage0_next_version,
+                ))
+                .filter(
+                    baseboard_dsl::part_number
+                        .eq(update.baseboard_id.part_number.clone()),
+                )
+                .filter(
+                    baseboard_dsl::serial_number
+                        .eq(update.baseboard_id.serial_number.clone()),
+                );
+            let count = diesel::insert_into(
+                update_dsl::bp_pending_mgs_update_rot_bootloader,
+            )
+            .values(selection)
+            .into_columns((
+                update_dsl::blueprint_id,
+                update_dsl::hw_baseboard_id,
+                update_dsl::sp_type,
+                update_dsl::sp_slot,
+                update_dsl::artifact_sha256,
+                update_dsl::artifact_version,
+                update_dsl::expected_stage0_version,
+                update_dsl::expected_stage0_next_version,
+            ))
+            .execute_async(conn)
+            .await?;
+            if count != 1 {
+                // As with `PendingMgsUpdateDetails::Sp`, this should be
+                // impossible in practice.
+                error!(log,
+                    "blueprint insertion: unexpectedly tried to insert wrong \
+                     number of rows into bp_pending_mgs_update_rot_bootloader \
+                     (aborting transaction)";
+                    "count" => count,
+                    &update.baseboard_id,
+                );
+                return Err(InsertTxnError::BadInsertCount {
+                    table_name: "bp_pending_mgs_update_rot_bootloader",
+                    count,
+                    baseboard_id: update.baseboard_id.clone(),
+                });
+            }
+
+            // This statement is just here to force a compilation error if the
+            // set of columns in `bp_pending_mgs_update_rot_bootloader` changes
+            // because that will affect the correctness of the above statement.
+            //
+            // If you're here because of a compile error, you might be changing
+            // the `bp_pending_mgs_update_rot_bootloader` table. Update the
+            // statement below and be sure to update the code above, too!
+            let (
+                _blueprint_id,
+                _hw_baseboard_id,
+                _sp_type,
+                _sp_slot,
+                _artifact_sha256,
+                _artifact_version,
+                _expected_stage0_version,
+                _expected_stage0_next_version,
+            ) = update_dsl::bp_pending_mgs_update_rot_bootloader::all_columns();
+        }
+        PendingMgsUpdateDetails::HostPhase1(
+            PendingMgsUpdateHostPhase1Details {
+                expected_active_phase_1_slot,
+                expected_boot_disk,
+                expected_active_phase_1_hash,
+                expected_active_phase_2_hash,
+                expected_inactive_phase_1_hash,
+                expected_inactive_phase_2_hash,
+                sled_agent_address,
+            },
+        ) => {
+            let db_blueprint_id = DbTypedUuid::from(blueprint_id)
+                .into_sql::<diesel::sql_types::Uuid>();
+            let db_sp_type =
+                SpType::from(update.sp_type).into_sql::<SpTypeEnum>();
+            let db_slot_id = SpMgsSlot::from(SqlU16::from(update.slot_id))
+                .into_sql::<diesel::sql_types::Int4>();
+            let db_artifact_hash = ArtifactHash::from(update.artifact_hash)
+                .into_sql::<diesel::sql_types::Text>();
+            let db_artifact_version =
+                DbArtifactVersion::from(update.artifact_version.clone())
+                    .into_sql::<diesel::sql_types::Text>();
+            let db_expected_active_phase_1_slot =
+                HwM2Slot::from(*expected_active_phase_1_slot)
+                    .into_sql::<HwM2SlotEnum>();
+            let db_expected_boot_disk =
+                HwM2Slot::from(*expected_boot_disk).into_sql::<HwM2SlotEnum>();
+            let db_expected_active_phase_1_hash =
+                ArtifactHash(*expected_active_phase_1_hash)
+                    .into_sql::<diesel::sql_types::Text>();
+            let db_expected_active_phase_2_hash =
+                ArtifactHash(*expected_active_phase_2_hash)
+                    .into_sql::<diesel::sql_types::Text>();
+            let db_expected_inactive_phase_1_hash =
+                ArtifactHash(*expected_inactive_phase_1_hash)
+                    .into_sql::<diesel::sql_types::Text>();
+            let db_expected_inactive_phase_2_hash =
+                ArtifactHash(*expected_inactive_phase_2_hash)
+                    .into_sql::<diesel::sql_types::Text>();
+            let db_sled_agent_ip = Ipv6Addr::from(sled_agent_address.ip())
+                .into_sql::<diesel::sql_types::Inet>();
+            let db_sled_agent_port =
+                SqlU16(sled_agent_address.port()).into_sql::<sql_types::Int4>();
+
+            use nexus_db_schema::schema::hw_baseboard_id::dsl as baseboard_dsl;
+            // Skip formatting to prevent rustfmt bailing out.
+            #[rustfmt::skip]
+            use nexus_db_schema::schema::bp_pending_mgs_update_host_phase_1::dsl
+                as update_dsl;
+            let selection = nexus_db_schema::schema::hw_baseboard_id::table
+                .select((
+                    db_blueprint_id,
+                    baseboard_dsl::id,
+                    db_sp_type,
+                    db_slot_id,
+                    db_artifact_hash,
+                    db_artifact_version,
+                    db_expected_active_phase_1_slot,
+                    db_expected_boot_disk,
+                    db_expected_active_phase_1_hash,
+                    db_expected_active_phase_2_hash,
+                    db_expected_inactive_phase_1_hash,
+                    db_expected_inactive_phase_2_hash,
+                    db_sled_agent_ip,
+                    db_sled_agent_port,
+                ))
+                .filter(
+                    baseboard_dsl::part_number
+                        .eq(update.baseboard_id.part_number.clone()),
+                )
+                .filter(
+                    baseboard_dsl::serial_number
+                        .eq(update.baseboard_id.serial_number.clone()),
+                );
+            let count = diesel::insert_into(
+                update_dsl::bp_pending_mgs_update_host_phase_1,
+            )
+            .values(selection)
+            .into_columns((
+                update_dsl::blueprint_id,
+                update_dsl::hw_baseboard_id,
+                update_dsl::sp_type,
+                update_dsl::sp_slot,
+                update_dsl::artifact_sha256,
+                update_dsl::artifact_version,
+                update_dsl::expected_active_phase_1_slot,
+                update_dsl::expected_boot_disk,
+                update_dsl::expected_active_phase_1_hash,
+                update_dsl::expected_active_phase_2_hash,
+                update_dsl::expected_inactive_phase_1_hash,
+                update_dsl::expected_inactive_phase_2_hash,
+                update_dsl::sled_agent_ip,
+                update_dsl::sled_agent_port,
+            ))
+            .execute_async(conn)
+            .await?;
+            if count != 1 {
+                // As with `PendingMgsUpdateDetails::Sp`, this should be
+                // impossible in practice.
+                error!(
+                    log,
+                    "blueprint insertion: unexpectedly tried to \
+                     insert wrong number of rows into \
+                     bp_pending_mgs_update_host_phase_1 (aborting transaction)";
+                    "count" => count,
+                    &update.baseboard_id,
+                );
+                return Err(InsertTxnError::BadInsertCount {
+                    table_name: "bp_pending_mgs_update_host_phase_1",
+                    count,
+                    baseboard_id: update.baseboard_id.clone(),
+                });
+            }
+
+            // This statement is just here to force a compilation error if the
+            // set of columns in `bp_pending_mgs_update_host_phase_1` changes
+            // because that will affect the correctness of the above statement.
+            //
+            // If you're here because of a compile error, you might be changing
+            // the `bp_pending_mgs_update_host_phase_1` table. Update the
+            // statement below and be sure to update the code above, too!
+            let (
+                _blueprint_id,
+                _hw_baseboard_id,
+                _sp_type,
+                _sp_slot,
+                _artifact_sha256,
+                _artifact_version,
+                _expected_active_phase_1_slot,
+                _expected_boot_disk,
+                _expected_active_phase_1_hash,
+                _expected_active_phase_2_hash,
+                _expected_inactive_phase_1_hash,
+                _expected_inactive_phase_2_hash,
+                _sled_agent_ip,
+                _sled_agent_port,
+            ) = update_dsl::bp_pending_mgs_update_host_phase_1::all_columns();
+        }
+    }
+    Ok(())
+}
+
+// Helper to process BpPendingMgsUpdateComponent rows
+fn process_update_row<T>(
+    row: T,
+    baseboards_by_id: &BTreeMap<Uuid, Arc<BaseboardId>>,
+    pending_mgs_updates: &mut PendingMgsUpdates,
+    blueprint_id: &TypedUuid<BlueprintKind>,
+) -> Result<(), Error>
+where
+    T: BpPendingMgsUpdateComponent,
+{
+    let Some(baseboard) = baseboards_by_id.get(row.hw_baseboard_id()) else {
+        // This should be impossible.
+        return Err(Error::internal_error(&format!(
+            "loading blueprint {}: missing baseboard that we should \
+             have fetched: {}",
+            blueprint_id,
+            row.hw_baseboard_id()
+        )));
+    };
+
+    let update = row.into_generic(baseboard.clone());
+    if let Some(previous) = pending_mgs_updates.insert(update) {
+        // This should be impossible.
+        return Err(Error::internal_error(&format!(
+            "blueprint {}: found multiple pending updates for \
+             baseboard {:?}",
+            blueprint_id, previous.baseboard_id
+        )));
+    }
+    Ok(())
 }
 
 // Helper to create an `authz::Blueprint` for a specific blueprint ID
@@ -1518,6 +3302,39 @@ impl From<InsertTargetError> for Error {
     }
 }
 
+// Uncastable sentinel used to detect we attempt to make a blueprint the target
+// when it does not exist in the blueprint table.
+const NO_SUCH_BLUEPRINT_SENTINEL: &str = "no-such-blueprint";
+
+// Uncastable sentinel used to detect we attempt to make a blueprint the target
+// when its parent_blueprint_id is not the current target.
+const PARENT_NOT_TARGET_SENTINEL: &str = "parent-not-target";
+
+// Error messages generated from the above sentinel values.
+const NO_SUCH_BLUEPRINT_ERROR_MESSAGE: &str = "could not parse \"no-such-blueprint\" as type uuid: \
+     uuid: incorrect UUID length: no-such-blueprint";
+const PARENT_NOT_TARGET_ERROR_MESSAGE: &str = "could not parse \"parent-not-target\" as type uuid: \
+     uuid: incorrect UUID length: parent-not-target";
+
+fn decode_target_insert_error(
+    target_id: BlueprintUuid,
+    err: DieselError,
+) -> InsertTargetError {
+    match err {
+        DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
+            if info.message() == NO_SUCH_BLUEPRINT_ERROR_MESSAGE =>
+        {
+            InsertTargetError::NoSuchBlueprint(target_id)
+        }
+        DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
+            if info.message() == PARENT_NOT_TARGET_ERROR_MESSAGE =>
+        {
+            InsertTargetError::ParentNotTarget(target_id)
+        }
+        other => InsertTargetError::Other(other),
+    }
+}
+
 /// Query to insert a new current target blueprint.
 ///
 /// The `bp_target` table's primary key is the `version` field, and we enforce
@@ -1535,359 +3352,199 @@ impl From<InsertTargetError> for Error {
 /// direct child of the previous current target. Enforcing the above has some
 /// subtleties (particularly around handling the "first blueprint with no
 /// parent" case). These are expanded on below through inline comments on the
-/// query we generate:
-///
-/// ```sql
-/// WITH
-///   -- Subquery to fetch the current target (i.e., the row with the max
-///   -- veresion in `bp_target`).
-///   current_target AS (
-///     SELECT
-///       "version" AS version,
-///       "blueprint_id" AS blueprint_id
-///     FROM "bp_target"
-///     ORDER BY "version" DESC
-///     LIMIT 1
-///   ),
-///
-///   -- Error checking subquery: This uses similar tricks as elsewhere in
-///   -- this crate to `CAST(... AS UUID)` with non-UUID values that result
-///   -- in runtime errors in specific cases, allowing us to give accurate
-///   -- error messages.
-///   --
-///   -- These checks are not required for correct behavior by the insert
-///   -- below. If we removed them, the insert would insert 0 rows if
-///   -- these checks would have failed. But they make it easier to report
-///   -- specific problems to our caller.
-///   --
-///   -- The specific cases we check here are noted below.
-///   check_validity AS MATERIALIZED (
-///     SELECT CAST(IF(
-///       -- Return `no-such-blueprint` if the ID we're being told to
-///       -- set as the target doesn't exist in the blueprint table.
-///       (SELECT "id" FROM "blueprint" WHERE "id" = <new_target_id>) IS NULL,
-///       'no-such-blueprint',
-///       IF(
-///         -- Check for whether our new target's parent matches our current
-///         -- target. There are two cases here: The first is the common case
-///         -- (i.e., the new target has a parent: does it match the current
-///         -- target ID?). The second is the bootstrapping check: if we're
-///         -- trying to insert a new target that does not have a parent,
-///         -- we should not have a current target at all.
-///         --
-///         -- If either of these cases fails, we return `parent-not-target`.
-///         (
-///            SELECT "parent_blueprint_id" FROM "blueprint", current_target
-///            WHERE
-///              "id" = <new_target_id>
-///              AND current_target.blueprint_id = "parent_blueprint_id"
-///         ) IS NOT NULL
-///         OR
-///         (
-///            SELECT 1 FROM "blueprint"
-///            WHERE
-///              "id" = <new_target_id>
-///              AND "parent_blueprint_id" IS NULL
-///              AND NOT EXISTS (SELECT version FROM current_target)
-///         ) = 1,
-///         -- Sometime between v22.1.9 and v22.2.19, Cockroach's type checker
-///         -- became too smart for our `CAST(... as UUID)` error checking
-///         -- gadget: it can infer that `<new_target_id>` must be a UUID, so
-///         -- then tries to parse 'parent-not-target' and 'no-such-blueprint'
-///         -- as UUIDs _during typechecking_, which causes the query to always
-///         -- fail. We can defeat this by casting the UUID to text here, which
-///         -- will allow the 'parent-not-target' and 'no-such-blueprint'
-///         -- sentinels to survive type checking, making it to query execution
-///         -- where they will only be cast to UUIDs at runtime in the failure
-///         -- cases they're supposed to catch.
-///         CAST(<new_target_id> AS text),
-///         'parent-not-target'
-///       )
-///     ) AS UUID)
-///   ),
-///
-///   -- Determine the new version number to use: either 1 if this is the
-///   -- first blueprint being made the current target, or 1 higher than
-///   -- the previous target's version.
-///   --
-///   -- The final clauses of each of these WHERE clauses repeat the
-///   -- checks performed above in `check_validity`, and will cause this
-///   -- subquery to return no rows if we should not allow the new
-///   -- target to be set.
-///   new_target AS (
-///     SELECT 1 AS new_version FROM "blueprint"
-///       WHERE
-///         "id" = <new_target_id>
-///         AND "parent_blueprint_id" IS NULL
-///         AND NOT EXISTS (SELECT version FROM current_target)
-///     UNION
-///     SELECT current_target.version + 1 FROM current_target, "blueprint"
-///       WHERE
-///         "id" = <new_target_id>
-///         AND "parent_blueprint_id" IS NOT NULL
-///         AND "parent_blueprint_id" = current_target.blueprint_id
-///   )
-///
-///   -- Perform the actual insertion.
-///   INSERT INTO "bp_target"(
-///     "version","blueprint_id","enabled","time_made_target"
-///   )
-///   SELECT
-///     new_target.new_version,
-///     <new_target_id>,
-///     <new_target_enabled>,
-///     <new_target_time_made_target>
-///     FROM new_target
-/// ```
-#[derive(Debug, Clone, Copy)]
-struct InsertTargetQuery {
+/// query we generate. See `tests/output/insert_target_blueprint_query.sql`
+/// for the full generated SQL.
+fn insert_target_query(
     target_id: BlueprintUuid,
     enabled: bool,
     time_made_target: DateTime<Utc>,
-}
+) -> TypedSqlQuery<()> {
+    let mut builder = QueryBuilder::new();
+    let target_id = *target_id.as_untyped_uuid();
 
-// Uncastable sentinel used to detect we attempt to make a blueprint the target
-// when it does not exist in the blueprint table.
-const NO_SUCH_BLUEPRINT_SENTINEL: &str = "no-such-blueprint";
+    // `current_target`: fetch the current target (row with max version
+    // in bp_target).
+    builder.sql(
+        "WITH \
+        current_target AS ( \
+          SELECT \
+            version, \
+            blueprint_id \
+          FROM bp_target \
+          ORDER BY version DESC \
+          LIMIT 1 \
+        ), ",
+    );
 
-// Uncastable sentinel used to detect we attempt to make a blueprint the target
-// when its parent_blueprint_id is not the current target.
-const PARENT_NOT_TARGET_SENTINEL: &str = "parent-not-target";
-
-// Error messages generated from the above sentinel values.
-const NO_SUCH_BLUEPRINT_ERROR_MESSAGE: &str = "could not parse \"no-such-blueprint\" as type uuid: \
-     uuid: incorrect UUID length: no-such-blueprint";
-const PARENT_NOT_TARGET_ERROR_MESSAGE: &str = "could not parse \"parent-not-target\" as type uuid: \
-     uuid: incorrect UUID length: parent-not-target";
-
-impl InsertTargetQuery {
-    fn decode_error(&self, err: DieselError) -> InsertTargetError {
-        match err {
-            DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
-                if info.message() == NO_SUCH_BLUEPRINT_ERROR_MESSAGE =>
-            {
-                InsertTargetError::NoSuchBlueprint(self.target_id)
-            }
-            DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
-                if info.message() == PARENT_NOT_TARGET_ERROR_MESSAGE =>
-            {
-                InsertTargetError::ParentNotTarget(self.target_id)
-            }
-            other => InsertTargetError::Other(other),
-        }
-    }
-}
-
-impl QueryId for InsertTargetQuery {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
-}
-
-impl QueryFragment<Pg> for InsertTargetQuery {
-    fn walk_ast<'a>(
-        &'a self,
-        mut out: AstPass<'_, 'a, Pg>,
-    ) -> diesel::QueryResult<()> {
-        use nexus_db_schema::schema::blueprint::dsl as bp_dsl;
-        use nexus_db_schema::schema::bp_target::dsl;
-
-        type FromClause<T> =
-            diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
-        type BpTargetFromClause =
-            FromClause<nexus_db_schema::schema::bp_target::table>;
-        type BlueprintFromClause =
-            FromClause<nexus_db_schema::schema::blueprint::table>;
-        const BP_TARGET_FROM_CLAUSE: BpTargetFromClause =
-            BpTargetFromClause::new();
-        const BLUEPRINT_FROM_CLAUSE: BlueprintFromClause =
-            BlueprintFromClause::new();
-
-        out.push_sql("WITH ");
-
-        out.push_sql("current_target AS (SELECT ");
-        out.push_identifier(dsl::version::NAME)?;
-        out.push_sql(" AS version,");
-        out.push_identifier(dsl::blueprint_id::NAME)?;
-        out.push_sql(" AS blueprint_id FROM ");
-        BP_TARGET_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" ORDER BY ");
-        out.push_identifier(dsl::version::NAME)?;
-        out.push_sql(" DESC LIMIT 1),");
-
-        out.push_sql(
+    // `check_validity`: error-checking CTE. Uses the CAST(... AS UUID)
+    // trick with non-UUID sentinel values to produce runtime errors for
+    // specific failure cases. These checks aren't required for correct
+    // behavior by the insert below — if we removed them, the insert would
+    // simply insert 0 rows — but they make it easier to report specific
+    // problems to our caller.
+    //
+    // Cases checked:
+    //   - 'no-such-blueprint': the blueprint ID we're being told to set
+    //     as the target doesn't exist in the blueprint table.
+    //   - 'parent-not-target': checks whether the new target's parent
+    //     matches the current target. Two sub-cases: (1) common case —
+    //     the new target has a parent; does it match the current target
+    //     ID? (2) bootstrap — the new target has no parent; there must
+    //     be no current target at all. If either check fails, we return
+    //     'parent-not-target'.
+    builder
+        .sql(
             "check_validity AS MATERIALIZED ( \
-               SELECT \
-                 CAST( \
-                   IF( \
-                     (SELECT ",
-        );
-        out.push_identifier(bp_dsl::id::NAME)?;
-        out.push_sql(" FROM ");
-        BLUEPRINT_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(bp_dsl::id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            self.target_id.as_untyped_uuid(),
-        )?;
-        out.push_sql(") IS NULL, ");
-        out.push_bind_param::<sql_types::Text, &'static str>(
-            &NO_SUCH_BLUEPRINT_SENTINEL,
-        )?;
-        out.push_sql(
-            ", \
-                     IF( \
-                       (SELECT ",
-        );
-        out.push_identifier(bp_dsl::parent_blueprint_id::NAME)?;
-        out.push_sql(" FROM ");
-        BLUEPRINT_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(", current_target WHERE ");
-        out.push_identifier(bp_dsl::id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            self.target_id.as_untyped_uuid(),
-        )?;
-        out.push_sql(" AND current_target.blueprint_id = ");
-        out.push_identifier(bp_dsl::parent_blueprint_id::NAME)?;
-        out.push_sql(
-            "          ) IS NOT NULL \
-                       OR \
-                       (SELECT 1 FROM ",
-        );
-        BLUEPRINT_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(bp_dsl::id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            self.target_id.as_untyped_uuid(),
-        )?;
-        out.push_sql(" AND ");
-        out.push_identifier(bp_dsl::parent_blueprint_id::NAME)?;
-        out.push_sql(
-            "  IS NULL \
-                        AND NOT EXISTS ( \
-                          SELECT version FROM current_target) \
-                        ) = 1, ",
-        );
-        out.push_sql("  CAST(");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            self.target_id.as_untyped_uuid(),
-        )?;
-        out.push_sql("  AS text), ");
-        out.push_bind_param::<sql_types::Text, &'static str>(
-            &PARENT_NOT_TARGET_SENTINEL,
-        )?;
-        out.push_sql(
-            "   ) \
-              ) \
-            AS UUID) \
-          ), ",
+          SELECT \
+            CAST( \
+              IF( \
+                (SELECT id FROM blueprint WHERE id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(target_id)
+        .sql(") IS NULL, '")
+        .sql(NO_SUCH_BLUEPRINT_SENTINEL)
+        .sql(
+            "', \
+                IF( \
+                  (SELECT parent_blueprint_id FROM blueprint, current_target \
+                   WHERE id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(target_id)
+        .sql(
+            " \
+                   AND current_target.blueprint_id = parent_blueprint_id \
+                  ) IS NOT NULL \
+                  OR \
+                  (SELECT 1 FROM blueprint \
+                   WHERE id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(target_id)
+        .sql(
+            " \
+                   AND parent_blueprint_id IS NULL \
+                   AND NOT EXISTS (SELECT version FROM current_target) \
+                  ) = 1, ",
         );
 
-        out.push_sql("new_target AS (SELECT 1 AS new_version FROM ");
-        BLUEPRINT_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(bp_dsl::id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            self.target_id.as_untyped_uuid(),
-        )?;
-        out.push_sql(" AND ");
-        out.push_identifier(bp_dsl::parent_blueprint_id::NAME)?;
-        out.push_sql(
-            " IS NULL \
-            AND NOT EXISTS \
-            (SELECT version FROM current_target) \
-             UNION \
-            SELECT current_target.version + 1 FROM \
-              current_target, ",
+    // Workaround: sometime between CRDB v22.1.9 and v22.2.19, the type
+    // checker became too smart for the CAST(... AS UUID) error-checking
+    // gadget — it infers that the target_id must be a UUID and tries to
+    // parse the sentinel strings as UUIDs during type checking, causing
+    // the query to always fail. Casting the UUID to text here defeats
+    // this inference, allowing the sentinels to survive type checking and
+    // only be cast to UUIDs at runtime in the failure cases.
+    builder
+        .sql("CAST(")
+        .param()
+        .bind::<sql_types::Uuid, _>(target_id)
+        .sql(" AS text), '")
+        .sql(PARENT_NOT_TARGET_SENTINEL)
+        .sql(
+            "' \
+                ) \
+              ) AS UUID \
+            ) \
+        ), ",
         );
-        BLUEPRINT_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(bp_dsl::id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            self.target_id.as_untyped_uuid(),
-        )?;
-        out.push_sql(" AND ");
-        out.push_identifier(bp_dsl::parent_blueprint_id::NAME)?;
-        out.push_sql(" IS NOT NULL AND ");
-        out.push_identifier(bp_dsl::parent_blueprint_id::NAME)?;
-        out.push_sql(" = current_target.blueprint_id) ");
 
-        out.push_sql("INSERT INTO ");
-        BP_TARGET_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql("(");
-        out.push_identifier(dsl::version::NAME)?;
-        out.push_sql(",");
-        out.push_identifier(dsl::blueprint_id::NAME)?;
-        out.push_sql(",");
-        out.push_identifier(dsl::enabled::NAME)?;
-        out.push_sql(",");
-        out.push_identifier(dsl::time_made_target::NAME)?;
-        out.push_sql(") SELECT new_target.new_version, ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            self.target_id.as_untyped_uuid(),
-        )?;
-        out.push_sql(",");
-        out.push_bind_param::<sql_types::Bool, bool>(&self.enabled)?;
-        out.push_sql(",");
-        out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
-            &self.time_made_target,
-        )?;
-        out.push_sql(" FROM new_target");
+    // `new_target`: determine the new version number to use — either 1
+    // if this is the first blueprint being made the current target, or
+    // 1 higher than the previous target's version. The final clauses of
+    // each WHERE repeat the checks from `check_validity`, and will cause
+    // this subquery to return no rows if the new target should not be set.
+    builder.sql(
+        "new_target AS ( \
+          SELECT 1 AS new_version FROM blueprint \
+          WHERE id = ",
+    )
+    .param()
+    .bind::<sql_types::Uuid, _>(target_id)
+    .sql(
+        " \
+          AND parent_blueprint_id IS NULL \
+          AND NOT EXISTS (SELECT version FROM current_target) \
+          UNION \
+          SELECT current_target.version + 1 \
+          FROM current_target, blueprint \
+          WHERE id = ",
+    )
+    .param()
+    .bind::<sql_types::Uuid, _>(target_id)
+    .sql(
+        " \
+          AND parent_blueprint_id IS NOT NULL \
+          AND parent_blueprint_id = current_target.blueprint_id \
+        ) \
+        INSERT INTO bp_target(version, blueprint_id, enabled, time_made_target) \
+        SELECT new_target.new_version, ",
+    )
+    .param()
+    .bind::<sql_types::Uuid, _>(target_id)
+    .sql(", ")
+    .param()
+    .bind::<sql_types::Bool, _>(enabled)
+    .sql(", ")
+    .param()
+    .bind::<sql_types::Timestamptz, _>(time_made_target)
+    .sql(" FROM new_target");
 
-        Ok(())
-    }
+    builder.query()
 }
-
-impl RunQueryDsl<DbConnection> for InsertTargetQuery {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use omicron_generation_kinds::NexusGeneration;
 
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::create_service_ip_pool;
     use crate::db::raw_query_builder::QueryBuilder;
-    use nexus_inventory::CollectionBuilder;
+    use assert_matches::assert_matches;
+    use gateway_types::rot::RotSlot;
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::Ensure;
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_reconfigurator_planning::planner::Planner;
+    use nexus_reconfigurator_planning::planner::PlannerRng;
+    use nexus_types::deployment::BlueprintArtifactVersion;
+    use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
+    use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
+    use nexus_types::deployment::BlueprintSledUpdateDisposition;
+    use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
-    use nexus_types::deployment::BlueprintZoneImageVersion;
     use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::deployment::ExpectedActiveRotSlot;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
+    use nexus_types::deployment::OmicronZoneExternalFloatingIps;
+    use nexus_types::deployment::PendingMgsUpdate;
     use nexus_types::deployment::PlanningInput;
-    use nexus_types::deployment::PlanningInputBuilder;
+    use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
     use nexus_types::deployment::SledDetails;
     use nexus_types::deployment::SledDisk;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::SledResources;
     use nexus_types::deployment::blueprint_zone_type;
-    use nexus_types::external_api::views::PhysicalDiskPolicy;
-    use nexus_types::external_api::views::PhysicalDiskState;
-    use nexus_types::external_api::views::SledPolicy;
-    use nexus_types::external_api::views::SledState;
+    use nexus_types::external_api::physical_disk::{
+        PhysicalDiskPolicy, PhysicalDiskState,
+    };
+    use nexus_types::external_api::sled::{SledPolicy, SledState};
     use nexus_types::inventory::Collection;
+    use nexus_types::tuf_repo::TufRepoDescription;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
-    use omicron_common::api::external::MacAddr;
-    use omicron_common::api::external::Name;
-    use omicron_common::api::external::TufArtifactMeta;
-    use omicron_common::api::external::TufRepoDescription;
-    use omicron_common::api::external::TufRepoMeta;
     use omicron_common::api::external::Vni;
-    use omicron_common::api::internal::shared::NetworkInterface;
-    use omicron_common::api::internal::shared::NetworkInterfaceKind;
-    use omicron_common::disk::DiskIdentity;
-    use omicron_common::update::ArtifactId;
+    use omicron_common::api::internal::shared::PrivateIpConfig;
+    use omicron_common::api::internal::shared::PrivateIpv4Config;
+    use omicron_common::api::internal::shared::PrivateIpv6Config;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::CondCheckError;
@@ -1897,27 +3554,29 @@ mod tests {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use oxnet::IpNet;
     use pretty_assertions::assert_eq;
     use rand::Rng;
-    use rand::thread_rng;
-    use slog::Logger;
+    use sled_agent_types::disk::DiskIdentity;
+    use sled_agent_types::disk::M2Slot;
+    use sled_agent_types::inventory::NetworkInterface;
+    use sled_agent_types::inventory::NetworkInterfaceKind;
+    use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
     use std::mem;
-    use std::net::IpAddr;
-    use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
-    use std::net::SocketAddrV6;
-    use std::str::FromStr;
     use std::sync::Arc;
-    use std::sync::LazyLock;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
+    use tufaceous_artifact::Artifact;
     use tufaceous_artifact::ArtifactHash;
+    use tufaceous_artifact::ArtifactSet;
     use tufaceous_artifact::ArtifactVersion;
-
-    static EMPTY_PLANNING_INPUT: LazyLock<PlanningInput> =
-        LazyLock::new(|| PlanningInputBuilder::empty_input());
+    use tufaceous_artifact::KnownArtifactTags;
+    use tufaceous_artifact::OsPhase2Tags;
+    use tufaceous_artifact::OsVariant;
+    use tufaceous_artifact::ZoneTags;
+    use uuid::Uuid;
 
     #[derive(Default)]
     pub struct NetworkResourceControlFlow {
@@ -1925,46 +3584,20 @@ mod tests {
         pub should_write_data: Option<Arc<AtomicBool>>,
     }
 
-    // This is a not-super-future-maintainer-friendly helper to check that all
-    // the subtables related to blueprints have been pruned of a specific
-    // blueprint ID. If additional blueprint tables are added in the future,
-    // this function will silently ignore them unless they're manually added.
+    // Check that all the subtables related to blueprints have been pruned of a specific
+    // blueprint ID. Uses the shared BlueprintTableCounts struct.
     async fn ensure_blueprint_fully_deleted(
         datastore: &DataStore,
         blueprint_id: BlueprintUuid,
     ) {
-        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let counts = BlueprintTableCounts::new(datastore, blueprint_id).await;
 
-        macro_rules! query_count {
-            ($table:ident, $blueprint_id_col:ident) => {{
-                use nexus_db_schema::schema::$table::dsl;
-                let result = dsl::$table
-                    .filter(
-                        dsl::$blueprint_id_col
-                            .eq(to_db_typed_uuid(blueprint_id)),
-                    )
-                    .count()
-                    .get_result_async(&*conn)
-                    .await;
-                (stringify!($table), result)
-            }};
-        }
-
-        for (table_name, result) in [
-            query_count!(blueprint, id),
-            query_count!(bp_sled_metadata, blueprint_id),
-            query_count!(bp_omicron_dataset, blueprint_id),
-            query_count!(bp_omicron_physical_disk, blueprint_id),
-            query_count!(bp_omicron_zone, blueprint_id),
-            query_count!(bp_omicron_zone_nic, blueprint_id),
-        ] {
-            let count: i64 = result.unwrap();
-            assert_eq!(
-                count, 0,
-                "nonzero row count for blueprint \
-                 {blueprint_id} in table {table_name}"
-            );
-        }
+        // All tables should be empty (no exceptions for deleted blueprints)
+        assert!(
+            counts.all_empty(),
+            "Blueprint {blueprint_id} not fully deleted. Non-empty tables: {:?}",
+            counts.non_empty_tables()
+        );
     }
 
     // Create a fake set of `SledDetails`, either with a subnet matching
@@ -1987,12 +3620,16 @@ mod tests {
                 )
             })
             .collect();
-        let ip = ip.unwrap_or_else(|| thread_rng().gen::<u128>().into());
+        let ip = ip.unwrap_or_else(|| rand::rng().random::<u128>().into());
         let resources = SledResources { zpools, subnet: Ipv6Subnet::new(ip) };
         SledDetails {
             policy: SledPolicy::provisionable(),
             state: SledState::Active,
             resources,
+            baseboard_id: BaseboardId {
+                part_number: String::from("unused"),
+                serial_number: String::from("unused"),
+            },
         }
     }
 
@@ -2043,10 +3680,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create an empty blueprint from it
-        let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
-            std::iter::empty(),
-            "test",
-        );
+        let blueprint1 = BlueprintBuilder::build_empty("test");
         let authz_blueprint = authz_blueprint_from_id(blueprint1.id);
 
         // Trying to read it from the database should fail with the relevant
@@ -2094,6 +3728,229 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_blueprint_zone_multiple_external_ips_round_trip() {
+        const TEST_NAME: &str =
+            "test_blueprint_zone_multiple_external_ips_round_trip";
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (_collection, _planning_input, mut blueprint) =
+            representative(&logctx.log, TEST_NAME);
+        let authz_blueprint = authz_blueprint_from_id(blueprint.id);
+
+        // Give a Nexus zone a second external IP by hand.
+        let second_ip = "192.0.2.222".parse::<std::net::IpAddr>().unwrap();
+        let second_id = ExternalIpUuid::new_v4();
+        let mut expected_ips = BTreeSet::new();
+        let mut nexus_zone_id = None;
+        'outer: for sled in blueprint.sleds.values_mut() {
+            for mut zone in sled.zones.iter_mut() {
+                if let BlueprintZoneType::Nexus(nexus) = &mut zone.zone_type {
+                    let mut ips: Vec<_> =
+                        nexus.external_ips.iter().copied().collect();
+                    ips.push(OmicronZoneExternalFloatingIp {
+                        id: second_id,
+                        ip: second_ip,
+                    });
+                    expected_ips = BTreeSet::from_iter(ips.iter().copied());
+                    let ips = iddqd::IdOrdMap::from_iter_unique(ips)
+                        .expect("external IPs are distinct");
+                    nexus.external_ips =
+                        OmicronZoneExternalFloatingIps::new(ips)
+                            .expect("two external IPs is valid");
+                    nexus_zone_id = Some(zone.id);
+                    break 'outer;
+                }
+            }
+        }
+        let nexus_zone_id =
+            nexus_zone_id.expect("representative blueprint has a Nexus zone");
+
+        datastore
+            .blueprint_insert(&opctx, &blueprint)
+            .await
+            .expect("failed to insert blueprint");
+        let blueprint_read = datastore
+            .blueprint_read(&opctx, &authz_blueprint)
+            .await
+            .expect("blueprint with multiple external IPs reads back");
+        assert_eq!(blueprint, blueprint_read);
+
+        // Re-read the Nexus zone and check it still has both external IPs.
+        let zone = blueprint_read
+            .sleds
+            .values()
+            .flat_map(|sled| sled.zones.iter())
+            .find(|zone| zone.id == nexus_zone_id)
+            .expect("the modified Nexus zone");
+        let BlueprintZoneType::Nexus(nexus) = &zone.zone_type else {
+            panic!("expected a Nexus zone");
+        };
+        let actual_ips: BTreeSet<_> =
+            nexus.external_ips.iter().copied().collect();
+        assert_eq!(
+            actual_ips, expected_ips,
+            "all external IPs should survive the round trip",
+        );
+        assert_eq!(
+            actual_ips.len(),
+            2,
+            "expected two external IPs, got {actual_ips:?}"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_measurement_blueprint() {
+        const TEST_NAME: &str = "test_measurement_blueprint";
+        // Setup
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a cohesive representative collection/policy/blueprint
+        let (_, planning_input, blueprint1) =
+            representative(&logctx.log, TEST_NAME);
+        let authz_blueprint1 = authz_blueprint_from_id(blueprint1.id);
+
+        // Write it to the database and read it back.
+        datastore
+            .blueprint_insert(&opctx, &blueprint1)
+            .await
+            .expect("failed to insert blueprint");
+        let blueprint_read = datastore
+            .blueprint_read(&opctx, &authz_blueprint1)
+            .await
+            .expect("failed to read collection back");
+
+        for (_, s) in blueprint_read.sleds {
+            assert!(s.measurements == BlueprintMeasurements::Unknown);
+        }
+
+        const ARTIFACT_VERSION_1: ArtifactVersion =
+            ArtifactVersion::new_const("1.0.0");
+        const ARTIFACT_VERSION_2: ArtifactVersion =
+            ArtifactVersion::new_const("2.0.0");
+        const MEASUREMENT_ARTIFACT_HASH_1: ArtifactHash = ArtifactHash([3; 32]);
+        const MEASUREMENT_ARTIFACT_HASH_2: ArtifactHash = ArtifactHash([4; 32]);
+        const MEASUREMENT_ARTIFACT_HASH_3: ArtifactHash = ArtifactHash([5; 32]);
+
+        const SYSTEM_VERSION: semver::Version = semver::Version::new(0, 0, 1);
+        const SYSTEM_HASH: ArtifactHash = ArtifactHash([6; 32]);
+
+        let tuf_repo = TufRepoDescription {
+            artifacts: ArtifactSet::from([
+                Artifact {
+                    version: ARTIFACT_VERSION_1,
+                    tags: KnownArtifactTags::MeasurementCorpus
+                        .to_tags()
+                        .unwrap(),
+                    hash: MEASUREMENT_ARTIFACT_HASH_1,
+                    length: 0,
+                },
+                Artifact {
+                    version: ARTIFACT_VERSION_1,
+                    tags: KnownArtifactTags::MeasurementCorpus
+                        .to_tags()
+                        .unwrap(),
+                    hash: MEASUREMENT_ARTIFACT_HASH_2,
+                    length: 0,
+                },
+                Artifact {
+                    version: ARTIFACT_VERSION_2,
+                    tags: KnownArtifactTags::MeasurementCorpus
+                        .to_tags()
+                        .unwrap(),
+                    hash: MEASUREMENT_ARTIFACT_HASH_3,
+                    length: 0,
+                },
+            ]),
+            metadata: BTreeMap::new(),
+            system_version: SYSTEM_VERSION,
+            hash: SYSTEM_HASH,
+            file_name: String::new(),
+        };
+
+        // Add rows to the tuf_artifact table to test version lookups.
+        {
+            // Add measurement artifacts.
+            datastore
+                .tuf_repo_insert(opctx, &tuf_repo)
+                .await
+                .expect("inserted TUF repo");
+        }
+
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint1,
+            "test2",
+            PlannerRng::from_entropy(),
+        )
+        .expect("failed to create builder");
+
+        let measurements = tuf_repo
+            .artifacts
+            .get_all(&KnownArtifactTags::MeasurementCorpus)
+            .iter()
+            .map(|artifact| BlueprintSingleMeasurement {
+                version: BlueprintArtifactVersion::Available {
+                    version: artifact.version.clone(),
+                },
+                hash: artifact.hash,
+            })
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(measurements.len(), 3);
+
+        let artifacts = BlueprintArtifactMeasurements::new(measurements)
+            .expect("this is non-zero");
+
+        for (s, _) in planning_input.all_sleds(SledFilter::InService) {
+            builder
+                .sled_set_measurements(
+                    s,
+                    BlueprintMeasurements::Artifacts {
+                        artifacts: artifacts.clone(),
+                    },
+                )
+                .expect("set measurements");
+        }
+
+        let blueprint2 = builder.build(BlueprintSource::Test);
+        let authz_blueprint2 = authz_blueprint_from_id(blueprint2.id);
+        // Write it to the database and read it back.
+        datastore
+            .blueprint_insert(&opctx, &blueprint2)
+            .await
+            .expect("failed to insert blueprint");
+        let blueprint_read = datastore
+            .blueprint_read(&opctx, &authz_blueprint2)
+            .await
+            .expect("failed to read collection back");
+
+        for (_, s) in blueprint_read.sleds {
+            match s.measurements {
+                BlueprintMeasurements::InstallDataset => {
+                    panic!("Failed to pickup measurements")
+                }
+                BlueprintMeasurements::Artifacts {
+                    artifacts: found_artifacts,
+                } => {
+                    assert_eq!(artifacts, found_artifacts);
+                }
+                BlueprintMeasurements::Unknown => {
+                    panic!("We should not be unknown")
+                }
+            }
+        }
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn test_representative_blueprint() {
         const TEST_NAME: &str = "test_representative_blueprint";
         // Setup
@@ -2102,8 +3959,28 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a cohesive representative collection/policy/blueprint
-        let (collection, planning_input, blueprint1) =
+        let (collection, planning_input, mut blueprint1) =
             representative(&logctx.log, TEST_NAME);
+
+        // The planner does not currently set a non-default
+        // `update_disposition`, so flip one sled to `Evacuating` by hand to
+        // ensure we test roundtripping through SQL. We also bump the generation
+        // away from its initial value so that we exercise roundtripping a
+        // non-initial generation too.
+        {
+            let sled = blueprint1
+                .sleds
+                .values_mut()
+                .next()
+                .expect("representative blueprint has at least one sled");
+            sled.update_disposition = BlueprintSledUpdateDisposition {
+                generation: sled.update_disposition.generation.next(),
+                kind: BlueprintSledUpdateDispositionKind::Evacuating {
+                    policy: ReconfiguratorDisruptionPolicy::MigrateOrTerminate,
+                },
+            };
+        }
+
         let authz_blueprint1 = authz_blueprint_from_id(blueprint1.id);
 
         // Write it to the database and read it back.
@@ -2121,6 +3998,9 @@ mod tests {
             [blueprint1.id]
         );
 
+        // Ensure every bp_* table received at least one row for this blueprint (issue #8455).
+        ensure_blueprint_fully_populated(&datastore, blueprint1.id).await;
+
         // Check the number of blueprint elements against our collection.
         assert_eq!(
             blueprint1.sleds.len(),
@@ -2128,8 +4008,8 @@ mod tests {
         );
         assert_eq!(blueprint1.sleds.len(), collection.sled_agents.len());
         assert_eq!(
-            blueprint1.all_omicron_zones(BlueprintZoneDisposition::any).count(),
-            collection.all_omicron_zones().count()
+            blueprint1.in_service_zones().count(),
+            collection.all_ledgered_omicron_zones().count()
         );
         // All zones should be in service.
         assert_all_zones_in_service(&blueprint1);
@@ -2188,11 +4068,18 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &planning_input,
-            &collection,
             "test",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder");
+
+        // We made changes to the planning input we want to be reflected in the
+        // new blueprint; reuse the `Planner`'s method for replicating those
+        // changes.
+        Planner::update_builder_from_planning_input(
+            &mut builder,
+            &planning_input,
+        );
 
         // Ensure disks on our sled
         assert_eq!(
@@ -2218,13 +4105,22 @@ mod tests {
 
         // Add zones to our new sled.
         assert_eq!(
-            builder.sled_ensure_zone_ntp(new_sled_id).unwrap(),
+            builder
+                .sled_ensure_zone_ntp(
+                    new_sled_id,
+                    BlueprintZoneImageSource::InstallDataset
+                )
+                .unwrap(),
             Ensure::Added
         );
         for zpool_id in new_sled_zpools.keys() {
             assert_eq!(
                 builder
-                    .sled_ensure_zone_crucible(new_sled_id, *zpool_id)
+                    .sled_ensure_zone_crucible(
+                        new_sled_id,
+                        *zpool_id,
+                        BlueprintZoneImageSource::InstallDataset
+                    )
                     .unwrap(),
                 Ensure::Added
             );
@@ -2232,36 +4128,67 @@ mod tests {
 
         const ARTIFACT_VERSION_1: ArtifactVersion =
             ArtifactVersion::new_const("1.0.0");
-        const ARTIFACT_HASH_1: ArtifactHash = ArtifactHash([1; 32]);
-        const ARTIFACT_HASH_2: ArtifactHash = ArtifactHash([2; 32]);
+        const ARTIFACT_VERSION_2: ArtifactVersion =
+            ArtifactVersion::new_const("2.0.0");
+        const ARTIFACT_VERSION_3: ArtifactVersion =
+            ArtifactVersion::new_const("2.0.0");
+        const ZONE_ARTIFACT_HASH_1: ArtifactHash = ArtifactHash([1; 32]);
+        const ZONE_ARTIFACT_HASH_2: ArtifactHash = ArtifactHash([2; 32]);
+        const HOST_ARTIFACT_HASH_1: ArtifactHash = ArtifactHash([3; 32]);
+        const HOST_ARTIFACT_HASH_2: ArtifactHash = ArtifactHash([4; 32]);
+        const HOST_ARTIFACT_HASH_3: ArtifactHash = ArtifactHash([5; 32]);
 
-        // Add an artifact to the tuf_artifact table. This is used to test
-        // artifact version lookup.
+        // Add rows to the tuf_artifact table to test version lookups.
         {
             const SYSTEM_VERSION: semver::Version =
                 semver::Version::new(0, 0, 1);
             const SYSTEM_HASH: ArtifactHash = ArtifactHash([3; 32]);
 
+            // Add a zone artifact and two host phase 2 artifacts.
             datastore
-                .update_tuf_repo_insert(
+                .tuf_repo_insert(
                     opctx,
                     &TufRepoDescription {
-                        repo: TufRepoMeta {
-                            hash: SYSTEM_HASH,
-                            targets_role_version: 0,
-                            valid_until: Utc::now(),
-                            system_version: SYSTEM_VERSION,
-                            file_name: String::new(),
-                        },
-                        artifacts: vec![TufArtifactMeta {
-                            id: ArtifactId {
-                                name: String::new(),
+                        artifacts: ArtifactSet::from([
+                            Artifact {
                                 version: ARTIFACT_VERSION_1,
-                                kind: KnownArtifactKind::Zone.into(),
+                                tags: KnownArtifactTags::Zone(ZoneTags {
+                                    zone_name: String::new(),
+                                })
+                                .to_tags()
+                                .unwrap(),
+                                hash: ZONE_ARTIFACT_HASH_1,
+                                length: 0,
                             },
-                            hash: ARTIFACT_HASH_1,
-                            size: 0,
-                        }],
+                            Artifact {
+                                version: ARTIFACT_VERSION_2,
+                                tags: KnownArtifactTags::OsPhase2(
+                                    OsPhase2Tags {
+                                        os_variant: OsVariant::Host,
+                                    },
+                                )
+                                .to_tags()
+                                .unwrap(),
+                                hash: HOST_ARTIFACT_HASH_1,
+                                length: 0,
+                            },
+                            Artifact {
+                                version: ARTIFACT_VERSION_3,
+                                tags: KnownArtifactTags::OsPhase2(
+                                    OsPhase2Tags {
+                                        os_variant: OsVariant::Host,
+                                    },
+                                )
+                                .to_tags()
+                                .unwrap(),
+                                hash: HOST_ARTIFACT_HASH_2,
+                                length: 0,
+                            },
+                        ]),
+                        metadata: BTreeMap::new(),
+                        system_version: SYSTEM_VERSION,
+                        hash: SYSTEM_HASH,
+                        file_name: String::new(),
                     },
                 )
                 .await
@@ -2271,10 +4198,7 @@ mod tests {
         // Take the first two zones and set their image sources.
         {
             let zone_ids: Vec<OmicronZoneUuid> = builder
-                .current_sled_zones(
-                    new_sled_id,
-                    BlueprintZoneDisposition::is_in_service,
-                )
+                .current_in_service_sled_zones(new_sled_id)
                 .map(|zone| zone.id)
                 .take(2)
                 .collect();
@@ -2289,10 +4213,10 @@ mod tests {
                     new_sled_id,
                     zone_ids[0],
                     BlueprintZoneImageSource::Artifact {
-                        version: BlueprintZoneImageVersion::Available {
+                        version: BlueprintArtifactVersion::Available {
                             version: ARTIFACT_VERSION_1,
                         },
-                        hash: ARTIFACT_HASH_1,
+                        hash: ZONE_ARTIFACT_HASH_1,
                     },
                 )
                 .unwrap();
@@ -2301,18 +4225,99 @@ mod tests {
                     new_sled_id,
                     zone_ids[1],
                     BlueprintZoneImageSource::Artifact {
-                        version: BlueprintZoneImageVersion::Unknown,
-                        hash: ARTIFACT_HASH_2,
+                        version: BlueprintArtifactVersion::Unknown,
+                        hash: ZONE_ARTIFACT_HASH_2,
                     },
                 )
                 .unwrap();
         }
 
+        // Try a few different combinations of desired host phase 2 contents on
+        // four sleds:
+        //
+        // 1. slot_a set to a known version; slot_b left at current contents
+        // 2. slot_a left at current contents; slot_b set to a known version
+        // 3. both slots set to a known version
+        // 4. slot_a set to a known version; slot b set to an unknown version
+        {
+            let sled_ids =
+                builder.current_commissioned_sleds().collect::<Vec<_>>();
+            assert!(sled_ids.len() >= 4, "at least 4 sleds");
+
+            let host_phase_2_samples = [
+                BlueprintHostPhase2DesiredSlots {
+                    slot_a: BlueprintHostPhase2DesiredContents::Artifact {
+                        version: BlueprintArtifactVersion::Available {
+                            version: ARTIFACT_VERSION_2,
+                        },
+                        hash: HOST_ARTIFACT_HASH_1,
+                    },
+                    slot_b: BlueprintHostPhase2DesiredContents::CurrentContents,
+                },
+                BlueprintHostPhase2DesiredSlots {
+                    slot_a: BlueprintHostPhase2DesiredContents::CurrentContents,
+                    slot_b: BlueprintHostPhase2DesiredContents::Artifact {
+                        version: BlueprintArtifactVersion::Available {
+                            version: ARTIFACT_VERSION_2,
+                        },
+                        hash: HOST_ARTIFACT_HASH_1,
+                    },
+                },
+                BlueprintHostPhase2DesiredSlots {
+                    slot_a: BlueprintHostPhase2DesiredContents::Artifact {
+                        version: BlueprintArtifactVersion::Available {
+                            version: ARTIFACT_VERSION_2,
+                        },
+                        hash: HOST_ARTIFACT_HASH_1,
+                    },
+                    slot_b: BlueprintHostPhase2DesiredContents::Artifact {
+                        version: BlueprintArtifactVersion::Available {
+                            version: ARTIFACT_VERSION_3,
+                        },
+                        hash: HOST_ARTIFACT_HASH_2,
+                    },
+                },
+                BlueprintHostPhase2DesiredSlots {
+                    slot_a: BlueprintHostPhase2DesiredContents::Artifact {
+                        version: BlueprintArtifactVersion::Available {
+                            version: ARTIFACT_VERSION_2,
+                        },
+                        hash: HOST_ARTIFACT_HASH_1,
+                    },
+                    slot_b: BlueprintHostPhase2DesiredContents::Artifact {
+                        version: BlueprintArtifactVersion::Unknown,
+                        hash: HOST_ARTIFACT_HASH_3,
+                    },
+                },
+            ];
+
+            for (sled_id, host_phase_2) in
+                sled_ids.into_iter().zip(host_phase_2_samples.into_iter())
+            {
+                builder.sled_set_host_phase_2(sled_id, host_phase_2).unwrap();
+            }
+        }
+
+        // Configure an SP update.
+        let (baseboard_id, sp) =
+            collection.sps.iter().next().expect("at least one SP");
+        builder.pending_mgs_update_insert(PendingMgsUpdate {
+            baseboard_id: baseboard_id.clone(),
+            sp_type: sp.sp_type,
+            slot_id: sp.sp_slot,
+            details: PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
+                expected_active_version: "1.0.0".parse().unwrap(),
+                expected_inactive_version: ExpectedVersion::NoValidVersion,
+            }),
+            artifact_hash: ArtifactHash([72; 32]),
+            artifact_version: "2.0.0".parse().unwrap(),
+        });
+
         let num_new_ntp_zones = 1;
         let num_new_crucible_zones = new_sled_zpools.len();
         let num_new_sled_zones = num_new_ntp_zones + num_new_crucible_zones;
 
-        let blueprint2 = builder.build();
+        let blueprint2 = builder.build(BlueprintSource::Test);
         let authz_blueprint2 = authz_blueprint_from_id(blueprint2.id);
 
         let diff = blueprint2.diff_since_blueprint(&blueprint1);
@@ -2331,14 +4336,21 @@ mod tests {
         );
         assert_eq!(blueprint1.sleds.len() + 1, blueprint2.sleds.len());
         assert_eq!(
-            blueprint1.all_omicron_zones(BlueprintZoneDisposition::any).count()
-                + num_new_sled_zones,
-            blueprint2.all_omicron_zones(BlueprintZoneDisposition::any).count()
+            blueprint1.in_service_zones().count() + num_new_sled_zones,
+            blueprint2.in_service_zones().count()
         );
 
         // All zones should be in service.
         assert_all_zones_in_service(&blueprint2);
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
+
+        // This blueprint contains a PendingMgsUpdate that references an SP from
+        // `collection`.  This must already be present in the database for
+        // blueprint insertion to work.
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("failed to insert inventory collection");
 
         // Check that we can write it to the DB and read it back.
         datastore
@@ -2399,6 +4411,196 @@ mod tests {
             [blueprint2.id]
         );
 
+        // blueprint2 is more interesting in terms of containing a variety of
+        // different blueprint structures.  We want to try deleting that.  To do
+        // that, we have to create a new blueprint and make that one the target.
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint2,
+            "dummy",
+            PlannerRng::from_entropy(),
+        )
+        .expect("failed to create builder");
+
+        // Configure an RoT update
+        let (baseboard_id, sp) =
+            collection.sps.iter().next().expect("at least one SP");
+        builder.pending_mgs_update_insert(PendingMgsUpdate {
+            baseboard_id: baseboard_id.clone(),
+            sp_type: sp.sp_type,
+            slot_id: sp.sp_slot,
+            details: PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
+                expected_active_slot: ExpectedActiveRotSlot {
+                    slot: RotSlot::A,
+                    version: "1.0.0".parse().unwrap(),
+                },
+                expected_inactive_version: ExpectedVersion::NoValidVersion,
+                expected_persistent_boot_preference: RotSlot::A,
+                expected_pending_persistent_boot_preference: None,
+                expected_transient_boot_preference: None,
+            }),
+            artifact_hash: ArtifactHash([72; 32]),
+            artifact_version: "2.0.0".parse().unwrap(),
+        });
+        let blueprint3 = builder.build(BlueprintSource::Test);
+        let authz_blueprint3 = authz_blueprint_from_id(blueprint3.id);
+        datastore
+            .blueprint_insert(&opctx, &blueprint3)
+            .await
+            .expect("failed to insert blueprint");
+        assert_eq!(
+            blueprint3,
+            datastore
+                .blueprint_read(&opctx, &authz_blueprint3)
+                .await
+                .expect("failed to read collection back")
+        );
+        let bp3_target = BlueprintTarget {
+            target_id: blueprint3.id,
+            enabled: true,
+            time_made_target: now_db_precision(),
+        };
+        datastore
+            .blueprint_target_set_current(&opctx, bp3_target)
+            .await
+            .unwrap();
+        datastore.blueprint_delete(&opctx, &authz_blueprint2).await.unwrap();
+        ensure_blueprint_fully_deleted(&datastore, blueprint2.id).await;
+
+        // We now make sure we can build and insert a blueprint containing an
+        // RoT bootloader Pending MGS update
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint3,
+            "dummy",
+            PlannerRng::from_entropy(),
+        )
+        .expect("failed to create builder");
+
+        // Configure an RoT bootloader update
+        let (baseboard_id, sp) =
+            collection.sps.iter().next().expect("at least one SP");
+        builder.pending_mgs_update_insert(PendingMgsUpdate {
+            baseboard_id: baseboard_id.clone(),
+            sp_type: sp.sp_type,
+            slot_id: sp.sp_slot,
+            details: PendingMgsUpdateDetails::RotBootloader(
+                PendingMgsUpdateRotBootloaderDetails {
+                    expected_stage0_version: "1.0.0".parse().unwrap(),
+                    expected_stage0_next_version:
+                        ExpectedVersion::NoValidVersion,
+                },
+            ),
+            artifact_hash: ArtifactHash([72; 32]),
+            artifact_version: "2.0.0".parse().unwrap(),
+        });
+        let blueprint4 = builder.build(BlueprintSource::Test);
+        let authz_blueprint4 = authz_blueprint_from_id(blueprint4.id);
+        datastore
+            .blueprint_insert(&opctx, &blueprint4)
+            .await
+            .expect("failed to insert blueprint");
+        assert_eq!(
+            blueprint4,
+            datastore
+                .blueprint_read(&opctx, &authz_blueprint4)
+                .await
+                .expect("failed to read collection back")
+        );
+        let bp4_target = BlueprintTarget {
+            target_id: blueprint4.id,
+            enabled: true,
+            time_made_target: now_db_precision(),
+        };
+        datastore
+            .blueprint_target_set_current(&opctx, bp4_target)
+            .await
+            .unwrap();
+        datastore.blueprint_delete(&opctx, &authz_blueprint3).await.unwrap();
+        ensure_blueprint_fully_deleted(&datastore, blueprint3.id).await;
+
+        // We now make sure we can build and insert a blueprint containing a
+        // host phase 1 MGS update
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint4,
+            "dummy",
+            PlannerRng::from_entropy(),
+        )
+        .expect("failed to create builder");
+
+        // Configure a host phase 1 update
+        let (baseboard_id, sp) =
+            collection.sps.iter().next().expect("at least one SP");
+        builder.pending_mgs_update_insert(PendingMgsUpdate {
+            baseboard_id: baseboard_id.clone(),
+            sp_type: sp.sp_type,
+            slot_id: sp.sp_slot,
+            details: PendingMgsUpdateDetails::HostPhase1(
+                PendingMgsUpdateHostPhase1Details {
+                    expected_active_phase_1_slot: M2Slot::A,
+                    expected_boot_disk: M2Slot::B,
+                    expected_active_phase_1_hash: ArtifactHash([1; 32]),
+                    expected_active_phase_2_hash: ArtifactHash([2; 32]),
+                    expected_inactive_phase_1_hash: ArtifactHash([3; 32]),
+                    expected_inactive_phase_2_hash: ArtifactHash([4; 32]),
+                    sled_agent_address: "[::1]:12345".parse().unwrap(),
+                },
+            ),
+            artifact_hash: ArtifactHash([72; 32]),
+            artifact_version: "2.0.0".parse().unwrap(),
+        });
+        let blueprint5 = builder.build(BlueprintSource::Test);
+        let authz_blueprint5 = authz_blueprint_from_id(blueprint5.id);
+        datastore
+            .blueprint_insert(&opctx, &blueprint5)
+            .await
+            .expect("failed to insert blueprint");
+        assert_eq!(
+            blueprint5,
+            datastore
+                .blueprint_read(&opctx, &authz_blueprint5)
+                .await
+                .expect("failed to read collection back")
+        );
+        let bp5_target = BlueprintTarget {
+            target_id: blueprint5.id,
+            enabled: true,
+            time_made_target: now_db_precision(),
+        };
+        datastore
+            .blueprint_target_set_current(&opctx, bp5_target)
+            .await
+            .unwrap();
+        datastore.blueprint_delete(&opctx, &authz_blueprint4).await.unwrap();
+        ensure_blueprint_fully_deleted(&datastore, blueprint4.id).await;
+
+        // Now make a new blueprint (with no meaningful changes) to ensure we
+        // can delete the last test blueprint we generated above.
+        let blueprint6 = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint5,
+            "dummy",
+            PlannerRng::from_entropy(),
+        )
+        .expect("failed to create builder")
+        .build(BlueprintSource::Test);
+        datastore
+            .blueprint_insert(&opctx, &blueprint6)
+            .await
+            .expect("failed to insert blueprint");
+        let bp6_target = BlueprintTarget {
+            target_id: blueprint6.id,
+            enabled: true,
+            time_made_target: now_db_precision(),
+        };
+        datastore
+            .blueprint_target_set_current(&opctx, bp6_target)
+            .await
+            .unwrap();
+        datastore.blueprint_delete(&opctx, &authz_blueprint5).await.unwrap();
+        ensure_blueprint_fully_deleted(&datastore, blueprint5.id).await;
+
         // Clean up.
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2441,34 +4643,26 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("no target blueprint set"));
 
-        // Create an initial empty collection
-        let collection = CollectionBuilder::new("test").build();
-
         // Create three blueprints:
         // * `blueprint1` has no parent
         // * `blueprint2` and `blueprint3` both have `blueprint1` as parent
-        let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
-            std::iter::empty(),
-            "test1",
-        );
+        let blueprint1 = BlueprintBuilder::build_empty("test1");
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &EMPTY_PLANNING_INPUT,
-            &collection,
             "test2",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
         let blueprint3 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &EMPTY_PLANNING_INPUT,
-            &collection,
             "test3",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
         assert_eq!(blueprint1.parent_blueprint_id, None);
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
         assert_eq!(blueprint3.parent_blueprint_id, Some(blueprint1.id));
@@ -2563,12 +4757,11 @@ mod tests {
         let blueprint4 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint3,
-            &EMPTY_PLANNING_INPUT,
-            &collection,
             "test3",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
         assert_eq!(blueprint4.parent_blueprint_id, Some(blueprint3.id));
         datastore.blueprint_insert(&opctx, &blueprint4).await.unwrap();
         let bp4_target = BlueprintTarget {
@@ -2597,23 +4790,16 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Create an initial empty collection
-        let collection = CollectionBuilder::new("test").build();
-
         // Create an initial blueprint and a child.
-        let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
-            std::iter::empty(),
-            "test1",
-        );
+        let blueprint1 = BlueprintBuilder::build_empty("test1");
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &EMPTY_PLANNING_INPUT,
-            &collection,
             "test2",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
         assert_eq!(blueprint1.parent_blueprint_id, None);
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
 
@@ -2703,93 +4889,620 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    async fn create_blueprint_with_external_ip(
-        datastore: &DataStore,
+    /// Creates a `bp_target` history for testing the pruning-related queries
+    ///
+    /// Creates `nblueprints` blueprints, each one a child of the last, making
+    /// each one the target as it goes.  After making each one the target,
+    /// toggles the enabled bit `ntoggles` times.  Each toggle adds another
+    /// `bp_target` row referring to the same blueprint, which is the main way
+    /// that `bp_target` rows and blueprints fail to correspond one-to-one.
+    ///
+    /// If the system already has a target blueprint, the new blueprints chain
+    /// onto it, so a test can call this more than once.
+    ///
+    /// Returns the ids of the blueprints created, oldest first.
+    async fn create_bp_target_history(
         opctx: &OpContext,
-    ) -> Blueprint {
-        // Create an initial blueprint and a child.
-        let sled_id = SledUuid::new_v4();
-        let mut blueprint = BlueprintBuilder::build_empty_with_sleds(
-            [sled_id].into_iter(),
-            "test1",
-        );
+        datastore: &DataStore,
+        log: &Logger,
+        nblueprints: usize,
+        ntoggles: usize,
+    ) -> Vec<BlueprintUuid> {
+        let mut blueprint_ids = Vec::with_capacity(nblueprints);
+        let mut enabled = false;
+        let mut parent: Option<Blueprint> =
+            if all_bp_target_rows(opctx, datastore).await.is_empty() {
+                None
+            } else {
+                let (target, blueprint) = datastore
+                    .blueprint_target_get_current_full(opctx)
+                    .await
+                    .expect("reading current target blueprint");
+                enabled = target.enabled;
+                Some(blueprint)
+            };
 
-        // To observe realistic database behavior, we need the invocation of
-        // "blueprint_ensure_external_networking_resources" to actually write something
-        // back to the database.
-        //
-        // While this is *mostly* made-up blueprint contents, the part that matters
-        // is that it's provisioning a zone (Nexus) which does have resources
-        // to be allocated.
-        let ip_range = IpRange::try_from((
-            Ipv4Addr::new(10, 0, 0, 1),
-            Ipv4Addr::new(10, 0, 0, 10),
-        ))
-        .unwrap();
-        let (service_ip_pool, _) = datastore
-            .ip_pools_service_lookup(&opctx)
-            .await
-            .expect("lookup service ip pool");
-        datastore
-            .ip_pool_add_range(&opctx, &service_ip_pool, &ip_range)
-            .await
-            .expect("add range to service ip pool");
-        let zone_id = OmicronZoneUuid::new_v4();
-        blueprint.sleds.get_mut(&sled_id).unwrap().zones.insert(
-            BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id: zone_id,
-                filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
-                zone_type: BlueprintZoneType::Nexus(
-                    blueprint_zone_type::Nexus {
-                        internal_address: SocketAddrV6::new(
-                            Ipv6Addr::LOCALHOST,
-                            0,
-                            0,
-                            0,
-                        ),
-                        external_ip: OmicronZoneExternalFloatingIp {
-                            id: ExternalIpUuid::new_v4(),
-                            ip: "10.0.0.1".parse().unwrap(),
-                        },
-                        nic: NetworkInterface {
-                            id: Uuid::new_v4(),
-                            kind: NetworkInterfaceKind::Service {
-                                id: *zone_id.as_untyped_uuid(),
-                            },
-                            name: Name::from_str("mynic").unwrap(),
-                            ip: "fd77:e9d2:9cd9:2::8".parse().unwrap(),
-                            mac: MacAddr::random_system(),
-                            subnet: IpNet::host_net(IpAddr::V6(
-                                Ipv6Addr::LOCALHOST,
-                            )),
-                            vni: Vni::random(),
-                            primary: true,
-                            slot: 1,
-                            transit_ips: vec![],
-                        },
-                        external_tls: false,
-                        external_dns_servers: vec![],
+        for _ in 0..nblueprints {
+            let blueprint = match &parent {
+                None => BlueprintBuilder::build_empty("test-suite"),
+                Some(parent) => BlueprintBuilder::new_based_on(
+                    log,
+                    parent,
+                    "test-suite",
+                    PlannerRng::from_entropy(),
+                )
+                .expect("creating BlueprintBuilder")
+                .build(BlueprintSource::Test),
+            };
+
+            datastore
+                .blueprint_insert(opctx, &blueprint)
+                .await
+                .expect("inserting blueprint");
+            datastore
+                .blueprint_target_set_current(
+                    opctx,
+                    BlueprintTarget {
+                        target_id: blueprint.id,
+                        enabled,
+                        time_made_target: now_db_precision(),
                     },
-                ),
-                image_source: BlueprintZoneImageSource::InstallDataset,
-            },
+                )
+                .await
+                .expect("setting target blueprint");
+
+            for _ in 0..ntoggles {
+                enabled = !enabled;
+                datastore
+                    .blueprint_target_set_current_enabled(
+                        opctx,
+                        BlueprintTarget {
+                            target_id: blueprint.id,
+                            enabled,
+                            time_made_target: now_db_precision(),
+                        },
+                    )
+                    .await
+                    .expect("toggling target blueprint");
+            }
+
+            blueprint_ids.push(blueprint.id);
+            parent = Some(blueprint);
+        }
+
+        blueprint_ids
+    }
+
+    /// Returns all rows of `bp_target`, oldest first
+    async fn all_bp_target_rows(
+        opctx: &OpContext,
+        datastore: &DataStore,
+    ) -> Vec<BpTarget> {
+        let mut rv = Vec::new();
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let batch = datastore
+                .bp_target_list_page(opctx, &p.current_pagparams())
+                .await
+                .expect("listing bp_target rows");
+            paginator = p.found_batch(&batch, &|b: &BpTarget| b.version);
+            rv.extend(batch);
+        }
+        rv
+    }
+
+    /// Returns the version of the first `bp_target` row referring to
+    /// `blueprint_id`
+    fn first_version_for(
+        rows: &[BpTarget],
+        blueprint_id: BlueprintUuid,
+    ) -> u32 {
+        rows.iter()
+            .find(|r| BlueprintUuid::from(r.blueprint_id) == blueprint_id)
+            .map(|r| *r.version)
+            .unwrap_or_else(|| {
+                panic!("no bp_target row for blueprint {blueprint_id}")
+            })
+    }
+
+    /// Converts a `usize` to a `NonZeroUsize` for tests that know the value is
+    /// not zero
+    fn nonzero(n: usize) -> NonZeroUsize {
+        NonZeroUsize::new(n).expect("test used a zero value for nkeep")
+    }
+
+    /// Tests `bp_target_list_page()`, including correct pagination in both
+    /// directions
+    #[tokio::test]
+    async fn test_bp_target_list_page() {
+        let logctx = dev::test_setup_log("test_bp_target_list_page");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // An empty table produces no rows in either direction.
+        for direction in [
+            dropshot::PaginationOrder::Ascending,
+            dropshot::PaginationOrder::Descending,
+        ] {
+            let rows = datastore
+                .bp_target_list_page(
+                    opctx,
+                    &DataPageParams {
+                        marker: None,
+                        direction,
+                        limit: SQL_BATCH_SIZE,
+                    },
+                )
+                .await
+                .expect("listing bp_target rows");
+            assert!(rows.is_empty());
+        }
+
+        // With one blueprint, both directions return the one row.  Note that
+        // the first target blueprint is always version 1.
+        let blueprint_ids =
+            create_bp_target_history(opctx, datastore, &logctx.log, 1, 0).await;
+        for direction in [
+            dropshot::PaginationOrder::Ascending,
+            dropshot::PaginationOrder::Descending,
+        ] {
+            let rows = datastore
+                .bp_target_list_page(
+                    opctx,
+                    &DataPageParams {
+                        marker: None,
+                        direction,
+                        limit: SQL_BATCH_SIZE,
+                    },
+                )
+                .await
+                .expect("listing bp_target rows");
+            assert_eq!(rows.len(), 1);
+            assert_eq!(*rows[0].version, 1);
+            assert_eq!(
+                BlueprintUuid::from(rows[0].blueprint_id),
+                blueprint_ids[0]
+            );
+        }
+
+        // Add more blueprints, with toggles, so that there are more rows than
+        // blueprints.
+        let ntoggles = 2;
+        let more_ids = create_bp_target_history(
+            opctx,
+            datastore,
+            &logctx.log,
+            4,
+            ntoggles,
+        )
+        .await;
+        // The first blueprint has one row.  Each of the others has one row for
+        // being made the target plus one for each toggle.
+        let nrows = 1 + more_ids.len() * (1 + ntoggles);
+
+        // Paging all the way through in either direction visits every row
+        // exactly once, in order.
+        for direction in [
+            dropshot::PaginationOrder::Ascending,
+            dropshot::PaginationOrder::Descending,
+        ] {
+            // Use a page size that does not evenly divide the number of rows so
+            // that the last page is a partial one.
+            // unwrap(): 3 != 0
+            let batch_size = NonZeroU32::new(3).unwrap();
+            assert_ne!(nrows % usize::try_from(batch_size.get()).unwrap(), 0);
+
+            let mut versions_found = Vec::new();
+            let mut paginator = Paginator::new(batch_size, direction);
+            while let Some(p) = paginator.next() {
+                let batch = datastore
+                    .bp_target_list_page(opctx, &p.current_pagparams())
+                    .await
+                    .expect("listing bp_target rows");
+                assert!(
+                    batch.len() <= usize::try_from(batch_size.get()).unwrap()
+                );
+                paginator = p.found_batch(&batch, &|b: &BpTarget| b.version);
+                versions_found.extend(batch.into_iter().map(|b| *b.version));
+            }
+
+            let mut expected: Vec<u32> =
+                (1..=u32::try_from(nrows).unwrap()).collect();
+            if matches!(direction, dropshot::PaginationOrder::Descending) {
+                expected.reverse();
+            }
+            assert_eq!(versions_found, expected);
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Tests `bp_target_determine_pruneable()` on histories where each
+    /// `bp_target` row refers to a different blueprint
+    ///
+    /// This is the query that decides how much of the history the blueprint
+    /// pruner may delete, so the cases that matter most are the ones where it
+    /// should decide to keep everything, the boundary around `nkeep`, and a
+    /// history with a gap in the version sequence.
+    #[tokio::test]
+    async fn test_bp_target_determine_pruneable() {
+        let logctx = dev::test_setup_log("test_bp_target_determine_pruneable");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // With no rows at all, we report an internal error.  On a real system,
+        // this should only be possible before RSS has completed.
+        let error = datastore
+            .bp_target_determine_pruneable(opctx, nonzero(3))
+            .await
+            .expect_err("determining pruneable rows with an empty table");
+        assert_matches!(
+            &error,
+            Error::InternalError { internal_message }
+                if internal_message == "no bp_target rows found"
         );
 
-        blueprint
+        // With one blueprint, there's nothing to prune, whatever `nkeep` is.
+        let blueprint_ids =
+            create_bp_target_history(opctx, datastore, &logctx.log, 1, 0).await;
+        for nkeep in [1, 2, 100] {
+            let pruneable = datastore
+                .bp_target_determine_pruneable(opctx, nonzero(nkeep))
+                .await
+                .expect("determining pruneable rows");
+            assert_eq!(pruneable.keep, KeepWhat::All);
+            assert_eq!(pruneable.nfound, 1);
+            assert_eq!(pruneable.nscanned, 1);
+            assert_eq!(pruneable.target_id, blueprint_ids[0]);
+        }
+
+        // Now build up a longer history with no toggles, so that `bp_target`
+        // rows and blueprints correspond one-to-one.
+        let nblueprints = 10;
+        let mut blueprint_ids = blueprint_ids;
+        blueprint_ids.extend(
+            create_bp_target_history(
+                opctx,
+                datastore,
+                &logctx.log,
+                nblueprints - 1,
+                0,
+            )
+            .await,
+        );
+        assert_eq!(blueprint_ids.len(), nblueprints);
+        let rows = all_bp_target_rows(opctx, datastore).await;
+        assert_eq!(rows.len(), nblueprints);
+
+        // Keeping at least as many as we have means keeping everything.  The
+        // `nkeep == nblueprints` case is a boundary: we have to scan the whole
+        // table to discover that there's nothing to prune.
+        for nkeep in [nblueprints, nblueprints + 1] {
+            let pruneable = datastore
+                .bp_target_determine_pruneable(opctx, nonzero(nkeep))
+                .await
+                .expect("determining pruneable rows");
+            assert_eq!(pruneable.keep, KeepWhat::All);
+            assert_eq!(pruneable.nfound, nblueprints);
+            assert_eq!(pruneable.nscanned, nblueprints);
+            assert_eq!(pruneable.target_id, blueprint_ids[nblueprints - 1]);
+        }
+
+        // Keeping fewer than we have means pruning the oldest ones.  Check
+        // every value of `nkeep` that prunes something, including the
+        // `nblueprints - 1` boundary.
+        for nkeep in 1..nblueprints {
+            let pruneable = datastore
+                .bp_target_determine_pruneable(opctx, nonzero(nkeep))
+                .await
+                .expect("determining pruneable rows");
+            // The oldest blueprint we keep is `nkeep` from the end.
+            let oldest_kept = blueprint_ids[nblueprints - nkeep];
+            assert_eq!(
+                pruneable.keep,
+                KeepWhat::StartingFromVersion(first_version_for(
+                    &rows,
+                    oldest_kept
+                ))
+            );
+            assert_eq!(pruneable.nfound, nkeep);
+            // We scan the rows we're keeping plus one more, which is how we
+            // discover that we've found `nkeep` distinct blueprints.
+            assert_eq!(pruneable.nscanned, nkeep + 1);
+            assert_eq!(pruneable.target_id, blueprint_ids[nblueprints - 1]);
+        }
+
+        // Punch a gap in the version sequence and check that we still keep
+        // `nkeep` blueprints.  This should not happen under normal operation.
+        // But an implementation that subtracted `nkeep` from the latest
+        // version, instead of counting the rows it actually saw, would decide
+        // to keep too few here.
+        let gap_start = 3;
+        let gap_size = 4;
+        let gap_versions: Vec<u32> = rows[gap_start..gap_start + gap_size]
+            .iter()
+            .map(|r| *r.version)
+            .collect();
+        {
+            use nexus_db_schema::schema::bp_target::dsl;
+            let conn = datastore
+                .pool_connection_for_tests()
+                .await
+                .expect("getting database connection");
+            let ndeleted = diesel::delete(
+                dsl::bp_target.filter(
+                    dsl::version
+                        .eq_any(gap_versions.iter().copied().map(SqlU32::new)),
+                ),
+            )
+            .execute_async(&*conn)
+            .await
+            .expect("deleting bp_target rows");
+            assert_eq!(ndeleted, gap_size);
+        }
+
+        let mut remaining_ids = blueprint_ids;
+        remaining_ids.drain(gap_start..gap_start + gap_size);
+        let nremaining = nblueprints - gap_size;
+        let rows = all_bp_target_rows(opctx, datastore).await;
+        assert_eq!(rows.len(), nremaining);
+
+        for nkeep in 1..nremaining {
+            let pruneable = datastore
+                .bp_target_determine_pruneable(opctx, nonzero(nkeep))
+                .await
+                .expect("determining pruneable rows");
+            let oldest_kept = remaining_ids[nremaining - nkeep];
+            assert_eq!(
+                pruneable.keep,
+                KeepWhat::StartingFromVersion(first_version_for(
+                    &rows,
+                    oldest_kept
+                ))
+            );
+            assert_eq!(pruneable.nfound, nkeep);
+            assert_eq!(pruneable.nscanned, nkeep + 1);
+            assert_eq!(pruneable.target_id, remaining_ids[nremaining - 1]);
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Tests `bp_target_determine_pruneable()` when several `bp_target` rows
+    /// refer to the same blueprint, which happens when the enabled bit is
+    /// toggled
+    ///
+    /// This includes a subtle case: having found `nkeep` distinct blueprints,
+    /// we have to keep scanning backwards until we see a *different* blueprint
+    /// id.  Otherwise we'd report that the older rows for the oldest blueprint
+    /// we're keeping could be pruned, and the caller would delete that
+    /// blueprint.
+    #[tokio::test]
+    async fn test_bp_target_determine_pruneable_dups() {
+        let logctx =
+            dev::test_setup_log("test_bp_target_determine_pruneable_dups");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a history where every blueprint has several `bp_target` rows.
+        let nblueprints = 8;
+        let ntoggles = 3;
+        let blueprint_ids = create_bp_target_history(
+            opctx,
+            datastore,
+            &logctx.log,
+            nblueprints,
+            ntoggles,
+        )
+        .await;
+        let rows = all_bp_target_rows(opctx, datastore).await;
+        assert_eq!(rows.len(), nblueprints * (1 + ntoggles));
+
+        // Try this with a range of batch sizes.  The interesting ones are those
+        // where a page boundary falls inside one blueprint's run of rows, and
+        // where a whole page can be filled with rows for a single blueprint.
+        let batch_sizes = [1, 2, 3, 4, 5, SQL_BATCH_SIZE.get()];
+        for batch_size in batch_sizes {
+            // unwrap(): none of `batch_sizes` is zero
+            let batch_size = NonZeroU32::new(batch_size).unwrap();
+
+            for nkeep in 1..=nblueprints {
+                let pruneable = datastore
+                    .bp_target_determine_pruneable_batched(
+                        opctx,
+                        nonzero(nkeep),
+                        batch_size,
+                    )
+                    .await
+                    .expect("determining pruneable rows");
+                let label = format!("batch_size {batch_size}, nkeep {nkeep}");
+
+                assert_eq!(pruneable.nfound, nkeep, "{label}");
+                assert_eq!(
+                    pruneable.target_id,
+                    blueprint_ids[nblueprints - 1],
+                    "{label}"
+                );
+
+                if nkeep == nblueprints {
+                    assert_eq!(pruneable.keep, KeepWhat::All, "{label}");
+                    continue;
+                }
+
+                // This is the crux of the test: the version we keep from must
+                // be the *first* row for the oldest blueprint we're keeping,
+                // not one of its later toggle rows.
+                let oldest_kept = blueprint_ids[nblueprints - nkeep];
+                let expected = first_version_for(&rows, oldest_kept);
+                assert_eq!(
+                    pruneable.keep,
+                    KeepWhat::StartingFromVersion(expected),
+                    "{label}"
+                );
+            }
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Tests `bp_target_delete_up_to()`, including both failure cases and the
+    /// basic success case
+    #[tokio::test]
+    async fn test_bp_target_delete_up_to() {
+        let logctx = dev::test_setup_log("test_bp_target_delete_up_to");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let nblueprints = 6;
+        let blueprint_ids = create_bp_target_history(
+            opctx,
+            datastore,
+            &logctx.log,
+            nblueprints,
+            0,
+        )
+        .await;
+        let rows_before = all_bp_target_rows(opctx, datastore).await;
+        assert_eq!(rows_before.len(), nblueprints);
+        let latest_version = *rows_before[nblueprints - 1].version;
+
+        // If the determination was to keep everything, we refuse to delete
+        // anything.
+        let keep_all = BpTargetPruneable {
+            nscanned: nblueprints,
+            nfound: nblueprints,
+            keep: KeepWhat::All,
+            target_id: blueprint_ids[nblueprints - 1],
+        };
+        let error = datastore
+            .bp_target_delete_up_to(opctx, &keep_all, 1)
+            .await
+            .expect_err("deleting rows when the determination was to keep all");
+        assert_matches!(
+            &error,
+            Error::InternalError { internal_message }
+                if internal_message.contains(
+                    "cannot delete from bp_targets when determination \
+                     was to keep all rows"
+                )
+        );
+
+        // If the caller asks to delete a version that the determination said to
+        // keep, we refuse.  Try both the first version to keep and one newer
+        // than that.
+        let nkeep = 3;
+        let keep_from = *rows_before[nblueprints - nkeep].version;
+        let pruneable = BpTargetPruneable {
+            nscanned: nkeep + 1,
+            nfound: nkeep,
+            keep: KeepWhat::StartingFromVersion(keep_from),
+            target_id: blueprint_ids[nblueprints - 1],
+        };
+        for version in [keep_from, keep_from + 1, latest_version] {
+            let error = datastore
+                .bp_target_delete_up_to(opctx, &pruneable, version)
+                .await
+                .expect_err("deleting rows that were to be kept");
+            assert_matches!(
+                &error,
+                Error::InternalError { internal_message }
+                    if internal_message.contains(
+                        "when determination was to keep"
+                    )
+            );
+        }
+
+        // None of the failed attempts changed anything.
+        assert_eq!(rows_before, all_bp_target_rows(opctx, datastore).await);
+
+        // Now exercise the transaction's last-ditch check that we're not
+        // deleting the newest row.  The interface above makes this hard to do
+        // by accident, so we have to construct a bogus determination that says
+        // to keep only rows newer than the newest one there is.
+        let bogus = BpTargetPruneable {
+            nscanned: 0,
+            nfound: 0,
+            keep: KeepWhat::StartingFromVersion(latest_version + 1),
+            target_id: blueprint_ids[nblueprints - 1],
+        };
+        let error = datastore
+            .bp_target_delete_up_to(opctx, &bogus, latest_version)
+            .await
+            .expect_err("deleting the latest bp_target row");
+        assert_matches!(
+            &error,
+            Error::InternalError { internal_message }
+                if internal_message == "cannot delete latest bp_target row"
+        );
+        assert_eq!(rows_before, all_bp_target_rows(opctx, datastore).await);
+
+        // Finally, the happy path: delete everything older than `keep_from`.
+        let ndeleted = datastore
+            .bp_target_delete_up_to(opctx, &pruneable, keep_from - 1)
+            .await
+            .expect("deleting old bp_target rows");
+        assert_eq!(ndeleted, nblueprints - nkeep);
+        let rows_after = all_bp_target_rows(opctx, datastore).await;
+        assert_eq!(
+            rows_after,
+            rows_before[nblueprints - nkeep..],
+            "expected exactly the oldest {} rows to be deleted",
+            nblueprints - nkeep
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_ensure_external_networking_works_with_good_target() {
+        const TEST_NAME: &str =
+            "test_ensure_external_networking_works_with_good_target";
         // Setup
-        let logctx = dev::test_setup_log(
-            "test_ensure_external_networking_works_with_good_target",
-        );
+        let logctx = dev::test_setup_log(TEST_NAME);
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let blueprint =
-            create_blueprint_with_external_ip(&datastore, &opctx).await;
+        let (example, mut blueprint) =
+            ExampleSystemBuilder::new(&opctx.log, TEST_NAME).build();
+
+        // Insert the IP pool ranges used by our example system.
+        for pool_range in
+            example.system.external_ip_policy().clone().into_raw_ranges()
+        {
+            // Create (idempotently) the service pool of the appropriate version
+            // for each range. We only need at most two (one V4, one V6), but our
+            // example system doesn't have many ranges so this should be fine.
+            let service_pool = create_service_ip_pool(
+                &opctx,
+                datastore,
+                "oxide-service-pool-v4",
+                pool_range.version(),
+            )
+            .await;
+            datastore
+                .ip_pool_add_range(
+                    &opctx,
+                    &service_pool.authz_pool,
+                    &service_pool.db_pool,
+                    &pool_range,
+                )
+                .await
+                .expect("add range to service IP pool");
+        }
+
+        // `ExampleSystemBuilder` returns a blueprint that has an empty parent.
+        // To make `blueprint` the target, we have to either insert that parent
+        // and make it the target first, or modify `blueprint` to make it look
+        // like it's the original. The latter is shorter.
+        blueprint.parent_blueprint_id = None;
+
         datastore.blueprint_insert(&opctx, &blueprint).await.unwrap();
 
         let bp_target = BlueprintTarget {
@@ -2840,31 +5553,35 @@ mod tests {
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &example_system.input,
-            &example_system.collection,
             &format!("{test_name}-2"),
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintSource::Test);
 
         // Insert an IP pool range covering the one Nexus IP.
         let nexus_ip = blueprint1
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .find_map(|(_, zone_config)| {
-                zone_config
-                    .zone_type
-                    .external_networking()
-                    .map(|(ip, _nic)| ip.ip())
+                zone_config.zone_type.external_networking().and_then(
+                    |networking| {
+                        networking.external_ips().next().map(|ip| ip.ip())
+                    },
+                )
             })
             .expect("found external IP");
-        let (service_ip_pool, _) = datastore
-            .ip_pools_service_lookup(&opctx)
-            .await
-            .expect("lookup service ip pool");
+        let service_pool = create_service_ip_pool(
+            &opctx,
+            datastore,
+            "oxide-service-pool-v4",
+            omicron_common::api::external::IpVersion::V4,
+        )
+        .await;
         datastore
             .ip_pool_add_range(
                 &opctx,
-                &service_ip_pool,
+                &service_pool.authz_pool,
+                &service_pool.db_pool,
                 &IpRange::try_from((nexus_ip, nexus_ip))
                     .expect("valid IP range"),
             )
@@ -2937,7 +5654,7 @@ mod tests {
                 if target_check_done.load(Ordering::SeqCst) {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &Duration::from_millis(50),
@@ -3068,12 +5785,572 @@ mod tests {
 
     fn assert_all_zones_in_service(blueprint: &Blueprint) {
         let not_in_service = blueprint
-            .all_omicron_zones(|disposition| !disposition.is_in_service())
+            .expunged_zones(
+                ZoneRunningStatus::Any,
+                BlueprintExpungedZoneAccessReason::Test,
+            )
             .collect::<Vec<_>>();
         assert!(
             not_in_service.is_empty(),
             "expected all zones to be in service, \
              found these zones not in service: {not_in_service:?}"
         );
+    }
+
+    /// Counts rows in blueprint-related tables for a specific blueprint ID.
+    /// Used by both `ensure_blueprint_fully_populated` and `ensure_blueprint_fully_deleted`.
+    struct BlueprintTableCounts {
+        counts: BTreeMap<String, i64>,
+    }
+
+    impl BlueprintTableCounts {
+        /// Create a new BlueprintTableCounts by querying all blueprint tables.
+        async fn new(
+            datastore: &DataStore,
+            blueprint_id: BlueprintUuid,
+        ) -> BlueprintTableCounts {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            macro_rules! query_count {
+                ($table:ident, $blueprint_id_col:ident) => {{
+                    use nexus_db_schema::schema::$table::dsl;
+                    let result = dsl::$table
+                        .filter(
+                            dsl::$blueprint_id_col
+                                .eq(to_db_typed_uuid(blueprint_id)),
+                        )
+                        .count()
+                        .get_result_async(&*conn)
+                        .await;
+                    (stringify!($table), result)
+                }};
+            }
+
+            let mut counts = BTreeMap::new();
+            for (table_name, result) in [
+                query_count!(blueprint, id),
+                query_count!(bp_sled_metadata, blueprint_id),
+                query_count!(bp_omicron_dataset, blueprint_id),
+                query_count!(bp_omicron_physical_disk, blueprint_id),
+                query_count!(bp_omicron_zone, blueprint_id),
+                query_count!(bp_omicron_zone_nic, blueprint_id),
+                query_count!(bp_omicron_zone_external_ip, blueprint_id),
+                query_count!(bp_clickhouse_cluster_config, blueprint_id),
+                query_count!(
+                    bp_clickhouse_keeper_zone_id_to_node_id,
+                    blueprint_id
+                ),
+                query_count!(
+                    bp_clickhouse_server_zone_id_to_node_id,
+                    blueprint_id
+                ),
+                query_count!(bp_oximeter_read_policy, blueprint_id),
+                query_count!(bp_pending_mgs_update_sp, blueprint_id),
+                query_count!(bp_pending_mgs_update_rot, blueprint_id),
+                query_count!(
+                    bp_pending_mgs_update_rot_bootloader,
+                    blueprint_id
+                ),
+                query_count!(bp_pending_mgs_update_host_phase_1, blueprint_id),
+                query_count!(bp_single_measurements, blueprint_id),
+                query_count!(debug_log_blueprint_planning, blueprint_id),
+            ] {
+                let count: i64 = result.unwrap();
+                counts.insert(table_name.to_string(), count);
+            }
+
+            let table_counts = BlueprintTableCounts { counts };
+
+            // Verify no new blueprint tables were added without updating this function
+            if let Err(msg) =
+                table_counts.verify_all_tables_covered(datastore).await
+            {
+                panic!("{}", msg);
+            }
+
+            table_counts
+        }
+
+        /// Returns true if all tables are empty (0 rows).
+        fn all_empty(&self) -> bool {
+            self.counts.values().all(|&count| count == 0)
+        }
+
+        /// Returns a list of table names that are empty.
+        fn empty_tables(&self) -> Vec<String> {
+            self.counts
+                .iter()
+                .filter_map(
+                    |(table, &count)| {
+                        if count == 0 { Some(table.clone()) } else { None }
+                    },
+                )
+                .collect()
+        }
+
+        /// Returns a list of table names that are non-empty.
+        fn non_empty_tables(&self) -> Vec<String> {
+            self.counts
+                .iter()
+                .filter_map(
+                    |(table, &count)| {
+                        if count > 0 { Some(table.clone()) } else { None }
+                    },
+                )
+                .collect()
+        }
+
+        /// Get all table names that were checked.
+        fn tables_checked(&self) -> BTreeSet<&str> {
+            self.counts.keys().map(|s| s.as_str()).collect()
+        }
+
+        /// Verify no new blueprint tables were added without updating this function.
+        async fn verify_all_tables_covered(
+            &self,
+            datastore: &DataStore,
+        ) -> Result<(), String> {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            // Tables prefixed with `bp_` that are *not* specific to a single blueprint
+            // and therefore intentionally ignored.  There is only one of these right now.
+            let tables_ignored: BTreeSet<_> =
+                ["bp_target"].into_iter().collect();
+            let tables_checked = self.tables_checked();
+
+            let mut query = QueryBuilder::new();
+            query.sql(
+                "SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'bp\\_%'",
+            );
+            let tables_unchecked: Vec<String> = query
+                .query::<diesel::sql_types::Text>()
+                .load_async(&*conn)
+                .await
+                .expect("Failed to query information_schema for tables")
+                .into_iter()
+                .filter(|f: &String| {
+                    let t = f.as_str();
+                    !tables_ignored.contains(t) && !tables_checked.contains(t)
+                })
+                .collect();
+
+            if !tables_unchecked.is_empty() {
+                Err(format!(
+                    "found blueprint-related table(s) not covered by BlueprintTableCounts: {}\n\n\
+                    If you see this message, you probably added a blueprint table whose name started with `bp_*`. \
+                    Add it to the query list in BlueprintTableCounts::new() so that this function checks the table. \
+                    You may also need to update blueprint deletion/insertion code to handle rows in that table.",
+                    tables_unchecked.join(", ")
+                ))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    // Verify that every blueprint-related table contains ≥1 row for `blueprint_id`.
+    // Complements `ensure_blueprint_fully_deleted`.
+    async fn ensure_blueprint_fully_populated(
+        datastore: &DataStore,
+        blueprint_id: BlueprintUuid,
+    ) {
+        let counts = BlueprintTableCounts::new(datastore, blueprint_id).await;
+
+        // Exception tables that may be empty in the representative blueprint:
+        // - MGS update tables: only populated when blueprint includes firmware
+        //   updates
+        // - ClickHouse tables: only populated when blueprint includes
+        //   ClickHouse configuration
+        // - debug log for planner reports: only populated when the blueprint
+        //   was produced by the planner (test blueprints generally aren't)
+        let exception_tables = [
+            "bp_pending_mgs_update_sp",
+            "bp_pending_mgs_update_rot",
+            "bp_pending_mgs_update_rot_bootloader",
+            "bp_pending_mgs_update_host_phase_1",
+            "bp_clickhouse_cluster_config",
+            "bp_clickhouse_keeper_zone_id_to_node_id",
+            "bp_clickhouse_server_zone_id_to_node_id",
+            "debug_log_blueprint_planning",
+            "bp_single_measurements",
+        ];
+
+        // Check that all non-exception tables have at least one row
+        let empty_tables = counts.empty_tables();
+        let problematic_tables: Vec<_> = empty_tables
+            .into_iter()
+            .filter(|table| !exception_tables.contains(&table.as_str()))
+            .collect();
+
+        if !problematic_tables.is_empty() {
+            panic!(
+                "Expected tables to be populated for blueprint {blueprint_id}: {:?}\n\n\
+                If every blueprint should be expected to have a value in this table, then this is a bug. \
+                Otherwise, you may need to add a table to the exception list in `ensure_blueprint_fully_populated()`. \
+                If you do this, please ensure that you add a test to `test_representative_blueprint()` that creates a \
+                blueprint that _does_ populate this table and verifies it.",
+                problematic_tables
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn expectorate_insert_target_query() {
+        use crate::db::raw_query_builder::expectorate_query_contents;
+
+        let query = insert_target_query(BlueprintUuid::nil(), true, Utc::now());
+
+        expectorate_query_contents(
+            &query,
+            "tests/output/insert_target_blueprint_query.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn explain_insert_target_query() {
+        use crate::db::explain::ExplainableAsync;
+
+        let logctx = dev::test_setup_log("explain_insert_target_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let query =
+            insert_target_query(BlueprintUuid::nil(), false, Utc::now());
+
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
+        eprintln!("{explanation}");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test that concurrent read and delete operations on blueprints do not
+    // result in torn reads. With the fix for issue #9594, blueprint_read
+    // checks for the top-level blueprint record at the END of reading, so
+    // if a concurrent delete has started (which deletes the top-level record
+    // first), the read will fail with "not found" rather than returning
+    // partial data.
+    //
+    // This test spawns concurrent readers and a deleter to exercise the race
+    // condition. Readers should either get the complete original blueprint
+    // OR a "not found" error - never partial/torn data.
+    #[tokio::test]
+    async fn test_concurrent_blueprint_read_delete() {
+        const TEST_NAME: &str = "test_concurrent_blueprint_read_delete";
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create two blueprints - one to be the target (so it can't be deleted)
+        // and one to be deleted while being read.
+        let (_, _, target_blueprint) = representative(&logctx.log, TEST_NAME);
+        let authz_target = authz_blueprint_from_id(target_blueprint.id);
+
+        // Insert target blueprint and make it the current target
+        datastore
+            .blueprint_insert(&opctx, &target_blueprint)
+            .await
+            .expect("failed to insert target blueprint");
+        let target = BlueprintTarget {
+            target_id: target_blueprint.id,
+            enabled: true,
+            time_made_target: now_db_precision(),
+        };
+        datastore
+            .blueprint_target_set_current(&opctx, target)
+            .await
+            .expect("failed to set target");
+
+        // Create a second blueprint that we'll delete while reading
+        let blueprint_to_delete = {
+            let mut builder = BlueprintBuilder::new_based_on(
+                &logctx.log,
+                &target_blueprint,
+                "test blueprint to delete",
+                PlannerRng::from_entropy(),
+            )
+            .expect("failed to create builder");
+            builder.comment("blueprint that will be deleted");
+            builder.build(BlueprintSource::Test)
+        };
+        let authz_blueprint = authz_blueprint_from_id(blueprint_to_delete.id);
+
+        datastore
+            .blueprint_insert(&opctx, &blueprint_to_delete)
+            .await
+            .expect("failed to insert blueprint to delete");
+
+        // Verify we can read it back correctly
+        let read_back = datastore
+            .blueprint_read(&opctx, &authz_blueprint)
+            .await
+            .expect("failed to read blueprint");
+        assert_eq!(blueprint_to_delete, read_back);
+
+        // Track results from concurrent readers
+        let successful_reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let not_found_errors = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let other_errors = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let delete_completed = Arc::new(AtomicBool::new(false));
+
+        // Signal when at least one read has completed, so we know readers are
+        // running before we start deleting
+        let (first_read_tx, first_read_rx) =
+            tokio::sync::oneshot::channel::<()>();
+        let first_read_tx =
+            Arc::new(std::sync::Mutex::new(Some(first_read_tx)));
+
+        // Spawn reader tasks that loop until deletion completes
+        const NUM_READERS: usize = 10;
+        let mut reader_handles = Vec::new();
+
+        for _ in 0..NUM_READERS {
+            let datastore = datastore.clone();
+            let opctx = opctx.child(std::collections::BTreeMap::new());
+            let authz_blueprint = authz_blueprint.clone();
+            let blueprint_to_delete = blueprint_to_delete.clone();
+            let successful_reads = successful_reads.clone();
+            let not_found_errors = not_found_errors.clone();
+            let other_errors = other_errors.clone();
+            let delete_completed = delete_completed.clone();
+            let first_read_tx = first_read_tx.clone();
+
+            reader_handles.push(tokio::spawn(async move {
+                loop {
+                    match datastore
+                        .blueprint_read(&opctx, &authz_blueprint)
+                        .await
+                    {
+                        Ok(blueprint) => {
+                            // If we got a blueprint back, it MUST be complete
+                            // and match the original. Any mismatch would
+                            // indicate a torn read.
+                            assert_eq!(
+                                blueprint, blueprint_to_delete,
+                                "Read returned a blueprint that doesn't match \
+                                 the original - this indicates a torn read!"
+                            );
+                            successful_reads.fetch_add(1, Ordering::Relaxed);
+
+                            // Signal that at least one read completed (only
+                            // the first sender to take the channel will send)
+                            if let Some(tx) =
+                                first_read_tx.lock().unwrap().take()
+                            {
+                                let _ = tx.send(());
+                            }
+                        }
+                        Err(e) => {
+                            let error_str = e.to_string();
+                            if error_str.contains("not found") {
+                                not_found_errors
+                                    .fetch_add(1, Ordering::Relaxed);
+                            } else {
+                                eprintln!("Unexpected error: {e}");
+                                other_errors.fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+                    }
+
+                    // Stop reading after delete completes
+                    if delete_completed.load(Ordering::Relaxed) {
+                        break;
+                    }
+                }
+            }));
+        }
+
+        // Wait for at least one successful read before deleting, so we know
+        // the reader tasks have started
+        first_read_rx.await.expect("no reader completed a read");
+
+        // Delete the blueprint while readers are running
+        datastore
+            .blueprint_delete(&opctx, &authz_blueprint)
+            .await
+            .expect("failed to delete blueprint");
+        delete_completed.store(true, Ordering::Relaxed);
+
+        // Wait for all readers to complete
+        for handle in reader_handles {
+            handle.await.expect("reader task panicked");
+        }
+
+        // Log results for debugging.
+        let successful = successful_reads.load(Ordering::Relaxed);
+        let not_found = not_found_errors.load(Ordering::Relaxed);
+        let other = other_errors.load(Ordering::Relaxed);
+        eprintln!(
+            "Results: {} successful reads, {} not-found errors, {} other errors",
+            successful, not_found, other
+        );
+
+        // Key invariants:
+        // - At least one successful read (we waited for this before deleting)
+        // - Successful reads are validated inside the reader loop (must match
+        //   the original blueprint exactly, or the assert_eq! fails)
+        // - "Not found" errors are expected after deletion
+        // - No other errors should occur
+        assert!(
+            successful > 0,
+            "Expected at least one successful read (we wait for this)"
+        );
+        assert_eq!(other, 0, "No unexpected errors should occur");
+
+        // Verify the target blueprint is still intact
+        let target_read = datastore
+            .blueprint_read(&opctx, &authz_target)
+            .await
+            .expect("target blueprint should still be readable");
+        assert_eq!(target_blueprint, target_read);
+
+        // Verify the deleted blueprint is fully cleaned up
+        ensure_blueprint_fully_deleted(&datastore, blueprint_to_delete.id)
+            .await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Roundtrip an Omicron zone NIC through the database. This exercises
+    // the columns and constraints that ensure we can handle single- and
+    // dual-stack NICs.
+    async fn round_trip_zone_nic_through_blueprint_db(
+        test_name: &'static str,
+        ip_config: PrivateIpConfig,
+    ) {
+        let logctx = dev::test_setup_log(test_name);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let zone_id = OmicronZoneUuid::new_v4();
+        let nic = NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Service {
+                id: zone_id.into_untyped_uuid(),
+            },
+            name: "test-service-nic".parse().unwrap(),
+            ip_config,
+            mac: "a8:40:25:ff:00:01".parse().unwrap(),
+            vni: Vni::try_from(100).unwrap(),
+            primary: true,
+            slot: 0,
+        };
+        let zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id: zone_id,
+            filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
+            zone_type: BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                internal_address: "[::1]:12345".parse().unwrap(),
+                lockstep_port: 12346,
+                external_ips: OmicronZoneExternalFloatingIps::from_single(
+                    OmicronZoneExternalFloatingIp {
+                        id: ExternalIpUuid::new_v4(),
+                        ip: "192.0.2.1".parse().unwrap(),
+                    },
+                ),
+                nic: nic.clone(),
+                external_tls: false,
+                external_dns_servers: Vec::new(),
+                nexus_generation: NexusGeneration::new(),
+            }),
+            image_source: BlueprintZoneImageSource::InstallDataset,
+        };
+
+        let blueprint_id = BlueprintUuid::new_v4();
+        let row = BpOmicronZoneNic::new(blueprint_id, &zone)
+            .expect("built blueprint NIC row")
+            .expect("zone has a service NIC");
+
+        {
+            use nexus_db_schema::schema::bp_omicron_zone_nic::dsl;
+            diesel::insert_into(dsl::bp_omicron_zone_nic)
+                .values(row)
+                .execute_async(&*conn)
+                .await
+                .expect("inserted blueprint zone NIC");
+        }
+        let read: BpOmicronZoneNic = {
+            use nexus_db_schema::schema::bp_omicron_zone_nic::dsl;
+            dsl::bp_omicron_zone_nic
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                .filter(dsl::id.eq(nic.id))
+                .select(BpOmicronZoneNic::as_select())
+                .first_async(&*conn)
+                .await
+                .expect("read back blueprint zone NIC")
+        };
+
+        // The persisted row rebuilds the exact NIC we started with.
+        let round_tripped =
+            read.into_network_interface_for_zone(zone_id).unwrap();
+        assert_eq!(nic, round_tripped);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_bp_zone_nic_dual_stack_round_trips_through_db() {
+        let ip_config = PrivateIpConfig::DualStack {
+            v4: PrivateIpv4Config::new(
+                "172.30.2.5".parse().unwrap(),
+                "172.30.2.0/24".parse().unwrap(),
+            )
+            .unwrap(),
+            v6: PrivateIpv6Config::new(
+                "fd00:1122:3344:100::5".parse().unwrap(),
+                "fd00:1122:3344:100::/64".parse().unwrap(),
+            )
+            .unwrap(),
+        };
+        round_trip_zone_nic_through_blueprint_db(
+            "test_bp_zone_nic_dual_stack_round_trips_through_db",
+            ip_config,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_bp_zone_nic_ipv6_only_round_trips_through_db() {
+        let ip_config = PrivateIpConfig::V6(
+            PrivateIpv6Config::new(
+                "fd00:1122:3344:100::5".parse().unwrap(),
+                "fd00:1122:3344:100::/64".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        round_trip_zone_nic_through_blueprint_db(
+            "test_bp_zone_nic_ipv6_only_round_trips_through_db",
+            ip_config,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_bp_zone_nic_ipv4_only_round_trips_through_db() {
+        let ip_config = PrivateIpConfig::V4(
+            PrivateIpv4Config::new(
+                "172.30.2.5".parse().unwrap(),
+                "172.30.2.0/24".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        round_trip_zone_nic_through_blueprint_db(
+            "test_bp_zone_nic_ipv4_only_round_trips_through_db",
+            ip_config,
+        )
+        .await;
     }
 }

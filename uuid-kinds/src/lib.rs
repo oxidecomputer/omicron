@@ -15,31 +15,7 @@ pub use newtype_uuid::{
 };
 
 use daft::Diffable;
-#[cfg(feature = "schemars08")]
-use schemars::JsonSchema;
-
-macro_rules! impl_typed_uuid_kind {
-    ($($kind:ident => $tag:literal),* $(,)?) => {
-        $(
-            paste::paste! {
-                #[cfg_attr(feature = "schemars08", derive(JsonSchema))]
-                #[derive(Debug, PartialEq, Eq, Diffable)]
-                pub enum [< $kind Kind>] {}
-
-                impl TypedUuidKind for [< $kind Kind >] {
-                    #[inline]
-                    fn tag() -> TypedUuidTag {
-                        // `const` ensures that tags are validated at compile-time.
-                        const TAG: TypedUuidTag = TypedUuidTag::new($tag);
-                        TAG
-                    }
-                }
-
-                pub type [< $kind Uuid>] = TypedUuid::<[< $kind Kind >]>;
-            }
-        )*
-    };
-}
+use newtype_uuid_macros::impl_typed_uuid_kinds;
 
 // NOTE:
 //
@@ -49,42 +25,111 @@ macro_rules! impl_typed_uuid_kind {
 // repos.
 //
 // Please keep this list in alphabetical order.
+impl_typed_uuid_kinds! {
+    settings = {
+        attrs = [#[derive(Diffable)]],
+        schemars08 = {
+            attrs = [#[cfg(feature = "schemars08")]],
+            rust_type = {
+                crate = "omicron-uuid-kinds",
+                version = "*",
+                path = "omicron_uuid_kinds",
+            },
+        },
+    },
+    kinds = {
+        AccessToken = {},
+        AffinityGroup = {},
+        Alert = {},
+        AlertReceiver = {},
+        AntiAffinityGroup = {},
+        BgpAnnounceSet = {},
+        BgpConfig = {},
+        BgpPeerConfigAllowExport = {},
+        BgpPeerConfigAllowImport = {},
+        BgpPeerConfigCommunity = {},
+        Blueprint = {},
+        BuiltInUser = {},
+        Case = {},
+        CaseEreport = {},
+        Collection = {},
+        ConsoleSession = {},
+        Dataset = {},
+        DemoSaga = {},
+        // A virtual disk (the customer-facing `disk` resource), as opposed to
+        // PhysicalDisk below.
+        Disk = {},
+        Downstairs = {},
+        DownstairsRegion = {},
+        EreporterRestart = {},
+        ExternalIp = {},
+        ExternalSubnet = {},
+        ExternalZpool = {},
+        Fact = {},
+        FmdHostCase = {},
+        FmdResource = {},
+        Instance = {},
+        InternalZpool = {},
+        IpPool = {},
+        LoopbackAddress = {},
+        MulticastGroup = {},
+        Measurement = {},
+        MultirackJoin = {},
+        Mupdate = {},
+        MupdateOverride = {},
+        // `OmicronSledConfig`s do not themselves contain IDs, but we generate IDs
+        // for them when they're serialized to the database during inventory
+        // collection. This ID type is therefore only used by nexus-db-model and
+        // nexus-db-queries.
+        OmicronSledConfig = {},
+        OmicronZone = {},
+        PhysicalDisk = {},
+        PhysicalDiskAdoptionRequest = {},
+        Probe = {},
+        Project = {},
+        Propolis = {},
+        Rack = {},
+        RackInit = {},
+        ReconfiguratorSimOp = {},
+        ReconfiguratorSimState = {},
+        Region = {},
+        Silo = {},
+        SiloGroup = {},
+        SiloUser = {},
+        Sitrep = {},
+        Sled = {},
+        SpUpdate = {},
+        SubnetPool = {},
+        SubnetPoolMember = {},
+        SupportBundle = {},
+        SvcEnabledNotOnline = {},
+        SvcEnabledNotOnlineParseError = {},
+        SvcEnabledNotOnlineService = {},
+        SwitchPortSettings = {},
+        TufArtifact = {},
+        TufRepo = {},
+        TufTrustRoot = {},
+        Upstairs = {},
+        UpstairsRepair = {},
+        UpstairsSession = {},
+        UserDataExport = {},
+        Vnic = {},
+        Volume = {},
+        WebhookDelivery = {},
+        WebhookDeliveryAttempt = {},
+        WebhookSecret = {},
+        Zpool = {},
+    },
+}
 
-impl_typed_uuid_kind! {
-    AffinityGroup => "affinity_group",
-    AntiAffinityGroup => "anti_affinity_group",
-    Blueprint => "blueprint",
-    Collection => "collection",
-    Dataset => "dataset",
-    DemoSaga => "demo_saga",
-    Downstairs => "downstairs",
-    DownstairsRegion => "downstairs_region",
-    EreporterGeneration => "ereporter_generation",
-    ExternalIp => "external_ip",
-    Instance => "instance",
-    LoopbackAddress => "loopback_address",
-    OmicronZone => "service",
-    PhysicalDisk => "physical_disk",
-    Propolis => "propolis",
-    Rack => "rack",
-    RackInit => "rack_init",
-    RackReset => "rack_reset",
-    ReconfiguratorSim => "reconfigurator_sim",
-    Region => "region",
-    Sled => "sled",
-    SpUpdate => "sp_update",
-    SupportBundle => "support_bundle",
-    TufArtifact => "tuf_artifact",
-    TufRepo => "tuf_repo",
-    Upstairs => "upstairs",
-    UpstairsRepair => "upstairs_repair",
-    UpstairsSession => "upstairs_session",
-    Vnic => "vnic",
-    Volume => "volume",
-    WebhookEvent => "webhook_event",
-    WebhookReceiver => "webhook_receiver",
-    WebhookDelivery => "webhook_delivery",
-    WebhookDeliveryAttempt => "webhook_delivery_attempt",
-    WebhookSecret => "webhook_secret",
-    Zpool => "zpool",
+impl From<ExternalZpoolKind> for ZpoolKind {
+    fn from(kind: ExternalZpoolKind) -> Self {
+        match kind {}
+    }
+}
+
+impl From<InternalZpoolKind> for ZpoolKind {
+    fn from(kind: InternalZpoolKind) -> Self {
+        match kind {}
+    }
 }

@@ -4,8 +4,6 @@
 
 //! Implementation of the `oximeter` metric collection server.
 
-// Copyright 2024 Oxide Computer Company
-
 pub use collection_task::ForcedCollectionError;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
@@ -18,6 +16,7 @@ use omicron_common::address::DNS_PORT;
 use omicron_common::address::get_internal_dns_server_addresses;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::backoff;
+use omicron_common::http_client::internal_http_client;
 use qorb::backend;
 use qorb::resolver::BoxedResolver;
 use qorb::resolvers::dns::DnsResolver;
@@ -33,6 +32,7 @@ use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::path::Path;
@@ -52,6 +52,70 @@ pub use agent::OximeterAgent;
 pub use http_entrypoints::oximeter_api;
 pub use standalone::Server as StandaloneNexus;
 pub use standalone::standalone_nexus_api;
+
+#[usdt::provider(provider = "oximeter")]
+mod probes {
+    /// Fires when a producer is registered or updated.
+    ///
+    /// The interval is given in milliseconds.
+    fn producer__registered(
+        collector_id: &str,
+        producer_id: &str,
+        addr: &str,
+        interval: u64,
+    ) {
+    }
+
+    /// Fires when a new producer is deleted.
+    fn producer__deleted(collector_id: &str, producer_id: &str) {}
+
+    /// Fires just before starting a collection from a producer.
+    fn collection__start(producer_id: &str, addr: &str) {}
+
+    /// Fires just after a successful collection from a producer, with the
+    /// number of samples collected.
+    fn collection__done(producer_id: &str, n_samples: u64) {}
+
+    /// Fires just after a failed collection from a producer, with an error
+    /// message describing the failure.
+    fn collection__failed(producer_id: &str, msg: &str) {}
+
+    /// Fires just before forwarding successful results to the result sink task.
+    fn results__sink__send__start(producer_id: &str, n_samples: u64) {}
+
+    /// Fires just after forwarding successful results to the result sink task.
+    fn results__sink__send__done(producer_id: &str) {}
+
+    /// Fires when the results sink dequeues an item from its result queue, but
+    /// before processing it.
+    fn results__sink__item__dequeued() {}
+
+    /// Fires after the results sink processes an item dequeued from its results
+    /// queue, with the number of samples.
+    fn results__sink__item__processed(n_samples: usize) {}
+
+    /// Fires when we have dropped old samples because the database insertion is
+    /// slower than the data batching task.
+    ///
+    /// We batch data from individual collection tasks into a ring buffer. When
+    /// that gets large enough, we insert the full contents into the database.
+    /// In the event that the database insertions are _very_ slow, and cannot
+    /// keep up with new batches, we'll drop the oldest samples. This probe
+    /// fires with the number of samples we dropped.
+    fn dropped__old__samples(n_dropped: usize) {}
+
+    /// Fires just before attempting to insert a batch of samples into the
+    /// database.
+    fn insert__samples__start(n_samples: usize) {}
+
+    /// Fires just after successfully inserting a batch of samples into the
+    /// database.
+    fn insert__samples__done() {}
+
+    /// Fires just after failing to insert a batch of samples into the database,
+    /// with the error details.
+    fn insert__samples__failed(msg: &str) {}
+}
 
 /// Errors collecting metric data
 #[derive(Debug, Error)]
@@ -97,12 +161,6 @@ pub struct DbConfig {
     /// Interval on which to insert data into the database, regardless of the number of collected
     /// samples. Value is in seconds.
     pub batch_interval: u64,
-
-    // TODO (https://github.com/oxidecomputer/omicron/issues/4148): This field
-    // should be removed if single node functionality is removed.
-    /// Whether ClickHouse is running as a replicated cluster or
-    /// single-node server.
-    pub replicated: bool,
 }
 
 impl DbConfig {
@@ -114,16 +172,12 @@ impl DbConfig {
     /// ClickHouse.
     pub const DEFAULT_BATCH_INTERVAL: u64 = 5;
 
-    /// Default ClickHouse topology.
-    pub const DEFAULT_REPLICATED: bool = false;
-
     // Construct config with an address, using the defaults for other fields
     fn with_address(address: SocketAddr) -> Self {
         Self {
             address: Some(address),
             batch_size: Self::DEFAULT_BATCH_SIZE,
             batch_interval: Self::DEFAULT_BATCH_INTERVAL,
-            replicated: Self::DEFAULT_REPLICATED,
         }
     }
 }
@@ -158,8 +212,9 @@ impl Config {
     /// Load configuration for an Oximeter server from a file.
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Config, Error> {
         let path = path.as_ref();
-        let contents = std::fs::read_to_string(path)
-            .map_err(|e| Error::Server(e.to_string()))?;
+        let contents = std::fs::read_to_string(path).map_err(|e| {
+            Error::Server(InlineErrorChain::new(&e).to_string())
+        })?;
         toml::from_str(&contents).map_err(|e| Error::Server(e.to_string()))
     }
 }
@@ -183,8 +238,9 @@ impl backend::Connector for NexusConnector {
         &self,
         backend: &backend::Backend,
     ) -> Result<Self::Connection, backend::Error> {
-        Ok(nexus_client::Client::new(
+        Ok(nexus_client::Client::new_with_client(
             &format!("http://{}", backend.address),
+            internal_http_client(),
             self.log.clone(),
         ))
     }
@@ -205,10 +261,9 @@ impl Oximeter {
         config: &Config,
         args: &OximeterArguments,
     ) -> Result<Self, Error> {
-        let log = config
-            .log
-            .to_logger("oximeter")
-            .map_err(|msg| Error::Server(msg.to_string()))?;
+        let log = config.log.to_logger("oximeter").map_err(|msg| {
+            Error::Server(InlineErrorChain::new(&msg).to_string())
+        })?;
         Self::with_logger(config, args, log).await
     }
 
@@ -280,7 +335,6 @@ impl Oximeter {
                     resolver,
                     cluster_resolver,
                     &log,
-                    config.db.replicated,
                 )
                 .await?,
             ))
@@ -301,18 +355,7 @@ impl Oximeter {
         .await
         .expect("Expected an infinite retry loop initializing the timeseries database");
 
-        let dropshot_log = log.new(o!("component" => "dropshot"));
-        let server = ServerBuilder::new(
-            oximeter_api(),
-            Arc::clone(&agent),
-            dropshot_log,
-        )
-        .config(ConfigDropshot {
-            bind_address: SocketAddr::V6(args.address),
-            ..Default::default()
-        })
-        .start()
-        .map_err(|e| Error::Server(e.to_string()))?;
+        let server = build_server(agent.clone(), args, &log)?;
 
         // Notify Nexus that this oximeter instance is available.
         let our_info = nexus_client::types::OximeterInfo {
@@ -335,20 +378,7 @@ impl Oximeter {
                     ))
                 };
 
-            match qorb::pool::Pool::new(
-                nexus_resolver,
-                Arc::new(NexusConnector { log: log.clone() }),
-                qorb::policy::Policy::default(),
-            ) {
-                Ok(pool) => {
-                    debug!(log, "registered USDT probes");
-                    pool
-                }
-                Err(err) => {
-                    error!(log, "failed to register USDT probes");
-                    err.into_inner()
-                }
-            }
+            build_nexus_pool(nexus_resolver, &log)
         };
 
         let notify_nexus = || async {
@@ -399,31 +429,21 @@ impl Oximeter {
         args: &OximeterArguments,
         nexus: SocketAddr,
         clickhouse: Option<SocketAddr>,
+        refresh_interval: Duration,
     ) -> Result<Self, Error> {
         let db_config = clickhouse.map(DbConfig::with_address);
         let agent = Arc::new(
             OximeterAgent::new_standalone(
                 args.id,
                 args.address,
-                crate::default_refresh_interval(),
+                refresh_interval,
                 db_config,
                 &log,
             )
             .await?,
         );
 
-        let dropshot_log = log.new(o!("component" => "dropshot"));
-        let server = ServerBuilder::new(
-            oximeter_api(),
-            Arc::clone(&agent),
-            dropshot_log,
-        )
-        .config(ConfigDropshot {
-            bind_address: SocketAddr::V6(args.address),
-            ..Default::default()
-        })
-        .start()
-        .map_err(|e| Error::Server(e.to_string()))?;
+        let server = build_server(agent.clone(), args, log)?;
         info!(log, "started oximeter standalone server");
 
         // Notify the standalone nexus.
@@ -438,9 +458,17 @@ impl Oximeter {
                 })
                 .send()
                 .await
-                .map_err(|e| backoff::BackoffError::transient(e.to_string()))?
+                .map_err(|e| {
+                    backoff::BackoffError::transient(
+                        InlineErrorChain::new(&e).to_string(),
+                    )
+                })?
                 .error_for_status()
-                .map_err(|e| backoff::BackoffError::transient(e.to_string()))
+                .map_err(|e| {
+                    backoff::BackoffError::transient(
+                        InlineErrorChain::new(&e).to_string(),
+                    )
+                })
         };
         let log_notification_failure = |error, delay| {
             warn!(
@@ -456,6 +484,11 @@ impl Oximeter {
         )
         .await
         .expect("Expected an infinite retry loop contacting Nexus");
+
+        // Poll the standalone nexus for collectors.
+        let nexus_resolver = Box::new(FixedResolver::new([nexus]));
+        let nexus_pool = build_nexus_pool(nexus_resolver, &log);
+        agent.ensure_producer_refresh_task(nexus_pool);
 
         Ok(Self { agent, server })
     }
@@ -479,25 +512,25 @@ impl Oximeter {
     /// already outstanding calls to force a collection. It rarely makes sense
     /// to have multiple concurrent calls here, so that should not impact most
     /// callers.
-    pub async fn try_force_collect(&self) -> Result<(), ForcedCollectionError> {
-        self.server.app_private().try_force_collection().await
+    pub fn try_force_collect(&self) -> Result<(), ForcedCollectionError> {
+        self.server.app_private().try_force_collection()
     }
 
     /// List producers.
     ///
     /// This returns up to `limit` producers, whose ID is _strictly greater_
     /// than `start`, or all producers if `start` is `None`.
-    pub async fn list_producers(
+    pub fn list_producers(
         &self,
         start: Option<Uuid>,
         limit: usize,
     ) -> Vec<ProducerEndpoint> {
-        self.agent.list_producers(start, limit).await
+        self.agent.list_producers(start, limit)
     }
 
     /// Delete a producer by ID, stopping its collection task.
-    pub async fn delete_producer(&self, id: Uuid) -> Result<(), Error> {
-        self.agent.delete_producer(id).await
+    pub fn delete_producer(&self, id: Uuid) {
+        self.agent.delete_producer(id);
     }
 
     /// Return the ID of this collector.
@@ -508,5 +541,48 @@ impl Oximeter {
     /// Return the address of the server.
     pub fn server_address(&self) -> SocketAddr {
         self.server.local_addr()
+    }
+}
+
+fn build_server(
+    agent: Arc<OximeterAgent>,
+    args: &OximeterArguments,
+    log: &Logger,
+) -> Result<HttpServer<Arc<OximeterAgent>>, Error> {
+    let dropshot_log = log.new(o!("component" => "dropshot"));
+    ServerBuilder::new(oximeter_api(), agent, dropshot_log)
+        .config(ConfigDropshot {
+            bind_address: SocketAddr::V6(args.address),
+            ..Default::default()
+        })
+        .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+            dropshot::ClientSpecifiesVersionInHeader::new(
+                omicron_common::api::VERSION_HEADER,
+                oximeter_api::latest_version(),
+            )
+            .min_version(oximeter_api::oldest_version()),
+        )))
+        .start()
+        .map_err(|e| Error::Server(e.to_string()))
+}
+
+fn build_nexus_pool(
+    nexus_resolver: BoxedResolver,
+    log: &Logger,
+) -> qorb::pool::Pool<nexus_client::Client> {
+    match qorb::pool::Pool::new(
+        "oximeter-to-nexus".to_string(),
+        nexus_resolver,
+        Arc::new(NexusConnector { log: log.clone() }),
+        qorb::policy::Policy::default(),
+    ) {
+        Ok(pool) => {
+            debug!(log, "registered USDT probes");
+            pool
+        }
+        Err(err) => {
+            error!(log, "failed to register USDT probes");
+            err.into_inner()
+        }
     }
 }

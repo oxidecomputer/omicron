@@ -70,9 +70,9 @@ impl DataStore {
         dns_group: DnsGroup,
     ) -> ListResultVec<DnsZone> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        Ok(self
-            .dns_zones_list_all_on_connection(opctx, &conn, dns_group)
-            .await?)
+        self.dns_zones_list_all_on_connection(opctx, &conn, dns_group)
+            .await
+            .map_err(|err| err.into_public_ignore_retries())
     }
 
     /// Variant of [`Self::dns_zones_list_all`] which may be called from a
@@ -116,7 +116,8 @@ impl DataStore {
                 &*self.pool_connection_authorized(opctx).await?,
                 dns_group,
             )
-            .await?;
+            .await
+            .map_err(|err| err.into_public_ignore_retries())?;
         Ok(version)
     }
 
@@ -245,7 +246,10 @@ impl DataStore {
         let mut zones = Vec::with_capacity(dns_zones.len());
         for zone in dns_zones {
             let mut zone_records = Vec::new();
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 debug!(log, "listing DNS names for zone";
                     "dns_zone_id" => zone.id.to_string(),
@@ -263,7 +267,7 @@ impl DataStore {
                     )
                     .await?;
                 paginator = p.found_batch(&names_batch, &|(n, _)| n.clone());
-                zone_records.extend(names_batch.into_iter());
+                zone_records.extend(names_batch);
             }
 
             debug!(log, "found all DNS names for zone";
@@ -288,6 +292,12 @@ impl DataStore {
 
         Ok(DnsConfigParams {
             generation: version.version.0,
+            serial: version.version.0.as_u64().try_into().map_err(|_| {
+                Error::internal_error(&format!(
+                    "DNS config would wrap the DNS serial number: {}",
+                    version.version.0.as_u64()
+                ))
+            })?,
             time_created: version.time_created,
             zones,
         })
@@ -402,7 +412,7 @@ impl DataStore {
             })
             .await
             .map_err(|e| match err.take() {
-                Some(err) => err.into(),
+                Some(err) => err.into_public_ignore_retries(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
             })
     }
@@ -677,7 +687,7 @@ impl DnsVersionUpdateBuilder {
             Err(Error::internal_error(&format!(
                 "DNS update ({:?}) attempted to remove name {:?} \
                 multiple times",
-                self.comment, &name,
+                self.comment, name,
             )))
         } else {
             assert!(self.names_removed.insert(name));
@@ -704,7 +714,7 @@ pub trait DataStoreDnsTest: Send + Sync {
         &'a self,
         opctx: &'a OpContext,
         dns_group: DnsGroup,
-        version: omicron_common::api::external::Generation,
+        version: omicron_generation_kinds::Generation,
     ) -> BoxFuture<'a, Result<DnsConfigParams, Error>>;
 }
 
@@ -713,7 +723,7 @@ impl DataStoreDnsTest for DataStore {
         &'a self,
         opctx: &'a OpContext,
         dns_group: DnsGroup,
-        version: omicron_common::api::external::Generation,
+        version: omicron_generation_kinds::Generation,
     ) -> BoxFuture<'a, Result<DnsConfigParams, Error>> {
         async move {
             use nexus_db_schema::schema::dns_version::dsl;
@@ -798,7 +808,7 @@ mod test {
         {
             use crate::db::model::DnsVersion;
             use nexus_db_schema::schema::dns_version::dsl;
-            use omicron_common::api::external::Generation;
+            use omicron_generation_kinds::Generation;
 
             diesel::insert_into(dsl::dns_version)
                 .values(DnsVersion {
@@ -1856,12 +1866,11 @@ mod test {
             update.add_name(String::from("n2"), records1.clone()).unwrap();
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            let error = Error::from(
-                datastore
-                    .dns_update_incremental(&opctx, &conn, update)
-                    .await
-                    .unwrap_err(),
-            );
+            let error = datastore
+                .dns_update_incremental(&opctx, &conn, update)
+                .await
+                .unwrap_err()
+                .into_public_ignore_retries();
             let msg = error.to_string();
             assert!(msg.starts_with("Internal Error: "), "Message: {msg:}");
             assert!(

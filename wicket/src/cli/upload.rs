@@ -17,7 +17,7 @@ use futures::StreamExt;
 use reqwest::Body;
 use tokio_util::io::ReaderStream;
 
-use crate::wicketd::create_wicketd_client;
+use crate::wicketd::create_commission_client;
 
 // We have observed wicketd running in a switch zone under load take ~60 seconds
 // to accept a repository; set the timeout to double that to give some headroom.
@@ -34,15 +34,7 @@ impl UploadArgs {
     pub(crate) async fn exec(
         self,
         log: slog::Logger,
-        wicketd_addr: SocketAddrV6,
-    ) -> Result<()> {
-        self.do_upload(log, wicketd_addr).await
-    }
-
-    async fn do_upload(
-        &self,
-        log: slog::Logger,
-        wicketd_addr: SocketAddrV6,
+        commission_addr: SocketAddrV6,
     ) -> Result<()> {
         let repo_bytes = Self::read_repository_from_stdin(&log).await?;
         let repository_bytes_len = repo_bytes.num_bytes();
@@ -56,16 +48,16 @@ impl UploadArgs {
             );
         } else {
             slog::info!(log, "uploading repository to wicketd");
-            let wicketd_client = create_wicketd_client(
+            let commission_client = create_commission_client(
                 &log,
-                wicketd_addr,
+                commission_addr,
                 WICKETD_UPLOAD_TIMEOUT,
             );
 
             let body = Body::wrap_stream(futures::stream::iter(
                 repo_bytes.into_iter().map(Ok::<_, Infallible>),
             ));
-            wicketd_client
+            commission_client
                 .put_repository(body)
                 .await
                 .context("error uploading repository to wicketd")?;

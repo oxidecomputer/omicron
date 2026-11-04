@@ -12,6 +12,8 @@ use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::SupportBundleCreateParams;
+use nexus_types::support_bundle::BundleDataSelection;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -39,7 +41,7 @@ impl super::Nexus {
     pub async fn support_bundle_list(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, (chrono::DateTime<chrono::Utc>, Uuid)>,
     ) -> ListResultVec<SupportBundle> {
         self.db_datastore.support_bundle_list(&opctx, pagparams).await
     }
@@ -61,8 +63,20 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         reason: &'static str,
+        user_comment: Option<String>,
     ) -> CreateResult<SupportBundle> {
-        self.db_datastore.support_bundle_create(&opctx, reason, self.id).await
+        self.db_datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason,
+                    nexus_id: self.id,
+                    user_comment,
+                    // TODO: eventually allow user-selectable data selection from the API.
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
+            .await
     }
 
     pub async fn support_bundle_download(
@@ -71,7 +85,7 @@ impl super::Nexus {
         id: SupportBundleUuid,
         query: SupportBundleQueryType,
         head: bool,
-        _range: Option<PotentialRange>,
+        range: Option<PotentialRange>,
     ) -> Result<Response<Body>, Error> {
         // Lookup the bundle, confirm it's accessible
         let (.., bundle) = LookupPath::new(opctx, &self.db_datastore)
@@ -90,9 +104,31 @@ impl super::Nexus {
             .db_datastore
             .zpool_get_sled_if_in_service(&opctx, bundle.zpool_id.into())
             .await?;
-        let client = self.sled_client(&sled_id).await?;
 
-        // TODO: Use "range"?
+        let short_timeout = std::time::Duration::from_secs(60);
+        let long_timeout = std::time::Duration::from_secs(3600);
+        let client = nexus_networking::default_reqwest_client_builder()
+            // Continuing to read from the sled agent should happen relatively
+            // quickly.
+            .read_timeout(short_timeout)
+            // However, the bundle itself may be large. As long as we're
+            // continuing to make progress (see: read_timeout) we should be
+            // willing to keep transferring the bundle for a while longer.
+            .timeout(long_timeout)
+            .build()
+            .expect("Failed to build reqwest Client");
+        let client = self.sled_client_ext(&sled_id, client).await?;
+
+        let range = if let Some(potential_range) = &range {
+            Some(potential_range.try_into_str().map_err(|err| match err {
+                range_requests::Error::Parse(_) => Error::invalid_request(
+                    "Failed to parse range request header",
+                ),
+                _ => Error::internal_error("Invalid range request"),
+            })?)
+        } else {
+            None
+        };
 
         let response = match (query, head) {
             (SupportBundleQueryType::Whole, true) => {
@@ -101,6 +137,7 @@ impl super::Nexus {
                         &ZpoolUuid::from(bundle.zpool_id),
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
+                        range,
                     )
                     .await
             }
@@ -110,6 +147,7 @@ impl super::Nexus {
                         &ZpoolUuid::from(bundle.zpool_id),
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
+                        range,
                     )
                     .await
             }
@@ -119,6 +157,7 @@ impl super::Nexus {
                         &ZpoolUuid::from(bundle.zpool_id),
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
+                        range,
                     )
                     .await
             }
@@ -128,6 +167,7 @@ impl super::Nexus {
                         &ZpoolUuid::from(bundle.zpool_id),
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
+                        range,
                     )
                     .await
             }
@@ -138,6 +178,7 @@ impl super::Nexus {
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
                         &file_path,
+                        range,
                     )
                     .await
             }
@@ -148,6 +189,7 @@ impl super::Nexus {
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
                         &file_path,
+                        range,
                     )
                     .await
             }
@@ -177,10 +219,20 @@ impl super::Nexus {
         opctx: &OpContext,
         id: SupportBundleUuid,
     ) -> DeleteResult {
-        let (authz_bundle, ..) = LookupPath::new(opctx, &self.db_datastore)
-            .support_bundle(id)
-            .lookup_for(authz::Action::Delete)
-            .await?;
+        let (authz_bundle, db_bundle) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .support_bundle(id)
+                .fetch_for(authz::Action::Delete)
+                .await?;
+
+        // Bundles in the "Failed" state have already had their storage cleaned
+        // up by the background task, so we can delete them immediately.
+        if db_bundle.state == SupportBundleState::Failed {
+            self.db_datastore
+                .support_bundle_delete(&opctx, &authz_bundle)
+                .await?;
+            return Ok(());
+        }
 
         // NOTE: We can't necessarily delete the support bundle
         // immediately - it might have state that needs cleanup
@@ -195,5 +247,28 @@ impl super::Nexus {
             )
             .await?;
         Ok(())
+    }
+
+    pub async fn support_bundle_update_user_comment(
+        &self,
+        opctx: &OpContext,
+        id: SupportBundleUuid,
+        user_comment: Option<String>,
+    ) -> LookupResult<SupportBundle> {
+        let (authz_bundle, ..) = LookupPath::new(opctx, &self.db_datastore)
+            .support_bundle(id)
+            .lookup_for(authz::Action::Modify)
+            .await?;
+
+        self.db_datastore
+            .support_bundle_update_user_comment(
+                &opctx,
+                &authz_bundle,
+                user_comment,
+            )
+            .await?;
+
+        // Return the updated bundle
+        self.support_bundle_view(opctx, id).await
     }
 }

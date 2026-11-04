@@ -19,10 +19,13 @@
 
 use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
+use crate::db::blueprints::cmd_db_blueprints;
+use crate::db::ereport::cmd_db_ereport;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::helpers::const_max_len;
 use crate::helpers::display_option_blank;
+use alert::AlertArgs;
 use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
@@ -40,6 +43,10 @@ use clap::ValueEnum;
 use clap::builder::PossibleValue;
 use clap::builder::PossibleValuesParser;
 use clap::builder::TypedValueParser;
+use db_metadata::DbMetadataArgs;
+use db_metadata::DbMetadataCommands;
+use db_metadata::cmd_db_metadata_force_mark_nexus_quiesced;
+use db_metadata::cmd_db_metadata_list_nexus;
 use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::JoinOnDsl;
@@ -48,20 +55,18 @@ use diesel::OptionalExtension;
 use diesel::TextExpressionMethods;
 use diesel::expression::SelectableHelper;
 use diesel::query_dsl::QueryDsl;
-use gateway_client::types::SpType;
+use display_error_chain::DisplayErrorChain;
 use indicatif::ProgressBar;
 use indicatif::ProgressDrawTarget;
 use indicatif::ProgressStyle;
 use internal_dns_types::names::ServiceName;
-use ipnetwork::IpNetwork;
-use itertools::Itertools;
 use nexus_config::PostgresConfigWithUrl;
 use nexus_config::RegionAllocationStrategy;
 use nexus_db_errors::OptionalError;
 use nexus_db_lookup::DataStoreConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::CrucibleDataset;
-use nexus_db_model::Disk;
+use nexus_db_model::DbSledBpAvailability;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::DnsName;
 use nexus_db_model::DnsVersion;
@@ -100,6 +105,8 @@ use nexus_db_model::SwCaboose;
 use nexus_db_model::SwRotPage;
 use nexus_db_model::UpstairsRepairNotification;
 use nexus_db_model::UpstairsRepairProgress;
+use nexus_db_model::UserDataExportRecord;
+use nexus_db_model::UserDataExportResource;
 use nexus_db_model::Vmm;
 use nexus_db_model::Volume;
 use nexus_db_model::VolumeRepair;
@@ -107,55 +114,66 @@ use nexus_db_model::VolumeResourceUsage;
 use nexus_db_model::VpcSubnet;
 use nexus_db_model::Zpool;
 use nexus_db_model::to_db_typed_uuid;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::CrucibleDisk;
 use nexus_db_queries::db::datastore::CrucibleTargets;
+use nexus_db_queries::db::datastore::Disk;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
-use nexus_db_queries::db::datastore::InstanceStateComputer;
+use nexus_db_queries::db::datastore::LocalStorageAllocation;
+use nexus_db_queries::db::datastore::LocalStorageDisk;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::datastore::VolumeCookedResult;
 use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
 use nexus_db_queries::db::identity::Asset;
+use nexus_db_queries::db::model::InstanceStateComputer;
 use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::queries::region_allocation;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views::PhysicalDiskPolicy;
-use nexus_types::external_api::views::PhysicalDiskState;
-use nexus_types::external_api::views::SledPolicy;
-use nexus_types::external_api::views::SledState;
+use nexus_types::external_api::disk::BlockSize;
+use nexus_types::external_api::instance::InstanceState;
+use nexus_types::external_api::physical_disk::{
+    PhysicalDiskPolicy, PhysicalDiskState,
+};
+use nexus_types::external_api::sled::{SledPolicy, SledState};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
-use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
-use nexus_types::inventory::RotPageWhich;
+use nexus_types::inventory::CollectionDisplayCliFilter;
 use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
-use omicron_common::api::external::Generation;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
+use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::InstanceStateGeneration;
+use omicron_generation_kinds::InstanceUpdaterGeneration;
+use omicron_generation_kinds::UpdateDispositionGeneration;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsRegionUuid;
+use omicron_uuid_kinds::ExternalZpoolUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use parallel_task_set::ParallelTaskSet;
 use sled_agent_client::VolumeConstructionRequest;
-use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -163,17 +181,25 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::future::Future;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
+use std::os::unix::process::CommandExt;
+use std::process::Command;
 use std::str::FromStr;
 use std::sync::Arc;
-use strum::IntoEnumIterator;
 use tabled::Tabled;
 use uuid::Uuid;
-use webhook::WebhookArgs;
-use webhook::cmd_db_webhook;
 
+mod alert;
+mod blueprints;
+mod db_metadata;
+mod ereport;
 mod saga;
-mod webhook;
+mod sitrep;
+mod target_release;
+mod user_data_export;
+mod whatis;
 
 const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
 const NOT_ON_SLED_MSG: &str = "<not on any sled>";
@@ -280,17 +306,20 @@ impl DbUrlOptions {
         log: &slog::Logger,
     ) -> anyhow::Result<Arc<DataStore>> {
         let db_url = self.resolve_pg_url(omdb, log).await?;
-        eprintln!("note: using database URL {}", &db_url);
+        eprintln!("note: using database URL {}", db_url);
 
-        let db_config = db::Config { url: db_url.clone() };
-        let pool =
-            Arc::new(db::Pool::new_single_host(&log.clone(), &db_config));
+        let addrs = db_url.all_addresses()?;
+        let pool = Arc::new(db::Pool::new_fixed_hosts(log, addrs));
 
         // Being a dev tool, we want to try this operation even if the schema
         // doesn't match what we expect.  So we use `DataStore::new_unchecked()`
         // here.  We will then check the schema version explicitly and warn the
         // user if it doesn't match.
-        let datastore = Arc::new(DataStore::new_unchecked(log.clone(), pool));
+        let datastore = Arc::new(DataStore::new_unchecked(
+            log.clone(),
+            pool,
+            omicron_git_version::current(),
+        ));
         check_schema_version(&datastore).await;
         Ok(datastore)
     }
@@ -306,7 +335,7 @@ impl DbUrlOptions {
         Fut: Future<Output = anyhow::Result<T>>,
     {
         let datastore = self.connect(omdb, log).await?;
-        let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+        let opctx = OpContext::for_omdb(log.clone(), datastore.clone());
         let result = f(opctx, datastore.clone()).await;
         datastore.terminate().await;
         result
@@ -339,6 +368,18 @@ pub struct DbFetchOptions {
 /// Subcommands that query or update the database
 #[derive(Debug, Subcommand, Clone)]
 enum DbCommands {
+    /// Launch `cockroach-sql`
+    ///
+    /// This launches with the session variable `default_transaction_read_only`
+    /// to on. Because this variable can be disabled, it is required to use
+    /// `--destructive` with this command.
+    Sql,
+    /// Print information about blueprints
+    ///
+    /// Most blueprint information is available via `omdb nexus`, not `omdb db`.
+    Blueprints(blueprints::BlueprintsArgs),
+    /// Commands for database metadata
+    DbMetadata(DbMetadataArgs),
     /// Commands relevant to Crucible datasets
     CrucibleDataset(CrucibleDatasetArgs),
     /// Print any Crucible resources that are located on expunged physical disks
@@ -349,6 +390,8 @@ enum DbCommands {
     Disks(DiskArgs),
     /// Print information about internal and external DNS
     Dns(DnsArgs),
+    /// Query and display error reports
+    Ereport(ereport::EreportArgs),
     /// Print information about collected hardware/software inventory
     Inventory(InventoryArgs),
     /// Print information about physical disks
@@ -363,8 +406,19 @@ enum DbCommands {
     RegionSnapshotReplacement(RegionSnapshotReplacementArgs),
     /// Commands for querying and interacting with sagas
     Saga(saga::SagaArgs),
+    /// Commands for querying and interacting with fault management situation
+    /// reports.
+    Sitrep(sitrep::SitrepArgs),
+    /// Show the current history of fault management situation reports.
+    ///
+    /// This is an alias for `omdb db sitrep history`.
+    Sitreps(sitrep::SitrepHistoryArgs),
     /// Print information about sleds
     Sleds(SledsArgs),
+    /// Show instances grouped by the sled they are running on
+    SledInstances(SledInstancesArgs),
+    /// Print the current target release and the update date
+    TargetRelease(target_release::TargetReleaseArgs),
     /// Print information about customer instances.
     Instance(InstanceArgs),
     /// Alias to `omdb instance list`.
@@ -387,10 +441,19 @@ enum DbCommands {
     Vmms(VmmListArgs),
     /// Print information about the oximeter collector.
     Oximeter(OximeterArgs),
-    /// Print information about webhooks
-    Webhook(WebhookArgs),
+    /// Print information about alerts
+    Alert(AlertArgs),
     /// Commands for querying and interacting with pools
     Zpool(ZpoolArgs),
+    /// Commands for querying and interacting with user data export objects
+    UserDataExport(user_data_export::UserDataExportArgs),
+    /// Given a UUID, try to figure out what type of object it refers to
+    ///
+    /// More precisely, `omdb db whatis` reports tables containing a unique UUID
+    /// column with the specified value.
+    Whatis(whatis::WhatisArgs),
+    /// Print information about trust quorum configurations
+    TrustQuorum(TrustQuorumArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -445,21 +508,28 @@ enum DiskCommands {
     /// Get info for a specific disk
     Info(DiskInfoArgs),
     /// Summarize current disks
-    List,
+    List(DiskListArgs),
     /// Determine what crucible resources are on the given physical disk.
     Physical(DiskPhysicalArgs),
 }
 
 #[derive(Debug, Args, Clone)]
 struct DiskInfoArgs {
-    /// The UUID of the volume
+    /// The UUID of the disk
     uuid: Uuid,
+}
+
+#[derive(Debug, Args, Clone)]
+struct DiskListArgs {
+    /// Include only disks of a given type.
+    #[clap(long = "type", short = 't', value_enum)]
+    disk_type: Option<DiskType>,
 }
 
 #[derive(Debug, Args, Clone)]
 struct DiskPhysicalArgs {
     /// The UUID of the physical disk
-    uuid: Uuid,
+    uuid: PhysicalDiskUuid,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -611,7 +681,7 @@ struct CollectionsShowArgs {
     show_long_strings: bool,
 
     #[clap(subcommand)]
-    filter: Option<CollectionsShowFilter>,
+    filter: Option<CollectionDisplayCliFilter>,
 }
 
 #[derive(Debug, Clone, Copy, Args)]
@@ -659,51 +729,6 @@ impl CollectionIdOrLatest {
     }
 }
 
-#[derive(Debug, Subcommand, Clone)]
-enum CollectionsShowFilter {
-    /// show all information from the collection
-    All,
-    /// show information about service processors (baseboard)
-    Sp {
-        /// show only information about one SP
-        serial: Option<String>,
-    },
-}
-
-impl CollectionsShowFilter {
-    fn include_sp_unknown_serial(&self) -> bool {
-        match self {
-            CollectionsShowFilter::All => true,
-            CollectionsShowFilter::Sp { serial: None } => true,
-            CollectionsShowFilter::Sp { serial: Some(_) } => false,
-        }
-    }
-
-    fn include_sp(&self, this_serial: &str) -> bool {
-        match self {
-            CollectionsShowFilter::All => true,
-            CollectionsShowFilter::Sp { serial: None } => true,
-            CollectionsShowFilter::Sp { serial: Some(serial) } => {
-                this_serial == serial
-            }
-        }
-    }
-
-    fn include_sleds(&self) -> bool {
-        match self {
-            CollectionsShowFilter::All => true,
-            CollectionsShowFilter::Sp { .. } => false,
-        }
-    }
-
-    fn include_keeper_membership(&self) -> bool {
-        match self {
-            CollectionsShowFilter::All => true,
-            CollectionsShowFilter::Sp { .. } => false,
-        }
-    }
-}
-
 #[derive(Debug, Args, Clone, Copy)]
 struct InvPhysicalDisksArgs {
     #[clap(long)]
@@ -725,6 +750,72 @@ struct SledsArgs {
     /// Show sleds that match the given filter
     #[clap(short = 'F', long, value_enum)]
     filter: Option<SledFilter>,
+}
+
+#[derive(Debug, Args, Clone)]
+struct SledInstancesArgs {
+    /// Filter by sled number(s). Comma-separated, ranges allowed
+    /// (e.g. "0,3,14-16")
+    #[clap(long = "sled")]
+    sled_numbers: Option<SledNumbers>,
+
+    /// Filter by sled serial number(s). Comma-separated
+    /// (e.g. "BRM44220010,BRM44220022")
+    #[clap(long = "serial", use_value_delimiter = true)]
+    serials: Option<Vec<String>>,
+
+    /// Filter by sled UUID(s). Comma-separated
+    #[clap(long = "sled-id", use_value_delimiter = true)]
+    sled_ids: Option<Vec<SledUuid>>,
+}
+
+/// A comma-separated list of sled numbers with range support
+/// (e.g. "0,3,14-16" -> [0, 3, 14, 15, 16]).
+#[derive(Debug, Clone)]
+struct SledNumbers(Vec<u16>);
+
+const MAX_SLED_NUMBER: u16 = 31;
+
+impl FromStr for SledNumbers {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut result = Vec::new();
+        for part in s.split(',') {
+            let part = part.trim();
+            if let Some((start, end)) = part.split_once('-') {
+                let start: u16 = start.trim().parse().map_err(|e| {
+                    format!("invalid sled number '{start}': {e}")
+                })?;
+                let end: u16 = end
+                    .trim()
+                    .parse()
+                    .map_err(|e| format!("invalid sled number '{end}': {e}"))?;
+                if end < start {
+                    return Err(format!("invalid range '{part}': end < start"));
+                }
+                if end > MAX_SLED_NUMBER {
+                    return Err(format!(
+                        "sled number {end} exceeds maximum \
+                         ({MAX_SLED_NUMBER})"
+                    ));
+                }
+                result.extend(start..=end);
+            } else {
+                let n: u16 = part.parse().map_err(|e| {
+                    format!("invalid sled number '{part}': {e}")
+                })?;
+                if n > MAX_SLED_NUMBER {
+                    return Err(format!(
+                        "sled number {n} exceeds maximum \
+                         ({MAX_SLED_NUMBER})"
+                    ));
+                }
+                result.push(n);
+            }
+        }
+        Ok(SledNumbers(result))
+    }
 }
 
 #[derive(Debug, Args, Clone)]
@@ -778,9 +869,10 @@ struct DryRunRegionAllocationArgs {
     #[arg(long)]
     block_size: u32,
 
-    /// The size of the virtual disk
+    /// The size of the virtual disk, in bytes or with a power-of-two unit
+    /// suffix (e.g. "10 GiB")
     #[arg(long)]
-    size: i64,
+    size: external::ByteCount,
 
     /// Should the allocated regions be restricted to distinct sleds?
     #[arg(long)]
@@ -1012,6 +1104,10 @@ enum ValidateCommands {
     /// Crucible agent says were deleted, or region snapshots that Nexus doesn't
     /// know about.
     ValidateRegionSnapshots,
+
+    /// Validate that the artifact replication configuration in the database
+    /// matches the one present on all sleds.
+    ValidateArtifactReplication,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1152,8 +1248,28 @@ struct SetStorageBufferArgs {
     /// The UUID of Pool
     id: Uuid,
 
-    /// How many bytes to set the buffer to
-    storage_buffer: i64,
+    /// The size to set the buffer to, in bytes or with a power-of-two unit
+    /// suffix (e.g. "250 GiB")
+    storage_buffer: external::ByteCount,
+}
+
+#[derive(Debug, Args, Clone)]
+struct TrustQuorumArgs {
+    #[command(subcommand)]
+    command: TrustQuorumCommands,
+}
+
+#[derive(Debug, Subcommand, Clone)]
+enum TrustQuorumCommands {
+    /// List trust quorum configurations for a rack
+    ListConfigs(TrustQuorumListConfigsArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+struct TrustQuorumListConfigsArgs {
+    /// Rack ID to list configurations for
+    #[arg(long)]
+    rack_id: RackUuid,
 }
 
 impl DbArgs {
@@ -1166,10 +1282,39 @@ impl DbArgs {
         omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
+        if let DbCommands::Sql = &self.command {
+            let _token = omdb.check_allow_destructive()?;
+            let url = self.db_url_opts.resolve_pg_url(omdb, log).await?;
+            let url = format!(
+                "postgresql://root@{}/omicron?sslmode=disable",
+                url.address()
+            );
+            let mut command =
+                Command::new("/opt/oxide/cockroachdb/bin/cockroach-sql");
+            let error = command.args(["--read-only", "--url", &url]).exec();
+            return Err(error)
+                .with_context(|| format!("failed to exec {command:?}"));
+        }
+
         let fetch_opts = &self.fetch_opts;
         self.db_url_opts.with_datastore(omdb, log, |opctx, datastore| {
             async move {
                 match &self.command {
+                    DbCommands::Sql => unreachable!(),
+                    DbCommands::Blueprints(args) => {
+                        cmd_db_blueprints(&opctx, &datastore, &fetch_opts, &args).await
+                    }
+                    DbCommands::DbMetadata(DbMetadataArgs {
+                        command: DbMetadataCommands::ListNexus,
+                    }) => {
+                        cmd_db_metadata_list_nexus(&opctx, &datastore).await
+                    }
+                    DbCommands::DbMetadata(DbMetadataArgs {
+                        command: DbMetadataCommands::ForceMarkNexusQuiesced(args),
+                    }) => {
+                        let token = omdb.check_allow_destructive()?;
+                        cmd_db_metadata_force_mark_nexus_quiesced(&opctx, &datastore, args, token).await
+                    }
                     DbCommands::CrucibleDataset(CrucibleDatasetArgs {
                         command: CrucibleDatasetCommands::List,
                     }) => {
@@ -1207,8 +1352,8 @@ impl DbArgs {
                     DbCommands::Disks(DiskArgs {
                         command: DiskCommands::Info(uuid),
                     }) => cmd_db_disk_info(&opctx, &datastore, uuid).await,
-                    DbCommands::Disks(DiskArgs { command: DiskCommands::List }) => {
-                        cmd_db_disk_list(&datastore, &fetch_opts).await
+                    DbCommands::Disks(DiskArgs { command: DiskCommands::List(args) }) => {
+                        cmd_db_disk_list(&datastore, &fetch_opts, args).await
                     }
                     DbCommands::Disks(DiskArgs {
                         command: DiskCommands::Physical(uuid),
@@ -1311,8 +1456,25 @@ impl DbArgs {
                     DbCommands::Saga(args) => {
                         args.exec(&omdb, &opctx, &datastore).await
                     }
+                    DbCommands::Sitrep(args) => {
+                        sitrep::cmd_db_sitrep(&omdb, &opctx, &datastore, &fetch_opts, args).await
+                    }
+                    DbCommands::Sitreps(args) => {
+                        sitrep::cmd_db_sitrep_history(&opctx, &datastore, &fetch_opts, args).await
+                    }
                     DbCommands::Sleds(args) => {
                         cmd_db_sleds(&opctx, &datastore, &fetch_opts, args).await
+                    }
+                    DbCommands::SledInstances(args) => {
+                        cmd_db_sled_instances(
+                            &opctx,
+                            &datastore,
+                            args,
+                        )
+                        .await
+                    }
+                    DbCommands::TargetRelease(args) => {
+                        target_release::cmd_db_target_release(&opctx, &datastore, &fetch_opts, args).await
                     }
                     DbCommands::Instance(InstanceArgs {
                         command: InstanceCommands::List(args),
@@ -1439,6 +1601,9 @@ impl DbArgs {
                     DbCommands::Validate(ValidateArgs {
                         command: ValidateCommands::ValidateRegionSnapshots,
                     }) => cmd_db_validate_region_snapshots(&datastore).await,
+                    DbCommands::Validate(ValidateArgs {
+                        command: ValidateCommands::ValidateArtifactReplication,
+                    }) => cmd_db_validate_artifact_replication(&opctx, &datastore, &fetch_opts).await,
                     DbCommands::Volumes(VolumeArgs {
                         command: VolumeCommands::Info(args),
                     }) => cmd_db_volume_info(&datastore, args).await,
@@ -1467,7 +1632,7 @@ impl DbArgs {
                         command: OximeterCommands::ListProducers
                     }) => cmd_db_oximeter_list_producers(&datastore, fetch_opts).await,
 
-                    DbCommands::Webhook(args) => cmd_db_webhook(&opctx, &datastore, &fetch_opts, &args).await,
+                    DbCommands::Alert(args) => alert::cmd_db_alert(&opctx, &datastore, &fetch_opts, &args).await,
                     DbCommands::Zpool(ZpoolArgs {
                         command: ZpoolCommands::List(args)
                     }) => cmd_db_zpool_list(&opctx, &datastore, &args).await,
@@ -1481,6 +1646,20 @@ impl DbArgs {
                             &args,
                             token,
                         ).await
+                    },
+                    DbCommands::Ereport(args) => {
+                        cmd_db_ereport(omdb, log, &datastore, &fetch_opts, &args).await
+                    }
+                    DbCommands::UserDataExport(args) => {
+                        args.exec(&omdb, &opctx, &datastore).await
+                    }
+                    DbCommands::Whatis(args) => {
+                        whatis::cmd_db_whatis(&datastore, args).await
+                    }
+                    DbCommands::TrustQuorum(TrustQuorumArgs {
+                        command: TrustQuorumCommands::ListConfigs(args),
+                    }) => {
+                        cmd_db_trust_quorum_list_configs(&opctx, &datastore, &fetch_opts, &args).await
                     }
                 }
             }
@@ -1604,16 +1783,19 @@ async fn lookup_service_info(
     service_id: Uuid,
     blueprint: &Blueprint,
 ) -> anyhow::Result<Option<ServiceInfo>> {
-    let Some(zone_config) = blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::any)
-        .find_map(|(_sled_id, zone_config)| {
-            if zone_config.id.into_untyped_uuid() == service_id {
-                Some(zone_config)
-            } else {
-                None
-            }
-        })
-    else {
+    // We don't know anything about `service_id`; it may be in-service or it may
+    // be expunged. Check all the zone states.
+    let mut all_zones = blueprint.all_in_service_and_expunged_zones(
+        BlueprintExpungedZoneAccessReason::Omdb,
+    );
+
+    let Some(zone_config) = all_zones.find_map(|(_sled_id, zone_config)| {
+        if zone_config.id.into_untyped_uuid() == service_id {
+            Some(zone_config)
+        } else {
+            None
+        }
+    }) else {
         return Ok(None);
     };
 
@@ -1656,13 +1838,13 @@ async fn lookup_probe(
 /// Helper function to looks up a project with the given ID.
 async fn lookup_project(
     datastore: &DataStore,
-    project_id: Uuid,
+    project_id: ProjectUuid,
 ) -> anyhow::Result<Option<Project>> {
     use nexus_db_schema::schema::project::dsl;
 
     let conn = datastore.pool_connection_for_tests().await?;
     dsl::project
-        .filter(dsl::id.eq(project_id))
+        .filter(dsl::id.eq(to_db_typed_uuid(project_id)))
         .limit(1)
         .select(Project::as_select())
         .get_result_async(&*conn)
@@ -1677,9 +1859,9 @@ async fn lookup_project(
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
 struct CrucibleDatasetRow {
     // dataset fields
-    id: Uuid,
+    id: DatasetUuid,
     time_deleted: String,
-    pool_id: Uuid,
+    pool_id: ZpoolUuid,
     address: String,
     size_used: i64,
     no_provision: bool,
@@ -1695,7 +1877,7 @@ struct CrucibleDatasetRow {
     size_left: Option<i128>,
 }
 
-fn option_impl_display<T: std::fmt::Display>(t: &Option<T>) -> String {
+pub fn option_impl_display<T: std::fmt::Display>(t: &Option<T>) -> String {
     match t {
         Some(v) => format!("{v}"),
         None => String::from("n/a"),
@@ -1715,20 +1897,19 @@ async fn get_crucible_dataset_rows(
         bail!("no latest inventory found!");
     };
 
-    let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
+    let mut zpool_total_size: HashMap<ZpoolUuid, i64> = HashMap::new();
 
-    for (_, sled_agent) in latest_collection.sled_agents {
+    for sled_agent in latest_collection.sled_agents {
         for zpool in sled_agent.zpools {
-            zpool_total_size
-                .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());
+            zpool_total_size.insert(zpool.id, zpool.total_size.into());
         }
     }
 
-    let zpools: HashMap<Uuid, Zpool> = datastore
+    let zpools: HashMap<ZpoolUuid, Zpool> = datastore
         .zpool_list_all_external_batched(opctx)
         .await?
         .into_iter()
-        .map(|(zpool, _)| (zpool.id().into_untyped_uuid(), zpool))
+        .map(|(zpool, _)| (zpool.id(), zpool))
         .collect();
 
     let mut result: Vec<CrucibleDatasetRow> =
@@ -1736,22 +1917,22 @@ async fn get_crucible_dataset_rows(
 
     for d in crucible_datasets {
         let control_plane_storage_buffer: Option<i64> = match zpools
-            .get(&d.pool_id)
+            .get(&d.pool_id())
         {
             Some(zpool) => Some(zpool.control_plane_storage_buffer().into()),
             None => None,
         };
 
-        let pool_total_size = zpool_total_size.get(&d.pool_id);
+        let pool_total_size = zpool_total_size.get(&d.pool_id());
 
         result.push(CrucibleDatasetRow {
             // dataset fields
-            id: d.id().into_untyped_uuid(),
+            id: d.id(),
             time_deleted: match d.time_deleted() {
                 Some(t) => t.to_string(),
                 None => String::from(""),
             },
-            pool_id: d.pool_id,
+            pool_id: d.pool_id(),
             address: d.address().to_string(),
             size_used: d.size_used,
             no_provision: d.no_provision(),
@@ -1869,8 +2050,38 @@ async fn cmd_crucible_dataset_mark_provisionable(
 struct DiskIdentity {
     id: Uuid,
     size: String,
+    #[tabled(rename = "TYPE")]
+    disk_type: DiskType,
     state: String,
     name: String,
+}
+
+#[derive(
+    Debug, Copy, Clone, PartialEq, Eq, clap::ValueEnum, strum::Display,
+)]
+#[clap(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+enum DiskType {
+    Crucible,
+    Local,
+}
+
+impl From<db::model::DiskType> for DiskType {
+    fn from(disk_type: db::model::DiskType) -> Self {
+        match disk_type {
+            db::model::DiskType::Crucible => DiskType::Crucible,
+            db::model::DiskType::LocalStorage => DiskType::Local,
+        }
+    }
+}
+
+impl From<DiskType> for db::model::DiskType {
+    fn from(disk_type: DiskType) -> Self {
+        match disk_type {
+            DiskType::Crucible => db::model::DiskType::Crucible,
+            DiskType::Local => db::model::DiskType::LocalStorage,
+        }
+    }
 }
 
 impl From<&'_ db::model::Disk> for DiskIdentity {
@@ -1878,6 +2089,7 @@ impl From<&'_ db::model::Disk> for DiskIdentity {
         Self {
             name: disk.name().to_string(),
             id: disk.id(),
+            disk_type: disk.disk_type.into(),
             size: disk.size.to_string(),
             state: disk.runtime().disk_state,
         }
@@ -1888,6 +2100,7 @@ impl From<&'_ db::model::Disk> for DiskIdentity {
 async fn cmd_db_disk_list(
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
+    args: &DiskListArgs,
 ) -> Result<(), anyhow::Error> {
     let ctx = || "listing disks".to_string();
 
@@ -1895,6 +2108,11 @@ async fn cmd_db_disk_list(
     let mut query = dsl::disk.into_boxed();
     if !fetch_opts.include_deleted {
         query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    if let Some(disk_type) = args.disk_type {
+        let disk_type = db::model::DiskType::from(disk_type);
+        query = query.filter(dsl::disk_type.eq(disk_type));
     }
 
     #[derive(Tabled)]
@@ -1919,7 +2137,7 @@ async fn cmd_db_disk_list(
 
     let disks = query
         .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
-        .select(Disk::as_select())
+        .select(db::model::Disk::as_select())
         .load_async(&*datastore.pool_connection_for_tests().await?)
         .await
         .context("loading disks")?;
@@ -2072,7 +2290,6 @@ async fn cmd_db_rack_list(
     struct RackRow {
         id: String,
         initialized: bool,
-        tuf_base_url: String,
         rack_subnet: String,
     }
 
@@ -2088,7 +2305,6 @@ async fn cmd_db_rack_list(
     let rows = rack_list.into_iter().map(|rack| RackRow {
         id: rack.id().to_string(),
         initialized: rack.initialized,
-        tuf_base_url: rack.tuf_base_url.unwrap_or_else(|| "-".to_string()),
         rack_subnet: rack
             .rack_subnet
             .map(|subnet| subnet.to_string())
@@ -2105,11 +2321,10 @@ async fn cmd_db_rack_list(
     Ok(())
 }
 
-/// Run `omdb db disk info <UUID>`.
-async fn cmd_db_disk_info(
+async fn crucible_disk_info(
     opctx: &OpContext,
     datastore: &DataStore,
-    args: &DiskInfoArgs,
+    disk: CrucibleDisk,
 ) -> Result<(), anyhow::Error> {
     // The row describing the instance
     #[derive(Tabled)]
@@ -2121,6 +2336,8 @@ async fn cmd_db_disk_info(
         propolis_zone: String,
         volume_id: String,
         disk_state: String,
+        import_address: String,
+        readonly: bool,
     }
 
     // The rows describing the downstairs regions for this disk/volume
@@ -2133,20 +2350,19 @@ async fn cmd_db_disk_info(
         physical_disk: String,
     }
 
-    use nexus_db_schema::schema::disk::dsl as disk_dsl;
-
     let conn = datastore.pool_connection_for_tests().await?;
 
-    let disk = disk_dsl::disk
-        .filter(disk_dsl::id.eq(args.uuid))
-        .limit(1)
-        .select(Disk::as_select())
-        .load_async(&*conn)
-        .await
-        .context("loading requested disk")?;
+    let disk_name = disk.name().to_string();
 
-    let Some(disk) = disk.into_iter().next() else {
-        bail!("no disk: {} found", args.uuid);
+    let volume_id = disk.volume_id().to_string();
+
+    let disk_state = disk.runtime().disk_state.to_string();
+
+    let readonly = disk.is_read_only();
+
+    let import_address = match disk.pantry_address() {
+        Some(ref pa) => pa.clone().to_string(),
+        None => "-".to_string(),
     };
 
     // For information about where this disk is attached.
@@ -2180,14 +2396,14 @@ async fn cmd_db_disk_info(
         };
 
         let instance_name = instance.instance().name().to_string();
-        let disk_name = disk.name().to_string();
+
         if instance.vmm().is_some() {
             let propolis_id =
                 instance.instance().runtime().propolis_id.unwrap();
             let my_sled_id = instance.sled_id().unwrap();
 
             let (_, my_sled) = LookupPath::new(opctx, datastore)
-                .sled_id(my_sled_id.into_untyped_uuid())
+                .sled_id(my_sled_id)
                 .fetch()
                 .await
                 .context("failed to look up sled")?;
@@ -2197,8 +2413,10 @@ async fn cmd_db_disk_info(
                 disk_name,
                 instance_name,
                 propolis_zone: format!("oxz_propolis-server_{}", propolis_id),
-                volume_id: disk.volume_id().to_string(),
-                disk_state: disk.runtime_state.disk_state.to_string(),
+                volume_id,
+                disk_state,
+                import_address,
+                readonly,
             }
         } else {
             UpstairsRow {
@@ -2206,20 +2424,23 @@ async fn cmd_db_disk_info(
                 disk_name,
                 instance_name,
                 propolis_zone: NO_ACTIVE_PROPOLIS_MSG.to_string(),
-                volume_id: disk.volume_id().to_string(),
-                disk_state: disk.runtime_state.disk_state.to_string(),
+                volume_id,
+                disk_state,
+                import_address,
+                readonly,
             }
         }
     } else {
-        // If the disk is not attached to anything, just print empty
-        // fields.
+        // If the disk is not attached to anything, just print empty fields.
         UpstairsRow {
             host_serial: "-".to_string(),
-            disk_name: disk.name().to_string(),
+            disk_name,
             instance_name: "-".to_string(),
             propolis_zone: "-".to_string(),
-            volume_id: disk.volume_id().to_string(),
-            disk_state: disk.runtime_state.disk_state.to_string(),
+            volume_id,
+            disk_state,
+            import_address,
+            readonly,
         }
     };
     rows.push(usr);
@@ -2236,14 +2457,14 @@ async fn cmd_db_disk_info(
 
     let mut rows = Vec::with_capacity(3);
     for (dataset, region) in regions {
-        let my_pool_id = dataset.pool_id;
+        let my_pool_id = dataset.pool_id();
         let (_, my_zpool) = LookupPath::new(opctx, datastore)
             .zpool_id(my_pool_id)
             .fetch()
             .await
             .context("failed to look up zpool")?;
 
-        let my_sled_id = my_zpool.sled_id;
+        let my_sled_id = my_zpool.sled_id();
 
         let (_, my_sled) = LookupPath::new(opctx, datastore)
             .sled_id(my_sled_id)
@@ -2255,7 +2476,7 @@ async fn cmd_db_disk_info(
             host_serial: my_sled.serial_number().to_string(),
             region: region.id().to_string(),
             dataset: dataset.id().to_string(),
-            physical_disk: my_zpool.physical_disk_id.to_string(),
+            physical_disk: my_zpool.physical_disk_id().to_string(),
         });
     }
 
@@ -2267,7 +2488,198 @@ async fn cmd_db_disk_info(
     println!("{}", table);
 
     get_and_display_vcr(disk.volume_id(), datastore).await?;
+
     Ok(())
+}
+
+async fn local_storage_disk_info(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    disk: LocalStorageDisk,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct GenericRow {
+        host_serial: String,
+        disk_name: String,
+        instance_name: String,
+        propolis_zone: String,
+        disk_state: String,
+    }
+
+    let conn = datastore.pool_connection_for_tests().await?;
+
+    let disk_name = disk.name().to_string();
+    let disk_state = disk.runtime().disk_state.to_string();
+
+    let row = if let Some(instance_uuid) = disk.runtime().attach_instance_id {
+        // Get the instance this disk is attached to
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
+        use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
+        let instances: Vec<InstanceAndActiveVmm> = instance_dsl::instance
+            .filter(instance_dsl::id.eq(instance_uuid))
+            .left_join(
+                vmm_dsl::vmm.on(vmm_dsl::id
+                    .nullable()
+                    .eq(instance_dsl::active_propolis_id)
+                    .and(vmm_dsl::time_deleted.is_null())),
+            )
+            .limit(1)
+            .select((Instance::as_select(), Option::<Vmm>::as_select()))
+            .load_async(&*conn)
+            .await
+            .context("loading requested instance")?
+            .into_iter()
+            .map(|i: (Instance, Option<Vmm>)| i.into())
+            .collect();
+
+        let Some(instance) = instances.into_iter().next() else {
+            bail!("no instance: {} found", instance_uuid);
+        };
+
+        let instance_name = instance.instance().name().to_string();
+
+        if instance.vmm().is_some() {
+            let propolis_id =
+                instance.instance().runtime().propolis_id.unwrap();
+            let my_sled_id = instance.sled_id().unwrap();
+
+            let (_, my_sled) = LookupPath::new(opctx, datastore)
+                .sled_id(my_sled_id)
+                .fetch()
+                .await
+                .context("failed to look up sled")?;
+
+            GenericRow {
+                host_serial: my_sled.serial_number().to_string(),
+                disk_name,
+                instance_name,
+                propolis_zone: format!("oxz_propolis-server_{}", propolis_id),
+                disk_state,
+            }
+        } else {
+            GenericRow {
+                host_serial: NOT_ON_SLED_MSG.to_string(),
+                disk_name,
+                instance_name,
+                propolis_zone: NO_ACTIVE_PROPOLIS_MSG.to_string(),
+                disk_state,
+            }
+        }
+    } else {
+        // If the disk is not attached to anything, just print empty fields.
+        GenericRow {
+            host_serial: "-".to_string(),
+            disk_name,
+            instance_name: "-".to_string(),
+            propolis_zone: "-".to_string(),
+            disk_state,
+        }
+    };
+
+    let table = tabled::Table::new(vec![row])
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct Row {
+        disk_name: String,
+
+        time_created: DateTime<Utc>,
+        #[tabled(display_with = "display_option_blank")]
+        time_deleted: Option<DateTime<Utc>>,
+
+        allocation_type: String,
+
+        allocation_id: DatasetUuid,
+        dataset_id: DatasetUuid,
+        pool_id: ExternalZpoolUuid,
+        sled_id: SledUuid,
+
+        dataset_size: u64,
+    }
+
+    if let Some(allocation) = &disk.local_storage_dataset_allocation {
+        let row = match allocation {
+            LocalStorageAllocation::Unencrypted(allocation) => Row {
+                disk_name: disk.name().to_string(),
+
+                time_created: allocation.time_created,
+                time_deleted: allocation.time_deleted,
+
+                allocation_type: String::from("unencrypted"),
+
+                allocation_id: allocation.id(),
+                dataset_id: allocation.local_storage_unencrypted_dataset_id(),
+                pool_id: allocation.pool_id(),
+                sled_id: allocation.sled_id(),
+
+                dataset_size: allocation.dataset_size.to_bytes(),
+            },
+
+            LocalStorageAllocation::Encrypted(allocation) => Row {
+                disk_name: disk.name().to_string(),
+
+                time_created: allocation.time_created,
+                time_deleted: allocation.time_deleted,
+
+                allocation_type: String::from("encrypted"),
+
+                allocation_id: allocation.id(),
+                dataset_id: allocation.local_storage_dataset_id(),
+                pool_id: allocation.pool_id(),
+                sled_id: allocation.sled_id(),
+
+                dataset_size: allocation.dataset_size.to_bytes(),
+            },
+        };
+
+        let rows = vec![row];
+
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string();
+
+        println!("{}", table);
+    } else {
+        println!("no allocation yet");
+    }
+
+    Ok(())
+}
+
+/// Run `omdb db disk info <UUID>`.
+async fn cmd_db_disk_info(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &DiskInfoArgs,
+) -> Result<(), anyhow::Error> {
+    let disk = {
+        use nexus_db_schema::schema::disk::dsl;
+
+        let conn = datastore.pool_connection_for_tests().await?;
+
+        dsl::disk
+            .filter(dsl::id.eq(args.uuid))
+            .select(nexus_db_model::Disk::as_select())
+            .get_result_async(&*conn)
+            .await
+            .context("failed to find disk")?
+    };
+
+    match datastore.disk_get_with_model(opctx, disk).await? {
+        Disk::Crucible(disk) => {
+            crucible_disk_info(opctx, datastore, disk).await
+        }
+        Disk::LocalStorage(disk) => {
+            local_storage_disk_info(opctx, datastore, disk).await
+        }
+    }
 }
 
 // Given a UUID, search the database for a volume with that ID
@@ -2318,7 +2730,7 @@ async fn cmd_db_disk_physical(
     }
 
     let zpools = query
-        .filter(zpool_dsl::physical_disk_id.eq(args.uuid))
+        .filter(zpool_dsl::physical_disk_id.eq(to_db_typed_uuid(args.uuid)))
         .select(Zpool::as_select())
         .load_async(&*conn)
         .await
@@ -2337,7 +2749,7 @@ async fn cmd_db_disk_physical(
     // changes, this code will still work.
     for zp in zpools {
         // zpool has the sled id, record that so we can find the serial number.
-        sled_ids.insert(zp.sled_id);
+        sled_ids.insert(zp.sled_id());
 
         // Next, we find all the Crucible datasets that are on our zpool.
         use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
@@ -2347,7 +2759,7 @@ async fn cmd_db_disk_physical(
         }
 
         let datasets = query
-            .filter(dataset_dsl::pool_id.eq(zp.id()))
+            .filter(dataset_dsl::pool_id.eq(to_db_typed_uuid(zp.id())))
             .select(CrucibleDataset::as_select())
             .load_async(&*conn)
             .await
@@ -2390,7 +2802,7 @@ async fn cmd_db_disk_physical(
             .context("loading region")?;
 
         for rs in regions {
-            volume_ids.insert(rs.volume_id().into_untyped_uuid());
+            volume_ids.insert(rs.volume_id());
         }
     }
 
@@ -2398,17 +2810,14 @@ async fn cmd_db_disk_physical(
     // that is part of a dataset on a pool on our disk.  The next step is
     // to find the virtual disks associated with these volume IDs and
     // display information about those disks.
-    use nexus_db_schema::schema::disk::dsl;
-    let mut query = dsl::disk.into_boxed();
-    if !fetch_opts.include_deleted {
-        query = query.filter(dsl::time_deleted.is_null());
-    }
 
-    let disks = query
-        .filter(dsl::volume_id.eq_any(volume_ids))
-        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
-        .select(Disk::as_select())
-        .load_async(&*conn)
+    let disks: Vec<CrucibleDisk> = datastore
+        .disks_get_matching_volumes(
+            &conn,
+            &volume_ids,
+            fetch_opts.include_deleted,
+            i64::from(u32::from(fetch_opts.fetch_limit)),
+        )
         .await
         .context("loading disks")?;
 
@@ -2550,7 +2959,7 @@ struct PhysicalDiskRow {
     serial: String,
     vendor: String,
     model: String,
-    sled_id: Uuid,
+    sled_id: SledUuid,
     policy: PhysicalDiskPolicy,
     state: PhysicalDiskState,
 }
@@ -2562,7 +2971,7 @@ impl From<PhysicalDisk> for PhysicalDiskRow {
             serial: d.serial.clone(),
             vendor: d.vendor.clone(),
             model: d.model.clone(),
-            sled_id: d.sled_id,
+            sled_id: d.sled_id(),
             policy: d.disk_policy.into(),
             state: d.disk_state.into(),
         }
@@ -2608,7 +3017,7 @@ async fn cmd_db_physical_disks(
 // SERVICES
 
 // Snapshots
-fn format_snapshot(state: &SnapshotState) -> impl Display {
+fn format_snapshot(state: &SnapshotState) -> impl Display + use<> {
     match state {
         SnapshotState::Creating => "creating".to_string(),
         SnapshotState::Ready => "ready".to_string(),
@@ -2775,14 +3184,14 @@ async fn cmd_db_snapshot_info(
     } else {
         let mut rows = Vec::with_capacity(3);
         for (dataset, region) in regions {
-            let my_pool_id = dataset.pool_id;
+            let my_pool_id = dataset.pool_id();
             let (_, my_zpool) = LookupPath::new(opctx, datastore)
                 .zpool_id(my_pool_id)
                 .fetch()
                 .await
                 .context("failed to look up zpool")?;
 
-            let my_sled_id = my_zpool.sled_id;
+            let my_sled_id = my_zpool.sled_id();
 
             let (_, my_sled) = LookupPath::new(opctx, datastore)
                 .sled_id(my_sled_id)
@@ -2794,7 +3203,7 @@ async fn cmd_db_snapshot_info(
                 host_serial: my_sled.serial_number().to_string(),
                 region: region.id().to_string(),
                 dataset: dataset.id().to_string(),
-                physical_disk: my_zpool.physical_disk_id.to_string(),
+                physical_disk: my_zpool.physical_disk_id().to_string(),
             });
         }
 
@@ -2815,14 +3224,14 @@ async fn cmd_db_snapshot_info(
 
     let mut rows = Vec::with_capacity(3);
     for (dataset, region) in regions {
-        let my_pool_id = dataset.pool_id;
+        let my_pool_id = dataset.pool_id();
         let (_, my_zpool) = LookupPath::new(opctx, datastore)
             .zpool_id(my_pool_id)
             .fetch()
             .await
             .context("failed to look up zpool")?;
 
-        let my_sled_id = my_zpool.sled_id;
+        let my_sled_id = my_zpool.sled_id();
 
         let (_, my_sled) = LookupPath::new(opctx, datastore)
             .sled_id(my_sled_id)
@@ -2834,7 +3243,7 @@ async fn cmd_db_snapshot_info(
             host_serial: my_sled.serial_number().to_string(),
             region: region.id().to_string(),
             dataset: dataset.id().to_string(),
-            physical_disk: my_zpool.physical_disk_id.to_string(),
+            physical_disk: my_zpool.physical_disk_id().to_string(),
         });
     }
 
@@ -2982,7 +3391,7 @@ fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
         bs: String,
         bpe: u64,
         ec: u32,
-        gen: u64,
+        generation: u64,
         read_only: bool,
     }
 
@@ -3028,7 +3437,7 @@ fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
             block_size,
             blocks_per_extent,
             extent_count,
-            gen,
+            generation,
             opts,
         } => {
             let row = VCRRegion {
@@ -3036,7 +3445,7 @@ fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
                 bs: block_size.to_string(),
                 bpe: blocks_per_extent,
                 ec: extent_count,
-                gen,
+                generation,
                 read_only: opts.read_only,
             };
             let table = tabled::Table::new(&[row])
@@ -3250,7 +3659,8 @@ async fn cmd_db_volume_cannot_activate(
 ) -> Result<(), anyhow::Error> {
     let conn = datastore.pool_connection_for_tests().await?;
 
-    let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+    let mut paginator =
+        Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
     while let Some(p) = paginator.next() {
         use nexus_db_schema::schema::volume::dsl;
         let batch = paginated(dsl::volume, dsl::id, &p.current_pagparams())
@@ -3464,26 +3874,20 @@ async fn volume_used_by(
     fetch_opts: &DbFetchOptions,
     volumes: &[Uuid],
 ) -> Result<Vec<VolumeUsedBy>, anyhow::Error> {
-    let disks_used: Vec<Disk> = {
-        let volumes = volumes.to_vec();
+    let disks_used: Vec<CrucibleDisk> = {
+        let conn = datastore.pool_connection_for_tests().await?;
+        let volumes: HashSet<VolumeUuid> = volumes
+            .iter()
+            .map(|id| VolumeUuid::from_untyped_uuid(*id))
+            .collect();
+
         datastore
-            .pool_connection_for_tests()
-            .await?
-            .transaction_async(async move |conn| {
-                use nexus_db_schema::schema::disk::dsl;
-
-                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
-
-                paginated(
-                    dsl::disk,
-                    dsl::id,
-                    &first_page::<dsl::id>(fetch_opts.fetch_limit),
-                )
-                .filter(dsl::volume_id.eq_any(volumes))
-                .select(Disk::as_select())
-                .load_async(&conn)
-                .await
-            })
+            .disks_get_matching_volumes(
+                &conn,
+                &volumes,
+                fetch_opts.include_deleted,
+                i64::from(u32::from(fetch_opts.fetch_limit)),
+            )
             .await?
     };
 
@@ -3549,6 +3953,33 @@ async fn volume_used_by(
         String::from("listing images used")
     });
 
+    let export_used: Vec<UserDataExportRecord> = {
+        let volumes = volumes.to_vec();
+        datastore
+            .pool_connection_for_tests()
+            .await?
+            .transaction_async(async move |conn| {
+                use nexus_db_schema::schema::user_data_export::dsl;
+
+                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+                paginated(
+                    dsl::user_data_export,
+                    dsl::id,
+                    &first_page::<dsl::id>(fetch_opts.fetch_limit),
+                )
+                .filter(dsl::volume_id.eq_any(volumes))
+                .select(UserDataExportRecord::as_select())
+                .load_async(&conn)
+                .await
+            })
+            .await?
+    };
+
+    check_limit(&export_used, fetch_opts.fetch_limit, || {
+        String::from("listing user data export used")
+    });
+
     Ok(volumes
         .iter()
         .map(|volume_id| {
@@ -3566,6 +3997,9 @@ async fn volume_used_by(
 
             let maybe_disk =
                 disks_used.iter().find(|x| x.volume_id() == volume_id);
+
+            let maybe_export =
+                export_used.iter().find(|x| x.volume_id() == Some(volume_id));
 
             if let Some(image) = maybe_image {
                 VolumeUsedBy {
@@ -3598,6 +4032,23 @@ async fn volume_used_by(
                     usage_id: disk.id().to_string(),
                     usage_name: disk.name().to_string(),
                     deleted: disk.time_deleted().is_some(),
+                }
+            } else if let Some(export) = maybe_export {
+                match export.resource() {
+                    UserDataExportResource::Snapshot { id } => VolumeUsedBy {
+                        volume_id,
+                        usage_type: String::from("export"),
+                        usage_id: id.to_string(),
+                        usage_name: String::from("snapshot"),
+                        deleted: export.deleted(),
+                    },
+                    UserDataExportResource::Image { id } => VolumeUsedBy {
+                        volume_id,
+                        usage_type: String::from("export"),
+                        usage_id: id.to_string(),
+                        usage_name: String::from("image"),
+                        deleted: export.deleted(),
+                    },
                 }
             } else {
                 VolumeUsedBy {
@@ -3652,7 +4103,7 @@ async fn cmd_db_region_used_by(
 
     let rows: Vec<_> = regions
         .into_iter()
-        .zip(volumes_used_by.into_iter())
+        .zip(volumes_used_by)
         .map(|(region, volume_used_by)| RegionRow {
             id: region.id(),
             volume_id: volume_used_by.volume_id,
@@ -3738,8 +4189,8 @@ async fn cmd_db_dry_run_region_allocation(
         None => VolumeUuid::new_v4(),
     };
 
-    let size: external::ByteCount = args.size.try_into()?;
-    let block_size: params::BlockSize = args.block_size.try_into()?;
+    let size = args.size;
+    let block_size: BlockSize = args.block_size.try_into()?;
 
     let (blocks_per_extent, extent_count) = DataStore::get_crucible_allocation(
         &block_size.try_into().unwrap(),
@@ -3817,10 +4268,10 @@ async fn cmd_db_dry_run_region_allocation(
     struct Row {
         pub region_id: Uuid,
 
-        pub dataset_id: Uuid,
+        pub dataset_id: DatasetUuid,
         pub size_used: i64,
 
-        pub pool_id: Uuid,
+        pub pool_id: ZpoolUuid,
 
         #[tabled(display_with = "option_impl_display")]
         pub total_size: Option<i64>,
@@ -3840,22 +4291,21 @@ async fn cmd_db_dry_run_region_allocation(
         );
     };
 
-    let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
+    let mut zpool_total_size: HashMap<ZpoolUuid, i64> = HashMap::new();
 
-    for (_, sled_agent) in latest_collection.sled_agents {
+    for sled_agent in latest_collection.sled_agents {
         for zpool in sled_agent.zpools {
-            zpool_total_size
-                .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());
+            zpool_total_size.insert(zpool.id, zpool.total_size.into());
         }
     }
 
     for (dataset, region) in datasets_and_regions {
-        let pool_id = dataset.pool_id.into_untyped_uuid();
+        let pool_id = dataset.pool_id();
         let total_size = zpool_total_size.get(&pool_id);
         rows.push(Row {
             region_id: region.id(),
 
-            dataset_id: dataset.id().into_untyped_uuid(),
+            dataset_id: dataset.id(),
             size_used: dataset.size_used,
 
             pool_id,
@@ -4016,6 +4466,9 @@ async fn cmd_db_region_replacement_status(
                         .await?;
 
                 if let Some(repair_progress) = maybe_repair_progress {
+                    // {wide_bar:.green}, etc. are indicatif template
+                    // placeholders, not Rust format args.
+                    #[expect(clippy::literal_string_with_formatting_args)]
                     let bar = ProgressBar::with_draw_target(
                         Some(repair_progress.total_items as u64),
                         ProgressDrawTarget::stdout(),
@@ -4116,6 +4569,9 @@ async fn cmd_db_region_replacement_info(
                     .await?;
 
             if let Some(repair_progress) = maybe_repair_progress {
+                // {wide_bar:.green}, etc. are indicatif template
+                // placeholders, not Rust format args.
+                #[expect(clippy::literal_string_with_formatting_args)]
                 let bar = ProgressBar::with_draw_target(
                     Some(repair_progress.total_items as u64),
                     ProgressDrawTarget::stdout(),
@@ -4223,11 +4679,13 @@ struct SledRow {
     role: &'static str,
     policy: SledPolicy,
     state: SledState,
-    id: Uuid,
+    #[tabled(rename = "BP AVAIL")]
+    bp_availability: &'static str,
+    id: SledUuid,
 }
 
-impl From<Sled> for SledRow {
-    fn from(s: Sled) -> Self {
+impl SledRow {
+    fn new(s: Sled, bp_availability: Option<DbSledBpAvailability>) -> Self {
         SledRow {
             id: s.id(),
             serial: s.serial_number().to_string(),
@@ -4235,6 +4693,10 @@ impl From<Sled> for SledRow {
             role: if s.is_scrimlet() { "scrimlet" } else { "-" },
             policy: s.policy(),
             state: s.state().into(),
+            bp_availability: match bp_availability {
+                Some(state) => state.label(),
+                None => "(missing)",
+            },
         }
     }
 }
@@ -4264,7 +4726,19 @@ async fn cmd_db_sleds(
         .context("listing sleds")?;
     check_limit(&sleds, limit, || String::from("listing sleds"));
 
-    let rows = sleds.into_iter().map(|s| SledRow::from(s));
+    // Look up each sled's reconfigurator provisioning availability from the
+    // `rendezvous_sled_bp_availability` rendezvous table. A sled might not be
+    // present in the table (e.g. it was just added and the reconciliation task
+    // has not run yet), in which case it is rendered as `(missing)`.
+    let bp_availability = datastore
+        .rendezvous_sled_bp_availability_list_all_batched(opctx)
+        .await
+        .context("listing sled bp-availability rendezvous rows")?;
+
+    let rows = sleds.into_iter().map(|s| {
+        let state = bp_availability.get(&s.id()).map(|r| r.bp_availability());
+        SledRow::new(s, state)
+    });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(1, 1, 0, 0))
@@ -4273,6 +4747,171 @@ async fn cmd_db_sleds(
     println!("{}", table);
 
     Ok(())
+}
+
+/// Run `omdb db sled-instances`: show instances grouped by sled.
+async fn cmd_db_sled_instances(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &SledInstancesArgs,
+) -> Result<(), anyhow::Error> {
+    use nexus_db_schema::schema::instance::dsl;
+    use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
+
+    // Step 1: Fetch the latest inventory collection to get
+    // sled -> (MGS slot, serial) mappings.
+    let collection =
+        CollectionIdOrLatest::Latest.to_collection(opctx, datastore).await?;
+
+    // Build a map: sled_id -> (sp_slot, serial). We only care
+    // about SpType::Sled SPs since instances only run on sleds.
+    struct SledInfo {
+        sp_slot: Option<u16>,
+        serial: String,
+    }
+
+    impl SledInfo {
+        fn slot_label(&self) -> String {
+            match self.sp_slot {
+                Some(sp_slot) => format!("Sled {}", sp_slot),
+                None => "Sled ???".to_string(),
+            }
+        }
+    }
+
+    let mut sled_info: BTreeMap<SledUuid, SledInfo> = BTreeMap::new();
+
+    for sled_agent in &collection.sled_agents {
+        let info = match &sled_agent.baseboard_id {
+            Some(baseboard_id) => {
+                let serial = baseboard_id.serial_number.clone();
+                match collection.sps.get(baseboard_id) {
+                    Some(sp)
+                        if sp.sp_type
+                            == nexus_types::inventory::SpType::Sled =>
+                    {
+                        SledInfo { sp_slot: Some(sp.sp_slot), serial }
+                    }
+                    Some(_) => continue, // not a sled, skip
+                    None => {
+                        eprintln!(
+                            "WARN: no SP found for baseboard \
+                                 {} (sled {})",
+                            baseboard_id.serial_number, sled_agent.sled_id,
+                        );
+                        SledInfo { sp_slot: None, serial }
+                    }
+                }
+            }
+            None => {
+                eprintln!(
+                    "WARN: sled {} has no baseboard ID in \
+                     inventory",
+                    sled_agent.sled_id,
+                );
+                SledInfo { sp_slot: None, serial: "unknown".to_string() }
+            }
+        };
+        sled_info.insert(sled_agent.sled_id, info);
+    }
+
+    // Apply filters: keep only sleds matching the requested
+    // --sled, --serial, or --sled-id criteria.
+    if args.sled_numbers.is_some()
+        || args.serials.is_some()
+        || args.sled_ids.is_some()
+    {
+        sled_info.retain(|sled_id, info| {
+            if let Some(ref nums) = args.sled_numbers {
+                if let Some(sp_slot) = info.sp_slot {
+                    if nums.0.contains(&sp_slot) {
+                        return true;
+                    }
+                }
+            }
+            if let Some(ref serials) = args.serials {
+                if serials.iter().any(|s| s == &info.serial) {
+                    return true;
+                }
+            }
+            if let Some(ref ids) = args.sled_ids {
+                if ids.contains(sled_id) {
+                    return true;
+                }
+            }
+            false
+        });
+    }
+
+    // Step 2: Sort sleds by slot number so that Sled 2 comes
+    // before Sled 10.
+    let mut sorted_sleds: Vec<_> = sled_info.iter().collect();
+    sorted_sleds.sort_by_key(|(_, a)| a.sp_slot);
+
+    // Step 3: For each sled, query for instances running on it
+    // and print the results.
+    for (sled_id, info) in &sorted_sleds {
+        let instances: Vec<InstanceAndActiveVmm> = dsl::instance
+            .filter(dsl::time_deleted.is_null())
+            .inner_join(
+                vmm_dsl::vmm.on(vmm_dsl::id
+                    .nullable()
+                    .eq(dsl::active_propolis_id)
+                    .and(vmm_dsl::time_deleted.is_null())
+                    .and(vmm_dsl::sled_id.eq(sled_id.into_untyped_uuid()))),
+            )
+            .select((Instance::as_select(), Option::<Vmm>::as_select()))
+            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .await
+            .context("loading instances")?
+            .into_iter()
+            .map(|i: (Instance, Option<Vmm>)| i.into())
+            .collect();
+
+        println!(
+            "{} (serial: {})  sled_id: {}",
+            info.slot_label(),
+            info.serial,
+            sled_id,
+        );
+        if !instances.is_empty() {
+            print_instance_table(&instances);
+        }
+        println!();
+    }
+
+    Ok(())
+}
+
+fn print_instance_table(instances: &[InstanceAndActiveVmm]) {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct SledInstanceRow {
+        instance_id: String,
+        propolis_id: MaybePropolisId,
+        state: String,
+        name: String,
+    }
+
+    let rows: Vec<SledInstanceRow> = instances
+        .iter()
+        .map(|inst| {
+            let f = instance_fields(inst);
+            SledInstanceRow {
+                instance_id: f.id,
+                propolis_id: f.propolis_id,
+                state: f.state,
+                name: f.name,
+            }
+        })
+        .collect();
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
 }
 
 // INSTANCES
@@ -4305,7 +4944,7 @@ async fn cmd_db_instance_info(
         .next()
         .ok_or_else(|| anyhow::anyhow!("no instance found with ID {id}"))?;
 
-    let active_vmm = if let Some(id) = instance.runtime_state.propolis_id {
+    let active_vmm = if let Some(id) = instance.propolis_id {
         let fetch_result = vmm_dsl::vmm
             .filter(vmm_dsl::id.eq(id))
             .select(Vmm::as_select())
@@ -4362,11 +5001,10 @@ async fn cmd_db_instance_info(
     const TARGET_VMM: &'static str = "target VMM ID";
     const MIGRATION_ID: &'static str = "migration ID";
     const UPDATER_LOCK: &'static str = "updater lock";
-    const ACTIVE_VMM_RECORD: &'static str = "active VMM record";
     const MIGRATION_RECORD: &'static str = "migration record";
-    const TARGET_VMM_RECORD: &'static str = "target VMM record";
     const WIDTH: usize = crate::helpers::const_max_len(&[
         ID,
+        PROJECT_ID,
         NAME,
         DESCRIPTION,
         CREATED,
@@ -4388,9 +5026,7 @@ async fn cmd_db_instance_info(
         TARGET_VMM,
         MIGRATION_ID,
         UPDATER_LOCK,
-        ACTIVE_VMM_RECORD,
         MIGRATION_RECORD,
-        TARGET_VMM_RECORD,
     ]);
 
     fn print_multiline_debug(slug: &str, thing: &impl core::fmt::Debug) {
@@ -4427,9 +5063,9 @@ async fn cmd_db_instance_info(
         dst_propolis_id,
         migration_id,
         nexus_state,
-        r#gen,
+        generation,
         time_last_auto_restarted,
-    } = instance.runtime_state;
+    } = instance.runtime();
     println!("    {STATE:>WIDTH$}: {nexus_state:?}");
     let effective_state =
         InstanceStateComputer::new(&instance, active_vmm.as_ref())
@@ -4441,7 +5077,7 @@ async fn cmd_db_instance_info(
     println!("    {INTENDED_STATE:>WIDTH$}: {}", instance.intended_state);
     println!(
         "    {LAST_UPDATED:>WIDTH$}: {time_updated:?} (generation {})",
-        r#gen.0
+        InstanceStateGeneration::from(generation)
     );
 
     // Reincarnation status
@@ -4462,15 +5098,29 @@ async fn cmd_db_instance_info(
                 "    {KARMIC_STATUS:>WIDTH$}: nirvāṇa (reincarnation disabled)"
             );
         }
-        Reincarnatability::CoolingDown(remaining) => {
+        Reincarnatability::CoolingDown { until } => {
             println!(
-                "/!\\ {KARMIC_STATUS:>WIDTH$}: cooling down \
-                 ({remaining:?} remaining)"
+                "    {KARMIC_STATUS:>WIDTH$}: cooling down \
+                 (until {until})"
             );
+
+            if let Some(last) = time_last_auto_restarted {
+                let icon = if needs_reincarnation { "/!\\" } else { "(i)" };
+                println!("{icon}  this instance last restarted at {last}.");
+                if needs_reincarnation {
+                    println!(
+                        "     it will not be permitted to restart until {until}"
+                    );
+                } else {
+                    println!(
+                        "     if it fails, it will not be permitted to \
+                        restart again until {until}"
+                    );
+                }
+            }
         }
     }
     println!("    {LAST_AUTO_RESTART:>WIDTH$}: {time_last_auto_restarted:?}");
-
     println!("    {ACTIVE_VMM:>WIDTH$}: {propolis_id:?}");
     println!("    {TARGET_VMM:>WIDTH$}: {dst_propolis_id:?}");
 
@@ -4483,7 +5133,10 @@ async fn cmd_db_instance_info(
     } else {
         print!("    {UPDATER_LOCK:>WIDTH$}: UNLOCKED");
     }
-    println!(" at generation: {}", instance.updater_gen.0);
+    println!(
+        " at generation: {}",
+        InstanceUpdaterGeneration::from(instance.updater_gen)
+    );
 
     fn print_vmm(kind: &str, id: Uuid, vmm: Option<&Vmm>) {
         match vmm {
@@ -4578,7 +5231,7 @@ async fn cmd_db_instance_info(
     }
 
     let disks = query
-        .select(Disk::as_select())
+        .select(db::model::Disk::as_select())
         .load_async(&*datastore.pool_connection_for_tests().await?)
         .await
         .with_context(ctx)?;
@@ -4672,9 +5325,7 @@ async fn cmd_db_instance_info(
                 println!("    {VCPUS:>WIDTH$}: {cpus_provisioned}");
                 println!("    {RAM:>WIDTH$}: {ram}");
                 println!("    {DISK:>WIDTH$}: {disk}");
-                if let Some(modified) = time_modified {
-                    println!("    {LAST_UPDATED:>WIDTH$}: {modified}")
-                }
+                println!("    {LAST_UPDATED:>WIDTH$}: {time_modified}");
             }
         }
     }
@@ -4696,7 +5347,7 @@ async fn cmd_db_instance_info(
             .with_context(ctx)?;
 
         if !past_migrations.is_empty() {
-            println!("\n{:=<80}\n", "== MIGRATION HISTORY");
+            println!("\n{:=<80}\n", "== MIGRATION HISTORY ");
 
             check_limit(&past_migrations, fetch_opts.fetch_limit, ctx);
 
@@ -4721,7 +5372,7 @@ async fn cmd_db_instance_info(
         struct VmmRow {
             #[tabled(inline)]
             state: VmmStateRow,
-            sled_id: Uuid,
+            sled_id: SledUuid,
             #[tabled(display_with = "datetime_rfc3339_concise")]
             time_created: chrono::DateTime<Utc>,
             #[tabled(display_with = "datetime_opt_rfc3339_concise")]
@@ -4743,27 +5394,23 @@ async fn cmd_db_instance_info(
 
             let table = tabled::Table::new(vmms.iter().map(|vmm| {
                 let &Vmm {
-                    id,
+                    id: _,
                     sled_id,
                     propolis_ip: _,
                     propolis_port: _,
                     instance_id: _,
+                    cpu_platform: _,
                     time_created,
                     time_deleted,
-                    runtime:
-                        db::model::VmmRuntimeState {
-                            time_state_updated: _,
-                            r#gen,
-                            state,
-                        },
+                    time_state_updated: _,
+                    generation: _,
+                    state: _,
+                    failure_reason: _,
+                    stop_for_update_disposition_generation: _,
                 } = vmm;
                 VmmRow {
-                    state: VmmStateRow {
-                        id,
-                        state,
-                        generation: r#gen.0.into(),
-                    },
-                    sled_id,
+                    state: VmmStateRow::from(vmm),
+                    sled_id: sled_id.into(),
                     time_created,
                     time_deleted,
                 }
@@ -4783,8 +5430,39 @@ async fn cmd_db_instance_info(
 struct VmmStateRow {
     id: Uuid,
     state: db::model::VmmState,
+    #[tabled(display_with = "display_option_blank")]
+    failure_reason: Option<db::model::VmmFailureReason>,
     #[tabled(rename = "GEN")]
     generation: u64,
+}
+
+impl From<&'_ db::model::Vmm> for VmmStateRow {
+    fn from(vmm: &db::model::Vmm) -> Self {
+        Self {
+            id: vmm.id,
+            state: vmm.state,
+            failure_reason: vmm.failure_reason,
+            generation: vmm.generation.0.into(),
+        }
+    }
+}
+
+/// Common fields extracted from an InstanceAndActiveVmm, shared by
+/// both `CustomerInstanceRow` and `SledInstanceRow`.
+struct InstanceFields {
+    id: String,
+    propolis_id: MaybePropolisId,
+    state: String,
+    name: String,
+}
+
+fn instance_fields(inst: &InstanceAndActiveVmm) -> InstanceFields {
+    InstanceFields {
+        id: inst.instance().id().to_string(),
+        propolis_id: inst.into(),
+        state: inst.effective_state().to_string(),
+        name: inst.instance().name().to_string(),
+    }
 }
 
 #[derive(Tabled)]
@@ -4847,7 +5525,7 @@ async fn cmd_db_instances(
                 h_to_s.entry(i.sled_id().unwrap())
             {
                 let (_, my_sled) = LookupPath::new(opctx, datastore)
-                    .sled_id(i.sled_id().unwrap().into_untyped_uuid())
+                    .sled_id(i.sled_id().unwrap())
                     .fetch()
                     .await
                     .context("failed to look up sled")?;
@@ -4866,14 +5544,15 @@ async fn cmd_db_instances(
             continue;
         }
 
+        let f = instance_fields(&i);
         let cir = CustomerInstanceRow {
-            id: i.instance().id().to_string(),
-            name: i.instance().name().to_string(),
-            state: i.effective_state().to_string(),
+            id: f.id,
+            state: f.state,
             intent: i.instance().intended_state,
-            propolis_id: (&i).into(),
+            propolis_id: f.propolis_id,
             sled_id: (&i).into(),
             host_serial,
+            name: f.name,
         };
 
         rows.push(cir);
@@ -5004,7 +5683,7 @@ async fn cmd_db_dns_diff(
         // Load the added and removed items.
         use nexus_db_schema::schema::dns_name::dsl;
 
-        let added = dsl::dns_name
+        let mut added = dsl::dns_name
             .filter(dsl::dns_zone_id.eq(zone.id))
             .filter(dsl::version_added.eq(version.version))
             .limit(i64::from(u32::from(limit)))
@@ -5014,21 +5693,26 @@ async fn cmd_db_dns_diff(
             .context("loading added names")?;
         check_limit(&added, limit, || "loading added names");
 
-        let removed = dsl::dns_name
+        let mut removed = dsl::dns_name
             .filter(dsl::dns_zone_id.eq(zone.id))
             .filter(dsl::version_removed.eq(version.version))
             .limit(i64::from(u32::from(limit)))
             .select(DnsName::as_select())
             .load_async(&*datastore.pool_connection_for_tests().await?)
             .await
-            .context("loading added names")?;
-        check_limit(&added, limit, || "loading removed names");
+            .context("loading removed names")?;
+        check_limit(&removed, limit, || "loading removed names");
         println!(
             "changes:                    names added: {}, names removed: {}",
             added.len(),
             removed.len()
         );
         println!("");
+
+        // This is kind of stupid-expensive, but there aren't a lot of records
+        // here and it's helpful for this output to be stable.
+        added.sort_by_cached_key(|k| format!("{} {:?}", k.name, k.records()));
+        removed.sort_by_cached_key(|k| format!("{} {:?}", k.name, k.records()));
 
         for a in added {
             print_name("+", &a.name, a.records().context("parsing records"));
@@ -5085,7 +5769,8 @@ async fn cmd_db_dns_names(
             }
         });
 
-        for (name, records) in names {
+        for (name, mut records) in names {
+            records.sort();
             print_name("", &name, Ok(records));
         }
     }
@@ -5241,7 +5926,8 @@ async fn cmd_db_eips(
                     };
 
                 let project =
-                    match lookup_project(datastore, instance.project_id).await?
+                    match lookup_project(datastore, instance.project_id())
+                        .await?
                     {
                         Some(project) => project,
                         None => {
@@ -5277,7 +5963,10 @@ async fn cmd_db_eips(
                 }
             };
 
-            Owner::Project { id: project_id, name: project.name().to_string() }
+            Owner::Project {
+                id: project_id.into_untyped_uuid(),
+                name: project.name().to_string(),
+            }
         } else {
             Owner::None
         };
@@ -5298,7 +5987,7 @@ async fn cmd_db_eips(
         rows.push(row);
     }
 
-    rows.sort_by(|a, b| a.ip.cmp(&b.ip));
+    rows.sort_by_key(|a| a.ip);
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .to_string();
@@ -5316,12 +6005,16 @@ async fn cmd_db_network_list_vnics(
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct NicRow {
-        ip: IpNetwork,
+        #[tabled(display_with = "option_impl_display")]
+        ipv4: Option<Ipv4Addr>,
+        #[tabled(display_with = "option_impl_display")]
+        ipv6: Option<Ipv6Addr>,
         mac: MacAddr,
         slot: u8,
         primary: bool,
         kind: &'static str,
-        subnet: String,
+        ipv4_subnet: String,
+        ipv6_subnet: String,
         parent_id: Uuid,
         parent_name: String,
     }
@@ -5357,7 +6050,7 @@ async fn cmd_db_network_list_vnics(
             NetworkInterfaceKind::Instance => {
                 match lookup_instance(datastore, nic.parent_id).await? {
                     Some(instance) => {
-                        match lookup_project(datastore, instance.project_id)
+                        match lookup_project(datastore, instance.project_id())
                             .await?
                         {
                             Some(project) => (
@@ -5385,7 +6078,7 @@ async fn cmd_db_network_list_vnics(
             NetworkInterfaceKind::Probe => {
                 match lookup_probe(datastore, nic.parent_id).await? {
                     Some(probe) => {
-                        match lookup_project(datastore, probe.project_id)
+                        match lookup_project(datastore, probe.project_id())
                             .await?
                         {
                             Some(project) => (
@@ -5411,7 +6104,7 @@ async fn cmd_db_network_list_vnics(
             }
         };
 
-        let subnet = {
+        let (ipv4_subnet, ipv6_subnet) = {
             use nexus_db_schema::schema::vpc_subnet::dsl;
             let subnet = match dsl::vpc_subnet
                 .filter(dsl::id.eq(nic.subnet_id))
@@ -5428,28 +6121,36 @@ async fn cmd_db_network_list_vnics(
                     continue;
                 }
             };
-
-            if nic.ip.is_ipv4() {
+            let ipv4_subnet = if nic.ipv4.is_some() {
                 subnet.ipv4_block.to_string()
             } else {
+                String::from("-")
+            };
+            let ipv6_subnet = if nic.ipv6.is_some() {
                 subnet.ipv6_block.to_string()
-            }
+            } else {
+                String::from("-")
+            };
+            (ipv4_subnet, ipv6_subnet)
         };
 
         let row = NicRow {
-            ip: nic.ip,
+            ipv4: nic.ipv4.map(Into::into),
+            ipv6: nic.ipv6.map(Into::into),
             mac: *nic.mac,
             slot: *nic.slot,
             primary: nic.primary,
             kind,
-            subnet,
+            ipv4_subnet,
+            ipv6_subnet,
             parent_id: nic.parent_id,
             parent_name,
         };
         rows.push(row);
     }
 
-    rows.sort_by(|a, b| a.ip.cmp(&b.ip));
+    // Sort by IPv4 address, and then IPv6 address.
+    rows.sort_by(|a, b| a.ipv4.cmp(&b.ipv4).then_with(|| a.ipv6.cmp(&b.ipv6)));
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .to_string();
@@ -5922,7 +6623,7 @@ async fn cmd_db_validate_volume_references(
                     // full table scan
                     conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
-                    let pattern = format!("%{}%", &snapshot_addr);
+                    let pattern = format!("%{}%", snapshot_addr);
 
                     use nexus_db_schema::schema::volume::dsl;
 
@@ -6622,6 +7323,96 @@ async fn cmd_db_validate_region_snapshots(
     Ok(())
 }
 
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct ValidateArtifactReplicationRow {
+    id: SledUuid,
+    serial: String,
+    ip: String,
+    state: String,
+}
+
+async fn cmd_db_validate_artifact_replication(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+) -> Result<(), anyhow::Error> {
+    let config = datastore.tuf_list_artifacts_unpruned_batched(opctx).await?;
+
+    let limit = fetch_opts.fetch_limit;
+    let filter = SledFilter::TufArtifactReplication;
+    let sleds = datastore
+        .sled_list(&opctx, &first_page(limit), filter)
+        .await
+        .context("listing sleds")?;
+    check_limit(&sleds, limit, || String::from("listing sleds"));
+
+    let mut task_set = ParallelTaskSet::new();
+    let mut outputs = Vec::new();
+    for sled in sleds {
+        let log = opctx.log.clone();
+        if let Some(output) = task_set
+            .spawn(async move {
+                let url = format!("http://{}", sled.address());
+                let client = sled_agent_client::Client::new(&url, log);
+                let sled_config = client
+                    .artifact_config_get()
+                    .await
+                    .map(|res| res.into_inner());
+                (sled, sled_config)
+            })
+            .await
+        {
+            outputs.push(output);
+        }
+    }
+    let mut rows = Vec::new();
+    outputs.extend(task_set.join_remaining().await);
+    for (sled, sled_config_result) in outputs {
+        let state = match sled_config_result {
+            Ok(sled_config) => {
+                match config.generation.cmp(&sled_config.generation) {
+                    Ordering::Equal => {
+                        // `artifacts` is a BTreeSet, so no need to sort.
+                        if config.artifacts == sled_config.artifacts {
+                            "OK".to_owned()
+                        } else {
+                            format!(
+                                "BAD: nexus's {g} = sled's {sg} with incorrect artifacts",
+                                g = config.generation,
+                                sg = sled_config.generation
+                            )
+                        }
+                    }
+                    Ordering::Less => format!(
+                        "BAD: nexus's {g} < sled's {sg}",
+                        g = config.generation,
+                        sg = sled_config.generation
+                    ),
+                    Ordering::Greater => format!(
+                        "OLD: nexus's {g} > sled's {sg}",
+                        g = config.generation,
+                        sg = sled_config.generation
+                    ),
+                }
+            }
+            Err(err) => format!("ERROR: {}", DisplayErrorChain::new(&err)),
+        };
+        rows.push(ValidateArtifactReplicationRow {
+            id: sled.id(),
+            serial: sled.serial_number().to_owned(),
+            ip: sled.ip().to_string(),
+            state,
+        });
+    }
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+    println!("{table}");
+    Ok(())
+}
+
 fn print_name(
     prefix: &str,
     name: &str,
@@ -6641,7 +7432,7 @@ fn print_name(
     if records.len() == 1 {
         match &records[0] {
             DnsRecord::Srv(_) => (),
-            DnsRecord::Aaaa(_) | DnsRecord::A(_) => {
+            DnsRecord::Aaaa(_) | DnsRecord::A(_) | DnsRecord::Ns(_) => {
                 println!(
                     "{}  {:50} {}",
                     prefix,
@@ -6659,13 +7450,14 @@ fn print_name(
     }
 }
 
-fn format_record(record: &DnsRecord) -> impl Display {
+fn format_record(record: &DnsRecord) -> impl Display + use<> {
     match record {
         DnsRecord::A(addr) => format!("A    {}", addr),
         DnsRecord::Aaaa(addr) => format!("AAAA {}", addr),
         DnsRecord::Srv(Srv { port, target, .. }) => {
             format!("SRV  port {:5} {}", port, target)
         }
+        DnsRecord::Ns(ns) => format!("NS   {}", ns),
     }
 }
 
@@ -6697,15 +7489,12 @@ async fn cmd_db_inventory(
                     ref filter,
                 }),
         }) => {
-            let long_string_formatter =
-                LongStringFormatter { show_long_strings };
-            let filter = filter.as_ref().unwrap_or(&CollectionsShowFilter::All);
             cmd_db_inventory_collections_show(
                 opctx,
                 datastore,
                 id_or_latest,
-                long_string_formatter,
-                filter,
+                show_long_strings,
+                filter.as_ref(),
             )
             .await
         }
@@ -6767,6 +7556,8 @@ async fn cmd_db_inventory_cabooses(
         git_commit: String,
         name: String,
         version: String,
+        #[tabled(display_with = "option_impl_display")]
+        sign: Option<String>,
     }
 
     use nexus_db_schema::schema::sw_caboose::dsl;
@@ -6785,6 +7576,7 @@ async fn cmd_db_inventory_cabooses(
         name: caboose.name,
         version: caboose.version,
         git_commit: caboose.git_commit,
+        sign: caboose.sign,
     });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
@@ -6995,410 +7787,19 @@ async fn cmd_db_inventory_collections_show(
     opctx: &OpContext,
     datastore: &DataStore,
     id_or_latest: CollectionIdOrLatest,
-    long_string_formatter: LongStringFormatter,
-    filter: &CollectionsShowFilter,
+    show_long_strings: bool,
+    filter: Option<&CollectionDisplayCliFilter>,
 ) -> Result<(), anyhow::Error> {
     let collection = id_or_latest.to_collection(opctx, datastore).await?;
 
-    inv_collection_print(&collection).await?;
-    let nerrors = inv_collection_print_errors(&collection).await?;
-    inv_collection_print_devices(&collection, filter, &long_string_formatter)
-        .await?;
-    if filter.include_sleds() {
-        inv_collection_print_sleds(&collection);
+    let mut display = collection.display();
+    if let Some(filter) = filter {
+        display.apply_cli_filter(filter);
     }
-    if filter.include_keeper_membership() {
-        inv_collection_print_keeper_membership(&collection);
-    }
-
-    if nerrors > 0 {
-        eprintln!(
-            "warning: {} collection error{} {} reported above",
-            nerrors,
-            if nerrors == 1 { "" } else { "s" },
-            if nerrors == 1 { "was" } else { "were" },
-        );
-    }
+    display.show_long_strings(show_long_strings);
+    println!("{}", display);
 
     Ok(())
-}
-
-async fn inv_collection_print(
-    collection: &Collection,
-) -> Result<(), anyhow::Error> {
-    println!("collection: {}", collection.id);
-    println!(
-        "collector:  {}{}",
-        collection.collector,
-        if collection.collector.parse::<Uuid>().is_ok() {
-            " (likely a Nexus instance)"
-        } else {
-            ""
-        }
-    );
-    println!(
-        "started:    {}",
-        humantime::format_rfc3339_millis(collection.time_started.into())
-    );
-    println!(
-        "done:       {}",
-        humantime::format_rfc3339_millis(collection.time_done.into())
-    );
-
-    Ok(())
-}
-
-async fn inv_collection_print_errors(
-    collection: &Collection,
-) -> Result<u32, anyhow::Error> {
-    println!("errors:     {}", collection.errors.len());
-    for (index, message) in collection.errors.iter().enumerate() {
-        println!("  error {}: {}", index, message);
-    }
-
-    Ok(collection
-        .errors
-        .len()
-        .try_into()
-        .expect("could not convert error count into u32 (yikes)"))
-}
-
-async fn inv_collection_print_devices(
-    collection: &Collection,
-    filter: &CollectionsShowFilter,
-    long_string_formatter: &LongStringFormatter,
-) -> Result<(), anyhow::Error> {
-    // Assemble a list of baseboard ids, sorted first by device type (sled,
-    // switch, power), then by slot number.  This is the order in which we will
-    // print everything out.
-    let mut sorted_baseboard_ids: Vec<_> =
-        collection.sps.keys().cloned().collect();
-    sorted_baseboard_ids.sort_by(|s1, s2| {
-        let sp1 = collection.sps.get(s1).unwrap();
-        let sp2 = collection.sps.get(s2).unwrap();
-        sp1.sp_type.cmp(&sp2.sp_type).then(sp1.sp_slot.cmp(&sp2.sp_slot))
-    });
-
-    // Now print them.
-    for baseboard_id in &sorted_baseboard_ids {
-        // This unwrap should not fail because the collection we're iterating
-        // over came from the one we're looking into now.
-        let sp = collection.sps.get(baseboard_id).unwrap();
-        let baseboard = collection.baseboards.get(baseboard_id);
-        let rot = collection.rots.get(baseboard_id);
-
-        match baseboard {
-            None => {
-                // It should be impossible to find an SP whose baseboard
-                // information we didn't previously fetch.  That's either a bug
-                // in this tool (for failing to fetch or find the right
-                // baseboard information) or the inventory system (for failing
-                // to insert a record into the hw_baseboard_id table).
-                if !filter.include_sp_unknown_serial() {
-                    continue;
-                }
-
-                println!("");
-                println!(
-                    "{:?} (serial number unknown -- this is a bug)",
-                    sp.sp_type
-                );
-                println!("    part number: unknown");
-            }
-            Some(baseboard) => {
-                if !filter.include_sp(&baseboard.serial_number) {
-                    continue;
-                }
-
-                println!("");
-                println!("{:?} {}", sp.sp_type, baseboard.serial_number);
-                println!("    part number: {}", baseboard.part_number);
-            }
-        };
-
-        println!("    power:    {:?}", sp.power_state);
-        println!("    revision: {}", sp.baseboard_revision);
-        print!("    MGS slot: {:?} {}", sp.sp_type, sp.sp_slot);
-        if let SpType::Sled = sp.sp_type {
-            print!(" (cubby {})", sp.sp_slot);
-        }
-        println!("");
-        println!("    found at: {} from {}", sp.time_collected, sp.source);
-
-        #[derive(Tabled)]
-        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-        struct CabooseRow<'a> {
-            slot: String,
-            board: &'a str,
-            name: &'a str,
-            version: &'a str,
-            git_commit: &'a str,
-        }
-
-        println!("    cabooses:");
-        let caboose_rows: Vec<_> = CabooseWhich::iter()
-            .filter_map(|c| {
-                collection.caboose_for(c, baseboard_id).map(|d| (c, d))
-            })
-            .map(|(c, found_caboose)| CabooseRow {
-                slot: format!("{:?}", c),
-                board: &found_caboose.caboose.board,
-                name: &found_caboose.caboose.name,
-                version: &found_caboose.caboose.version,
-                git_commit: &found_caboose.caboose.git_commit,
-            })
-            .collect();
-        let table = tabled::Table::new(caboose_rows)
-            .with(tabled::settings::Style::empty())
-            .with(tabled::settings::Padding::new(0, 1, 0, 0))
-            .to_string();
-        println!("{}", textwrap::indent(&table.to_string(), "        "));
-
-        #[derive(Tabled)]
-        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-        struct RotPageRow<'a> {
-            slot: String,
-            data_base64: Cow<'a, str>,
-        }
-
-        println!("    RoT pages:");
-        let rot_page_rows: Vec<_> = RotPageWhich::iter()
-            .filter_map(|which| {
-                collection.rot_page_for(which, baseboard_id).map(|d| (which, d))
-            })
-            .map(|(which, found_page)| RotPageRow {
-                slot: format!("{which:?}"),
-                data_base64: long_string_formatter
-                    .maybe_truncate(&found_page.page.data_base64),
-            })
-            .collect();
-        let table = tabled::Table::new(rot_page_rows)
-            .with(tabled::settings::Style::empty())
-            .with(tabled::settings::Padding::new(0, 1, 0, 0))
-            .to_string();
-        println!("{}", textwrap::indent(&table.to_string(), "        "));
-
-        if let Some(rot) = rot {
-            println!("    RoT: active slot: slot {:?}", rot.active_slot);
-            println!(
-                "    RoT: persistent boot preference: slot {:?}",
-                rot.persistent_boot_preference,
-            );
-            println!(
-                "    RoT: pending persistent boot preference: {}",
-                rot.pending_persistent_boot_preference
-                    .map(|s| format!("slot {:?}", s))
-                    .unwrap_or_else(|| String::from("-"))
-            );
-            println!(
-                "    RoT: transient boot preference: {}",
-                rot.transient_boot_preference
-                    .map(|s| format!("slot {:?}", s))
-                    .unwrap_or_else(|| String::from("-"))
-            );
-
-            println!(
-                "    RoT: slot A SHA3-256: {}",
-                rot.slot_a_sha3_256_digest
-                    .clone()
-                    .unwrap_or_else(|| String::from("-"))
-            );
-
-            println!(
-                "    RoT: slot B SHA3-256: {}",
-                rot.slot_b_sha3_256_digest
-                    .clone()
-                    .unwrap_or_else(|| String::from("-"))
-            );
-        } else {
-            println!("    RoT: no information found");
-        }
-    }
-
-    println!("");
-    for sp_missing_rot in collection
-        .sps
-        .keys()
-        .collect::<BTreeSet<_>>()
-        .difference(&collection.rots.keys().collect::<BTreeSet<_>>())
-    {
-        // It's not a bug in either omdb or the inventory system to find an SP
-        // with no RoT.  It just means that when we collected inventory from the
-        // SP, it couldn't communicate with its RoT.
-        let sp = collection.sps.get(*sp_missing_rot).unwrap();
-        println!(
-            "warning: found SP with no RoT: {:?} slot {}",
-            sp.sp_type, sp.sp_slot
-        );
-    }
-
-    for rot_missing_sp in collection
-        .rots
-        .keys()
-        .collect::<BTreeSet<_>>()
-        .difference(&collection.sps.keys().collect::<BTreeSet<_>>())
-    {
-        // It *is* a bug in the inventory system (or omdb) to find an RoT with
-        // no SP, since we get the RoT information from the SP in the first
-        // place.
-        println!(
-            "error: found RoT with no SP: \
-            hw_baseboard_id {:?} -- this is a bug",
-            rot_missing_sp
-        );
-    }
-
-    Ok(())
-}
-
-fn inv_collection_print_sleds(collection: &Collection) {
-    println!("SLED AGENTS");
-    for sled in collection.sled_agents.values() {
-        println!(
-            "\nsled {} (role = {:?}, serial {})",
-            sled.sled_id,
-            sled.sled_role,
-            match &sled.baseboard_id {
-                Some(baseboard_id) => &baseboard_id.serial_number,
-                None => "unknown",
-            },
-        );
-        println!(
-            "    found at:    {} from {}",
-            sled.time_collected, sled.source
-        );
-        println!("    address:     {}", sled.sled_agent_address);
-        println!("    usable hw threads:   {}", sled.usable_hardware_threads);
-        println!(
-            "    usable memory (GiB): {}",
-            sled.usable_physical_ram.to_whole_gibibytes()
-        );
-        println!(
-            "    reservoir (GiB):     {}",
-            sled.reservoir_size.to_whole_gibibytes()
-        );
-
-        if !sled.zpools.is_empty() {
-            println!("    physical disks:");
-        }
-        for disk in &sled.disks {
-            let nexus_types::inventory::PhysicalDisk {
-                identity,
-                variant,
-                slot,
-                ..
-            } = disk;
-            println!("      {variant:?}: {identity:?} in {slot}");
-        }
-
-        if !sled.zpools.is_empty() {
-            println!("    zpools");
-        }
-        for zpool in &sled.zpools {
-            let nexus_types::inventory::Zpool { id, total_size, .. } = zpool;
-            println!("      {id}: total size: {total_size}");
-        }
-
-        if !sled.datasets.is_empty() {
-            println!("    datasets:");
-        }
-        for dataset in &sled.datasets {
-            let nexus_types::inventory::Dataset {
-                id,
-                name,
-                available,
-                used,
-                quota,
-                reservation,
-                compression,
-            } = dataset;
-
-            let id = if let Some(id) = id {
-                id.to_string()
-            } else {
-                String::from("none")
-            };
-
-            println!("      {name} - id: {id}, compression: {compression}");
-            println!("        available: {available}, used: {used}");
-            println!("        reservation: {reservation:?}, quota: {quota:?}");
-        }
-
-        println!(
-            "    zones generation: {} (count: {})",
-            sled.omicron_zones.generation,
-            sled.omicron_zones.zones.len(),
-        );
-
-        if sled.omicron_zones.zones.is_empty() {
-            continue;
-        }
-
-        println!("    ZONES FOUND");
-        for z in &sled.omicron_zones.zones {
-            println!(
-                "      zone {} (type {})",
-                z.id,
-                z.zone_type.kind().report_str()
-            );
-        }
-    }
-}
-
-fn inv_collection_print_keeper_membership(collection: &Collection) {
-    println!("\nKEEPER MEMBERSHIP");
-    for k in &collection.clickhouse_keeper_cluster_membership {
-        println!("\n    queried keeper: {}", k.queried_keeper);
-        println!(
-            "    leader_committed_log_index: {}",
-            k.leader_committed_log_index
-        );
-
-        let s = k.raft_config.iter().join(", ");
-        println!("    raft config: {s}");
-    }
-    if collection.clickhouse_keeper_cluster_membership.is_empty() {
-        println!("No membership retrieved.");
-    }
-    println!("");
-}
-
-#[derive(Debug)]
-struct LongStringFormatter {
-    show_long_strings: bool,
-}
-
-impl LongStringFormatter {
-    fn maybe_truncate<'a>(&self, s: &'a str) -> Cow<'a, str> {
-        use unicode_width::UnicodeWidthChar;
-
-        // pick an arbitrary width at which we'll truncate, knowing that these
-        // strings are probably contained in tables with other columns
-        const TRUNCATE_AT_WIDTH: usize = 32;
-
-        // quick check for short strings or if we should show long strings in
-        // their entirety
-        if self.show_long_strings || s.len() <= TRUNCATE_AT_WIDTH {
-            return s.into();
-        }
-
-        // longer check; we'll do the proper thing here and check the unicode
-        // width, and we don't really care about speed, so we can just iterate
-        // over chars
-        let mut width = 0;
-        for (pos, ch) in s.char_indices() {
-            let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
-            if width + ch_width > TRUNCATE_AT_WIDTH {
-                let (prefix, _) = s.split_at(pos);
-                return format!("{prefix}...").into();
-            }
-            width += ch_width;
-        }
-
-        // if we didn't break out of the loop, `s` in its entirety is not too
-        // wide, so return it as-is
-        s.into()
-    }
 }
 
 // Migrations
@@ -7409,20 +7810,19 @@ async fn cmd_db_migrations_list(
     args: &MigrationsListArgs,
 ) -> Result<(), anyhow::Error> {
     use nexus_db_schema::schema::migration::dsl;
-    use omicron_common::api::internal::nexus;
 
     let mut state_filters = Vec::new();
     if args.completed {
-        state_filters.push(MigrationState(nexus::MigrationState::Completed));
+        state_filters.push(MigrationState::COMPLETED);
     }
     if args.failed {
-        state_filters.push(MigrationState(nexus::MigrationState::Failed));
+        state_filters.push(MigrationState::FAILED);
     }
     if args.in_progress {
-        state_filters.push(MigrationState(nexus::MigrationState::InProgress));
+        state_filters.push(MigrationState::IN_PROGRESS);
     }
     if args.pending {
-        state_filters.push(MigrationState(nexus::MigrationState::Pending));
+        state_filters.push(MigrationState::PENDING);
     }
 
     let mut query = dsl::migration.into_boxed();
@@ -7601,13 +8001,13 @@ async fn cmd_db_vmm_info(
         .next()
         .ok_or_else(|| anyhow::anyhow!("no VMM found with ID {uuid}"))?;
     let sled_result =
-        LookupPath::new(opctx, datastore).sled_id(vmm.sled_id).fetch().await;
+        LookupPath::new(opctx, datastore).sled_id(vmm.sled_id()).fetch().await;
     let sled = match sled_result {
         Ok((_, sled)) => Some(sled),
         Err(err) => {
             eprintln!(
                 "WARN: failed to fetch sled with ID {}: {err}",
-                vmm.sled_id
+                vmm.sled_id()
             );
             None
         }
@@ -7637,18 +8037,25 @@ async fn cmd_db_vmm_info(
                     reservoir_ram: ByteCount(reservoir),
                 },
             instance_id: _,
+            state,
         } = resource;
+
         const SLED_ID: &'static str = "sled ID";
         const THREADS: &'static str = "hardware threads";
         const RSS: &'static str = "RSS RAM";
         const RESERVOIR: &'static str = "reservoir RAM";
-        const WIDTH: usize = const_max_len(&[SLED_ID, THREADS, RSS, RESERVOIR]);
+        const STATE: &'static str = "state";
+        const WIDTH: usize =
+            const_max_len(&[SLED_ID, THREADS, RSS, RESERVOIR, STATE]);
+
         if include_sled_id {
             println!("    {SLED_ID:>WIDTH$}: {sled_id}");
         }
+
         println!("    {THREADS:>WIDTH$}: {hardware_threads}");
         println!("    {RSS:>WIDTH$}: {rss}");
         println!("    {RESERVOIR:>WIDTH$}: {reservoir}");
+        println!("    {STATE:>WIDTH$}: {state}");
     }
 
     let reservations = resource_dsl::sled_resource_vmm
@@ -7727,61 +8134,129 @@ fn prettyprint_vmm(
     sled_serial: Option<&str>,
     inst_id: bool,
 ) {
-    const ID: &'static str = "ID";
-    const CREATED: &'static str = "created at";
-    const DELETED: &'static str = "deleted at";
-    const UPDATED: &'static str = "updated at";
-    const INSTANCE_ID: &'static str = "instance ID";
-    const SLED_ID: &'static str = "sled ID";
-    const SLED_SERIAL: &'static str = "sled serial";
-    const ADDRESS: &'static str = "propolis address";
-    const STATE: &'static str = "state";
-    const WIDTH: usize = const_max_len(&[
-        ID,
-        CREATED,
-        DELETED,
-        UPDATED,
-        INSTANCE_ID,
-        SLED_ID,
-        SLED_SERIAL,
-        STATE,
-        ADDRESS,
-    ]);
+    print!("{}", VmmDisplay { indent, vmm, width, sled_serial, inst_id });
+}
 
-    let width = std::cmp::max(width, Some(WIDTH)).unwrap_or(WIDTH);
-    let Vmm {
-        id,
-        time_created,
-        time_deleted,
-        instance_id,
-        sled_id,
-        propolis_ip,
-        propolis_port,
-        runtime: db::model::VmmRuntimeState { state, r#gen, time_state_updated },
-    } = vmm;
+struct VmmDisplay<'a> {
+    indent: &'a str,
+    vmm: &'a Vmm,
+    width: Option<usize>,
+    sled_serial: Option<&'a str>,
+    inst_id: bool,
+}
 
-    println!("{indent}{ID:>width$}: {id}");
-    if inst_id {
-        println!("{indent}{INSTANCE_ID:>width$}: {instance_id}");
-    }
-    println!("{indent}{CREATED:>width$}: {time_created}");
-    if let Some(deleted) = time_deleted {
-        println!("{indent}{DELETED:width$}: {deleted}");
-    }
-    println!("{indent}{STATE:>width$}: {state}");
-    let g = u64::from(r#gen.0);
-    println!(
-        "{indent}{UPDATED:>width$}: {time_state_updated:?} (generation {g})"
-    );
+impl Display for VmmDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { indent, vmm, width, sled_serial, inst_id } = *self;
+        const ID: &'static str = "ID";
+        const CREATED: &'static str = "created at";
+        const DELETED: &'static str = "deleted at";
+        const UPDATED: &'static str = "updated at";
+        const INSTANCE_ID: &'static str = "instance ID";
+        const SLED_ID: &'static str = "sled ID";
+        const SLED_SERIAL: &'static str = "sled serial";
+        const CPU_PLATFORM: &'static str = "CPU platform";
+        const ADDRESS: &'static str = "propolis address";
+        const STATE: &'static str = "state";
+        const FAILURE_REASON: &'static str = "  failure reason";
+        const FAILURE_NOTE: &'static str = "  note";
+        const STOP_FOR_UPDATE: &'static str =
+            "  marked to stop for sled update";
+        const WIDTH: usize = const_max_len(&[
+            ID,
+            CREATED,
+            DELETED,
+            UPDATED,
+            INSTANCE_ID,
+            SLED_ID,
+            SLED_SERIAL,
+            CPU_PLATFORM,
+            STATE,
+            ADDRESS,
+            FAILURE_REASON,
+            FAILURE_NOTE,
+            STOP_FOR_UPDATE,
+        ]);
 
-    println!(
-        "{indent}{ADDRESS:>width$}: {}:{}",
-        propolis_ip.ip(),
-        propolis_port.0
-    );
-    println!("{indent}{SLED_ID:>width$}: {sled_id}");
-    if let Some(serial) = sled_serial {
-        println!("{indent}{SLED_SERIAL:>width$}: {serial}");
+        let width = std::cmp::max(width, Some(WIDTH)).unwrap_or(WIDTH);
+        let Vmm {
+            id,
+            time_created,
+            time_deleted,
+            instance_id,
+            sled_id,
+            propolis_ip,
+            propolis_port,
+            cpu_platform,
+            state,
+            generation,
+            time_state_updated,
+            failure_reason,
+            stop_for_update_disposition_generation,
+        } = vmm;
+
+        writeln!(f, "{indent}{ID:>width$}: {id}")?;
+        if inst_id {
+            writeln!(f, "{indent}{INSTANCE_ID:>width$}: {instance_id}")?;
+        }
+        writeln!(f, "{indent}{CREATED:>width$}: {time_created}")?;
+        if let Some(deleted) = time_deleted {
+            writeln!(f, "{indent}{DELETED:>width$}: {deleted}")?;
+        }
+        writeln!(f, "{indent}{STATE:>width$}: {state}")?;
+        if let Some(reason) = failure_reason {
+            writeln!(f, "{indent}{FAILURE_REASON:>width$}: {reason}")?;
+
+            if state == &db::model::VmmState::Failed {
+                writeln!(
+                    f,
+                    "{indent}{FAILURE_NOTE:>width$}: {}",
+                    reason.description()
+                )?;
+            } else {
+                writeln!(
+                    f,
+                    "{:<width$}weird: VMMs should only have non-NULL failure \
+                         reasons if they are in the failed state",
+                    "/!\\",
+                    width = indent.len(),
+                )?;
+            }
+        } else if state == &db::model::VmmState::Failed {
+            writeln!(
+                f,
+                "{:<width$}weird: VMMs in the 'failed' state should have a \
+                 non-NULL failure reason",
+                "/!\\",
+                width = indent.len(),
+            )?;
+        }
+        if let Some(ud_generation) = stop_for_update_disposition_generation {
+            let u_g = UpdateDispositionGeneration::from(*ud_generation);
+            writeln!(
+                f,
+                "{indent}{STOP_FOR_UPDATE:>width$}: update disposition generation {u_g}"
+            )?;
+        }
+
+        let g = u64::from(generation.0);
+        writeln!(
+            f,
+            "{indent}{UPDATED:>width$}: {time_state_updated:?} (generation {g})"
+        )?;
+
+        writeln!(
+            f,
+            "{indent}{ADDRESS:>width$}: {}:{}",
+            propolis_ip.ip(),
+            propolis_port.0
+        )?;
+        writeln!(f, "{indent}{SLED_ID:>width$}: {sled_id}")?;
+        if let Some(serial) = sled_serial {
+            writeln!(f, "{indent}{SLED_SERIAL:>width$}: {serial}")?;
+        }
+        writeln!(f, "{indent}{CPU_PLATFORM:>width$}: {cpu_platform}")?;
+        Ok(())
     }
 }
 
@@ -7849,21 +8324,21 @@ async fn cmd_db_vmm_list(
     }
 
     impl<'a> From<&'a (Vmm, Option<Sled>)> for VmmRow<'a> {
-        fn from((ref vmm, ref sled): &'a (Vmm, Option<Sled>)) -> Self {
+        fn from((vmm, sled): &'a (Vmm, Option<Sled>)) -> Self {
             let &Vmm {
-                id,
+                id: _,
                 time_created: _,
                 time_deleted: _,
                 instance_id,
                 sled_id,
                 propolis_ip: _,
                 propolis_port: _,
-                runtime:
-                    db::model::VmmRuntimeState {
-                        state,
-                        r#gen,
-                        time_state_updated: _,
-                    },
+                cpu_platform: _,
+                time_state_updated: _,
+                generation: _,
+                state: _,
+                failure_reason: _,
+                stop_for_update_disposition_generation: _,
             } = vmm;
             let sled = match sled {
                 Some(sled) => sled.serial_number(),
@@ -7872,11 +8347,7 @@ async fn cmd_db_vmm_list(
                     "<unknown>"
                 }
             };
-            VmmRow {
-                instance_id,
-                state: VmmStateRow { id, state, generation: r#gen.0.into() },
-                sled,
-            }
+            VmmRow { instance_id, state: VmmStateRow::from(vmm), sled }
         }
     }
 
@@ -7885,7 +8356,7 @@ async fn cmd_db_vmm_list(
     struct VerboseVmmRow<'a> {
         #[tabled(inline)]
         inner: VmmRow<'a>,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         address: std::net::SocketAddr,
         #[tabled(display_with = "datetime_rfc3339_concise")]
         time_created: DateTime<Utc>,
@@ -7901,18 +8372,18 @@ async fn cmd_db_vmm_list(
                 sled_id,
                 propolis_ip,
                 propolis_port,
-                ref runtime,
+                time_state_updated,
                 ..
             } = it.0;
             VerboseVmmRow {
-                sled_id,
+                sled_id: sled_id.into(),
                 inner: VmmRow::from(it),
                 address: std::net::SocketAddr::new(
                     propolis_ip.ip(),
                     propolis_port.into(),
                 ),
                 time_created,
-                time_updated: runtime.time_state_updated,
+                time_updated: time_state_updated,
             }
         }
     }
@@ -8072,22 +8543,21 @@ async fn cmd_db_zpool_list(
         bail!("no latest inventory found!");
     };
 
-    let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
+    let mut zpool_total_size: HashMap<ZpoolUuid, i64> = HashMap::new();
 
-    for (_, sled_agent) in latest_collection.sled_agents {
+    for sled_agent in latest_collection.sled_agents {
         for zpool in sled_agent.zpools {
-            zpool_total_size
-                .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());
+            zpool_total_size.insert(zpool.id, zpool.total_size.into());
         }
     }
 
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct ZpoolRow {
-        id: Uuid,
+        id: ZpoolUuid,
         time_deleted: String,
-        sled_id: Uuid,
-        physical_disk_id: Uuid,
+        sled_id: SledUuid,
+        physical_disk_id: PhysicalDiskUuid,
         #[tabled(display_with = "option_impl_display")]
         total_size: Option<i64>,
         control_plane_storage_buffer: i64,
@@ -8096,15 +8566,15 @@ async fn cmd_db_zpool_list(
     let rows: Vec<ZpoolRow> = zpools
         .into_iter()
         .map(|(p, _)| {
-            let zpool_id = p.id().into_untyped_uuid();
+            let zpool_id = p.id();
             Ok(ZpoolRow {
                 id: zpool_id,
                 time_deleted: match p.time_deleted() {
                     Some(t) => t.to_string(),
                     None => String::from(""),
                 },
-                sled_id: p.sled_id,
-                physical_disk_id: p.physical_disk_id.into_untyped_uuid(),
+                sled_id: p.sled_id(),
+                physical_disk_id: p.physical_disk_id(),
                 total_size: zpool_total_size.get(&zpool_id).cloned(),
                 control_plane_storage_buffer: p
                     .control_plane_storage_buffer()
@@ -8139,14 +8609,149 @@ async fn cmd_db_zpool_set_storage_buffer(
         .zpool_set_control_plane_storage_buffer(
             opctx,
             ZpoolUuid::from_untyped_uuid(args.id),
-            args.storage_buffer,
+            args.storage_buffer.into(),
         )
         .await?;
 
     println!(
-        "set pool {} control plane storage buffer bytes to {}",
-        args.id, args.storage_buffer,
+        "set pool {} control plane storage buffer to {} ({} bytes)",
+        args.id,
+        args.storage_buffer,
+        args.storage_buffer.to_bytes(),
     );
 
     Ok(())
+}
+
+/// Run `omdb db trust-quorum list-configs`.
+async fn cmd_db_trust_quorum_list_configs(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &TrustQuorumListConfigsArgs,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct TqConfigRow {
+        epoch: i64,
+        #[tabled(display_with = "option_impl_display")]
+        last_committed_epoch: Option<i64>,
+        state: String,
+        threshold: u8,
+        commit_crash_tolerance: u8,
+        coordinator_hardware_baseboard_id: Uuid,
+        #[tabled(display_with = "datetime_rfc3339_concise")]
+        time_created: DateTime<Utc>,
+        #[tabled(display_with = "option_datetime_rfc3339_concise")]
+        time_committing: Option<DateTime<Utc>>,
+        #[tabled(display_with = "option_datetime_rfc3339_concise")]
+        time_committed: Option<DateTime<Utc>>,
+        #[tabled(display_with = "option_datetime_rfc3339_concise")]
+        time_aborted: Option<DateTime<Utc>>,
+        #[tabled(display_with = "display_option_blank")]
+        abort_reason: Option<String>,
+    }
+
+    let limit = fetch_opts.fetch_limit;
+    let authz_tq = authz::TrustQuorumConfig::for_rack_id(args.rack_id);
+    let configs = datastore
+        .tq_list_config(opctx, authz_tq, &first_page::<i64>(limit))
+        .await
+        .context("listing trust quorum configurations")?;
+
+    check_limit(&configs, limit, || {
+        String::from("listing trust quorum configurations")
+    });
+
+    let rows: Vec<TqConfigRow> = configs
+        .into_iter()
+        .map(|config| TqConfigRow {
+            epoch: config.epoch,
+            last_committed_epoch: config.last_committed_epoch,
+            state: format!("{:?}", config.state),
+            threshold: config.threshold.into(),
+            commit_crash_tolerance: config.commit_crash_tolerance.into(),
+            coordinator_hardware_baseboard_id: config.coordinator,
+            time_created: config.time_created,
+            time_committing: config.time_committing,
+            time_committed: config.time_committed,
+            time_aborted: config.time_aborted,
+            abort_reason: config.abort_reason,
+        })
+        .collect();
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use swrite::SWrite as _;
+    use swrite::swriteln;
+
+    fn epoch_vmm() -> Vmm {
+        let when = chrono::DateTime::from_timestamp(0, 0)
+            .expect("the epoch is a valid timestamp");
+        let mut vmm = Vmm::new(
+            PropolisUuid::nil(),
+            InstanceUuid::nil(),
+            SledUuid::nil(),
+            "127.0.0.1".parse().unwrap(),
+            12400,
+            db::model::VmmCpuPlatform::AmdMilan,
+        );
+        vmm.time_created = when;
+        vmm.time_state_updated = when;
+        vmm
+    }
+
+    #[test]
+    fn test_vmm_display() {
+        let mut failed = epoch_vmm();
+        failed.state = db::model::VmmState::Failed;
+        failed.stop_for_update_disposition_generation =
+            Some(db::model::to_db_typed_generation(
+                UpdateDispositionGeneration::from_u32(7),
+            ));
+
+        let mut running = epoch_vmm();
+        running.state = db::model::VmmState::Running;
+        running.failure_reason = Some(db::model::VmmFailureReason::SledOff);
+
+        let mut deleted = epoch_vmm();
+        deleted.time_deleted = Some(deleted.time_created);
+
+        let mut output = String::new();
+        for (name, vmm, sled_serial, inst_id) in [
+            ("failed without reason", &failed, None, false),
+            ("reason without failure", &running, None, false),
+            (
+                "deleted with instance and serial",
+                &deleted,
+                Some("BRM00000000"),
+                true,
+            ),
+        ] {
+            swriteln!(output, "=== {name} ===");
+            swriteln!(
+                output,
+                "{}",
+                VmmDisplay {
+                    indent: "    ",
+                    vmm,
+                    width: None,
+                    sled_serial,
+                    inst_id,
+                }
+            );
+        }
+        expectorate::assert_contents("tests/output/vmm-lines.txt", &output);
+    }
 }

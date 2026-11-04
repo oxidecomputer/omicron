@@ -5,9 +5,11 @@
 use super::{Generation, Region, SqlU16};
 use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
+use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_db_schema::schema::{crucible_dataset, region};
+use omicron_uuid_kinds::*;
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
@@ -35,7 +37,7 @@ pub struct CrucibleDataset {
     time_deleted: Option<DateTime<Utc>>,
     rcgen: Generation,
 
-    pub pool_id: Uuid,
+    pub pool_id: DbTypedUuid<ZpoolKind>,
 
     ip: ipv6::Ipv6Addr,
     port: SqlU16,
@@ -50,14 +52,14 @@ pub struct CrucibleDataset {
 impl CrucibleDataset {
     pub fn new(
         id: omicron_uuid_kinds::DatasetUuid,
-        pool_id: Uuid,
+        pool_id: ZpoolUuid,
         addr: SocketAddrV6,
     ) -> Self {
         Self {
             identity: CrucibleDatasetIdentity::new(id),
             time_deleted: None,
             rcgen: Generation::new(),
-            pool_id,
+            pool_id: pool_id.into(),
             ip: addr.ip().into(),
             port: addr.port().into(),
             size_used: 0,
@@ -79,6 +81,10 @@ impl CrucibleDataset {
 
     pub fn no_provision(&self) -> bool {
         self.no_provision
+    }
+
+    pub fn pool_id(&self) -> ZpoolUuid {
+        self.pool_id.into()
     }
 }
 

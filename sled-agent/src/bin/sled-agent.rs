@@ -7,12 +7,14 @@
 use anyhow::anyhow;
 use camino::Utf8PathBuf;
 use clap::Parser;
+use nix::sys::signal;
 use omicron_common::cmd::CmdError;
 use omicron_common::cmd::fatal;
 use omicron_sled_agent::bootstrap::RssAccessError;
 use omicron_sled_agent::bootstrap::server as bootstrap_server;
 use omicron_sled_agent::config::Config as SledConfig;
-use sled_agent_types::rack_init::RackInitializeRequest;
+use sled_agent_rack_setup::RackInitializeRequestParams;
+use sled_agent_rack_setup::rack_initialize_request_from_file;
 
 #[derive(Debug, Parser)]
 #[clap(
@@ -28,9 +30,27 @@ enum Args {
     },
 }
 
-#[tokio::main]
-async fn main() {
-    if let Err(message) = do_run().await {
+fn main() {
+    let rt = oxide_tokio_rt::OxideBuilder::new_multi_thread()
+        // Configure `oxide-tokio-rt` to route SIGCHLD signals to a dedicated
+        // signal-handling thread outside the Tokio runtime.
+        //
+        // sled-agent spawns a large number of short-lived of child processes
+        // (using `tokio::process`), and `SIGCHLD` is delivered when those
+        // children exit. Therefore, we should expect to receive `SIGCHLD`
+        // fairly frequently. Receiving a signal on a worker thread can
+        // interfere with IPCC communication (see
+        // https://github.com/oxidecomputer/omicron/issues/9849 and
+        // https://github.com/oxidecomputer/stlouis/issues/922).
+        //
+        // Note: `oxide-tokio-rt` will add `SIGCHLD` to the set of signals
+        // handled by the dedicated signal-handling thread by default if one is
+        // enabled at all, as it anticipates that `tokio::process` is being
+        // used. However, I'm still adding it here for explicitness.
+        .signal_thread(signal::SigSet::empty() | signal::Signal::SIGCHLD)
+        .build()
+        .expect("failed to initialize Tokio runtime");
+    if let Err(message) = rt.block_on(do_run()) {
         fatal(message);
     }
 }
@@ -62,10 +82,14 @@ async fn do_run() -> Result<(), CmdError> {
                 rss_config_path
             };
             let rss_config = if rss_config_path.exists() {
-                Some(
-                    RackInitializeRequest::from_file(rss_config_path)
-                        .map_err(|e| CmdError::Failure(anyhow!(e)))?,
-                )
+                let rss_config =
+                    rack_initialize_request_from_file(rss_config_path)
+                        .map_err(|e| CmdError::Failure(anyhow!(e)))?;
+                let skip_timesync = config.skip_timesync.unwrap_or(false);
+                Some(RackInitializeRequestParams::new(
+                    rss_config,
+                    skip_timesync,
+                ))
             } else {
                 None
             };
@@ -93,7 +117,6 @@ async fn do_run() -> Result<(), CmdError> {
                 .wait_for_finish()
                 .await
                 .map_err(|err| CmdError::Failure(anyhow!(err)))?;
-
             Ok(())
         }
     }

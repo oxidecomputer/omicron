@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Functions for querying the timeseries database.
-// Copyright 2024 Oxide Computer Company
 
 use crate::{DATABASE_NAME, Error, FieldSchema, FieldSource, TimeseriesSchema};
 use chrono::{DateTime, Utc};
@@ -732,26 +731,26 @@ impl SelectQuery {
 // Format the value for use in a query to the database, e.g., `... WHERE field_value = {}`.
 fn field_as_db_str(value: &FieldValue) -> String {
     match value {
-        FieldValue::Bool(ref inner) => {
+        FieldValue::Bool(inner) => {
             format!("{}", if *inner { 1 } else { 0 })
         }
-        FieldValue::I8(ref inner) => format!("{}", inner),
-        FieldValue::U8(ref inner) => format!("{}", inner),
-        FieldValue::I16(ref inner) => format!("{}", inner),
-        FieldValue::U16(ref inner) => format!("{}", inner),
-        FieldValue::I32(ref inner) => format!("{}", inner),
-        FieldValue::U32(ref inner) => format!("{}", inner),
-        FieldValue::I64(ref inner) => format!("{}", inner),
-        FieldValue::U64(ref inner) => format!("{}", inner),
-        FieldValue::IpAddr(ref inner) => {
+        FieldValue::I8(inner) => format!("{}", inner),
+        FieldValue::U8(inner) => format!("{}", inner),
+        FieldValue::I16(inner) => format!("{}", inner),
+        FieldValue::U16(inner) => format!("{}", inner),
+        FieldValue::I32(inner) => format!("{}", inner),
+        FieldValue::U32(inner) => format!("{}", inner),
+        FieldValue::I64(inner) => format!("{}", inner),
+        FieldValue::U64(inner) => format!("{}", inner),
+        FieldValue::IpAddr(inner) => {
             let addr = match inner {
-                IpAddr::V4(ref v4) => v4.to_ipv6_mapped(),
-                IpAddr::V6(ref v6) => *v6,
+                IpAddr::V4(v4) => v4.to_ipv6_mapped(),
+                IpAddr::V6(v6) => *v6,
             };
             format!("'{}'", addr)
         }
-        FieldValue::String(ref inner) => format!("'{}'", inner),
-        FieldValue::Uuid(ref inner) => format!("'{}'", inner),
+        FieldValue::String(inner) => crate::quoted_string_literal(inner),
+        FieldValue::Uuid(inner) => format!("'{}'", inner),
     }
 }
 
@@ -770,6 +769,8 @@ mod tests {
         assert_eq!(field_as_db_str(&FieldValue::from(false)), "0");
         assert_eq!(field_as_db_str(&FieldValue::from(true)), "1");
         assert_eq!(field_as_db_str(&FieldValue::from(10i64)), "10");
+        assert_eq!(field_as_db_str(&FieldValue::from("it's")), r"'it\'s'");
+        assert_eq!(field_as_db_str(&FieldValue::from(r"a\b")), r"'a\\b'");
         assert_eq!(
             field_as_db_str(&FieldValue::IpAddr("127.0.0.1".parse().unwrap())),
             "'::ffff:127.0.0.1'"

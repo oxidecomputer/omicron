@@ -2,14 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::TokioResolver;
 use hickory_resolver::config::{
-    LookupIpStrategy, NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
+    LookupIpStrategy, NameServerConfig, ResolveHosts, ResolverConfig,
+    ResolverOpts,
 };
 use hickory_resolver::lookup::SrvLookup;
+use hickory_resolver::name_server::TokioConnectionProvider;
 use internal_dns_types::names::ServiceName;
 use omicron_common::address::{
-    AZ_PREFIX, DNS_PORT, Ipv6Subnet, get_internal_dns_server_addresses,
+    AZ_PREFIX_LENGTH, DNS_PORT, Ipv6Subnet, get_internal_dns_server_addresses,
 };
 use slog::{debug, error, info, trace};
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -17,13 +19,44 @@ use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ResolveError {
     #[error(transparent)]
-    Resolve(#[from] hickory_resolver::error::ResolveError),
+    Resolve(#[from] hickory_resolver::ResolveError),
 
     #[error("Record not found for SRV key: {}", .0.dns_name())]
     NotFound(ServiceName),
 
     #[error("Record not found for {0}")]
     NotFoundByString(String),
+}
+
+fn is_no_records_found(err: &hickory_resolver::ResolveError) -> bool {
+    match err.kind() {
+        hickory_resolver::ResolveErrorKind::Proto(proto_error) => {
+            match proto_error.kind() {
+                hickory_resolver::proto::ProtoErrorKind::NoRecordsFound {
+                    ..
+                } => true,
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+impl ResolveError {
+    /// Returns "true" if this error indicates the record is not found.
+    pub fn is_not_found(&self) -> bool {
+        match self {
+            ResolveError::NotFound(_) | ResolveError::NotFoundByString(_) => {
+                true
+            }
+            ResolveError::Resolve(hickory_err)
+                if is_no_records_found(&hickory_err) =>
+            {
+                true
+            }
+            _ => false,
+        }
+    }
 }
 
 /// A wrapper around a set of bootstrap DNS addresses, providing a convenient
@@ -71,7 +104,7 @@ impl QorbResolver {
 #[derive(Clone)]
 pub struct Resolver {
     log: slog::Logger,
-    resolver: TokioAsyncResolver,
+    resolver: TokioResolver,
 }
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -94,11 +127,11 @@ impl Resolver {
     pub fn new_from_system_conf(
         log: slog::Logger,
     ) -> Result<Self, ResolveError> {
-        let (rc, mut opts) = hickory_resolver::system_conf::read_system_conf()?;
+        let mut builder = TokioResolver::builder_tokio()?;
         // Enable edns for potentially larger records
-        opts.edns0 = true;
+        builder.options_mut().edns0 = true;
 
-        let resolver = TokioAsyncResolver::tokio(rc, opts);
+        let resolver = builder.build();
 
         Ok(Self { log, resolver })
     }
@@ -113,24 +146,35 @@ impl Resolver {
         let mut rc = ResolverConfig::new();
         let dns_server_count = dns_addrs.len();
         for &socket_addr in dns_addrs.into_iter() {
-            rc.add_name_server(NameServerConfig {
+            let mut ns_config = NameServerConfig::new(
                 socket_addr,
-                protocol: Protocol::Udp,
-                tls_dns_name: None,
-                trust_negative_responses: false,
-                bind_addr: None,
-            });
+                hickory_resolver::proto::xfer::Protocol::Udp,
+            );
+            // Intentionally continue trying other DNS servers if we get an
+            // NXDOMAIN or NOERROR with no answer.  This should be a rare
+            // circumstance.  If it occurs and the name is genuinely not
+            // present, we'll be slower to error.  If the name is unevenly
+            // distributed it is in the process of going away, or a DNS server
+            // is serving stale records and may not be getting updated anymore.
+            // In this last case, we may be avoiding service disruption.
+            ns_config.trust_negative_responses = false;
+            rc.add_name_server(ns_config);
         }
         let mut opts = ResolverOpts::default();
         // Enable edns for potentially larger records
         opts.edns0 = true;
-        opts.use_hosts_file = false;
+        opts.use_hosts_file = ResolveHosts::Never;
         opts.num_concurrent_reqs = dns_server_count;
         // The underlay is IPv6 only, so this helps avoid needless lookups of
         // the IPv4 variant.
         opts.ip_strategy = LookupIpStrategy::Ipv6Only;
         opts.negative_max_ttl = Some(std::time::Duration::from_secs(15));
-        let resolver = TokioAsyncResolver::tokio(rc, opts);
+        let resolver = TokioResolver::builder_with_config(
+            rc,
+            TokioConnectionProvider::default(),
+        )
+        .with_options(opts)
+        .build();
 
         Ok(Self { log, resolver })
     }
@@ -142,7 +186,7 @@ impl Resolver {
         log: slog::Logger,
         address: Ipv6Addr,
     ) -> Result<Self, ResolveError> {
-        let subnet = Ipv6Subnet::<AZ_PREFIX>::new(address);
+        let subnet = Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(address);
         Self::new_from_subnet(log, subnet)
     }
 
@@ -150,7 +194,7 @@ impl Resolver {
     /// /etc/resolv.conf) for the underlying nameservers.
     pub fn new_with_resolver(
         log: slog::Logger,
-        resolver: TokioAsyncResolver,
+        resolver: TokioResolver,
     ) -> Self {
         Self { log, resolver }
     }
@@ -165,7 +209,7 @@ impl Resolver {
     // re-resolve this.  That's how we'd learn about dynamic changes to the set
     // of DNS servers.
     pub fn servers_from_subnet(
-        subnet: Ipv6Subnet<AZ_PREFIX>,
+        subnet: Ipv6Subnet<AZ_PREFIX_LENGTH>,
     ) -> Vec<SocketAddr> {
         get_internal_dns_server_addresses(subnet.net().addr())
             .into_iter()
@@ -183,7 +227,7 @@ impl Resolver {
     /// [omicron_common::address::ReservedRackSubnet].
     pub fn new_from_subnet(
         log: slog::Logger,
-        subnet: Ipv6Subnet<AZ_PREFIX>,
+        subnet: Ipv6Subnet<AZ_PREFIX_LENGTH>,
     ) -> Result<Self, ResolveError> {
         let dns_ips = Self::servers_from_subnet(subnet);
         Resolver::new_from_addrs(log, &dns_ips)
@@ -341,10 +385,10 @@ impl Resolver {
     async fn lookup_service_targets(
         &self,
         service_lookup: SrvLookup,
-    ) -> impl Iterator<Item = SocketAddrV6> + Send {
+    ) -> impl Iterator<Item = SocketAddrV6> + Send + use<> {
         let futures =
             std::iter::repeat((self.log.clone(), self.resolver.clone()))
-                .zip(service_lookup.into_iter())
+                .zip(service_lookup)
                 .map(|((log, resolver), srv)| async move {
                     let target = srv.target();
                     let port = srv.port();
@@ -413,11 +457,12 @@ mod test {
     use super::ResolveError;
     use super::Resolver;
     use anyhow::Context;
-    use assert_matches::assert_matches;
+    use camino_tempfile::Utf8TempDir;
     use dropshot::{
         ApiDescription, HandlerTaskMode, HttpError, HttpResponseOk,
         RequestContext, endpoint,
     };
+    use hickory_resolver::ResolveErrorKind;
     use internal_dns_types::config::DnsConfigBuilder;
     use internal_dns_types::config::DnsConfigParams;
     use internal_dns_types::names::DNS_ZONE;
@@ -430,13 +475,13 @@ mod test {
     use std::net::SocketAddr;
     use std::net::SocketAddrV6;
     use std::str::FromStr;
-    use tempfile::TempDir;
+    use std::sync::Arc;
 
     struct DnsServer {
         // We hang onto the storage_path even though it's never used because
         // dropping it causes it to be cleaned up.
         #[allow(dead_code)]
-        storage_path: Option<TempDir>,
+        storage_path: Option<Utf8TempDir>,
         // Similarly, we hang onto the Dropshot server to keep it running.
         #[allow(dead_code)]
         dropshot_server: dropshot::HttpServer<dns_server::http_server::Context>,
@@ -449,15 +494,11 @@ mod test {
 
     impl DnsServer {
         async fn create(log: &Logger) -> Self {
-            let storage_path =
-                TempDir::new().expect("Failed to create temporary directory");
+            let storage_path = Utf8TempDir::new()
+                .expect("Failed to create temporary directory");
             let config_store = dns_server::storage::Config {
                 keep_old_generations: 3,
-                storage_path: storage_path
-                    .path()
-                    .to_string_lossy()
-                    .into_owned()
-                    .into(),
+                storage_path: storage_path.path().to_owned(),
             };
             let store = dns_server::storage::Store::new(
                 log.new(o!("component" => "DnsStore")),
@@ -468,14 +509,16 @@ mod test {
             let (dns_server, dropshot_server) = dns_server::start_servers(
                 log.clone(),
                 store,
-                &dns_server::dns_server::Config {
-                    bind_address: "[::1]:0".parse().unwrap(),
-                },
+                &dns_server::dns_server::Config::new(vec![
+                    "[::1]:0".parse().unwrap(),
+                ])
+                .expect("valid DNS configuration"),
                 &dropshot::ConfigDropshot {
                     bind_address: "[::1]:0".parse().unwrap(),
                     default_request_body_max_bytes: 8 * 1024,
                     default_handler_task_mode: HandlerTaskMode::Detached,
                     log_headers: vec![],
+                    compression: dropshot::CompressionConfig::None,
                 },
             )
             .await
@@ -497,7 +540,7 @@ mod test {
         }
 
         fn dns_server_address(&self) -> SocketAddr {
-            self.dns_server.local_address()
+            self.dns_server.sole_local_address().expect("exactly one address")
         }
 
         fn cleanup_successful(mut self) {
@@ -528,7 +571,7 @@ mod test {
             if !self.successful {
                 // If we didn't explicitly succeed, then we want to keep the
                 // temporary directory around.
-                let _ = self.storage_path.take().unwrap().into_path();
+                let _ = self.storage_path.take().unwrap().keep();
             }
         }
     }
@@ -545,19 +588,27 @@ mod test {
             .await
             .expect_err("Looking up non-existent service should fail");
 
+        expect_no_records(&err);
+
+        dns_server.cleanup_successful();
+        logctx.cleanup_successful();
+    }
+
+    #[track_caller]
+    fn expect_no_records(err: &ResolveError) {
         let dns_error = match err {
             ResolveError::Resolve(err) => err,
             _ => panic!("Unexpected error: {err}"),
         };
-        assert!(
-            matches!(
-                dns_error.kind(),
-                hickory_resolver::error::ResolveErrorKind::NoRecordsFound { .. },
-            ),
-            "Saw error: {dns_error}",
-        );
-        dns_server.cleanup_successful();
-        logctx.cleanup_successful();
+
+        if let ResolveErrorKind::Proto(proto_err) = dns_error.kind() {
+            if let hickory_proto::ProtoErrorKind::NoRecordsFound { .. } =
+                proto_err.kind()
+            {
+                return;
+            }
+        }
+        panic!("Saw error: {dns_error}");
     }
 
     // Insert and retreive a single DNS record.
@@ -703,13 +754,8 @@ mod test {
             .lookup_socket_v6(ServiceName::Cockroach)
             .await
             .expect_err("unexpectedly found records");
-        assert_matches!(
-            error,
-            ResolveError::Resolve(error)
-                if matches!(error.kind(),
-                    hickory_resolver::error::ResolveErrorKind::NoRecordsFound { .. }
-                )
-        );
+
+        expect_no_records(&error);
 
         // If we remove the zone altogether, we'll get a different resolution
         // error because the DNS server is no longer authoritative for this
@@ -788,17 +834,10 @@ mod test {
         spec = "tests/output/test-server.json",
         interface = Positional,
         inner_type = slog::Logger,
-        pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-            slog::debug!(log, "client request";
-                "method" => %request.method(),
-                "uri" => %request.url(),
-                "body" => ?&request.body(),
-            );
-        }),
-        post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-            slog::debug!(log, "client response"; "result" => ?result);
-        }),
+        hooks = Expected,
     );
+
+    progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
 
     // Verify that we have an up-to-date representation
     // of this server's API as JSON.
@@ -826,6 +865,12 @@ mod test {
         };
         dropshot::ServerBuilder::new(api(), label, log)
             .config(config_dropshot)
+            .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+                dropshot::ClientSpecifiesVersionInHeader::new(
+                    omicron_common::api::VERSION_HEADER,
+                    dns_server_api::VERSION_SOA_AND_NS,
+                ),
+            )))
             .start()
             .unwrap()
     }
@@ -842,7 +887,7 @@ mod test {
         let dns_server = DnsServer::create(&logctx.log).await;
         let resolver = Resolver::new_from_addrs(
             logctx.log.clone(),
-            &[dns_server.dns_server.local_address()],
+            &dns_server.dns_server.local_addresses().collect::<Vec<_>>(),
         )
         .unwrap();
 
@@ -862,7 +907,9 @@ mod test {
         // standalone test server.
         let dns_name = ServiceName::Nexus.srv_name();
         let reqwest_client = reqwest::ClientBuilder::new()
-            .dns_resolver(resolver.clone().into())
+            .dns_resolver(
+                Arc::new(resolver.clone()) as Arc<dyn reqwest::dns::Resolve>
+            )
             .build()
             .expect("Failed to build client");
 
@@ -920,8 +967,14 @@ mod test {
         let resolver = Resolver::new_from_addrs(
             logctx.log.clone(),
             &[
-                dns_server1.dns_server.local_address(),
-                dns_server2.dns_server.local_address(),
+                dns_server1
+                    .dns_server
+                    .sole_local_address()
+                    .expect("exactly one address"),
+                dns_server2
+                    .dns_server
+                    .sole_local_address()
+                    .expect("exactly one address"),
             ],
         )
         .unwrap();
@@ -942,7 +995,9 @@ mod test {
         // standalone test server.
         let dns_name = ServiceName::Nexus.srv_name();
         let reqwest_client = reqwest::ClientBuilder::new()
-            .dns_resolver(resolver.clone().into())
+            .dns_resolver(
+                Arc::new(resolver.clone()) as Arc<dyn reqwest::dns::Resolve>
+            )
             .build()
             .expect("Failed to build client");
 
@@ -995,7 +1050,7 @@ mod test {
         let dns_server = DnsServer::create(&logctx.log).await;
         let resolver = Resolver::new_from_addrs(
             logctx.log.clone(),
-            &[dns_server.dns_server.local_address()],
+            &dns_server.dns_server.local_addresses().collect::<Vec<_>>(),
         )
         .unwrap();
 

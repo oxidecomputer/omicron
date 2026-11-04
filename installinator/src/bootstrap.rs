@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
-
 //! Perform "bootstrap-agent lite" sled setup.
 
 use anyhow::Context;
@@ -14,12 +12,13 @@ use illumos_utils::dladm;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_internal_service_aggressive;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
+use sled_hardware::DataLinks;
 use sled_hardware::underlay;
-use sled_hardware_types::underlay::BootstrapInterface;
+use sled_hardware::underlay::BootstrapInterface;
 use slog::Logger;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
@@ -31,11 +30,12 @@ const MG_DDM_MANIFEST_PATH: &str = "/opt/oxide/mg-ddm/pkg/ddm/manifest.xml";
 // `sled_agent::bootstrap::server::Server::start()`; consider whether we could
 // find a way for them to share it.
 pub(crate) async fn bootstrap_sled(
-    data_links: &[String; 2],
+    links: &DataLinks,
     log: Logger,
 ) -> Result<()> {
     // Find address objects to pass to maghemite.
-    let links = underlay::find_chelsio_links(data_links)
+    let links = underlay::find_chelsio_links(links)
+        .await
         .context("failed to find chelsio links")?;
     ensure!(
         !links.is_empty(),
@@ -44,6 +44,7 @@ pub(crate) async fn bootstrap_sled(
 
     let mg_addr_objs =
         underlay::ensure_links_have_global_zone_link_local_v6_addresses(&links)
+            .await
             .context("failed to create address objects for maghemite")?;
 
     info!(log, "Starting mg-ddm service");
@@ -59,15 +60,18 @@ pub(crate) async fn bootstrap_sled(
     // Set up an interface for our bootstrap network.
     let bootstrap_etherstub =
         Dladm::ensure_etherstub(dladm::BOOTSTRAP_ETHERSTUB_NAME)
+            .await
             .context("failed to ensure bootstrap etherstub existence")?;
 
     let bootstrap_etherstub_vnic =
         Dladm::ensure_etherstub_vnic(&bootstrap_etherstub)
+            .await
             .context("failed to ensure bootstrap etherstub vnic existence")?;
 
     // Use the mac address of the first link to derive our bootstrap address.
-    let ip =
-        BootstrapInterface::GlobalZone.ip(&links[0]).with_context(|| {
+    let ip = underlay::bootstrap_ip(BootstrapInterface::GlobalZone, &links[0])
+        .await
+        .with_context(|| {
             format!("failed to derive a bootstrap prefix from {:?}", links[0])
         })?;
 
@@ -76,13 +80,14 @@ pub(crate) async fn bootstrap_sled(
         ip,
         "bootstrap6",
     )
+    .await
     .context("failed to create v6 address for bootstrap etherstub vnic")?;
 
     // Spawn a background task to notify our local ddmd of our bootstrap address
     // so it can advertise it to other sleds.
     let ddmd_client = DdmAdminClient::localhost(&log)?;
     tokio::spawn({
-        let prefix = Ipv6Subnet::<SLED_PREFIX>::new(ip).net();
+        let prefix = Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(ip).net();
         async move {
             retry_notify(
                 retry_policy_internal_service_aggressive(),

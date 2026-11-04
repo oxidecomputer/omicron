@@ -1,0 +1,24 @@
+# Start with an example system.
+load-example
+
+# Create a chain of blueprints.
+blueprint-edit dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 expunge-zones 2bf59188-be61-4c64-9abf-2e336d82f2e6
+blueprint-edit 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 add-nexus d81c6a84-79b8-4958-ae41-ea46c9b19763 2
+blueprint-edit 58d5e830-0884-47d8-a7cd-b2b3751adeb4 bump-nexus-generation
+blueprint-edit af934083-59b5-4bf6-8966-6fb5292c29e1 expunge-zones 7d0b456b-da4e-414c-8df8-31412a5bd0fe
+
+# By default, `blueprint-history` shows the history from the current target,
+# which does not include any of those blueprints.
+blueprint-history
+
+# You can give it a specific blueprint.
+blueprint-history 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
+
+# Running it from the latest blueprint should report all of them.
+blueprint-history latest
+
+# Show what happens when we reach the limit.
+blueprint-history --limit 2 latest
+
+# Show diffs, too.
+blueprint-history --diff latest

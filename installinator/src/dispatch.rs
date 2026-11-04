@@ -3,30 +3,33 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::time::Duration;
+use std::{collections::BTreeSet, io::Read};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use buf_list::{BufList, Cursor};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
+use flate2::bufread::GzDecoder;
 use installinator_common::{
     InstallinatorCompletionMetadata, InstallinatorComponent, InstallinatorSpec,
     InstallinatorStepId, StepContext, StepHandle, StepProgress, StepSuccess,
     StepWarning, UpdateEngine,
 };
 use omicron_common::FileKv;
+use oxide_update_engine::StepResult;
 use sha2::{Digest, Sha256};
+use sled_hardware::{DataLinks, is_oxide_sled};
 use slog::{Drain, error, warn};
 use tufaceous_artifact::{
-    ArtifactHash, ArtifactHashId, ArtifactKind, KnownArtifactKind,
+    ArtifactHash, InstallinatorArtifact, InstallinatorArtifactKind,
+    InstallinatorDocument,
 };
-use tufaceous_lib::ControlPlaneZoneImages;
-use update_engine::StepResult;
 
 use crate::{
-    ArtifactWriter, WriteDestination,
-    artifact::ArtifactIdOpts,
+    ArtifactToWrite, ArtifactWriter, WriteDestination,
+    artifact::{ArtifactIdOpts, ArtifactLookupId},
     fetch::{FetchArtifactBackend, FetchedArtifact, HttpFetchBackend},
-    peers::DiscoveryMechanism,
+    peers::{DiscoveryMechanism, LastKnownPeer},
     reporter::{HttpProgressBackend, ProgressReporter, ReportProgressBackend},
 };
 
@@ -78,7 +81,7 @@ enum InstallinatorCommand {
     /// Scan hardware to find the target M.2 device.
     DebugHardwareScan(DebugHardwareScan),
     /// Perform the installation.
-    Install(InstallOpts),
+    Install(Box<InstallOpts>),
 }
 
 /// Perform discovery of peers.
@@ -98,6 +101,7 @@ impl DebugDiscoverOpts {
                 self.opts.mechanism.discover_peers(&log).await?,
             )),
             Duration::from_secs(10),
+            None,
         );
         println!("discovered peers: {}", backend.peers().display());
         Ok(())
@@ -167,28 +171,46 @@ struct InstallOpts {
     data_link1: String,
 
     // TODO: checksum?
-
-    // The destination to write to.
+    /// The first destination to write to, representing M.2 slot A.
+    ///
+    /// This is mutually exclusive with --install-on-gimlet. At least one of the
+    /// two must be provided.
     #[clap(
         required_unless_present = "install_on_gimlet",
         conflicts_with = "install_on_gimlet"
     )]
-    destination: Option<Utf8PathBuf>,
+    a_destination: Option<Utf8PathBuf>,
+
+    /// The second destination to write to, representing M.2 slot B.
+    ///
+    /// This is mutually exclusive with --install-on-gimlet, and is optional to
+    /// provide.
+    #[clap(conflicts_with = "install_on_gimlet")]
+    b_destination: Option<Utf8PathBuf>,
 }
 
 impl InstallOpts {
     async fn exec(self, log: &slog::Logger) -> Result<()> {
         if self.bootstrap_sled {
-            let data_links = [self.data_link0.clone(), self.data_link1.clone()];
+            let data_links = if is_oxide_sled()? {
+                DataLinks::Physical
+            } else {
+                DataLinks::Virtual {
+                    devices: vec![
+                        self.data_link0.clone(),
+                        self.data_link1.clone(),
+                    ],
+                }
+            };
             crate::bootstrap::bootstrap_sled(&data_links, log.clone()).await?;
         }
 
-        let image_id = self.artifact_ids.resolve()?;
+        let lookup_id = self.artifact_ids.resolve()?;
 
         let discovery = self.discover_opts.mechanism.clone();
         let (progress_reporter, event_sender) = ProgressReporter::new(
             log,
-            image_id.update_id,
+            lookup_id.update_id,
             ReportProgressBackend::new(
                 log,
                 HttpProgressBackend::new(log, discovery),
@@ -196,91 +218,106 @@ impl InstallOpts {
         );
         let progress_handle = progress_reporter.start();
         let discovery = &self.discover_opts.mechanism;
+        let last_known_peer = LastKnownPeer::new();
+        let last_known_peer = &last_known_peer;
 
         let engine = UpdateEngine::new(log, event_sender);
 
-        let host_phase_2_id = ArtifactHashId {
-            // TODO: currently we're assuming that wicketd will unpack the host
-            // phase 2 image. We may instead have the installinator do it.
-            kind: ArtifactKind::HOST_PHASE_2,
-            hash: image_id.host_phase_2,
-        };
-        let host_2_phase_id_2 = host_phase_2_id.clone();
-        let host_phase_2_artifact = engine
+        let artifacts = engine
             .new_step(
-                InstallinatorComponent::HostPhase2,
+                InstallinatorComponent::InstallinatorDocument,
                 InstallinatorStepId::Download,
-                "Downloading host phase 2 artifact",
+                "Downloading installinator document",
                 async move |cx| {
-                    let host_phase_2_artifact =
-                        fetch_artifact(&cx, &host_phase_2_id, discovery, log)
-                            .await?;
-
-                    // Check that the sha256 of the data we got from wicket
-                    // matches the data we asked for. If this fails, we fail the
-                    // entire installation rather than trying to fetch the
-                    // artifact again, because we're fetching data from wicketd
-                    // (in memory) over TCP to ourselves (in memory), so the
-                    // only cases where this could fail are disturbing enough
-                    // (memory corruption, corruption under TCP, or wicketd gave
-                    // us something other than what we requested) we want to
-                    // know immediately and not retry: it's likely an operator
-                    // could miss any warnings we emit if a retry succeeds.
-                    check_downloaded_artifact_hash(
-                        "host phase 2",
-                        host_phase_2_artifact.artifact.clone(),
-                        host_phase_2_id.hash,
+                    let installinator_doc_id = ArtifactLookupId {
+                        // v2-aware Wicket doesn't read this field, but this is
+                        // necessary to get the Installinator document from an
+                        // older Wicket.
+                        kind: "installinator_document",
+                        hash: lookup_id.document,
+                    };
+                    let installinator_doc = fetch_artifact(
+                        &cx,
+                        installinator_doc_id,
+                        discovery,
+                        &last_known_peer,
+                        log,
                     )
-                    .await?;
+                    .await
+                    .context("failed to fetch installinator document")?;
 
-                    let address = host_phase_2_artifact.peer.address();
+                    // Read the document as JSON.
+                    //
+                    // Going via the reader is slightly less efficient
+                    // than operating purely in-memory, but serde_json
+                    // doesn't have a good way to pass in a BufList
+                    // directly.
+                    let json: InstallinatorDocument = serde_json::from_reader(
+                        buf_list::Cursor::new(&installinator_doc.artifact),
+                    )
+                    .context("error deserializing installinator document")?;
 
-                    StepSuccess::new(host_phase_2_artifact)
-                        .with_metadata(
-                            InstallinatorCompletionMetadata::Download {
-                                address,
-                            },
-                        )
-                        .into()
+                    // We expect there is exactly one host phase 2 image.
+                    let host_phase_2_count = json
+                        .artifacts
+                        .iter()
+                        .filter(|artifact| {
+                            matches!(
+                                artifact.kind,
+                                InstallinatorArtifactKind::HostPhase2
+                            )
+                        })
+                        .count();
+                    ensure!(
+                        host_phase_2_count == 1,
+                        "expected a single host phase 2 \
+                        image but found {host_phase_2_count}"
+                    );
+
+                    // We expect that measurement corpus and zone file names
+                    // are unique.
+                    let mut measurements = BTreeSet::new();
+                    let mut zones = BTreeSet::new();
+                    for artifact in &json.artifacts {
+                        match artifact.kind {
+                            InstallinatorArtifactKind::MeasurementCorpus => {
+                                ensure!(
+                                    measurements.insert(&artifact.file_name),
+                                    "measurement with file name {} seen twice",
+                                    artifact.file_name
+                                );
+                            }
+                            InstallinatorArtifactKind::Zone { .. } => {
+                                ensure!(
+                                    zones.insert(&artifact.file_name),
+                                    "zone with file name {} seen twice",
+                                    artifact.file_name
+                                );
+                            }
+                            InstallinatorArtifactKind::HostPhase2
+                            | InstallinatorArtifactKind::ControlPlane => {}
+                        }
+                    }
+
+                    StepSuccess::new(json.artifacts).into()
                 },
             )
             .register();
 
-        let control_plane_id = ArtifactHashId {
-            kind: KnownArtifactKind::ControlPlane.into(),
-            hash: image_id.control_plane,
-        };
-        let control_plane_id_2 = control_plane_id.clone();
-        let control_plane_artifact = engine
+        let downloads = engine
             .new_step(
-                InstallinatorComponent::ControlPlane,
+                InstallinatorComponent::All,
                 InstallinatorStepId::Download,
-                "Downloading control plane artifact",
+                "Downloading artifacts",
                 async move |cx| {
-                    let control_plane_artifact =
-                        fetch_artifact(&cx, &control_plane_id, discovery, log)
-                            .await?;
-
-                    // Check that the sha256 of the data we got from wicket
-                    // matches the data we asked for. We do not retry this for
-                    // the same reasons described above when checking the
-                    // downloaded host phase 2 artifact.
-                    check_downloaded_artifact_hash(
-                        "control plane",
-                        control_plane_artifact.artifact.clone(),
-                        control_plane_id.hash,
+                    download_all_artifacts(
+                        &cx,
+                        &log,
+                        artifacts,
+                        discovery,
+                        last_known_peer,
                     )
-                    .await?;
-
-                    let address = control_plane_artifact.peer.address();
-
-                    StepSuccess::new(control_plane_artifact)
-                        .with_metadata(
-                            InstallinatorCompletionMetadata::Download {
-                                address,
-                            },
-                        )
-                        .into()
+                    .await
                 },
             )
             .register();
@@ -289,60 +326,102 @@ impl InstallOpts {
             let log = log.clone();
             engine
                 .new_step(
-                    InstallinatorComponent::Both,
+                    InstallinatorComponent::All,
                     InstallinatorStepId::Scan,
                     "Scanning hardware to find M.2 disks",
                     async move |cx| scan_hardware_with_retries(&cx, &log).await,
                 )
                 .register()
         } else {
-            // clap ensures `self.destination` is not `None` if
+            // clap ensures `self.a_destination` is not `None` if
             // `install_on_gimlet` is false.
-            let destination = self.destination.as_ref().unwrap();
-            StepHandle::ready(WriteDestination::in_directory(destination)?)
+            let a_destination = self.a_destination.as_ref().unwrap();
+            StepHandle::ready(WriteDestination::in_directories(
+                a_destination,
+                self.b_destination.as_deref(),
+            )?)
         };
-
-        let control_plane_zones = engine
-            .new_step(
-                InstallinatorComponent::ControlPlane,
-                InstallinatorStepId::UnpackControlPlaneArtifact,
-                "Unpacking composite control plane artifact",
-                async move |cx| {
-                    let control_plane_artifact =
-                        control_plane_artifact.into_value(cx.token()).await;
-                    let zones = tokio::task::spawn_blocking(|| {
-                        ControlPlaneZoneImages::extract(Cursor::new(
-                            control_plane_artifact.artifact,
-                        ))
-                    })
-                    .await
-                    .unwrap()?;
-
-                    let zones_to_install = zones.zones.len();
-                    StepSuccess::new(zones).with_metadata(InstallinatorCompletionMetadata::ControlPlaneZones {
-                        zones_to_install,
-                    }).into()
-                },
-            )
-            .register();
 
         engine
             .new_step(
-                InstallinatorComponent::Both,
+                InstallinatorComponent::All,
                 InstallinatorStepId::Write,
-                "Writing host and control plane artifacts",
+                "Writing host, control plane, and measurement artifacts",
                 async move |cx| {
                     let destination = destination.into_value(cx.token()).await;
-                    let host_phase_2_artifact =
-                        host_phase_2_artifact.into_value(cx.token()).await;
-                    let control_plane_zones =
-                        control_plane_zones.into_value(cx.token()).await;
+
+                    let mut host_phase_2 = None;
+                    let mut zones = Vec::new();
+                    let mut zone_file_names = BTreeSet::new();
+                    let mut measurement_corpus = Vec::new();
+                    for (artifact, step) in
+                        downloads.into_value(cx.token()).await
+                    {
+                        let data = step.into_value(cx.token()).await;
+                        match &artifact.kind {
+                            InstallinatorArtifactKind::MeasurementCorpus => {
+                                measurement_corpus.push(ArtifactToWrite {
+                                    file_name: artifact.file_name,
+                                    data,
+                                    hash: artifact.hash,
+                                });
+                            }
+                            InstallinatorArtifactKind::HostPhase2 => {
+                                host_phase_2 = Some((artifact.hash, data));
+                            }
+                            InstallinatorArtifactKind::Zone { .. } => {
+                                // We already checked this against other zones
+                                // in the same Installinator document, but we
+                                // might have extracted a legacy control plane
+                                // tarball. (We can remove this check once that
+                                // branch is removed.)
+                                ensure!(
+                                    zone_file_names
+                                        .insert(artifact.file_name.clone()),
+                                    "zone with file name {} seen twice",
+                                    artifact.file_name
+                                );
+                                zones.push(ArtifactToWrite {
+                                    file_name: artifact.file_name,
+                                    data,
+                                    hash: artifact.hash,
+                                });
+                            }
+                            // When this branch is removed, remove the duplicate
+                            // zone file name check in the `Zone` branch.
+                            InstallinatorArtifactKind::ControlPlane => {
+                                for zone in
+                                    read_legacy_control_plane_tarball(data)
+                                        .await
+                                        .context(
+                                            "failed to read control \
+                                            plane tarball",
+                                        )?
+                                {
+                                    ensure!(
+                                        zone_file_names
+                                            .insert(zone.file_name.clone()),
+                                        "zone with file name {} seen twice",
+                                        artifact.file_name
+                                    );
+                                    zones.push(zone);
+                                }
+                            }
+                        }
+                    }
+                    // We checked there is at least one host phase 2 artifact
+                    // when we read the installinator document.
+                    let (host_phase_2_hash, host_phase_2_data) = host_phase_2
+                        .expect(
+                            "already checked presence of host phase 2 artifact",
+                        );
 
                     let mut writer = ArtifactWriter::new(
-                        &host_2_phase_id_2,
-                        &host_phase_2_artifact.artifact,
-                        &control_plane_id_2,
-                        &control_plane_zones,
+                        lookup_id.update_id,
+                        host_phase_2_hash,
+                        &host_phase_2_data,
+                        &zones,
+                        &measurement_corpus,
                         destination,
                     );
 
@@ -397,31 +476,6 @@ impl InstallOpts {
 
         Ok(())
     }
-}
-
-async fn check_downloaded_artifact_hash(
-    name: &'static str,
-    data: BufList,
-    expected_hash: ArtifactHash,
-) -> Result<()> {
-    tokio::task::spawn_blocking(move || {
-        let mut hasher = Sha256::new();
-        for chunk in data.iter() {
-            hasher.update(chunk);
-        }
-        let computed_hash = ArtifactHash(hasher.finalize().into());
-        if expected_hash != computed_hash {
-            bail!(
-                "downloaded {name} checksum failure: \
-                 expected {} but calculated {}",
-                hex::encode(&expected_hash),
-                hex::encode(&computed_hash)
-            );
-        }
-        Ok(())
-    })
-    .await
-    .unwrap()
 }
 
 async fn scan_hardware_with_retries(
@@ -479,19 +533,100 @@ async fn scan_hardware_with_retries(
         .into()
 }
 
+async fn download_all_artifacts(
+    cx: &StepContext,
+    log: &slog::Logger,
+    artifacts: StepHandle<BTreeSet<InstallinatorArtifact>, InstallinatorSpec>,
+    discovery: &DiscoveryMechanism,
+    last_known_peer: &LastKnownPeer,
+) -> Result<
+    StepResult<
+        Vec<(InstallinatorArtifact, StepHandle<BufList, InstallinatorSpec>)>,
+        InstallinatorSpec,
+    >,
+> {
+    let artifacts = artifacts.into_value(cx.token()).await;
+    let mut downloads = Vec::new();
+    cx.with_nested_engine(|engine| {
+        for artifact in artifacts {
+            let kind = match &artifact.kind {
+                // v2-aware Wicket doesn't read `kind` on ArtifactLookupId, but
+                // using the correct value is necessary to get the artifact from
+                // an older Wicket.
+                InstallinatorArtifactKind::HostPhase2 => "host_phase_2",
+                InstallinatorArtifactKind::MeasurementCorpus => {
+                    "measurement_corpus"
+                }
+                InstallinatorArtifactKind::ControlPlane => "control_plane",
+
+                // This kind doesn't exist on an older Wicket, and it won't be
+                // present in an Installinator document if we fetched it from an
+                // older Wicket, so this value is arbitrary.
+                InstallinatorArtifactKind::Zone { .. } => "zone",
+            };
+            let id = ArtifactLookupId { kind, hash: artifact.hash };
+
+            let component = match &artifact.kind {
+                InstallinatorArtifactKind::MeasurementCorpus => {
+                    InstallinatorComponent::MeasurementCorpus
+                }
+                InstallinatorArtifactKind::HostPhase2 => {
+                    InstallinatorComponent::HostPhase2
+                }
+                InstallinatorArtifactKind::Zone { .. }
+                | InstallinatorArtifactKind::ControlPlane => {
+                    InstallinatorComponent::ControlPlaneZone
+                }
+            };
+            let file_name = artifact.file_name.clone();
+            let step = engine
+                .new_step(
+                    component,
+                    InstallinatorStepId::Download,
+                    format!("Downloading {}", file_name),
+                    async move |cx2| {
+                        let fetched = fetch_artifact(
+                            &cx2,
+                            id,
+                            discovery,
+                            last_known_peer,
+                            log,
+                        )
+                        .await
+                        .with_context(|| {
+                            format!("failed to fetch {file_name}")
+                        })?;
+                        StepSuccess::new(fetched.artifact)
+                            .with_metadata(
+                                InstallinatorCompletionMetadata::Download {
+                                    address: fetched.peer.address(),
+                                },
+                            )
+                            .into()
+                    },
+                )
+                .register();
+            downloads.push((artifact, step));
+        }
+        Ok(())
+    })
+    .await?;
+    StepSuccess::new(downloads).into()
+}
+
 async fn fetch_artifact(
     cx: &StepContext,
-    id: &ArtifactHashId,
+    id: ArtifactLookupId,
     discovery: &DiscoveryMechanism,
+    last_known_peer: &LastKnownPeer,
     log: &slog::Logger,
 ) -> Result<FetchedArtifact> {
-    // TODO: Not sure why slog::o!("artifact" => ?id) isn't working, figure it
-    // out at some point.
     let log = log.new(slog::o!("artifact" => format!("{id:?}")));
-    let artifact = FetchedArtifact::loop_fetch_from_peers(
+    let fetched = FetchedArtifact::loop_fetch_from_peers(
         cx,
         &log,
         || async {
+            let preferred = last_known_peer.get();
             Ok(FetchArtifactBackend::new(
                 &log,
                 Box::new(HttpFetchBackend::new(
@@ -499,26 +634,59 @@ async fn fetch_artifact(
                     discovery.discover_peers(&log).await?,
                 )),
                 Duration::from_secs(10),
+                preferred,
             ))
         },
         id,
     )
     .await
-    .with_context(|| format!("error fetching image with id {id:?}"))?;
+    .with_context(|| format!("error fetching artifact with id {id:?}"))?;
+
+    // Check that the sha256 of the data we got from wicket matches the data we
+    // asked for.
+    //
+    // If this fails, we fail the entire installation rather than trying to
+    // fetch the artifact again, because we're fetching data from wicketd
+    // (cached in a temp dir) over TCP to ourselves (in memory), so the only
+    // cases where this could fail are disturbing enough (memory corruption,
+    // corruption under TCP, or wicketd gave us something other than what we
+    // requested) we want to know immediately and not retry: it's likely an
+    // operator could miss any warnings we emit if a retry succeeds.
+    let fetched = tokio::task::spawn_blocking(move || {
+        let mut hasher = Sha256::new();
+        for chunk in &fetched.artifact {
+            hasher.update(&chunk);
+        }
+        let computed_hash = ArtifactHash(hasher.finalize().into());
+        if id.hash != computed_hash {
+            bail!(
+                "downloaded {} checksum failure: \
+                 expected {} but calculated {}",
+                id.kind,
+                hex::encode(&id.hash),
+                hex::encode(&computed_hash)
+            );
+        }
+        Ok(fetched)
+    })
+    .await
+    .unwrap()?;
+
+    last_known_peer.set(fetched.peer);
 
     slog::info!(
         log,
         "fetched {} bytes from {}",
-        artifact.artifact.num_bytes(),
-        artifact.peer,
+        fetched.artifact.num_bytes(),
+        fetched.peer,
     );
 
-    Ok(artifact)
+    Ok(fetched)
 }
 
 pub(crate) fn stderr_env_drain(
     env_var: &str,
-) -> impl Drain<Ok = (), Err = slog::Never> {
+) -> impl Drain<Ok = (), Err = slog::Never> + use<> {
     let stderr_decorator = slog_term::TermDecorator::new().build();
     let stderr_drain =
         slog_term::FullFormat::new(stderr_decorator).build().fuse();
@@ -530,4 +698,58 @@ pub(crate) fn stderr_env_drain(
         builder = builder.filter(None, slog::FilterLevel::Info);
     }
     builder.build()
+}
+
+/// If the Wicket on the other end has a v1 repo, it will serve the original v1
+/// Installinator document, which lists the control plane tarball. We have to
+/// read the individual zone artifacts out of the tarball we've downloaded.
+///
+/// This function can be removed at the same time the
+/// `InstallinatorArtifactKind::ControlPlane` variant is removed at the end of
+/// the transition.
+async fn read_legacy_control_plane_tarball(
+    data: BufList,
+) -> Result<Vec<ArtifactToWrite>> {
+    // None of this is blocking I/O since it's copying and hashing memory, but
+    // the tarball is large enough that we should probably do this on its own
+    // worker thread.
+    tokio::task::spawn_blocking(move || {
+        let mut zones = Vec::new();
+        let mut archive = tar::Archive::new(GzDecoder::new(Cursor::new(data)));
+        for entry in archive.entries()? {
+            let mut entry = entry?;
+            let path = entry.header().path()?;
+            if !path.starts_with("zones/") {
+                continue;
+            }
+            let path = Utf8PathBuf::try_from(path.into_owned())?;
+            let Some(file_name) = path.file_name() else { continue };
+
+            let mut buf = [0; 8192];
+            let mut data = BufList::new();
+            let mut hasher = Sha256::new();
+            loop {
+                let n = entry
+                    .read(&mut buf)
+                    .with_context(|| format!("failed to read from {path}"))?;
+                if n == 0 {
+                    break;
+                }
+                data.push_chunk(&buf[..n]);
+                hasher.update(&buf[..n]);
+            }
+
+            zones.push(ArtifactToWrite {
+                file_name: file_name.to_owned(),
+                data,
+                hash: ArtifactHash(hasher.finalize().into()),
+            });
+        }
+        ensure!(
+            !zones.is_empty(),
+            "no zones were extracted from control plane tarball"
+        );
+        Ok(zones)
+    })
+    .await?
 }

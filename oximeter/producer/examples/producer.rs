@@ -4,8 +4,6 @@
 
 //! Integration test running a producer that exports a few basic metrics.
 
-// Copyright 2023 Oxide Computer Company
-
 use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
@@ -107,6 +105,11 @@ impl Producer for CpuBusyProducer {
     }
 }
 
+#[expect(
+    clippy::disallowed_macros,
+    reason = "using tokio::main avoids an `oxide-tokio-rt` dependency for \
+        examples"
+)]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();

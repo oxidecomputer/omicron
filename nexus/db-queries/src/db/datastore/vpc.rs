@@ -15,6 +15,7 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::Resource;
 use crate::db::model::ApplySledFilterExt;
+use crate::db::model::DbTypedUuid;
 use crate::db::model::IncompleteVpc;
 use crate::db::model::InstanceNetworkInterface;
 use crate::db::model::Name;
@@ -32,6 +33,7 @@ use crate::db::model::VpcRouterUpdate;
 use crate::db::model::VpcSubnet;
 use crate::db::model::VpcSubnetUpdate;
 use crate::db::model::VpcUpdate;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::model::{Ipv4Net, Ipv6Net};
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
@@ -55,6 +57,7 @@ use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V6;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_ID;
 use nexus_db_fixed_data::vpc::SERVICES_VPC_ID;
+use nexus_db_fixed_data::vpc_firewall_rule::NEXUS_ICMP_FW_RULE_NAME;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::DbBpZoneDisposition;
 use nexus_db_model::ExternalIp;
@@ -76,12 +79,16 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteKind as ExternalRouteKind;
+use omicron_common::api::external::ServiceIcmpConfig;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni as ExternalVni;
+use omicron_common::api::external::VpcFirewallRuleStatus;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterTarget;
+use omicron_uuid_kinds::ProjectUuid;
+use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
 use ref_cast::RefCast;
 use std::collections::BTreeMap;
@@ -135,7 +142,7 @@ impl DataStore {
         let igw = db::model::InternetGateway::new(
             *SERVICES_INTERNET_GATEWAY_ID,
             authz_vpc.id(),
-            nexus_types::external_api::params::InternetGatewayCreate {
+            nexus_types::external_api::internet_gateway::InternetGatewayCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "default".parse().unwrap(),
                     description: String::from("Default VPC gateway"),
@@ -164,7 +171,7 @@ impl DataStore {
                 SERVICES_VPC.system_router_id,
                 *SERVICES_VPC_ID,
                 VpcRouterKind::System,
-                nexus_types::external_api::params::VpcRouterCreate {
+                nexus_types::external_api::vpc::VpcRouterCreate {
                     identity: IdentityMetadataCreateParams {
                         name: "system".parse().unwrap(),
                         description: "Built-in VPC Router for Oxide Services"
@@ -181,7 +188,7 @@ impl DataStore {
             *SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4,
             SERVICES_VPC.system_router_id,
             ExternalRouteKind::Default,
-            nexus_types::external_api::params::RouterRouteCreate {
+            nexus_types::external_api::vpc::RouterRouteCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "default-v4".parse().unwrap(),
                     description: String::from("Default IPv4 route"),
@@ -199,7 +206,7 @@ impl DataStore {
             *SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V6,
             SERVICES_VPC.system_router_id,
             ExternalRouteKind::Default,
-            nexus_types::external_api::params::RouterRouteCreate {
+            nexus_types::external_api::vpc::RouterRouteCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "default-v6".parse().unwrap(),
                     description: String::from("Default IPv6 route"),
@@ -235,7 +242,7 @@ impl DataStore {
         opctx: &OpContext,
     ) -> Result<(), Error> {
         use nexus_db_fixed_data::vpc_firewall_rule::DNS_VPC_FW_RULE;
-        use nexus_db_fixed_data::vpc_firewall_rule::NEXUS_VPC_FW_RULE;
+        use nexus_db_fixed_data::vpc_firewall_rule::NEXUS_ICMP_FW_RULE;
 
         debug!(opctx.log, "attempting to create built-in VPC firewall rules");
 
@@ -264,13 +271,13 @@ impl DataStore {
             fw_rules.insert(DNS_VPC_FW_RULE.name.clone(), rule);
         }
 
-        if !fw_rules.contains_key(&NEXUS_VPC_FW_RULE.name) {
+        if !fw_rules.contains_key(&NEXUS_ICMP_FW_RULE.name) {
             let rule = VpcFirewallRule::new(
                 Uuid::new_v4(),
                 *SERVICES_VPC_ID,
-                &NEXUS_VPC_FW_RULE,
+                &NEXUS_ICMP_FW_RULE,
             )?;
-            fw_rules.insert(NEXUS_VPC_FW_RULE.name.clone(), rule);
+            fw_rules.insert(NEXUS_ICMP_FW_RULE.name.clone(), rule);
         }
 
         let rules = fw_rules
@@ -359,7 +366,8 @@ impl DataStore {
         authz_project: &authz::Project,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Vpc> {
-        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
+        let authz_vpc_list = authz::VpcList::new(authz_project.clone());
+        opctx.authorize(authz::Action::ListChildren, &authz_vpc_list).await?;
 
         use nexus_db_schema::schema::vpc::dsl;
         match pagparams {
@@ -373,7 +381,7 @@ impl DataStore {
             ),
         }
         .filter(dsl::time_deleted.is_null())
-        .filter(dsl::project_id.eq(authz_project.id()))
+        .filter(dsl::project_id.eq(to_db_typed_uuid(authz_project.id())))
         .select(Vpc::as_select())
         .load_async(&*self.pool_connection_authorized(opctx).await?)
         .await
@@ -421,7 +429,7 @@ impl DataStore {
                 }
                 Err(e) => return Err(e),
                 Ok(None) => {
-                    crate::probes::vni__search__range__empty!(|| (&id));
+                    crate::probes::vni__search__range__empty!(|| &id);
                     debug!(
                         opctx.log,
                         "No VNIs available within current search range, retrying";
@@ -458,7 +466,10 @@ impl DataStore {
     ) -> Result<Option<(authz::Vpc, Vpc)>, Error> {
         use nexus_db_schema::schema::vpc::dsl;
 
-        assert_eq!(authz_project.id(), vpc_query.vpc.project_id);
+        assert_eq!(
+            authz_project.id(),
+            ProjectUuid::from(vpc_query.vpc.project_id)
+        );
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
         let name = vpc_query.vpc.identity.name.clone();
@@ -483,7 +494,7 @@ impl DataStore {
             Err(AsyncInsertError::CollectionNotFound) => {
                 Err(Error::ObjectNotFound {
                     type_name: ResourceType::Project,
-                    lookup_type: LookupType::ById(project_id),
+                    lookup_type: LookupType::by_id(project_id),
                 })
             }
             Err(AsyncInsertError::DatabaseError(
@@ -740,12 +751,86 @@ impl DataStore {
             })
     }
 
+    pub async fn nexus_inbound_icmp_view(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<ServiceIcmpConfig, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use nexus_db_schema::schema::vpc_firewall_rule::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let rule = dsl::vpc_firewall_rule
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*SERVICES_VPC_ID))
+            .filter(dsl::name.eq(NEXUS_ICMP_FW_RULE_NAME))
+            .limit(1)
+            .select(VpcFirewallRule::as_select())
+            .get_result_async::<VpcFirewallRule>(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        if let Some(rule) = rule {
+            Ok(ServiceIcmpConfig {
+                enabled: rule.status.0 == VpcFirewallRuleStatus::Enabled,
+            })
+        } else {
+            Err(Error::internal_error(&format!(
+                "services VPC is missing the builtin firewall rule \
+                {NEXUS_ICMP_FW_RULE_NAME}"
+            )))
+        }
+    }
+
+    pub async fn nexus_inbound_icmp_update(
+        &self,
+        opctx: &OpContext,
+        config: ServiceIcmpConfig,
+    ) -> Result<ServiceIcmpConfig, Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        use nexus_db_schema::schema::vpc_firewall_rule::dsl;
+
+        let ServiceIcmpConfig { enabled } = config;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let status = nexus_db_model::VpcFirewallRuleStatus(if enabled {
+            VpcFirewallRuleStatus::Enabled
+        } else {
+            VpcFirewallRuleStatus::Disabled
+        });
+
+        let now = Utc::now();
+        let rule = diesel::update(dsl::vpc_firewall_rule)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*SERVICES_VPC_ID))
+            .filter(dsl::name.eq(NEXUS_ICMP_FW_RULE_NAME))
+            .set((dsl::time_modified.eq(now), dsl::status.eq(status)))
+            .returning(VpcFirewallRule::as_returning())
+            .get_result_async(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        if let Some(rule) = rule {
+            Ok(ServiceIcmpConfig {
+                enabled: rule.status.0 == VpcFirewallRuleStatus::Enabled,
+            })
+        } else {
+            Err(Error::internal_error(&format!(
+                "services VPC is missing the builtin firewall rule \
+                {NEXUS_ICMP_FW_RULE_NAME}"
+            )))
+        }
+    }
+
     /// Return the list of `Sled`s hosting instances or control plane services
     /// with network interfaces on the provided VPC.
     pub async fn vpc_resolve_to_sleds(
         &self,
         vpc_id: Uuid,
-        sleds_filter: &[Uuid],
+        sleds_filter: &[SledUuid],
     ) -> Result<Vec<Sled>, Error> {
         // Resolve each VNIC in the VPC to the Sled it's on, so we know which
         // Sleds to notify when firewall rules change.
@@ -816,7 +901,14 @@ impl DataStore {
             .sled_filter(SledFilter::VpcFirewall)
             .into_boxed();
         if !sleds_filter.is_empty() {
-            sleds = sleds.filter(sled::id.eq_any(sleds_filter.to_vec()));
+            sleds = sleds.filter(
+                sled::id.eq_any(
+                    sleds_filter
+                        .iter()
+                        .map(|id| to_db_typed_uuid(*id))
+                        .collect::<Vec<DbTypedUuid<_>>>(),
+                ),
+            );
         }
 
         let conn = self.pool_connection_unauthorized().await?;
@@ -2375,7 +2467,7 @@ impl DataStore {
     pub async fn vpc_resolve_sled_external_ips_to_gateways(
         &self,
         opctx: &OpContext,
-        sled_id: Uuid,
+        sled_id: SledUuid,
     ) -> Result<HashMap<Uuid, HashMap<IpAddr, HashSet<Uuid>>>, Error> {
         // TODO: give GW-bound addresses preferential treatment.
         use nexus_db_schema::schema::external_ip as eip;
@@ -2402,7 +2494,7 @@ impl DataStore {
                 vmm::table.on(vmm::instance_id
                     .nullable()
                     .eq(eip::parent_id)
-                    .and(vmm::sled_id.eq(sled_id))),
+                    .and(vmm::sled_id.eq(to_db_typed_uuid(sled_id)))),
             )
             .inner_join(
                 ni::table.on(ni::parent_id.nullable().eq(eip::parent_id)),
@@ -2505,7 +2597,10 @@ impl DataStore {
                 .internal_context("lookup router by id for rules")?;
         let vpc_id = authz_vpc.id();
 
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         let mut all_rules = vec![];
         while let Some(p) = paginator.next() {
             let batch = self
@@ -2764,14 +2859,14 @@ impl DataStore {
                     .unwrap_or_default(),
                 (RouteTarget::Instance(n), _) => instances
                     .get(&n)
-                    .map(|i| match i.1.ip {
-                        // TODO: update for dual-stack v4/6.
-                        ip @ IpNetwork::V4(_) => {
-                            (Some(RouterTarget::Ip(ip.ip())), None)
-                        }
-                        ip @ IpNetwork::V6(_) => {
-                            (None, Some(RouterTarget::Ip(ip.ip())))
-                        }
+                    .map(|(_inst, iface)| {
+                        let v4_target = iface
+                            .ipv4
+                            .map(|ipv4| RouterTarget::Ip(ipv4.into()));
+                        let v6_target = iface
+                            .ipv6
+                            .map(|ipv6| RouterTarget::Ip(ipv6.into()));
+                        (v4_target, v6_target)
                     })
                     .unwrap_or_default(),
                 (RouteTarget::Drop, _) => {
@@ -2872,29 +2967,43 @@ mod tests {
     use crate::db::model::Project;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use crate::db::queries::vpc::MAX_VNI_SEARCH_RANGE_SIZE;
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use nexus_db_model::IncompleteNetworkInterface;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
+    use nexus_reconfigurator_planning::planner::Planner;
+    use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_reconfigurator_planning::system::SledBuilder;
     use nexus_reconfigurator_planning::system::SystemDescription;
     use nexus_types::deployment::Blueprint;
+    use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
-    use nexus_types::external_api::params;
+    use nexus_types::deployment::BlueprintZoneImageSource;
+    use nexus_types::deployment::OperatorNexusConfig;
+    use nexus_types::external_api::instance as instance_types;
+    use nexus_types::external_api::instance::PrivateIpStackCreate;
+    use nexus_types::external_api::project;
+    use nexus_types::external_api::vpc;
     use nexus_types::identity::Asset;
     use omicron_common::api::external;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::SledConfigGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
-    use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::RackUuid;
+    use omicron_uuid_kinds::SiloUuid;
     use oxnet::IpNet;
     use oxnet::Ipv4Net;
     use slog::info;
+    use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
+    use std::sync::Arc;
 
     // Test that we detect the right error condition and return None when we
     // fail to insert a VPC due to VNI exhaustion.
@@ -2912,13 +3021,14 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a project.
-        let project_params = params::ProjectCreate {
+        let project_params = project::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: "project".parse().unwrap(),
                 description: String::from("test project"),
             },
+            defaults: None,
         };
-        let project = Project::new(Uuid::new_v4(), project_params);
+        let project = Project::new(SiloUuid::new_v4(), project_params);
         let (authz_project, _) = datastore
             .project_create(&opctx, project)
             .await
@@ -2934,13 +3044,14 @@ mod tests {
                 Uuid::new_v4(),
                 authz_project.id(),
                 Uuid::new_v4(),
-                params::VpcCreate {
+                vpc::VpcCreate {
                     identity: IdentityMetadataCreateParams {
                         name: name.clone(),
                         description: description.clone(),
                     },
                     ipv6_prefix: None,
                     dns_name: name.clone(),
+                    defaults: None,
                 },
             )
             .expect("failed to create incomplete VPC");
@@ -2975,13 +3086,14 @@ mod tests {
             Uuid::new_v4(),
             authz_project.id(),
             Uuid::new_v4(),
-            params::VpcCreate {
+            vpc::VpcCreate {
                 identity: IdentityMetadataCreateParams {
                     name: name.clone(),
                     description: description.clone(),
                 },
                 ipv6_prefix: None,
                 dns_name: name.clone(),
+                defaults: None,
             },
         )
         .expect("failed to create incomplete VPC");
@@ -3017,13 +3129,14 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a project.
-        let project_params = params::ProjectCreate {
+        let project_params = project::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: "project".parse().unwrap(),
                 description: String::from("test project"),
             },
+            defaults: None,
         };
-        let project = Project::new(Uuid::new_v4(), project_params);
+        let project = Project::new(SiloUuid::new_v4(), project_params);
         let (authz_project, _) = datastore
             .project_create(&opctx, project)
             .await
@@ -3039,13 +3152,14 @@ mod tests {
                 Uuid::new_v4(),
                 authz_project.id(),
                 Uuid::new_v4(),
-                params::VpcCreate {
+                vpc::VpcCreate {
                     identity: IdentityMetadataCreateParams {
                         name: name.clone(),
                         description: description.clone(),
                     },
                     ipv6_prefix: None,
                     dns_name: name.clone(),
+                    defaults: None,
                 },
             )
             .expect("failed to create incomplete VPC");
@@ -3081,13 +3195,14 @@ mod tests {
             Uuid::new_v4(),
             authz_project.id(),
             Uuid::new_v4(),
-            params::VpcCreate {
+            vpc::VpcCreate {
                 identity: IdentityMetadataCreateParams {
                     name: name.clone(),
                     description: description.clone(),
                 },
                 ipv6_prefix: None,
                 dns_name: name.clone(),
+                defaults: None,
             },
         )
         .expect("failed to create incomplete VPC");
@@ -3123,7 +3238,7 @@ mod tests {
             .await
             .expect("failed to resolve to sleds")
             .into_iter()
-            .map(|sled| SledUuid::from_untyped_uuid(sled.id()))
+            .map(|sled| sled.id())
             .collect::<Vec<_>>();
         service_sled_ids.sort();
         assert_eq!(expected_sled_ids, service_sled_ids);
@@ -3161,7 +3276,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Set up our fake system with 5 sleds.
-        let rack_id = Uuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let mut system = SystemDescription::new();
         let mut sled_ids = Vec::new();
         for _ in 0..5 {
@@ -3172,20 +3287,21 @@ mod tests {
                 .sled_id(sled_id)
                 .rack_id(rack_id)
                 .build();
-            datastore.sled_upsert(sled_update).await.expect("upserting sled");
+            sled_upsert_expect_written(datastore, sled_update).await;
         }
         sled_ids.sort_unstable();
-        let planning_input = system
-            .to_planning_input_builder()
-            .expect("creating planning builder")
-            .build();
 
         // Helper to convert a zone's nic into an insertable nic.
         let db_nic_from_zone = |zone_config: &BlueprintZoneConfig| {
-            let (_, nic) = zone_config
+            let nic = zone_config
                 .zone_type
                 .external_networking()
-                .expect("external networking for zone type");
+                .expect("external networking for zone type")
+                .nic();
+            let ip = nic
+                .ip_config
+                .ipv4_addr()
+                .expect("an IPv4 address for this NIC");
             IncompleteNetworkInterface::new_service(
                 nic.id,
                 zone_config.id.into_untyped_uuid(),
@@ -3194,7 +3310,7 @@ mod tests {
                     name: nic.name.clone(),
                     description: nic.name.to_string(),
                 },
-                nic.ip,
+                PrivateIpStackCreate::from_ipv4(*ip),
                 nic.mac,
                 nic.slot,
             )
@@ -3202,30 +3318,36 @@ mod tests {
         };
 
         // Create an initial, empty blueprint, and make it the target.
-        let bp0 = BlueprintBuilder::build_empty_with_sleds(
-            sled_ids.iter().copied(),
-            "test",
-        );
+        let bp0 = Arc::new(BlueprintBuilder::build_empty("test"));
         bp_insert_and_make_target(&opctx, &datastore, &bp0).await;
+
+        let planning_input = system
+            .to_planning_input_builder(Arc::clone(&bp0))
+            .expect("creating planning builder")
+            .build();
 
         // Our blueprint doesn't describe any services, so we shouldn't find any
         // sled IDs running services.
         assert_service_sled_ids(&datastore, &[]).await;
-
-        // Build an initial empty collection
-        let collection =
-            system.to_collection_builder().expect("collection builder").build();
 
         // Create a blueprint that has a Nexus on our third sled.
         let bp1 = {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &bp0,
-                &planning_input,
-                &collection,
                 "test",
+                PlannerRng::from_entropy(),
             )
             .expect("created blueprint builder");
+
+            // We made changes to the planning input we want to be reflected in
+            // the new blueprint; reuse the `Planner`'s method for replicating
+            // those changes.
+            Planner::update_builder_from_planning_input(
+                &mut builder,
+                &planning_input,
+            );
+
             for &sled_id in &sled_ids {
                 builder
                     .sled_add_disks(
@@ -3237,10 +3359,26 @@ mod tests {
                     )
                     .expect("ensured disks");
             }
+            let external_ip = ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                planning_input.external_ip_policy(),
+            )
+            .expect("constructed ExternalNetworkingAllocator")
+            .for_new_nexus()
+            .expect("found external IP for Nexus");
             builder
-                .sled_add_zone_nexus_with_config(sled_ids[2], false, Vec::new())
+                .sled_add_zone_nexus(
+                    sled_ids[2],
+                    BlueprintZoneImageSource::InstallDataset,
+                    external_ip,
+                    bp0.nexus_generation,
+                    &OperatorNexusConfig {
+                        external_tls: false,
+                        external_dns_servers: &[],
+                    },
+                )
                 .expect("added nexus to third sled");
-            builder.build()
+            builder.build(BlueprintSource::Test)
         };
         bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
 
@@ -3281,36 +3419,59 @@ mod tests {
         assert_service_sled_ids(&datastore, &[]).await;
 
         // Delete the service NIC record so we can reuse this IP later.
-        datastore
-            .service_delete_network_interface(
-                &opctx,
-                bp1.sleds[&sled_ids[2]]
-                    .zones
-                    .first()
-                    .unwrap()
-                    .id
-                    .into_untyped_uuid(),
-                bp1_nic.id(),
-            )
-            .await
-            .expect("deleted bp1 nic");
+        {
+            let conn = datastore
+                .pool_connection_for_tests()
+                .await
+                .expect("got connection for tests");
+            datastore
+                .service_delete_network_interface_on_connection(
+                    &conn,
+                    bp1.sleds[&sled_ids[2]]
+                        .zones
+                        .first()
+                        .unwrap()
+                        .id
+                        .into_untyped_uuid(),
+                    bp1_nic.id(),
+                )
+                .await
+                .expect("deleted bp1 nic");
+        }
 
         // Create a blueprint with Nexus on all our sleds.
         let bp3 = {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &bp2,
-                &planning_input,
-                &collection,
                 "test",
+                PlannerRng::from_entropy(),
             )
             .expect("created blueprint builder");
+            let mut external_networking_alloc =
+                ExternalNetworkingAllocator::from_current_zones(
+                    &builder,
+                    planning_input.external_ip_policy(),
+                )
+                .expect("constructed ExternalNetworkingAllocator");
             for &sled_id in &sled_ids {
+                let external_ip = external_networking_alloc
+                    .for_new_nexus()
+                    .expect("found external IP for Nexus");
                 builder
-                    .sled_add_zone_nexus_with_config(sled_id, false, Vec::new())
+                    .sled_add_zone_nexus(
+                        sled_id,
+                        BlueprintZoneImageSource::InstallDataset,
+                        external_ip,
+                        bp2.nexus_generation,
+                        &OperatorNexusConfig {
+                            external_tls: false,
+                            external_dns_servers: &[],
+                        },
+                    )
                     .expect("added nexus to third sled");
             }
-            builder.build()
+            builder.build(BlueprintSource::Test)
         };
 
         // Insert the service NIC records for all the Nexuses.
@@ -3373,7 +3534,7 @@ mod tests {
                 bp4.sleds.get_mut(&sled_ids[3]).expect("config for sled");
             sled3.zones.iter_mut().next().unwrap().disposition =
                 BlueprintZoneDisposition::Expunged {
-                    as_of_generation: Generation::new(),
+                    as_of_generation: SledConfigGeneration::new(),
                     ready_for_cleanup: false,
                 };
             sled3.sled_agent_generation = sled3.sled_agent_generation.next();
@@ -3397,11 +3558,12 @@ mod tests {
         datastore: &DataStore,
     ) -> (authz::Project, authz::Vpc, Vpc, authz::VpcRouter, VpcRouter) {
         // Create a project and VPC.
-        let project_params = params::ProjectCreate {
+        let project_params = project::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: "project".parse().unwrap(),
                 description: String::from("test project"),
             },
+            defaults: None,
         };
         let project = Project::new(DEFAULT_SILO.id(), project_params);
         let (authz_project, _) = datastore
@@ -3415,13 +3577,14 @@ mod tests {
             Uuid::new_v4(),
             authz_project.id(),
             Uuid::new_v4(),
-            params::VpcCreate {
+            vpc::VpcCreate {
                 identity: IdentityMetadataCreateParams {
                     name: vpc_name.clone(),
                     description: description.clone(),
                 },
                 ipv6_prefix: None,
                 dns_name: vpc_name.clone(),
+                defaults: None,
             },
         )
         .expect("failed to create incomplete VPC");
@@ -3450,7 +3613,7 @@ mod tests {
             db_vpc.system_router_id,
             db_vpc.id(),
             VpcRouterKind::System,
-            nexus_types::external_api::params::VpcRouterCreate {
+            nexus_types::external_api::vpc::VpcRouterCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "system".parse().unwrap(),
                     description: description.clone(),
@@ -3763,10 +3926,10 @@ mod tests {
             assert!(resolved.iter().any(|x| {
                 let k = &x.dest;
                 let v = &x.target;
-                *k == subnet.ipv4_block.0.into()
+                *k == IpNet::from(subnet.ipv4_block.0)
                     && match v {
                         RouterTarget::VpcSubnet(ip) => {
-                            *ip == subnet.ipv4_block.0.into()
+                            *ip == IpNet::from(subnet.ipv4_block.0)
                         }
                         _ => false,
                     }
@@ -3774,10 +3937,10 @@ mod tests {
             assert!(resolved.iter().any(|x| {
                 let k = &x.dest;
                 let v = &x.target;
-                *k == subnet.ipv6_block.0.into()
+                *k == IpNet::from(subnet.ipv6_block.0)
                     && match v {
                         RouterTarget::VpcSubnet(ip) => {
-                            *ip == subnet.ipv6_block.0.into()
+                            *ip == IpNet::from(subnet.ipv6_block.0)
                         }
                         _ => false,
                     }
@@ -3825,7 +3988,7 @@ mod tests {
                     Uuid::new_v4(),
                     authz_router.id(),
                     external::RouterRouteKind::Custom,
-                    params::RouterRouteCreate {
+                    vpc::RouterRouteCreate {
                         identity: IdentityMetadataCreateParams {
                             name: "to-vpn".parse().unwrap(),
                             description: "A rule...".into(),
@@ -3861,24 +4024,27 @@ mod tests {
                 db::model::Instance::new(
                     InstanceUuid::new_v4(),
                     authz_project.id(),
-                    &params::InstanceCreate {
+                    &instance_types::InstanceCreate {
                         identity: IdentityMetadataCreateParams {
                             name: inst_name.clone(),
                             description: "An instance...".into(),
                         },
-                        ncpus: external::InstanceCpuCount(1),
+                        ncpus: instance_types::InstanceCpuCount(1),
                         memory: 10.into(),
                         hostname: "insty".parse().unwrap(),
                         user_data: vec![],
                         network_interfaces:
-                            params::InstanceNetworkInterfaceAttachment::None,
+                            instance_types::InstanceNetworkInterfaceAttachment::None,
                         external_ips: vec![],
                         disks: vec![],
                         boot_disk: None,
+                        cpu_platform: None,
                         ssh_public_keys: None,
                         start: false,
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
+                        multicast_groups: Vec::new(),
+                        enable_jumbo_frames: false,
                     },
                 ),
             )
@@ -3913,7 +4079,7 @@ mod tests {
                         name: "nic".parse().unwrap(),
                         description: "A NIC...".into(),
                     },
-                    None,
+                    PrivateIpStackCreate::auto_ipv4(),
                 )
                 .unwrap(),
             )
@@ -3930,7 +4096,10 @@ mod tests {
         assert!(routes.iter().any(|x| (x.dest
             == "192.168.0.0/16".parse::<IpNet>().unwrap())
             && match x.target {
-                RouterTarget::Ip(ip) => ip == nic.ip.ip(),
+                RouterTarget::Ip(IpAddr::V4(ipv4)) =>
+                    ipv4 == Ipv4Addr::from(nic.ipv4.unwrap()),
+                RouterTarget::Ip(IpAddr::V6(ipv6)) =>
+                    ipv6 == Ipv6Addr::from(nic.ipv6.unwrap()),
                 _ => false,
             }));
 

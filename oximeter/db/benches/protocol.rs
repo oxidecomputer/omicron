@@ -4,12 +4,11 @@
 
 //! Benchmark comparing the native protocol to JSON-over-HTTP.
 
-// Copyright 2024 Oxide Computer Company
-
 use criterion::BenchmarkId;
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
 use omicron_common::address::CLICKHOUSE_TCP_PORT;
+use oximeter_db::User;
 use oximeter_db::native::Connection;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
@@ -37,7 +36,11 @@ async fn native_impl(
     conn: &Arc<Mutex<Connection>>,
     query: &str,
 ) {
-    conn.lock().await.query(query).await.expect("Expected to run query");
+    conn.lock()
+        .await
+        .query(uuid::Uuid::new_v4(), query)
+        .await
+        .expect("Expected to run query");
 }
 
 /// Setup the native query benchmark.
@@ -53,9 +56,9 @@ fn native(c: &mut Criterion) {
     // be pretty small since it's uncontended.
     let addr = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), CLICKHOUSE_TCP_PORT);
     let rt = Runtime::new().unwrap();
-    let conn = Arc::new(Mutex::new(
-        rt.block_on(async { Connection::new(addr).await.unwrap() }),
-    ));
+    let conn = Arc::new(Mutex::new(rt.block_on(async {
+        Connection::new(addr, User::Admin).await.unwrap()
+    })));
     for query in QUERIES {
         group.bench_with_input(
             BenchmarkId::from_parameter(*query),

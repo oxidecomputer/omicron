@@ -6,10 +6,10 @@
 //!
 //! A VMM is considered "abandoned" if (and only if):
 //!
-//! - It is in the `Destroyed` state.
+//! - It is in the `Destroyed`, `Failed`, or `SagaUnwound` state.
 //! - It is not currently running an instance, and it is also not the
-//!   migration target of any instance (i.e. it is not pointed to by
-//!   any instance record's `active_propolis_id` and `target_propolis_id`
+//!   migration target of an instance (i.e. it is not pointed to by its
+//!   owning instance's `active_propolis_id` or `target_propolis_id`
 //!   fields).
 //! - It has not been deleted yet.
 //!
@@ -60,7 +60,10 @@ impl AbandonedVmmReaper {
         status: &mut AbandonedVmmReaperStatus,
         opctx: &OpContext,
     ) -> Result<(), anyhow::Error> {
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let vmms = self
                 .datastore
@@ -99,6 +102,7 @@ impl AbandonedVmmReaper {
         for vmm in vmms {
             let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
             slog::trace!(opctx.log, "Deleting abandoned VMM"; "vmm" => %vmm_id);
+
             // Attempt to remove the abandoned VMM's sled resource reservation.
             match self.datastore.sled_reservation_delete(opctx, vmm_id).await {
                 Ok(_) => {
@@ -198,12 +202,13 @@ mod tests {
     use nexus_db_model::Resources;
     use nexus_db_model::SledResourceVmm;
     use nexus_db_model::Vmm;
-    use nexus_db_model::VmmRuntimeState;
+    use nexus_db_model::VmmCpuPlatform;
     use nexus_db_model::VmmState;
+    use nexus_db_queries::db::datastore::sled::SledReservationReason;
     use nexus_test_utils::resource_helpers;
     use nexus_test_utils_macros::nexus_test;
     use omicron_uuid_kinds::InstanceUuid;
-    use uuid::Uuid;
+    use omicron_uuid_kinds::SledUuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -220,7 +225,7 @@ mod tests {
             datastore: &Arc<DataStore>,
             opctx: &OpContext,
         ) -> Self {
-            resource_helpers::create_default_ip_pool(&client).await;
+            resource_helpers::create_default_ip_pools(&client).await;
 
             let _project =
                 resource_helpers::create_project(client, PROJECT_NAME).await;
@@ -240,14 +245,15 @@ mod tests {
                         time_created: Utc::now(),
                         time_deleted: None,
                         instance_id: instance.identity.id,
-                        sled_id: Uuid::new_v4(),
+                        sled_id: SledUuid::new_v4().into(),
                         propolis_ip: "::1".parse().unwrap(),
                         propolis_port: 12345.into(),
-                        runtime: VmmRuntimeState {
-                            state: VmmState::Destroyed,
-                            time_state_updated: Utc::now(),
-                            gen: Generation::new(),
-                        }
+                        cpu_platform: VmmCpuPlatform::SledDefault,
+                        state: VmmState::Destroyed,
+                        time_state_updated: Utc::now(),
+                        generation: Generation::new(),
+                        failure_reason: None,
+                        stop_for_update_disposition_generation: None,
                     }),
                 )
                 .await
@@ -268,6 +274,10 @@ mod tests {
                         destroyed_vmm_id,
                         resources.clone(),
                         constraints,
+                        // Setting the reservation reason of `target` means this
+                        // was the target of a migration, and that migration
+                        // failed according to the VMM state of destroyed.
+                        SledReservationReason::MigrationTarget,
                     )
                     .await
                     .expect("sled reservation should be created successfully")
@@ -364,7 +374,10 @@ mod tests {
         // order to simulate a condition where the VMM record was deleted
         // between when the listing query was run and when the bg task attempted
         // to delete the VMM record.
-        let paginator = Paginator::new(SQL_BATCH_SIZE);
+        let paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         let p = paginator.next().unwrap();
         let abandoned_vmms = datastore
             .vmm_list_abandoned(&opctx, &p.current_pagparams())
@@ -411,7 +424,10 @@ mod tests {
         // order to simulate a condition where the sled reservation record was
         // deleted between when the listing query was run and when the bg task
         // attempted to delete the sled reservation..
-        let paginator = Paginator::new(SQL_BATCH_SIZE);
+        let paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         let p = paginator.next().unwrap();
         let abandoned_vmms = datastore
             .vmm_list_abandoned(&opctx, &p.current_pagparams())

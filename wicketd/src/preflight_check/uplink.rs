@@ -14,22 +14,27 @@ use dpd_client::types::PortId;
 use dpd_client::types::PortSettings;
 use dpd_client::types::PortSpeed as DpdPortSpeed;
 use either::Either;
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::TokioResolver;
 use hickory_resolver::config::NameServerConfigGroup;
+use hickory_resolver::config::ResolveHosts;
 use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
-use hickory_resolver::error::ResolveErrorKind;
+use hickory_resolver::name_server::TokioConnectionProvider;
 use illumos_utils::PFEXEC;
 use illumos_utils::zone::SVCCFG;
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::address::DENDRITE_PORT;
-use omicron_common::api::internal::shared::PortFec as OmicronPortFec;
-use omicron_common::api::internal::shared::PortSpeed as OmicronPortSpeed;
-use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_common::http_client::internal_http_client;
 use oxnet::IpNet;
+use sled_agent_types::early_networking::LinkFec;
+use sled_agent_types::early_networking::LinkSpeed;
+use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UplinkAddress;
+use sled_agent_types::early_networking::UplinkAddressConfig;
 use slog::Logger;
 use slog::error;
 use slog::o;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -49,8 +54,9 @@ use wicket_common::preflight_check::StepWarning;
 use wicket_common::preflight_check::UpdateEngine;
 use wicket_common::preflight_check::UplinkPreflightStepId;
 use wicket_common::preflight_check::UplinkPreflightTerminalError;
-use wicket_common::rack_setup::UserSpecifiedPortConfig;
-use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicketd_commission_types::rack_setup::UplinkPortConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedPortConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
 
 const DNS_PORT: u16 = 53;
 
@@ -73,13 +79,14 @@ pub(super) async fn run_local_uplink_preflight_check(
     network_config: UserSpecifiedRackNetworkConfig,
     dns_servers: Vec<IpAddr>,
     ntp_servers: Vec<String>,
-    our_switch_location: SwitchLocation,
+    our_switch_slot: SwitchSlot,
     dns_name_to_query: Option<String>,
     event_buffer: Arc<Mutex<Option<EventBuffer>>>,
     log: &Logger,
 ) {
-    let dpd_client = DpdClient::new(
+    let dpd_client = DpdClient::new_with_client(
         &format!("http://[::1]:{DENDRITE_PORT}"),
+        internal_http_client(),
         DpdClientState {
             tag: WICKETD_TAG.to_string(),
             log: log.new(o!("component" => "DpdClient")),
@@ -87,10 +94,15 @@ pub(super) async fn run_local_uplink_preflight_check(
     );
 
     // Build the update executor.
-    let (sender, mut receiver) = update_engine::channel();
+    let (sender, mut receiver) = oxide_update_engine::channel();
     let mut engine = UpdateEngine::new(log, sender);
 
-    for (port, uplink) in network_config.port_map(our_switch_location) {
+    for (port, uplink) in network_config.port_map(our_switch_slot) {
+        let UserSpecifiedPortConfig::Uplink(uplink) = uplink else {
+            error!(log, "DDM ports not supported for uplinks",);
+            continue;
+        };
+
         add_steps_for_single_local_uplink_preflight_check(
             &mut engine,
             &dpd_client,
@@ -130,7 +142,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
     engine: &mut UpdateEngine<'a>,
     dpd_client: &'a DpdClient,
     port: &'a str,
-    uplink: &'a UserSpecifiedPortConfig,
+    uplink: &'a UplinkPortConfig,
     dns_servers: &'a [IpAddr],
     ntp_servers: &'a [String],
     dns_name_to_query: Option<&'a str>,
@@ -306,11 +318,37 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                 let uplink_property =
                     UplinkProperty(format!("uplinks/{}_0", port));
 
-                for addr in &uplink.addresses {
-                    // This includes the CIDR only
-                    let uplink_cidr = addr.address.to_string();
+                for &addr in &uplink.addresses {
+                    let addr = UplinkAddressConfig::from(addr);
+
+                    // count current number of link-local addresses
+                    let addrconf_count = match execute_command(&[
+                        IPADM,
+                        "show-addr",
+                        "-p",
+                        "-o",
+                        "type",
+                    ])
+                    .await
+                    {
+                        Ok(stdout) => stdout,
+                        Err(err) => {
+                            return StepWarning::new(
+                                Err(L2Failure::RunIpadm(
+                                    level1,
+                                    uplink_property,
+                                )),
+                                format!("failed running ipadm: {err}"),
+                            )
+                            .into();
+                        }
+                    }
+                    .split('\n')
+                    .filter(|i| i.to_lowercase() == "addrconf")
+                    .count();
+
                     // This includes the VLAN ID, if any
-                    let uplink_cfg = addr.to_string();
+                    let uplink_cfg = addr.to_uplinkd_smf_property();
                     if let Err(err) = execute_command(&[
                         SVCCFG,
                         "-s",
@@ -350,31 +388,74 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                     // Wait for the `uplink` service to create the IP address.
                     let start_waiting_addr = Instant::now();
                     'waiting_for_addr: loop {
-                        let ipadm_out = match execute_command(&[
-                            IPADM,
-                            "show-addr",
-                            "-p",
-                            "-o",
-                            "addr",
-                        ])
-                        .await
-                        {
-                            Ok(stdout) => stdout,
-                            Err(err) => {
-                                return StepWarning::new(
-                                    Err(L2Failure::RunIpadm(
-                                        level1,
-                                        uplink_property,
-                                    )),
-                                    format!("failed running ipadm: {err}"),
-                                )
-                                .into();
-                            }
-                        };
+                        match addr.address {
+                            // When we are using numbered uplinks
+                            UplinkAddress::Static { ip_net: uplink_cidr } => {
+                                let ipadm_out = match execute_command(&[
+                                    IPADM,
+                                    "show-addr",
+                                    "-p",
+                                    "-o",
+                                    "addr",
+                                ])
+                                .await
+                                {
+                                    Ok(stdout) => stdout,
+                                    Err(err) => {
+                                        return StepWarning::new(
+                                            Err(L2Failure::RunIpadm(
+                                                level1,
+                                                uplink_property,
+                                            )),
+                                            format!(
+                                                "failed running ipadm: {err}"
+                                            ),
+                                        )
+                                        .into();
+                                    }
+                                };
 
-                        for line in ipadm_out.split('\n') {
-                            if line == uplink_cidr {
-                                break 'waiting_for_addr;
+                                for line in ipadm_out.split('\n') {
+                                    if line == uplink_cidr.to_string() {
+                                        break 'waiting_for_addr;
+                                    }
+                                }
+                            }
+                            // unnumbered uplinks
+                            UplinkAddress::AddrConf => {
+                                // look for a new unnumbered uplink
+                                let new_count = match execute_command(&[
+                                    IPADM,
+                                    "show-addr",
+                                    "-p",
+                                    "-o",
+                                    "type",
+                                ])
+                                .await
+                                {
+                                    Ok(stdout) => stdout,
+                                    Err(err) => {
+                                        return StepWarning::new(
+                                            Err(L2Failure::RunIpadm(
+                                                level1,
+                                                uplink_property,
+                                            )),
+                                            format!(
+                                                "failed running ipadm: {err}"
+                                            ),
+                                        )
+                                        .into();
+                                    }
+                                }
+                                .split('\n')
+                                .filter(|i| i.to_lowercase() == "addrconf")
+                                .count();
+
+                                // If we have a new addrconf address, we have our new link-local
+                                // address
+                                if new_count == addrconf_count + 1 {
+                                    break 'waiting_for_addr;
+                                }
                             }
                         }
 
@@ -393,7 +474,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                                 )),
                                 format!(
                                     "timed out waiting for `uplink` to \
-                                 create {uplink_cidr}"
+                                     create {uplink_cfg}"
                                 ),
                             )
                             .into();
@@ -746,30 +827,40 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
 }
 
 fn build_port_settings(
-    uplink: &UserSpecifiedPortConfig,
+    uplink: &UplinkPortConfig,
     link_id: &LinkId,
 ) -> PortSettings {
     // Map from omicron_common types to dpd_client types
     let fec = uplink.uplink_port_fec.map(|fec| match fec {
-        OmicronPortFec::Firecode => DpdPortFec::Firecode,
-        OmicronPortFec::None => DpdPortFec::None,
-        OmicronPortFec::Rs => DpdPortFec::Rs,
+        LinkFec::Firecode => DpdPortFec::Firecode,
+        LinkFec::None => DpdPortFec::None,
+        LinkFec::Rs => DpdPortFec::Rs,
     });
     let speed = match uplink.uplink_port_speed {
-        OmicronPortSpeed::Speed0G => DpdPortSpeed::Speed0G,
-        OmicronPortSpeed::Speed1G => DpdPortSpeed::Speed1G,
-        OmicronPortSpeed::Speed10G => DpdPortSpeed::Speed10G,
-        OmicronPortSpeed::Speed25G => DpdPortSpeed::Speed25G,
-        OmicronPortSpeed::Speed40G => DpdPortSpeed::Speed40G,
-        OmicronPortSpeed::Speed50G => DpdPortSpeed::Speed50G,
-        OmicronPortSpeed::Speed100G => DpdPortSpeed::Speed100G,
-        OmicronPortSpeed::Speed200G => DpdPortSpeed::Speed200G,
-        OmicronPortSpeed::Speed400G => DpdPortSpeed::Speed400G,
+        LinkSpeed::Speed0G => DpdPortSpeed::Speed0G,
+        LinkSpeed::Speed1G => DpdPortSpeed::Speed1G,
+        LinkSpeed::Speed10G => DpdPortSpeed::Speed10G,
+        LinkSpeed::Speed25G => DpdPortSpeed::Speed25G,
+        LinkSpeed::Speed40G => DpdPortSpeed::Speed40G,
+        LinkSpeed::Speed50G => DpdPortSpeed::Speed50G,
+        LinkSpeed::Speed100G => DpdPortSpeed::Speed100G,
+        LinkSpeed::Speed200G => DpdPortSpeed::Speed200G,
+        LinkSpeed::Speed400G => DpdPortSpeed::Speed400G,
     };
 
     let mut port_settings = PortSettings { links: HashMap::new() };
 
-    let addrs = uplink.addresses.iter().map(|a| a.addr()).collect();
+    let addrs = uplink
+        .addresses
+        .iter()
+        .map(|a| a.address.ip_squashing_addrconf_to_unspecified())
+        .collect();
+
+    // We always enable DDM on the backplane, so this only applies to the front
+    // IO ports which are _not_ uplinks. This entire code path is only used for
+    // the preflight uplink checks, so we can confidently say we don't want to
+    // allow DDM.
+    let allow_ddm_traffic = false;
 
     port_settings.links.insert(
         link_id.to_string(),
@@ -782,6 +873,7 @@ fn build_port_settings(
                 speed,
                 lane: Some(LinkId(0)),
                 tx_eq: None,
+                allow_ddm_traffic,
             },
         },
     );
@@ -800,10 +892,9 @@ fn build_port_settings(
 async fn execute_command(args: &[&str]) -> Result<String, String> {
     let mut command = Command::new(PFEXEC);
     command.env_clear().args(args);
-    let output = command
-        .output()
-        .await
-        .map_err(|err| format!("failed to execute command: {err}"))?;
+    let output = command.output().await.map_err(|err| {
+        format!("failed to execute command: {}", InlineErrorChain::new(&err))
+    })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
@@ -828,10 +919,9 @@ async fn execute_command_ignoring_status(
 ) -> Result<CommandOutput, String> {
     let mut command = Command::new(PFEXEC);
     command.env_clear().args(args);
-    let output = command
-        .output()
-        .await
-        .map_err(|err| format!("failed to execute command: {err}"))?;
+    let output = command.output().await.map_err(|err| {
+        format!("failed to execute command: {}", InlineErrorChain::new(&err))
+    })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1018,7 +1108,7 @@ impl DnsLookupStep {
     async fn lookup_ip(
         &mut self,
         dns_ip: IpAddr,
-        resolver: &TokioAsyncResolver,
+        resolver: &TokioResolver,
         name: &str,
         options: DnsLookupOptions,
         cx: &StepContext,
@@ -1088,91 +1178,77 @@ impl DnsLookupStep {
                 Err(err) => err,
             };
 
-            match err.kind() {
-                // If `NoRecordsFound` is an acceptable end to this lookup,
-                // we're done.
-                ResolveErrorKind::NoRecordsFound { .. }
-                    if options.is_no_records_found_okay =>
-                {
-                    let message = format!(
-                        "DNS server {dns_ip} \
-                         {query_type} query attempt {attempt}: \
-                         no record found for {name}; \
-                         connectivity to DNS server appears good"
-                    );
-                    query_results.push(message.clone());
-                    cx.send_progress(StepProgress::Progress {
-                        progress: None,
-                        metadata: message,
-                    })
-                    .await;
+            if err.is_no_records_found() && options.is_no_records_found_okay {
+                let message = format!(
+                    "DNS server {dns_ip} \
+                     {query_type} query attempt {attempt}: \
+                     no record found for {name}; \
+                     connectivity to DNS server appears good"
+                );
+                query_results.push(message.clone());
+                cx.send_progress(StepProgress::Progress {
+                    progress: None,
+                    metadata: message,
+                })
+                .await;
 
-                    self.messages.append(&mut query_results);
+                self.messages.append(&mut query_results);
+                return Ok(());
+            } else if err.is_no_records_found() {
+                // If we did not find records but that is not an acceptable
+                // result for the lookup. Switch to AAAA queries (if this was A)
+                // or we're done (and failed).
+                let message = format!(
+                    "DNS server {dns_ip} \
+                     {query_type} query attempt {attempt}: \
+                     failed to look up {name}: {}",
+                    DisplayErrorChain::new(&err)
+                );
+                query_results.push(message.clone());
+                cx.send_progress(StepProgress::Progress {
+                    progress: None,
+                    metadata: message,
+                })
+                .await;
+
+                if query_ipv4 {
+                    query_ipv4 = false;
+                    attempt = 0;
+                    continue;
+                } else {
+                    self.warnings.append(&mut query_results);
                     return Ok(());
                 }
+            } else {
+                let message = format!(
+                    "DNS server {dns_ip} \
+                     {query_type} query attempt {attempt}: \
+                     failed to look up {name}: {}",
+                    DisplayErrorChain::new(&err)
+                );
+                query_results.push(message.clone());
+                cx.send_progress(StepProgress::Progress {
+                    progress: None,
+                    metadata: message,
+                })
+                .await;
 
-                // Otherwise, `NoRecordsFound` means we should either switch to
-                // AAAA queries (if this was A) or we're done (and failed).
-                ResolveErrorKind::NoRecordsFound { .. } => {
-                    let message = format!(
-                        "DNS server {dns_ip} \
-                         {query_type} query attempt {attempt}: \
-                         failed to look up {name}: {}",
-                        DisplayErrorChain::new(&err)
-                    );
-                    query_results.push(message.clone());
-                    cx.send_progress(StepProgress::Progress {
-                        progress: None,
-                        metadata: message,
-                    })
-                    .await;
-
-                    // If this was an A query, switch to AAAA and reset the
-                    // attempt counter; otherwise, we're done (and we failed
-                    // to resolve the name).
-                    if query_ipv4 {
-                        query_ipv4 = false;
-                        attempt = 0;
-                        continue;
-                    } else {
-                        self.warnings.append(&mut query_results);
-                        return Ok(());
-                    }
-                }
-
-                // For any other error, we're done (and failed) if we've passed
-                // `RETRY_TIMEOUT`; otherwise, we sleep briefly and then retry.
-                _ => {
-                    let message = format!(
-                        "DNS server {dns_ip} \
-                         {query_type} query attempt {attempt}: \
-                         failed to look up {name}: {}",
-                        DisplayErrorChain::new(&err)
-                    );
-                    query_results.push(message.clone());
-                    cx.send_progress(StepProgress::Progress {
-                        progress: None,
-                        metadata: message,
-                    })
-                    .await;
-
-                    if start.elapsed() < RETRY_TIMEOUT {
-                        tokio::time::sleep(Duration::from_secs(1)).await;
-                        continue;
-                    } else {
-                        self.warnings.append(&mut query_results);
-                        return Err(StopTryingServer);
-                    }
+                if start.elapsed() < RETRY_TIMEOUT {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue;
+                } else {
+                    self.warnings.append(&mut query_results);
+                    return Err(StopTryingServer);
                 }
             }
         }
     }
 
-    /// Returns a `TokioAsyncResolver` if we're able to build one.
+    /// Returns a `TokioResolver` if we're able to build one.
     ///
     /// If building it fails, we'll append to our internal `warnings` and return
     /// `None`.
-    fn build_resolver(&mut self, dns_ip: IpAddr) -> TokioAsyncResolver {
+    fn build_resolver(&mut self, dns_ip: IpAddr) -> TokioResolver {
         let mut options = ResolverOpts::default();
 
         // Enable edns for potentially larger records
@@ -1187,7 +1263,7 @@ impl DnsLookupStep {
         options.cache_size = 0;
 
         // We only want to query the DNS server, not /etc/hosts.
-        options.use_hosts_file = false;
+        options.use_hosts_file = ResolveHosts::Never;
 
         // This is currently the default for `ResolverOpts`, but it
         // doesn't hurt to specify it in case that changes.
@@ -1197,7 +1273,7 @@ impl DnsLookupStep {
         // _probably_ doesn't matter.
         options.num_concurrent_reqs = 1;
 
-        TokioAsyncResolver::tokio(
+        TokioResolver::builder_with_config(
             ResolverConfig::from_parts(
                 None,
                 vec![],
@@ -1207,8 +1283,10 @@ impl DnsLookupStep {
                     true,
                 ),
             ),
-            options,
+            TokioConnectionProvider::default(),
         )
+        .with_options(options)
+        .build()
     }
 }
 

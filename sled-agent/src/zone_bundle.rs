@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
-
 //! Tools for collecting and inspecting service bundles for zones.
 
 use anyhow::Context;
@@ -27,10 +25,11 @@ use illumos_utils::zfs::Snapshot;
 use illumos_utils::zfs::ZFS;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zone::AdmError;
+use sled_agent_config_reconciler::AvailableDatasetsReceiver;
+use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::zone_bundle::*;
-use sled_storage::dataset::U2_DEBUG_DATASET;
-use sled_storage::manager::StorageHandle;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::io::Cursor;
@@ -67,61 +66,63 @@ const ZONE_BUNDLE_ZFS_PROPERTY_VALUE: &'static str = "true";
 // This deletes any snapshots matching the names we expect to create ourselves
 // during bundling.
 #[cfg(not(test))]
-fn initialize_zfs_resources(log: &Logger) -> Result<(), BundleError> {
-    let zb_snapshots =
-        Zfs::list_snapshots().unwrap().into_iter().filter(|snap| {
-            // Check for snapshots named how we expect to create them.
-            let is_root_snapshot = snap.snap_name == ZONE_ROOT_SNAPSHOT_NAME;
-            let is_archive_snapshot =
-                snap.snap_name.starts_with(ARCHIVE_SNAPSHOT_PREFIX);
-            let is_zone_bundle_snapshot =
-                is_root_snapshot || is_archive_snapshot;
-            if !is_zone_bundle_snapshot {
-                return false;
-            }
+async fn initialize_zfs_resources(log: &Logger) -> Result<(), BundleError> {
+    let mut zb_snapshots = Vec::new();
+    for snap in Zfs::list_snapshots().await.unwrap().into_iter() {
+        // Check for snapshots named how we expect to create them.
+        let is_root_snapshot = snap.snap_name == ZONE_ROOT_SNAPSHOT_NAME;
+        let is_archive_snapshot =
+            snap.snap_name.starts_with(ARCHIVE_SNAPSHOT_PREFIX);
+        let is_zone_bundle_snapshot = is_root_snapshot || is_archive_snapshot;
+        if !is_zone_bundle_snapshot {
+            continue;
+        }
 
-            // Additionally check for the zone-bundle-specific property.
-            //
-            // If we find a dataset that matches our names, but which _does not_
-            // have such a property (or has in invalid property), we'll log it
-            // but avoid deleting the snapshot.
-            let name = snap.to_string();
-            let value = match Zfs::get_values(
-                &name,
-                &[ZONE_BUNDLE_ZFS_PROPERTY_NAME],
-                Some(illumos_utils::zfs::PropertySource::Local),
-            ) {
-                Ok([value]) => value,
-                Err(err) => {
-                    warn!(
-                        log,
-                        "Found a ZFS snapshot with a name reserved for zone \
-                        bundling, but which does not have the zone-bundle-specific \
-                        property. Bailing out, rather than risking deletion of \
-                        user data.";
-                        "snap_name" => &name,
-                        "property" => ZONE_BUNDLE_ZFS_PROPERTY_NAME,
-                        "error" => slog_error_chain::InlineErrorChain::new(&err),
-                    );
-                    return false;
-                }
-            };
-            if value != ZONE_BUNDLE_ZFS_PROPERTY_VALUE {
+        // Additionally check for the zone-bundle-specific property.
+        //
+        // If we find a dataset that matches our names, but which _does not_
+        // have such a property (or has in invalid property), we'll log it
+        // but avoid deleting the snapshot.
+        let name = snap.to_string();
+        let value = match Zfs::get_values(
+            &name,
+            &[ZONE_BUNDLE_ZFS_PROPERTY_NAME],
+            Some(illumos_utils::zfs::PropertySource::Local),
+        )
+        .await
+        {
+            Ok([value]) => value,
+            Err(err) => {
                 warn!(
                     log,
                     "Found a ZFS snapshot with a name reserved for zone \
-                    bundling, with an unexpected property value. \
-                    Bailing out, rather than risking deletion of user data.";
+                    bundling, but which does not have the zone-bundle-specific \
+                    property. Bailing out, rather than risking deletion of \
+                    user data.";
                     "snap_name" => &name,
                     "property" => ZONE_BUNDLE_ZFS_PROPERTY_NAME,
-                    "property_value" => value,
+                    "error" => slog_error_chain::InlineErrorChain::new(&err),
                 );
-                return false;
+                continue;
             }
-            true
-        });
+        };
+        if value != ZONE_BUNDLE_ZFS_PROPERTY_VALUE {
+            warn!(
+                log,
+                "Found a ZFS snapshot with a name reserved for zone \
+                bundling, with an unexpected property value. \
+                Bailing out, rather than risking deletion of user data.";
+                "snap_name" => &name,
+                "property" => ZONE_BUNDLE_ZFS_PROPERTY_NAME,
+                "property_value" => value,
+            );
+            continue;
+        }
+        zb_snapshots.push(snap);
+    }
     for snapshot in zb_snapshots {
-        Zfs::destroy_snapshot(&snapshot.filesystem, &snapshot.snap_name)?;
+        Zfs::destroy_snapshot(&snapshot.filesystem, &snapshot.snap_name)
+            .await?;
         debug!(
             log,
             "destroyed pre-existing zone bundle snapshot";
@@ -143,7 +144,8 @@ pub struct ZoneBundler {
 // State shared between tasks, e.g., used when creating a bundle in different
 // tasks or between a creation and cleanup.
 struct Inner {
-    storage_handle: StorageHandle,
+    internal_disks_rx: InternalDisksReceiver,
+    available_datasets_rx: AvailableDatasetsReceiver,
     cleanup_context: CleanupContext,
     last_cleanup_at: Instant,
 }
@@ -171,11 +173,11 @@ impl Inner {
     // that can exist but do not, i.e., those whose parent datasets already
     // exist; and returns those.
     async fn bundle_directories(&self) -> Vec<Utf8PathBuf> {
-        let resources = self.storage_handle.get_latest_disks().await;
         // NOTE: These bundle directories are always stored on M.2s, so we don't
         // need to worry about synchronizing with U.2 disk expungement at the
         // callsite.
-        let expected = resources.all_zone_bundle_directories();
+        let internal_disks = self.internal_disks_rx.current();
+        let expected = internal_disks.all_zone_bundle_directories();
         let mut out = Vec::with_capacity(expected.len());
         for each in expected.into_iter() {
             if tokio::fs::create_dir_all(&each).await.is_ok() {
@@ -238,9 +240,10 @@ impl ZoneBundler {
     /// This creates an object that manages zone bundles on the system. It can
     /// be used to create bundles from running zones, and runs a periodic task
     /// to clean them up to free up space.
-    pub fn new(
+    pub async fn new(
         log: Logger,
-        storage_handle: StorageHandle,
+        internal_disks_rx: InternalDisksReceiver,
+        available_datasets_rx: AvailableDatasetsReceiver,
         cleanup_context: CleanupContext,
     ) -> Self {
         // This is compiled out in tests because there's no way to set our
@@ -250,15 +253,16 @@ impl ZoneBundler {
         // Omicron. It has since been removed; it may be possible to use
         // dependency injection here ("fake" vs "real" implementation of ZFS)
         // instead of conditional compilation.
-        // See also: The "sled-storage" `StorageManagerTestHarness`, which
-        // might be useful for making ZFS datasets on top of a test-only
-        // temporary directory.
+        // See also: `ZfsTestHarness`, which is used in some illumos-only tests
+        // for making ZFS datasets on top of a test-only temporary directory.
         #[cfg(not(test))]
         initialize_zfs_resources(&log)
+            .await
             .expect("Failed to initialize existing ZFS resources");
         let notify_cleanup = Arc::new(Notify::new());
         let inner = Arc::new(Mutex::new(Inner {
-            storage_handle,
+            internal_disks_rx,
+            available_datasets_rx,
             cleanup_context,
             last_cleanup_at: Instant::now(),
         }));
@@ -353,17 +357,20 @@ impl ZoneBundler {
         zone: &RunningZone,
         cause: ZoneBundleCause,
     ) -> Result<ZoneBundleMetadata, BundleError> {
-        // NOTE: [Self::await_completion_of_prior_bundles] relies on this lock
-        // being held across this whole function. If we want more concurrency,
-        // we'll need to add a barrier-like mechanism to let callers know when
-        // prior bundles have completed.
+        // NOTE: Previously (Prior to #8064),
+        // [Self::await_completion_of_prior_bundles] relied on this lock being
+        // held across this whole function.
+        //
+        // That method was unused, but the lock was left in place. The method
+        // has since been removed, but the lock was kept to avoid changing
+        // behavior in an unrelated [PR](#11476).
         let inner = self.inner.lock().await;
         let storage_dirs = inner.bundle_directories().await;
-        let resources = inner.storage_handle.get_latest_disks().await;
-        let extra_log_dirs = resources
-            .all_u2_mountpoints(U2_DEBUG_DATASET)
+        let extra_log_dirs = inner
+            .available_datasets_rx
+            .all_mounted_debug_datasets()
             .into_iter()
-            .map(|pool_path| pool_path.path)
+            .map(|pool_path| pool_path.into_path())
             .collect();
         let context = ZoneBundleContext { cause, storage_dirs, extra_log_dirs };
         info!(
@@ -373,14 +380,6 @@ impl ZoneBundler {
             "context" => ?context,
         );
         create(&self.log, zone, &context).await
-    }
-
-    /// Awaits the completion of all prior calls to [ZoneBundler::create].
-    ///
-    /// This is critical for disk expungement, which wants to ensure that the
-    /// Sled Agent is no longer using devices after they have been expunged.
-    pub async fn await_completion_of_prior_bundles(&self) {
-        let _ = self.inner.lock().await;
     }
 
     /// Return the paths for all bundles of the provided zone and ID.
@@ -643,7 +642,7 @@ fn insert_data<W: std::io::Write>(
 }
 
 // Create a read-only snapshot from an existing filesystem.
-fn create_snapshot(
+async fn create_snapshot(
     log: &Logger,
     filesystem: &str,
     snap_name: &str,
@@ -652,7 +651,8 @@ fn create_snapshot(
         filesystem,
         snap_name,
         &[(ZONE_BUNDLE_ZFS_PROPERTY_NAME, ZONE_BUNDLE_ZFS_PROPERTY_VALUE)],
-    )?;
+    )
+    .await?;
     debug!(
         log,
         "created snapshot";
@@ -670,7 +670,8 @@ fn create_snapshot(
 // A key feature of the zone-bundle process is that we pull all the log files
 // for a zone. This is tricky. The logs are both being written to by the
 // programs we're interested in, and also potentially being rotated by `logadm`,
-// and / or archived out to the U.2s through the code in `crate::dump_setup`.
+// and / or archived out to the U.2s through the code in
+// `crate::debug_collector`.
 //
 // We need to capture all these logs, while avoiding inconsistent state (e.g., a
 // missing log message that existed when the bundle was created) and also
@@ -697,15 +698,15 @@ fn create_snapshot(
 // At this point, we operate entirely on those snapshots. We search for
 // "current" log files in the root snapshot, and archived log files in the
 // archive snapshots.
-fn create_zfs_snapshots(
+async fn create_zfs_snapshots(
     log: &Logger,
     zone: &RunningZone,
     extra_log_dirs: &[Utf8PathBuf],
 ) -> Result<Vec<Snapshot>, BundleError> {
     // Snapshot the root filesystem.
-    let dataset = Zfs::get_dataset_name(zone.root().as_str())?;
+    let dataset = Zfs::get_dataset_name(zone.root().as_str()).await?;
     let root_snapshot =
-        create_snapshot(log, &dataset, ZONE_ROOT_SNAPSHOT_NAME)?;
+        create_snapshot(log, &dataset, ZONE_ROOT_SNAPSHOT_NAME).await?;
     let mut snapshots = vec![root_snapshot];
 
     // Look at all the provided extra log directories, and take a snapshot for
@@ -718,24 +719,24 @@ fn create_zfs_snapshots(
         match std::fs::metadata(&zone_dir) {
             Ok(d) => {
                 if d.is_dir() {
-                    let dataset = match Zfs::get_dataset_name(zone_dir.as_str())
-                    {
-                        Ok(ds) => Utf8PathBuf::from(ds),
-                        Err(e) => {
-                            error!(
-                                log,
-                                "failed to list datasets, will \
-                                unwind any previously created snapshots";
-                                "error" => ?e,
-                            );
-                            assert!(
-                                maybe_err
-                                    .replace(BundleError::from(e))
-                                    .is_none()
-                            );
-                            break;
-                        }
-                    };
+                    let dataset =
+                        match Zfs::get_dataset_name(zone_dir.as_str()).await {
+                            Ok(ds) => Utf8PathBuf::from(ds),
+                            Err(e) => {
+                                error!(
+                                    log,
+                                    "failed to list datasets, will \
+                                    unwind any previously created snapshots";
+                                    &e,
+                                );
+                                assert!(
+                                    maybe_err
+                                        .replace(BundleError::from(e))
+                                        .is_none()
+                                );
+                                break;
+                            }
+                        };
 
                     // These datasets are named like `<pool_name>/...`. Since
                     // we're snapshotting zero or more of them, we disambiguate
@@ -746,7 +747,9 @@ fn create_zfs_snapshots(
                         .expect("Zone archive datasets must be non-empty");
                     let snap_name =
                         format!("{}{}", ARCHIVE_SNAPSHOT_PREFIX, pool_name);
-                    match create_snapshot(log, dataset.as_str(), &snap_name) {
+                    match create_snapshot(log, dataset.as_str(), &snap_name)
+                        .await
+                    {
                         Ok(snapshot) => snapshots.push(snapshot),
                         Err(e) => {
                             error!(
@@ -773,22 +776,24 @@ fn create_zfs_snapshots(
                     log,
                     "failed to get metadata for potential zone directory";
                     "zone_dir" => %zone_dir,
-                    "error" => ?e,
+                    InlineErrorChain::new(&e),
                 );
             }
         }
     }
     if let Some(err) = maybe_err {
-        cleanup_zfs_snapshots(log, &snapshots);
+        cleanup_zfs_snapshots(log, &snapshots).await;
         return Err(err);
     };
     Ok(snapshots)
 }
 
 // Destroy any created ZFS snapshots.
-fn cleanup_zfs_snapshots(log: &Logger, snapshots: &[Snapshot]) {
+async fn cleanup_zfs_snapshots(log: &Logger, snapshots: &[Snapshot]) {
     for snapshot in snapshots.iter() {
-        match Zfs::destroy_snapshot(&snapshot.filesystem, &snapshot.snap_name) {
+        match Zfs::destroy_snapshot(&snapshot.filesystem, &snapshot.snap_name)
+            .await
+        {
             Ok(_) => debug!(
                 log,
                 "destroyed zone bundle ZFS snapshot";
@@ -798,7 +803,7 @@ fn cleanup_zfs_snapshots(log: &Logger, snapshots: &[Snapshot]) {
                 log,
                 "failed to destroy zone bundle ZFS snapshot";
                 "snapshot" => %snapshot,
-                "error" => ?e,
+                e,
             ),
         }
     }
@@ -827,7 +832,7 @@ async fn find_service_log_files(
     // additional directories, most notably `<zonepath>/root`. So the _cloned_
     // log file will live at
     // `/<pool_name>/crypt/zone/.zfs/snapshot/<snap_name>/root/var/svc/log/...`.
-    let mut current_log_file = snapshots[0].full_path()?;
+    let mut current_log_file = snapshots[0].full_path().await?;
     current_log_file.push(RunningZone::ROOT_FS_PATH);
     current_log_file.push(svc.log_file.as_str().trim_start_matches('/'));
     let log_dir =
@@ -859,18 +864,17 @@ async fn find_service_log_files(
     // archiving to one location, but move to another if a quota is hit. We'll
     // iterate over all the extra log directories and try to find any log files
     // in those filesystem snapshots.
-    let snapped_extra_log_dirs = snapshots
-        .iter()
-        .skip(1)
-        .flat_map(|snapshot| {
-            extra_log_dirs.iter().map(|d| {
-                // Join the snapshot path with both the log directory and the
-                // zone name, to arrive at something like:
-                // /path/to/dataset/.zfs/snapshot/<snap_name>/path/to/extra/<zone_name>
-                snapshot.full_path().map(|p| p.join(d).join(zone_name))
-            })
-        })
-        .collect::<Result<BTreeSet<_>, _>>()?;
+    let mut snapped_extra_log_dirs = BTreeSet::new();
+
+    for snapshot in snapshots.iter().skip(1) {
+        for d in extra_log_dirs {
+            // Join the snapshot path with both the log directory and the
+            // zone name, to arrive at something like:
+            // /path/to/dataset/.zfs/snapshot/<snap_name>/path/to/extra/<zone_name>
+            let p = snapshot.full_path().await?;
+            snapped_extra_log_dirs.insert(p.join(d).join(zone_name));
+        }
+    }
     debug!(
         log,
         "looking for extra log files in filesystem snapshots";
@@ -939,7 +943,7 @@ async fn create(
                 "failed to create bundle file";
                 "zone" => zone.name(),
                 "file" => %full_path,
-                "error" => ?e,
+                InlineErrorChain::new(&e),
             );
             return Err(BundleError::OpenBundleFile {
                 path: full_path.to_owned(),
@@ -979,7 +983,7 @@ async fn create(
         );
         let output = match zone.run_cmd(cmd) {
             Ok(s) => s,
-            Err(e) => format!("{}", e),
+            Err(e) => InlineErrorChain::new(&e).to_string(),
         };
         let contents = format!("Command: {:?}\n{}", cmd, output).into_bytes();
         if let Err(e) = insert_data(&mut builder, cmd[0], &contents) {
@@ -1030,8 +1034,8 @@ async fn create(
     //
     // Both of these are dynamic. The current log file is likely being written
     // by the service itself, and `logadm` may also be rotating files. At the
-    // same time, the log-archival process in `dump_setup.rs` may be copying
-    // these out to the U.2s, after which it deletes those on the zone
+    // same time, the log-archival process in `debug_collector.rs` may be
+    // copying these out to the U.2s, after which it deletes those on the zone
     // filesystem itself.
     //
     // To avoid various kinds of corruption, such as a bad tarball or missing
@@ -1039,7 +1043,7 @@ async fn create(
     // filesystems, and insert those (now-static) files into the zone-bundle
     // tarballs.
     let snapshots =
-        match create_zfs_snapshots(log, zone, &context.extra_log_dirs) {
+        match create_zfs_snapshots(log, zone, &context.extra_log_dirs).await {
             Ok(snapshots) => snapshots,
             Err(e) => {
                 error!(
@@ -1072,7 +1076,7 @@ async fn create(
             );
             let output = match zone.run_cmd(args) {
                 Ok(s) => s,
-                Err(e) => format!("{}", e),
+                Err(e) => InlineErrorChain::new(&e).to_string(),
             };
             let contents =
                 format!("Command: {:?}\n{}", args, output).into_bytes();
@@ -1113,7 +1117,7 @@ async fn create(
                     "zone" => zone.name(),
                     "error" => ?e,
                 );
-                cleanup_zfs_snapshots(&log, &snapshots);
+                cleanup_zfs_snapshots(&log, &snapshots).await;
                 return Err(e);
             }
         };
@@ -1135,7 +1139,7 @@ async fn create(
                         "failed to append log file to zone bundle";
                         "zone" => zone.name(),
                         "log_file" => %svc.log_file,
-                        "error" => ?e,
+                        InlineErrorChain::new(&e),
                     );
                 }
             }
@@ -1144,7 +1148,7 @@ async fn create(
 
     // Finish writing out the tarball itself.
     if let Err(e) = builder.into_inner().context("Failed to build bundle") {
-        cleanup_zfs_snapshots(&log, &snapshots);
+        cleanup_zfs_snapshots(&log, &snapshots).await;
         return Err(BundleError::from(e));
     }
 
@@ -1167,7 +1171,7 @@ async fn create(
             break;
         }
     }
-    cleanup_zfs_snapshots(&log, &snapshots);
+    cleanup_zfs_snapshots(&log, &snapshots).await;
     if let Some(err) = copy_err {
         return Err(err);
     }
@@ -1203,7 +1207,7 @@ async fn find_archived_log_files<'a, T: Iterator<Item = &'a Utf8PathBuf>>(
                         log,
                         "failed to read zone debug directory";
                         "directory" => ?dir,
-                        "reason" => ?e,
+                        "reason" => InlineErrorChain::new(&e),
                     );
                     continue;
                 }
@@ -1252,13 +1256,13 @@ async fn find_archived_log_files<'a, T: Iterator<Item = &'a Utf8PathBuf>>(
                             log,
                             "failed to fetch zone debug directory entry";
                             "directory" => ?dir,
-                            "reason" => ?e,
+                            "reason" => InlineErrorChain::new(&e),
                         );
                     }
                 }
             }
         } else {
-            // The logic in `dump_setup` picks some U.2 in which to start
+            // The logic in `debug_collector` picks some U.2 in which to start
             // archiving logs, and thereafter tries to keep placing new ones
             // there, subject to space constraints. It's not really an error for
             // there to be no entries for the named zone in any particular U.2
@@ -1518,7 +1522,7 @@ async fn run_cleanup(
 
         // Sort all the bundles in the current directory, using the priority
         // described in `context.priority`.
-        info.sort_by(|lhs, rhs| context.priority.compare_bundles(lhs, rhs));
+        info.sort_by(|lhs, rhs| compare_bundles(&context.priority, lhs, rhs));
         let current_usage = usages.get(&dir).unwrap();
 
         // Remove bundles until we fall below the threshold.
@@ -1676,73 +1680,6 @@ mod tests {
         let path = Utf8PathBuf::from("/some/nonexistent/path");
         assert!(dir_size(&path).await.is_err());
     }
-
-    #[tokio::test]
-    // Different operating systems ship slightly different versions of `du(1)`,
-    // with differing behaviors. We really only care that the `dir_size`
-    // function behaves the same as the illumos `du(1)`, so skip this test on
-    // other systems.
-    #[cfg_attr(not(target_os = "illumos"), ignore)]
-    async fn test_dir_size_matches_du() {
-        const DU: &str = "du";
-        async fn dir_size_du(path: &Utf8PathBuf) -> Result<u64, BundleError> {
-            let args = &["-A", "-s", path.as_str()];
-            let output =
-                Command::new(DU).args(args).output().await.map_err(|err| {
-                    BundleError::Command {
-                        cmd: format!("{DU} {}", args.join(" ")),
-                        err,
-                    }
-                })?;
-            let err = |msg: &str| {
-                BundleError::Cleanup(anyhow!(
-                    "failed to fetch disk usage for {}: {}",
-                    path,
-                    msg,
-                ))
-            };
-            if !output.status.success() {
-                return Err(err("du command failed"));
-            }
-            let Ok(s) = std::str::from_utf8(&output.stdout) else {
-                return Err(err("non-UTF8 stdout"));
-            };
-            let Some(line) = s.lines().next() else {
-                return Err(err("no lines in du output"));
-            };
-            let Some(part) = line.trim().split_ascii_whitespace().next() else {
-                return Err(err("no disk usage size computed in output"));
-            };
-            part.parse().map_err(|_| err("failed to parse du output"))
-        }
-
-        let du_output =
-            Command::new(DU).arg("--version").output().await.unwrap();
-        eprintln!(
-            "du --version:\n{}\n",
-            String::from_utf8_lossy(&du_output.stdout)
-        );
-
-        let path =
-            Utf8PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
-        let t0 = std::time::Instant::now();
-        let usage =
-            dbg!(dir_size(&path).await).expect("disk usage for src dir failed");
-        eprintln!("dir_size({path}) took {:?}", t0.elapsed());
-
-        let t0 = std::time::Instant::now();
-        // Run `du -As /path/to/omicron/sled-agent/src`, which currently shows this
-        // directory is ~450 KiB.
-        let du_usage =
-            dbg!(dir_size_du(&path).await).expect("running du failed!");
-        eprintln!("du -s {path} took {:?}", t0.elapsed());
-
-        assert_eq!(
-            usage, du_usage,
-            "expected `dir_size({path})` to == `du -s {path}`\n\
-             {usage}B (`dir_size`) != {du_usage}B (`du`)",
-        );
-    }
 }
 
 #[cfg(all(target_os = "illumos", test))]
@@ -1766,11 +1703,15 @@ mod illumos_tests {
     use chrono::Timelike;
     use chrono::Utc;
     use rand::RngCore;
-    use sled_storage::manager_test_harness::StorageManagerTestHarness;
+    use sled_agent_config_reconciler::AvailableDatasetsReceiver;
+    use sled_agent_config_reconciler::InternalDiskDetails;
+    use sled_agent_config_reconciler::InternalDisksReceiver;
+    use sled_agent_types::disk::DiskIdentity;
     use slog::Drain;
     use slog::Logger;
     use std::sync::Arc;
     use tokio::sync::Mutex;
+    use zfs_test_harness::ZfsTestHarness;
 
     /// An iterator that returns the date of consecutive days beginning with 1st
     /// January 2020. The time portion of each returned date will be fixed at
@@ -1840,25 +1781,16 @@ mod illumos_tests {
         ctx: Arc<Mutex<CleanupTestContextInner>>,
     }
 
-    // A wrapper around `StorageResources`, that automatically creates dummy
-    // directories in the provided test locations and removes them on drop.
-    //
-    // They don't exist when you just do `StorageResources::new_for_test()`.
-    // This type creates the datasets at the expected mountpoints, backed by the
-    // ramdisk, and removes them on drop. This is basically a tempdir-like
-    // system, that creates the directories implied by the `StorageResources`
-    // expected disk structure.
+    // A wrapper around `ZfsTestHarness` that keeps the directores we expect to
+    // use easy to access (and sorted).
     struct ResourceWrapper {
-        storage_test_harness: StorageManagerTestHarness,
+        storage_test_harness: ZfsTestHarness,
         dirs: Vec<Utf8PathBuf>,
     }
 
-    async fn setup_storage(log: &Logger) -> StorageManagerTestHarness {
-        let mut harness = StorageManagerTestHarness::new(&log).await;
-
-        harness.handle().key_manager_ready().await;
-        let _raw_disks =
-            harness.add_vdevs(&["m2_left.vdev", "m2_right.vdev"]).await;
+    async fn setup_storage(log: &Logger) -> ZfsTestHarness {
+        let mut harness = ZfsTestHarness::new(log.clone());
+        harness.add_internal_disks(2).await;
         harness
     }
 
@@ -1866,12 +1798,8 @@ mod illumos_tests {
         // Create new storage resources, and mount datasets at the required
         // locations.
         async fn new(log: &Logger) -> Self {
-            // Spawn the storage related tasks required for testing and insert
-            // synthetic disks.
             let storage_test_harness = setup_storage(log).await;
-            let resources =
-                storage_test_harness.handle().get_latest_disks().await;
-            let mut dirs = resources.all_zone_bundle_directories();
+            let mut dirs = storage_test_harness.all_zone_bundle_directories();
             dirs.sort();
             Self { storage_test_harness, dirs }
         }
@@ -1890,11 +1818,43 @@ mod illumos_tests {
         let log = test_logger();
         let context = CleanupContext::default();
         let resource_wrapper = ResourceWrapper::new(&log).await;
+        let harness = &resource_wrapper.storage_test_harness;
+
+        // Convert from ZfsTestHarness to config-reconciler channels.
+        let internal_disks_rx = InternalDisksReceiver::fake_static(
+            Arc::clone(harness.mount_config()),
+            harness.all_internal_zpool_ids().enumerate().map(
+                |(i, zpool_id)| {
+                    InternalDiskDetails::fake_details(
+                        DiskIdentity {
+                            vendor: format!("test-vendor-{i}"),
+                            model: format!("test-model-{i}"),
+                            serial: format!("test-serial-{i}"),
+                        },
+                        zpool_id,
+                        i == 0, // is_boot_disk
+                        None,
+                        None,
+                    )
+                },
+            ),
+        );
+        let available_datasets_rx = AvailableDatasetsReceiver::fake_static(
+            harness.all_internal_zpools().map(|zpool| {
+                (
+                    *zpool,
+                    zpool.dataset_mountpoint(&harness.mount_config().root, "."),
+                )
+            }),
+        );
+
         let bundler = ZoneBundler::new(
             log,
-            resource_wrapper.storage_test_harness.handle().clone(),
+            internal_disks_rx,
+            available_datasets_rx,
             context,
-        );
+        )
+        .await;
         Ok(CleanupTestContext {
             ctx: Arc::new(Mutex::new(CleanupTestContextInner {
                 resource_wrapper,
@@ -1910,7 +1870,7 @@ mod illumos_tests {
         let mut ctx = context.ctx.lock().await;
         let context = ctx.bundler.cleanup_context().await;
         assert_eq!(context, ctx.context, "received incorrect context");
-        ctx.resource_wrapper.storage_test_harness.cleanup().await;
+        ctx.resource_wrapper.storage_test_harness.cleanup();
     }
 
     #[tokio::test]
@@ -1939,7 +1899,7 @@ mod illumos_tests {
             .expect("failed to set context");
         let context = ctx.bundler.cleanup_context().await;
         assert_eq!(context, new_context, "failed to update context");
-        ctx.resource_wrapper.storage_test_harness.cleanup().await;
+        ctx.resource_wrapper.storage_test_harness.cleanup();
     }
 
     // Quota applied to test datasets.
@@ -1968,7 +1928,7 @@ mod illumos_tests {
             &ctx.bundler.log,
             "Test completed, performing cleanup before emitting result"
         );
-        ctx.resource_wrapper.storage_test_harness.cleanup().await;
+        ctx.resource_wrapper.storage_test_harness.cleanup();
         result.expect("test failed!");
     }
 
@@ -1999,13 +1959,10 @@ mod illumos_tests {
         // If this needs to change, go modify the "add_vdevs" call in
         // "setup_storage".
         assert!(
-            TEST_QUOTA
-                < StorageManagerTestHarness::DEFAULT_VDEV_SIZE
-                    .try_into()
-                    .unwrap(),
+            TEST_QUOTA < ZfsTestHarness::DEFAULT_VDEV_SIZE.try_into().unwrap(),
             "Quota larger than underlying device (quota: {:?}, device size: {})",
             TEST_QUOTA,
-            StorageManagerTestHarness::DEFAULT_VDEV_SIZE,
+            ZfsTestHarness::DEFAULT_VDEV_SIZE,
         );
 
         anyhow::ensure!(
@@ -2287,7 +2244,7 @@ mod illumos_tests {
         // Inject some ~incompressible ballast to ensure the bundles are, though
         // fake, not also microscopic:
         let mut ballast = vec![0; 64 * 1024];
-        rand::thread_rng().fill_bytes(&mut ballast);
+        rand::rng().fill_bytes(&mut ballast);
         super::insert_data(&mut builder, "ballast.bin", &ballast)?;
 
         let _ = builder.into_inner().context("failed to finish tarball")?;
@@ -2298,7 +2255,8 @@ mod illumos_tests {
     #[tokio::test]
     async fn test_find_archived_log_files() {
         let log = test_logger();
-        let tmpdir = tempfile::tempdir().expect("Failed to make tempdir");
+        let tmpdir =
+            camino_tempfile::tempdir().expect("Failed to make tempdir");
 
         for prefix in ["oxide", "system-illumos"] {
             let mut should_match = [
@@ -2316,10 +2274,7 @@ mod illumos_tests {
                     .expect("failed to create dummy file");
             }
 
-            let path = Utf8PathBuf::try_from(
-                tmpdir.path().as_os_str().to_str().unwrap(),
-            )
-            .unwrap();
+            let path = tmpdir.path().to_owned();
             let mut files = find_archived_log_files(
                 &log,
                 "zone-name", // unused here, for logging only

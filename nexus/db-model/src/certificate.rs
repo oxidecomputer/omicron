@@ -5,14 +5,17 @@
 use super::ServiceKind;
 use db_macros::Resource;
 use nexus_db_schema::schema::certificate;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::certificate as certificate_types;
 use nexus_types::identity::Resource;
 use omicron_certificates::CertificateValidator;
+use omicron_certificates::TlsCertificate;
 use omicron_common::api::external::Error;
 use uuid::Uuid;
 
+use crate::DbTypedUuid;
 pub use omicron_certificates::CertificateError;
+use omicron_uuid_kinds::SiloKind;
+use omicron_uuid_kinds::SiloUuid;
 
 /// Representation of x509 certificates used by services.
 #[derive(Queryable, Insertable, Clone, Selectable, Resource)]
@@ -21,7 +24,7 @@ pub struct Certificate {
     #[diesel(embed)]
     identity: CertificateIdentity,
 
-    pub silo_id: Uuid,
+    pub silo_id: DbTypedUuid<SiloKind>,
     pub service: ServiceKind,
 
     pub cert: Vec<u8>,
@@ -40,11 +43,15 @@ impl std::fmt::Debug for Certificate {
 }
 
 impl Certificate {
+    pub fn silo_id(&self) -> SiloUuid {
+        self.silo_id.into()
+    }
+
     pub fn new(
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         id: Uuid,
         service: ServiceKind,
-        params: params::CertificateCreate,
+        params: certificate_types::CertificateCreate,
         possible_dns_names: &[String],
     ) -> Result<Self, CertificateError> {
         let validator = CertificateValidator::default();
@@ -61,14 +68,14 @@ impl Certificate {
     // For testing only: allow creation of certificates that would otherwise not
     // be allowed (e.g., expired)
     pub fn new_unvalidated(
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         id: Uuid,
         service: ServiceKind,
-        params: params::CertificateCreate,
+        params: certificate_types::CertificateCreate,
     ) -> Self {
         Self {
             identity: CertificateIdentity::new(id, params.identity),
-            silo_id,
+            silo_id: silo_id.into(),
             service,
             cert: params.cert.into_bytes(),
             key: params.key.into_bytes(),
@@ -76,7 +83,7 @@ impl Certificate {
     }
 }
 
-impl TryFrom<Certificate> for views::Certificate {
+impl TryFrom<Certificate> for certificate_types::Certificate {
     type Error = Error;
     fn try_from(cert: Certificate) -> Result<Self, Error> {
         Ok(Self {
@@ -90,5 +97,17 @@ impl TryFrom<Certificate> for views::Certificate {
                 Error::internal_error("Certificate is not valid UTF-8")
             })?,
         })
+    }
+}
+
+impl TryFrom<Certificate> for TlsCertificate {
+    type Error = anyhow::Error;
+
+    fn try_from(cert: Certificate) -> Result<Self, anyhow::Error> {
+        let raw = omicron_certificates::RawCertKey {
+            certs: &cert.cert,
+            private_key: &cert.key,
+        };
+        Self::new(cert.id(), raw)
     }
 }

@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
-
 //! HTTP entrypoint functions for the gateway service
 
 use crate::ServerContext;
@@ -23,32 +21,54 @@ use dropshot::WebsocketEndpointResult;
 use dropshot::WebsocketUpgrade;
 use futures::TryFutureExt;
 use gateway_api::*;
+use gateway_messages::HfError;
 use gateway_messages::RotBootInfo;
 use gateway_messages::SpComponent;
+use gateway_messages::SpError;
 use gateway_sp_comms::HostPhase2Provider;
 use gateway_sp_comms::VersionedSpState;
 use gateway_sp_comms::error::CommunicationError;
+use gateway_types::caboose::ComponentCabooseSlot;
 use gateway_types::caboose::SpComponentCaboose;
+use gateway_types::component::PathSp;
+use gateway_types::component::PathSpComponent;
+use gateway_types::component::PathSpComponentFirmwareSlot;
 use gateway_types::component::PowerState;
+use gateway_types::component::SetComponentActiveSlotParams;
 use gateway_types::component::SpComponentFirmwareSlot;
 use gateway_types::component::SpComponentInfo;
 use gateway_types::component::SpComponentList;
 use gateway_types::component::SpIdentifier;
 use gateway_types::component::SpState;
 use gateway_types::component_details::SpComponentDetails;
+use gateway_types::component_vpd::ComponentVpd;
+use gateway_types::host::ComponentFirmwareHashStatus;
 use gateway_types::host::HostStartupOptions;
+use gateway_types::ignition::PathSpIgnitionCommand;
 use gateway_types::ignition::SpIgnitionInfo;
+use gateway_types::local::RackId;
+use gateway_types::rot::GetCfpaParams;
+use gateway_types::rot::GetRotBootInfoParams;
 use gateway_types::rot::RotCfpa;
 use gateway_types::rot::RotCfpaSlot;
 use gateway_types::rot::RotCmpa;
 use gateway_types::rot::RotState;
+use gateway_types::sensor::PathSpSensorId;
 use gateway_types::sensor::SpSensorReading;
+use gateway_types::task_dump::PathSpTaskDumpIndex;
 use gateway_types::task_dump::TaskDump;
+use gateway_types::update::ComponentUpdateIdSlot;
 use gateway_types::update::HostPhase2Progress;
 use gateway_types::update::HostPhase2RecoveryImageId;
 use gateway_types::update::InstallinatorImageId;
+use gateway_types::update::SpComponentResetError;
 use gateway_types::update::SpUpdateStatus;
+use gateway_types::update::UpdateAbortBody;
+use omicron_uuid_kinds::GenericUuid;
+use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::io::Cursor;
+use std::num::NonZeroU8;
 use std::str;
 use std::sync::Arc;
 use tufaceous_artifact::ArtifactHash;
@@ -194,7 +214,32 @@ impl GatewayApi for GatewayImpl {
                 })?;
 
             Ok(HttpResponseOk(
-                details.entries.into_iter().map(Into::into).collect(),
+                details
+                    .entries
+                    .into_iter()
+                    .filter_map(|sp_details| {
+                        match SpComponentDetails::try_from(sp_details) {
+                            Ok(details) => Some(details),
+                            Err(err) => {
+                                // Once omicron#9708 is addressed, we should
+                                // update the API type to turn the
+                                // `try_from()` into a `from()` and remove
+                                // this branch entirely.
+                                warn!(
+                                    apictx.log,
+                                    "skipping some component details \
+                                     that we can't convert to the MGS \
+                                     API type (yet)";
+                                    "sp_type" => ?sp_id.typ,
+                                    "sp_slot" => sp_id.slot,
+                                    "component" => %component,
+                                    InlineErrorChain::new(&err)
+                                );
+                                None
+                            }
+                        }
+                    })
+                    .collect(),
             ))
         };
 
@@ -462,23 +507,38 @@ impl GatewayApi for GatewayImpl {
     async fn sp_component_reset(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    ) -> Result<HttpResponseUpdatedNoContent, SpComponentResetError> {
         let apictx = rqctx.context();
         let PathSpComponent { sp, component } = path.into_inner();
         let sp_id = sp.into();
         let handler = async {
-            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let sp = apictx.mgmt_switch.sp(sp_id).map_err(HttpError::from)?;
             let component = component_from_str(&component)?;
+
+            // Our config may specifically disallow resetting the SP of our
+            // local sled. This is because resetting our local SP after an
+            // update doesn't work: `reset_component_trigger` below will issue a
+            // "reset with watchdog", wait for the SP to come back, then send a
+            // "disarm the watchdog" message. But if we've reset our own local
+            // sled, we won't be alive to disarm the watchdog, which will result
+            // in the SP (erroneously) rolling back the update. (In production
+            // we always disallow this; it's a config option to support dev/test
+            // environments that don't need this.)
+            if component == SpComponent::SP_ITSELF {
+                apictx.mgmt_switch.validate_sp_reset_is_allowed(sp_id)?;
+            }
 
             sp.reset_component_prepare(component)
                 // We always want to run with the watchdog when resetting as
-                // disabling the watchdog should be considered a debug only feature
+                // disabling the watchdog should be considered a debug only
+                // feature
                 .and_then(|()| sp.reset_component_trigger(component, false))
                 .await
                 .map_err(|err| SpCommsError::SpCommunicationFailed {
                     sp: sp_id,
                     err,
-                })?;
+                })
+                .map_err(HttpError::from)?;
 
             Ok(HttpResponseUpdatedNoContent {})
         };
@@ -534,6 +594,93 @@ impl GatewayApi for GatewayImpl {
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
+    async fn sp_component_hash_firmware_start(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSpComponentFirmwareSlot>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = rqctx.context();
+
+        let PathSpComponentFirmwareSlot { sp, component, firmware_slot } =
+            path.into_inner();
+        let sp_id = sp.into();
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let component = component_from_str(&component)?;
+
+            if component != SpComponent::HOST_CPU_BOOT_FLASH {
+                return Err(HttpError::for_bad_request(
+                    Some("RequestUnsupportedForComponent".to_string()),
+                    "Only the host boot flash can be hashed".into(),
+                ));
+            }
+
+            // The SP (reasonably!) returns a `HashInProgress` error if we try
+            // to start hashing while hashing is being calculated, but we're
+            // presenting an idempotent "start hashing if it isn't started"
+            // endpoint instead. Swallow that error.
+            match sp.start_host_flash_hash(firmware_slot).await {
+                Ok(())
+                | Err(CommunicationError::SpError(SpError::Hf(
+                    HfError::HashInProgress,
+                ))) => Ok(HttpResponseUpdatedNoContent()),
+                Err(err) => {
+                    Err(SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+                        .into())
+                }
+            }
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+    }
+
+    async fn sp_component_hash_firmware_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSpComponentFirmwareSlot>,
+    ) -> Result<HttpResponseOk<ComponentFirmwareHashStatus>, HttpError> {
+        let apictx = rqctx.context();
+
+        let PathSpComponentFirmwareSlot { sp, component, firmware_slot } =
+            path.into_inner();
+        let sp_id = sp.into();
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let component = component_from_str(&component)?;
+
+            if component != SpComponent::HOST_CPU_BOOT_FLASH {
+                return Err(HttpError::for_bad_request(
+                    Some("RequestUnsupportedForComponent".to_string()),
+                    "Only the host boot flash can be hashed".into(),
+                ));
+            }
+
+            let status = match sp.get_host_flash_hash(firmware_slot).await {
+                // success
+                Ok(sha256) => ComponentFirmwareHashStatus::Hashed { sha256 },
+
+                // expected failure: hash needs to be calculated (or
+                // recalculated; either way the client operation is the same)
+                Err(CommunicationError::SpError(SpError::Hf(
+                    HfError::HashUncalculated | HfError::RecalculateHash,
+                ))) => ComponentFirmwareHashStatus::HashNotCalculated,
+
+                // expected failure: hashing is currently in progress; client
+                // needs to wait and try again later
+                Err(CommunicationError::SpError(SpError::Hf(
+                    HfError::HashInProgress,
+                ))) => ComponentFirmwareHashStatus::HashInProgress,
+
+                // other errors are failures
+                Err(err) => {
+                    return Err(HttpError::from(
+                        SpCommsError::SpCommunicationFailed { sp: sp_id, err },
+                    ));
+                }
+            };
+
+            Ok(HttpResponseOk(status))
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+    }
+
     async fn sp_component_update_abort(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
@@ -553,6 +700,33 @@ impl GatewayApi for GatewayImpl {
             })?;
 
             Ok(HttpResponseUpdatedNoContent {})
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+    }
+
+    async fn sp_component_vpd_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSpComponent>,
+    ) -> Result<HttpResponseOk<ComponentVpd>, HttpError> {
+        let apictx = rqctx.context();
+
+        let PathSpComponent { sp, component } = path.into_inner();
+        let sp_id = sp.into();
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let component = component_from_str(&component)?;
+            let vpd = sp.component_vpd(component).await.map_err(|err| {
+                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+            })?;
+            let vpd = vpd.try_into().map_err(|err| {
+                http_err_with_message(
+                    dropshot::ErrorStatusCode::INTERNAL_SERVER_ERROR,
+                    "InvalidComponentVpd",
+                    format!("invalid VPD returned by SP: {err}"),
+                )
+            })?;
+
+            Ok(HttpResponseOk(vpd))
         };
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
@@ -693,7 +867,9 @@ impl GatewayApi for GatewayImpl {
 
             let mut cursor = Cursor::new(Vec::new());
             raw_dump.write_zip(&mut cursor).map_err(|err| {
-                HttpError::for_internal_error(err.to_string())
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&err).to_string(),
+                )
             })?;
 
             let base64_zip = base64::engine::general_purpose::STANDARD
@@ -814,9 +990,24 @@ impl GatewayApi for GatewayImpl {
             let sp = apictx.mgmt_switch.sp(sp_id)?;
             let power_state = body.into_inner();
 
-            sp.set_power_state(power_state.into()).await.map_err(|err| {
-                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-            })?;
+            let transition = sp
+                .set_power_state(power_state.into())
+                .await
+                .map_err(|err| SpCommsError::SpCommunicationFailed {
+                    sp: sp_id,
+                    err,
+                })?;
+
+            // Log whether the power state actually changed, or if the SP was
+            // already in the desired state.
+            slog::debug!(
+                &rqctx.log,
+                "sp_power_state_set";
+                "type" => ?sp_id.typ,
+                "slot" => sp_id.slot,
+                "power_state" => ?power_state,
+                "transition" => ?transition,
+            );
 
             Ok(HttpResponseUpdatedNoContent {})
         };
@@ -835,7 +1026,7 @@ impl GatewayApi for GatewayImpl {
         let handler = async {
             let sp = apictx.mgmt_switch.sp(sp_id)?;
 
-            let image_id = ipcc::InstallinatorImageId::from(body.into_inner());
+            let image_id = to_ipcc_installinator_image_id(body.into_inner());
 
             sp.set_ipcc_key_lookup_value(
                 Key::InstallinatorImageId as u8,
@@ -989,6 +1180,90 @@ impl GatewayApi for GatewayImpl {
         };
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
+
+    async fn sp_ereports_ingest(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSp>,
+        query: Query<ereport_types::EreportQuery>,
+    ) -> Result<HttpResponseOk<ereport_types::Ereports>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            use crate::EreportError;
+            use gateway_sp_comms::ereport;
+
+            let ereport_types::EreportQuery {
+                restart_id,
+                start_at,
+                committed,
+                limit,
+            } = query.into_inner();
+
+            let sp_id = path.into_inner().sp.into();
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+
+            let req_restart_id = restart_id.into_untyped_uuid();
+            let start_ena = start_at
+                .map(|ereport_types::Ena(e)| ereport::Ena::new(e))
+                .unwrap_or(ereport::Ena::new(0));
+
+            // If the limit is greater than 255, just clamp to that for now.
+            // TODO(eliza): eventually, we may want to request multiple tranches
+            // from the SP until we either receive an empty one or satisfy the
+            // limit requested by Nexus.
+            let limit = NonZeroU8::try_from(limit).unwrap_or(NonZeroU8::MAX);
+            let committed_ena =
+                committed.map(|ereport_types::Ena(e)| ereport::Ena::new(e));
+
+            let ereport::EreportTranche { restart_id, ereports } = sp
+                .ereports(req_restart_id, start_ena, limit, committed_ena)
+                .await
+                .map_err(|error| match error {
+                    gateway_sp_comms::error::EreportError::Communication(
+                        err,
+                    ) => EreportError::SpCommunicationFailed { sp: sp_id, err },
+                    err => EreportError::Ereport { sp: sp_id, err },
+                })?;
+            let restart_id =
+                ereport_types::EreporterRestartUuid::from_untyped_uuid(
+                    restart_id,
+                );
+            let ereports = ereports
+                .into_iter()
+                .map(|ereport::Ereport { ena: ereport::Ena(ena), data }| {
+                    ereport_types::Ereport {
+                        ena: ereport_types::Ena(ena.into()),
+                        data,
+                    }
+                })
+                .collect();
+            let reports = dropshot::ResultsPage::new(
+                ereports,
+                &dropshot::EmptyScanParams {},
+                |ereport_types::Ereport { ena, .. }, _| *ena,
+            )?;
+            Ok(HttpResponseOk(ereport_types::Ereports { restart_id, reports }))
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+    }
+
+    async fn rack_id_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<RackId>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            match apictx.rack_id.get() {
+                Some(&rack_id) => Ok(HttpResponseOk(RackId { rack_id })),
+                None => Err(HttpError::for_unavail(
+                    Some("RackIdNotSet".to_string()),
+                    "the rack UUID has not yet been set; perhaps RSS has not \
+                        run yet?"
+                        .to_string(),
+                )),
+            }
+        };
+
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+    }
 }
 
 // wrap `SpComponent::try_from(&str)` into a usable form for dropshot endpoints
@@ -999,6 +1274,16 @@ fn component_from_str(s: &str) -> Result<SpComponent, HttpError> {
             "invalid SP component name".to_string(),
         )
     })
+}
+
+fn to_ipcc_installinator_image_id(
+    image_id: InstallinatorImageId,
+) -> ipcc::InstallinatorImageId {
+    ipcc::InstallinatorImageId {
+        update_id: image_id.update_id,
+        host_phase_2: image_id.host_phase_2,
+        control_plane: image_id.control_plane,
+    }
 }
 
 // The _from_comms functions are here rather than `From` impls in gateway-types

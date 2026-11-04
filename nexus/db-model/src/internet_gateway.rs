@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use super::Generation;
 use crate::DatastoreCollectionConfig;
 use db_macros::Resource;
@@ -5,7 +9,7 @@ use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{
     internet_gateway, internet_gateway_ip_address, internet_gateway_ip_pool,
 };
-use nexus_types::external_api::{params, views};
+use nexus_types::external_api::internet_gateway as api;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use uuid::Uuid;
@@ -25,7 +29,7 @@ impl InternetGateway {
     pub fn new(
         gateway_id: Uuid,
         vpc_id: Uuid,
-        params: params::InternetGatewayCreate,
+        params: api::InternetGatewayCreate,
     ) -> Self {
         let identity =
             InternetGatewayIdentity::new(gateway_id, params.identity);
@@ -33,7 +37,7 @@ impl InternetGateway {
     }
 }
 
-impl From<InternetGateway> for views::InternetGateway {
+impl From<InternetGateway> for api::InternetGateway {
     fn from(value: InternetGateway) -> Self {
         Self { identity: value.identity(), vpc_id: value.vpc_id }
     }
@@ -61,7 +65,7 @@ impl InternetGatewayIpPool {
     }
 }
 
-impl From<InternetGatewayIpPool> for views::InternetGatewayIpPool {
+impl From<InternetGatewayIpPool> for api::InternetGatewayIpPool {
     fn from(value: InternetGatewayIpPool) -> Self {
         Self {
             identity: value.identity(),
@@ -85,7 +89,7 @@ impl InternetGatewayIpAddress {
     pub fn new(
         pool_id: Uuid,
         internet_gateway_id: Uuid,
-        params: params::InternetGatewayIpAddressCreate,
+        params: api::InternetGatewayIpAddressCreate,
     ) -> Self {
         let identity =
             InternetGatewayIpAddressIdentity::new(pool_id, params.identity);
@@ -97,7 +101,7 @@ impl InternetGatewayIpAddress {
     }
 }
 
-impl From<InternetGatewayIpAddress> for views::InternetGatewayIpAddress {
+impl From<InternetGatewayIpAddress> for api::InternetGatewayIpAddress {
     fn from(value: InternetGatewayIpAddress) -> Self {
         Self {
             identity: value.identity(),

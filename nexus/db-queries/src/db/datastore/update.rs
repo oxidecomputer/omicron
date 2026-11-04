@@ -4,68 +4,157 @@
 
 //! [`DataStore`] methods related to updates and artifacts.
 
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
+use crate::db::datastore::SQL_BATCH_SIZE;
+use crate::db::datastore::target_release::RecentTargetReleases;
 use crate::db::model::SemverVersion;
+use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
+use crate::db::pagination::paginated_multicolumn;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
+use iddqd::IdHashMap;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
-use nexus_db_model::{ArtifactHash, TufArtifact, TufRepo, TufRepoDescription};
-use omicron_common::api::external::{
-    self, CreateResult, DataPageParams, Generation, ListResultVec,
-    LookupResult, LookupType, ResourceType, TufRepoInsertStatus,
+use nexus_db_model::{
+    ArtifactHash, DbTypedGeneration, TargetRelease, TufArtifact,
+    TufArtifactDescription, TufArtifactFile, TufArtifactTag, TufMetadataEntry,
+    TufRepo, TufRepoDescription, TufRepoUpload, TufTrustRoot, to_db_typed_uuid,
 };
-use omicron_uuid_kinds::TufRepoKind;
-use omicron_uuid_kinds::TypedUuid;
+use nexus_types::external_api::update::TufRepoUploadStatus;
+use omicron_common::api::external::{
+    self, ByteCountRangeError, CreateResult, DataPageParams, DeleteResult,
+    ListResultVec, LookupResult, LookupType, ResourceType, UpdateResult,
+};
+use omicron_common::api::external::{Error, InternalContext};
+use omicron_generation_kinds::{
+    ArtifactConfigGeneration, ArtifactConfigGenerationKind,
+};
+use omicron_uuid_kinds::{GenericUuid, TufRepoUuid};
+use semver::Version;
+use sled_agent_types::artifact::ArtifactConfig;
 use swrite::{SWrite, swrite};
-use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::{Artifact, ArtifactSet};
 use uuid::Uuid;
 
-/// The return value of [`DataStore::update_tuf_repo_insert`].
-///
-/// This is similar to [`external::TufRepoInsertResponse`], but uses
-/// nexus-db-model's types instead of external types.
-pub struct TufRepoInsertResponse {
-    pub recorded: TufRepoDescription,
-    pub status: TufRepoInsertStatus,
-}
-
-impl TufRepoInsertResponse {
-    pub fn into_external(self) -> external::TufRepoInsertResponse {
-        external::TufRepoInsertResponse {
-            recorded: self.recorded.into_external(),
-            status: self.status,
-        }
-    }
-}
-
 async fn artifacts_for_repo(
-    repo_id: TypedUuid<TufRepoKind>,
+    repo_id: TufRepoUuid,
     conn: &async_bb8_diesel::Connection<DbConnection>,
-) -> Result<Vec<TufArtifact>, DieselError> {
+) -> Result<Vec<TufArtifactDescription>, DieselError> {
     use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+    use nexus_db_schema::schema::tuf_artifact_file::dsl as tuf_artifact_file_dsl;
+    use nexus_db_schema::schema::tuf_artifact_tag::dsl as tuf_artifact_tag_dsl;
     use nexus_db_schema::schema::tuf_repo_artifact::dsl as tuf_repo_artifact_dsl;
 
-    let join_on_dsl =
-        tuf_artifact_dsl::id.eq(tuf_repo_artifact_dsl::tuf_artifact_id);
-    // Don't bother paginating because each repo should only have a few (under
-    // 20) artifacts.
-    tuf_repo_artifact_dsl::tuf_repo_artifact
+    let mut artifacts = IdHashMap::new();
+
+    // First collect all the artifacts belonging to this repo ID.
+    let mut paginator =
+        Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
+    while let Some(p) = paginator.next() {
+        let batch = paginated(
+            tuf_artifact_dsl::tuf_artifact,
+            tuf_artifact_dsl::id,
+            &p.current_pagparams(),
+        )
+        .inner_join(tuf_repo_artifact_dsl::tuf_repo_artifact.on(
+            tuf_repo_artifact_dsl::tuf_artifact_id.eq(tuf_artifact_dsl::id),
+        ))
         .filter(
             tuf_repo_artifact_dsl::tuf_repo_id
                 .eq(nexus_db_model::to_db_typed_uuid(repo_id)),
         )
-        .inner_join(tuf_artifact_dsl::tuf_artifact.on(join_on_dsl))
-        .select(TufArtifact::as_select())
+        .inner_join(
+            tuf_artifact_file_dsl::tuf_artifact_file
+                .on(tuf_artifact_file_dsl::sha256.eq(tuf_artifact_dsl::sha256)),
+        )
+        .select((TufArtifact::as_select(), TufArtifactFile::as_select()))
         .load_async(conn)
-        .await
+        .await?;
+        paginator = p.found_batch(&batch, &|(artifact, _)| artifact.id);
+        artifacts.extend(batch.into_iter().map(|(artifact, file)| {
+            TufArtifactDescription::from_db_untagged(artifact, file)
+        }));
+    }
+
+    // Now collect all the tags.
+    let mut paginator =
+        Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
+    while let Some(p) = paginator.next() {
+        let batch = paginated_multicolumn(
+            tuf_artifact_tag_dsl::tuf_artifact_tag,
+            (tuf_artifact_tag_dsl::tuf_artifact_id, tuf_artifact_tag_dsl::key),
+            &p.current_pagparams(),
+        )
+        .inner_join(
+            tuf_repo_artifact_dsl::tuf_repo_artifact
+                .on(tuf_repo_artifact_dsl::tuf_artifact_id
+                    .eq(tuf_artifact_tag_dsl::tuf_artifact_id)),
+        )
+        .filter(
+            tuf_repo_artifact_dsl::tuf_repo_id
+                .eq(nexus_db_model::to_db_typed_uuid(repo_id)),
+        )
+        .select(TufArtifactTag::as_select())
+        .load_async(conn)
+        .await?;
+        paginator = p
+            .found_batch(&batch, &|tag| (tag.tuf_artifact_id, tag.key.clone()));
+        for tag in batch {
+            let Some(mut artifact) = artifacts.get_mut(&tag.tuf_artifact_id)
+            else {
+                // This implies that the contents of `tuf_repo_artifact` for our
+                // repo ID changed between the first batch of queries (listing
+                // artifacts) and this batch (listing tags). Not only should
+                // this not happen because we are in a transaction, this should
+                // never happen because the set of artifacts for a particular
+                // repository never changes after first being inserted!
+                return Err(DieselError::DatabaseError(
+                    DatabaseErrorKind::ForeignKeyViolation,
+                    Box::new(format!(
+                        "artifact for {tag:?} was not seen in previous query"
+                    )),
+                ));
+            };
+            artifact.tags.insert(tag.key, tag.value);
+        }
+    }
+
+    Ok(artifacts.into_iter().collect())
+}
+
+async fn metadata_for_repo(
+    repo_id: TufRepoUuid,
+    conn: &async_bb8_diesel::Connection<DbConnection>,
+) -> Result<Vec<TufMetadataEntry>, DieselError> {
+    use nexus_db_schema::schema::tuf_repo_metadata::dsl;
+
+    let mut entries = Vec::new();
+    let mut paginator =
+        Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
+    while let Some(p) = paginator.next() {
+        let batch =
+            paginated(dsl::tuf_repo_metadata, dsl::key, &p.current_pagparams())
+                .filter(
+                    dsl::tuf_repo_id
+                        .eq(nexus_db_model::to_db_typed_uuid(repo_id)),
+                )
+                .select(TufMetadataEntry::as_select())
+                .load_async(conn)
+                .await?;
+        paginator = p.found_batch(&batch, &|entry| entry.key.clone());
+        entries.extend(batch);
+    }
+    Ok(entries)
 }
 
 impl DataStore {
@@ -75,18 +164,16 @@ impl DataStore {
     /// `TufRepoDescription` if one was already found. (This is not an upsert,
     /// because if we know about an existing repo but with different contents,
     /// we reject that.)
-    pub async fn update_tuf_repo_insert(
+    pub async fn tuf_repo_insert(
         &self,
         opctx: &OpContext,
-        description: &external::TufRepoDescription,
-    ) -> CreateResult<TufRepoInsertResponse> {
+        description: &nexus_types::tuf_repo::TufRepoDescription,
+    ) -> CreateResult<TufRepoUpload> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        let log = opctx.log.new(
-            slog::o!(
-                "method" => "update_tuf_repo_insert",
-                "uploaded_system_version" => description.repo.system_version.to_string(),
-            ),
-        );
+        let log = opctx.log.new(slog::o!(
+            "method" => "update_tuf_repo_insert",
+            "uploaded_system_version" => description.system_version.to_string(),
+        ));
 
         let err = OptionalError::new();
         let err2 = err.clone();
@@ -106,20 +193,57 @@ impl DataStore {
             })
     }
 
-    /// Returns the TUF repo description corresponding to this system version.
-    pub async fn update_tuf_repo_get(
+    /// Returns a TUF repo description.
+    pub async fn tuf_repo_get_by_id(
         &self,
         opctx: &OpContext,
-        system_version: SemverVersion,
+        repo_id: TufRepoUuid,
     ) -> LookupResult<TufRepoDescription> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
         use nexus_db_schema::schema::tuf_repo::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-
         let repo = dsl::tuf_repo
+            .filter(dsl::id.eq(to_db_typed_uuid(repo_id)))
+            .select(TufRepo::as_select())
+            .first_async::<TufRepo>(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::TufRepo,
+                        LookupType::ById(repo_id.into_untyped_uuid()),
+                    ),
+                )
+            })?;
+
+        let artifacts = artifacts_for_repo(repo.id.into(), &conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        let metadata = metadata_for_repo(repo.id.into(), &conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(TufRepoDescription { repo, artifacts, metadata })
+    }
+
+    /// Returns the TUF repo corresponding to this system version.
+    pub async fn tuf_repo_get_by_version(
+        &self,
+        opctx: &OpContext,
+        system_version: SemverVersion,
+    ) -> LookupResult<TufRepo> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        use nexus_db_schema::schema::tuf_repo::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        dsl::tuf_repo
             .filter(dsl::system_version.eq(system_version.clone()))
+            .filter(dsl::time_pruned.is_null())
             .select(TufRepo::as_select())
             .first_async::<TufRepo>(&*conn)
             .await
@@ -131,43 +255,430 @@ impl DataStore {
                         LookupType::ByCompositeId(system_version.to_string()),
                     ),
                 )
-            })?;
-
-        let artifacts = artifacts_for_repo(repo.id.into(), &conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Ok(TufRepoDescription { repo, artifacts })
+            })
     }
 
-    /// Returns the list of all TUF repo artifacts known to the system.
-    pub async fn update_tuf_artifact_list(
+    /// Given a TUF repo ID, get its version. We could use `tuf_repo_get_by_id`,
+    /// but that makes an additional query for the artifacts that we don't need
+    /// in the code that uses this method.
+    pub async fn tuf_repo_get_version(
         &self,
         opctx: &OpContext,
-        generation: Generation,
+        tuf_repo_id: &TufRepoUuid,
+    ) -> LookupResult<semver::Version> {
+        opctx
+            .authorize(authz::Action::Read, &authz::TARGET_RELEASE_CONFIG)
+            .await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        use nexus_db_schema::schema::tuf_repo;
+        tuf_repo::table
+            .select(tuf_repo::system_version)
+            .filter(tuf_repo::id.eq(tuf_repo_id.into_untyped_uuid()))
+            .first_async::<SemverVersion>(&*conn)
+            .await
+            .map(|v| v.0)
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            // looking up a non-existent ID will 500, but it doesn't
+            // automatically include the bad ID
+            .with_internal_context(|| {
+                format!("tuf_repo_get_version {tuf_repo_id}")
+            })
+    }
+
+    /// Pages through the list of all not-yet-pruned TUF repos in the system
+    pub async fn tuf_list_repos_unpruned(
+        &self,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<TufArtifact> {
+    ) -> ListResultVec<TufRepo> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
-        use nexus_db_schema::schema::tuf_artifact::dsl;
+        use nexus_db_schema::schema::tuf_repo::dsl;
 
-        let generation = nexus_db_model::Generation(generation);
-        paginated(dsl::tuf_artifact, dsl::id, pagparams)
-            .filter(dsl::generation_added.le(generation))
-            .select(TufArtifact::as_select())
+        paginated(dsl::tuf_repo, dsl::id, pagparams)
+            .filter(dsl::time_pruned.is_null())
+            .select(TufRepo::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Returns the current TUF repo generation number.
-    pub async fn update_tuf_generation_get(
+    /// Lists all unpruned TUF repos, making as many queries as needed to get
+    /// them all
+    ///
+    /// This should not be used from contexts that shouldn't make lots of
+    /// database queries (e.g., API endpoints).
+    ///
+    /// Since this involves pagination, this is not a consistent snapshot.
+    /// Consider using `tuf_get_generation()` before calling this function and
+    /// then making any subsequent queries conditional on the generation not
+    /// having changed.
+    pub async fn tuf_list_repos_unpruned_batched(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<Generation> {
+    ) -> ListResultVec<TufRepo> {
+        opctx.check_complex_operations_allowed()?;
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        let mut rv = Vec::new();
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .tuf_list_repos_unpruned(opctx, &p.current_pagparams())
+                .await
+                .internal_context("fetching page of TUF repos")?;
+            paginator = p.found_batch(&batch, &|a| a.id.into_untyped_uuid());
+            rv.extend(batch);
+        }
+        Ok(rv)
+    }
+
+    /// Generate an [`ArtifactConfig`] from the current set of unpruned TUF
+    /// repos, making as many queries as needed to list them all.
+    ///
+    /// This should not be used from contexts that shouldn't make lots of
+    /// database queries (e.g., API endpoints).
+    ///
+    /// In addition to the usual error cases, this may return an error if
+    /// the TUF repo generation changes while reading the list of unpruned
+    /// repositories.
+    pub async fn tuf_list_artifacts_unpruned_batched(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<ArtifactConfig> {
+        opctx.check_complex_operations_allowed()?;
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let generation = self.tuf_get_generation(opctx).await?;
+        let repos = self.tuf_list_repos_unpruned_batched(opctx).await?;
+        // `tuf_list_repos_unpruned_batched` performs pagination internally,
+        // so check that the generation hasn't changed during our pagination to
+        // ensure we got a consistent read.
+        {
+            let generation_now = self.tuf_get_generation(opctx).await?;
+            if generation != generation_now {
+                return Err(Error::internal_error(format!(
+                    "generation changed from {generation} \
+                    to {generation_now}, bailing"
+                )));
+            }
+        }
+
+        let mut config =
+            ArtifactConfig { generation, artifacts: BTreeSet::new() };
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+            use nexus_db_schema::schema::tuf_repo_artifact::dsl;
+
+            let pagination_columns = (dsl::tuf_repo_id, dsl::tuf_artifact_id);
+            let join_on_dsl = tuf_artifact_dsl::id.eq(dsl::tuf_artifact_id);
+
+            let batch = paginated_multicolumn(
+                dsl::tuf_repo_artifact,
+                pagination_columns,
+                &p.current_pagparams(),
+            )
+            .filter(dsl::tuf_repo_id.eq_any(repos.iter().map(|repo| repo.id)))
+            .inner_join(tuf_artifact_dsl::tuf_artifact.on(join_on_dsl))
+            .select((pagination_columns, tuf_artifact_dsl::sha256))
+            .load_async::<((Uuid, Uuid), ArtifactHash)>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+            paginator = p.found_batch(&batch, &|(key, _)| *key);
+            config
+                .artifacts
+                .extend(batch.into_iter().map(|(_, sha256)| sha256.0));
+        }
+        Ok(config)
+    }
+
+    /// Marks the given TUF repo as eligible for pruning
+    ///
+    /// Callers are expected to verify that it's safe to prune this TUF repo.
+    ///
+    /// `recent_releases` comes from `target_release_fetch_recent_distinct()`.
+    /// As part of verifying that it's safe to prune this TUF repo, callers are
+    /// expected to check that it's not the current or immediately previous
+    /// target release.
+    ///
+    /// This transaction will be conditional on:
+    ///
+    /// - the current TUF generation matching `initial_tuf_generation`
+    ///   (i.e., we will not prune a release if some other query has added or
+    ///   pruned a release since the caller fetched this generation)
+    /// - the current target release generation matching what it was when
+    ///   `recent_releases` was fetched (because this would invalidate the check
+    ///   mentioned above that we're not pruning the target release).
+    pub async fn tuf_repo_mark_pruned(
+        &self,
+        opctx: &OpContext,
+        initial_tuf_generation: ArtifactConfigGeneration,
+        recent_releases: &RecentTargetReleases,
+        tuf_repo_id: TufRepoUuid,
+    ) -> UpdateResult<()> {
+        // Double-check that the caller's done their diligence.
+        //
+        // These are not the primary way that we check these conditions.
+        // They're a belt-and-suspenders check, since we have this information
+        // available.
+        if recent_releases.count < 2 {
+            return Err(Error::internal_error(
+                "must have fetched at least two recent releases to properly \
+                 validate that an important release is not being pruned",
+            ));
+        }
+        if recent_releases.releases.contains(&tuf_repo_id) {
+            return Err(Error::internal_error(
+                "attempting to prune a current or recent target release",
+            ));
+        }
+
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let error = OptionalError::new();
+        self.transaction_retry_wrapper("tuf_repo_mark_pruned")
+            .transaction(&conn, |txn| {
+                let error = error.clone();
+                async move {
+                    // If the target release generation has changed, bail out.
+                    // This means someone has changed the target release, which
+                    // means they may have set it to the repo we're trying to
+                    // prune.  (This check could be more fine-grained, but this
+                    // is adequate for now)
+                    let target_release_generation_now = {
+                        use nexus_db_schema::schema::target_release::dsl;
+                        dsl::target_release
+                            .select(TargetRelease::as_select())
+                            .order_by(dsl::generation.desc())
+                            .limit(1)
+                            .first_async(&txn)
+                            .await
+                            .map_err(|e| {
+                                error.bail_retryable_or_else(e, |e| {
+                                    public_error_from_diesel(
+                                        e,
+                                        ErrorHandler::Server,
+                                    )
+                                    .internal_context(
+                                        "fetching latest target_release \
+                                         generation",
+                                    )
+                                })
+                            })?
+                            .generation()
+                    };
+                    if target_release_generation_now
+                        != recent_releases.target_release_generation
+                    {
+                        return Err(error.bail(Error::conflict(format!(
+                            "bailing out to avoid risk of marking current \
+                                 target release pruned: target release has \
+                                 changed since check (currently {}, was {})",
+                            target_release_generation_now,
+                            recent_releases.target_release_generation
+                        ))));
+                    }
+
+                    // If the TUF repo generation has changed, bail out.
+                    // Someone else is adding or pruning repos.  Force the
+                    // caller to re-evaluate.  This is probably more
+                    // conservative than necessary, but ensures that two Nexus
+                    // instances don't concurrently decide to prune a lot more
+                    // than either of them would on their own because they chose
+                    // different repos to keep.
+                    let tuf_generation_now =
+                        get_generation(&txn).await.map_err(|e| {
+                            error.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                                .internal_context(
+                                    "fetching latest TUF generation",
+                                )
+                            })
+                        })?;
+                    if tuf_generation_now != initial_tuf_generation {
+                        return Err(error.bail(Error::conflict(format!(
+                            "bailing out to avoid risk of pruning too much: \
+                             tuf repo generation has changed since check \
+                             (currently {}, was {})",
+                            tuf_generation_now, initial_tuf_generation,
+                        ))));
+                    }
+
+                    // Try to mark the repo pruned.
+                    use nexus_db_schema::schema::tuf_repo::dsl;
+                    let count = diesel::update(dsl::tuf_repo)
+                        .filter(dsl::id.eq(to_db_typed_uuid(tuf_repo_id)))
+                        .filter(dsl::time_pruned.is_null())
+                        .set(dsl::time_pruned.eq(chrono::Utc::now()))
+                        .execute_async(&txn)
+                        .await
+                        .map_err(|e| {
+                            error.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                                .internal_context("marking TUF repo pruned")
+                            })
+                        })?;
+
+                    // If we made any changes, bump the TUF repo generation.
+                    // This is necessary because that generation covers the set
+                    // of TUF repos whose artifacts should be replicated.
+                    if count > 0 {
+                        put_generation(
+                            &txn,
+                            tuf_generation_now.into(),
+                            tuf_generation_now.next().into(),
+                        )
+                        .await
+                        .map_err(|e| {
+                            error.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                                .internal_context("bumping TUF generation")
+                            })
+                        })?;
+                    }
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| match error.take() {
+                Some(err) => err,
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })
+    }
+
+    /// List the artifacts present in a TUF repo.
+    pub async fn tuf_list_repo_artifacts(
+        &self,
+        opctx: &OpContext,
+        repo_id: TufRepoUuid,
+    ) -> ListResultVec<TufArtifactDescription> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        artifacts_for_repo(repo_id, &conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Returns the current TUF repo generation number.
+    pub async fn tuf_get_generation(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<ArtifactConfigGeneration> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         get_generation(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List all TUF repositories (without artifacts) ordered by system version
+    /// (newest first by default).
+    pub async fn tuf_repo_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Version>,
+    ) -> ListResultVec<TufRepo> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        use nexus_db_schema::schema::tuf_repo;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let marker_owner = pagparams
+            .marker
+            .map(|version| SemverVersion::from(version.clone()));
+        let db_pagparams = DataPageParams {
+            marker: marker_owner.as_ref(),
+            direction: pagparams.direction,
+            limit: pagparams.limit,
+        };
+
+        paginated(tuf_repo::table, tuf_repo::system_version, &db_pagparams)
+            .filter(tuf_repo::time_pruned.is_null())
+            .select(TufRepo::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List the trusted TUF root roles in the trust store.
+    pub async fn tuf_trust_root_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<TufTrustRoot> {
+        use nexus_db_schema::schema::tuf_trust_root::dsl;
+
+        opctx
+            .authorize(
+                authz::Action::ListChildren,
+                &authz::UPDATE_TRUST_ROOT_LIST,
+            )
+            .await?;
+        paginated(dsl::tuf_trust_root, dsl::id, pagparams)
+            .select(TufTrustRoot::as_select())
+            .filter(dsl::time_deleted.is_null())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Insert a trusted TUF root role into the trust store.
+    pub async fn tuf_trust_root_insert(
+        &self,
+        opctx: &OpContext,
+        trust_root: TufTrustRoot,
+    ) -> CreateResult<TufTrustRoot> {
+        use nexus_db_schema::schema::tuf_trust_root::dsl;
+
+        opctx
+            .authorize(
+                authz::Action::CreateChild,
+                &authz::UPDATE_TRUST_ROOT_LIST,
+            )
+            .await?;
+        diesel::insert_into(dsl::tuf_trust_root)
+            .values(trust_root)
+            .returning(TufTrustRoot::as_returning())
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Remove a TUF root role from the trust store (by setting the time_deleted
+    /// field).
+    pub async fn tuf_trust_root_delete(
+        &self,
+        opctx: &OpContext,
+        authz_trust_root: &authz::TufTrustRoot,
+    ) -> DeleteResult {
+        use nexus_db_schema::schema::tuf_trust_root::dsl;
+
+        opctx.authorize(authz::Action::Delete, authz_trust_root).await?;
+        diesel::update(dsl::tuf_trust_root)
+            .filter(dsl::id.eq(to_db_typed_uuid(authz_trust_root.id())))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::time_deleted.eq(chrono::Utc::now()))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map(|_| ())
     }
 }
 
@@ -176,16 +687,17 @@ impl DataStore {
 async fn insert_impl(
     log: slog::Logger,
     conn: async_bb8_diesel::Connection<DbConnection>,
-    desc: &external::TufRepoDescription,
+    logical_desc: &nexus_types::tuf_repo::TufRepoDescription,
     err: OptionalError<InsertError>,
-) -> Result<TufRepoInsertResponse, DieselError> {
+) -> Result<TufRepoUpload, DieselError> {
     // Load the current generation from the database and increment it, then
     // use that when creating the `TufRepoDescription`. If we determine there
     // are any artifacts to be inserted, we update the generation to this value
     // later.
     let old_generation = get_generation(&conn).await?;
     let new_generation = old_generation.next();
-    let desc = TufRepoDescription::from_external(desc.clone(), new_generation);
+    let desc = TufRepoDescription::new(logical_desc.clone(), new_generation)
+        .map_err(|error| err.bail(InsertError::ByteCountRangeError(error)))?;
 
     let repo = {
         use nexus_db_schema::schema::tuf_repo::dsl;
@@ -198,9 +710,42 @@ async fn insert_impl(
             .await
             .optional()?;
 
-        if let Some(existing_repo) = existing_repo {
-            // It doesn't matter whether the UUID of the repo matches or not,
-            // since it's uniquely generated. But do check the hash.
+        if let Some(mut existing_repo) = existing_repo {
+            // A repository for this system version already exists. Fetch all
+            // additional information about the repository from the database
+            // and ensure the uploaded repository and the existing repository
+            // are equivalent. If so, update `time_created` and `time_pruned` to
+            // reset its position in the pruning queue, and return the existing
+            // repository.
+            let existing_artifacts =
+                artifacts_for_repo(existing_repo.id.into(), &conn).await?;
+            let existing_metadata =
+                metadata_for_repo(existing_repo.id.into(), &conn).await?;
+
+            {
+                // `ArtifactSet` maintains consistent ordering.
+                let existing_artifacts = existing_artifacts
+                    .iter()
+                    .cloned()
+                    .map(Artifact::from)
+                    .collect::<ArtifactSet>();
+                if logical_desc.artifacts != existing_artifacts {
+                    return Err(err.bail(InsertError::RepoArtifactMismatch {
+                        system_version: desc.repo.system_version,
+                    }));
+                }
+
+                let existing_metadata = existing_metadata
+                    .iter()
+                    .map(|TufMetadataEntry { key, value, .. }| (key, value))
+                    .collect::<BTreeMap<_, _>>();
+                if !logical_desc.metadata.iter().eq(existing_metadata) {
+                    return Err(err.bail(InsertError::RepoMetadataMismatch {
+                        system_version: desc.repo.system_version,
+                    }));
+                }
+            }
+
             if existing_repo.sha256 != desc.repo.sha256 {
                 return Err(err.bail(InsertError::RepoHashMismatch {
                     system_version: desc.repo.system_version,
@@ -209,15 +754,41 @@ async fn insert_impl(
                 }));
             }
 
-            // Just return the existing repo along with all of its artifacts.
-            let artifacts =
-                artifacts_for_repo(existing_repo.id.into(), &conn).await?;
+            // Now, reset `time_created` to now and ensure `time_pruned` is set
+            // to NULL.
+            existing_repo.time_created = chrono::Utc::now();
+            if existing_repo.time_pruned.is_some() {
+                // We're changing the set of unpruned repositories, so we need
+                // to bump the generation number.
+                debug!(log, "setting new TUF repo generation";
+                    "generation" => new_generation,
+                );
+                put_generation(
+                    &conn,
+                    old_generation.into(),
+                    new_generation.into(),
+                )
+                .await?;
+            }
+            existing_repo.time_pruned = None;
+            diesel::update(dsl::tuf_repo)
+                .filter(dsl::id.eq(existing_repo.id))
+                .set((
+                    dsl::sha256.eq(existing_repo.sha256),
+                    dsl::time_created.eq(existing_repo.time_created),
+                    dsl::time_pruned.eq(existing_repo.time_pruned),
+                ))
+                .execute_async(&conn)
+                .await?;
 
-            let recorded =
-                TufRepoDescription { repo: existing_repo, artifacts };
-            return Ok(TufRepoInsertResponse {
+            let recorded = TufRepoDescription {
+                repo: existing_repo,
+                artifacts: existing_artifacts,
+                metadata: existing_metadata,
+            };
+            return Ok(TufRepoUpload {
                 recorded,
-                status: TufRepoInsertStatus::AlreadyExists,
+                status: TufRepoUploadStatus::AlreadyExists,
             });
         }
 
@@ -234,73 +805,161 @@ async fn insert_impl(
     // Since we've inserted a new repo, we also need to insert the
     // corresponding artifacts.
     let all_artifacts = {
-        use nexus_db_schema::schema::tuf_artifact::dsl;
+        use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+        use nexus_db_schema::schema::tuf_artifact_file::dsl as tuf_artifact_file_dsl;
+        use nexus_db_schema::schema::tuf_artifact_tag::dsl as tuf_artifact_tag_dsl;
 
-        // Multiple repos can have the same artifacts, so we shouldn't error
-        // out if we find an existing artifact. However, we should check that
-        // the SHA256 hash and length matches if an existing artifact matches.
+        // Multiple repos can have the same artifacts, so we shouldn't error out
+        // if we find an existing artifact. However, we should avoid adding new
+        // rows to the artifact table if we've already recorded them.
+        //
+        // The only rule we enforce is that if two artifacts have the same
+        // SHA-256 checksum, they must also have the same length and the same
+        // version (because artifacts should contain their own version string,
+        // or otherwise be unique due to the version). This is enforced at the
+        // database schema via the `tuf_artifact_file` table.
+        //
+        // We don't enforce that two artifacts with the same SHA-256 checksum
+        // have the same tags; they are entered as separate artifacts. Two
+        // artifacts with the same contents may have different tags to allow
+        // them to be selected in a way that is clear to Nexus (for example, if
+        // we have two kinds of compute sleds that use the same CPU generation,
+        // we might want to select the same OS phase 1 image with either board
+        // name.)
+        //
+        // Because it is not possible for the database to ensure a one-to-one
+        // mapping of artifact UUID to a set of tags and SHA-256 checksum, it
+        // is possible to end up with multiple artifact entries in the database
+        // with the same set of tags. This is okay; we don't make decisions
+        // around the uniqueness of an artifact in the database. This function
+        // makes a best-effort attempt to avoid inserting duplicate artifacts to
+        // avoid unnecessary database bloat.
 
-        let mut filter_dsl = dsl::tuf_artifact.into_boxed();
-        for artifact in desc.artifacts.clone() {
-            filter_dsl = filter_dsl
-                .or_filter(
-                    // Look up artifacts by name/version/kind.
-                    dsl::name
-                        .eq(artifact.name)
-                        .and(dsl::version.eq(artifact.version))
-                        .and(dsl::kind.eq(artifact.kind.clone())),
-                )
-                .or_filter(
-                    // Also look up artifacts by kind/hash.
-                    dsl::kind
-                        .eq(artifact.kind)
-                        .and(dsl::sha256.eq(artifact.sha256)),
-                );
-        }
-
-        let results = filter_dsl
-            .select(TufArtifact::as_select())
+        // First, build a list of artifacts matching any artifact hash present
+        // in the uploaded repository.
+        let mut results = IdHashMap::new();
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let batch = paginated(
+                tuf_artifact_dsl::tuf_artifact,
+                tuf_artifact_dsl::id,
+                &p.current_pagparams(),
+            )
+            .filter(
+                tuf_artifact_dsl::sha256
+                    .eq_any(desc.artifacts.iter().map(|a| a.artifact.sha256)),
+            )
+            .inner_join(
+                tuf_artifact_file_dsl::tuf_artifact_file
+                    .on(tuf_artifact_file_dsl::sha256
+                        .eq(tuf_artifact_dsl::sha256)),
+            )
+            .select((TufArtifact::as_select(), TufArtifactFile::as_select()))
             .load_async(&conn)
             .await?;
-        debug!(
-            log,
-            "found {} existing artifacts with nvk lookup", results.len();
-            "results" => ?results,
-        );
+            paginator = p.found_batch(&batch, &|(artifact, _)| artifact.id);
+            results.extend(batch.into_iter().map(|(artifact, file)| {
+                TufArtifactDescription::from_db_untagged(artifact, file)
+            }));
+        }
+        // Now fetch their tags and add them.
+        if !results.is_empty() {
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    tuf_artifact_tag_dsl::tuf_artifact_tag,
+                    (
+                        tuf_artifact_tag_dsl::tuf_artifact_id,
+                        tuf_artifact_tag_dsl::key,
+                    ),
+                    &p.current_pagparams(),
+                )
+                .filter(tuf_artifact_tag_dsl::tuf_artifact_id.eq_any(
+                    results.iter().map(|artifact| artifact.artifact.id),
+                ))
+                .select(TufArtifactTag::as_select())
+                .load_async(&conn)
+                .await?;
+                paginator = p.found_batch(&batch, &|tag| {
+                    (tag.tuf_artifact_id, tag.key.clone())
+                });
+                for tag in batch {
+                    let Some(mut artifact) =
+                        results.get_mut(&tag.tuf_artifact_id)
+                    else {
+                        // This implies that the contents of `tuf_repo_artifact`
+                        // for our repo ID changed between the first batch of
+                        // queries (listing artifacts) and this batch (listing
+                        // tags). Not only should this not happen because we are
+                        // in a transaction, this should never happen because
+                        // the set of artifacts for a particular repository
+                        // never changes after first being inserted!
+                        return Err(DieselError::DatabaseError(
+                            DatabaseErrorKind::ForeignKeyViolation,
+                            Box::new(format!(
+                                "artifact for {tag:?} was not seen \
+                                in previous query"
+                            )),
+                        ));
+                    };
+                    artifact.tags.insert(tag.key, tag.value);
+                }
+            }
+        }
 
-        let results_by_id = results
-            .iter()
-            .map(|artifact| (artifact.nvk(), artifact))
-            .collect::<HashMap<_, _>>();
-        let results_by_hash_id = results
-            .iter()
-            .map(|artifact| ((&artifact.kind, artifact.sha256), artifact))
-            .collect::<HashMap<_, _>>();
+        // Time to make this list useful. For each artifact in our uploaded
+        // repository, we need to find any artifacts with the same SHA-256
+        // checksum and ensure its length and version are equal to ours. Then
+        // we need to look for an artifact with the same set of tags as ours.
+        // If one is present, we use the already-present artifact instead of the
+        // newly-generated one.
+        //
+        // We use a nested hash table. The outer hash table uses the SHA-256
+        // checksum as the key. The inner hash table uses a BTreeMap of the tag
+        // keys and values as the key.
+        let mut lookup = HashMap::<_, HashMap<_, _>>::new();
+        for artifact in &results {
+            lookup
+                .entry(artifact.artifact.sha256)
+                .or_default()
+                .insert(&artifact.tags, artifact);
+        }
 
-        // uploaded_and_existing contains non-matching artifacts in pairs of
-        // (uploaded, currently in db).
-        let mut nvk_mismatch = Vec::new();
-        let mut hash_id_mismatch = Vec::new();
+        // Iterate through our uploaded artifacts, check that their length and
+        // version are equal to what's in the database, and then look for an
+        // existing entry we can use instead or insert our new entry.
+        let mut mismatch = Vec::new();
+        let mut new_files: IdHashMap<TufArtifactFile> = IdHashMap::new();
         let mut new_artifacts = Vec::new();
         let mut all_artifacts = Vec::new();
 
-        enum ArtifactStatus {
+        enum ArtifactStatus<'a> {
             New,
-            Existing,
+            Existing(&'a TufArtifactDescription),
             Mismatch,
         }
 
-        impl ArtifactStatus {
-            fn mark_existing(&mut self) {
+        impl<'a> ArtifactStatus<'a> {
+            fn mark_existing(&mut self, artifact: &'a TufArtifactDescription) {
                 match self {
-                    ArtifactStatus::New => *self = ArtifactStatus::Existing,
-                    ArtifactStatus::Existing | ArtifactStatus::Mismatch => (),
+                    ArtifactStatus::New => {
+                        *self = ArtifactStatus::Existing(artifact)
+                    }
+                    ArtifactStatus::Existing(_) | ArtifactStatus::Mismatch => {
+                        ()
+                    }
                 }
             }
 
             fn mark_mismatch(&mut self) {
                 match self {
-                    ArtifactStatus::New | ArtifactStatus::Existing => {
+                    ArtifactStatus::New | ArtifactStatus::Existing(_) => {
                         *self = ArtifactStatus::Mismatch
                     }
                     ArtifactStatus::Mismatch => (),
@@ -308,47 +967,45 @@ async fn insert_impl(
             }
         }
 
-        for uploaded_artifact in desc.artifacts.clone() {
+        for uploaded_artifact in &desc.artifacts {
             let mut status = ArtifactStatus::New;
-            if let Some(&existing_nvk) =
-                results_by_id.get(&uploaded_artifact.nvk())
+            let uploaded_file = uploaded_artifact.to_db_file();
+            // Check that this isn't a mismatch within the repository.
+            if let Some(file) =
+                new_files.get(&uploaded_artifact.artifact.sha256)
             {
-                status.mark_existing();
-                if existing_nvk.sha256 != uploaded_artifact.sha256
-                    || existing_nvk.artifact_size()
-                        != uploaded_artifact.artifact_size()
-                {
-                    nvk_mismatch.push((
-                        uploaded_artifact.clone(),
-                        existing_nvk.clone(),
-                    ));
+                if uploaded_file != *file {
+                    mismatch.push((uploaded_file.clone(), file.clone()));
                     status.mark_mismatch();
                 }
-            };
-
-            if let Some(&existing_hash) = results_by_hash_id
-                .get(&(&uploaded_artifact.kind, uploaded_artifact.sha256))
+            }
+            if let Some(inner) = lookup.get(&uploaded_artifact.artifact.sha256)
             {
-                status.mark_existing();
-                if existing_hash.name != uploaded_artifact.name
-                    || existing_hash.version != uploaded_artifact.version
-                {
-                    hash_id_mismatch.push((
-                        uploaded_artifact.clone(),
-                        existing_hash.clone(),
-                    ));
-                    status.mark_mismatch();
+                // Check that this isn't a mismatch within previously-uploaded
+                // artifacts.
+                for artifact in inner.values() {
+                    let artifact_file = artifact.to_db_file();
+                    if uploaded_file != artifact_file {
+                        mismatch.push((uploaded_file.clone(), artifact_file));
+                        status.mark_mismatch();
+                        break;
+                    }
                 }
-            };
+                // Check to see if this artifact already exists with the same
+                // tags.
+                if let Some(artifact) = inner.get(&uploaded_artifact.tags) {
+                    status.mark_existing(artifact);
+                }
+            }
 
-            // This is a new artifact.
             match status {
                 ArtifactStatus::New => {
                     new_artifacts.push(uploaded_artifact.clone());
-                    all_artifacts.push(uploaded_artifact);
+                    new_files.insert_overwrite(uploaded_file);
+                    all_artifacts.push(uploaded_artifact.clone());
                 }
-                ArtifactStatus::Existing => {
-                    all_artifacts.push(uploaded_artifact);
+                ArtifactStatus::Existing(existing_artifact) => {
+                    all_artifacts.push(existing_artifact.clone());
                 }
                 ArtifactStatus::Mismatch => {
                     // This is an error case -- we'll return an error before
@@ -357,15 +1014,11 @@ async fn insert_impl(
             }
         }
 
-        if !nvk_mismatch.is_empty() || !hash_id_mismatch.is_empty() {
+        if !mismatch.is_empty() {
             debug!(log, "uploaded artifacts don't match existing artifacts";
-                "nvk_mismatch" => ?nvk_mismatch,
-                "hash_id_mismatch" => ?hash_id_mismatch,
+                "mismatch" => ?mismatch,
             );
-            return Err(err.bail(InsertError::ArtifactMismatch {
-                nvk_mismatch,
-                hash_id_mismatch,
-            }));
+            return Err(err.bail(InsertError::ArtifactMismatch { mismatch }));
         }
 
         debug!(
@@ -383,9 +1036,32 @@ async fn insert_impl(
             put_generation(&conn, old_generation.into(), new_generation.into())
                 .await?;
 
+            let (new_artifacts, mut new_files, new_tags) = new_artifacts
+                .into_iter()
+                .map(TufArtifactDescription::into_db)
+                .collect::<(Vec<_>, Vec<_>, Vec<_>)>();
+            let new_tags: Vec<_> = new_tags.into_iter().flatten().collect();
+            // Only insert values in `tuf_artifact_file` that we have not seen
+            // before.
+            new_files.retain(|file| !lookup.contains_key(&file.sha256));
+            // Remove duplicate hashes; we've already verified that they are
+            // consistent above.
+            new_files.sort_unstable_by_key(|file| file.sha256);
+            new_files.dedup_by_key(|file| file.sha256);
+
             // Insert new artifacts into the database.
-            diesel::insert_into(dsl::tuf_artifact)
+            diesel::insert_into(tuf_artifact_dsl::tuf_artifact)
                 .values(new_artifacts)
+                .execute_async(&conn)
+                .await?;
+            // Insert newly-seen checksums/versions/lengths into the database.
+            diesel::insert_into(tuf_artifact_file_dsl::tuf_artifact_file)
+                .values(new_files)
+                .execute_async(&conn)
+                .await?;
+            // Insert new tags into the database.
+            diesel::insert_into(tuf_artifact_tag_dsl::tuf_artifact_tag)
+                .values(new_tags)
                 .execute_async(&conn)
                 .await?;
         }
@@ -393,20 +1069,20 @@ async fn insert_impl(
         all_artifacts
     };
 
-    // Finally, insert all the associations into the tuf_repo_artifact table.
+    // Insert all the associations into the tuf_repo_artifact table.
     {
         use nexus_db_schema::schema::tuf_repo_artifact::dsl;
 
         let mut values = Vec::new();
-        for artifact in desc.artifacts.clone() {
+        for artifact in &all_artifacts {
             slog::debug!(
                 log,
                 "inserting artifact into tuf_repo_artifact table";
-                "artifact" => %artifact.id,
+                "artifact" => %artifact.artifact.id,
             );
             values.push((
                 dsl::tuf_repo_id.eq(desc.repo.id),
-                dsl::tuf_artifact_id.eq(artifact.id),
+                dsl::tuf_artifact_id.eq(artifact.artifact.id),
             ));
         }
 
@@ -416,31 +1092,43 @@ async fn insert_impl(
             .await?;
     }
 
-    let recorded = TufRepoDescription { repo, artifacts: all_artifacts };
-    Ok(TufRepoInsertResponse {
-        recorded,
-        status: TufRepoInsertStatus::Inserted,
-    })
+    // Insert the metadata.
+    {
+        use nexus_db_schema::schema::tuf_repo_metadata::dsl;
+
+        diesel::insert_into(dsl::tuf_repo_metadata)
+            .values(desc.metadata.clone())
+            .execute_async(&conn)
+            .await?;
+    }
+
+    let recorded = TufRepoDescription {
+        repo,
+        artifacts: all_artifacts,
+        metadata: desc.metadata,
+    };
+    Ok(TufRepoUpload { recorded, status: TufRepoUploadStatus::Inserted })
 }
 
 async fn get_generation(
     conn: &async_bb8_diesel::Connection<DbConnection>,
-) -> Result<Generation, DieselError> {
+) -> Result<ArtifactConfigGeneration, DieselError> {
     use nexus_db_schema::schema::tuf_generation::dsl;
 
-    let generation: nexus_db_model::Generation = dsl::tuf_generation
-        .filter(dsl::singleton.eq(true))
-        .select(dsl::generation)
-        .get_result_async(conn)
-        .await?;
-    Ok(generation.0)
+    let generation: DbTypedGeneration<ArtifactConfigGenerationKind> =
+        dsl::tuf_generation
+            .filter(dsl::singleton.eq(true))
+            .select(dsl::generation)
+            .get_result_async(conn)
+            .await?;
+    Ok(generation.into())
 }
 
 async fn put_generation(
     conn: &async_bb8_diesel::Connection<DbConnection>,
-    old_generation: nexus_db_model::Generation,
-    new_generation: nexus_db_model::Generation,
-) -> Result<nexus_db_model::Generation, DieselError> {
+    old_generation: DbTypedGeneration<ArtifactConfigGenerationKind>,
+    new_generation: DbTypedGeneration<ArtifactConfigGenerationKind>,
+) -> Result<DbTypedGeneration<ArtifactConfigGenerationKind>, DieselError> {
     use nexus_db_schema::schema::tuf_generation::dsl;
 
     // We use `get_result_async` instead of `execute_async` to check that we
@@ -463,17 +1151,17 @@ enum InsertError {
         uploaded: ArtifactHash,
         existing: ArtifactHash,
     },
-    /// Some uploaded artifacts doesn't match the corresponding entries in the
-    /// database.
-    ArtifactMismatch {
-        // Artifacts for which the name/version/kind were the same, but the hash
-        // or length were different.
-        nvk_mismatch: Vec<(TufArtifact, TufArtifact)>,
-
-        // Artifacts for which the kind/hash were the same, but the name or
-        // version were different.
-        hash_id_mismatch: Vec<(TufArtifact, TufArtifact)>,
-    },
+    /// An existing repository with the same system version has a different set
+    /// of artifacts than the uploaded repository.
+    RepoArtifactMismatch { system_version: SemverVersion },
+    /// An existing repository with the same system version has a different set
+    /// of metadata than the uploaded repository.
+    RepoMetadataMismatch { system_version: SemverVersion },
+    /// Some uploaded artifacts with the same hash don't match existing entries
+    /// in the database.
+    ArtifactMismatch { mismatch: Vec<(TufArtifactFile, TufArtifactFile)> },
+    /// The length of an artifact exceeds `i64::MAX`.
+    ByteCountRangeError(ByteCountRangeError),
 }
 
 impl From<InsertError> for external::Error {
@@ -485,58 +1173,312 @@ impl From<InsertError> for external::Error {
                 existing,
             } => external::Error::conflict(format!(
                 "Uploaded repository with system version {} has SHA256 hash \
-                     {}, but existing repository has SHA256 hash {}.",
+                 {}, but existing repository has SHA256 hash {}.",
                 system_version, uploaded, existing,
             )),
-            InsertError::ArtifactMismatch {
-                nvk_mismatch,
-                hash_id_mismatch,
-            } => {
+            InsertError::RepoArtifactMismatch { system_version } => {
+                external::Error::conflict(format!(
+                    "Uploaded repository with system version {} does not have \
+                    the same artifacts as existing repository with same \
+                    system version",
+                    system_version
+                ))
+            }
+            InsertError::RepoMetadataMismatch { system_version } => {
+                external::Error::conflict(format!(
+                    "Uploaded repository with system version {} does not have \
+                    the same metadata as existing repository with same \
+                    system version",
+                    system_version
+                ))
+            }
+            InsertError::ArtifactMismatch { mismatch } => {
                 // Build a message out of uploaded and existing artifacts.
                 let mut message = "Uploaded artifacts don't match existing \
-                                   artifacts with same IDs:\n"
+                                   artifacts:\n"
                     .to_string();
-                for (uploaded, existing) in nvk_mismatch {
-                    // Uploaded and existing artifacts are matched by their
-                    // name/version/kinds.
+                for (uploaded, existing) in mismatch {
                     swrite!(
                         message,
-                        "- For artifact {}, uploaded SHA256 hash {} and length \
-                         {}, but existing artifact has SHA256 hash {} and \
-                         length {}.\n",
-                        display_nvk(uploaded.nvk()),
+                        "- Uploaded artifact with SHA-256 checksum {} has \
+                        length {} and version {}, but existing artifact with \
+                        SHA-256 checksum {} has length {} and version {}.\n",
                         uploaded.sha256,
-                        uploaded.artifact_size(),
-                        existing.sha256,
-                        existing.artifact_size(),
-                    );
-                }
-
-                for (uploaded, existing) in hash_id_mismatch {
-                    swrite!(
-                        message,
-                        "- For artifact {}, uploaded name {} and version {}, \
-                           but existing artifact has name {} and version {}.\n",
-                        display_kind_hash(&uploaded.kind, uploaded.sha256),
-                        uploaded.name,
+                        uploaded.artifact_size.0.to_bytes(),
                         uploaded.version,
-                        existing.name,
+                        existing.sha256,
+                        existing.artifact_size.0.to_bytes(),
                         existing.version,
                     );
                 }
-
                 external::Error::conflict(message)
+            }
+            InsertError::ByteCountRangeError(error) => {
+                external::Error::internal_error(&format!(
+                    "could not convert artifact length: {error}"
+                ))
             }
         }
     }
 }
 
-fn display_nvk(
-    (name, version, kind): (&str, &ArtifactVersion, &str),
-) -> String {
-    format!("(name: {name}, version: {version}, kind: {kind})")
-}
+#[cfg(test)]
+mod test {
+    use crate::db::datastore::SQL_BATCH_SIZE;
+    use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::insert_test_tuf_repo;
+    use nexus_db_model::TargetRelease;
+    use omicron_test_utils::dev;
+    use slog_error_chain::InlineErrorChain;
+    use std::collections::BTreeSet;
 
-fn display_kind_hash(kind: &str, hash: ArtifactHash) -> String {
-    format!("(kind: {kind}, hash: {hash})")
+    #[tokio::test]
+    async fn test_tuf_repo_get_by_id() {
+        let logctx = dev::test_setup_log("test_tuf_repo_get_by_id");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let repo_id = insert_test_tuf_repo(opctx, datastore, 1).await;
+        let repo = datastore
+            .tuf_repo_get_by_id(opctx, repo_id)
+            .await
+            .expect("getting TUF repo");
+        assert_eq!(repo_id, repo.repo.id());
+        // Per `make_test_repo` we should have one artifact with one tag, and
+        // one metadata field on the repo.
+        assert_eq!(repo.artifacts.len(), 1);
+        assert_eq!(repo.artifacts[0].tags.len(), 1);
+        assert_eq!(repo.metadata.len(), 1);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_repo_mark_pruned() {
+        let logctx = dev::test_setup_log("test_repo_mark_pruned");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Initially, there should be no TUF repos.
+        let repos = datastore
+            .tuf_list_repos_unpruned_batched(opctx)
+            .await
+            .expect("listing all repos");
+        assert!(repos.is_empty());
+
+        // Add one TUF repo to the database.
+        let repo1id = insert_test_tuf_repo(opctx, datastore, 1).await;
+
+        // Make sure it's there.
+        let repos = datastore
+            .tuf_list_repos_unpruned_batched(opctx)
+            .await
+            .expect("listing all repos");
+        assert!(!repos.is_empty());
+        assert!(repos.iter().any(|r| r.id() == repo1id));
+
+        // Now prune that one.
+        let tuf_generation1 = datastore
+            .tuf_get_generation(opctx)
+            .await
+            .expect("fetching TUF generation");
+        let recent1 = datastore
+            .target_release_fetch_recent_distinct(opctx, 2)
+            .await
+            .expect("fetching recent target releases");
+        datastore
+            .tuf_repo_mark_pruned(opctx, tuf_generation1, &recent1, repo1id)
+            .await
+            .expect("pruning release");
+
+        // Make sure it was pruned.
+        let repos = datastore
+            .tuf_list_repos_unpruned_batched(opctx)
+            .await
+            .expect("listing all repos");
+        assert!(repos.is_empty());
+
+        // Now set up a more realistic case.
+        let old_target_repo1_id =
+            insert_test_tuf_repo(opctx, datastore, 2).await;
+        let old_target_repo2_id =
+            insert_test_tuf_repo(opctx, datastore, 3).await;
+        let old_target_repo3_id =
+            insert_test_tuf_repo(opctx, datastore, 4).await;
+        let old_target_repo4_id =
+            insert_test_tuf_repo(opctx, datastore, 5).await;
+        let new_upload1 = insert_test_tuf_repo(opctx, datastore, 10).await;
+        let new_upload2 = insert_test_tuf_repo(opctx, datastore, 11).await;
+        let new_upload3 = insert_test_tuf_repo(opctx, datastore, 12).await;
+
+        // Make sure they're all there.
+        let repos = datastore
+            .tuf_list_repos_unpruned_batched(opctx)
+            .await
+            .expect("listing all repos");
+        assert_eq!(repos.len(), 7);
+
+        // Set the target release a few times.
+        let initial = datastore
+            .target_release_get_current(opctx)
+            .await
+            .expect("initial target release");
+        let mut next = initial;
+        for repo_id in [
+            old_target_repo1_id,
+            old_target_repo2_id,
+            old_target_repo3_id,
+            old_target_repo4_id,
+        ] {
+            next = datastore
+                .target_release_insert(
+                    opctx,
+                    TargetRelease::new_system_version(&next, repo_id.into()),
+                )
+                .await
+                .expect("setting target release");
+        }
+
+        // We should be able to prune the following releases.
+        for repo_id in
+            [old_target_repo1_id, new_upload1, new_upload2, new_upload3]
+        {
+            let repos = datastore
+                .tuf_list_repos_unpruned_batched(opctx)
+                .await
+                .expect("listing all repos");
+            assert!(repos.iter().any(|r| r.id() == repo_id));
+
+            let tuf_generation = datastore
+                .tuf_get_generation(opctx)
+                .await
+                .expect("fetching TUF generation");
+            let recent = datastore
+                .target_release_fetch_recent_distinct(opctx, 3)
+                .await
+                .expect("fetching recent target releases");
+
+            // If we supply the initial TUF generation OR the initial "recent
+            // releases", this should fail because things have changed.
+            let error = datastore
+                .tuf_repo_mark_pruned(opctx, tuf_generation1, &recent, repo_id)
+                .await
+                .expect_err(
+                    "unexpectedly succeeded in pruning release with old \
+                     tuf_generation",
+                );
+            eprintln!(
+                "got error (expected one): {}",
+                InlineErrorChain::new(&error)
+            );
+            let error = datastore
+                .tuf_repo_mark_pruned(opctx, tuf_generation, &recent1, repo_id)
+                .await
+                .expect_err(
+                    "unexpectedly succeeded in pruning release with old \
+                     recent_releases",
+                );
+            eprintln!(
+                "got error (expected one): {}",
+                InlineErrorChain::new(&error)
+            );
+
+            // It should still be there.
+            let repos = datastore
+                .tuf_list_repos_unpruned_batched(opctx)
+                .await
+                .expect("listing all repos");
+            assert!(repos.iter().any(|r| r.id() == repo_id));
+
+            // With up-to-date info, this should succeed.
+            datastore
+                .tuf_repo_mark_pruned(opctx, tuf_generation, &recent, repo_id)
+                .await
+                .expect("pruning release");
+            let repos = datastore
+                .tuf_list_repos_unpruned_batched(opctx)
+                .await
+                .expect("listing all repos");
+            assert!(!repos.iter().any(|r| r.id() == repo_id));
+        }
+
+        // It should be illegal to prune the following releases because they're
+        // too recent target releases.
+        for repo_id in
+            [old_target_repo2_id, old_target_repo3_id, old_target_repo4_id]
+        {
+            let repos = datastore
+                .tuf_list_repos_unpruned_batched(opctx)
+                .await
+                .expect("listing all repos");
+            assert!(repos.iter().any(|r| r.id() == repo_id));
+            let tuf_generation = datastore
+                .tuf_get_generation(opctx)
+                .await
+                .expect("fetching TUF generation");
+            let recent = datastore
+                .target_release_fetch_recent_distinct(opctx, 3)
+                .await
+                .expect("fetching recent target releases");
+            let error = datastore
+                .tuf_repo_mark_pruned(opctx, tuf_generation, &recent, repo_id)
+                .await
+                .expect_err("unexpectedly pruned recent target release repo");
+            eprintln!(
+                "found error (expected one): {}",
+                InlineErrorChain::new(&error)
+            );
+            let repos = datastore
+                .tuf_list_repos_unpruned_batched(opctx)
+                .await
+                .expect("listing all repos");
+            assert!(repos.iter().any(|r| r.id() == repo_id));
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Tests pagination behavior around `tuf_list_repos_unpruned_batched()`.
+    ///
+    /// The behavior of filtering out pruned repos is tested in
+    /// test_repo_mark_pruned().
+    #[tokio::test]
+    async fn test_list_unpruned() {
+        let logctx = dev::test_setup_log("test_list_unpruned");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let repos = datastore
+            .tuf_list_repos_unpruned_batched(opctx)
+            .await
+            .expect("listing all repos");
+        assert!(repos.is_empty());
+
+        // Make sure we have more than a page worth of TUF repos.
+        let count = SQL_BATCH_SIZE.get() + 3;
+        let mut expected_repos = BTreeSet::new();
+        for i in 0..count {
+            assert!(
+                expected_repos.insert(
+                    insert_test_tuf_repo(opctx, datastore, i + 1).await
+                )
+            );
+        }
+
+        // Fetch them.  Make sure we got them all and nothing else.
+        let repos = datastore
+            .tuf_list_repos_unpruned_batched(opctx)
+            .await
+            .expect("listing all repos");
+        assert_eq!(repos.len(), usize::try_from(count).unwrap());
+        for repo in repos {
+            assert!(expected_repos.remove(&repo.id()));
+        }
+        assert!(expected_repos.is_empty());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 }

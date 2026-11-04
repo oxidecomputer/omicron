@@ -41,7 +41,7 @@ impl<'a> Sled<'a> {
         let lookup = self.lookup_root();
         let opctx = &lookup.opctx;
         let datastore = lookup.datastore;
-        match &self {
+        match self {
             Sled::Error(_, error) => Err(error.clone()),
             Sled::PrimaryKey(_, v0) => {
                 Self::fetch_by_id_for(opctx, datastore, v0, action).await
@@ -99,7 +99,7 @@ impl<'a> Sled<'a> {
         let lookup = self.lookup_root();
         let opctx = &lookup.opctx;
         let datastore = lookup.datastore;
-        match &self {
+        match self {
             Sled::Error(_, error) => Err(error.clone()),
             Sled::PrimaryKey(_, v0) => {
                 let (authz_sled, _) = Self::lookup_by_id_no_authz(opctx, datastore, v0)

@@ -1,1 +1,0 @@
-These steps are separated from 11.0.0 because they drop things that are used in previous steps, which causes the idempotence test to fail when it runs each migration multiple times — the things earlier steps rely on are not there.

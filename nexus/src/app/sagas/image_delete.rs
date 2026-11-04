@@ -6,6 +6,7 @@ use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::{authn, authz, db};
+use nexus_types::saga::saga_action_failed;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
@@ -108,7 +109,7 @@ async fn sid_delete_image_record(
                 .datastore()
                 .project_image_delete(&opctx, &authz_image, image)
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
         }
 
         ImageParam::Silo { authz_image, image } => {
@@ -116,7 +117,7 @@ async fn sid_delete_image_record(
                 .datastore()
                 .silo_image_delete(&opctx, &authz_image, image)
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
         }
     }
 

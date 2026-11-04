@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::external_api::params;
-use crate::external_api::shared::SwitchLinkState;
 use db::datastore::SwitchPortSettingsCombinedResult;
 use dpd_client::types::LinkId;
 use dpd_client::types::PortId;
@@ -14,12 +12,18 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::UpdatePrecondition;
 use nexus_db_queries::db::model::{SwitchPort, SwitchPortSettings};
-use omicron_common::api::external::SwitchLocation;
+use nexus_types::external_api::networking;
+use nexus_types::external_api::switch::SwitchLinkState;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
-    self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
+    CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, Name, NameOrId, UpdateResult,
 };
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SwitchPortSettingsUuid;
+use sled_agent_types::early_networking::RouterPeerType;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -27,7 +31,7 @@ impl super::Nexus {
     pub(crate) async fn switch_port_settings_post(
         self: &Arc<Self>,
         opctx: &OpContext,
-        params: params::SwitchPortSettingsCreate,
+        params: networking::SwitchPortSettingsCreate,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         Self::switch_port_settings_validate(&params)?;
@@ -55,19 +59,26 @@ impl super::Nexus {
         }
     }
 
-    // TODO: more validation wanted
     fn switch_port_settings_validate(
-        params: &params::SwitchPortSettingsCreate,
+        params: &networking::SwitchPortSettingsCreate,
     ) -> CreateResult<()> {
-        for x in params.bgp_peers.values() {
+        for x in &params.bgp_peers {
             for p in x.peers.iter() {
                 if let Some(ref key) = p.md5_auth_key {
+                    let peer_id = match p.addr {
+                        RouterPeerType::Numbered(numbered_peer) => {
+                            format!("peer {}", numbered_peer.target_addr())
+                        }
+                        RouterPeerType::Unnumbered(_) => {
+                            format!("unnumbered peer {}", p.bgp_config)
+                        }
+                    };
                     if key.len() > 80 {
                         return Err(Error::invalid_value(
                             "md5_auth_key",
                             format!(
                                 "md5 auth key for {} is longer than 80 characters",
-                                p.addr
+                                peer_id
                             ),
                         ));
                     }
@@ -77,7 +88,7 @@ impl super::Nexus {
                                 "md5_auth_key",
                                 format!(
                                     "md5 auth key for {} must be printable ascii",
-                                    p.addr
+                                    peer_id
                                 ),
                             ));
                         }
@@ -91,17 +102,32 @@ impl super::Nexus {
     pub async fn switch_port_settings_create(
         self: &Arc<Self>,
         opctx: &OpContext,
-        params: params::SwitchPortSettingsCreate,
-        id: Option<Uuid>,
+        params: networking::SwitchPortSettingsCreate,
+        id: Option<SwitchPortSettingsUuid>,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
-        self.db_datastore.switch_port_settings_create(opctx, &params, id).await
+        // We explicitly do not expose `allow_ddm_traffic` through the external
+        // API. We want to wait until multirack is further along to determine
+        // the shape of exposure. The flag is only set by RSS for testing
+        // purposes. Setting it to false here won't restrict our testing right
+        // now.
+        let allow_ddm_traffic = false;
+        let result = self
+            .db_datastore
+            .switch_port_settings_create(opctx, &params, id, allow_ddm_traffic)
+            .await?;
+
+        // eagerly propagate changes via rpw
+        self.background_tasks
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
+
+        Ok(result)
     }
 
     pub(crate) async fn switch_port_settings_update(
         self: &Arc<Self>,
         opctx: &OpContext,
-        switch_port_settings_id: Uuid,
-        new_settings: params::SwitchPortSettingsCreate,
+        switch_port_settings_id: SwitchPortSettingsUuid,
+        new_settings: networking::SwitchPortSettingsCreate,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
         let result = self
             .db_datastore
@@ -137,7 +163,7 @@ impl super::Nexus {
     pub(crate) async fn switch_port_settings_delete(
         &self,
         opctx: &OpContext,
-        params: &params::SwitchPortSettingsSelector,
+        params: &networking::SwitchPortSettingsSelector,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         self.db_datastore.switch_port_settings_delete(opctx, params).await
@@ -161,23 +187,6 @@ impl super::Nexus {
         self.db_datastore.switch_port_settings_get(opctx, name_or_id).await
     }
 
-    async fn switch_port_create(
-        &self,
-        opctx: &OpContext,
-        rack_id: Uuid,
-        switch_location: Name,
-        port: Name,
-    ) -> CreateResult<SwitchPort> {
-        self.db_datastore
-            .switch_port_create(
-                opctx,
-                rack_id,
-                switch_location.into(),
-                port.into(),
-            )
-            .await
-    }
-
     pub(crate) async fn switch_port_list(
         &self,
         opctx: &OpContext,
@@ -191,8 +200,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         switch_port_id: Uuid,
-        port_settings_id: Option<Uuid>,
-        current_id: UpdatePrecondition<Uuid>,
+        port_settings_id: Option<SwitchPortSettingsUuid>,
+        current_id: UpdatePrecondition<SwitchPortSettingsUuid>,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         self.db_datastore
@@ -209,22 +218,22 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         port: &Name,
-        selector: &params::SwitchPortSelector,
-        settings: &params::SwitchPortApplySettings,
+        selector: &networking::SwitchPortSelector,
+        settings: &networking::SwitchPortApplySettings,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let switch_port_id = self
             .db_datastore
             .switch_port_get_id(
                 opctx,
-                selector.rack_id,
-                selector.switch_location.clone().into(),
+                RackUuid::from_untyped_uuid(selector.rack_id),
+                selector.switch_slot,
                 port.clone().into(),
             )
             .await?;
 
         let switch_port_settings_id = match &settings.port_settings {
-            NameOrId::Id(id) => *id,
+            NameOrId::Id(id) => SwitchPortSettingsUuid::from_untyped_uuid(*id),
             NameOrId::Name(name) => {
                 self.db_datastore
                     .switch_port_settings_get_id(opctx, name.clone().into())
@@ -251,15 +260,15 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         port: &Name,
-        params: &params::SwitchPortSelector,
+        params: &networking::SwitchPortSelector,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let switch_port_id = self
             .db_datastore
             .switch_port_get_id(
                 opctx,
-                params.rack_id,
-                params.switch_location.clone().into(),
+                RackUuid::from_untyped_uuid(params.rack_id),
+                params.switch_slot,
                 port.clone().into(),
             )
             .await?;
@@ -280,45 +289,13 @@ impl super::Nexus {
         Ok(())
     }
 
-    pub(crate) async fn populate_switch_ports(
-        &self,
-        opctx: &OpContext,
-        ports: &[Name],
-        switch: Name,
-    ) -> CreateResult<()> {
-        for port in ports {
-            match self
-                .switch_port_create(
-                    opctx,
-                    self.rack_id,
-                    switch.clone(),
-                    port.clone(),
-                )
-                .await
-            {
-                Ok(_) => {}
-                // ignore ObjectAlreadyExists but pass through other errors
-                Err(external::Error::ObjectAlreadyExists { .. }) => {}
-                Err(e) => return Err(e),
-            };
-        }
-
-        Ok(())
-    }
-
     pub(crate) async fn switch_port_status(
         &self,
         opctx: &OpContext,
-        switch: Name,
+        switch: SwitchSlot,
         port: Name,
     ) -> Result<SwitchLinkState, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
-        let loc: SwitchLocation = switch.as_str().parse().map_err(|e| {
-            Error::invalid_request(&format!(
-                "invalid switch name {switch}: {e}"
-            ))
-        })?;
 
         let port_id = PortId::Qsfp(port.as_str().parse().map_err(|e| {
             Error::invalid_request(&format!("invalid port name: {port} {e}"))
@@ -331,8 +308,8 @@ impl super::Nexus {
             Error::internal_error(&format!("dpd clients get: {e}"))
         })?;
 
-        let dpd = dpd_clients.get(&loc).ok_or(Error::internal_error(
-            &format!("no client for switch {switch}"),
+        let dpd = dpd_clients.get(&switch).ok_or(Error::internal_error(
+            &format!("no client for switch {switch:?}"),
         ))?;
 
         let status = dpd

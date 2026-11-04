@@ -7,6 +7,7 @@
 mod block_size_writer;
 mod progress;
 mod raw_disk_writer;
+pub mod report;
 
 pub use block_size_writer::*;
 pub use progress::*;

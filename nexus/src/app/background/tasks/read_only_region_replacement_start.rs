@@ -163,7 +163,6 @@ mod test {
     use super::*;
     use crate::app::MIN_DISK_SIZE_BYTES;
     use crate::app::RegionAllocationStrategy;
-    use crate::external_api::params;
     use chrono::Utc;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::BlockSize;
@@ -178,9 +177,12 @@ mod test {
     use nexus_db_queries::db::datastore::RegionAllocationParameters;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::disk;
     use omicron_common::api::external;
     use omicron_uuid_kinds::DatasetUuid;
+
     use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::ProjectUuid;
     use omicron_uuid_kinds::VolumeUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_client::VolumeConstructionRequest;
@@ -200,7 +202,7 @@ mod test {
 
         let client = &cptestctx.external_client;
         let project = create_project(&client, "testing").await;
-        let project_id = project.identity.id;
+        let project_id = ProjectUuid::from_untyped_uuid(project.identity.id);
 
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
@@ -237,8 +239,8 @@ mod test {
                 &opctx,
                 RegionAllocationFor::SnapshotVolume { volume_id, snapshot_id },
                 RegionAllocationParameters::FromDiskSource {
-                    disk_source: &params::DiskSource::Blank {
-                        block_size: params::BlockSize::try_from(512).unwrap(),
+                    disk_source: &disk::DiskSource::Blank {
+                        block_size: disk::BlockSize::try_from(512).unwrap(),
                     },
                     size: external::ByteCount::from_gibibytes_u32(1),
                 },
@@ -292,13 +294,13 @@ mod test {
                         time_deleted: None,
                     },
 
-                    project_id,
+                    project_id: project_id.into(),
                     disk_id: Uuid::new_v4(),
 
                     volume_id: volume_id.into(),
                     destination_volume_id: VolumeUuid::new_v4().into(),
 
-                    gen: Generation::new(),
+                    generation: Generation::new(),
                     state: SnapshotState::Creating,
                     block_size: BlockSize::Traditional,
 
@@ -316,7 +318,7 @@ mod test {
             disk_test.zpools().next().expect("Expected at least one zpool");
 
         let (_, db_zpool) = LookupPath::new(&opctx, datastore)
-            .zpool_id(first_zpool.id.into_untyped_uuid())
+            .zpool_id(first_zpool.id)
             .fetch()
             .await
             .unwrap();
@@ -324,7 +326,7 @@ mod test {
         datastore
             .physical_disk_update_policy(
                 &opctx,
-                db_zpool.physical_disk_id.into(),
+                db_zpool.physical_disk_id(),
                 PhysicalDiskPolicy::Expunged,
             )
             .await
@@ -336,7 +338,7 @@ mod test {
         let result: ReadOnlyRegionReplacementStartStatus =
             serde_json::from_value(task.activate(&opctx).await).unwrap();
 
-        eprintln!("{:?}", &result);
+        eprintln!("{:?}", result);
 
         assert_eq!(result.requests_created_ok.len(), 1);
         assert!(result.errors.is_empty());

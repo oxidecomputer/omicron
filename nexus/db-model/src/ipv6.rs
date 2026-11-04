@@ -42,6 +42,30 @@ impl From<&std::net::Ipv6Addr> for Ipv6Addr {
     }
 }
 
+impl From<Ipv6Addr> for std::net::IpAddr {
+    fn from(value: Ipv6Addr) -> Self {
+        value.0.into()
+    }
+}
+
+impl From<&Ipv6Addr> for std::net::IpAddr {
+    fn from(value: &Ipv6Addr) -> Self {
+        (*value).into()
+    }
+}
+
+impl From<Ipv6Addr> for Ipv6Network {
+    fn from(value: Ipv6Addr) -> Self {
+        Ipv6Network::from(value.0)
+    }
+}
+
+impl From<Ipv6Addr> for IpNetwork {
+    fn from(value: Ipv6Addr) -> Self {
+        IpNetwork::V6(Ipv6Network::from(value.0))
+    }
+}
+
 impl ToSql<Inet, Pg> for Ipv6Addr {
     fn to_sql<'a>(&'a self, out: &mut Output<'a, '_, Pg>) -> serialize::Result {
         let net = IpNetwork::V6(Ipv6Network::from(self.0));

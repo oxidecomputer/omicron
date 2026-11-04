@@ -14,7 +14,7 @@
 //! as gone.
 
 use super::impl_enum_type;
-use nexus_types::external_api::views;
+use nexus_types::external_api::sled;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use strum::EnumIter;
@@ -33,24 +33,24 @@ impl_enum_type!(
 impl fmt::Display for SledState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Forward to the canonical implementation in nexus-types.
-        views::SledState::from(*self).fmt(f)
+        sled::SledState::from(*self).fmt(f)
     }
 }
 
-impl From<SledState> for views::SledState {
+impl From<SledState> for sled::SledState {
     fn from(state: SledState) -> Self {
         match state {
-            SledState::Active => views::SledState::Active,
-            SledState::Decommissioned => views::SledState::Decommissioned,
+            SledState::Active => sled::SledState::Active,
+            SledState::Decommissioned => sled::SledState::Decommissioned,
         }
     }
 }
 
-impl From<views::SledState> for SledState {
-    fn from(state: views::SledState) -> Self {
+impl From<sled::SledState> for SledState {
+    fn from(state: sled::SledState) -> Self {
         match state {
-            views::SledState::Active => SledState::Active,
-            views::SledState::Decommissioned => SledState::Decommissioned,
+            sled::SledState::Active => SledState::Active,
+            sled::SledState::Decommissioned => SledState::Decommissioned,
         }
     }
 }

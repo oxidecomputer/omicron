@@ -113,7 +113,7 @@ impl ServerContext {
         // crdb instance.
         let node_statuses = self
             .cockroach_cli()
-            .node_status()
+            .node_status(&self.log)
             .await
             .context("failed to get node status")?;
 
@@ -164,7 +164,11 @@ mod tests {
         )
         .parse()
         .expect("valid SocketAddrV6");
-        let cli = CockroachCli::new("cockroach".into(), cockroach_address);
+        let cli = CockroachCli::new(
+            "cockroach".into(),
+            cockroach_address,
+            SocketAddr::V6(cockroach_address),
+        );
         let context = ServerContext::new(
             OmicronZoneUuid::new_v4(),
             cli,

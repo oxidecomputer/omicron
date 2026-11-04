@@ -1,7 +1,7 @@
 [package]
 name = "nexus-saga-recovery"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 
 [lints]
 workspace = true
@@ -25,6 +25,10 @@ steno.workspace = true
 tokio.workspace = true
 
 omicron-workspace-hack.workspace = true
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true
 
 [dev-dependencies]
 nexus-auth.workspace = true

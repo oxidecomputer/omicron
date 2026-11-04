@@ -1,7 +1,7 @@
 [package]
 name = "sled-agent-client"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
@@ -10,19 +10,25 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+byte-wrapper.workspace = true
 chrono.workspace = true
-nexus-sled-agent-shared.workspace = true
+iddqd.workspace = true
+omicron-generation-kinds.workspace = true
+sled-agent-types-versions.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 oxnet.workspace = true
 progenitor.workspace = true
+progenitor-extras = { workspace = true, features = ["slog"] }
 propolis-client.workspace = true
 regress.workspace = true
-reqwest = { workspace = true, features = [ "json", "rustls-tls", "stream" ] }
+reqwest = { workspace = true, features = [ "json", "rustls", "stream" ] }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sled-agent-types.workspace = true
+sled-hardware-types.workspace = true
+trust-quorum-types.workspace = true
 slog.workspace = true
 uuid.workspace = true

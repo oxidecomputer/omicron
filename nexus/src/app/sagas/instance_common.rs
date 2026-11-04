@@ -6,20 +6,28 @@
 
 use std::net::{IpAddr, Ipv6Addr};
 
+use super::NexusActionContext;
+use super::sled_out_of_service_gone_check;
 use crate::Nexus;
+use crate::app::instance_network::InstanceNetworkFilters;
+use http::StatusCode;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::{
-    ByteCount, ExternalIp, InstanceState, IpAttachState, Ipv4NatEntry,
-    SledReservationConstraints, SledResourceVmm, VmmState,
+    ByteCount, ExternalIp, InstanceState, IpAttachState, IpNet, NatEntry,
+    SledReservationConstraints, SledResourceVmm, VmmCpuPlatform, VmmState,
 };
 use nexus_db_queries::authz;
+use nexus_db_queries::db::datastore::ExternalSubnetBeginOpResult;
+use nexus_db_queries::db::datastore::sled::SledReservationReason;
 use nexus_db_queries::{authn, context::OpContext, db, db::DataStore};
-use omicron_common::api::external::{Error, NameOrId};
+use nexus_types::saga::saga_action_failed;
+use omicron_common::api::external::{Error, IpVersion, NameOrId, ResourceType};
+use omicron_common::backoff::backon_retry_policy_internal_service;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
+use progenitor_extras::retry::retry_operation_while_indefinitely;
 use serde::{Deserialize, Serialize};
+use slog_error_chain::InlineErrorChain;
 use steno::ActionError;
-
-use super::NexusActionContext;
 
 /// The port propolis-server listens on inside the propolis zone.
 const DEFAULT_PROPOLIS_PORT: u16 = 12400;
@@ -43,6 +51,7 @@ pub async fn reserve_vmm_resources(
     ncpus: u32,
     guest_memory: ByteCount,
     constraints: SledReservationConstraints,
+    reservation_reason: SledReservationReason,
 ) -> Result<SledResourceVmm, ActionError> {
     // ALLOCATION POLICY
     //
@@ -74,9 +83,10 @@ pub async fn reserve_vmm_resources(
             propolis_id,
             resources,
             constraints,
+            reservation_reason,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(resource)
 }
@@ -94,6 +104,7 @@ pub async fn create_and_insert_vmm_record(
     propolis_id: PropolisUuid,
     sled_id: SledUuid,
     propolis_ip: Ipv6Addr,
+    cpu_platform: VmmCpuPlatform,
 ) -> Result<db::model::Vmm, ActionError> {
     let vmm = db::model::Vmm::new(
         propolis_id,
@@ -101,12 +112,11 @@ pub async fn create_and_insert_vmm_record(
         sled_id,
         IpAddr::V6(propolis_ip).into(),
         DEFAULT_PROPOLIS_PORT,
+        cpu_platform,
     );
 
-    let vmm = datastore
-        .vmm_insert(&opctx, vmm)
-        .await
-        .map_err(ActionError::action_failed)?;
+    let vmm =
+        datastore.vmm_insert(&opctx, vmm).await.map_err(saga_action_failed)?;
 
     Ok(vmm)
 }
@@ -121,7 +131,7 @@ pub(super) async fn allocate_vmm_ipv6(
     datastore
         .next_ipv6_address(opctx, sled_uuid)
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 /// External IP state needed for IP attach/detachment.
@@ -159,7 +169,7 @@ pub async fn instance_ip_move_state(
         return Ok(true);
     }
     let Some(new_ip) = new_ip.external_ip.as_ref() else {
-        return Err(ActionError::action_failed(Error::internal_error(
+        return Err(saga_action_failed(Error::internal_error(
             "tried to `do_saga` without valid external IP",
         )));
     };
@@ -167,27 +177,27 @@ pub async fn instance_ip_move_state(
     match datastore
         .external_ip_complete_op(&opctx, new_ip.id, new_ip.kind, from, to)
         .await
-        .map_err(ActionError::action_failed)?
+        .map_err(saga_action_failed)?
     {
         0 => Ok(false),
         1 => Ok(true),
-        _ => Err(ActionError::action_failed(Error::internal_error(
+        _ => Err(saga_action_failed(Error::internal_error(
             "ip state change affected > 1 row",
         ))),
     }
 }
 
-/// Yields the sled on which an instance is found to be running so that IP
-/// attachment and detachment operations can be propagated there.
+/// Yields the sled on which an instance is found to be running so that IP and
+/// subnet attachment and detachment operations can be propagated there.
 ///
 /// # Preconditions
 ///
 /// To synchronize correctly with other concurrent operations on an instance,
-/// the calling saga must have placed the IP it is attaching or detaching into
-/// the Attaching or Detaching state so that concurrent attempts to start the
-/// instance will notice that the IP state is in flux and ask the caller to
-/// retry.
-pub(super) async fn instance_ip_get_instance_state(
+/// the calling saga must have placed the IP or subnet it is attaching or
+/// detaching into the Attaching or Detaching state so that concurrent attempts
+/// to start the instance will notice that the IP state is in flux and ask the
+/// caller to retry.
+pub(super) async fn networking_resource_instance_state(
     sagactx: &NexusActionContext,
     serialized_authn: &authn::saga::Serialized,
     authz_instance: &authz::Instance,
@@ -204,20 +214,19 @@ pub(super) async fn instance_ip_get_instance_state(
     let inst_and_vmm = datastore
         .instance_fetch_with_vmm(&opctx, authz_instance)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
-    let found_vmm_state =
-        inst_and_vmm.vmm().as_ref().map(|vmm| vmm.runtime.state);
-    let found_instance_state =
-        inst_and_vmm.instance().runtime_state.nexus_state;
+    let found_vmm_state = inst_and_vmm.vmm().as_ref().map(|vmm| vmm.state);
+    let found_instance_state = inst_and_vmm.instance().nexus_state;
     let mut propolis_and_sled_id =
         inst_and_vmm.vmm().as_ref().map(|vmm| VmmAndSledIds {
             vmm_id: PropolisUuid::from_untyped_uuid(vmm.id),
-            sled_id: SledUuid::from_untyped_uuid(vmm.sled_id),
+            sled_id: vmm.sled_id(),
         });
 
     slog::debug!(
-        osagactx.log(), "evaluating instance state for IP attach/detach";
+        osagactx.log(),
+        "evaluating instance state for networking attach/detach";
         "instance_state" => ?found_instance_state,
         "vmm_state" => ?found_vmm_state
     );
@@ -229,12 +238,14 @@ pub(super) async fn instance_ip_get_instance_state(
     //             otherwise convert OPTE ensure to 'service unavailable'
     //             and undo.
     // - deleting: can only be called from stopped -- we won't push to dpd
-    //             or sled-agent, and IP record might be deleted or forcibly
-    //             detached. Catch here just in case.
+    //             or sled-agent, and IP / subnet record might be deleted
+    //             or forcibly detached. Catch here just in case.
     // - starting: see below.
     match (found_instance_state, found_vmm_state) {
         // If there's no VMM, the instance is definitely not on any sled.
-        (InstanceState::NoVmm, _) | (_, Some(VmmState::SagaUnwound)) => {
+        (InstanceState::NoVmm, _)
+        | (InstanceState::SledEvacuating, _)
+        | (_, Some(VmmState::SagaUnwound)) => {
             propolis_and_sled_id = None;
         }
 
@@ -252,20 +263,20 @@ pub(super) async fn instance_ip_get_instance_state(
         // Although an instance with a Starting (or Creating) VMM has a sled
         // assignment, there's no way to tell at this point whether or not
         // there's a  concurrent instance-start saga that has passed the point
-        // where it sends IP assignments to the instance's new sled:
+        // where it sends IP / subnet assignments to the instance's new sled:
         //
-        // - If the start saga is still in progress and hasn't pushed any IP
-        //   information to the instance's new sled yet, then either of two
-        //   things can happen:
-        //   - This function's caller can finish modifying IPs before the start
-        //     saga propagates IP information to the sled. In this case the
-        //     calling saga should do nothing--the start saga will send the
-        //     right IP set to the sled.
+        // - If the start saga is still in progress and hasn't pushed any
+        //   network information to the instance's new sled yet, then either of
+        //   two things can happen:
+        //   - This function's caller can finish modifying IPs or subnets before
+        //     the start saga propagates information to the sled. In this case,
+        //     the calling saga should do nothing--the start saga will send the
+        //     right IP or subnet set to the sled.
         //   - If the start saga "wins" the race, it will see that the instance
         //     still has an attaching/detaching IP and bail out.
         //  - If the start saga is already done, and Nexus is just waiting for
         //    the VMM to report that it's Running, the calling saga needs to
-        //    send the IP change to the instance's sled.
+        //    send the IP or subnet change to the instance's sled.
         //
         // There's no way to distinguish these cases, so if a VMM is Starting,
         // block the attach/detach.
@@ -277,49 +288,204 @@ pub(super) async fn instance_ip_get_instance_state(
             | Some(state @ VmmState::Stopped)
             | Some(state @ VmmState::Creating),
         ) => {
-            return Err(ActionError::action_failed(Error::unavail(&format!(
+            return Err(saga_action_failed(Error::unavail(&format!(
                 "can't {verb} in transient state {state}"
             ))));
         }
         (InstanceState::Destroyed, _) => {
-            return Err(ActionError::action_failed(Error::not_found_by_id(
+            return Err(saga_action_failed(Error::not_found_by_id(
                 omicron_common::api::external::ResourceType::Instance,
                 &authz_instance.id(),
             )));
         }
         (InstanceState::Creating, _) => {
-            return Err(ActionError::action_failed(Error::invalid_request(
-                "cannot modify instance IPs, instance is still being created",
+            return Err(saga_action_failed(Error::invalid_request(
+                "cannot modify instance IP or subnets, instance is \
+                still being created",
             )));
         }
         (InstanceState::Failed, _)
         | (InstanceState::Vmm, Some(VmmState::Failed)) => {
-            return Err(ActionError::action_failed(Error::invalid_request(
-                "cannot modify instance IPs, instance is in unhealthy state",
+            return Err(saga_action_failed(Error::invalid_request(
+                "cannot modify instance IPs or subnets, instance is \
+                in unhealthy state",
             )));
         }
 
         // This case represents an inconsistency in the database. It should
         // never happen, but don't blow up Nexus if it somehow does.
         (InstanceState::Vmm, None) => {
-            return Err(ActionError::action_failed(Error::internal_error(
-                &format!(
-                    "instance {} is in the 'VMM' state but has no VMM ID",
-                    authz_instance.id(),
-                ),
-            )));
+            return Err(saga_action_failed(Error::internal_error(&format!(
+                "instance {} is in the 'VMM' state but has no VMM ID",
+                authz_instance.id(),
+            ))));
         }
         (InstanceState::Vmm, Some(VmmState::Destroyed)) => {
-            return Err(ActionError::action_failed(Error::internal_error(
-                &format!(
-                    "instance {} points to destroyed VMM",
-                    authz_instance.id(),
-                ),
-            )));
+            return Err(saga_action_failed(Error::internal_error(&format!(
+                "instance {} points to destroyed VMM",
+                authz_instance.id(),
+            ))));
         }
     }
 
     Ok(propolis_and_sled_id)
+}
+
+/// Send details about a new attached subnet to Dendrite.
+pub(super) async fn send_subnet_attachment_to_dpd(
+    sagactx: &NexusActionContext,
+    serialized_authn: &authn::saga::Serialized,
+    authz_instance: &authz::Instance,
+    sled_uuid: Option<SledUuid>,
+    subnet: ExternalSubnetBeginOpResult,
+) -> Result<Option<IpNet>, ActionError> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+
+    // Check that we have a sled and actually want to proceed with the saga.
+    let Some(sled_uuid) = sled_uuid else {
+        return Ok(None);
+    };
+    let ExternalSubnetBeginOpResult { subnet, do_saga } = subnet;
+    if !do_saga {
+        return Ok(None);
+    }
+
+    // Querying sleds requires fleet access; use the instance allocator context
+    // for this.
+    let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, datastore)
+        .sled_id(sled_uuid)
+        .fetch()
+        .await
+        .map_err(saga_action_failed)?;
+
+    // Build the instance target for Dendrite.
+    //
+    // We first need the primary NIC of the instance, since we're mapping to the
+    // inner MAC and VNI.
+    let primary_nic = datastore
+        .derive_guest_network_interface_info(&opctx, &authz_instance)
+        .await
+        .map_err(saga_action_failed)?
+        .into_iter()
+        .find(|nic| nic.primary)
+        .ok_or_else(|| {
+            saga_action_failed(Error::internal_error(
+                "instance does not have a primary NIC, \
+                cannot yet send Dendrite attached subnet info",
+            ))
+        })?;
+    let target = dpd_client::types::InstanceTarget {
+        inner_mac: dpd_client::types::MacAddr {
+            a: primary_nic.mac.into_array(),
+        },
+        internal_ip: sled.ip.into(),
+        vni: dpd_client::types::Vni(primary_nic.vni.into()),
+    };
+    osagactx
+        .nexus()
+        .send_attached_subnet_to_dendrite(&[subnet.subnet.into()], target)
+        .await
+        .map(|_| Some(subnet.subnet))
+        .map_err(saga_action_failed)
+}
+
+/// Delete an attached subnet from Dendrite.
+pub(super) async fn delete_subnet_attachment_from_dpd(
+    sagactx: &NexusActionContext,
+    subnet: IpNet,
+) -> Result<(), ActionError> {
+    sagactx
+        .user_data()
+        .nexus()
+        .delete_attached_subnet_from_dendrite(subnet.into())
+        .await
+        .map_err(saga_action_failed)
+}
+
+/// Send details about a new attached subnet to OPTE.
+pub(super) async fn send_subnet_attachment_to_opte(
+    sagactx: &NexusActionContext,
+    vmm_and_sled: Option<VmmAndSledIds>,
+    subnet: ExternalSubnetBeginOpResult,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let Some(VmmAndSledIds { vmm_id: propolis_id, sled_id }) = vmm_and_sled
+    else {
+        return Ok(());
+    };
+    let ExternalSubnetBeginOpResult { subnet, do_saga } = subnet;
+    if !do_saga {
+        return Ok(());
+    }
+    let request = sled_agent_types::attached_subnet::AttachedSubnet {
+        // TODO-completeness: Expand this code to handle VPC subnets too. See
+        // https://github.com/oxidecomputer/omicron/issues/9580.
+        kind: sled_agent_types::attached_subnet::AttachedSubnetKind::External,
+        subnet: subnet.subnet.into(),
+    };
+    let result = osagactx
+        .nexus()
+        .sled_client(&sled_id)
+        .await
+        .map_err(|_| {
+            saga_action_failed(Error::unavail(
+                "sled agent client went away mid-attach/detach",
+            ))
+        })?
+        .vmm_post_attached_subnet(&propolis_id, &request)
+        .await;
+    let result = match result {
+        Ok(_) => Ok(()),
+        Err(progenitor_client::Error::ErrorResponse(err))
+            if err.status() == StatusCode::CONFLICT =>
+        {
+            Ok(())
+        }
+        Err(progenitor_client::Error::CommunicationError(_)) => {
+            Err(Error::unavail("sled agent client went away mid-attach/detach"))
+        }
+        Err(e) => Err(Error::internal_error(e.to_string().as_str())),
+    };
+    result.map_err(saga_action_failed)
+}
+
+/// Delete a single attached subnet from OPTE.
+pub(super) async fn delete_subnet_attachment_from_opte(
+    sagactx: &NexusActionContext,
+    vmm_and_sled: Option<VmmAndSledIds>,
+    subnet: ExternalSubnetBeginOpResult,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let Some(VmmAndSledIds { vmm_id: propolis_id, sled_id }) = vmm_and_sled
+    else {
+        return Ok(());
+    };
+    let ExternalSubnetBeginOpResult { subnet, do_saga } = subnet;
+    if !do_saga {
+        return Ok(());
+    }
+    osagactx
+        .nexus()
+        .sled_client(&sled_id)
+        .await
+        .map_err(|_| {
+            saga_action_failed(Error::unavail(
+                "sled agent client went away mid-attach/detach",
+            ))
+        })?
+        .vmm_delete_attached_subnet(&propolis_id, &subnet.subnet.into())
+        .await
+        .map(|_| ())
+        .map_err(|e| match e {
+            progenitor_client::Error::CommunicationError(_) => {
+                Error::unavail("sled agent client went away mid-attach/detach")
+            }
+            e => Error::internal_error(e.to_string().as_str()),
+        })
+        .map_err(saga_action_failed)
 }
 
 /// Adds a NAT entry to DPD, routing packets bound for `target_ip` to a
@@ -333,7 +499,7 @@ pub async fn instance_ip_add_nat(
     authz_instance: &authz::Instance,
     sled_uuid: Option<SledUuid>,
     target_ip: ModifyStateForExternalIp,
-) -> Result<Option<Ipv4NatEntry>, ActionError> {
+) -> Result<Option<NatEntry>, ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let opctx =
@@ -348,7 +514,7 @@ pub async fn instance_ip_add_nat(
         return Ok(None);
     }
     let Some(target_ip) = target_ip.external_ip else {
-        return Err(ActionError::action_failed(Error::internal_error(
+        return Err(saga_action_failed(Error::internal_error(
             "tried to `do_saga` without valid external IP",
         )));
     };
@@ -356,10 +522,10 @@ pub async fn instance_ip_add_nat(
     // Querying sleds requires fleet access; use the instance allocator context
     // for this.
     let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, datastore)
-        .sled_id(sled_uuid.into_untyped_uuid())
+        .sled_id(sled_uuid)
         .fetch()
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     osagactx
         .nexus()
@@ -367,7 +533,7 @@ pub async fn instance_ip_add_nat(
             &opctx,
             InstanceUuid::from_untyped_uuid(authz_instance.id()),
             &sled.address(),
-            Some(target_ip.id),
+            InstanceNetworkFilters::single_ip(target_ip.id),
         )
         .await
         .and_then(|v| {
@@ -377,7 +543,7 @@ pub async fn instance_ip_add_nat(
                 )
             })
         })
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 /// Remove a single NAT entry from DPD, dropping packets bound for `target_ip`.
@@ -403,7 +569,7 @@ pub async fn instance_ip_remove_nat(
         return Ok(());
     }
     let Some(target_ip) = target_ip.external_ip else {
-        return Err(ActionError::action_failed(Error::internal_error(
+        return Err(saga_action_failed(Error::internal_error(
             "tried to `do_saga` without valid external IP",
         )));
     };
@@ -412,7 +578,7 @@ pub async fn instance_ip_remove_nat(
         .nexus()
         .external_ip_delete_dpd_config(&opctx, &target_ip)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -440,27 +606,26 @@ pub(super) async fn instance_ip_add_opte(
         return Ok(());
     }
     let Some(target_ip) = target_ip.external_ip else {
-        return Err(ActionError::action_failed(Error::internal_error(
+        return Err(saga_action_failed(Error::internal_error(
             "tried to `do_saga` without valid external IP",
         )));
     };
 
-    let sled_agent_body =
-        target_ip.try_into().map_err(ActionError::action_failed)?;
+    let sled_agent_body = target_ip.try_into().map_err(saga_action_failed)?;
 
     osagactx
         .nexus()
         .sled_client(&sled_id)
         .await
         .map_err(|_| {
-            ActionError::action_failed(Error::unavail(
+            saga_action_failed(Error::unavail(
                 "sled agent client went away mid-attach/detach",
             ))
         })?
         .vmm_put_external_ip(&propolis_id, &sled_agent_body)
         .await
         .map_err(|e| {
-            ActionError::action_failed(match e {
+            saga_action_failed(match e {
                 progenitor_client::Error::CommunicationError(_) => {
                     Error::unavail(
                         "sled agent client went away mid-attach/detach",
@@ -497,27 +662,26 @@ pub(super) async fn instance_ip_remove_opte(
         return Ok(());
     }
     let Some(target_ip) = target_ip.external_ip else {
-        return Err(ActionError::action_failed(Error::internal_error(
+        return Err(saga_action_failed(Error::internal_error(
             "tried to `do_saga` without valid external IP",
         )));
     };
 
-    let sled_agent_body =
-        target_ip.try_into().map_err(ActionError::action_failed)?;
+    let sled_agent_body = target_ip.try_into().map_err(saga_action_failed)?;
 
     osagactx
         .nexus()
         .sled_client(&sled_id)
         .await
         .map_err(|_| {
-            ActionError::action_failed(Error::unavail(
+            saga_action_failed(Error::unavail(
                 "sled agent client went away mid-attach/detach",
             ))
         })?
         .vmm_delete_external_ip(&propolis_id, &sled_agent_body)
         .await
         .map_err(|e| {
-            ActionError::action_failed(match e {
+            saga_action_failed(match e {
                 progenitor_client::Error::CommunicationError(_) => {
                     Error::unavail(
                         "sled agent client went away mid-attach/detach",
@@ -530,8 +694,149 @@ pub(super) async fn instance_ip_remove_opte(
     Ok(())
 }
 
+/// Ensures that the VMM `propolis_id` is not registered with the sled-agent on
+/// `sled_id`, by rudely terminating the Propolis zone if one exists.
+///
+/// This is intended use in undo actions that unwind sagas which may have
+/// created a VMM on a sled (i.e. instance-start and instance-migrate sagas). It
+/// returns `Ok(())` only once it has affirmatively determined that no Propolis
+/// zone with the requested ID currently exists on the sled, either because:
+///
+/// - The sled-agent responds successfully to a `vmm_unregister` request. That
+///   endpoint is idempotent, and it succeeds if a VMM was destroyed, *or* if
+///   no such VMM currently exists on the sled. Therefore, this function is also
+///   idempotent.
+/// - The sled is no longer in service (or has disappeared from the database
+///   entirely). If the sled has been expunged, the control plane must treat it
+///   as though it no longer exists.
+///
+/// # Errors
+///
+/// This function returns an error if the sled could not be looked up in the
+/// database, or if the sled-agent returns a non-retryable error..
+pub(super) async fn ensure_vmm_unregistered(
+    sagactx: &NexusActionContext,
+    serialized_authn: &authn::saga::Serialized,
+    instance_id: InstanceUuid,
+    propolis_id: PropolisUuid,
+    sled_id: SledUuid,
+) -> Result<(), Error> {
+    let osagactx = sagactx.user_data();
+    let opctx =
+        crate::context::op_context_for_saga_action(sagactx, serialized_authn);
+    let log = osagactx.log();
+
+    let client = match osagactx.nexus().sled_client(&sled_id).await {
+        Ok(client) => client,
+        // If the sled no longer exists in the database at all, that's...quite
+        // surprising! But, we can hopefully assume that the sled, and any VMMs
+        // running on it, no longer exist.
+        Err(Error::ObjectNotFound {
+            type_name: ResourceType::Sled, ..
+        }) => {
+            slog::warn!(
+                log,
+                "sled no longer exists in the database; assuming VMM is gone";
+                "instance_id" => %instance_id,
+                "propolis_id" => %propolis_id,
+                "sled_id" => %sled_id,
+            );
+            return Ok(());
+        }
+        Err(e) => {
+            return Err(e.internal_context(format!(
+                "failed to look up sled {sled_id} to unregister VMM \
+                 {propolis_id}"
+            )));
+        }
+    };
+
+    let result = retry_operation_while_indefinitely(
+        backon_retry_policy_internal_service(),
+        || client.vmm_unregister(&propolis_id),
+        || {
+            sled_out_of_service_gone_check(
+                osagactx.datastore(),
+                &opctx,
+                sled_id,
+            )
+        },
+        |notification| {
+            slog::warn!(
+                log,
+                "failed to unregister VMM, retrying in {:?}",
+                notification.delay;
+                "instance_id" => %instance_id,
+                "propolis_id" => %propolis_id,
+                "sled_id" => %sled_id,
+                "attempt" => notification.attempt,
+                InlineErrorChain::new(&notification.error),
+            );
+        },
+    )
+    .await;
+
+    match result {
+        Ok(rsp) => {
+            // The sled-agent only returns an updated runtime state if there was
+            // previously a running Propolis zone to destroy. Otherwise, the VMM
+            // was either already unregistered or was never there to begin with.
+            if rsp.into_inner().updated_runtime.is_some() {
+                slog::info!(
+                    log,
+                    "unregistered VMM from sled; continuing to unwind...";
+                    "instance_id" => %instance_id,
+                    "propolis_id" => %propolis_id,
+                    "sled_id" => %sled_id,
+                );
+            } else {
+                slog::debug!(
+                    log,
+                    "VMM was not registered with sled; continuing to unwind...";
+                    "instance_id" => %instance_id,
+                    "propolis_id" => %propolis_id,
+                    "sled_id" => %sled_id,
+                );
+            }
+            Ok(())
+        }
+        // The sled has either been expunged or completely removed from the
+        // database. The Propolis zone we were trying to destroy is definitely
+        // gone.
+        Err(e) if e.is_gone() => {
+            slog::info!(
+                log,
+                "the sled hosting the VMM to unregister is no longer in \
+                 service; assuming the VMM is gone";
+                "instance_id" => %instance_id,
+                "propolis_id" => %propolis_id,
+                "sled_id" => %sled_id,
+            );
+            Ok(())
+        }
+        // Welp. That's not good...
+        Err(e) => {
+            let error = InlineErrorChain::new(&e);
+            slog::error!(
+                log,
+                "failed to unregister VMM from sled";
+                "instance_id" => %instance_id,
+                "propolis_id" => %propolis_id,
+                "sled_id" => %sled_id,
+                &error
+            );
+            Err(Error::InternalError {
+                internal_message: format!(
+                    "failed to unregister VMM {propolis_id} from sled \
+                    {sled_id}: {error}"
+                ),
+            })
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum ExternalIpAttach {
-    Ephemeral { pool: Option<NameOrId> },
-    Floating { floating_ip: authz::FloatingIp },
+    Ephemeral { pool: Option<NameOrId>, ip_version: Option<IpVersion> },
+    Floating { floating_ip: authz::FloatingIp, ip_version: IpVersion },
 }

@@ -13,6 +13,8 @@ use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::DateTime;
+use chrono::Utc;
 use clap::Args;
 use clap::Subcommand;
 use diesel::prelude::*;
@@ -20,20 +22,30 @@ use internal_dns_resolver::ResolveError;
 use internal_dns_types::names::ServiceName;
 use nexus_db_lookup::DataStoreConnection;
 use nexus_db_model::Saga;
+use nexus_db_model::SagaExecState;
 use nexus_db_model::SagaNodeEvent;
 use nexus_db_model::SagaState;
 use nexus_db_model::SecId;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
+use nexus_db_queries::db::datastore::SagaStateDbFields;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use owo_colors::OwoColorize;
+use petgraph::Graph;
+use petgraph::graph::NodeIndex;
+use serde::Deserialize;
+use serde::Serialize;
+use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tabled::Tabled;
 use uuid::Uuid;
 
+use nexus_types::saga::saga_action_failed;
+use omicron_common::api::external::Error;
 use steno::ActionError;
 use steno::SagaNodeEventType;
 
@@ -74,11 +86,27 @@ enum SagaCommands {
     /// while all inactive Nexuses are unreachable, an unreachable Nexus is not
     /// necessarily inactive.
     Abandon(SagaAbandonArgs),
+
+    /// Show the execution of a saga
+    Show(SagaShowArgs),
 }
 
 #[derive(Clone, Debug, Args)]
 struct SagaInjectErrorArgs {
-    saga_id: Uuid,
+    saga_id: steno::SagaId,
+
+    /// Skip checking if the SEC is up
+    #[clap(long, default_value_t = false)]
+    bypass_sec_check: bool,
+}
+
+#[derive(Clone, Debug, Args)]
+struct SagaAbandonArgs {
+    saga_id: steno::SagaId,
+
+    #[clap(long, default_value = "manually abandoned")]
+    /// Additional comment as to why the saga was abandoned
+    comment: String,
 
     /// Skip checking if the SEC is up
     #[clap(long, default_value_t = false)]
@@ -86,12 +114,8 @@ struct SagaInjectErrorArgs {
 }
 
 #[derive(Clone, Copy, Debug, Args)]
-struct SagaAbandonArgs {
-    saga_id: Uuid,
-
-    /// Skip checking if the SEC is up
-    #[clap(long, default_value_t = false)]
-    bypass_sec_check: bool,
+struct SagaShowArgs {
+    saga_id: steno::SagaId,
 }
 
 impl SagaArgs {
@@ -112,7 +136,11 @@ impl SagaArgs {
 
             SagaCommands::Abandon(args) => {
                 let token = omdb.check_allow_destructive()?;
-                cmd_sagas_abandon(omdb, opctx, datastore, *args, token).await
+                cmd_sagas_abandon(omdb, opctx, datastore, args, token).await
+            }
+
+            SagaCommands::Show(args) => {
+                cmd_sagas_show(omdb, opctx, datastore, *args).await
             }
         }
     }
@@ -126,29 +154,7 @@ async fn cmd_sagas_running(
 
     let sagas = get_all_sagas_in_state(&conn, SagaState::Running).await?;
 
-    #[derive(Tabled)]
-    struct SagaRow {
-        id: Uuid,
-        current_sec: String,
-        time_created: String,
-        name: String,
-        state: String,
-    }
-
-    let rows: Vec<_> = sagas
-        .into_iter()
-        .map(|saga: Saga| SagaRow {
-            id: saga.id.0.into(),
-            current_sec: if let Some(current_sec) = saga.current_sec {
-                current_sec.0.to_string()
-            } else {
-                String::from("-")
-            },
-            time_created: datetime_rfc3339_concise(&saga.time_created),
-            name: saga.name,
-            state: format!("{:?}", saga.saga_state),
-        })
-        .collect();
+    let rows: Vec<_> = sagas.into_iter().map(SagaRow::from).collect();
 
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::psql())
@@ -157,6 +163,43 @@ async fn cmd_sagas_running(
     println!("{}", table);
 
     Ok(())
+}
+
+#[derive(Tabled)]
+struct SagaRow {
+    id: steno::SagaId,
+    current_sec: String,
+    #[tabled(display_with = "datetime_rfc3339_concise")]
+    time_created: DateTime<Utc>,
+    name: String,
+    state: String,
+}
+
+impl From<Saga> for SagaRow {
+    fn from(saga: Saga) -> Self {
+        let Saga {
+            id,
+            creator: _,
+            time_created,
+            name,
+            saga_dag: _,
+            saga_state,
+            current_sec,
+            adopt_generation: _,
+            adopt_time: _,
+        } = saga;
+        Self {
+            id,
+            current_sec: if let Some(current_sec) = current_sec {
+                current_sec.0.to_string()
+            } else {
+                String::from("-")
+            },
+            time_created,
+            name,
+            state: format!("{:?}", SagaState::from(saga_state)),
+        }
+    }
 }
 
 async fn cmd_sagas_inject_error(
@@ -199,8 +242,9 @@ You should only do this if:
         let saga: Saga = {
             use nexus_db_schema::schema::saga::dsl;
             dsl::saga
-                .filter(dsl::id.eq(args.saga_id))
-                .first_async(&*conn)
+                .filter(dsl::id.eq(to_db_typed_uuid(args.saga_id)))
+                .select(Saga::as_select())
+                .first_async::<Saga>(&*conn)
                 .await?
         };
 
@@ -231,7 +275,7 @@ You should only do this if:
         use nexus_db_schema::schema::saga_node_event::dsl;
 
         dsl::saga_node_event
-            .filter(dsl::saga_id.eq(args.saga_id))
+            .filter(dsl::saga_id.eq(to_db_typed_uuid(args.saga_id)))
             .filter(dsl::event_type.eq(SagaNodeEventType::Started.label()))
             .load_async(&*conn)
             .await?
@@ -250,7 +294,7 @@ You should only do this if:
             SagaNodeEventType::Failed(ActionError::InjectedError).label();
 
         dsl::saga_node_event
-            .filter(dsl::saga_id.eq(args.saga_id))
+            .filter(dsl::saga_id.eq(to_db_typed_uuid(args.saga_id)))
             .filter(
                 dsl::event_type
                     .eq(succeeded_label)
@@ -288,7 +332,7 @@ You should only do this if:
 
     // Inject an error for those nodes, which will cause the saga to unwind
     for node in incomplete_nodes {
-        let action_error = ActionError::action_failed(String::from(
+        let action_error = saga_action_failed(Error::internal_error(
             "error injected with omdb",
         ));
 
@@ -325,7 +369,7 @@ async fn cmd_sagas_abandon(
     omdb: &Omdb,
     opctx: &OpContext,
     datastore: &DataStore,
-    SagaAbandonArgs { saga_id, bypass_sec_check }: SagaAbandonArgs,
+    args: &SagaAbandonArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> anyhow::Result<()> {
     use nexus_db_schema::schema::saga::dsl;
@@ -333,17 +377,20 @@ async fn cmd_sagas_abandon(
     let should_print_color =
         should_colorize(omdb.output.color, supports_color::Stream::Stdout);
     let conn = datastore.pool_connection_for_tests().await?;
-    let saga: Saga =
-        { dsl::saga.filter(dsl::id.eq(saga_id)).first_async(&*conn).await? };
+    let saga: Saga = dsl::saga
+        .filter(dsl::id.eq(to_db_typed_uuid(args.saga_id)))
+        .select(Saga::as_select())
+        .first_async::<Saga>(&*conn)
+        .await?;
 
     match saga.saga_state {
-        SagaState::Done => {
-            bail!("saga {saga_id} is already done executing");
+        SagaExecState::Done => {
+            bail!("saga {} is already done executing", args.saga_id);
         }
-        SagaState::Abandoned => {
-            bail!("saga {saga_id} is already abandoned");
+        SagaExecState::Abandoned(_) => {
+            bail!("saga {} is already abandoned", args.saga_id);
         }
-        SagaState::Running | SagaState::Unwinding => {}
+        SagaExecState::Running | SagaExecState::Unwinding => {}
     }
 
     let text = r#"
@@ -373,10 +420,12 @@ execute even if it is abandoned. You should only proceed if:
 
     // Before doing anything: find the current SEC for the saga, and ping it to
     // ensure that the Nexus is down.
-    if !bypass_sec_check {
-        let saga: Saga = {
-            dsl::saga.filter(dsl::id.eq(saga_id)).first_async(&*conn).await?
-        };
+    if !args.bypass_sec_check {
+        let saga = dsl::saga
+            .filter(dsl::id.eq(to_db_typed_uuid(args.saga_id)))
+            .select(Saga::as_select())
+            .first_async::<Saga>(&*conn)
+            .await?;
 
         let status = get_saga_sec_status(omdb, opctx, &saga).await;
         status.display_message(should_print_color);
@@ -396,9 +445,16 @@ execute even if it is abandoned. You should only proceed if:
     prompt.read_and_validate("y/N", "y")?;
     drop(prompt);
 
+    let new_state = SagaStateDbFields {
+        saga_state: SagaState::Abandoned,
+        abandon_reason: Some(nexus_db_model::SagaReasonAbandoned::Omdb),
+        abandon_comment: Some(args.comment.to_string()),
+        abandon_time: Some(Utc::now()),
+    };
+
     diesel::update(dsl::saga)
-        .filter(dsl::id.eq(saga_id))
-        .set(dsl::saga_state.eq(SagaState::Abandoned))
+        .filter(dsl::id.eq(to_db_typed_uuid(args.saga_id)))
+        .set(new_state)
         .execute_async(&*conn)
         .await?;
 
@@ -412,20 +468,32 @@ async fn get_all_sagas_in_state(
     state: SagaState,
 ) -> Result<Vec<Saga>, anyhow::Error> {
     let mut sagas = Vec::new();
-    let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+    let mut paginator =
+        Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
     while let Some(p) = paginator.next() {
         use nexus_db_schema::schema::saga::dsl;
         let records_batch =
             paginated(dsl::saga, dsl::id, &p.current_pagparams())
                 .filter(dsl::saga_state.eq(state))
-                .select(Saga::as_select())
-                .load_async(&**conn)
+                .select(nexus_db_model::LoadedSaga::as_select())
+                .load_async::<nexus_db_model::LoadedSaga>(&**conn)
                 .await
                 .context("fetching sagas")?;
 
-        paginator = p.found_batch(&records_batch, &|s: &Saga| s.id);
+        paginator = p
+            .found_batch(&records_batch, &|s: &nexus_db_model::LoadedSaga| {
+                to_db_typed_uuid(s.id())
+            });
 
-        sagas.extend(records_batch);
+        for row in records_batch {
+            let saga_id = row.id();
+            match Saga::try_from(row) {
+                Ok(saga) => sagas.push(saga),
+                Err(e) => {
+                    eprintln!("WARNING: Skipping saga with id {saga_id}: {e}")
+                }
+            };
+        }
     }
 
     // Sort them by creation time (equivalently: how long they've been running)
@@ -606,7 +674,7 @@ async fn get_saga_sec_status(
         }
     };
 
-    let client = nexus_client::Client::new(
+    let client = nexus_lockstep_client::Client::new(
         &format!("http://[{addr}]:{port}/"),
         opctx.log.clone(),
     );
@@ -617,21 +685,20 @@ async fn get_saga_sec_status(
         }
 
         Err(e) => match e {
-            nexus_client::Error::InvalidRequest(_)
-            | nexus_client::Error::InvalidUpgrade(_)
-            | nexus_client::Error::ErrorResponse(_)
-            | nexus_client::Error::ResponseBodyError(_)
-            | nexus_client::Error::InvalidResponsePayload(_, _)
-            | nexus_client::Error::UnexpectedResponse(_)
-            | nexus_client::Error::PreHookError(_)
-            | nexus_client::Error::PostHookError(_) => {
+            nexus_lockstep_client::Error::InvalidRequest(_)
+            | nexus_lockstep_client::Error::InvalidUpgrade(_)
+            | nexus_lockstep_client::Error::ErrorResponse(_)
+            | nexus_lockstep_client::Error::ResponseBodyError(_)
+            | nexus_lockstep_client::Error::InvalidResponsePayload(_, _)
+            | nexus_lockstep_client::Error::UnexpectedResponse(_)
+            | nexus_lockstep_client::Error::Custom(_) => {
                 return SagaSecStatus::SecPingError {
                     sec_id: current_sec,
                     observed_error: e.to_string(),
                 };
             }
 
-            nexus_client::Error::CommunicationError(_) => {
+            nexus_lockstep_client::Error::CommunicationError(_) => {
                 // Assume communication error means that it could not be
                 // contacted.
                 //
@@ -643,5 +710,340 @@ async fn get_saga_sec_status(
                 };
             }
         },
+    }
+}
+
+// Copy some types from Steno, because steno uses pub(crate) everywhere. We
+// don't want to change Steno to make the internals public, but these types
+// should be fairly stable.
+#[derive(Serialize, Deserialize)]
+struct StenoDag {
+    pub saga_name: String,
+    pub graph: Graph<StenoNode, ()>,
+    pub start_node: NodeIndex,
+    pub end_node: NodeIndex,
+}
+
+impl StenoDag {
+    pub fn get(&self, node_index: NodeIndex) -> Option<&StenoNode> {
+        self.graph.node_weight(node_index)
+    }
+
+    pub fn get_from_saga_node_id(
+        &self,
+        saga_node_id: &nexus_db_model::saga_types::SagaNodeId,
+    ) -> Option<&StenoNode> {
+        self.get(u32::from(saga_node_id.0).into())
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+enum StenoNode {
+    Start { params: Arc<serde_json::Value> },
+    End,
+    Action { name: String, label: String, action_name: String },
+    Constant { name: String, value: Arc<serde_json::Value> },
+    SubsagaStart { saga_name: String, params_node_name: String },
+    SubsagaEnd { name: String },
+}
+
+async fn cmd_sagas_show(
+    _omdb: &Omdb,
+    _opctx: &OpContext,
+    datastore: &DataStore,
+    SagaShowArgs { saga_id }: SagaShowArgs,
+) -> anyhow::Result<()> {
+    let conn = datastore.pool_connection_for_tests().await?;
+    let mut nodes = Vec::new();
+    let mut paginator =
+        Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
+
+    while let Some(p) = paginator.next() {
+        use nexus_db_schema::schema::saga_node_event::dsl;
+
+        let batch = paginated(
+            dsl::saga_node_event,
+            dsl::event_time,
+            &p.current_pagparams(),
+        )
+        .filter(dsl::saga_id.eq(to_db_typed_uuid(saga_id)))
+        .order_by(dsl::event_time)
+        .select(SagaNodeEvent::as_select())
+        .load_async(&*conn)
+        .await
+        .with_context(|| format!("error fetching saga nodes for {saga_id}"))?;
+        paginator =
+            p.found_batch(&batch, &|node: &SagaNodeEvent| node.event_time);
+        nodes.extend(batch);
+    }
+
+    let saga = {
+        use nexus_db_schema::schema::saga::dsl;
+        dsl::saga
+            .filter(dsl::id.eq(to_db_typed_uuid(saga_id)))
+            .select(Saga::as_select())
+            .first_async::<Saga>(&*conn)
+            .await
+            .with_context(|| format!("error fetching saga {saga_id}"))?
+    };
+
+    print_saga_nodes(Some(saga), nodes);
+
+    Ok(())
+}
+
+/// Print a table showing saga nodes. If a Saga object is supplied as the first
+/// argument, then look up the saga node's name and use that for output instead
+/// of a node id.
+fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
+    let dag: Option<StenoDag> = saga.as_ref().map(|saga: &Saga| {
+        serde_json::from_value(saga.saga_dag.clone()).unwrap()
+    });
+
+    if let Some(saga) = saga {
+        let dag = saga.saga_dag.clone();
+
+        let table = tabled::Table::new(Some(SagaRow::from(saga)))
+            .with(tabled::settings::Style::psql())
+            .to_string();
+
+        println!("{table}\n");
+        println!("DAG: {}", dag);
+        println!();
+    }
+
+    struct SagaNodeRow {
+        event_time: String,
+        sub_saga_id: Option<u32>,
+        node_id: String,
+        event_type: String,
+        data: String,
+    }
+
+    // Keep track of which saga nodes are subsaga start nodes.
+    let mut sub_saga_starts: BTreeMap<
+        nexus_db_model::saga_types::SagaNodeId,
+        u32,
+    > = BTreeMap::default();
+    let mut sub_saga_counter = 0;
+
+    // Keep track of which nodes belong to which sub sagas
+    let mut sub_saga_map: BTreeMap<
+        nexus_db_model::saga_types::SagaNodeId,
+        u32,
+    > = BTreeMap::default();
+
+    let mut rows: Vec<_> = Vec::with_capacity(saga_nodes.len());
+
+    for saga_node in saga_nodes {
+        let (node_id, sub_saga_id, data) = if let Some(dag) = &dag {
+            let dag_node =
+                dag.get_from_saga_node_id(&saga_node.node_id).unwrap();
+
+            let sub_saga_id: Option<u32> = match sub_saga_map
+                .get(&saga_node.node_id)
+            {
+                Some(id) => {
+                    // We already determined this node was part of a sub
+                    // saga.
+                    Some(*id)
+                }
+
+                None => {
+                    // Figure out if we're in an existing sub saga
+                    let mut this_sub_saga_start_node_id = None;
+                    let mut this_sub_saga_id = None;
+
+                    for (sub_saga_start_node_id, sub_saga_id) in
+                        &sub_saga_starts
+                    {
+                        // Is there a path from the start of the sub saga to
+                        // this node? If so, then this node is in the sub saga.
+                        let from: u32 = sub_saga_start_node_id.0.into();
+                        let to: u32 = saga_node.node_id.0.into();
+
+                        if petgraph::algo::has_path_connecting(
+                            &dag.graph,
+                            from.into(),
+                            to.into(),
+                            None,
+                        ) {
+                            this_sub_saga_start_node_id =
+                                Some(*sub_saga_start_node_id);
+                            this_sub_saga_id = Some(*sub_saga_id);
+                            break;
+                        }
+                    }
+
+                    if let Some(this_sub_saga_start_node_id) =
+                        this_sub_saga_start_node_id
+                    {
+                        // Is the sub saga over?
+                        if matches!(dag_node, StenoNode::SubsagaEnd { .. }) {
+                            sub_saga_starts
+                                .remove(&this_sub_saga_start_node_id);
+                        }
+                    } else {
+                        // Did a new sub saga start?
+                        if matches!(dag_node, StenoNode::SubsagaStart { .. })
+                            && saga_node.event_type == *"started"
+                        {
+                            sub_saga_starts
+                                .insert(saga_node.node_id, sub_saga_counter);
+                            sub_saga_counter += 1;
+
+                            this_sub_saga_id = Some(sub_saga_counter - 1);
+                        } else {
+                            // Not in a sub saga
+                        }
+                    }
+
+                    if let Some(this_sub_saga_id) = this_sub_saga_id {
+                        sub_saga_map
+                            .insert(saga_node.node_id, this_sub_saga_id);
+                    }
+
+                    this_sub_saga_id
+                }
+            };
+
+            let node_id = format!(
+                "{:3}: {}",
+                saga_node.node_id.0,
+                match dag_node {
+                    StenoNode::Start { .. } => String::from("start"),
+                    StenoNode::End => String::from("end"),
+                    StenoNode::Action { action_name, .. } =>
+                        action_name.clone(),
+                    StenoNode::Constant { name, .. } => name.clone(),
+                    StenoNode::SubsagaStart { saga_name, params_node_name } =>
+                        format!(
+                            "subsaga start {} ({})",
+                            saga_name, params_node_name
+                        ),
+                    StenoNode::SubsagaEnd { name } =>
+                        format!("subsaga end {}", name),
+                },
+            );
+
+            // If the saga node produced data, label it with the saga name, not the action name
+            let data = match dag_node {
+                StenoNode::Action { name, .. } => {
+                    if let Some(saga_node_data) = saga_node.data {
+                        match saga_node_data {
+                            serde_json::Value::Null => String::from(""),
+
+                            x => {
+                                format!(
+                                    "\"{}\" => {}",
+                                    name,
+                                    serde_json::to_string(&x).unwrap(),
+                                )
+                            }
+                        }
+                    } else {
+                        String::from("")
+                    }
+                }
+
+                _ => String::from(""),
+            };
+
+            (node_id, sub_saga_id, data)
+        } else {
+            let node_id = format!("{}", saga_node.node_id.0);
+
+            let data = if let Some(saga_node_data) = saga_node.data {
+                match saga_node_data {
+                    serde_json::Value::Null => String::from(""),
+                    x => serde_json::to_string(&x).unwrap(),
+                }
+            } else {
+                String::from("")
+            };
+
+            (node_id, None, data)
+        };
+
+        rows.push(SagaNodeRow {
+            event_time: datetime_rfc3339_concise(&saga_node.event_time),
+            sub_saga_id,
+            node_id,
+            event_type: saga_node.event_type,
+            data,
+        })
+    }
+
+    if rows.is_empty() {
+        return;
+    }
+
+    // We avoid `Tabled` here because some columns could be very wide, and its
+    // auto-sizing would cause all rows to be that wide, resulting in unreadable
+    // output.
+    let row_char_counts: Vec<_> = rows
+        .iter()
+        .map(|x| {
+            (
+                x.event_time.chars().count(),
+                if let Some(sub_saga_id) = x.sub_saga_id {
+                    format!("{}", sub_saga_id).chars().count()
+                } else {
+                    0
+                },
+                x.node_id.chars().count(),
+                x.event_type.chars().count(),
+                x.data.chars().count(),
+            )
+        })
+        .collect();
+
+    let (width0, width1, width2, width3): (usize, usize, usize, usize) = (
+        row_char_counts.iter().map(|x| x.0).max().unwrap(),
+        std::cmp::max(
+            row_char_counts.iter().map(|x| x.1).max().unwrap(),
+            "sub saga".len(),
+        ),
+        std::cmp::max(
+            row_char_counts.iter().map(|x| x.2).max().unwrap(),
+            "node id".len(),
+        ),
+        std::cmp::max(
+            row_char_counts.iter().map(|x| x.3).max().unwrap(),
+            "event type".len(),
+        ),
+    );
+
+    println!(
+        "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {}",
+        String::from("event time"),
+        String::from("sub saga"),
+        String::from("node id"),
+        String::from("event type"),
+        String::from("data"),
+    );
+
+    println!(
+        "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {}",
+        (0..width0).map(|_| "-").collect::<String>(),
+        (0..width1).map(|_| "-").collect::<String>(),
+        (0..width2).map(|_| "-").collect::<String>(),
+        (0..width3).map(|_| "-").collect::<String>(),
+        String::from("---"),
+    );
+
+    for row in rows {
+        println!(
+            "{:>width0$} | {:width1$} | {:>width2$} | {:width3$} | {}",
+            row.event_time,
+            if let Some(sub_saga_id) = row.sub_saga_id {
+                format!("{}", sub_saga_id)
+            } else {
+                String::from("")
+            },
+            row.node_id,
+            row.event_type,
+            row.data,
+        );
     }
 }

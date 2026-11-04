@@ -13,235 +13,136 @@ use std::convert::TryFrom;
 use uuid::Uuid;
 
 pub use propolis_client::{CrucibleOpts, VolumeConstructionRequest};
-
 progenitor::generate_api!(
-    spec = "../../openapi/sled-agent.json",
+    spec = "../../openapi/sled-agent/sled-agent-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
-    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-        slog::debug!(log, "client request";
-            "method" => %request.method(),
-            "uri" => %request.url(),
-            "body" => ?&request.body(),
-        );
-    }),
-    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-        slog::debug!(log, "client response"; "result" => ?result);
-    }),
+    hooks = Expected,
     derives = [schemars::JsonSchema, PartialEq],
     patch = {
-        BfdPeerConfig = { derives = [Eq, Hash] },
-        BgpConfig = { derives = [Eq, Hash] },
-        BgpPeerConfig = { derives = [Eq, Hash] },
-        LldpPortConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
-        TxEqConfig = { derives = [Eq, Hash] },
         OmicronPhysicalDiskConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
-        PortConfigV2 = { derives = [Eq, Hash] },
-        RouteConfig = { derives = [Eq, Hash] },
-        UplinkAddressConfig = { derives = [Eq, Hash] },
         VirtualNetworkInterfaceHost = { derives = [Eq, Hash] },
     },
     crates = {
+        "byte-wrapper" = "0.2.0",
+        "iddqd" = "*",
+        "omicron-uuid-kinds" = "*",
         "oxnet" = "0.1.0",
     },
     replace = {
-        Baseboard = nexus_sled_agent_shared::inventory::Baseboard,
+        ArtifactConfig = sled_agent_types::artifact::ArtifactConfig,
+        ArtifactConfigGeneration = omicron_generation_kinds::ArtifactConfigGeneration,
+        AttachedSubnet = sled_agent_types_versions::latest::attached_subnet::AttachedSubnet,
+        AttachedSubnetKind = sled_agent_types_versions::latest::attached_subnet::AttachedSubnetKind,
+        AttachedSubnets = sled_agent_types_versions::latest::attached_subnet::AttachedSubnets,
+        Attestation = sled_agent_types_versions::latest::rot::Attestation,
+        Baseboard = sled_agent_types_versions::latest::inventory::Baseboard,
+        BaseboardId = sled_hardware_types::BaseboardId,
+        BfdPeerConfig = sled_agent_types_versions::latest::early_networking::BfdPeerConfig,
+        BgpConfig = sled_agent_types_versions::latest::early_networking::BgpConfig,
+        BgpPeerConfig = sled_agent_types_versions::latest::early_networking::BgpPeerConfig,
         ByteCount = omicron_common::api::external::ByteCount,
-        DatasetsConfig = omicron_common::disk::DatasetsConfig,
-        DatasetManagementStatus = omicron_common::disk::DatasetManagementStatus,
+        CertificateChain = sled_agent_types_versions::latest::rot::CertificateChain,
+        CommitRequest = trust_quorum_types::messages::CommitRequest,
+        CommitStatus = trust_quorum_types::status::CommitStatus,
+        ConfigReconcilerInventory = sled_agent_types_versions::latest::inventory::ConfigReconcilerInventory,
+        CoordinatorStatus = trust_quorum_types::status::CoordinatorStatus,
+        DatasetConfig = sled_agent_types_versions::latest::disk::DatasetConfig,
         DatasetKind = omicron_common::api::internal::shared::DatasetKind,
-        DiskIdentity = omicron_common::disk::DiskIdentity,
-        DiskManagementStatus = omicron_common::disk::DiskManagementStatus,
-        DiskManagementError = omicron_common::disk::DiskManagementError,
-        DiskVariant = omicron_common::disk::DiskVariant,
+        DiskIdentity = sled_agent_types::disk::DiskIdentity,
+        DiskVariant = sled_agent_types::disk::DiskVariant,
+        Epoch = trust_quorum_types::types::Epoch,
+        ExternalIp = sled_agent_types_versions::latest::probes::ExternalIp,
+        ExternalIpConfig = sled_agent_types_versions::latest::instance::ExternalIpConfig,
         ExternalIpGatewayMap = omicron_common::api::internal::shared::ExternalIpGatewayMap,
-        Generation = omicron_common::api::external::Generation,
+        ExternalIpv4Config = sled_agent_types_versions::latest::instance::ExternalIpv4Config,
+        ExternalIpv6Config = sled_agent_types_versions::latest::instance::ExternalIpv6Config,
+        FmdHostCase = sled_agent_types_versions::latest::inventory::FmdHostCase,
+        FmdInventory = sled_agent_types_versions::latest::inventory::FmdInventory,
+        FmdInventoryError = sled_agent_types_versions::latest::inventory::FmdInventoryError,
+        FmdInventoryErrorKind = sled_agent_types_versions::latest::inventory::FmdInventoryErrorKind,
+        FmdResource = sled_agent_types_versions::latest::inventory::FmdResource,
+        Generation = omicron_generation_kinds::Generation,
         Hostname = omicron_common::api::external::Hostname,
-        ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
-        Inventory = nexus_sled_agent_shared::inventory::Inventory,
-        InventoryDisk = nexus_sled_agent_shared::inventory::InventoryDisk,
-        InventoryZpool = nexus_sled_agent_shared::inventory::InventoryZpool,
+        ImportExportPolicy = sled_agent_types_versions::latest::early_networking::ImportExportPolicy,
+        Inventory = sled_agent_types_versions::latest::inventory::Inventory,
+        InventoryDisk = sled_agent_types_versions::latest::inventory::InventoryDisk,
+        InventoryZpool = sled_agent_types_versions::latest::inventory::InventoryZpool,
+        IpKind = sled_agent_types_versions::latest::probes::IpKind,
+        LinkFec = sled_agent_types_versions::latest::early_networking::LinkFec,
+        LinkSpeed = sled_agent_types_versions::latest::early_networking::LinkSpeed,
+        LldpAdminStatus = sled_agent_types_versions::latest::early_networking::LldpAdminStatus,
+        LldpPortConfig = sled_agent_types_versions::latest::early_networking::LldpPortConfig,
+        LrtqUpgradeMsg = trust_quorum_types::messages::LrtqUpgradeMsg,
         MacAddr = omicron_common::api::external::MacAddr,
+        ManifestBootInventory = sled_agent_types_versions::latest::inventory::ManifestBootInventory,
+        ManifestInventory = sled_agent_types_versions::latest::inventory::ManifestInventory,
+        ManifestNonBootInventory = sled_agent_types_versions::latest::inventory::ManifestNonBootInventory,
+        MaxPathConfig = sled_agent_types_versions::latest::early_networking::MaxPathConfig,
+        Measurement = sled_agent_types_versions::latest::rot::Measurement,
+        MeasurementLog = sled_agent_types_versions::latest::rot::MeasurementLog,
+        MigrationRuntimeState = sled_agent_types_versions::latest::instance::MigrationRuntimeState,
+        MigrationState = sled_agent_types_versions::latest::instance::MigrationState,
+        MupdateOverrideBootInventory = sled_agent_types_versions::latest::inventory::MupdateOverrideBootInventory,
+        MupdateOverrideInventory = sled_agent_types_versions::latest::inventory::MupdateOverrideInventory,
+        MupdateOverrideNonBootInventory = sled_agent_types_versions::latest::inventory::MupdateOverrideNonBootInventory,
         Name = omicron_common::api::external::Name,
-        NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
-        OmicronPhysicalDiskConfig = omicron_common::disk::OmicronPhysicalDiskConfig,
-        OmicronPhysicalDisksConfig = omicron_common::disk::OmicronPhysicalDisksConfig,
-        OmicronSledConfig = nexus_sled_agent_shared::inventory::OmicronSledConfig,
-        OmicronSledConfigResult = nexus_sled_agent_shared::inventory::OmicronSledConfigResult,
-        OmicronZoneConfig = nexus_sled_agent_shared::inventory::OmicronZoneConfig,
-        OmicronZoneDataset = nexus_sled_agent_shared::inventory::OmicronZoneDataset,
-        OmicronZoneImageSource = nexus_sled_agent_shared::inventory::OmicronZoneImageSource,
-        OmicronZoneType = nexus_sled_agent_shared::inventory::OmicronZoneType,
-        OmicronZonesConfig = nexus_sled_agent_shared::inventory::OmicronZonesConfig,
-        PortFec = omicron_common::api::internal::shared::PortFec,
-        PortSpeed = omicron_common::api::internal::shared::PortSpeed,
-        RouterId = omicron_common::api::internal::shared::RouterId,
+        NetworkInterface = sled_agent_types_versions::latest::inventory::NetworkInterface,
+        NetworkInterfaceKind = sled_agent_types_versions::latest::inventory::NetworkInterfaceKind,
+        Nonce = sled_agent_types_versions::latest::rot::Nonce,
+        OmicronPhysicalDiskConfig = sled_agent_types::disk::OmicronPhysicalDiskConfig,
+        OmicronSledConfig = sled_agent_types_versions::latest::inventory::OmicronSledConfig,
+        OmicronZoneConfig = sled_agent_types_versions::latest::inventory::OmicronZoneConfig,
+        OmicronZoneDataset = sled_agent_types_versions::latest::inventory::OmicronZoneDataset,
+        OmicronZoneImageSource = sled_agent_types_versions::latest::inventory::OmicronZoneImageSource,
+        OmicronZoneType = sled_agent_types_versions::latest::inventory::OmicronZoneType,
+        OmicronZonesConfig = sled_agent_types_versions::latest::inventory::OmicronZonesConfig,
+        OrphanedDataset = sled_agent_types_versions::latest::inventory::OrphanedDataset,
+        PortConfig = sled_agent_types_versions::latest::early_networking::PortConfig,
+        PrepareAndCommitRequest = trust_quorum_types::messages::PrepareAndCommitRequest,
+        ProbeCreate = sled_agent_types_versions::latest::probes::ProbeCreate,
+        ProbeSet = sled_agent_types_versions::latest::probes::ProbeSet,
+        RackNetworkConfig = sled_agent_types_versions::latest::early_networking::RackNetworkConfig,
+        ReconfigureMsg = trust_quorum_types::messages::ReconfigureMsg,
+        ResolvedVpcFirewallRule = sled_agent_types_versions::latest::instance::ResolvedVpcFirewallRule,
         ResolvedVpcRoute = omicron_common::api::internal::shared::ResolvedVpcRoute,
         ResolvedVpcRouteSet = omicron_common::api::internal::shared::ResolvedVpcRouteSet,
+        Rot = sled_agent_types_versions::latest::rot::Rot,
+        RouteConfig = sled_agent_types_versions::latest::early_networking::RouteConfig,
+        RouterId = omicron_common::api::internal::shared::RouterId,
+        RouterLifetimeConfig = sled_agent_types_versions::latest::early_networking::RouterLifetimeConfig,
         RouterTarget = omicron_common::api::internal::shared::RouterTarget,
         RouterVersion = omicron_common::api::internal::shared::RouterVersion,
-        SledRole = nexus_sled_agent_shared::inventory::SledRole,
-        SourceNatConfig = omicron_common::api::internal::shared::SourceNatConfig,
-        SwitchLocation = omicron_common::api::external::SwitchLocation,
-        TypedUuidForDatasetKind = omicron_uuid_kinds::DatasetUuid,
-        TypedUuidForInstanceKind = omicron_uuid_kinds::InstanceUuid,
-        TypedUuidForOmicronZoneKind = omicron_uuid_kinds::OmicronZoneUuid,
-        TypedUuidForPropolisKind = omicron_uuid_kinds::PropolisUuid,
-        TypedUuidForSledKind = omicron_uuid_kinds::SledUuid,
-        TypedUuidForSupportBundleKind = omicron_uuid_kinds::SupportBundleUuid,
-        TypedUuidForZpoolKind = omicron_uuid_kinds::ZpoolUuid,
+        ServiceZoneNatEntries = sled_agent_types_versions::latest::system_networking::ServiceZoneNatEntries,
+        ServiceZoneNatEntry = sled_agent_types_versions::latest::system_networking::ServiceZoneNatEntry,
+        Sha3_256Digest = sled_agent_types_versions::latest::rot::Sha3_256Digest,
+        SingleMeasurementInventory = sled_agent_types_versions::latest::inventory::SingleMeasurementInventory,
+        SledAgentInfo = sled_agent_types_versions::latest::multirack::SledAgentInfo,
+        SledRole = sled_agent_types_versions::latest::inventory::SledRole,
+        SledVmmState = sled_agent_types_versions::latest::instance::SledVmmState,
+        SourceNatConfigGeneric = sled_agent_types_versions::latest::inventory::SourceNatConfigGeneric,
+        SwitchSlot = sled_agent_types_versions::latest::early_networking::SwitchSlot,
+        SystemNetworkingConfig = sled_agent_types_versions::latest::system_networking::SystemNetworkingConfig,
+        Threshold = trust_quorum_types::types::Threshold,
+        TrustQuorumCoordinatorStatusResponse = sled_agent_types_versions::latest::trust_quorum::TrustQuorumCoordinatorStatusResponse,
+        TxEqConfig = sled_agent_types_versions::latest::early_networking::TxEqConfig,
+        UplinkAddressConfig = sled_agent_types_versions::latest::early_networking::UplinkAddressConfig,
+        VmmRuntimeState = sled_agent_types_versions::latest::instance::VmmRuntimeState,
+        VmmState = sled_agent_types_versions::latest::instance::VmmState,
         Vni = omicron_common::api::external::Vni,
+        VpcFirewallIcmpFilter = omicron_common::api::external::VpcFirewallIcmpFilter,
+        WriteNetworkConfigRequest = sled_agent_types_versions::latest::system_networking::WriteNetworkConfigRequest,
+        ZoneArtifactInventory = sled_agent_types_versions::latest::inventory::ZoneArtifactInventory,
         ZpoolKind = omicron_common::zpool_name::ZpoolKind,
         ZpoolName = omicron_common::zpool_name::ZpoolName,
     }
 );
 
+progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
+
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {
         self.message.clone()
-    }
-}
-
-impl From<omicron_common::api::internal::nexus::VmmState> for types::VmmState {
-    fn from(s: omicron_common::api::internal::nexus::VmmState) -> Self {
-        use omicron_common::api::internal::nexus::VmmState as Input;
-        match s {
-            Input::Starting => types::VmmState::Starting,
-            Input::Running => types::VmmState::Running,
-            Input::Stopping => types::VmmState::Stopping,
-            Input::Stopped => types::VmmState::Stopped,
-            Input::Rebooting => types::VmmState::Rebooting,
-            Input::Migrating => types::VmmState::Migrating,
-            Input::Failed => types::VmmState::Failed,
-            Input::Destroyed => types::VmmState::Destroyed,
-        }
-    }
-}
-
-impl From<types::VmmState> for omicron_common::api::internal::nexus::VmmState {
-    fn from(s: types::VmmState) -> Self {
-        use omicron_common::api::internal::nexus::VmmState as Output;
-        match s {
-            types::VmmState::Starting => Output::Starting,
-            types::VmmState::Running => Output::Running,
-            types::VmmState::Stopping => Output::Stopping,
-            types::VmmState::Stopped => Output::Stopped,
-            types::VmmState::Rebooting => Output::Rebooting,
-            types::VmmState::Migrating => Output::Migrating,
-            types::VmmState::Failed => Output::Failed,
-            types::VmmState::Destroyed => Output::Destroyed,
-        }
-    }
-}
-
-impl From<types::VmmRuntimeState>
-    for omicron_common::api::internal::nexus::VmmRuntimeState
-{
-    fn from(s: types::VmmRuntimeState) -> Self {
-        Self { state: s.state.into(), gen: s.gen, time_updated: s.time_updated }
-    }
-}
-
-impl From<types::SledVmmState>
-    for omicron_common::api::internal::nexus::SledVmmState
-{
-    fn from(s: types::SledVmmState) -> Self {
-        Self {
-            vmm_state: s.vmm_state.into(),
-            migration_in: s.migration_in.map(Into::into),
-            migration_out: s.migration_out.map(Into::into),
-        }
-    }
-}
-
-impl From<types::MigrationRuntimeState>
-    for omicron_common::api::internal::nexus::MigrationRuntimeState
-{
-    fn from(s: types::MigrationRuntimeState) -> Self {
-        Self {
-            migration_id: s.migration_id,
-            state: s.state.into(),
-            gen: s.gen,
-            time_updated: s.time_updated,
-        }
-    }
-}
-
-impl From<types::MigrationState>
-    for omicron_common::api::internal::nexus::MigrationState
-{
-    fn from(s: types::MigrationState) -> Self {
-        use omicron_common::api::internal::nexus::MigrationState as Output;
-        match s {
-            types::MigrationState::Pending => Output::Pending,
-            types::MigrationState::InProgress => Output::InProgress,
-            types::MigrationState::Failed => Output::Failed,
-            types::MigrationState::Completed => Output::Completed,
-        }
-    }
-}
-
-impl From<omicron_common::api::internal::nexus::DiskRuntimeState>
-    for types::DiskRuntimeState
-{
-    fn from(s: omicron_common::api::internal::nexus::DiskRuntimeState) -> Self {
-        Self {
-            disk_state: s.disk_state.into(),
-            gen: s.gen,
-            time_updated: s.time_updated,
-        }
-    }
-}
-
-impl From<omicron_common::api::external::DiskState> for types::DiskState {
-    fn from(s: omicron_common::api::external::DiskState) -> Self {
-        use omicron_common::api::external::DiskState::*;
-        match s {
-            Creating => Self::Creating,
-            Detached => Self::Detached,
-            ImportReady => Self::ImportReady,
-            ImportingFromUrl => Self::ImportingFromUrl,
-            ImportingFromBulkWrites => Self::ImportingFromBulkWrites,
-            Finalizing => Self::Finalizing,
-            Maintenance => Self::Maintenance,
-            Attaching(u) => Self::Attaching(u),
-            Attached(u) => Self::Attached(u),
-            Detaching(u) => Self::Detaching(u),
-            Destroyed => Self::Destroyed,
-            Faulted => Self::Faulted,
-        }
-    }
-}
-
-impl From<types::DiskRuntimeState>
-    for omicron_common::api::internal::nexus::DiskRuntimeState
-{
-    fn from(s: types::DiskRuntimeState) -> Self {
-        Self {
-            disk_state: s.disk_state.into(),
-            gen: s.gen,
-            time_updated: s.time_updated,
-        }
-    }
-}
-
-impl From<types::DiskState> for omicron_common::api::external::DiskState {
-    fn from(s: types::DiskState) -> Self {
-        use types::DiskState::*;
-        match s {
-            Creating => Self::Creating,
-            Detached => Self::Detached,
-            ImportReady => Self::ImportReady,
-            ImportingFromUrl => Self::ImportingFromUrl,
-            ImportingFromBulkWrites => Self::ImportingFromBulkWrites,
-            Finalizing => Self::Finalizing,
-            Maintenance => Self::Maintenance,
-            Attaching(u) => Self::Attaching(u),
-            Attached(u) => Self::Attached(u),
-            Detaching(u) => Self::Detaching(u),
-            Destroyed => Self::Destroyed,
-            Faulted => Self::Faulted,
-        }
     }
 }
 
@@ -309,23 +210,22 @@ impl From<omicron_common::api::external::VpcFirewallRuleProtocol>
         match s {
             Tcp => Self::Tcp,
             Udp => Self::Udp,
-            Icmp => Self::Icmp,
+            Icmp(v) => Self::Icmp(v),
+            Icmp6(v) => Self::Icmp6(v),
         }
     }
 }
 
-impl From<omicron_common::api::internal::shared::NetworkInterfaceKind>
-    for types::NetworkInterfaceKind
-{
-    fn from(
-        s: omicron_common::api::internal::shared::NetworkInterfaceKind,
-    ) -> Self {
-        use omicron_common::api::internal::shared::NetworkInterfaceKind::*;
-        match s {
-            Instance { id } => Self::Instance(id),
-            Service { id } => Self::Service(id),
-            Probe { id } => Self::Probe(id),
-        }
+// TODO-cleanup This is icky; can we move these methods to a separate client so
+// we don't need to add this header by hand?
+// https://github.com/oxidecomputer/omicron/issues/8900
+trait ApiVersionHeader {
+    fn api_version_header(self, api_version: &'static str) -> Self;
+}
+
+impl ApiVersionHeader for reqwest::RequestBuilder {
+    fn api_version_header(self, api_version: &'static str) -> Self {
+        self.header("api-version", api_version)
     }
 }
 
@@ -335,12 +235,18 @@ impl From<omicron_common::api::internal::shared::NetworkInterfaceKind>
 pub trait TestInterfaces {
     async fn vmm_single_step(&self, id: PropolisUuid);
     async fn vmm_finish_transition(&self, id: PropolisUuid);
+    /// Essentially like `vmm_finish_transition`, but returns an error instead
+    /// of panicking if the request fails. Useful when the VMM may have been
+    /// removed.
+    async fn try_vmm_finish_transition(
+        &self,
+        id: PropolisUuid,
+    ) -> Result<(), reqwest::Error>;
     async fn vmm_simulate_migration_source(
         &self,
         id: PropolisUuid,
         params: SimulateMigrationSource,
     );
-    async fn disk_finish_transition(&self, id: Uuid);
 }
 
 #[async_trait]
@@ -351,31 +257,31 @@ impl TestInterfaces for Client {
         let url = format!("{}/vmms/{}/poke-single-step", baseurl, id);
         client
             .post(url)
+            .api_version_header(Client::api_version())
             .send()
             .await
             .expect("instance_single_step() failed unexpectedly");
     }
 
     async fn vmm_finish_transition(&self, id: PropolisUuid) {
+        self.try_vmm_finish_transition(id)
+            .await
+            .expect("instance_finish_transition() failed unexpectedly");
+    }
+
+    async fn try_vmm_finish_transition(
+        &self,
+        id: PropolisUuid,
+    ) -> Result<(), reqwest::Error> {
         let baseurl = self.baseurl();
         let client = self.client();
         let url = format!("{}/vmms/{}/poke", baseurl, id);
         client
             .post(url)
+            .api_version_header(Client::api_version())
             .send()
-            .await
-            .expect("instance_finish_transition() failed unexpectedly");
-    }
-
-    async fn disk_finish_transition(&self, id: Uuid) {
-        let baseurl = self.baseurl();
-        let client = self.client();
-        let url = format!("{}/disks/{}/poke", baseurl, id);
-        client
-            .post(url)
-            .send()
-            .await
-            .expect("disk_finish_transition() failed unexpectedly");
+            .await?;
+        Ok(())
     }
 
     async fn vmm_simulate_migration_source(
@@ -388,6 +294,7 @@ impl TestInterfaces for Client {
         let url = format!("{baseurl}/vmms/{id}/sim-migration-source");
         client
             .post(url)
+            .api_version_header(Client::api_version())
             .json(&params)
             .send()
             .await

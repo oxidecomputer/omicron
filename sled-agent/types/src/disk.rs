@@ -2,40 +2,70 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use omicron_common::api::internal::nexus::DiskRuntimeState;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+//! Disk types for sled-agent.
 
-/// Sent from to a sled agent to establish the runtime state of a Disk
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct DiskEnsureBody {
-    /// Last runtime state of the Disk known to Nexus (used if the agent has
-    /// never seen this Disk before).
-    pub initial_runtime: DiskRuntimeState,
-    /// requested runtime state of the Disk
-    pub target: DiskStateRequested,
+pub use sled_agent_types_versions::latest::disk::*;
+
+use omicron_common::api::external::ByteCount;
+use omicron_common::disk::DatasetKind;
+
+/// The kinds of datasets that every in-service U.2 has, regardless of which
+/// zones are placed on it.
+///
+/// These datasets are owned by the sled config: RSS includes them in the
+/// initial blueprint, the Reconfigurator planner maintains them afterwards,
+/// and the sled-agent config reconciler creates them and applies their
+/// properties.
+///
+/// Use [`strum::IntoEnumIterator::iter`] to visit every kind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, strum::EnumIter)]
+pub enum PerDiskDatasetKind {
+    /// Long-term storage for debug data (crash dumps, core dumps, logs, etc.).
+    /// See `DebugCollector`.
+    Debug,
+    /// Parent of transient zone root filesystems.
+    TransientZoneRoot,
+    /// Parent of encrypted local storage datasets.
+    LocalStorage,
+    /// Parent of unencrypted local storage datasets.
+    LocalStorageUnencrypted,
 }
 
-/// Used to request a Disk state change
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "lowercase", tag = "state", content = "instance")]
-pub enum DiskStateRequested {
-    Detached,
-    Attached(Uuid),
-    Destroyed,
-    Faulted,
-}
+// TODO-correctness: This value of 100GiB is a pretty wild guess, and should be
+// tuned as needed.
+const U2_DEBUG_DATASET_QUOTA: ByteCount = ByteCount::from_gibibytes_u32(100);
 
-impl DiskStateRequested {
-    /// Returns whether the requested state is attached to an Instance or not.
-    pub fn is_attached(&self) -> bool {
+impl PerDiskDatasetKind {
+    /// Returns the properties of this dataset.
+    pub fn config(self) -> SharedDatasetConfig {
         match self {
-            DiskStateRequested::Detached => false,
-            DiskStateRequested::Destroyed => false,
-            DiskStateRequested::Faulted => false,
+            Self::Debug => SharedDatasetConfig {
+                compression: CompressionAlgorithm::Lz4,
+                quota: Some(U2_DEBUG_DATASET_QUOTA),
+                reservation: None,
+            },
+            Self::TransientZoneRoot
+            | Self::LocalStorage
+            | Self::LocalStorageUnencrypted => SharedDatasetConfig {
+                compression: CompressionAlgorithm::Off,
+                quota: None,
+                reservation: None,
+            },
+        }
+    }
+}
 
-            DiskStateRequested::Attached(_) => true,
+impl From<PerDiskDatasetKind> for DatasetKind {
+    fn from(kind: PerDiskDatasetKind) -> Self {
+        match kind {
+            PerDiskDatasetKind::Debug => DatasetKind::Debug,
+            PerDiskDatasetKind::TransientZoneRoot => {
+                DatasetKind::TransientZoneRoot
+            }
+            PerDiskDatasetKind::LocalStorage => DatasetKind::LocalStorage,
+            PerDiskDatasetKind::LocalStorageUnencrypted => {
+                DatasetKind::LocalStorageUnencrypted
+            }
         }
     }
 }

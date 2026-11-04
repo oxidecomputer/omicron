@@ -10,6 +10,7 @@ use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use nexus_config::PostgresConfigWithUrl;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::SledFilter;
 use omicron_common::address::Ipv6Subnet;
@@ -41,6 +42,7 @@ impl LiveTestContext {
         let datastore = create_datastore(&log, &resolver).await?;
         let opctx = OpContext::for_tests(log.clone(), datastore.clone());
         check_hardware_environment(&opctx, &datastore).await?;
+        check_configuration(&opctx, &datastore).await?;
         Ok(LiveTestContext { logctx, opctx, resolver, datastore })
     }
 
@@ -72,20 +74,20 @@ impl LiveTestContext {
     pub fn specific_internal_nexus_client(
         &self,
         sockaddr: SocketAddrV6,
-    ) -> nexus_client::Client {
+    ) -> nexus_lockstep_client::Client {
         let url = format!("http://{}", sockaddr);
         let log = self.logctx.log.new(o!("nexus_internal_url" => url.clone()));
-        nexus_client::Client::new(&url, log)
+        nexus_lockstep_client::Client::new(&url, log)
     }
 
     /// Returns a list of clients for the internal APIs for all Nexus instances
     /// found in DNS
     pub async fn all_internal_nexus_clients(
         &self,
-    ) -> Result<Vec<nexus_client::Client>, anyhow::Error> {
+    ) -> Result<Vec<nexus_lockstep_client::Client>, anyhow::Error> {
         Ok(self
             .resolver
-            .lookup_all_socket_v6(ServiceName::Nexus)
+            .lookup_all_socket_v6(ServiceName::NexusLockstep)
             .await
             .context("looking up Nexus in internal DNS")?
             .into_iter()
@@ -133,9 +135,12 @@ async fn create_datastore(
     .context("failed to parse constructed postgres URL")?;
 
     let db_config = nexus_db_queries::db::Config { url };
-    let pool =
-        Arc::new(nexus_db_queries::db::Pool::new_single_host(log, &db_config));
-    DataStore::new_failfast(log, pool)
+    let pool = Arc::new(nexus_db_queries::db::Pool::new_single_host(
+        log,
+        &db_config,
+        db::ClaimBacktraceSetting::Capture,
+    ));
+    DataStore::new_failfast(log, pool, omicron_git_version::current())
         .await
         .context("creating DataStore")
         .map(Arc::new)
@@ -221,14 +226,19 @@ async fn check_hardware_environment(
         "BRM42220004",
         // test rig: "london"
         "BRM42220036",
-        "BRM42220062",
+        "2CN2M459",
         "BRM42220030",
-        "BRM44220007",
+        "2RGCFG10",
         // test rig: "dublin"
-        "BRM42220026",
+        "2F8JEXDK",
         "BRM27230037",
         "BRM23230018",
         "BRM23230010",
+        // test rig: "berlin"
+        "BRM42220011",
+        "BRM44220007",
+        "BRM42220082",
+        "271FVPY0",
     ];
 
     // Refuse to operate in an environment that might contain real Oxide
@@ -253,5 +263,27 @@ async fn check_hardware_environment(
             "refusing to operate in an environment with an unknown system: {}",
             scary_sleds.join(", ")
         ))
+    }
+}
+
+/// Performs checks on the system configuration to determine if it's appropriate
+/// for live tests
+///
+/// Currently, this just verifies that the planner is off.
+async fn check_configuration(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> Result<(), anyhow::Error> {
+    let reconfigurator_config = datastore
+        .reconfigurator_config_get_latest(opctx)
+        .await
+        .expect("obtained latest reconfigurator config")
+        .unwrap_or_default();
+    if reconfigurator_config.config.planner_enabled {
+        Err(anyhow!(
+            "refusing to operate on a system with blueprint planning enabled"
+        ))
+    } else {
+        Ok(())
     }
 }

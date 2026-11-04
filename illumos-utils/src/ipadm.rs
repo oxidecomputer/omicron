@@ -6,9 +6,10 @@
 
 use crate::addrobj::{IPV6_LINK_LOCAL_ADDROBJ_NAME, IPV6_STATIC_ADDROBJ_NAME};
 use crate::zone::IPADM;
-use crate::{ExecutionError, PFEXEC, execute};
+use crate::{ExecutionError, PFEXEC, execute_async};
 use oxnet::IpNet;
 use std::net::{IpAddr, Ipv6Addr};
+use tokio::process::Command;
 
 /// Wraps commands for interacting with interfaces.
 pub struct Ipadm {}
@@ -27,19 +28,21 @@ const INTERFACE_ALREADY_EXISTS: &str = "Interface already exists";
 const ADDROBJ_ALREADY_EXISTS: &str = "Address object already exists";
 
 pub enum AddrObjType {
-    DHCP,
+    // NOTE: This can result in more than one address, if there is a DHCPv6
+    // server on the same link as the addrobj. That happens most often for OPTE
+    // ports used in zones that need external connectivity.
     AddrConf,
     Static(IpAddr),
 }
 
 impl Ipadm {
     /// Ensure that an IP interface exists on the provided datalink.
-    pub fn ensure_ip_interface_exists(
+    pub async fn ensure_ip_interface_exists(
         datalink: &str,
     ) -> Result<(), ExecutionError> {
-        let mut cmd = std::process::Command::new(PFEXEC);
+        let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[IPADM, "create-if", "-t", datalink]);
-        match execute(cmd) {
+        match execute_async(cmd).await {
             Ok(_) => Ok(()),
             Err(ExecutionError::CommandFailure(info))
                 if info.stderr.contains(INTERFACE_ALREADY_EXISTS) =>
@@ -54,21 +57,20 @@ impl Ipadm {
     /// with the requested name already exists, return success. Note that in
     /// this case, the existing object is not checked to ensure it is
     /// consistent with the provided parameters.
-    pub fn ensure_ip_addrobj_exists(
+    pub async fn ensure_ip_addrobj_exists(
         addrobj: &str,
         addrtype: AddrObjType,
     ) -> Result<(), ExecutionError> {
-        let mut cmd = std::process::Command::new(PFEXEC);
+        let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[IPADM, "create-addr", "-t", "-T"]);
         let cmd = match addrtype {
-            AddrObjType::DHCP => cmd.args(&["dhcp"]),
             AddrObjType::AddrConf => cmd.args(&["addrconf"]),
             AddrObjType::Static(addr) => {
                 cmd.args(&["static", "-a", &addr.to_string()])
             }
         };
         let cmd = cmd.arg(&addrobj);
-        match execute(cmd) {
+        match execute_async(cmd).await {
             Ok(_) => Ok(()),
             Err(ExecutionError::CommandFailure(info))
                 if info.stderr.contains(ADDROBJ_ALREADY_EXISTS) =>
@@ -82,6 +84,9 @@ impl Ipadm {
     /// Remove any scope from an IPv6 address.
     /// e.g. fe80::8:20ff:fed0:8687%oxControlService1/10 ->
     ///      fe80::8:20ff:fed0:8687/10
+    //
+    // TODO-cleanup: This could directly parse the line into an IpNet if
+    // possible, rather than emitting a new string.
     fn remove_addr_scope(input: &str) -> String {
         if let Some(pos) = input.find('%') {
             let (base, rest) = input.split_at(pos);
@@ -97,14 +102,18 @@ impl Ipadm {
 
     /// Return the IP network associated with an address object, or None if
     /// there is no address object with this name.
-    pub fn addrobj_addr(
+    //
+    // TODO-correctness: There can be many addresses associated with an addrobj,
+    // e.g., for IPv6 where we have link-local + DHCPv6 addresses. This will
+    // ignore all but the first.
+    pub async fn addrobj_addr(
         addrobj: &str,
     ) -> Result<Option<IpNet>, ExecutionError> {
         // Note that additional privileges are not required to list address
         // objects, and so there is no `pfexec` here.
-        let mut cmd = std::process::Command::new(IPADM);
+        let mut cmd = Command::new(IPADM);
         let cmd = cmd.args(&["show-addr", "-po", "addr", addrobj]);
-        match execute(cmd) {
+        match execute_async(cmd).await {
             Err(ExecutionError::CommandFailure(info))
                 if [ADDROBJ_NOT_FOUND_ERR1, ADDROBJ_NOT_FOUND_ERR2]
                     .iter()
@@ -136,13 +145,15 @@ impl Ipadm {
     }
 
     /// Determine if a named address object exists
-    pub fn addrobj_exists(addrobj: &str) -> Result<bool, ExecutionError> {
-        Ok(Self::addrobj_addr(addrobj)?.is_some())
+    pub async fn addrobj_exists(addrobj: &str) -> Result<bool, ExecutionError> {
+        Ok(Self::addrobj_addr(addrobj).await?.is_some())
     }
 
     /// Set MTU to 9000 on both IPv4 and IPv6
-    pub fn set_interface_mtu(datalink: &str) -> Result<(), ExecutionError> {
-        let mut cmd = std::process::Command::new(PFEXEC);
+    pub async fn set_interface_mtu(
+        datalink: &str,
+    ) -> Result<(), ExecutionError> {
+        let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[
             IPADM,
             "set-ifprop",
@@ -153,9 +164,9 @@ impl Ipadm {
             "ipv4",
             datalink,
         ]);
-        execute(cmd)?;
+        execute_async(cmd).await?;
 
-        let mut cmd = std::process::Command::new(PFEXEC);
+        let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[
             IPADM,
             "set-ifprop",
@@ -166,40 +177,33 @@ impl Ipadm {
             "ipv6",
             datalink,
         ]);
-        execute(cmd)?;
+        execute_async(cmd).await?;
         Ok(())
     }
 
-    pub fn create_static_and_autoconfigured_addrs(
+    /// Create a link-local IPv6 addrconf address and a static IPv6 address.
+    pub async fn create_static_and_autoconfigured_addrs(
         datalink: &str,
         listen_addr: &Ipv6Addr,
     ) -> Result<(), ExecutionError> {
         // Create auto-configured address on the IP interface if it doesn't
         // already exist
         let addrobj = format!("{}/{}", datalink, IPV6_LINK_LOCAL_ADDROBJ_NAME);
-        Self::ensure_ip_addrobj_exists(&addrobj, AddrObjType::AddrConf)?;
+        Self::ensure_ip_addrobj_exists(&addrobj, AddrObjType::AddrConf).await?;
 
         // Create static address on the IP interface if it doesn't already exist
         let addrobj = format!("{}/{}", datalink, IPV6_STATIC_ADDROBJ_NAME);
         Self::ensure_ip_addrobj_exists(
             &addrobj,
             AddrObjType::Static((*listen_addr).into()),
-        )?;
-        Ok(())
-    }
-
-    // Create gateway on the IP interface if it doesn't already exist
-    pub fn create_opte_gateway(
-        opte_iface: &String,
-    ) -> Result<(), ExecutionError> {
-        let addrobj = format!("{}/public", opte_iface);
-        Self::ensure_ip_addrobj_exists(&addrobj, AddrObjType::DHCP)?;
+        )
+        .await?;
         Ok(())
     }
 
     /// Set TCP recv_buf to 1 MB.
-    pub fn set_tcp_recv_buf() -> Result<(), ExecutionError> {
-        let mut cmd = std::process::Command::new(PFEXEC);
+    pub async fn set_tcp_recv_buf() -> Result<(), ExecutionError> {
+        let mut cmd = Command::new(PFEXEC);
 
         // This is to improve single-connection throughput on large uploads
         // from clients, e.g., images. Modern browsers will almost always use
@@ -216,14 +220,14 @@ impl Ipadm {
             "recv_buf=1000000",
             "tcp",
         ]);
-        execute(cmd)?;
+        execute_async(cmd).await?;
 
         Ok(())
     }
 
     /// Set TCP congestion control algorithm to `cubic`.
-    pub fn set_tcp_congestion_control() -> Result<(), ExecutionError> {
-        let mut cmd = std::process::Command::new(PFEXEC);
+    pub async fn set_tcp_congestion_control() -> Result<(), ExecutionError> {
+        let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[
             IPADM,
             "set-prop",
@@ -232,7 +236,7 @@ impl Ipadm {
             "congestion_control=cubic",
             "tcp",
         ]);
-        execute(cmd)?;
+        execute_async(cmd).await?;
 
         Ok(())
     }

@@ -13,6 +13,11 @@ use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_test_utils::dev::{self, clickhouse::ClickHousePorts};
 use signal_hook_tokio::Signals;
 
+#[expect(
+    clippy::disallowed_macros,
+    reason = "this is a dev-tool, and avoiding a dependency on \
+     `omicron-runtime` helps minimize compile time."
+)]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = ChDevApp::parse();

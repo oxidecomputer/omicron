@@ -17,6 +17,7 @@ use crate::db::model::IpPoolResourceType;
 use crate::db::model::Name;
 use crate::db::model::Silo;
 use crate::db::model::VirtualProvisioningCollection;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -30,10 +31,11 @@ use nexus_db_fixed_data::silo::{DEFAULT_SILO, INTERNAL_SILO};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::Certificate;
 use nexus_db_model::ServiceKind;
+use nexus_db_model::SiloAuthSettings;
 use nexus_db_model::SiloQuotas;
-use nexus_types::external_api::params;
-use nexus_types::external_api::shared;
-use nexus_types::external_api::shared::SiloRole;
+use nexus_types::external_api::policy;
+use nexus_types::external_api::policy::SiloRole;
+use nexus_types::external_api::silo as silo_types;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -42,6 +44,9 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloGroupUuid;
+use omicron_uuid_kinds::SiloUuid;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
@@ -64,24 +69,31 @@ impl DataStore {
 
         debug!(opctx.log, "attempting to create built-in silos");
 
-        use nexus_db_schema::schema::silo::dsl;
-        use nexus_db_schema::schema::silo_quotas::dsl as quotas_dsl;
+        use nexus_db_schema::schema::silo;
+        use nexus_db_schema::schema::silo_auth_settings;
+        use nexus_db_schema::schema::silo_quotas;
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let count = self
             .transaction_retry_wrapper("load_builtin_silos")
             .transaction(&conn, |conn| async move {
-                diesel::insert_into(quotas_dsl::silo_quotas)
+                diesel::insert_into(silo_quotas::table)
                     .values(SiloQuotas::arbitrarily_high_default(
                         DEFAULT_SILO.id(),
                     ))
-                    .on_conflict(quotas_dsl::silo_id)
+                    .on_conflict(silo_quotas::silo_id)
                     .do_nothing()
                     .execute_async(&conn)
                     .await?;
-                let count = diesel::insert_into(dsl::silo)
+                diesel::insert_into(silo_auth_settings::table)
+                    .values(SiloAuthSettings::new(DEFAULT_SILO.id()))
+                    .on_conflict(silo_auth_settings::silo_id)
+                    .do_nothing()
+                    .execute_async(&conn)
+                    .await?;
+                let count = diesel::insert_into(silo::table)
                     .values([&*DEFAULT_SILO, &*INTERNAL_SILO])
-                    .on_conflict(dsl::id)
+                    .on_conflict(silo::id)
                     .do_nothing()
                     .execute_async(&conn)
                     .await?;
@@ -95,7 +107,7 @@ impl DataStore {
         self.virtual_provisioning_collection_create(
             opctx,
             VirtualProvisioningCollection::new(
-                DEFAULT_SILO.id(),
+                DEFAULT_SILO.id().into_untyped_uuid(),
                 CollectionTypeProvisioned::Silo,
             ),
         )
@@ -107,7 +119,7 @@ impl DataStore {
     async fn silo_create_query(
         opctx: &OpContext,
         silo: Silo,
-    ) -> Result<impl RunnableQuery<Silo>, Error> {
+    ) -> Result<impl RunnableQuery<Silo> + use<>, Error> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
         // If the new Silo has configuration mapping its roles to Fleet-level
@@ -141,7 +153,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         nexus_opctx: &OpContext,
-        new_silo_params: params::SiloCreate,
+        new_silo_params: silo_types::SiloCreate,
         new_silo_dns_names: &[String],
         dns_update: DnsVersionUpdateBuilder,
     ) -> CreateResult<Silo> {
@@ -152,63 +164,98 @@ impl DataStore {
                 opctx,
                 nexus_opctx,
                 new_silo_params,
+                true,
                 new_silo_dns_names,
                 dns_update,
             )
-            .await?;
+            .await
+            .map_err(|err| err.into_public_ignore_retries())?;
         Ok(silo)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn silo_create_conn(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         nexus_opctx: &OpContext,
-        new_silo_params: params::SiloCreate,
+        new_silo_params: silo_types::SiloCreate,
+        discoverable: bool,
         new_silo_dns_names: &[String],
         dns_update: DnsVersionUpdateBuilder,
     ) -> Result<Silo, TransactionError<Error>> {
-        let silo_id = Uuid::new_v4();
-        let silo_group_id = Uuid::new_v4();
+        let silo_id = SiloUuid::new_v4();
+        let silo_group_id = SiloGroupUuid::new_v4();
 
         let silo_create_query = Self::silo_create_query(
             opctx,
-            db::model::Silo::new_with_id(silo_id, new_silo_params.clone())?,
+            db::model::Silo::new_with_id(
+                silo_id,
+                new_silo_params.clone(),
+                discoverable,
+            )?,
         )
         .await?;
 
         let authz_silo =
-            authz::Silo::new(authz::FLEET, silo_id, LookupType::ById(silo_id));
+            authz::Silo::new(authz::FLEET, silo_id, LookupType::by_id(silo_id));
 
         let silo_admin_group_ensure_query = if let Some(ref admin_group_name) =
             new_silo_params.admin_group_name
         {
-            let silo_admin_group_ensure_query =
-                DataStore::silo_group_ensure_query(
-                    &nexus_opctx,
-                    &authz_silo,
-                    db::model::SiloGroup::new(
-                        silo_group_id,
-                        silo_id,
-                        admin_group_name.clone(),
-                    ),
-                )
-                .await?;
+            let maybe_silo_admin_group =
+                match new_silo_params.identity_mode.user_provision_type() {
+                    silo_types::UserProvisionType::ApiOnly => {
+                        Some(db::model::SiloGroup::new_api_only(
+                            silo_group_id,
+                            silo_id,
+                            admin_group_name.clone(),
+                        ))
+                    }
 
-            Some(silo_admin_group_ensure_query)
+                    silo_types::UserProvisionType::Jit => {
+                        Some(db::model::SiloGroup::new_jit(
+                            silo_group_id,
+                            silo_id,
+                            admin_group_name.clone(),
+                        ))
+                    }
+
+                    silo_types::UserProvisionType::Scim => {
+                        // Do not create any group automatically, the SCIM
+                        // provisioning client is responsible for all user and
+                        // group CRUD.
+                        None
+                    }
+                };
+
+            if let Some(silo_admin_group) = maybe_silo_admin_group {
+                let silo_admin_group_ensure_query =
+                    DataStore::silo_group_ensure_query(
+                        &nexus_opctx,
+                        &authz_silo,
+                        silo_admin_group,
+                    )
+                    .await?;
+
+                Some(silo_admin_group_ensure_query)
+            } else {
+                None
+            }
         } else {
             None
         };
 
         let silo_admin_group_role_assignment_queries =
-            if new_silo_params.admin_group_name.is_some() {
+            if silo_admin_group_ensure_query.is_some() {
                 // Grant silo admin role for members of the admin group.
-                let policy = shared::Policy {
-                    role_assignments: vec![shared::RoleAssignment {
-                        identity_type: shared::IdentityType::SiloGroup,
-                        identity_id: silo_group_id,
-                        role_name: SiloRole::Admin,
-                    }],
+                let policy = policy::Policy {
+                    role_assignments: vec![
+                        policy::RoleAssignment::for_silo_group(
+                            silo_group_id,
+                            SiloRole::Admin,
+                        ),
+                    ],
                 };
 
                 let silo_admin_group_role_assignment_queries =
@@ -247,7 +294,7 @@ impl DataStore {
                 self.virtual_provisioning_collection_create_on_connection(
                     &conn,
                     VirtualProvisioningCollection::new(
-                        silo.id(),
+                        silo.id().into_untyped_uuid(),
                         CollectionTypeProvisioned::Silo,
                     ),
                 )
@@ -300,6 +347,12 @@ impl DataStore {
                     ),
                 )
                 .await?;
+                self.silo_auth_settings_create(
+                    &conn,
+                    &authz_silo,
+                    SiloAuthSettings::new(authz_silo.id()),
+                )
+                .await?;
 
                 Ok::<Silo, TransactionError<Error>>(silo)
             })
@@ -341,7 +394,7 @@ impl DataStore {
                 &params.map_name(|n| Name::ref_cast(n)),
             ),
         }
-        .filter(dsl::id.ne(INTERNAL_SILO.id()))
+        .filter(dsl::id.ne(to_db_typed_uuid(INTERNAL_SILO.id())))
         .filter(dsl::time_deleted.is_null());
 
         if let Discoverability::DiscoverableOnly = discoverability {
@@ -367,7 +420,10 @@ impl DataStore {
     ) -> ListResultVec<Silo> {
         opctx.check_complex_operations_allowed()?;
         let mut all_silos = Vec::new();
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let batch = self
                 .silos_list(
@@ -376,8 +432,9 @@ impl DataStore {
                     discoverability,
                 )
                 .await?;
-            paginator =
-                p.found_batch(&batch, &|s: &nexus_db_model::Silo| s.id());
+            paginator = p.found_batch(&batch, &|s: &nexus_db_model::Silo| {
+                s.id().into_untyped_uuid()
+            });
             all_silos.extend(batch);
         }
         Ok(all_silos)
@@ -407,7 +464,7 @@ impl DataStore {
         let id = authz_silo.id();
         let rcgen = db_silo.rcgen;
         let project_found = project::dsl::project
-            .filter(project::dsl::silo_id.eq(id))
+            .filter(project::dsl::silo_id.eq(to_db_typed_uuid(id)))
             .filter(project::dsl::time_deleted.is_null())
             .select(project::dsl::id)
             .limit(1)
@@ -432,7 +489,7 @@ impl DataStore {
             .transaction(&conn, |conn| async move {
                 let updated_rows = diesel::update(silo::dsl::silo)
                     .filter(silo::dsl::time_deleted.is_null())
-                    .filter(silo::dsl::id.eq(id))
+                    .filter(silo::dsl::id.eq(to_db_typed_uuid(id)))
                     .filter(silo::dsl::rcgen.eq(rcgen))
                     .set(silo::dsl::time_deleted.eq(now))
                     .execute_async(&conn)
@@ -451,9 +508,13 @@ impl DataStore {
                 }
 
                 self.silo_quotas_delete(opctx, &conn, &authz_silo).await?;
+                self.silo_auth_settings_delete(opctx, &conn, &authz_silo)
+                    .await?;
 
                 self.virtual_provisioning_collection_delete_on_connection(
-                    &opctx.log, &conn, id,
+                    &opctx.log,
+                    &conn,
+                    id.into_untyped_uuid(),
                 )
                 .await?;
 
@@ -482,8 +543,12 @@ impl DataStore {
         .filter(
             silo_user_password_hash::dsl::silo_user_id.eq_any(
                 silo_user::dsl::silo_user
-                    .filter(silo_user::dsl::silo_id.eq(id))
+                    .filter(silo_user::dsl::silo_id.eq(to_db_typed_uuid(id)))
                     .filter(silo_user::dsl::time_deleted.is_null())
+                    .filter(
+                        silo_user::dsl::user_provision_type
+                            .eq(db_silo.user_provision_type),
+                    )
                     .select(silo_user::dsl::id),
             ),
         )
@@ -497,8 +562,12 @@ impl DataStore {
         );
 
         let updated_rows = diesel::update(silo_user::dsl::silo_user)
-            .filter(silo_user::dsl::silo_id.eq(id))
+            .filter(silo_user::dsl::silo_id.eq(to_db_typed_uuid(id)))
             .filter(silo_user::dsl::time_deleted.is_null())
+            .filter(
+                silo_user::dsl::user_provision_type
+                    .eq(db_silo.user_provision_type),
+            )
             .set(silo_user::dsl::time_deleted.eq(now))
             .execute_async(&*conn)
             .await
@@ -515,8 +584,15 @@ impl DataStore {
                 .filter(
                     silo_group_membership::dsl::silo_group_id.eq_any(
                         silo_group::dsl::silo_group
-                            .filter(silo_group::dsl::silo_id.eq(id))
+                            .filter(
+                                silo_group::dsl::silo_id
+                                    .eq(to_db_typed_uuid(id)),
+                            )
                             .filter(silo_group::dsl::time_deleted.is_null())
+                            .filter(
+                                silo_group::dsl::user_provision_type
+                                    .eq(db_silo.user_provision_type),
+                            )
                             .select(silo_group::dsl::id),
                     ),
                 )
@@ -533,8 +609,12 @@ impl DataStore {
 
         // delete all silo groups
         let updated_rows = diesel::update(silo_group::dsl::silo_group)
-            .filter(silo_group::dsl::silo_id.eq(id))
+            .filter(silo_group::dsl::silo_id.eq(to_db_typed_uuid(id)))
             .filter(silo_group::dsl::time_deleted.is_null())
+            .filter(
+                silo_group::dsl::user_provision_type
+                    .eq(db_silo.user_provision_type),
+            )
             .set(silo_group::dsl::time_deleted.eq(now))
             .execute_async(&*conn)
             .await
@@ -549,7 +629,7 @@ impl DataStore {
         use nexus_db_schema::schema::identity_provider::dsl as idp_dsl;
 
         let updated_rows = diesel::update(idp_dsl::identity_provider)
-            .filter(idp_dsl::silo_id.eq(id))
+            .filter(idp_dsl::silo_id.eq(to_db_typed_uuid(id)))
             .filter(idp_dsl::time_deleted.is_null())
             .set(idp_dsl::time_deleted.eq(Utc::now()))
             .execute_async(&*conn)
@@ -561,7 +641,7 @@ impl DataStore {
         use nexus_db_schema::schema::saml_identity_provider::dsl as saml_idp_dsl;
 
         let updated_rows = diesel::update(saml_idp_dsl::saml_identity_provider)
-            .filter(saml_idp_dsl::silo_id.eq(id))
+            .filter(saml_idp_dsl::silo_id.eq(to_db_typed_uuid(id)))
             .filter(saml_idp_dsl::time_deleted.is_null())
             .set(saml_idp_dsl::time_deleted.eq(Utc::now()))
             .execute_async(&*conn)
@@ -577,7 +657,7 @@ impl DataStore {
         use nexus_db_schema::schema::certificate::dsl as cert_dsl;
 
         let updated_rows = diesel::update(cert_dsl::certificate)
-            .filter(cert_dsl::silo_id.eq(id))
+            .filter(cert_dsl::silo_id.eq(to_db_typed_uuid(id)))
             .filter(cert_dsl::time_deleted.is_null())
             .set(cert_dsl::time_deleted.eq(Utc::now()))
             .execute_async(&*conn)
@@ -590,7 +670,7 @@ impl DataStore {
         use nexus_db_schema::schema::ip_pool_resource;
 
         let updated_rows = diesel::delete(ip_pool_resource::table)
-            .filter(ip_pool_resource::resource_id.eq(id))
+            .filter(ip_pool_resource::resource_id.eq(id.into_untyped_uuid()))
             .filter(
                 ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
             )
@@ -601,6 +681,20 @@ impl DataStore {
         debug!(
             opctx.log,
             "deleted {} IP pool links for silo {}", updated_rows, id
+        );
+
+        // delete subnet pool links (not subnet pools, just the links)
+        use nexus_db_schema::schema::subnet_pool_silo_link;
+
+        let updated_rows = diesel::delete(subnet_pool_silo_link::table)
+            .filter(subnet_pool_silo_link::silo_id.eq(to_db_typed_uuid(id)))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        debug!(
+            opctx.log,
+            "deleted {} subnet pool links for silo {}", updated_rows, id
         );
 
         Ok(())

@@ -4,8 +4,6 @@
 
 //! AST node for the `group_by` operation.
 
-// Copyright 2024 Oxide Computer Company
-
 use chrono::DateTime;
 use chrono::Utc;
 
@@ -51,6 +49,10 @@ impl GroupBy {
             "Group by operations require exactly one table",
         );
         let table = &tables[0];
+        anyhow::ensure!(
+            table.len() > 0,
+            "Input tables to a `group_by` must not be empty"
+        );
         anyhow::ensure!(
             table.is_aligned(),
             "Input tables to a `group_by` must be aligned"

@@ -82,7 +82,7 @@ Propolis server, where the actual VM initialization occurs.
 . At this point, the instance is up and running, and the Sled Agent monitors it
 such that Nexus may be notified if the VM changes state.
 
-= TODOs
+== TODOs
 
 We track issues on Github using the following labels:
 
@@ -92,8 +92,6 @@ We track issues on Github using the following labels:
 
 However, the following are general areas of improvement for the Sled Agent:
 
-* (Correctness) Plumbing of Nexus-customizable InstanceProperties, such as
-image, bootrom, memory, vcpus.
 * (Correctness) Integration of OPTE to manage the network and apply policy
 changes as requested by Nexus.
 * (Resilience) On initialization of the `InstanceManager`, the Sled Agent

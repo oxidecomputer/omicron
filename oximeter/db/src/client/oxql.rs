@@ -4,10 +4,6 @@
 
 //! Client methods for running OxQL queries against the timeseries database.
 
-// Copyright 2024 Oxide Computer Company
-
-use super::Handle;
-use super::query_summary::QuerySummary;
 use crate::Error;
 use crate::Metric;
 use crate::Target;
@@ -29,6 +25,7 @@ use slog::Logger;
 use slog::debug;
 use slog::trace;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::time::Duration;
 use std::time::Instant;
 use uuid::Uuid;
@@ -70,7 +67,7 @@ pub struct OxqlResult {
     /// This returns a list of summaries, one for each SQL query that was run.
     /// It includes the ClickHouse-assigned query ID for correlation and looking
     /// up in the logs.
-    pub query_summaries: Vec<QuerySummary>,
+    pub query_summaries: Vec<oxql_types::QuerySummary>,
 
     /// The list of OxQL tables returned from the query.
     pub tables: Vec<oxql_types::Table>,
@@ -179,7 +176,6 @@ impl Client {
         let result = self
             .run_oxql_query(
                 &query_log,
-                &mut self.claim_connection().await?,
                 query_id,
                 filtered_query,
                 &mut total_rows_fetched,
@@ -332,11 +328,9 @@ impl Client {
     // concatenate the results; and then apply all the remaining
     // transformations.
     #[async_recursion::async_recursion]
-    #[allow(clippy::too_many_arguments)]
     async fn run_oxql_query(
         &self,
         query_log: &Logger,
-        handle: &mut Handle,
         query_id: Uuid,
         query: oxql::Query,
         total_rows_fetched: &mut u64,
@@ -367,7 +361,6 @@ impl Client {
                 let res = self
                     .run_oxql_query(
                         query_log,
-                        handle,
                         query_id,
                         subq,
                         total_rows_fetched,
@@ -405,6 +398,18 @@ impl Client {
 
         // This is a flat query, let's just run it directly. First step is
         // getting the schema itself.
+        //
+        // TODO-robustness: This seems fragile when running against a replicated
+        // ClickHouse cluster. In that case, each of these different query
+        // components could execute against a different replica, which might
+        // have different sets of data from one another depending on the
+        // replication status. In that case, we could run into weird races or
+        // inconsistencies. Holding a database claim across the entire OxQL
+        // query is slightly better (though terrible for other reasons), but
+        // still not perfect: ClickHouse's weak gaurantees around consistency
+        // and the fact that we're inserting into multiple tables today make it
+        // possible that querying even a single replica could cause consistency
+        // problems.
         let query_start = Instant::now();
         let oxql::ast::SplitQuery::Flat(query) = split else {
             unreachable!();
@@ -413,7 +418,7 @@ impl Client {
         let Some(schema) = self.schema_for_timeseries(name).await? else {
             return Err(Error::TimeseriesNotFound(name.to_string()));
         };
-        debug!(
+        trace!(
             query_log,
             "running flat OxQL query";
             "query" => ?query,
@@ -425,14 +430,14 @@ impl Client {
         // that apply to this timeseries in particular. We also need to merge
         // them in with the predicates passed in from a possible outer query.
         let preds = query.coalesced_predicates(outer_predicates.clone());
-        debug!(
+        trace!(
             query_log,
             "coalesced predicates from flat query";
             "outer_predicates" => ?&outer_predicates,
             "coalesced" => ?&preds,
         );
         let limit = query.coalesced_limits(outer_limit);
-        debug!(
+        trace!(
             query_log,
             "coalesced limit operations from flat query";
             "outer_limit" => ?&outer_limit,
@@ -473,7 +478,7 @@ impl Client {
         // groups for the measurement queries.
         let disjoint_predicates = if let Some(preds) = preds.as_ref() {
             let simplified = preds.simplify_to_dnf()?;
-            debug!(
+            trace!(
                 query_log,
                 "simplified filtering predicates to disjunctive normal form";
                 "original" => %preds,
@@ -497,7 +502,7 @@ impl Client {
         let mut query_summaries =
             Vec::with_capacity(1 + disjoint_predicates.len());
         for predicates in disjoint_predicates.into_iter() {
-            debug!(
+            trace!(
                 query_log,
                 "running disjoint query predicate";
                 "predicate" => predicates.as_ref().map(|s| s.to_string()).unwrap_or("none".into()),
@@ -505,13 +510,9 @@ impl Client {
             let all_fields_query =
                 self.all_fields_query(&schema, predicates.as_ref())?;
             let (summary, consistent_keys) = self
-                .select_matching_timeseries_info(
-                    handle,
-                    &all_fields_query,
-                    &schema,
-                )
+                .select_matching_timeseries_info(&all_fields_query, &schema)
                 .await?;
-            debug!(
+            trace!(
                 query_log,
                 "fetched information for matching timeseries keys";
                 "n_keys" => consistent_keys.len(),
@@ -553,7 +554,6 @@ impl Client {
         let (summaries, timeseries_by_key) = self
             .select_matching_samples(
                 query_log,
-                handle,
                 &schema,
                 &consistent_key_groups,
                 limit,
@@ -570,7 +570,7 @@ impl Client {
         )?];
 
         let transformations = query.transformations();
-        debug!(
+        trace!(
             query_log,
             "constructed OxQL table, starting transformation pipeline";
             "name" => tables[0].name(),
@@ -609,13 +609,15 @@ impl Client {
     async fn select_matching_samples(
         &self,
         query_log: &Logger,
-        handle: &mut Handle,
         schema: &TimeseriesSchema,
         consistent_key_groups: &[ConsistentKeyGroup],
         limit: Option<Limit>,
         total_rows_fetched: &mut u64,
     ) -> Result<
-        (Vec<QuerySummary>, BTreeMap<TimeseriesKey, oxql_types::Timeseries>),
+        (
+            Vec<oxql_types::QuerySummary>,
+            BTreeMap<TimeseriesKey, oxql_types::Timeseries>,
+        ),
         Error,
     > {
         // We'll create timeseries for each key on the fly. To enable computing
@@ -640,8 +642,12 @@ impl Client {
                 limit,
                 total_rows_fetched,
             )?;
-            let result =
-                self.execute_with_block(handle, &measurements_query).await?;
+            let result = self
+                .execute_with_block(
+                    &mut self.claim_connection().await?,
+                    &measurements_query,
+                )
+                .await?;
             let summary = result.query_summary();
             summaries.push(summary);
             let Some(block) = result.data.as_ref() else {
@@ -667,7 +673,7 @@ impl Client {
                 n_measurements += 1;
             }
         }
-        debug!(
+        trace!(
             query_log,
             "fetched measurements for OxQL query";
             "n_keys" => measurements_by_key.len(),
@@ -724,7 +730,7 @@ impl Client {
                 oxql_types::point::Points::gauge_from_gauge(&measurements)?
             };
             timeseries.points = points;
-            debug!(
+            trace!(
                 query_log,
                 "inserted new OxQL timeseries";
                 "key" => key,
@@ -947,98 +953,100 @@ impl Client {
         Ok(query)
     }
 
+    // Build a reasonably efficient query to retrieve all fields for a given
+    // timeseries. Joins in ClickHouse are expensive, so aggregate all relevant
+    // fields from each relevant fields table in a single subquery, then join
+    // the results together. This results in n - 1 joins, where n is the number
+    // of relevant fields tables. Note that we may be able to improve
+    // performance in future ClickHouse versions, which have better support for
+    // Variant types, better support for the merge() table function, and faster
+    // joins.
     fn all_fields_query_raw(
         &self,
         schema: &TimeseriesSchema,
     ) -> (bool, String) {
         match schema.field_schema.len() {
             0 => unreachable!(),
-            1 => {
-                let field_schema = schema.field_schema.first().unwrap();
-                (
-                    true,
-                    format!(
-                        "SELECT DISTINCT timeseries_key, field_value AS {field_name} \
-                        FROM {db_name}.{field_table} \
-                        WHERE \
-                            timeseries_name = '{timeseries_name}' AND \
-                            field_name = '{field_name}'",
-                        field_name = field_schema.name,
-                        db_name = crate::DATABASE_NAME,
-                        field_table = field_table_name(field_schema.field_type),
-                        timeseries_name = schema.timeseries_name,
-                    ),
-                )
-            }
             _ => {
-                let mut top_level_columns =
-                    Vec::with_capacity(schema.field_schema.len());
-                let mut field_subqueries =
-                    Vec::with_capacity(schema.field_schema.len());
-
-                // Select each field value, aliasing it to its field name.
+                // Build a vector of top-level select expressions, as well as a
+                // map from fields to lists of subquery select expressions.
+                let mut top_selects: Vec<String> = Vec::new();
+                let mut select_map: HashMap<oximeter::FieldType, Vec<String>> =
+                    HashMap::new();
                 for field_schema in schema.field_schema.iter() {
-                    top_level_columns.push(format!(
-                        "filter_on_{}.field_value AS {}",
-                        field_schema.name, field_schema.name
-                    ));
-                    field_subqueries.push((
-                        format!(
-                            "SELECT DISTINCT timeseries_key, field_value \
-                                FROM {db_name}.{field_table} \
-                                WHERE \
-                                    timeseries_name = '{timeseries_name}' AND \
-                                    field_name = '{field_name}' \
-                                ",
-                            db_name = crate::DATABASE_NAME,
-                            field_table =
-                                field_table_name(field_schema.field_type),
-                            timeseries_name = schema.timeseries_name,
-                            field_name = field_schema.name,
-                        ),
-                        format!("filter_on_{}", field_schema.name),
+                    select_map
+                        .entry(field_schema.field_type)
+                        .or_insert_with(|| vec![String::from("timeseries_key")])
+                        .push(format!(
+                            "anyIf(field_value, field_name = '{}') AS {}",
+                            field_schema.name, field_schema.name
+                        ));
+                    top_selects.push(format!(
+                        "{}_pivot.{} AS {}",
+                        field_table_name(field_schema.field_type),
+                        field_schema.name,
+                        field_schema.name
                     ));
                 }
 
-                // Write the top-level select statement, starting by selecting
-                // the timeseries key from the first field schema.
-                let mut out = format!(
-                    "SELECT {}.timeseries_key AS timeseries_key, {} FROM ",
-                    field_subqueries[0].1,
-                    top_level_columns.join(", "),
-                );
+                // Sort field tables by number of columns, descending.
+                // ClickHouse recommends joining larger tables to smaller
+                // tables, and doesn't currently reorder joins automatically.
+                let mut field_types: Vec<oximeter::FieldType> =
+                    select_map.keys().cloned().collect();
+                field_types.sort_by(|a, b| {
+                    select_map[b]
+                        .len()
+                        .cmp(&select_map[a].len())
+                        .then(field_table_name(*a).cmp(&field_table_name(*b)))
+                });
 
-                // Then add all the subqueries selecting each field.
-                //
-                // We need to add these, along with their aliases. The first
-                // such subquery has no join conditions, but the later ones all
-                // refer to the previous via:
-                //
-                // `ON <previous_filter_name>.timeseries_key = <current_filter_name>.timeseries_key`
-                for (i, (subq, alias)) in field_subqueries.iter().enumerate() {
-                    // Push the subquery itself, aliased.
-                    out.push('(');
-                    out.push_str(subq);
-                    out.push_str(") AS ");
-                    out.push_str(alias);
-
-                    // Push the join conditions.
-                    if i > 0 {
-                        let previous_alias = &field_subqueries[i - 1].1;
-                        out.push_str(" ON ");
-                        out.push_str(alias);
-                        out.push_str(".timeseries_key = ");
-                        out.push_str(previous_alias);
-                        out.push_str(".timeseries_key");
-                    }
-
-                    // Push the "INNER JOIN" expression itself, for all but the
-                    // last subquery.
-                    if i < field_subqueries.len() - 1 {
-                        out.push_str(" INNER JOIN ");
-                    }
+                // Build a map from field type to pivot subquery. We filter by
+                // timeseries_name, group by timeseries_key, and use anyIf to
+                // pivot fields to a wide table. We can use anyIf to take the
+                // first matching value because a given timeseries key is
+                // always associated with the same set of fields, so all rows
+                // with a given (timeseries_key, field_name) will have the same
+                // field_value.
+                let mut query_map: HashMap<oximeter::FieldType, String> =
+                    HashMap::new();
+                for field_type in field_types.clone() {
+                    let selects = &select_map[&field_type];
+                    let query = format!(
+                        "(
+                            SELECT
+                                {select}
+                            FROM {db_name}.{from}
+                            WHERE timeseries_name = '{timeseries_name}'
+                            GROUP BY timeseries_key
+                        ) AS {subquery_name}_pivot",
+                        select = selects.join(", "),
+                        db_name = crate::DATABASE_NAME,
+                        from = field_table_name(field_type),
+                        timeseries_name = schema.timeseries_name,
+                        subquery_name = field_table_name(field_type),
+                    );
+                    query_map.insert(field_type, query);
                 }
-                (false, out)
+
+                // Assemble the final query.
+                let mut from = query_map[&field_types[0]].clone();
+                for field_type in field_types.iter().skip(1) {
+                    from = format!(
+                        "{from} JOIN {query} ON {source}_pivot.timeseries_key = {dest}_pivot.timeseries_key",
+                        from = from,
+                        query = query_map[field_type],
+                        source = field_table_name(field_types[0]),
+                        dest = field_table_name(*field_type),
+                    );
+                }
+                top_selects.push(format!(
+                    "{}_pivot.timeseries_key AS timeseries_key",
+                    field_table_name(field_types[0])
+                ));
+                let query =
+                    format!("SELECT {} FROM {}", top_selects.join(", "), from);
+                (false, query)
             }
         }
     }
@@ -1184,7 +1192,7 @@ mod tests {
         QueryAuthzScope, chunk_consistent_key_groups_impl,
     };
     use crate::oxql::ast::grammar::query_parser;
-    use crate::{Client, DATABASE_TIMESTAMP_FORMAT, DbWrite};
+    use crate::{Client, DATABASE_TIMESTAMP_FORMAT, DbWrite, User};
     use crate::{Metric, Target};
     use chrono::{DateTime, NaiveDate, Utc};
     use dropshot::test_util::LogContext;
@@ -1194,8 +1202,10 @@ mod tests {
         AuthzScope, DatumType, FieldSchema, FieldSource, FieldType, Sample,
         TimeseriesSchema, Units,
     };
-    use oximeter::{FieldValue, types::Cumulative};
+    use oximeter::{FieldValue, TimeseriesName, types::Cumulative};
     use oxql_types::{Table, Timeseries, point::Points};
+    use qorb::policy::{Policy, SetConfig};
+    use qorb::resolvers::fixed::FixedResolver;
     use std::collections::{BTreeMap, BTreeSet};
     use std::time::Duration;
 
@@ -1316,8 +1326,9 @@ mod tests {
         let db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let client = Client::new(db.native_address().into(), &logctx.log);
-        client
+        let admin_client =
+            Client::new(User::Admin, db.native_address().into(), &logctx.log);
+        admin_client
             .init_single_node_db()
             .await
             .expect("Failed to init single-node oximeter database");
@@ -1328,11 +1339,267 @@ mod tests {
             .flatten()
             .cloned()
             .collect();
-        client
+        admin_client
             .insert_samples(&samples)
             .await
             .expect("Failed to insert test data");
+        let client =
+            Client::new(User::Writer, db.native_address().into(), &logctx.log);
         TestContext { logctx, clickhouse: db, client, test_data }
+    }
+
+    #[tokio::test]
+    async fn test_get_fields_query() {
+        let ctx = setup_oxql_test("test_get_fields_query").await;
+
+        let schema = ctx
+            .client
+            .schema_for_timeseries(
+                &TimeseriesName::try_from("some_target:some_metric").unwrap(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let query = ctx.client.all_fields_query(&schema, None).unwrap();
+        let want = "SELECT
+            fields_i32_pivot.foo AS foo,
+            fields_u32_pivot.index AS index,
+            fields_string_pivot.name AS name,
+            fields_i32_pivot.timeseries_key AS timeseries_key
+        FROM
+        (
+            SELECT
+                timeseries_key,
+                anyIf(field_value, field_name = 'foo') AS foo
+            FROM oximeter.fields_i32
+            WHERE timeseries_name = 'some_target:some_metric'
+            GROUP BY timeseries_key
+        ) AS fields_i32_pivot
+        JOIN
+        (
+            SELECT
+                timeseries_key,
+                anyIf(field_value, field_name = 'name') AS name
+            FROM oximeter.fields_string
+            WHERE timeseries_name = 'some_target:some_metric'
+            GROUP BY timeseries_key
+        ) AS fields_string_pivot ON fields_i32_pivot.timeseries_key = fields_string_pivot.timeseries_key
+        JOIN
+        (
+            SELECT
+                timeseries_key,
+                anyIf(field_value, field_name = 'index') AS index
+            FROM oximeter.fields_u32
+            WHERE timeseries_name = 'some_target:some_metric'
+            GROUP BY timeseries_key
+        ) AS fields_u32_pivot ON fields_i32_pivot.timeseries_key = fields_u32_pivot.timeseries_key";
+        assert_eq!(
+            want.split_whitespace().collect::<Vec<&str>>().join(" "),
+            query.split_whitespace().collect::<Vec<&str>>().join(" ")
+        );
+
+        ctx.cleanup_successful().await;
+    }
+
+    #[tokio::test]
+    async fn test_get_fields() {
+        let ctx = setup_oxql_test("test_get_fields").await;
+
+        #[derive(Clone, Debug, oximeter::Metric)]
+        struct Metric1 {
+            foo: i32,
+            bar: i32,
+            datum: Cumulative<u64>,
+        }
+        #[derive(Clone, Debug, oximeter::Metric)]
+        struct Metric2 {
+            foo: i32,
+            baz: i32,
+            datum: Cumulative<u64>,
+        }
+
+        // Insert samples for multiple metrics with partially overlapping field
+        // names and types. Then we'll query for one of those metrics and
+        // assert that we only get the expected fields, and not fields of the
+        // same name and type from another metric.
+        let samples = [
+            Sample::new(
+                &SomeTarget { name: String::from("ts1"), index: 1 },
+                &Metric1 { foo: 1, bar: 2, datum: Cumulative::new(5) },
+            )
+            .unwrap(),
+            Sample::new(
+                &SomeTarget { name: String::from("ts1"), index: 1 },
+                &Metric1 { foo: 1, bar: 2, datum: Cumulative::new(6) },
+            )
+            .unwrap(),
+            Sample::new(
+                &SomeTarget { name: String::from("ts2"), index: 1 },
+                &Metric2 { foo: 3, baz: 4, datum: Cumulative::new(5) },
+            )
+            .unwrap(),
+            Sample::new(
+                &SomeTarget { name: String::from("ts2"), index: 1 },
+                &Metric2 { foo: 3, baz: 4, datum: Cumulative::new(6) },
+            )
+            .unwrap(),
+        ];
+        ctx.client
+            .insert_samples(&samples[..])
+            .await
+            .expect("failed to insert samples");
+
+        let query = "get some_target:metric2 | filter timestamp > @2020-01-01";
+        let result = ctx
+            .client
+            .oxql_query(query, QueryAuthzScope::Fleet)
+            .await
+            .expect("failed to run OxQL query");
+
+        assert_eq!(result.tables.len(), 1, "should be exactly 1 table");
+        let table = result.tables.get(0).unwrap();
+
+        assert_eq!(table.n_timeseries(), 1, "should be exactly 1 series");
+        let series: Vec<&Timeseries> = table.timeseries().collect();
+
+        assert_eq!(series[0].fields.get("foo").unwrap(), &FieldValue::I32(3));
+        assert_eq!(series[0].fields.get("baz").unwrap(), &FieldValue::I32(4));
+
+        ctx.cleanup_successful().await;
+    }
+
+    #[tokio::test]
+    async fn test_string_literals_are_escaped() {
+        let ctx = setup_oxql_test("test_string_literals_are_escaped").await;
+
+        // Unescaped \n and \x41 become a newline and 'A' in ClickHouse.
+        // A trailing backslash would escape the closing quote.
+        let weird_name = String::from(
+            "it's a \\n \\x41 weird\tname\n\0 with ünïcödé 日本\\",
+        );
+        let target = SomeTarget { name: weird_name.clone(), index: 1 };
+        let metric = SomeMetric { foo: 0, datum: Cumulative::new(1) };
+        let sample = Sample::new(&target, &metric).unwrap();
+        ctx.client
+            .insert_samples(&[sample])
+            .await
+            .expect("failed to insert samples");
+
+        // Backslashes and control characters need OxQL escapes too.
+        let query = concat!(
+            "get some_target:some_metric | filter name == ",
+            r#""it's a \\n \\x41 weird\tname\n\0 with ünïcödé 日本\\""#,
+        );
+        let result = ctx
+            .client
+            .oxql_query(query, QueryAuthzScope::Fleet)
+            .await
+            .expect("failed to run OxQL query");
+        assert_eq!(result.tables.len(), 1);
+        let table = result.tables.get(0).unwrap();
+        assert_eq!(table.n_timeseries(), 1);
+        let series = table.timeseries().next().unwrap();
+        assert_eq!(
+            series.fields.get("name").unwrap(),
+            &FieldValue::String(weird_name.into()),
+        );
+
+        ctx.cleanup_successful().await;
+    }
+
+    #[tokio::test]
+    async fn test_string_literal_cannot_inject_sql() {
+        let ctx =
+            setup_oxql_test("test_string_literal_cannot_inject_sql").await;
+
+        // The filter renders to SQL as `equals(name, '<value>')`. This value
+        // closes that literal and call, adds a predicate that is always true,
+        // and reopens a literal to consume the closing quote and paren that
+        // follow. Without escaping, it is valid SQL and matches every key for
+        // this timeseries. Rust filtering can hide extra SQL results, so check
+        // the keys returned by ClickHouse before running the full OxQL query.
+        let filter =
+            r#"filter name == "first-target') OR 1 = 1 OR equals(name, '""#;
+        let predicate = query_parser::filter(filter).unwrap();
+        let schema = ctx
+            .client
+            .schema_for_timeseries(
+                &TimeseriesName::try_from("some_target:some_metric").unwrap(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let field_query =
+            ctx.client.all_fields_query(&schema, Some(&predicate)).unwrap();
+        let (_, matching_keys) = ctx
+            .client
+            .select_matching_timeseries_info(&field_query, &schema)
+            .await
+            .expect("failed to query matching keys");
+        assert!(
+            matching_keys.is_empty(),
+            "unexpected matching keys: {matching_keys:?}",
+        );
+
+        let query = format!("get some_target:some_metric | {filter}");
+        let result = ctx
+            .client
+            .oxql_query(&query, QueryAuthzScope::Fleet)
+            .await
+            .expect("failed to run OxQL query");
+        assert_eq!(result.tables.len(), 1);
+        assert_eq!(result.tables.get(0).unwrap().n_timeseries(), 0);
+
+        ctx.cleanup_successful().await;
+    }
+
+    // ClickHouse decodes the C-style escapes it recognizes inside a string
+    // literal, so an unescaped `\b` reaches the regex engine as a backspace
+    // rather than a word boundary. Escapes it does not recognize, like `\d`,
+    // keep their backslash. Of the four names below, only a word-boundary `\b`
+    // matches exactly one.
+    #[tokio::test]
+    async fn test_regex_string_literals_are_escaped() {
+        let ctx =
+            setup_oxql_test("test_regex_string_literals_are_escaped").await;
+        let metric = SomeMetric { foo: 0, datum: Cumulative::new(1) };
+        let samples: Vec<_> =
+            ["it's foo", "it's foobar", "it's afoo", "it is foo"]
+                .into_iter()
+                .map(|name| {
+                    Sample::new(
+                        &SomeTarget { name: name.to_string(), index: 1 },
+                        &metric,
+                    )
+                    .unwrap()
+                })
+                .collect();
+        ctx.client.insert_samples(&samples).await.unwrap();
+
+        let filter = r#"filter name ~= "it's \\bfoo\\b""#;
+        let predicate = query_parser::filter(filter).unwrap();
+        let schema = TimeseriesSchema::from(&samples[0]);
+        let field_query =
+            ctx.client.all_fields_query(&schema, Some(&predicate)).unwrap();
+        let (_, matching_keys) = ctx
+            .client
+            .select_matching_timeseries_info(&field_query, &schema)
+            .await
+            .unwrap();
+        assert_eq!(matching_keys.len(), 1);
+        let (target, _) = matching_keys.values().next().unwrap();
+        let name = target.fields.iter().find(|f| f.name == "name").unwrap();
+        assert_eq!(name.value, FieldValue::from("it's foo"));
+
+        let query = format!("get some_target:some_metric | {filter}");
+        let result =
+            ctx.client.oxql_query(query, QueryAuthzScope::Fleet).await.unwrap();
+        assert_eq!(result.tables.len(), 1);
+        assert_eq!(result.tables[0].n_timeseries(), 1);
+        let series = result.tables[0].timeseries().next().unwrap();
+        assert_eq!(series.fields["name"], FieldValue::from("it's foo"));
+
+        ctx.cleanup_successful().await;
     }
 
     #[tokio::test]
@@ -1780,5 +2047,46 @@ mod tests {
             )
         );
         logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn oxql_query_uses_at_most_one_concurrent_claim() {
+        let ctx =
+            setup_oxql_test("oxql_query_uses_at_most_one_concurrent_claim")
+                .await;
+
+        // Construct a pool with exactly one claim. This ensures that we never
+        // try to acquire a claim while already holding one.
+        let policy = Policy {
+            max_slots: 1,
+            claim_timeout: Duration::from_secs(5),
+            set_config: SetConfig { max_count: 1, ..Default::default() },
+            ..Default::default()
+        };
+        let client = Client::new_with_pool_policy(
+            User::Reader,
+            Box::new(FixedResolver::new([ctx
+                .clickhouse
+                .native_address()
+                .into()])),
+            "single-slot-test",
+            policy,
+            &ctx.logctx.log,
+        );
+
+        // Run a stupid-simple query under a timeout to avoid stalling the test
+        // itself.
+        let result = tokio::time::timeout(
+            Duration::from_secs(30),
+            client.oxql_query(
+                "get some_target:some_metric | last 1",
+                QueryAuthzScope::Fleet,
+            ),
+        )
+        .await
+        .expect("oxql query should not time out")
+        .expect("oxql query should succeed with a single-slot pool");
+        assert!(!result.tables.is_empty(), "Should have some result tables");
+        ctx.cleanup_successful().await;
     }
 }

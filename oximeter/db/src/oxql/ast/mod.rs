@@ -4,8 +4,6 @@
 
 //! AST for the Oximeter Query Language.
 
-// Copyright 2024 Oxide Computer Company
-
 use std::collections::BTreeSet;
 use std::fmt;
 

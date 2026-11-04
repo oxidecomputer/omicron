@@ -6,11 +6,11 @@
 
 use crate::storage::{self, UpdateError};
 use dns_server_api::DnsServerApi;
-use dns_service_client::{
-    ERROR_CODE_BAD_UPDATE_GENERATION, ERROR_CODE_UPDATE_IN_PROGRESS,
-};
 use dropshot::RequestContext;
-use internal_dns_types::config::{DnsConfig, DnsConfigParams};
+use internal_dns_types::config::{
+    DnsConfig, DnsConfigParams, ERROR_CODE_BAD_UPDATE_GENERATION,
+    ERROR_CODE_UPDATE_IN_PROGRESS,
+};
 
 pub struct Context {
     store: storage::Store,

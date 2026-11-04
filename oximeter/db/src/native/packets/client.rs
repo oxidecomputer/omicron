@@ -2,13 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
-// Copyright 2024 Oxide Computer Company
 
 //! Packets sent from client to server.
 
 use super::server::ProfileInfo;
 use super::server::Progress;
-use crate::QuerySummary;
 use crate::native::block::Block;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -17,13 +15,13 @@ use std::sync::LazyLock;
 use uuid::Uuid;
 
 /// A packet sent from client to server in the native protocol.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 #[allow(dead_code)]
 pub enum Packet {
     /// The initial packet to the server, to say hello.
-    Hello(Hello),
+    Hello(Box<Hello>),
     /// Send a query to the server.
-    Query(Query),
+    Query(Box<Query>),
     /// Send a block of data to the server.
     Data(Block),
     /// Cancel the current query.
@@ -52,7 +50,7 @@ impl Packet {
 }
 
 /// The initial packet sent from client to server after connecting.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct Hello {
     /// The name of the client.
     pub client_name: Cow<'static, str>,
@@ -80,22 +78,68 @@ pub const PROTOCOL_VERSION: u64 = super::server::REVISION;
 // database doesn't exist, so we just use the real "default" and always
 // fully-qualify table names with the database in queries.
 const DATABASE: Cow<'static, str> = Cow::Borrowed("default");
-const USERNAME: Cow<'static, str> = Cow::Borrowed("default");
-const PASSWORD: Cow<'static, str> = Cow::Borrowed("");
+const OXIMETER_ADMIN_USERNAME: Cow<'static, str> = Cow::Borrowed("default");
+const OXIMETER_ADMIN_CLIENT_NAME: Cow<'static, str> =
+    Cow::Borrowed("oximeter_admin");
+const OXIMETER_READER_USERNAME: Cow<'static, str> = Cow::Borrowed("reader");
+const OXIMETER_READER_CLIENT_NAME: Cow<'static, str> =
+    Cow::Borrowed("oximeter_reader");
+const OXIMETER_WRITER_USERNAME: Cow<'static, str> = Cow::Borrowed("writer");
+const OXIMETER_WRITER_CLIENT_NAME: Cow<'static, str> =
+    Cow::Borrowed("oximeter_writer");
+const EMPTY_PASSWORD: Cow<'static, str> = Cow::Borrowed("");
 
-/// Static hello packet sent from the oximeter client.
-pub static OXIMETER_HELLO: Hello = Hello {
-    client_name: CLIENT_NAME,
-    version_major: VERSION_MAJOR,
-    version_minor: VERSION_MINOR,
-    protocol_version: PROTOCOL_VERSION,
-    database: DATABASE,
-    username: USERNAME,
-    password: PASSWORD,
-};
+fn hello(client_name: Cow<'static, str>, username: Cow<'static, str>) -> Hello {
+    Hello {
+        client_name,
+        version_major: VERSION_MAJOR,
+        version_minor: VERSION_MINOR,
+        protocol_version: PROTOCOL_VERSION,
+        database: DATABASE,
+        username,
+        password: EMPTY_PASSWORD,
+    }
+}
+
+/// The user to connect to the server as.
+#[derive(Clone, Copy, Debug, strum::EnumIter)]
+pub enum User {
+    /// A read-only user, suitable for serving OxQL metric queries through
+    /// Nexus.
+    Reader,
+    /// A user with write permissions, suitable for `oximeter` itself.
+    Writer,
+    /// An admin user, should only be used in tests or the ClickHouse admin
+    /// servers.
+    Admin,
+}
+
+impl User {
+    /// Return the hello packet for the user.
+    pub fn hello(&self) -> Hello {
+        hello(self.client_name(), self.username())
+    }
+
+    /// Return the username for this user.
+    pub fn username(&self) -> Cow<'static, str> {
+        match self {
+            User::Reader => OXIMETER_READER_USERNAME,
+            User::Writer => OXIMETER_WRITER_USERNAME,
+            User::Admin => OXIMETER_ADMIN_USERNAME,
+        }
+    }
+
+    fn client_name(&self) -> Cow<'static, str> {
+        match self {
+            User::Reader => OXIMETER_READER_CLIENT_NAME,
+            User::Writer => OXIMETER_WRITER_CLIENT_NAME,
+            User::Admin => OXIMETER_ADMIN_CLIENT_NAME,
+        }
+    }
+}
 
 /// A query sent from the client.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct Query {
     /// An ID for the query. In our case, these are always UUIDs.
     pub id: Cow<'static, str>,
@@ -114,11 +158,21 @@ pub struct Query {
 }
 
 impl Query {
-    pub fn new(id: Uuid, address: SocketAddr, query: &str) -> Self {
+    pub fn new(id: Uuid, address: SocketAddr, user: User, query: &str) -> Self {
+        Self::new_with_settings(id, address, user, query, Settings::new())
+    }
+
+    pub fn new_with_settings(
+        id: Uuid,
+        address: SocketAddr,
+        user: User,
+        query: &str,
+        settings: Settings,
+    ) -> Self {
         Self {
             id: id.to_string().into(),
-            client_info: ClientInfo::new(id.to_string(), address),
-            settings: Settings::new(),
+            client_info: ClientInfo::new(id.to_string(), address, user),
+            settings,
             secret: "".into(),
             stage: Stage::Complete,
             compression: 0,
@@ -132,6 +186,8 @@ impl Query {
 pub struct QueryResult {
     /// The ID of the query.
     pub id: Uuid,
+    /// The raw SQL query.
+    pub query: String,
     /// The accumulated query progress for the whole query.
     pub progress: Progress,
     /// Any data returned by the query.
@@ -147,17 +203,57 @@ pub struct QueryResult {
 
 impl QueryResult {
     /// Return a query summary from the full query result.
-    pub fn query_summary(&self) -> QuerySummary {
-        QuerySummary {
+    pub fn query_summary(&self) -> oxql_types::QuerySummary {
+        oxql_types::QuerySummary {
             id: self.id,
+            query: self.query.clone(),
             elapsed: self.progress.query_time,
             io_summary: self.progress.into(),
+            profile_summary: self.profile_summary(),
         }
+    }
+
+    /// Aggregate ClickHouse profile events by name.
+    ///
+    /// By default, ClickHouse includes a block of ProfileEvents with each
+    /// query when using the native protocol:
+    ///
+    /// ```text
+    /// host_name                      current_time         thread_id  type       name                                 value
+    /// ────────────────────────────── ──────────────────── ────────── ───────── ──────────────────────────────── ──────────
+    /// oxz_clickhouse_aa646c82.local  2026-03-25 21:00:00          0 increment ReadCompressedBytes               124134764
+    /// oxz_clickhouse_aa646c82.local  2026-03-25 21:00:00          0 increment DiskReadElapsedMicroseconds          211350
+    /// oxz_clickhouse_aa646c82.local  2026-03-25 21:00:00          0 increment SelectedRows                       16941579
+    /// oxz_clickhouse_aa646c82.local  2026-03-25 21:00:00          0 increment UserTimeMicroseconds                 339959
+    /// oxz_clickhouse_aa646c82.local  2026-03-25 21:00:00          0 increment SystemTimeMicroseconds              2169535
+    /// oxz_clickhouse_aa646c82.local  2026-03-25 21:00:00          0 gauge     MemoryTrackerUsage                 40823063
+    /// oxz_clickhouse_aa646c82.local  2026-03-25 21:00:00          0 gauge     MemoryTrackerPeakUsage             40823063
+    /// ...
+    /// ```
+    ///
+    /// If profile events are available, sum their values by event name to
+    /// attach to the query summary.
+    fn profile_summary(&self) -> BTreeMap<String, i64> {
+        let mut summary = BTreeMap::new();
+        if let Some(block) = self.profile_events.as_ref() {
+            let names = block
+                .column_values("name")
+                .ok()
+                .and_then(|v| v.as_string().ok());
+            let values =
+                block.column_values("value").ok().and_then(|v| v.as_i64().ok());
+            if let (Some(names), Some(values)) = (names, values) {
+                for (name, &value) in names.iter().zip(values.iter()) {
+                    *summary.entry(name.clone()).or_insert(0) += value;
+                }
+            }
+        }
+        summary
     }
 }
 
 /// The stage through which we run a query.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize)]
 #[allow(dead_code)]
 pub enum Stage {
     /// Fetch the column names and types resulting from the query.
@@ -172,7 +268,7 @@ pub enum Stage {
 
 /// The details about the client, sent in each query.
 // Also mostly static data, no otel.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct ClientInfo {
     /// Who initiated the query?
     pub query_kind: QueryKind,
@@ -229,10 +325,10 @@ static CLIENT_HOSTNAME: LazyLock<String> = LazyLock::new(|| {
 });
 
 impl ClientInfo {
-    fn new(id: String, address: SocketAddr) -> Self {
+    fn new(id: String, address: SocketAddr, user: User) -> Self {
         Self {
             query_kind: QueryKind::Initial,
-            initial_user: USERNAME,
+            initial_user: user.username(),
             initial_query_id: id.into(),
             initial_address: address.to_string().into(),
             initial_time: 0,
@@ -254,7 +350,7 @@ impl ClientInfo {
 /// We always use TCP to talk to the server.
 pub const TCP_INTERFACE_KIND: u8 = 1;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct OtelState {
     pub trace_id: [u8; 16],
     pub span_id: [u8; 16],
@@ -263,7 +359,7 @@ pub struct OtelState {
 }
 
 /// Indicates who initiated the query.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize)]
 #[allow(dead_code)]
 pub enum QueryKind {
     /// Default, unused value.
@@ -281,7 +377,7 @@ pub enum QueryKind {
 pub type Settings = BTreeMap<Cow<'static, str>, Setting>;
 
 /// A single setting in the settings map.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct Setting {
     /// The value for the setting.
     pub value: Cow<'static, str>,

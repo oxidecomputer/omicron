@@ -1,0 +1,16 @@
+header:
+  # default is 80; allow shebangs and XML prologs before the header
+  license-location-threshold: 120
+  license:
+    spdx-id: MPL-2.0
+
+  paths:
+    - '**/*.rs'
+    - '**/*.sh'
+
+  paths-ignore:
+    - 'target'
+    - 'out'
+    - 'workspace-hack'
+    - '**/*.md'
+    - 'LICENSE'

@@ -1,8 +1,11 @@
 #!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #:
 #: name = "clippy (helios)"
 #: variety = "basic"
-#: target = "helios-2.0"
+#: target = "helios-3.0"
 #: rust_toolchain = true
 #: output_rules = []
 
@@ -34,4 +37,4 @@ ptime -m bash ./tools/install_builder_prerequisites.sh -y
 banner clippy
 export CARGO_INCREMENTAL=0
 ptime -m cargo xtask clippy
-RUSTDOCFLAGS="--document-private-items -D warnings" ptime -m cargo doc --workspace --no-deps
+RUSTDOCFLAGS="--document-private-items -D warnings --cfg tokio" ptime -m cargo doc --workspace --no-deps

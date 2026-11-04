@@ -8,24 +8,29 @@ use super::MAX_DISKS_PER_INSTANCE;
 use super::MAX_EPHEMERAL_IPS_PER_INSTANCE;
 use super::MAX_EXTERNAL_IPS_PER_INSTANCE;
 use super::MAX_MEMORY_BYTES_PER_INSTANCE;
+use super::MAX_MULTICAST_GROUPS_PER_INSTANCE;
 use super::MAX_NICS_PER_INSTANCE;
 use super::MAX_SSH_KEYS_PER_INSTANCE;
 use super::MAX_VCPU_PER_INSTANCE;
 use super::MIN_MEMORY_BYTES_PER_INSTANCE;
 use crate::app::sagas;
 use crate::app::sagas::NexusSaga;
-use crate::external_api::params;
+use crate::db::datastore::Disk;
+use crate::db::datastore::LocalStorageAllocation;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
+use iddqd::IdOrdMap;
+use itertools::Either;
+use itertools::Itertools as _;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
+use nexus_db_model::ExternalIp;
 use nexus_db_model::InstanceIntendedState as IntendedState;
 use nexus_db_model::InstanceUpdate;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_model::Vmm as DbVmm;
-use nexus_db_model::VmmRuntimeState;
 use nexus_db_model::VmmState as DbVmmState;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
@@ -33,27 +38,41 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
-use nexus_db_queries::db::datastore::InstanceStateComputer;
+use nexus_db_queries::db::datastore::VmmStateUpdateResult;
 use nexus_db_queries::db::identity::Resource;
-use nexus_types::external_api::views;
+use nexus_db_queries::db::model::InstanceStateComputer;
+use nexus_types::external_api::disk;
+use nexus_types::external_api::external_ip;
+use nexus_types::external_api::instance;
+use nexus_types::internal_api::params::InstanceMigrateDestination;
+use omicron_common::http_client::internal_http_client;
+// We'll use `InstanceState` frequently, and the code that uses it is already
+// subtle enough: break from the pattern of external API types being referenced
+// by `topic::Name` to help legibility and keep line wrapping under control..
+use nexus_types::external_api::instance::InstanceState;
+use nexus_types::external_api::ip_pool;
+use nexus_types::external_api::multicast;
+use nexus_types::external_api::project;
+use nexus_types::instance::SledVmmState;
+use nexus_types::instance::VmmState;
+use omicron_common::address::ConcreteIp;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Hostname;
-use omicron_common::api::external::InstanceCpuCount;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::internal::nexus;
-use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::MulticastGroupUuid;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use propolis_client::support::InstanceSerialConsoleHelper;
@@ -65,9 +84,20 @@ use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use sagas::instance_common::ExternalIpAttach;
 use sagas::instance_start;
 use sagas::instance_update;
+use sled_agent_client::types::DelegatedZvol;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::VmmPutStateBody;
+use sled_agent_types::attached_subnet::AttachedSubnet;
+use sled_agent_types::attached_subnet::AttachedSubnetKind;
+use sled_agent_types::instance as sled_agent;
+use sled_agent_types::instance::ExternalIpConfig;
+use sled_agent_types::instance::ExternalIps;
+use sled_agent_types::inventory::SourceNatConfig;
+use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeSet;
+use std::collections::{HashMap, HashSet};
 use std::matches;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -116,7 +146,9 @@ impl From<SledAgentInstanceError> for dropshot::HttpError {
                 // a 4xx error. So, instead, we construct an internal error and
                 // then munge its status code.
                 // See https://github.com/oxidecomputer/dropshot/issues/693
-                let mut error = HttpError::for_internal_error(e.to_string());
+                let mut error = HttpError::for_internal_error(
+                    InlineErrorChain::new(&e).to_string(),
+                );
                 error.status_code = if e.is_timeout() {
                     ErrorStatusCode::GATEWAY_TIMEOUT
                 } else {
@@ -167,6 +199,16 @@ impl SledAgentInstanceError {
             _ => false,
         }
     }
+
+    /// If this error indicates that the VMM should be marked as `Failed`,
+    /// returns the reason for the failure.
+    pub fn vmm_failure_reason(&self) -> Option<db::model::VmmFailureReason> {
+        if self.vmm_gone() {
+            Some(db::model::VmmFailureReason::NoSuchInstance)
+        } else {
+            None
+        }
+    }
 }
 
 /// An error that can be returned from an operation that changes the state of an
@@ -206,6 +248,7 @@ impl From<InstanceStateChangeError> for dropshot::HttpError {
 
 /// The kinds of state changes that can be requested of an instance's current
 /// VMM (i.e. the VMM pointed to be the instance's `propolis_id` field).
+#[derive(Debug)]
 pub(crate) enum InstanceStateChangeRequest {
     Run,
     Reboot,
@@ -230,6 +273,7 @@ impl From<InstanceStateChangeRequest>
 
 /// The actions that can be taken in response to an
 /// [`InstanceStateChangeRequest`].
+#[derive(Debug)]
 enum InstanceStateChangeRequestAction {
     /// The instance is already in the correct state, so no action is needed.
     AlreadyDone,
@@ -273,7 +317,7 @@ async fn normalize_ssh_keys(
         .actor_required()
         .internal_context("loading current user's ssh keys for new Instance")?;
     let (.., authz_user) = LookupPath::new(opctx, datastore)
-        .silo_user_id(actor.actor_id())
+        .silo_user_actor(&actor)?
         .lookup_for(authz::Action::ListChildren)
         .await?;
 
@@ -314,13 +358,17 @@ async fn normalize_anti_affinity_groups(
 }
 
 impl super::Nexus {
+    /// Look up an instance by name or UUID.
+    ///
+    /// The `project` parameter is required for name-based lookup (provides scope)
+    /// and must NOT be specified for UUID-based lookup.
     pub fn instance_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        instance_selector: params::InstanceSelector,
+        instance_selector: instance::InstanceSelector,
     ) -> LookupResult<lookup::Instance<'a>> {
         match instance_selector {
-            params::InstanceSelector {
+            instance::InstanceSelector {
                 instance: NameOrId::Id(id),
                 project: None,
             } => {
@@ -328,45 +376,242 @@ impl super::Nexus {
                     LookupPath::new(opctx, &self.db_datastore).instance_id(id);
                 Ok(instance)
             }
-            params::InstanceSelector {
+            instance::InstanceSelector {
                 instance: NameOrId::Name(name),
                 project: Some(project),
             } => {
                 let instance = self
-                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .project_lookup(
+                        opctx,
+                        project::ProjectSelector { project },
+                    )?
                     .instance_name_owned(name.into());
                 Ok(instance)
             }
-            params::InstanceSelector { instance: NameOrId::Id(_), .. } => {
-                Err(Error::invalid_request(
-                    "when providing instance as an ID project should not be specified",
-                ))
-            }
+            instance::InstanceSelector {
+                instance: NameOrId::Id(_), ..
+            } => Err(Error::invalid_request(
+                "when providing instance as an ID project should not be specified",
+            )),
             _ => Err(Error::invalid_request(
                 "instance should either be UUID or project should be specified",
             )),
         }
     }
 
+    /// Handle multicast group membership changes during instance reconfiguration.
+    ///
+    /// Diff is computed against the instance's active memberships only
+    /// (i.e., rows with `time_deleted IS NULL`). Removed ("Left") rows are
+    /// ignored here and handled by the reconciler.
+    async fn handle_multicast_group_changes(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        multicast_groups: &[multicast::MulticastGroupJoinSpec],
+    ) -> Result<(), Error> {
+        let instance_id = authz_instance.id();
+
+        // Check if multicast is enabled -> if not, skip all multicast operations
+        if !self.multicast_enabled() {
+            debug!(opctx.log,
+                   "multicast not enabled, skipping multicast group changes";
+                   "instance_id" => %instance_id,
+                   "requested_groups_count" => multicast_groups.len());
+            return Ok(());
+        }
+
+        debug!(
+            opctx.log,
+            "processing multicast group changes";
+            "instance_id" => %instance_id,
+            "requested_groups" => ?multicast_groups,
+            "requested_groups_count" => multicast_groups.len()
+        );
+
+        // Get current multicast group memberships (active-only)
+        let current_memberships = self
+            .datastore()
+            .multicast_group_members_list_by_instance(
+                opctx,
+                InstanceUuid::from_untyped_uuid(instance_id),
+                &DataPageParams::max_page(),
+            )
+            .await?;
+        let current_group_ids: HashSet<_> =
+            current_memberships.iter().map(|m| m.external_group_id).collect();
+
+        debug!(
+            opctx.log,
+            "current multicast memberships";
+            "instance_id" => %instance_id,
+            "current_memberships_count" => current_memberships.len(),
+            "current_group_ids" => ?current_group_ids
+        );
+
+        // Resolve multicast group identifiers to group IDs.
+        //
+        // For existing memberships (group already in current_group_ids), we just
+        // need the ID - no validation needed since source_ips: None means
+        // "preserve existing sources".
+        //
+        // For new memberships, we resolve (which creates groups if needed) and
+        // validation (address family + SSM) happens inside resolve.
+        let mut new_group_ids = HashSet::new();
+        let mut group_source_ips: HashMap<Uuid, Option<Vec<std::net::IpAddr>>> =
+            HashMap::new();
+        for spec in multicast_groups {
+            // Check if this is an existing membership by looking up the group ID first
+            let group_uuid = match self
+                .resolve_multicast_group_identifier(opctx, &spec.group)
+                .await
+            {
+                Ok(id) => {
+                    let uuid = id.into_untyped_uuid();
+                    // If already a member, skip validation (None = preserve)
+                    if !current_group_ids.contains(&uuid) {
+                        // New membership - validate (address family + SSM)
+                        self.resolve_multicast_group_identifier_with_sources(
+                            opctx,
+                            &spec.group,
+                            spec.source_ips.as_deref(),
+                            spec.ip_version,
+                        )
+                        .await?;
+                    }
+                    uuid
+                }
+                Err(Error::ObjectNotFound { .. }) => {
+                    // Group doesn't exist: resolve will create it (and validate accordingly)
+                    let id = self
+                        .resolve_multicast_group_identifier_with_sources(
+                            opctx,
+                            &spec.group,
+                            spec.source_ips.as_deref(),
+                            spec.ip_version,
+                        )
+                        .await?;
+                    id.into_untyped_uuid()
+                }
+                Err(e) => return Err(e),
+            };
+            new_group_ids.insert(group_uuid);
+            group_source_ips.insert(group_uuid, spec.source_ips.clone());
+        }
+
+        // Validate no duplicate groups were specified
+        if new_group_ids.len() != multicast_groups.len() {
+            return Err(Error::invalid_request(
+                "Duplicate multicast group specified in request",
+            ));
+        }
+
+        // Determine which groups to leave and join
+        let groups_to_leave: Vec<_> =
+            current_group_ids.difference(&new_group_ids).cloned().collect();
+        let groups_to_join: Vec<_> =
+            new_group_ids.difference(&current_group_ids).cloned().collect();
+
+        debug!(
+            opctx.log,
+            "membership changes";
+            "instance_id" => %instance_id,
+            "groups_to_leave" => ?groups_to_leave,
+            "groups_to_join" => ?groups_to_join
+        );
+
+        // Remove members from groups that are no longer wanted
+        for group_id in groups_to_leave {
+            debug!(
+                opctx.log,
+                "removing member from group";
+                "instance_id" => %instance_id,
+                "group_id" => %group_id
+            );
+            self.datastore()
+                .multicast_group_member_detach_by_group_and_instance(
+                    opctx,
+                    MulticastGroupUuid::from_untyped_uuid(group_id),
+                    InstanceUuid::from_untyped_uuid(instance_id),
+                )
+                .await?;
+        }
+
+        // Add members to new groups with their source_ips.
+        // Validation (address family + SSM) already happened in resolve.
+        for group_id in groups_to_join {
+            let source_ips = group_source_ips
+                .get(&group_id)
+                .cloned()
+                .expect("group_id must be in group_source_ips");
+
+            debug!(
+                opctx.log,
+                "adding member to group (reconciler will handle dataplane updates)";
+                "instance_id" => %instance_id,
+                "group_id" => %group_id,
+                "source_ips" => ?source_ips
+            );
+            self.datastore()
+                .multicast_group_member_attach_to_instance(
+                    opctx,
+                    MulticastGroupUuid::from_untyped_uuid(group_id),
+                    InstanceUuid::from_untyped_uuid(instance_id),
+                    source_ips.as_deref(),
+                )
+                .await?;
+        }
+
+        Ok(())
+    }
+
     pub(crate) async fn instance_reconfigure(
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-        params: &params::InstanceUpdate,
+        params: &instance::InstanceUpdate,
     ) -> UpdateResult<InstanceAndActiveVmm> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
-        check_instance_cpu_memory_sizes(params.ncpus, params.memory)?;
+        let instance::InstanceUpdate {
+            ncpus,
+            memory,
+            auto_restart_policy,
+            boot_disk,
+            cpu_platform,
+            multicast_groups,
+            enable_jumbo_frames,
+        } = params;
 
-        let boot_disk_id = match params.boot_disk.clone() {
+        check_instance_cpu_memory_sizes(*ncpus, *memory)?;
+
+        // Opting in to jumbo frames requires the fleet-wide opt-in. Opting out
+        // (`Some(false)`) is always allowed.
+        if *enable_jumbo_frames {
+            let settings = self
+                .db_datastore
+                .system_networking_settings_view(opctx)
+                .await?;
+            if !settings.external_jumbo_frames_opt_in_enabled {
+                return Err(Error::invalid_request(
+                    "enable_jumbo_frames may only be set to true when the \
+                     fleet-wide jumbo-frames opt-in is enabled by a fleet \
+                     administrator",
+                ));
+            }
+        }
+
+        let boot_disk_id = match boot_disk.as_ref() {
             Some(disk) => {
-                let selector = params::DiskSelector {
+                let selector = disk::DiskSelector {
                     project: match &disk {
-                        NameOrId::Name(_) => Some(authz_project.id().into()),
+                        NameOrId::Name(_) => Some(NameOrId::Id(
+                            authz_project.id().into_untyped_uuid(),
+                        )),
                         NameOrId::Id(_) => None,
                     },
-                    disk,
+                    disk: disk.clone(),
                 };
                 let (.., authz_disk) = self
                     .disk_lookup(opctx, selector)?
@@ -378,29 +623,59 @@ impl super::Nexus {
             None => None,
         };
 
-        let auto_restart_policy = params.auto_restart_policy.map(Into::into);
-        let ncpus = params.ncpus.into();
-        let memory = params.memory.into();
+        let auto_restart_policy = auto_restart_policy.map(Into::into);
+        let ncpus = (*ncpus).into();
+        let memory = (*memory).into();
+        let cpu_platform = cpu_platform.map(Into::into);
 
-        let update =
-            InstanceUpdate { boot_disk_id, auto_restart_policy, ncpus, memory };
-        self.datastore()
+        let update = InstanceUpdate {
+            boot_disk_id,
+            auto_restart_policy,
+            ncpus,
+            memory,
+            cpu_platform,
+            enable_jumbo_frames: *enable_jumbo_frames,
+        };
+
+        // Update the instance configuration
+        let result = self
+            .datastore()
             .instance_reconfigure(opctx, &authz_instance, update)
-            .await
+            .await;
+
+        // Handle multicast group updates if specified
+        if let Some(multicast_groups) = multicast_groups {
+            self.handle_multicast_group_changes(
+                opctx,
+                &authz_instance,
+                multicast_groups,
+            )
+            .await?;
+        }
+
+        // Return early with any database errors before activating reconciler
+        let instance_result = result?;
+
+        // Activate multicast reconciler after successful reconfiguration if multicast groups were modified
+        if multicast_groups.is_some() {
+            self.background_tasks.task_multicast_reconciler.activate();
+        }
+
+        Ok(instance_result)
     }
 
     pub(crate) async fn project_create_instance(
         self: &Arc<Self>,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        params: &params::InstanceCreate,
+        params: &instance::InstanceCreate,
     ) -> CreateResult<InstanceAndActiveVmm> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
         check_instance_cpu_memory_sizes(params.ncpus, params.memory)?;
 
-        let all_disks: Vec<&params::InstanceDiskAttachment> =
+        let all_disks: Vec<&instance::InstanceDiskAttachment> =
             params.boot_disk.iter().chain(params.disks.iter()).collect();
 
         // Validate parameters
@@ -410,32 +685,76 @@ impl super::Nexus {
                 MAX_DISKS_PER_INSTANCE
             )));
         }
+
         for disk in all_disks.iter() {
-            if let params::InstanceDiskAttachment::Create(create) = disk {
+            if let instance::InstanceDiskAttachment::Create(create) = disk {
                 self.validate_disk_create_params(opctx, &authz_project, create)
                     .await?;
             }
         }
+
         if params.external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
             return Err(Error::invalid_request(&format!(
                 "An instance may not have more than {} external IP addresses",
                 MAX_EXTERNAL_IPS_PER_INSTANCE,
             )));
         }
-        if params
+
+        if params.multicast_groups.len() > MAX_MULTICAST_GROUPS_PER_INSTANCE {
+            return Err(Error::invalid_request(&format!(
+                "An instance may not join more than {} multicast groups",
+                MAX_MULTICAST_GROUPS_PER_INSTANCE,
+            )));
+        }
+
+        // Requiring jumbo frames on a new instance requires the fleet-wide
+        // opt-in.
+        if params.enable_jumbo_frames {
+            let settings = self
+                .db_datastore
+                .system_networking_settings_view(opctx)
+                .await?;
+            if !settings.external_jumbo_frames_opt_in_enabled {
+                return Err(Error::invalid_request(
+                    "enable_jumbo_frames may only be set on an instance when \
+                     the fleet-wide jumbo-frames opt-in is enabled by a \
+                     fleet administrator",
+                ));
+            }
+        }
+
+        // Collect ephemeral IP selectors for validation
+        let ephemeral_selectors: Vec<_> = params
             .external_ips
             .iter()
-            .filter(|v| matches!(v, params::ExternalIpCreate::Ephemeral { .. }))
-            .count()
-            > MAX_EPHEMERAL_IPS_PER_INSTANCE
-        {
+            .filter_map(|v| match v {
+                instance::ExternalIpCreate::Ephemeral { pool_selector } => {
+                    Some(pool_selector)
+                }
+                _ => None,
+            })
+            .collect();
+
+        if ephemeral_selectors.len() > MAX_EPHEMERAL_IPS_PER_INSTANCE {
             return Err(Error::invalid_request(&format!(
-                "An instance may not have more than {} ephemeral IP address",
+                "An instance may not have more than {} ephemeral IP addresses",
                 MAX_EPHEMERAL_IPS_PER_INSTANCE,
             )));
         }
-        if let params::InstanceNetworkInterfaceAttachment::Create(ref ifaces) =
-            params.network_interfaces
+
+        // If requesting two ephemeral IPs, validate they specify different versions
+        if ephemeral_selectors.len() == 2 {
+            self.validate_ephemeral_ip_pair(
+                opctx,
+                ephemeral_selectors[0],
+                ephemeral_selectors[1],
+            )
+            .await?;
+        }
+
+        if let instance::InstanceNetworkInterfaceAttachment::Create(
+            ref ifaces,
+        ) = params.network_interfaces
         {
             if ifaces.len() > MAX_NICS_PER_INSTANCE {
                 return Err(Error::invalid_request(&format!(
@@ -496,7 +815,7 @@ impl super::Nexus {
         let saga_params = sagas::instance_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_id: authz_project.id(),
-            create_params: params::InstanceCreate {
+            create_params: instance::InstanceCreate {
                 ssh_public_keys: ssh_keys,
                 anti_affinity_groups,
                 ..params.clone()
@@ -515,7 +834,7 @@ impl super::Nexus {
 
         let instance_id = saga_outputs
             .lookup_node_output::<Uuid>("instance_id")
-            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .map_err(|e| Error::internal_error(&format!("{:#}", e)))
             .internal_context("looking up output from instance create saga")?;
 
         // If the caller asked to start the instance, kick off that saga.
@@ -540,7 +859,9 @@ impl super::Nexus {
             }
         }
 
+        // Activate background tasks after successful instance creation
         self.background_tasks.task_vpc_route_manager.activate();
+        self.background_tasks.task_multicast_reconciler.activate();
 
         // TODO: This operation should return the instance as it was created.
         // Refetching the instance state here won't return that version of the
@@ -613,8 +934,36 @@ impl super::Nexus {
             )
             .await?;
 
+        // Activate background tasks after successful saga completion
         self.background_tasks.task_vpc_route_manager.activate();
+        self.background_tasks.task_multicast_reconciler.activate();
         Ok(())
+    }
+
+    /// Returns true if any of the attached disks are type LocalStorage
+    pub(crate) async fn instance_uses_local_storage(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) -> Result<bool, Error> {
+        let disks = self
+            .db_datastore
+            .instance_list_disks(
+                opctx,
+                authz_instance,
+                &PaginatedBy::Name(DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: std::num::NonZeroU32::new(MAX_DISKS_PER_INSTANCE)
+                        .unwrap(),
+                }),
+            )
+            .await?;
+
+        Ok(disks.into_iter().any(|disk| match disk {
+            db::datastore::Disk::LocalStorage(_) => true,
+            db::datastore::Disk::Crucible(_) => false,
+        }))
     }
 
     pub(crate) async fn instance_migrate(
@@ -628,25 +977,36 @@ impl super::Nexus {
             .lookup_for(authz::Action::Modify)
             .await?;
 
+        // Cannot migrate instance if it has local storage
+        if self.instance_uses_local_storage(opctx, &authz_instance).await? {
+            return Err(Error::invalid_request(format!(
+                "cannot migrate instance {} as it uses local storage",
+                authz_instance.id()
+            )));
+        }
+
         let state = self
             .db_datastore
             .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
         let (instance, vmm) = (state.instance(), state.vmm());
 
-        if vmm.is_none()
-            || vmm.as_ref().unwrap().runtime.state != DbVmmState::Running
-        {
+        if vmm.is_none() || vmm.as_ref().unwrap().state != DbVmmState::Running {
             return Err(Error::invalid_request(
                 "instance must be running before it can migrate",
             ));
         }
 
         let vmm = vmm.as_ref().unwrap();
-        if vmm.sled_id == params.dst_sled_id {
-            return Err(Error::invalid_request(
-                "instance is already running on destination sled",
-            ));
+        match params.destination {
+            InstanceMigrateDestination::Autoselect => (),
+            InstanceMigrateDestination::ById { dst_sled_id } => {
+                if vmm.sled_id() == dst_sled_id {
+                    return Err(Error::invalid_request(
+                        "instance is already running on destination sled",
+                    ));
+                }
+            }
         }
 
         if instance.runtime().migration_id.is_some() {
@@ -666,7 +1026,9 @@ impl super::Nexus {
             )
             .await?;
 
+        // Activate background tasks after successful saga completion
         self.background_tasks.task_vpc_route_manager.activate();
+        self.background_tasks.task_multicast_reconciler.activate();
 
         // TODO correctness TODO robustness TODO design
         // Should we lookup the instance again here?
@@ -708,9 +1070,15 @@ impl super::Nexus {
             if let (InstanceStateChangeError::SledAgent(inner), Some(vmm)) =
                 (&e, state.vmm())
             {
-                if inner.vmm_gone() {
+                if let Some(reason) = inner.vmm_failure_reason() {
                     let _ = self
-                        .mark_vmm_failed(opctx, authz_instance, vmm, inner)
+                        .mark_vmm_failed(
+                            opctx,
+                            authz_instance,
+                            vmm,
+                            inner,
+                            reason,
+                        )
                         .await;
                 }
             }
@@ -762,6 +1130,11 @@ impl super::Nexus {
                     )
                     .await?;
 
+                // Activate multicast reconciler after successful instance start.
+                // The reconciler handles both group and member state, including
+                // Joining→Joined transitions now that sled_id is set.
+                self.background_tasks.task_multicast_reconciler.activate();
+
                 self.db_datastore
                     .instance_fetch_with_vmm(opctx, &authz_instance)
                     .await
@@ -803,38 +1176,28 @@ impl super::Nexus {
         {
             if let (InstanceStateChangeError::SledAgent(inner), Some(vmm)) =
                 (&e, state.vmm())
+                && let Some(reason) = inner.vmm_failure_reason()
             {
-                if inner.vmm_gone() {
-                    let _ = self
-                        .mark_vmm_failed(opctx, authz_instance, vmm, inner)
-                        .await;
-                }
+                let _ = self
+                    .mark_vmm_failed(opctx, authz_instance, vmm, inner, reason)
+                    .await;
             }
 
             return Err(e);
+        }
+
+        // Idempotent stop: with no active VMM, the instance-update saga will
+        // not fire (no terminal transition to drive it), so nudge the
+        // reconciler to converge any stale "Joined" rows now rather than wait
+        // a full reconciler tick.
+        if state.vmm().is_none() && self.multicast_enabled() {
+            self.background_tasks.task_multicast_reconciler.activate();
         }
 
         self.db_datastore
             .instance_fetch_with_vmm(opctx, &authz_instance)
             .await
             .map_err(Into::into)
-    }
-
-    /// Idempotently ensures that the sled specified in `db_instance` does not
-    /// have a record of the instance. If the instance is currently running on
-    /// this sled, this operation rudely terminates it.
-    pub(crate) async fn instance_ensure_unregistered(
-        &self,
-        propolis_id: &PropolisUuid,
-        sled_id: &SledUuid,
-    ) -> Result<Option<nexus::SledVmmState>, InstanceStateChangeError> {
-        let sa = self.sled_client(&sled_id).await?;
-        sa.vmm_unregister(propolis_id)
-            .await
-            .map(|res| res.into_inner().updated_runtime.map(Into::into))
-            .map_err(|e| {
-                InstanceStateChangeError::SledAgent(SledAgentInstanceError(e))
-            })
     }
 
     /// Determines the action to take on an instance's active VMM given a
@@ -854,8 +1217,11 @@ impl super::Nexus {
     /// - `Ok(action)` if the request is allowed to proceed. The result payload
     ///   specifies how to handle the request.
     /// - `Err` if the request should be denied.
+    //
+    // This is an associated function rather than a method so it can be tested
+    // independently.
     fn select_runtime_change_action(
-        &self,
+        log: &slog::Logger,
         instance_state: &db::model::Instance,
         vmm_state: &Option<db::model::Vmm>,
         requested: &InstanceStateChangeRequest,
@@ -868,10 +1234,7 @@ impl super::Nexus {
         // instance's current sled agent. If there is none, the request needs to
         // be handled specially based on its type.
         let (sled_id, propolis_id) = if let Some(vmm) = vmm_state {
-            (
-                SledUuid::from_untyped_uuid(vmm.sled_id),
-                PropolisUuid::from_untyped_uuid(vmm.id),
-            )
+            (vmm.sled_id(), PropolisUuid::from_untyped_uuid(vmm.id))
         } else {
             match effective_state {
                 // If there's no active sled because the instance is stopped,
@@ -940,15 +1303,11 @@ impl super::Nexus {
                         ));
                     }
 
-                    let prev_runtime = instance_state.runtime();
                     return Ok(
                         InstanceStateChangeRequestAction::UpdateRuntime(
-                            db::model::InstanceRuntimeState {
-                                time_updated: chrono::Utc::now(),
-                                r#gen: prev_runtime.r#gen.0.next().into(),
-                                nexus_state: db::model::InstanceState::NoVmm,
-                                ..prev_runtime.clone()
-                            },
+                            instance_state.runtime().with_new_nexus_state(
+                                db::model::InstanceState::NoVmm,
+                            ),
                         ),
                     );
                 }
@@ -961,10 +1320,82 @@ impl super::Nexus {
                     )));
                 }
 
+                // An internal `SledEvacuating` state surfaces as a `Rebooting`
+                // effective state, but it's nontrivially different in practice:
+                // in particular, there is no associated VMM with an instance
+                // that's currently stopped due to sled evacuation. We represent
+                // it as `Rebooting` because it will be reincarnated, but we can
+                // still allow some changes in this state (in particular: the
+                // user should be able to stop it).
+                InstanceState::Rebooting => {
+                    match instance_state.nexus_state {
+                        // This is the state we expect to see, and it should not
+                        // have an associated VMM.
+                        nexus_db_model::InstanceState::SledEvacuating => {
+                            if vmm_state.is_some() {
+                                return Err(Error::internal_error(
+                                    "an instance should not be in the \
+                                     SledEvacuating state if it has an \
+                                     active VMM",
+                                ));
+                            }
+                        }
+                        // These states should not be reachable at this point:
+                        // either they don't result in an effective state of
+                        // `Rebooting`, or if they do, there should be an
+                        // associated sled/VMM.
+                        nexus_db_model::InstanceState::Creating
+                        | nexus_db_model::InstanceState::NoVmm
+                        | nexus_db_model::InstanceState::Vmm
+                        | nexus_db_model::InstanceState::Failed
+                        | nexus_db_model::InstanceState::Destroyed => {
+                            return Err(Error::internal_error(format!(
+                                "instance is rebooting but not resident on a \
+                                 sled; internal state is {:?}",
+                                instance_state.nexus_state,
+                            )));
+                        }
+                    }
+
+                    match requested {
+                        // The instance reincarnation task is already trying to
+                        // run instances in this state; these requests are fine
+                        // and require no work on our part.
+                        InstanceStateChangeRequest::Run
+                        | InstanceStateChangeRequest::Reboot => {
+                            return Ok(
+                                InstanceStateChangeRequestAction::AlreadyDone,
+                            );
+                        }
+                        // Stopping an instance in this state is fine; we'll
+                        // stop trying to reincarnate it.
+                        InstanceStateChangeRequest::Stop => {
+                            return Ok(
+                                InstanceStateChangeRequestAction::UpdateRuntime(
+                                    instance_state
+                                        .runtime()
+                                        .with_new_nexus_state(
+                                            db::model::InstanceState::NoVmm,
+                                        ),
+                                ),
+                            );
+                        }
+                        // We can't migrate instances in this state, which is an
+                        // unfortunate asymmetry with "normal" rebooting
+                        // instances. But there's no source VMM to migrate from.
+                        InstanceStateChangeRequest::Migrate(_) => {
+                            return Err(Error::invalid_request(
+                                "cannot migrate instance that is rebooting \
+                                 due to sled evacuation",
+                            ));
+                        }
+                    }
+                }
+
                 // In other states, the instance should have a sled, and an
                 // internal invariant has been violated if it doesn't have one.
                 _ => {
-                    error!(self.log, "instance has no sled but isn't halted";
+                    error!(log, "instance has no sled but isn't halted";
                            "instance_id" => %instance_state.id(),
                            "state" => ?effective_state);
 
@@ -1028,12 +1459,14 @@ impl super::Nexus {
         prev_vmm_state: &Option<db::model::Vmm>,
         requested: InstanceStateChangeRequest,
     ) -> Result<(), InstanceStateChangeError> {
-        match self.select_runtime_change_action(
+        match Self::select_runtime_change_action(
+            &self.log,
             prev_instance_state,
             prev_vmm_state,
             &requested,
         )? {
             InstanceStateChangeRequestAction::AlreadyDone => Ok(()),
+
             InstanceStateChangeRequestAction::UpdateRuntime(new_runtime) => {
                 let instance_id =
                     InstanceUuid::from_untyped_uuid(prev_instance_state.id());
@@ -1054,6 +1487,7 @@ impl super::Nexus {
                     Ok(())
                 }
             }
+
             InstanceStateChangeRequestAction::SendToSled {
                 sled_id,
                 propolis_id,
@@ -1081,7 +1515,13 @@ impl super::Nexus {
                     Ok(Some(ref state)) => self
                         .notify_vmm_updated(opctx, propolis_id, state)
                         .await
-                        .map_err(Into::into),
+                        .map_err(Into::into)
+                        // Here, we don't actually care if the VMM generation
+                        // number we attempted to write to the DB was stale or
+                        // not. If it was out of date, that's fine, something
+                        // else has already advanced the state past the one we
+                        // observed, and we can just move on.
+                        .map(|_| ()),
                     Ok(None) => Ok(()),
                     Err(e) => Err(InstanceStateChangeError::SledAgent(e)),
                 }
@@ -1138,80 +1578,62 @@ impl super::Nexus {
             )
             .await?;
 
+        // Each Disk::LocalStorage will require a delegated zvol entry.
+        let mut delegated_zvols: Vec<DelegatedZvol> =
+            Vec::with_capacity(disks.len());
+
+        for disk in &disks {
+            let local_storage_disk = match disk {
+                Disk::Crucible(_) => {
+                    continue;
+                }
+
+                Disk::LocalStorage(local_storage_disk) => local_storage_disk,
+            };
+
+            let Some(local_storage_dataset_allocation) =
+                &local_storage_disk.local_storage_dataset_allocation
+            else {
+                return Err(Error::internal_error(&format!(
+                    "local storage disk {} allocation is None!",
+                    disk.id()
+                ))
+                .into());
+            };
+
+            match local_storage_dataset_allocation {
+                LocalStorageAllocation::Unencrypted(allocation) => {
+                    delegated_zvols.push(
+                        DelegatedZvol::LocalStorageUnencrypted {
+                            zpool_id: allocation.pool_id(),
+                            dataset_id: allocation.id(),
+                        },
+                    );
+                }
+
+                LocalStorageAllocation::Encrypted(_) => {
+                    let msg = "disks backed by encrypted local storage are \
+                        currently not supported";
+                    return Err(Error::invalid_request(msg).into());
+                }
+            }
+        }
+
         let nics = self
             .db_datastore
             .derive_guest_network_interface_info(&opctx, &authz_instance)
             .await?;
 
-        // Collect the external IPs for the instance.
-        let (snat_ip, external_ips): (Vec<_>, Vec<_>) = self
+        // Collect the external IPs for the instance, and construct the external
+        // configuration for the sled-agent request.
+        let all_external_ips = self
             .db_datastore
             .instance_lookup_external_ips(
                 &opctx,
                 InstanceUuid::from_untyped_uuid(authz_instance.id()),
             )
-            .await?
-            .into_iter()
-            .partition(|ip| ip.kind == IpKind::SNat);
-
-        // Sanity checks on the number and kind of each IP address.
-        if external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
-            return Err(Error::internal_error(
-                format!(
-                    "Expected the number of external IPs to be limited to \
-                    {}, but found {}",
-                    MAX_EXTERNAL_IPS_PER_INSTANCE,
-                    external_ips.len(),
-                )
-                .as_str(),
-            )
-            .into());
-        }
-
-        // If there are any external IPs not yet fully attached/detached,then
-        // there are attach/detach sagas in progress. That should complete in
-        // its own time, so return a 503 to indicate a possible retry.
-        if external_ips.iter().any(|v| v.state != IpAttachState::Attached) {
-            return Err(Error::unavail(
-                "External IP attach/detach is in progress during instance_ensure_registered"
-            ).into());
-        }
-
-        // Partition remaining external IPs by class: we can have at most
-        // one ephemeral ip.
-        let (ephemeral_ips, floating_ips): (Vec<_>, Vec<_>) = external_ips
-            .into_iter()
-            .partition(|ip| ip.kind == IpKind::Ephemeral);
-
-        if ephemeral_ips.len() > MAX_EPHEMERAL_IPS_PER_INSTANCE {
-            return Err(Error::internal_error(
-                format!(
-                "Expected at most {} ephemeral IP for an instance, found {}",
-                MAX_EPHEMERAL_IPS_PER_INSTANCE,
-                ephemeral_ips.len()
-            )
-                .as_str(),
-            )
-            .into());
-        }
-
-        let ephemeral_ip = ephemeral_ips.get(0).map(|model| model.ip.ip());
-
-        let floating_ips =
-            floating_ips.into_iter().map(|model| model.ip.ip()).collect();
-        if snat_ip.len() != 1 {
-            return Err(Error::internal_error(
-                "Expected exactly one SNAT IP address for an instance",
-            )
-            .into());
-        }
-        let source_nat =
-            SourceNatConfig::try_from(snat_ip.into_iter().next().unwrap())
-                .map_err(|err| {
-                    Error::internal_error(&format!(
-                        "read invalid SNAT config from db: {err}"
-                    ))
-                })?;
+            .await?;
+        let external_ips = build_external_ip_config(&all_external_ips)?;
 
         // Gather the firewall rules for the VPC this instance is in.
         // The NIC info we gathered above doesn't have VPC information
@@ -1257,6 +1679,7 @@ impl super::Nexus {
             .generate_vmm_spec(
                 &operation,
                 db_instance,
+                initial_vmm,
                 &disks,
                 &nics,
                 &ssh_keys,
@@ -1264,46 +1687,126 @@ impl super::Nexus {
             .await?;
 
         let metadata = sled_agent_client::types::InstanceMetadata {
-            silo_id: authz_silo.id(),
-            project_id: authz_project.id(),
+            silo_id: authz_silo.id().into_untyped_uuid(),
+            project_id: authz_project.id().into_untyped_uuid(),
+        };
+
+        let mut multicast_groups = Vec::new();
+
+        if self.multicast_enabled() {
+            let multicast_members = self
+                .db_datastore
+                .multicast_group_members_list_by_instance(
+                    opctx,
+                    InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                    &DataPageParams::max_page(),
+                )
+                .await
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "failed to list multicast group members for instance: {e}"
+                    ))
+                })?;
+
+            for member in multicast_members {
+                // Get the group details for this membership
+                if let Ok(group) = self
+                    .db_datastore
+                    .multicast_group_fetch(
+                        opctx,
+                        omicron_uuid_kinds::MulticastGroupUuid::from_untyped_uuid(
+                            member.external_group_id,
+                        ),
+                    )
+                    .await
+                {
+                    // Source IPs are per-member, not per-group
+                    multicast_groups.push(
+                        sled_agent_client::types::InstanceMulticastMembership {
+                            group_ip: group.multicast_ip.ip(),
+                            sources: member
+                                .source_ips
+                                .into_iter()
+                                .map(|src_ip| src_ip.ip())
+                                .collect(),
+                        },
+                    );
+                }
+            }
+        }
+
+        // TODO-completeness: We need to handle VPC subnets too, see
+        // https://github.com/oxidecomputer/omicron/issues/9580.
+        let attached_subnets = IdOrdMap::from_iter_unique(
+            self.datastore()
+                .instance_lookup_external_subnets(opctx, authz_instance)
+                .await?
+                .into_iter()
+                .map(|ext| AttachedSubnet {
+                    subnet: ext.subnet.into(),
+                    kind: AttachedSubnetKind::External,
+                }),
+        )
+        .map_err(|dup| {
+            Error::internal_error(&format!(
+                "instance {} has multiple attached subnets with the same \
+                 IP subnet {}",
+                authz_instance.id(),
+                dup.new_item().subnet,
+            ))
+        })?;
+
+        // Compute the effective MTU for the instance's primary OPTE port.
+        let primary_nic_mtu = if db_instance.enable_jumbo_frames {
+            let settings = self
+                .db_datastore
+                .system_networking_settings_view(opctx)
+                .await?;
+            primary_nic_mtu_for_jumbo_frames(
+                db_instance.enable_jumbo_frames,
+                settings.external_jumbo_frames_opt_in_enabled,
+            )
+        } else {
+            None
         };
 
         let local_config = sled_agent_client::types::InstanceSledLocalConfig {
             hostname,
             nics,
-            source_nat,
-            ephemeral_ip,
-            floating_ips,
+            external_ips,
             firewall_rules,
+            multicast_groups,
             dhcp_config: sled_agent_client::types::DhcpConfig {
                 dns_servers: self.external_dns_servers.clone(),
                 // TODO: finish designing instance DNS
                 host_domain: None,
                 search_domains: Vec::new(),
             },
+            delegated_zvols,
+            attached_subnets,
+            primary_nic_mtu,
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
-        let sa = self
-            .sled_client(&SledUuid::from_untyped_uuid(initial_vmm.sled_id))
-            .await?;
+        let sa = self.sled_client(&initial_vmm.sled_id()).await?;
         // The state of a freshly-created VMM record in the database is always
         // `VmmState::Creating`. Based on whether this VMM is created in order
         // to start or migrate an instance, determine the VMM state we will want
         // the sled-agent to create the VMM in. Once sled-agent acknowledges our
         // registration request, we will advance the database record to the new
         // state.
-        let vmm_runtime = sled_agent_client::types::VmmRuntimeState {
+        let state_requested = match operation {
+            InstanceRegisterReason::Migrate { .. } => {
+                sled_agent::VmmState::Migrating
+            }
+            InstanceRegisterReason::Start { .. } => {
+                sled_agent::VmmState::Starting
+            }
+        };
+        let vmm_runtime = sled_agent::VmmRuntimeState {
             time_updated: chrono::Utc::now(),
-            r#gen: initial_vmm.runtime.gen.next(),
-            state: match operation {
-                InstanceRegisterReason::Migrate { .. } => {
-                    sled_agent_client::types::VmmState::Migrating
-                }
-                InstanceRegisterReason::Start { .. } => {
-                    sled_agent_client::types::VmmState::Starting
-                }
-            },
+            generation: initial_vmm.generation.next(),
+            state: state_requested,
         };
         let instance_register_result = sa
             .vmm_register(
@@ -1326,33 +1829,96 @@ impl super::Nexus {
             .map(|res| res.into_inner().into())
             .map_err(|e| SledAgentInstanceError(e));
 
-        match instance_register_result {
-            Ok(state) => {
-                self.notify_vmm_updated(opctx, *propolis_id, &state).await?;
-                Ok(db::model::Vmm {
-                    runtime: state.vmm_state.into(),
-                    ..initial_vmm.clone()
-                })
-            }
+        let sled_state = match instance_register_result {
+            Ok(state) => state,
             Err(e) => {
-                if e.vmm_gone() {
+                // If this error indicates that the VMM should be marked as
+                // `Failed`, do that now.
+                if let Some(reason) = e.vmm_failure_reason() {
                     let _ = self
                         .mark_vmm_failed(
                             &opctx,
                             authz_instance.clone(),
                             &initial_vmm,
                             &e,
+                            reason,
                         )
                         .await;
                 }
-                Err(InstanceStateChangeError::SledAgent(e))
+                return Err(InstanceStateChangeError::SledAgent(e));
             }
+        };
+
+        // Attempt to write the state received from the sled-agent to the
+        // database.
+        let update_result =
+            self.notify_vmm_updated(opctx, *propolis_id, &sled_state).await?;
+        let db_vmm = update_result.vmm;
+        let db_runtime = db_vmm.runtime();
+        let sled_runtime = sled_state.vmm_state;
+
+        // We're about to check whether we have successfully advanced the VMM to
+        // `Starting` or `Migrating` (depending on why the VMM is being
+        // registered). We will check whether the sled-agent actually returned
+        // the requested state, and then whether the VMM state in the database
+        // is consistent with what we received from the sled-agent.
+        let state_requested = VmmState::from(state_requested);
+        let mk_error = || {
+            Error::conflict(match operation {
+                InstanceRegisterReason::Start { .. } => {
+                    "instance changed state before it could be started"
+                }
+                InstanceRegisterReason::Migrate { .. } => {
+                    "instance changed state before it could migrate"
+                }
+            })
+        };
+        // First, did the request to the sled-agent return the requested state,
+        // or a different one? This would mean that something else has acted
+        // upon the VMM already. That *really shouldn't* happen, as the VMM is
+        // exclusively owned by the instance-start or instance-migrate saga at
+        // this point in time, but it could have been acted upon by some outside
+        // force.
+        //
+        // Note that we perform this check only *after* calling
+        // `notify_vmm_updated`. because we _do_ want to ensure that whatever
+        // state the sled-agent gave us makes it to the database.
+        if sled_runtime.state != state_requested {
+            let error = mk_error().internal_context(format!(
+                "expected sled-agent to return a {state_requested:?} VMM, but \
+                 received {sled_runtime:?} instead",
+            ));
+            return Err(InstanceStateChangeError::Other(error));
         }
+
+        // Next, check if the state in the *database* is also in the requested
+        // state.
+        //
+        // Note: What we actually care about here is that the VMM is in the
+        // requested state. If our write was not the one that advanced it to
+        // `Starting`, that is acceptable: because this function is called in a
+        // saga action, it must be idempotent, and if a previous execution was
+        // the one that had actually registered the VMM and written back the
+        // state, and then it died before it recorded that the saga node
+        // succeeded, we want to succeed idempotently rather than failing. On
+        // the other hand, if the state has changed on us, we have raced with
+        // something else (probably an attempt to stop the instance) and should
+        // unwind.
+        if db_runtime.state != state_requested {
+            let error = mk_error().internal_context(format!(
+                "after registering {propolis_id}, we received VMM state \
+                {sled_runtime:?} from the sled-agent, but the VMM's state in \
+                the database has changed to {db_runtime:?}",
+            ));
+            return Err(InstanceStateChangeError::Other(error));
+        }
+
+        Ok(db_vmm)
     }
 
     /// Attempts to transition an instance to to the `Failed` state in
     /// response to an error returned from a call to a sled
-    /// agent instance API, supplied in `reason`.
+    /// agent instance API, supplied in `error`.
     ///
     /// This is done by first marking the associated `vmm` as `Failed`, and then
     /// running an `instance-update` saga which transitions the instance record
@@ -1371,25 +1937,30 @@ impl super::Nexus {
         opctx: &OpContext,
         authz_instance: authz::Instance,
         vmm: &db::model::Vmm,
-        reason: &SledAgentInstanceError,
+        error: &SledAgentInstanceError,
+        reason: db::model::VmmFailureReason,
     ) -> Result<(), Error> {
         let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
         let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
-        error!(self.log, "marking VMM failed due to sled agent API error";
-               "instance_id" => %instance_id,
-               "vmm_id" => %vmm_id,
-               "error" => ?reason);
+        error!(
+            &opctx.log,
+            "marking VMM failed due to sled agent API error";
+            "instance_id" => %instance_id,
+            "vmm_id" => %vmm_id,
+            "error" => &InlineErrorChain::new(&error),
+            "reason" => %reason,
+        );
 
-        let new_runtime = VmmRuntimeState {
-            state: db::model::VmmState::Failed,
-            time_state_updated: chrono::Utc::now(),
-            r#gen: db::model::Generation(vmm.runtime.r#gen.next()),
-        };
+        let new_runtime = vmm
+            .runtime()
+            .transition(nexus_types::instance::VmmState::Failed(reason.into()));
 
         match self.db_datastore.vmm_update_runtime(&vmm_id, &new_runtime).await
         {
             Ok(_) => {
-                info!(self.log, "marked VMM as Failed, preparing update saga";
+                info!(
+                    &opctx.log,
+                    "marked VMM as Failed, preparing update saga";
                     "instance_id" => %instance_id,
                     "vmm_id" => %vmm_id,
                     "reason" => ?reason,
@@ -1433,7 +2004,7 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<db::model::Disk> {
+    ) -> ListResultVec<db::datastore::Disk> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
@@ -1447,15 +2018,18 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         disk: NameOrId,
-    ) -> UpdateResult<db::model::Disk> {
+    ) -> UpdateResult<db::datastore::Disk> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
+
         let (.., authz_project_disk, authz_disk) = self
             .disk_lookup(
                 opctx,
-                params::DiskSelector {
+                disk::DiskSelector {
                     project: match disk {
-                        NameOrId::Name(_) => Some(authz_project.id().into()),
+                        NameOrId::Name(_) => Some(NameOrId::Id(
+                            authz_project.id().into_untyped_uuid(),
+                        )),
                         NameOrId::Id(_) => None,
                     },
                     disk,
@@ -1498,6 +2072,7 @@ impl super::Nexus {
                 MAX_DISKS_PER_INSTANCE,
             )
             .await?;
+
         Ok(disk)
     }
 
@@ -1507,15 +2082,17 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         disk: NameOrId,
-    ) -> UpdateResult<db::model::Disk> {
+    ) -> UpdateResult<db::datastore::Disk> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
         let (.., authz_disk) = self
             .disk_lookup(
                 opctx,
-                params::DiskSelector {
+                disk::DiskSelector {
                     project: match disk {
-                        NameOrId::Name(_) => Some(authz_project.id().into()),
+                        NameOrId::Name(_) => Some(NameOrId::Id(
+                            authz_project.id().into_untyped_uuid(),
+                        )),
                         NameOrId::Id(_) => None,
                     },
                     disk,
@@ -1581,16 +2158,21 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         propolis_id: PropolisUuid,
-        new_runtime_state: &nexus::SledVmmState,
-    ) -> Result<(), Error> {
-        if let Some((instance_id, saga)) = process_vmm_update(
+        new_runtime_state: &SledVmmState,
+    ) -> Result<VmmStateUpdateResult, Error> {
+        let ProcessedVmmUpdate {
+            instance_id,
+            update_saga,
+            db_update_result,
+            ..
+        } = process_vmm_update(
             &self.db_datastore,
             opctx,
             propolis_id,
             new_runtime_state,
         )
-        .await?
-        {
+        .await?;
+        if let Some(saga) = update_saga {
             // We don't need to wait for the instance update saga to run to
             // completion to return OK to the sled-agent --- all it needs to care
             // about is that the VMM/migration state in the database was updated.
@@ -1608,7 +2190,7 @@ impl super::Nexus {
             tokio::spawn(self.update_instance(&opctx.log, saga, instance_id));
         }
 
-        Ok(())
+        Ok(db_update_result)
     }
 
     /// Returns the requested range of serial console output bytes,
@@ -1617,8 +2199,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-        params: &params::InstanceSerialConsoleRequest,
-    ) -> Result<params::InstanceSerialConsoleData, Error> {
+        params: &instance::InstanceSerialConsoleRequest,
+    ) -> Result<instance::InstanceSerialConsoleData, Error> {
         let (_, client) = self
             .propolis_client_for_instance(
                 opctx,
@@ -1647,7 +2229,7 @@ impl super::Nexus {
                 ))
             })?
             .into_inner();
-        Ok(params::InstanceSerialConsoleData {
+        Ok(instance::InstanceSerialConsoleData {
             data: data.data,
             last_byte_offset: data.last_byte_offset,
         })
@@ -1658,7 +2240,7 @@ impl super::Nexus {
         opctx: &OpContext,
         mut client_stream: WebSocketStream<impl AsyncRead + AsyncWrite + Unpin>,
         instance_lookup: &lookup::Instance<'_>,
-        params: &params::InstanceSerialConsoleStreamRequest,
+        params: &instance::InstanceSerialConsoleStreamRequest,
     ) -> Result<(), Error> {
         let (_, client_addr) = match self
             .propolis_addr_for_instance(
@@ -1731,7 +2313,7 @@ impl super::Nexus {
             .await?;
 
         if let Some(vmm) = state.vmm() {
-            match vmm.runtime.state {
+            match vmm.state {
                 DbVmmState::Running
                 | DbVmmState::Rebooting
                 | DbVmmState::Migrating => Ok((
@@ -1779,7 +2361,10 @@ impl super::Nexus {
             .await?;
         Ok((
             vmm,
-            propolis_client::Client::new(&format!("http://{}", client_addr)),
+            propolis_client::Client::new_with_client(
+                &format!("http://{}", client_addr),
+                internal_http_client(),
+            ),
         ))
     }
 
@@ -1943,7 +2528,29 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         pool: Option<NameOrId>,
-    ) -> UpdateResult<views::ExternalIp> {
+        ip_version: Option<IpVersion>,
+    ) -> UpdateResult<external_ip::ExternalIp> {
+        // Validate pool/ip_version compatibility upfront for clear error
+        // communication.
+        //
+        // The saga will look up the pool again, but this ensures the user gets
+        // a direct error before any saga machinery starts, and without changing
+        // the `Ephemeral` type fields.
+        if let (Some(pool_id), Some(requested_version)) = (&pool, ip_version) {
+            let (_, db_pool) = self
+                .ip_pool_lookup(opctx, pool_id)?
+                .fetch_for(authz::Action::CreateChild)
+                .await?;
+            let db_version: IpVersion = db_pool.ip_version.into();
+            if db_version != requested_version {
+                return Err(Error::invalid_request(format!(
+                    "requested IP version ({requested_version}) does not match \
+                     pool '{}' version ({db_version})",
+                    db_pool.name().as_str(),
+                )));
+            }
+        }
+
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -1951,19 +2558,121 @@ impl super::Nexus {
             opctx,
             authz_instance,
             authz_project.id(),
-            ExternalIpAttach::Ephemeral { pool },
+            ExternalIpAttach::Ephemeral { pool, ip_version },
         )
         .await
     }
 
-    /// Attach an ephemeral IP to an instance.
+    /// Validate that two ephemeral IP pool selectors specify different IP versions.
+    ///
+    /// This is used during instance creation to ensure dual-stack configurations
+    /// are valid (one IPv4 + one IPv6 ephemeral IP).
+    async fn validate_ephemeral_ip_pair(
+        &self,
+        opctx: &OpContext,
+        first: &ip_pool::PoolSelector,
+        second: &ip_pool::PoolSelector,
+    ) -> Result<(), Error> {
+        use ip_pool::PoolSelector;
+
+        match (first, second) {
+            // Reject any case where ip_version is not specified. This keeps
+            // the API predictable: if you want two ephemeral IPs, you must be
+            // explicit about what you want for both. No relying on defaults.
+            (PoolSelector::Auto { ip_version: None }, _)
+            | (_, PoolSelector::Auto { ip_version: None }) => {
+                return Err(Error::invalid_request(
+                    "when requesting two ephemeral IPs, IP version or explicit \
+                     pool name must be specified on each",
+                ));
+            }
+
+            // Two Auto with same version
+            (
+                PoolSelector::Auto { ip_version: Some(v1) },
+                PoolSelector::Auto { ip_version: Some(v2) },
+            ) if v1 == v2 => {
+                return Err(Error::invalid_request(format!(
+                    "cannot request two ephemeral IPs of the same version ({v1})"
+                )));
+            }
+
+            // Two Auto with different versions - valid
+            (
+                PoolSelector::Auto { ip_version: Some(_) },
+                PoolSelector::Auto { ip_version: Some(_) },
+            ) => {}
+
+            // Two Explicit with same pool
+            (
+                PoolSelector::Explicit { pool: p1 },
+                PoolSelector::Explicit { pool: p2 },
+            ) if p1 == p2 => {
+                return Err(Error::invalid_request(
+                    "cannot request two ephemeral IPs from the same pool",
+                ));
+            }
+
+            // Two Explicit with different pools - verify different versions
+            (
+                PoolSelector::Explicit { pool: p1 },
+                PoolSelector::Explicit { pool: p2 },
+            ) => {
+                let v1 = self.get_pool_ip_version(opctx, p1).await?;
+                let v2 = self.get_pool_ip_version(opctx, p2).await?;
+                if v1 == v2 {
+                    return Err(Error::invalid_request(format!(
+                        "cannot request two ephemeral IPs of the same version \
+                         ({v1}): both pools are {v1}"
+                    )));
+                }
+            }
+
+            // Explicit + Auto(Some) - verify different versions
+            (
+                PoolSelector::Explicit { pool },
+                PoolSelector::Auto { ip_version: Some(v) },
+            )
+            | (
+                PoolSelector::Auto { ip_version: Some(v) },
+                PoolSelector::Explicit { pool },
+            ) => {
+                let pool_version =
+                    self.get_pool_ip_version(opctx, pool).await?;
+                if pool_version == *v {
+                    return Err(Error::invalid_request(format!(
+                        "cannot request two ephemeral IPs of the same version \
+                         ({v}): explicit pool and auto selection both specify {v}"
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get the IP version of a pool by name or ID.
+    async fn get_pool_ip_version(
+        &self,
+        opctx: &OpContext,
+        pool: &NameOrId,
+    ) -> Result<IpVersion, Error> {
+        let (_, db_pool) = self
+            .ip_pool_lookup(opctx, pool)?
+            .fetch_for(authz::Action::CreateChild)
+            .await?;
+        Ok(db_pool.ip_version.into())
+    }
+
+    /// Attach a Floating IP to an instance.
     pub(crate) async fn instance_attach_floating_ip(
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         authz_fip: authz::FloatingIp,
+        ip_version: IpVersion,
         authz_fip_project: authz::Project,
-    ) -> UpdateResult<views::ExternalIp> {
+    ) -> UpdateResult<external_ip::ExternalIp> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -1977,7 +2686,7 @@ impl super::Nexus {
             opctx,
             authz_instance,
             authz_project.id(),
-            ExternalIpAttach::Floating { floating_ip: authz_fip },
+            ExternalIpAttach::Floating { floating_ip: authz_fip, ip_version },
         )
         .await
     }
@@ -1987,9 +2696,9 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         authz_instance: authz::Instance,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         ext_ip: ExternalIpAttach,
-    ) -> UpdateResult<views::ExternalIp> {
+    ) -> UpdateResult<external_ip::ExternalIp> {
         let saga_params = sagas::instance_ip_attach::Params {
             create_params: ext_ip.clone(),
             authz_instance,
@@ -2005,8 +2714,8 @@ impl super::Nexus {
             .await?;
 
         let out = saga_outputs
-            .lookup_node_output::<views::ExternalIp>("output")
-            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .lookup_node_output::<external_ip::ExternalIp>("output")
+            .map_err(|e| Error::internal_error(&format!("{:#}", e)))
             .internal_context("looking up output from ip attach saga");
 
         // The VPC routing RPW currently has double-duty on ensuring that
@@ -2023,8 +2732,8 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-        ext_ip: &params::ExternalIpDetach,
-    ) -> UpdateResult<views::ExternalIp> {
+        ext_ip: &instance::ExternalIpDetach,
+    ) -> UpdateResult<external_ip::ExternalIp> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -2043,8 +2752,8 @@ impl super::Nexus {
             .await?;
 
         saga_outputs
-            .lookup_node_output::<Option<views::ExternalIp>>("output")
-            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .lookup_node_output::<Option<external_ip::ExternalIp>>("output")
+            .map_err(|e| Error::internal_error(&format!("{:#}", e)))
             .internal_context("looking up output from ip detach saga")
             .and_then(|eip| {
                 // Saga idempotency means we'll get Ok(None) on double detach
@@ -2070,10 +2779,12 @@ impl super::Nexus {
         log: &slog::Logger,
         saga: steno::SagaDag,
         instance_id: InstanceUuid,
-    ) -> impl std::future::Future<Output = ()> + Send {
+    ) -> impl std::future::Future<Output = ()> + Send + use<> {
         let sagas = self.sagas.clone();
         let task_instance_updater =
             self.background_tasks.task_instance_updater.clone();
+        let task_multicast_reconciler =
+            self.background_tasks.task_multicast_reconciler.clone();
         let log = log.clone();
         async move {
             debug!(
@@ -2114,9 +2825,152 @@ impl super::Nexus {
                 // instance, kick the instance-updater background task
                 // to try and start it again in a timely manner.
                 task_instance_updater.activate();
+            } else {
+                // Activate multicast reconciler after successful saga completion
+                task_multicast_reconciler.activate();
             }
         }
     }
+}
+
+fn build_external_ip_config(
+    ips: &[ExternalIp],
+) -> Result<ExternalIpConfig, Error> {
+    // Partition into concrete IPv4 and IPv6 addresses, using subset of data
+    // needed for the concrete conversions only.
+    let (ipv4, ipv6): (Vec<_>, Vec<_>) =
+        ips.iter().partition_map(|ip| match ip.ip.ip() {
+            IpAddr::V4(v4) => Either::Left(ExternalIpData {
+                ip: v4,
+                first_port: ip.first_port.into(),
+                last_port: ip.last_port.into(),
+                kind: ip.kind,
+                attach_state: ip.state,
+            }),
+            IpAddr::V6(v6) => Either::Right(ExternalIpData {
+                ip: v6,
+                first_port: ip.first_port.into(),
+                last_port: ip.last_port.into(),
+                kind: ip.kind,
+                attach_state: ip.state,
+            }),
+        });
+    let v4 = if ipv4.is_empty() {
+        None
+    } else {
+        Some(build_concrete_external_ip_config(ipv4)?)
+    };
+    let v6 = if ipv6.is_empty() {
+        None
+    } else {
+        Some(build_concrete_external_ip_config(ipv6)?)
+    };
+    Ok(ExternalIpConfig { v4, v6 })
+}
+
+// Subset of an `ExternalIp` needed to build the `ExternalIpConfig` for the
+// concrete address version.
+struct ExternalIpData<T: ConcreteIp> {
+    ip: T,
+    first_port: u16,
+    last_port: u16,
+    kind: IpKind,
+    attach_state: IpAttachState,
+}
+
+fn build_concrete_external_ip_config<T>(
+    ips: Vec<ExternalIpData<T>>,
+) -> Result<ExternalIps<T>, Error>
+where
+    T: ConcreteIp,
+{
+    let mut source_nat = None;
+    let mut ephemeral_ip = None;
+    let mut floating_ips = BTreeSet::new();
+    for ip in ips.iter() {
+        if ip.attach_state != IpAttachState::Attached {
+            return Err(Error::unavail(
+                "External IP attach/detach is in progress \
+            during instance_ensure_registered",
+            ));
+        }
+        match ip.kind {
+            IpKind::SNat if source_nat.is_none() => {
+                source_nat = Some(
+                    SourceNatConfig::new(ip.ip, ip.first_port, ip.last_port)
+                        .map_err(|e| {
+                            Error::internal_error(
+                                format!(
+                                    "Failed to build source NAT config: {e}"
+                                )
+                                .as_str(),
+                            )
+                        })?,
+                );
+            }
+            IpKind::SNat => {
+                return Err(Error::internal_error(
+                    "Expected at most one SNAT IP address for an instance",
+                ));
+            }
+            IpKind::Ephemeral if ephemeral_ip.is_none() => {
+                ephemeral_ip = Some(ip.ip);
+            }
+            IpKind::Ephemeral => {
+                return Err(Error::internal_error(
+                    "Expected at most 1 Ephemeral IP for an instance",
+                ));
+            }
+            IpKind::Floating => {
+                floating_ips.insert(ip.ip);
+            }
+        }
+    }
+
+    // Ensure limit to the number of non-SNAT IPs.
+    let n_external_ips =
+        usize::from(ephemeral_ip.is_some()) + floating_ips.len();
+    if n_external_ips > MAX_EXTERNAL_IPS_PER_INSTANCE {
+        return Err(Error::internal_error(
+            format!(
+                "Expected the number of external IPs per IP version to \
+            be limited to {}, but found {}",
+                MAX_EXTERNAL_IPS_PER_INSTANCE, n_external_ips
+            )
+            .as_str(),
+        ));
+    }
+    Ok(ExternalIps { source_nat, ephemeral_ip, floating_ips })
+}
+
+/// The result of a call to [`process_vmm_update`]. This includes any
+/// [instance-update saga](Self::update_saga) that should be started as a result
+/// of this update, and [the results of updating the VMM state in the
+/// database](Self::db_update_result).
+#[must_use = "callers of `process_vmm_update` should check if an `update_saga` \
+    was returned, and start the saga so that VMM state changes are propagated \
+    to the VMM's instance record in a timely manner"]
+pub struct ProcessedVmmUpdate {
+    /// The ID of the instance corresponding to the VMM whose state change has
+    /// been processed.
+    pub instance_id: InstanceUuid,
+    /// If this is `Some`, the VMM state change requires an `instance_update`
+    /// saga to be reflected by the instance record. The contained
+    /// [`steno::SagaDag`] will perform the required update, and should be
+    /// started to ensure that the instance record is updated in a timely
+    /// manner. Callers who need to ensure that the state update is reflected
+    /// synchronously (i.e. endpoints that request the instance's state change)
+    /// should wait for the saga to complete, while those which do not require
+    /// the instance record to be updated may spawn it to run in the background.
+    ///
+    /// If the saga is dropped, the instance record will *eventually* be updated
+    /// by a background task, so running it is only necessary for correctness if
+    /// the caller depends on the result of the update. But, all callers
+    /// *should* try to start the saga to improve the latency with which updates
+    /// are propagated to the instance record.
+    pub update_saga: Option<steno::SagaDag>,
+    /// The return value from [`DataStore::vmm_and_migration_update_runtime`].
+    pub db_update_result: db::datastore::VmmStateUpdateResult,
 }
 
 /// Writes the VMM and migration state supplied in `new_runtime_state` to the
@@ -2124,18 +2978,20 @@ impl super::Nexus {
 ///
 /// # Return value
 ///
-/// - `Ok(Some(instance_id, saga))` if the new VMM state obsoletes the current
-///   instance state. The caller should execute the returned instance update
-///   saga to reconcile the instance to the new VMM state.
-/// - `Ok(None)` if the new state was successfully published but does not
-///   require an instance update.
-/// - `Err` if an error occurred.
+/// - [`Ok`]`(`[`ProcessedVmmUpdate`]`)` if the changes to the VMM and
+///   migration state were processed successfully (i.e., they were either
+///   written to the database successfully or were stale).
+///
+///   If an `instance_update` saga must be started in order to update the
+///   instance record, it is included in the returned [`ProcessedVmmUpdate`].
+///   See that type's documentation for more details.
+/// - [`Err`] if an error occurred.
 pub(crate) async fn process_vmm_update(
     datastore: &DataStore,
     opctx: &OpContext,
     propolis_id: PropolisUuid,
-    new_runtime_state: &nexus::SledVmmState,
-) -> Result<Option<(InstanceUuid, steno::SagaDag)>, Error> {
+    new_runtime_state: &SledVmmState,
+) -> Result<ProcessedVmmUpdate, Error> {
     let migrations = new_runtime_state.migrations();
     info!(opctx.log, "received new VMM runtime state from sled agent";
         "propolis_id" => %propolis_id,
@@ -2148,52 +3004,55 @@ pub(crate) async fn process_vmm_update(
             &opctx,
             propolis_id,
             // TODO(eliza): probably should take this by value...
-            &new_runtime_state.vmm_state.clone().into(),
+            &new_runtime_state.vmm_state.clone(),
             migrations,
         )
         .await?;
 
+    let instance_id = InstanceUuid::from_untyped_uuid(result.vmm.instance_id);
+
     // If an instance-update saga must be executed as a result of this update,
     // prepare and return it.
-    if instance_update::update_saga_needed(
+    let update_saga = if instance_update::update_saga_needed(
         &opctx.log,
         propolis_id,
         new_runtime_state,
         &result,
     ) {
-        let instance_id =
-            InstanceUuid::from_untyped_uuid(result.found_vmm.instance_id);
-
         let (.., authz_instance) = LookupPath::new(&opctx, datastore)
             .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await?;
 
-        match instance_update::SagaInstanceUpdate::prepare(
+        let saga = instance_update::SagaInstanceUpdate::prepare(
             &instance_update::Params {
                 serialized_authn: authn::saga::Serialized::for_opctx(opctx),
                 authz_instance,
             },
-        ) {
-            Ok(saga) => Ok(Some((instance_id, saga))),
-            Err(e) => {
-                error!(opctx.log, "failed to prepare instance update saga";
-                       "error" => ?e,
-                       "instance_id" => %instance_id,
-                       "propolis_id" => %propolis_id);
-
-                Err(e)
-            }
-        }
+        )
+        .map_err(|e| {
+            error!(opctx.log, "failed to prepare instance update saga";
+                    "error" => ?e,
+                    "instance_id" => %instance_id,
+                    "propolis_id" => %propolis_id);
+            e
+        })?;
+        Some(saga)
     } else {
-        Ok(None)
-    }
+        None
+    };
+
+    Ok(ProcessedVmmUpdate {
+        instance_id,
+        update_saga,
+        db_update_result: result,
+    })
 }
 
 /// Determines whether the supplied instance sizes (CPU count and memory size)
 /// are acceptable.
 fn check_instance_cpu_memory_sizes(
-    ncpus: InstanceCpuCount,
+    ncpus: instance::InstanceCpuCount,
     memory: ByteCount,
 ) -> Result<(), Error> {
     if ncpus.0 > MAX_VCPU_PER_INSTANCE {
@@ -2217,7 +3076,10 @@ fn check_instance_cpu_memory_sizes(
 
     // Reject instances where the memory is not divisible by
     // MIN_MEMORY_BYTES_PER_INSTANCE
-    if (memory.to_bytes() % u64::from(MIN_MEMORY_BYTES_PER_INSTANCE)) != 0 {
+    if !memory
+        .to_bytes()
+        .is_multiple_of(u64::from(MIN_MEMORY_BYTES_PER_INSTANCE))
+    {
         return Err(Error::invalid_value(
             "size",
             format!(
@@ -2239,6 +3101,20 @@ fn check_instance_cpu_memory_sizes(
     }
 
     Ok(())
+}
+
+/// Effective MTU for an instance's primary OPTE port. Jumbo frames are only
+/// applied when both the fleet-wide opt-in is enabled and the per-instance bit
+/// is set; otherwise this returns `None` and OPTE applies the default MTU.
+fn primary_nic_mtu_for_jumbo_frames(
+    instance_jumbo_frames_enabled: bool,
+    fleet_jumbo_frames_opt_in_enabled: bool,
+) -> Option<u32> {
+    if instance_jumbo_frames_enabled && fleet_jumbo_frames_opt_in_enabled {
+        Some(omicron_common::address::EXTERNAL_JUMBO_FRAMES_MTU)
+    } else {
+        None
+    }
 }
 
 /// Determines the disposition of a request to start an instance given its state
@@ -2275,7 +3151,7 @@ fn instance_start_allowed(
                 // If a previous start saga failed and left behind a VMM in the
                 // SagaUnwound state, allow a new start saga to try to overwrite
                 // it.
-                Some(vmm) if vmm.runtime.state == DbVmmState::SagaUnwound => {
+                Some(vmm) if vmm.state == DbVmmState::SagaUnwound => {
                     debug!(
                         log,
                         "instance's last VMM's start saga unwound, OK to start";
@@ -2293,7 +3169,7 @@ fn instance_start_allowed(
                             "instance is {s:?} but still has an active VMM";
                             "instance_id" => %instance.id(),
                             "propolis_id" => %vmm.id,
-                            "propolis_state" => ?vmm.runtime.state,
+                            "propolis_state" => ?vmm.state,
                             "start_reason" => ?reason);
 
                     Err(Error::InternalError {
@@ -2308,7 +3184,7 @@ fn instance_start_allowed(
         }
         InstanceState::Stopping => {
             let (propolis_id, propolis_state) = match vmm.as_ref() {
-                Some(vmm) => (Some(vmm.id), Some(vmm.runtime.state)),
+                Some(vmm) => (Some(vmm.id), Some(vmm.state)),
                 None => (None, None),
             };
             debug!(log, "instance's VMM is still in the process of stopping";
@@ -2335,15 +3211,17 @@ mod tests {
     use super::*;
     use core::time::Duration;
     use futures::{SinkExt, StreamExt};
+    use instance::InstanceNetworkInterfaceAttachment;
     use nexus_db_model::{
         Instance as DbInstance, InstanceState as DbInstanceState,
-        VmmState as DbVmmState,
+        VmmCpuPlatform, VmmState as DbVmmState,
     };
+    use nexus_types::external_api::instance;
     use omicron_common::api::external::{
-        Hostname, IdentityMetadataCreateParams, InstanceCpuCount, Name,
+        Hostname, IdentityMetadataCreateParams, Name,
     };
+    use omicron_generation_kinds::InstanceStateGeneration;
     use omicron_test_utils::dev::test_setup_log;
-    use params::InstanceNetworkInterfaceAttachment;
     use propolis_client::support::tungstenite::protocol::Role;
     use propolis_client::support::{
         InstanceSerialConsoleHelper, WSClientOffset,
@@ -2446,12 +3324,12 @@ mod tests {
     /// that the VMM is *not* installed in the instance's `active_propolis_id`
     /// field.
     fn make_instance_and_vmm() -> (DbInstance, DbVmm) {
-        let params = params::InstanceCreate {
+        let params = instance::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: Name::try_from("elysium".to_owned()).unwrap(),
                 description: "this instance is disco".to_owned(),
             },
-            ncpus: InstanceCpuCount(1),
+            ncpus: instance::InstanceCpuCount(1),
             memory: ByteCount::from_gibibytes_u32(1),
             hostname: Hostname::try_from("elysium").unwrap(),
             user_data: vec![],
@@ -2459,14 +3337,17 @@ mod tests {
             external_ips: vec![],
             disks: vec![],
             boot_disk: None,
+            cpu_platform: None,
             ssh_public_keys: None,
             start: false,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            multicast_groups: Vec::new(),
+            enable_jumbo_frames: false,
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
-        let project_id = Uuid::new_v4();
+        let project_id = ProjectUuid::new_v4();
         let instance = DbInstance::new(instance_id, project_id, &params);
 
         let propolis_id = PropolisUuid::from_untyped_uuid(Uuid::new_v4());
@@ -2478,6 +3359,7 @@ mod tests {
             ipnetwork::IpNetwork::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0)
                 .unwrap(),
             0,
+            VmmCpuPlatform::SledDefault,
         );
 
         (instance, vmm)
@@ -2487,7 +3369,7 @@ mod tests {
     fn test_instance_start_allowed_when_no_vmm() {
         let logctx = test_setup_log("test_instance_start_allowed_when_no_vmm");
         let (mut instance, _vmm) = make_instance_and_vmm();
-        instance.runtime_state.nexus_state = DbInstanceState::NoVmm;
+        instance.nexus_state = DbInstanceState::NoVmm;
         let state = InstanceAndActiveVmm::from((instance, None));
         assert!(
             instance_start_allowed(
@@ -2506,9 +3388,9 @@ mod tests {
             "test_instance_start_allowed_when_vmm_in_saga_unwound",
         );
         let (mut instance, mut vmm) = make_instance_and_vmm();
-        instance.runtime_state.nexus_state = DbInstanceState::Vmm;
-        instance.runtime_state.propolis_id = Some(vmm.id);
-        vmm.runtime.state = DbVmmState::SagaUnwound;
+        instance.nexus_state = DbInstanceState::Vmm;
+        instance.propolis_id = Some(vmm.id);
+        vmm.state = DbVmmState::SagaUnwound;
         let state = InstanceAndActiveVmm::from((instance, Some(vmm)));
         assert!(
             instance_start_allowed(
@@ -2526,7 +3408,7 @@ mod tests {
         let logctx =
             test_setup_log("test_instance_start_forbidden_while_creating");
         let (mut instance, _vmm) = make_instance_and_vmm();
-        instance.runtime_state.nexus_state = DbInstanceState::Creating;
+        instance.nexus_state = DbInstanceState::Creating;
         let state = InstanceAndActiveVmm::from((instance, None));
         assert!(
             instance_start_allowed(
@@ -2543,9 +3425,9 @@ mod tests {
     fn test_instance_start_idempotent_if_active() {
         let logctx = test_setup_log("test_instance_start_idempotent_if_active");
         let (mut instance, mut vmm) = make_instance_and_vmm();
-        instance.runtime_state.nexus_state = DbInstanceState::Vmm;
-        instance.runtime_state.propolis_id = Some(vmm.id);
-        vmm.runtime.state = DbVmmState::Starting;
+        instance.nexus_state = DbInstanceState::Vmm;
+        instance.propolis_id = Some(vmm.id);
+        vmm.state = DbVmmState::Starting;
         let state =
             InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));
         assert!(
@@ -2557,7 +3439,7 @@ mod tests {
             .is_ok()
         );
 
-        vmm.runtime.state = DbVmmState::Running;
+        vmm.state = DbVmmState::Running;
         let state =
             InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));
         assert!(
@@ -2569,7 +3451,7 @@ mod tests {
             .is_ok()
         );
 
-        vmm.runtime.state = DbVmmState::Rebooting;
+        vmm.state = DbVmmState::Rebooting;
         let state =
             InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));
         assert!(
@@ -2581,7 +3463,7 @@ mod tests {
             .is_ok()
         );
 
-        vmm.runtime.state = DbVmmState::Migrating;
+        vmm.state = DbVmmState::Migrating;
         let state = InstanceAndActiveVmm::from((instance, Some(vmm)));
         assert!(
             instance_start_allowed(
@@ -2592,5 +3474,261 @@ mod tests {
             .is_ok()
         );
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_select_action_sled_evacuating_stop() {
+        let logctx = test_setup_log("test_select_action_sled_evacuating_stop");
+        let (mut instance, _vmm) = make_instance_and_vmm();
+        instance.nexus_state = DbInstanceState::SledEvacuating;
+        let action = Nexus::select_runtime_change_action(
+            &logctx.log,
+            &instance,
+            &None,
+            &InstanceStateChangeRequest::Stop,
+        )
+        .expect("stopping a SledEvacuating instance should be allowed");
+        let InstanceStateChangeRequestAction::UpdateRuntime(rt) = action else {
+            panic!("expected UpdateRuntime, got {action:?}");
+        };
+        assert_eq!(rt.nexus_state, DbInstanceState::NoVmm);
+        assert_eq!(rt.propolis_id, None);
+        assert_eq!(
+            InstanceStateGeneration::from(rt.generation),
+            InstanceStateGeneration::from(instance.state_generation).next(),
+        );
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_select_action_sled_evacuating_reboot_and_run() {
+        let logctx =
+            test_setup_log("test_select_action_sled_evacuating_reboot_and_run");
+        let (mut instance, _vmm) = make_instance_and_vmm();
+        instance.nexus_state = DbInstanceState::SledEvacuating;
+        for requested in [
+            InstanceStateChangeRequest::Reboot,
+            InstanceStateChangeRequest::Run,
+        ] {
+            let action = Nexus::select_runtime_change_action(
+                &logctx.log,
+                &instance,
+                &None,
+                &requested,
+            )
+            .unwrap_or_else(|e| panic!("{requested:?} should succeed: {e}"));
+            assert!(
+                matches!(action, InstanceStateChangeRequestAction::AlreadyDone),
+                "{requested:?} should be AlreadyDone, got {action:?}"
+            );
+        }
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_select_action_sled_evacuating_migrate() {
+        let logctx =
+            test_setup_log("test_select_action_sled_evacuating_migrate");
+        let (mut instance, _vmm) = make_instance_and_vmm();
+        instance.nexus_state = DbInstanceState::SledEvacuating;
+        let err = Nexus::select_runtime_change_action(
+            &logctx.log,
+            &instance,
+            &None,
+            &InstanceStateChangeRequest::Migrate(
+                InstanceMigrationTargetParams {
+                    src_propolis_addr: "[::1]:12400".parse().unwrap(),
+                },
+            ),
+        )
+        .expect_err("migrating a SledEvacuating instance should fail");
+        assert!(
+            matches!(err, Error::InvalidRequest { .. }),
+            "expected InvalidRequest, got {err:?}"
+        );
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_select_action_vmm_rebooting_stop_goes_to_sled() {
+        let logctx = test_setup_log(
+            "test_select_action_vmm_rebooting_stop_goes_to_sled",
+        );
+        let (mut instance, mut vmm) = make_instance_and_vmm();
+        instance.nexus_state = DbInstanceState::Vmm;
+        instance.propolis_id = Some(vmm.id);
+        vmm.state = DbVmmState::Rebooting;
+        let expected_sled_id = vmm.sled_id();
+        let expected_propolis_id = PropolisUuid::from_untyped_uuid(vmm.id);
+        let action = Nexus::select_runtime_change_action(
+            &logctx.log,
+            &instance,
+            &Some(vmm),
+            &InstanceStateChangeRequest::Stop,
+        )
+        .expect("stopping a rebooting instance with a VMM should be allowed");
+        match action {
+            InstanceStateChangeRequestAction::SendToSled {
+                sled_id,
+                propolis_id,
+            } => {
+                assert_eq!(sled_id, expected_sled_id);
+                assert_eq!(propolis_id, expected_propolis_id);
+            }
+            other => panic!("expected SendToSled, got {other:?}"),
+        }
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_select_action_failed_stop() {
+        let logctx = test_setup_log("test_select_action_failed_stop");
+        let (mut instance, _vmm) = make_instance_and_vmm();
+        instance.nexus_state = DbInstanceState::Failed;
+        let action = Nexus::select_runtime_change_action(
+            &logctx.log,
+            &instance,
+            &None,
+            &InstanceStateChangeRequest::Stop,
+        )
+        .expect("stopping a Failed instance should be allowed");
+        let InstanceStateChangeRequestAction::UpdateRuntime(rt) = action else {
+            panic!("expected UpdateRuntime, got {action:?}");
+        };
+        assert_eq!(rt.nexus_state, DbInstanceState::NoVmm);
+        assert_eq!(rt.propolis_id, None);
+        assert_eq!(
+            InstanceStateGeneration::from(rt.generation),
+            InstanceStateGeneration::from(instance.state_generation).next(),
+        );
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_select_action_no_vmm_stop_is_idempotent() {
+        let logctx =
+            test_setup_log("test_select_action_no_vmm_stop_is_idempotent");
+        let (mut instance, _vmm) = make_instance_and_vmm();
+        instance.nexus_state = DbInstanceState::NoVmm;
+        let action = Nexus::select_runtime_change_action(
+            &logctx.log,
+            &instance,
+            &None,
+            &InstanceStateChangeRequest::Stop,
+        )
+        .expect("stopping a stopped instance should succeed");
+        assert!(
+            matches!(action, InstanceStateChangeRequestAction::AlreadyDone),
+            "expected AlreadyDone, got {action:?}"
+        );
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_select_action_no_vmm_run_reboot_migrate_rejected() {
+        let logctx = test_setup_log(
+            "test_select_action_no_vmm_run_reboot_migrate_rejected",
+        );
+        let (mut instance, _vmm) = make_instance_and_vmm();
+        instance.nexus_state = DbInstanceState::NoVmm;
+        for requested in [
+            InstanceStateChangeRequest::Run,
+            InstanceStateChangeRequest::Reboot,
+            InstanceStateChangeRequest::Migrate(
+                InstanceMigrationTargetParams {
+                    src_propolis_addr: "[::1]:12400".parse().unwrap(),
+                },
+            ),
+        ] {
+            let err = match Nexus::select_runtime_change_action(
+                &logctx.log,
+                &instance,
+                &None,
+                &requested,
+            ) {
+                Ok(action) => {
+                    panic!("{requested:?} should fail, got {action:?}")
+                }
+                Err(err) => err,
+            };
+            assert!(
+                matches!(err, Error::InvalidRequest { .. }),
+                "{requested:?}: expected InvalidRequest, got {err:?}"
+            );
+        }
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_select_action_creating_rejected() {
+        let logctx = test_setup_log("test_select_action_creating_rejected");
+        let (mut instance, _vmm) = make_instance_and_vmm();
+        instance.nexus_state = DbInstanceState::Creating;
+        let err = Nexus::select_runtime_change_action(
+            &logctx.log,
+            &instance,
+            &None,
+            &InstanceStateChangeRequest::Stop,
+        )
+        .expect_err("changing state of a Creating instance should fail");
+        assert!(
+            matches!(err, Error::InvalidRequest { .. }),
+            "expected InvalidRequest, got {err:?}"
+        );
+        logctx.cleanup_successful();
+    }
+
+    /// Build a DbInstance from `make_instance_and_vmm`'s base params with the
+    /// `enable_jumbo_frames` field overridden.
+    fn make_instance_with_jumbo_frames(
+        enable_jumbo_frames: bool,
+    ) -> DbInstance {
+        let params = instance::InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: Name::try_from("jumbo".to_owned()).unwrap(),
+                description: "instance under jumbo-frames test".to_owned(),
+            },
+            ncpus: instance::InstanceCpuCount(1),
+            memory: ByteCount::from_gibibytes_u32(1),
+            hostname: Hostname::try_from("jumbo").unwrap(),
+            user_data: vec![],
+            network_interfaces: InstanceNetworkInterfaceAttachment::None,
+            external_ips: vec![],
+            disks: vec![],
+            boot_disk: None,
+            cpu_platform: None,
+            ssh_public_keys: None,
+            start: false,
+            auto_restart_policy: Default::default(),
+            anti_affinity_groups: Vec::new(),
+            multicast_groups: Vec::new(),
+            enable_jumbo_frames,
+        };
+        let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
+        let project_id = ProjectUuid::new_v4();
+        DbInstance::new(instance_id, project_id, &params)
+    }
+
+    /// `InstanceCreate::enable_jumbo_frames` must be propagated into the
+    /// resulting `DbInstance`, so that downstream code (VMM registration, view
+    /// rendering) sees the value the user requested.
+    #[test]
+    fn test_instance_create_propagates_enable_jumbo_frames() {
+        assert!(!make_instance_with_jumbo_frames(false).enable_jumbo_frames);
+        assert!(make_instance_with_jumbo_frames(true).enable_jumbo_frames);
+    }
+
+    /// The effective primary-NIC MTU is jumbo only when both the per-instance
+    /// bit and the fleet-wide opt-in are enabled. Any other combination must
+    /// leave the MTU unset so OPTE applies its default.
+    #[test]
+    fn test_primary_nic_mtu_for_jumbo_frames() {
+        assert_eq!(primary_nic_mtu_for_jumbo_frames(false, false), None);
+        assert_eq!(primary_nic_mtu_for_jumbo_frames(true, false), None);
+        assert_eq!(primary_nic_mtu_for_jumbo_frames(false, true), None);
+        assert_eq!(
+            primary_nic_mtu_for_jumbo_frames(true, true),
+            Some(omicron_common::address::EXTERNAL_JUMBO_FRAMES_MTU),
+        );
     }
 }

@@ -6,7 +6,9 @@ use async_trait::async_trait;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::Error;
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
+use omicron_uuid_kinds::{
+    GenericUuid, InstanceUuid, PropolisUuid, RackUuid, SledUuid,
+};
 use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -31,7 +33,7 @@ pub struct InstanceSledAgentInfo {
 #[async_trait]
 pub trait TestInterfaces {
     /// Access the Rack ID of the currently executing Nexus.
-    fn rack_id(&self) -> Uuid;
+    fn rack_id(&self) -> RackUuid;
 
     /// Attempts to obtain the Propolis ID and sled agent information for an
     /// instance.
@@ -63,11 +65,17 @@ pub trait TestInterfaces {
     async fn set_disk_as_faulted(&self, disk_id: &Uuid) -> Result<bool, Error>;
 
     fn set_samael_max_issue_delay(&self, max_issue_delay: chrono::Duration);
+
+    /// Manually invalidate multicast caches and activate reconciler.
+    ///
+    /// This simulates topology changes that would require cache invalidation,
+    /// such as backplane configuration changes or sled movements.
+    fn invalidate_multicast_caches(&self);
 }
 
 #[async_trait]
 impl TestInterfaces for super::Nexus {
-    fn rack_id(&self) -> Uuid {
+    fn rack_id(&self) -> RackUuid {
         self.rack_id
     }
 
@@ -103,7 +111,7 @@ impl TestInterfaces for super::Nexus {
             return Ok(None);
         };
 
-        let sled_id = SledUuid::from_untyped_uuid(vmm.sled_id);
+        let sled_id = vmm.sled_id();
         Ok(Some(InstanceSledAgentInfo {
             propolis_id: PropolisUuid::from_untyped_uuid(vmm.id),
             sled_id,
@@ -153,7 +161,7 @@ impl TestInterfaces for super::Nexus {
                 .fetch()
                 .await?;
 
-        let new_runtime = db_disk.runtime_state.faulted();
+        let new_runtime = db_disk.runtime().faulted();
 
         self.db_datastore
             .disk_update_runtime(&opctx, &authz_disk, &new_runtime)
@@ -163,5 +171,12 @@ impl TestInterfaces for super::Nexus {
     fn set_samael_max_issue_delay(&self, max_issue_delay: chrono::Duration) {
         let mut mid = self.samael_max_issue_delay.lock().unwrap();
         *mid = Some(max_issue_delay);
+    }
+
+    fn invalidate_multicast_caches(&self) {
+        // Cache invalidation happens automatically when the reconciler detects
+        // sled location changes. Activating the reconciler is sufficient.
+        self.background_tasks
+            .activate(&self.background_tasks.task_multicast_reconciler);
     }
 }

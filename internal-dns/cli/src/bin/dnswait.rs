@@ -56,8 +56,11 @@ impl From<ServiceName> for internal_dns_types::names::ServiceName {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    oxide_tokio_rt::run(main_impl())
+}
+
+async fn main_impl() -> Result<()> {
     let opt = Opt::parse();
     let log = dropshot::ConfigLogging::File {
         path: "/dev/stderr".into(),

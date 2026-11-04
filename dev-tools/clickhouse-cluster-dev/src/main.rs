@@ -14,13 +14,16 @@ use clickhouse_admin_test_utils::{
     default_clickhouse_log_ctx_and_path,
 };
 use clickward::KeeperId;
-use oximeter_db::Client;
+use oximeter_db::{Client, User};
 use oximeter_test_utils::{wait_for_keepers, wait_for_ping};
 use scopeguard::ScopeGuard;
 use std::time::Duration;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    oxide_tokio_rt::run(main_impl())
+}
+
+async fn main_impl() -> Result<()> {
     let request_timeout = Duration::from_secs(15);
     let (logctx, path) = default_clickhouse_log_ctx_and_path();
 
@@ -65,11 +68,13 @@ async fn main() -> Result<()> {
     deployment.deploy().context("failed to deploy")?;
 
     let client1 = Client::new_with_request_timeout(
+        User::Admin,
         deployment.native_addr(1.into()),
         &logctx.log,
         request_timeout,
     );
     let client2 = Client::new_with_request_timeout(
+        User::Admin,
         deployment.native_addr(2.into()),
         &logctx.log,
         request_timeout,

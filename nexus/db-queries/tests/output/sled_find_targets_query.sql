@@ -4,7 +4,10 @@ WITH
       SELECT
         sled.id AS sled_id
       FROM
-        sled LEFT JOIN sled_resource_vmm ON sled_resource_vmm.sled_id = sled.id
+        sled
+        JOIN rendezvous_sled_bp_availability AS sled_bp_avail ON
+            sled_bp_avail.sled_id = sled.id AND sled_bp_avail.bp_availability = 'available'
+        LEFT JOIN sled_resource_vmm ON sled_resource_vmm.sled_id = sled.id
       WHERE
         sled.time_deleted IS NULL AND sled.sled_policy = 'in_service' AND sled.sled_state = 'active'
       GROUP BY

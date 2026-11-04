@@ -7,7 +7,6 @@ use crate::MigrationState;
 use chrono::DateTime;
 use chrono::Utc;
 use nexus_db_schema::schema::migration;
-use omicron_common::api::internal::nexus;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
 use serde::Serialize;
@@ -79,11 +78,13 @@ impl Migration {
             instance_id: instance_id.into_untyped_uuid(),
             time_created: Utc::now(),
             time_deleted: None,
-            source_state: nexus::MigrationState::Pending.into(),
+            source_state: sled_agent_types::instance::MigrationState::Pending
+                .into(),
             source_propolis_id,
             source_gen: Generation::new(),
             time_source_updated: None,
-            target_state: nexus::MigrationState::Pending.into(),
+            target_state: sled_agent_types::instance::MigrationState::Pending
+                .into(),
             target_propolis_id,
             target_gen: Generation::new(),
             time_target_updated: None,

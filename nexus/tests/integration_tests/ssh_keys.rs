@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Sanity-tests for public SSH keys
 
 use http::{StatusCode, method::Method};
@@ -6,8 +10,8 @@ use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
 
-use nexus_types::external_api::params::SshKeyCreate;
-use nexus_types::external_api::views::SshKey;
+use nexus_types::external_api::ssh_key::SshKey;
+use nexus_types::external_api::ssh_key::SshKeyCreate;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 
 type ControlPlaneTestContext =

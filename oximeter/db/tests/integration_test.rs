@@ -5,14 +5,17 @@
 use anyhow::Context;
 use clickward::{BasePorts, Deployment, DeploymentConfig, KeeperId};
 use dropshot::test_util::log_prefix_for_test;
+use omicron_test_utils::dev::file_checksum;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::test_setup_log;
+use oximeter_db::User;
 use oximeter_db::oxql::query::QueryAuthzScope;
 use oximeter_db::{Client, DbWrite, OxqlResult, Sample, TestDbWrite};
 use oximeter_test_utils::wait_for_keepers;
 use slog::{Logger, info};
 use std::collections::BTreeSet;
 use std::default::Default;
+use std::path::PathBuf;
 use std::time::Duration;
 
 pub struct TestInput {
@@ -36,6 +39,44 @@ impl TestInput {
     fn n_points(&self) -> usize {
         self.n_projects * self.n_instances * self.n_cpus * self.n_samples
     }
+}
+
+/// Ensure the oximeter database schemas for both single node and replicated
+/// cluster are not modified.
+///
+/// Schema changes for the `oximeter` database are not allowed because there is
+/// no mechanism to apply them to existing systems. If we need to support schema
+/// changes at some point, we'll have to do the work to update them during
+/// automated update. See https://github.com/oxidecomputer/omicron/issues/8862
+/// for details.
+#[tokio::test]
+async fn test_schemas_are_not_modified() -> anyhow::Result<()> {
+    let cur_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let single_node_schema_checksum =
+        file_checksum(cur_dir.as_path().join("schema/single-node/db-init.sql"))
+            .unwrap();
+    let replicated_schema_1_checksum = file_checksum(
+        cur_dir.as_path().join("schema/replicated/db-init-1.sql"),
+    )
+    .unwrap();
+    let replicated_schema_2_checksum = file_checksum(
+        cur_dir.as_path().join("schema/replicated/db-init-2.sql"),
+    )
+    .unwrap();
+
+    assert_eq!(
+        "1422131e72b3410b7f4520bf72a213f0c3288ce8cd738a0010b1bf44edea480a",
+        single_node_schema_checksum
+    );
+    assert_eq!(
+        "038ca7fc66006d6c06243a6fa122cf2f0bfee6edf55227e13166a9b854169abb",
+        replicated_schema_1_checksum
+    );
+    assert_eq!(
+        "d78c49e5662a2bd211eba63cc71a33bffacca7c6a80d9090532329650c6baae0",
+        replicated_schema_2_checksum
+    );
+    Ok(())
 }
 
 /// Ensure `db-init-1.sql` and `db-init-2.sql` contain disjoint sets of tables.
@@ -64,6 +105,7 @@ async fn test_schemas_disjoint() -> anyhow::Result<()> {
     deployment.deploy().context("failed to deploy")?;
 
     let client1 = Client::new_with_request_timeout(
+        User::Admin,
         deployment.native_addr(1.into()),
         log,
         request_timeout,
@@ -159,11 +201,13 @@ async fn test_cluster() -> anyhow::Result<()> {
     deployment.deploy().context("failed to deploy")?;
 
     let client1 = Client::new_with_request_timeout(
+        User::Admin,
         deployment.native_addr(1.into()),
         log,
         request_timeout,
     );
     let client2 = Client::new_with_request_timeout(
+        User::Admin,
         deployment.native_addr(2.into()),
         log,
         request_timeout,
@@ -223,6 +267,23 @@ async fn test_cluster() -> anyhow::Result<()> {
     // Ensure the samples are correct on this replica
     assert_input_and_output(&input, &samples, &oxql_res1);
 
+    // Assert that at least one query summary and at least one known profile
+    // type are present.
+    assert!(
+        !oxql_res1.query_summaries.is_empty(),
+        "expected at least one query summary"
+    );
+    let total_user_cpu: i64 = oxql_res1
+        .query_summaries
+        .iter()
+        .filter_map(|s| s.profile_summary.get("UserTimeMicroseconds"))
+        .sum();
+    assert!(
+        total_user_cpu > 0,
+        "expected non-zero UserTimeMicroseconds in profile summaries, got {}",
+        total_user_cpu,
+    );
+
     let start = tokio::time::Instant::now();
     wait_for_num_points(&log, &client2, samples.len())
         .await
@@ -232,6 +293,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     // Add a 3rd clickhouse server and wait for it to come up
     deployment.add_server().expect("failed to launch a 3rd clickhouse server");
     let client3 = Client::new_with_request_timeout(
+        User::Admin,
         deployment.native_addr(3.into()),
         log,
         request_timeout,
@@ -333,6 +395,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     // few hundred milliseconds. To shorten the length of our test, we create a
     // new client with a shorter timeout.
     let client1_short_timeout = Client::new_with_request_timeout(
+        User::Admin,
         deployment.native_addr(1.into()),
         log,
         Duration::from_secs(2),
@@ -434,7 +497,7 @@ async fn wait_for_num_points(
                     QueryAuthzScope::Fleet)
                 .await
                 .map_err(|_| {
-                    poll::CondCheckError::<oximeter_db::Error>::NotYet
+                    poll::CondCheckError::<oximeter_db::Error>::NotYet { status: None }
                 })?;
             if total_points(&oxql_res) != n_samples {
                 info!(
@@ -443,7 +506,7 @@ async fn wait_for_num_points(
                     total_points(&oxql_res),
                     n_samples
                 );
-                Err(poll::CondCheckError::<oximeter_db::Error>::NotYet)
+                Err(poll::CondCheckError::<oximeter_db::Error>::NotYet { status: None })
             } else {
                 Ok(())
             }
@@ -461,10 +524,11 @@ async fn wait_for_num_points(
 async fn wait_for_ping(log: &Logger, client: &Client) -> anyhow::Result<()> {
     poll::wait_for_condition(
         || async {
-            client
-                .ping()
-                .await
-                .map_err(|_| poll::CondCheckError::<oximeter_db::Error>::NotYet)
+            client.ping().await.map_err(|_| poll::CondCheckError::<
+                oximeter_db::Error,
+            >::NotYet {
+                status: None,
+            })
         },
         &Duration::from_millis(100),
         &Duration::from_secs(30),
@@ -483,10 +547,11 @@ async fn wait_for_insert(
 ) -> anyhow::Result<()> {
     poll::wait_for_condition(
         || async {
-            client
-                .insert_samples(&samples)
-                .await
-                .map_err(|_| poll::CondCheckError::<oximeter_db::Error>::NotYet)
+            client.insert_samples(&samples).await.map_err(|_| {
+                poll::CondCheckError::<oximeter_db::Error>::NotYet {
+                    status: None,
+                }
+            })
         },
         &Duration::from_millis(1000),
         &Duration::from_secs(60),

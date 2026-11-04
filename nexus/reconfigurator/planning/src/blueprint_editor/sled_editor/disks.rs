@@ -3,11 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::blueprint_builder::EditCounts;
-use id_map::Entry;
-use id_map::IdMap;
+use iddqd::IdOrdMap;
+use iddqd::id_ord_map::Entry;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::SledConfigGeneration;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 
@@ -25,15 +25,15 @@ pub enum DisksEditError {
 
 #[derive(Debug)]
 pub(super) struct DisksEditor {
-    incoming_sled_agent_generation: Generation,
-    disks: IdMap<BlueprintPhysicalDiskConfig>,
+    incoming_sled_agent_generation: SledConfigGeneration,
+    disks: IdOrdMap<BlueprintPhysicalDiskConfig>,
     counts: EditCounts,
 }
 
 impl DisksEditor {
     pub fn new(
-        incoming_sled_agent_generation: Generation,
-        disks: IdMap<BlueprintPhysicalDiskConfig>,
+        incoming_sled_agent_generation: SledConfigGeneration,
+        disks: IdOrdMap<BlueprintPhysicalDiskConfig>,
     ) -> Self {
         Self {
             incoming_sled_agent_generation,
@@ -44,13 +44,15 @@ impl DisksEditor {
 
     pub fn empty() -> Self {
         Self {
-            incoming_sled_agent_generation: Generation::new(),
-            disks: IdMap::new(),
+            incoming_sled_agent_generation: SledConfigGeneration::new(),
+            disks: IdOrdMap::new(),
             counts: EditCounts::zeroes(),
         }
     }
 
-    pub fn finalize(self) -> (IdMap<BlueprintPhysicalDiskConfig>, EditCounts) {
+    pub fn finalize(
+        self,
+    ) -> (IdOrdMap<BlueprintPhysicalDiskConfig>, EditCounts) {
         (self.disks, self.counts)
     }
 
@@ -129,7 +131,7 @@ impl DisksEditor {
         &mut self,
         disk_id: &PhysicalDiskUuid,
     ) -> Result<(bool, ZpoolUuid), DisksEditError> {
-        let mut config = self.disks.get_mut(disk_id).ok_or_else(|| {
+        let mut config = self.disks.get_mut(*disk_id).ok_or_else(|| {
             DisksEditError::ExpungeNonexistentDisk { id: *disk_id }
         })?;
 
@@ -162,7 +164,7 @@ impl DisksEditor {
         &mut self,
         disk_id: &PhysicalDiskUuid,
     ) -> Result<bool, DisksEditError> {
-        let mut config = self.disks.get_mut(disk_id).ok_or_else(|| {
+        let mut config = self.disks.get_mut(*disk_id).ok_or_else(|| {
             DisksEditError::DecommissionNonexistentDisk { id: *disk_id }
         })?;
 

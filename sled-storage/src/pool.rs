@@ -4,9 +4,8 @@
 
 //! ZFS storage pool
 
-use crate::error::Error;
-use illumos_utils::zpool::{Zpool, ZpoolInfo, ZpoolName};
-use omicron_common::disk::DiskIdentity;
+use illumos_utils::zpool::{GetInfoError, Zpool, ZpoolInfo, ZpoolName};
+use sled_agent_types::disk::DiskIdentity;
 
 /// A ZFS storage pool wrapper that tracks information returned from
 /// `zpool` commands
@@ -21,8 +20,11 @@ impl Pool {
     /// Queries for an existing Zpool by name.
     ///
     /// Returns Ok if the pool exists.
-    pub fn new(name: ZpoolName, parent: DiskIdentity) -> Result<Pool, Error> {
-        let info = Zpool::get_info(&name.to_string())?;
+    pub async fn new(
+        name: ZpoolName,
+        parent: DiskIdentity,
+    ) -> Result<Pool, GetInfoError> {
+        let info = Zpool::get_info(&name.to_string()).await?;
         Ok(Pool { name, info, parent })
     }
 

@@ -3,13 +3,18 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::DiskFirmware;
-use crate::{DendriteAsic, HardwareUpdate, SledMode, UnparsedDisk};
+use crate::ExternalDisks;
+use crate::HardwareView;
+use crate::TofinoSnapshot;
+use crate::TofinoView;
+use crate::{DendriteAsic, SledMode, UnparsedDisk};
 use camino::Utf8PathBuf;
 use gethostname::gethostname;
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
 use libnvme::{Nvme, controller::Controller};
-use omicron_common::disk::{DiskIdentity, DiskVariant};
-use sled_hardware_types::Baseboard;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::DiskVariant;
+use sled_hardware_types::{Baseboard, OxideSled, SledCpuFamily};
 use slog::Logger;
 use slog::debug;
 use slog::error;
@@ -17,24 +22,26 @@ use slog::info;
 use slog::o;
 use slog::warn;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use std::sync::Mutex;
-use tokio::sync::broadcast;
+use tokio::sync::watch;
 use uuid::Uuid;
 
 mod gpt;
 mod partitions;
+mod softnpu;
 mod sysconf;
 
 pub use partitions::{NvmeFormattingError, ensure_partition_layout};
+pub use softnpu::find_softnpu_device;
+
+const TOFINO_MONITOR: &'static str = "/opt/oxide/sled-agent/tofino-monitor";
 
 #[derive(thiserror::Error, Debug)]
 enum Error {
     #[error("Failed to access devinfo: {0}")]
     DevInfo(anyhow::Error),
 
-    #[error("Device does not appear to be an Oxide Gimlet: {0}")]
-    NotAGimlet(String),
+    #[error("Device does not appear to be an Oxide sled: {0}")]
+    NotAnOxideSled(String),
 
     #[error("Invalid Utf8 path: {0}")]
     FromPathBuf(#[from] camino::FromPathBufError),
@@ -76,28 +83,19 @@ enum Error {
     FirmwareLogPage(#[from] libnvme::firmware::FirmwareLogPageError),
 }
 
-const GIMLET_ROOT_NODE_NAME: &str = "Oxide,Gimlet";
-
-/// Return true if the host system is an Oxide Gimlet.
-pub fn is_gimlet() -> anyhow::Result<bool> {
+/// Return true if the host system is an Oxide Sled.
+pub fn is_oxide_sled() -> anyhow::Result<bool> {
     let mut device_info = DevInfo::new()?;
     let mut node_walker = device_info.walk_node();
     let Some(root) = node_walker.next().transpose()? else {
         anyhow::bail!("No nodes in device tree");
     };
-    Ok(root.node_name() == GIMLET_ROOT_NODE_NAME)
-}
-
-// A snapshot of information about the underlying Tofino device
-#[derive(Copy, Clone)]
-struct TofinoSnapshot {
-    exists: bool,
-    driver_loaded: bool,
+    Ok(OxideSled::try_from_root_node_name(&root.node_name()).is_some())
 }
 
 impl TofinoSnapshot {
     fn new() -> Self {
-        Self { exists: false, driver_loaded: false }
+        Self { exists: false, available: false }
     }
 }
 
@@ -121,21 +119,25 @@ impl TryFrom<i64> for BootStorageUnit {
 }
 
 // A snapshot of information about the underlying hardware
+#[derive(Debug, Clone)]
 struct HardwareSnapshot {
     tofino: TofinoSnapshot,
     disks: HashMap<DiskIdentity, UnparsedDisk>,
-    baseboard: Baseboard,
 }
 
 impl HardwareSnapshot {
     // Walk the device tree to capture a view of the current hardware.
-    fn new(log: &Logger) -> Result<Self, Error> {
+    fn new(
+        log: &Logger,
+        external_disks: &ExternalDisks,
+    ) -> Result<Self, Error> {
         let mut device_info =
             DevInfo::new_force_load().map_err(Error::DevInfo)?;
 
         let mut node_walker = device_info.walk_node();
 
-        // First, check the root node. If we aren't running on a Gimlet, bail.
+        // First, check the root node. If we aren't running on an Oxide sled,
+        // bail.
         let Some(root) =
             node_walker.next().transpose().map_err(Error::DevInfo)?
         else {
@@ -144,195 +146,98 @@ impl HardwareSnapshot {
             )));
         };
         let root_node = root.node_name();
-        if root_node != GIMLET_ROOT_NODE_NAME {
-            return Err(Error::NotAGimlet(root_node));
-        }
+        let Some(sled_type) = OxideSled::try_from_root_node_name(&root_node)
+        else {
+            return Err(Error::NotAnOxideSled(root_node));
+        };
 
-        let properties = find_properties(
-            &root,
-            [
-                "baseboard-identifier",
-                "baseboard-model",
-                "baseboard-revision",
-                "boot-storage-unit",
-            ],
-        )?;
-        let baseboard = Baseboard::new_gimlet(
-            string_from_property(&properties[0])?,
-            string_from_property(&properties[1])?,
-            u32_from_property(&properties[2])?,
-        );
+        let properties = find_properties(&root, ["boot-storage-unit"])?;
         let boot_storage_unit =
-            BootStorageUnit::try_from(i64_from_property(&properties[3])?)?;
+            BootStorageUnit::try_from(i64_from_property(&properties[0])?)?;
 
         // Monitor for the Tofino device and driver.
         let tofino = get_tofino_snapshot(log, &mut device_info);
 
         // Monitor for block devices.
         let mut disks = HashMap::new();
-        let mut node_walker = device_info.walk_driver("blkdev");
-        while let Some(node) =
-            node_walker.next().transpose().map_err(Error::DevInfo)?
-        {
-            poll_blkdev_node(&log, &mut disks, node, boot_storage_unit)?;
+        match external_disks {
+            ExternalDisks::DetectPhysical => {
+                let mut node_walker = device_info.walk_driver("blkdev");
+                while let Some(node) =
+                    node_walker.next().transpose().map_err(Error::DevInfo)?
+                {
+                    poll_blkdev_node(
+                        &log,
+                        sled_type,
+                        &mut disks,
+                        node,
+                        boot_storage_unit,
+                    )?;
+                }
+            }
+
+            ExternalDisks::Hardcoded { vdevs: _, disks: hardcoded_disks } => {
+                for disk in hardcoded_disks {
+                    disks.insert(disk.identity().clone(), disk.clone());
+                }
+            }
         }
 
-        Ok(Self { tofino, disks, baseboard })
+        Ok(Self { tofino, disks })
     }
-}
-
-// Describes a view of the Tofino switch.
-enum TofinoView {
-    // The view of the Tofino switch exactly matches the snapshot of hardware.
-    Real(TofinoSnapshot),
-    // The Tofino switch has been "stubbed out", and the underlying hardware is
-    // being ignored.
-    Stub { active: bool },
-}
-
-// A cached copy of "our latest view of what hardware exists".
-//
-// This struct can be expanded arbitrarily, as it's useful for the Sled Agent
-// to perceive hardware.
-//
-// Q: Why bother caching this information at all? Why not rely on devinfo for
-// all queries?
-// A: By keeping an in-memory representation, we can "diff" with the information
-// reported from libdevinfo to decide when to send notifications and change
-// which services are currently executing.
-struct HardwareView {
-    tofino: TofinoView,
-    disks: HashMap<DiskIdentity, UnparsedDisk>,
-    baseboard: Option<Baseboard>,
-    online_processor_count: u32,
-    usable_physical_pages: u64,
-    usable_physical_ram_bytes: u64,
 }
 
 impl HardwareView {
-    // TODO: We should populate these constructors with real data from the
-    // first attempt at polling hardware.
-    //
-    // Otherwise, values that we really expect to be static will need to be
-    // nullable.
-    fn new() -> Result<Self, Error> {
+    // TODO-cleanup: We construct a mostly-empty `HardwareView` and rely on our
+    // caller (`HardwareManager::new()`) filling in several of these fields with
+    // correct values by calling `poll_device_tree()` _before_ it ever exposes a
+    // `HardwareView` to its consumers. This isn't ideal (we leave a window open
+    // where we return a mostly-empty view) but is not trivial to rework.
+    fn new(
+        baseboard: Baseboard,
+        tofino: TofinoView,
+        cpu_family: SledCpuFamily,
+    ) -> Result<Self, Error> {
         Ok(Self {
-            tofino: TofinoView::Real(TofinoSnapshot::new()),
+            tofino,
             disks: HashMap::new(),
-            baseboard: None,
+            baseboard,
             online_processor_count: sysconf::online_processor_count()?,
             usable_physical_pages: sysconf::usable_physical_pages()?,
             usable_physical_ram_bytes: sysconf::usable_physical_ram_bytes()?,
+            cpu_family,
         })
-    }
-
-    fn new_stub_tofino(active: bool) -> Result<Self, Error> {
-        Ok(Self {
-            tofino: TofinoView::Stub { active },
-            disks: HashMap::new(),
-            baseboard: None,
-            online_processor_count: sysconf::online_processor_count()?,
-            usable_physical_pages: sysconf::usable_physical_pages()?,
-            usable_physical_ram_bytes: sysconf::usable_physical_ram_bytes()?,
-        })
-    }
-
-    // Updates our view of the Tofino switch against a snapshot.
-    fn update_tofino(
-        &mut self,
-        polled_hw: &HardwareSnapshot,
-        updates: &mut Vec<HardwareUpdate>,
-    ) {
-        match self.tofino {
-            TofinoView::Real(TofinoSnapshot { driver_loaded, exists }) => {
-                use HardwareUpdate::*;
-                // Identify if the Tofino device changed power states.
-                if exists != polled_hw.tofino.exists {
-                    updates.push(TofinoDeviceChange);
-                }
-
-                // Identify if the Tofino driver was recently loaded/unloaded.
-                match (driver_loaded, polled_hw.tofino.driver_loaded) {
-                    (false, true) => updates.push(TofinoLoaded),
-                    (true, false) => updates.push(TofinoUnloaded),
-                    _ => (),
-                };
-
-                // Update our view of the underlying hardware
-                self.tofino = TofinoView::Real(polled_hw.tofino);
-            }
-            TofinoView::Stub { .. } => (),
-        }
-    }
-
-    // Updates our view of block devices against a snapshot.
-    fn update_blkdev(
-        &mut self,
-        polled_hw: &HardwareSnapshot,
-        updates: &mut Vec<HardwareUpdate>,
-    ) {
-        let mut added = Vec::new();
-        let mut removed = Vec::new();
-        let mut updated = Vec::new();
-
-        // Find new or updated disks.
-        for (key, value) in &polled_hw.disks {
-            match self.disks.get(&key) {
-                Some(found) => {
-                    if value != found {
-                        updated.push(value.clone());
-                    }
-                }
-                None => added.push(value.clone()),
-            }
-        }
-
-        // Find disks which have been removed.
-        for (key, value) in &self.disks {
-            if !polled_hw.disks.contains_key(key) {
-                removed.push(value.clone());
-            }
-        }
-
-        use HardwareUpdate::*;
-        for disk in removed {
-            updates.push(DiskRemoved(disk));
-        }
-        for disk in added {
-            updates.push(DiskAdded(disk));
-        }
-        for disk in updated {
-            updates.push(DiskUpdated(disk));
-        }
-
-        self.disks.clone_from(&polled_hw.disks);
     }
 }
 
-fn slot_to_disk_variant(slot: i64) -> Option<DiskVariant> {
-    match slot {
-        // For the source of these values, refer to:
-        //
-        // https://github.com/oxidecomputer/illumos-gate/blob/87a8bbb8edfb89ad5012beb17fa6f685c7795416/usr/src/uts/oxide/milan/milan_dxio_data.c#L823-L847
-        0x00..=0x09 => Some(DiskVariant::U2),
-        0x11..=0x12 => Some(DiskVariant::M2),
-        _ => None,
+fn slot_to_disk_variant(sled: OxideSled, slot: i64) -> Option<DiskVariant> {
+    let u2_slots = sled.u2_disk_slots();
+    let m2_slots = sled.m2_disk_slots();
+    if u2_slots.contains(&slot) {
+        Some(DiskVariant::U2)
+    } else if m2_slots.contains(&slot) {
+        Some(DiskVariant::M2)
+    } else {
+        None
     }
 }
 
-fn slot_is_boot_disk(slot: i64, boot_storage_unit: BootStorageUnit) -> bool {
-    match (boot_storage_unit, slot) {
-        // See reference for these values in `slot_to_disk_variant` above.
-        (BootStorageUnit::A, 0x11) | (BootStorageUnit::B, 0x12) => true,
-        _ => false,
+fn slot_is_boot_disk(
+    sled: OxideSled,
+    slot: i64,
+    boot_storage_unit: BootStorageUnit,
+) -> bool {
+    let slots = sled.bootdisk_slots();
+    match boot_storage_unit {
+        BootStorageUnit::A => slots[0] == slot,
+        BootStorageUnit::B => slots[1] == slot,
     }
 }
 
 fn get_tofino_snapshot(log: &Logger, devinfo: &mut DevInfo) -> TofinoSnapshot {
-    let (exists, driver_loaded) = match tofino::get_tofino_from_devinfo(devinfo)
-    {
+    let (exists, available) = match tofino::get_tofino_from_devinfo(devinfo) {
         Ok(None) => (false, false),
-        Ok(Some(node)) => (node.has_asic(), node.has_driver()),
+        Ok(Some(node)) => (node.has_asic(), node.is_available()),
         Err(e) => {
             error!(log, "failed to get tofino state: {e:?}");
             (false, false)
@@ -341,11 +246,11 @@ fn get_tofino_snapshot(log: &Logger, devinfo: &mut DevInfo) -> TofinoSnapshot {
     if exists {
         debug!(
             log,
-            "Found tofino node, with driver {}loaded",
-            if driver_loaded { "" } else { "not " }
+            "Found tofino node, with asic {}available",
+            if available { "" } else { "un" }
         );
     }
-    TofinoSnapshot { exists, driver_loaded }
+    TofinoSnapshot { exists, available }
 }
 
 fn get_dev_path_of_whole_disk(
@@ -481,6 +386,7 @@ fn find_properties<'a, const N: usize>(
 
 fn poll_blkdev_node(
     log: &Logger,
+    sled: OxideSled,
     disks: &mut HashMap<DiskIdentity, UnparsedDisk>,
     node: Node<'_>,
     boot_storage_unit: BootStorageUnit,
@@ -551,7 +457,7 @@ fn poll_blkdev_node(
     let slot = i64_from_property(
         &find_properties(&pcieb_node, ["physical-slot#"])?[0],
     )?;
-    let Some(variant) = slot_to_disk_variant(slot) else {
+    let Some(variant) = slot_to_disk_variant(sled, slot) else {
         warn!(log, "Slot# {slot} is not recognized as a disk: {devfs_path}");
         return Err(Error::UnrecognizedSlot { slot });
     };
@@ -589,118 +495,295 @@ fn poll_blkdev_node(
         slot,
         variant,
         device_id.clone(),
-        slot_is_boot_disk(slot, boot_storage_unit),
+        slot_is_boot_disk(sled, slot, boot_storage_unit),
         firmware.clone(),
     );
     disks.insert(device_id, disk);
     Ok(())
 }
 
-// Performs a single walk of the device info tree, updating our view of hardware
-// and sending notifications to any subscribers.
+// Poll just enough of the device info tree to get the Baseboard. We really
+// don't want to deal with an `Option` upstream.
+fn learn_baseboard(log: &Logger) -> Result<Baseboard, Error> {
+    let mut device_info = DevInfo::new_force_load().map_err(Error::DevInfo)?;
+
+    let mut node_walker = device_info.walk_node();
+
+    // First, check the root node. If we aren't running on an Oxide sled,
+    // bail.
+    let Some(root) = node_walker.next().transpose().map_err(Error::DevInfo)?
+    else {
+        return Err(Error::DevInfo(anyhow::anyhow!("No nodes in device tree")));
+    };
+    let root_node = root.node_name();
+    let Some(sled_type) = OxideSled::try_from_root_node_name(&root_node) else {
+        return Ok(get_pc_baseboard(log, root_node.as_str()));
+    };
+
+    let properties = find_properties(
+        &root,
+        ["baseboard-identifier", "baseboard-model", "baseboard-revision"],
+    )?;
+
+    let baseboard = Baseboard::new_oxide_sled(
+        sled_type,
+        string_from_property(&properties[0])?,
+        string_from_property(&properties[1])?,
+        u32_from_property(&properties[2])?,
+    );
+
+    info!(log, "Found baseboard for Oxide hardware"; "baseboard" => %baseboard);
+
+    Ok(baseboard)
+}
+
+// Performs a single walk of the device info tree, updating the view of hardware
+// kept in the `hardware_view_tx` watch channel if anything has changed.
 fn poll_device_tree(
     log: &Logger,
-    inner: &Arc<Mutex<HardwareView>>,
-    nongimlet_observed_disks: &[UnparsedDisk],
-    tx: &broadcast::Sender<HardwareUpdate>,
+    hardware_view_tx: &watch::Sender<HardwareView>,
+    external_disks: &ExternalDisks,
 ) -> Result<(), Error> {
     // Construct a view of hardware by walking the device tree.
-    let polled_hw = match HardwareSnapshot::new(log) {
+    let polled_hw = match HardwareSnapshot::new(log, external_disks) {
         Ok(polled_hw) => polled_hw,
 
         Err(e) => {
-            if let Error::NotAGimlet(root_node) = &e {
-                let mut inner = inner.lock().unwrap();
+            if let Error::NotAnOxideSled(_) = &e {
+                hardware_view_tx.send_if_modified(|inner| {
+                    let mut did_modify = false;
 
-                if root_node.as_str() == "i86pc" {
-                    // If on i86pc, generate some baseboard information before
-                    // returning this error. Each sled agent has to be uniquely
-                    // identified for multiple non-gimlets to work.
-                    if inner.baseboard.is_none() {
-                        let pc_baseboard = Baseboard::new_pc(
-                            gethostname().into_string().unwrap_or_else(|_| {
-                                Uuid::new_v4().simple().to_string()
-                            }),
-                            root_node.clone(),
-                        );
-
-                        info!(
-                            log,
-                            "Generated i86pc baseboard {:?}", pc_baseboard
-                        );
-
-                        inner.baseboard = Some(pc_baseboard);
+                    // For platforms that don't support the HardwareSnapshot
+                    // functionality, sled-agent can be supplied a fixed list of
+                    // UnparsedDisks. Add those to the HardwareSnapshot here if
+                    // they are missing (which they will be for non-sleds).
+                    if let ExternalDisks::Hardcoded { vdevs: _, disks } =
+                        external_disks
+                    {
+                        for disk in disks {
+                            let identity = disk.identity();
+                            if !inner.disks.contains_key(identity) {
+                                inner
+                                    .disks
+                                    .insert(identity.clone(), disk.clone());
+                                did_modify = true;
+                            }
+                        }
                     }
-                }
 
-                // For platforms that don't support the HardwareSnapshot
-                // functionality, sled-agent can be supplied a fixed list of
-                // UnparsedDisks. Add those to the HardwareSnapshot here if they
-                // are missing (which they will be for non-gimlets).
-                for observed_disk in nongimlet_observed_disks {
-                    let identity = observed_disk.identity();
-                    if !inner.disks.contains_key(identity) {
-                        inner
-                            .disks
-                            .insert(identity.clone(), observed_disk.clone());
-                    }
-                }
+                    did_modify
+                });
             }
 
             return Err(e);
         }
     };
 
-    // After inspecting the device tree, diff with the old view, and provide
-    // necessary updates.
-    let mut updates = vec![];
-    {
-        let mut inner = inner.lock().unwrap();
-        inner.update_tofino(&polled_hw, &mut updates);
-        inner.update_blkdev(&polled_hw, &mut updates);
-        inner.baseboard = Some(polled_hw.baseboard);
-    };
+    let HardwareSnapshot { tofino: polled_tofino, disks: polled_disks } =
+        polled_hw;
 
-    if updates.is_empty() {
-        debug!(log, "No updates from polling device tree");
+    // Check for any changes since the last view.
+    let mut did_modify_tofino = false;
+    let mut did_modify_disks = false;
+    hardware_view_tx.send_if_modified(|inner| {
+        did_modify_tofino = match &mut inner.tofino {
+            TofinoView::Real(inner_snapshot) => {
+                if *inner_snapshot == polled_tofino {
+                    false
+                } else {
+                    *inner_snapshot = polled_tofino;
+                    true
+                }
+            }
+            TofinoView::Stub { .. } => false,
+        };
+
+        did_modify_disks = if inner.disks == polled_disks {
+            false
+        } else {
+            inner.disks = polled_disks.clone();
+            true
+        };
+
+        did_modify_tofino || did_modify_disks
+    });
+
+    info!(
+        log, "Completed poll of device tree";
+        "did_modify_tofino" => did_modify_tofino,
+        "did_modify_disks" => did_modify_disks,
+    );
+    if did_modify_tofino {
+        info!(log, "Updated tofino"; "tofino" => ?polled_tofino);
     }
-
-    for update in updates.into_iter() {
-        info!(log, "Update from polling device tree: {:?}", update);
-        let _ = tx.send(update);
+    if did_modify_disks {
+        info!(log, "Updated disks"; "disks" => ?polled_disks);
     }
 
     Ok(())
 }
 
-async fn hardware_tracking_task(
+// Using an external process, watch for the disappearance of a tofino device.
+fn monitor_tofino(
+    log: slog::Logger,
+    hardware_view_tx: watch::Sender<HardwareView>,
+) {
+    match std::fs::exists(TOFINO_MONITOR) {
+        Err(_) | Ok(false) => {
+            error!(&log, "tofino monitor tool not found at {}", TOFINO_MONITOR);
+            return;
+        }
+        _ => {}
+    };
+
+    loop {
+        let mut child = match std::process::Command::new(TOFINO_MONITOR).spawn()
+        {
+            Ok(c) => {
+                debug!(
+                    &log,
+                    "launched tofino monitor process as pid {}",
+                    c.id()
+                );
+                c
+            }
+            Err(e) => {
+                error!(&log, "failed to launch tofino monitor: {e:?}");
+                return;
+            }
+        };
+
+        // This child process should only exit if it has seen a tofino ASIC and
+        // then received a "tofino removed" event from the kernel.  If that
+        // happens, it should exit cleanly with an exit code of 0.  If the child
+        // exits for any other reason, we don't know what it means, and can only
+        // log the event for posterity.  In either case, we send a message to
+        // the hardware monitor task indicating that the Tofino is gone, and it
+        // will perform any necessary cleanup.  This cleanup will include
+        // shutting down the switch zone if, for some reason, it still exists.
+        match child.wait() {
+            Err(e) => error!(&log, "failed to collect exit status: {e:?}"),
+            Ok(s) => info!(&log, "child exited with code: {:?}", s.code()),
+        }
+        hardware_view_tx.send_if_modified(|inner| {
+            match &mut inner.tofino {
+                TofinoView::Real(snapshot) => {
+                    if snapshot.available {
+                        snapshot.available = false;
+                        true // we did modify the value
+                    } else {
+                        // tofino already unavailable; no changes
+                        false
+                    }
+                }
+                TofinoView::Stub { .. } => false,
+            }
+        });
+
+        // By the time we get here, the switch zone should be gone and the
+        // device tree cleaned up.  Still, it doesn't hurt to give things a
+        // moment to stabilize before restarting the monitor.
+        std::thread::sleep(std::time::Duration::from_secs(5));
+    }
+}
+
+/// Return a `Baseboard` for non-Oxide hardware
+///
+/// The device tree is not populated with `Baseboard` information on non-Oxide
+/// hardware. Therefore we must construct one. For backwards compatibility
+/// with the Canada region we continue to use the hostname as the serial number
+/// in the common case. However, first we check the smbios type1 table to see
+/// if we are running in a4x2. If so we use the configured information from
+/// the smbios. This allows us to match the generated certificates used for
+/// sprockets so that trust quorum works in a4x2.
+fn get_pc_baseboard(log: &Logger, root_node: &str) -> Baseboard {
+    let pc_baseboard = read_smbios(log).unwrap_or_else(|| {
+        Baseboard::new_pc(
+            gethostname()
+                .into_string()
+                .unwrap_or_else(|_| Uuid::new_v4().simple().to_string()),
+            root_node.to_string(),
+        )
+    });
+    info!(log, "Generated {} baseboard {:?}", root_node, pc_baseboard);
+    pc_baseboard
+}
+
+/// Read the smbios type 1 information. If the manufacturer is "a4x2" then construct
+/// and return a `Baseboard`. Otherwise, return None.
+fn read_smbios(log: &Logger) -> Option<Baseboard> {
+    let output = std::process::Command::new("/usr/sbin/smbios")
+        .args(["-t", "1"])
+        .output()
+        .ok()?;
+
+    parse_smbios_output(log, String::from_utf8(output.stdout).ok()?)
+}
+
+/// Parse the smbios input returning a `Baseboard` if the manufacturer is `a4x2`
+/// and parsing completes successfully.
+fn parse_smbios_output(log: &Logger, output: String) -> Option<Baseboard> {
+    let mut iter = output.lines().skip(3);
+
+    let log = log.new(o!("component" => "HardwareManager: parse_smbios"));
+
+    // Parse manufacturer
+    let mut manufacturer_iter = iter.next()?.split(":");
+    if manufacturer_iter.next()?.trim() != "Manufacturer" {
+        info!(log, "Missing manufacturer key: skipping");
+        return None;
+    }
+    if manufacturer_iter.next()?.trim() != "a4x2" {
+        info!(log, "Manufacturer is not a4x2: skipping");
+        return None;
+    }
+
+    // Parse Product
+    let mut product_iter = iter.next()?.split(":");
+    if product_iter.next()?.trim() != "Product" {
+        info!(log, "Missing product key: skipping");
+        return None;
+    }
+    let product = product_iter.next()?.trim().to_string();
+
+    // Parse Serial Number
+    let mut serial_iter = iter.nth(1)?.split(":");
+    if serial_iter.next()?.trim() != "Serial Number" {
+        info!(log, "Missing serial number key: skipping");
+        return None;
+    }
+    let serial_number = serial_iter.next()?.trim().to_string();
+
+    Some(Baseboard::new_pc(serial_number, product))
+}
+
+fn hardware_tracking_task(
     log: Logger,
-    inner: Arc<Mutex<HardwareView>>,
-    nongimlet_observed_disks: Vec<UnparsedDisk>,
-    tx: broadcast::Sender<HardwareUpdate>,
+    hardware_view_tx: watch::Sender<HardwareView>,
+    external_disks: ExternalDisks,
 ) {
     loop {
-        match poll_device_tree(&log, &inner, &nongimlet_observed_disks, &tx) {
-            // We've already warned about `NotAGimlet` by this point,
+        match poll_device_tree(&log, &hardware_view_tx, &external_disks) {
+            // We've already warned about `NotAnOxideSled` by this point,
             // so let's not spam the logs.
-            Ok(_) | Err(Error::NotAGimlet(_)) => (),
+            Ok(_) | Err(Error::NotAnOxideSled(_)) => (),
             Err(err) => {
                 warn!(log, "Failed to query device tree: {err}");
             }
         }
-        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        std::thread::sleep(std::time::Duration::from_secs(5));
     }
 }
 
 /// A representation of the underlying hardware.
 ///
-/// This structure provides interfaces for both querying and for receiving new
-/// events.
+/// This is a wrapper around a watch channel, mostly for historical reasons. We
+/// provide various methods that delegate down to the inner value. For callers
+/// that need real access to a watch channel (e.g., to monitor for `changed()`
+/// events), use [`HardwareManager::subscribe()`].
 #[derive(Clone)]
 pub struct HardwareManager {
-    log: Logger,
-    inner: Arc<Mutex<HardwareView>>,
-    tx: broadcast::Sender<HardwareUpdate>,
+    hardware_view_rx: watch::Receiver<HardwareView>,
 }
 
 impl HardwareManager {
@@ -709,38 +792,47 @@ impl HardwareManager {
     ///
     /// Arguments:
     /// - `sled_mode`: The sled's mode of operation (auto detect or force gimlet/scrimlet).
-    /// - `nongimlet_observed_disks`: For non-gimlets, inject these disks into
+    /// - `nonsled_observed_disks`: For non-sleds, inject these disks into
     ///    HardwareSnapshot objects.
     pub fn new(
         log: &Logger,
         sled_mode: SledMode,
-        nongimlet_observed_disks: Vec<UnparsedDisk>,
+        external_disks: ExternalDisks,
     ) -> Result<Self, String> {
         let log = log.new(o!("component" => "HardwareManager"));
         info!(log, "Creating HardwareManager");
+        let cpu_family = crate::detect_cpu_family(&log);
 
-        // The size of the broadcast channel is arbitrary, but bounded.
-        // If the channel fills up, old notifications will be dropped, and the
-        // receiver will receive a tokio::sync::broadcast::error::RecvError::Lagged
-        // error, indicating they should re-scan the hardware themselves.
-        let (tx, _) = broadcast::channel(1024);
+        let baseboard = learn_baseboard(&log).map_err(|err| {
+            format!("Failed to learn baseboard via device tree: {err}")
+        })?;
+
         let hw =
             match sled_mode {
                 // Treat as a possible scrimlet and setup to scan for real Tofino device.
                 SledMode::Auto
                 | SledMode::Scrimlet { asic: DendriteAsic::TofinoAsic } => {
-                    HardwareView::new()
+                    HardwareView::new(
+                        baseboard,
+                        TofinoView::Real(TofinoSnapshot::new()),
+                        cpu_family,
+                    )
                 }
 
                 // Treat sled as gimlet and ignore any attached Tofino device.
-                SledMode::Gimlet => HardwareView::new_stub_tofino(
-                    // active=
-                    false,
+                SledMode::Sled => HardwareView::new(
+                    baseboard,
+                    TofinoView::Stub { active: false },
+                    cpu_family,
                 ),
 
                 // Treat as scrimlet and use the stub Tofino device.
                 SledMode::Scrimlet { asic: DendriteAsic::TofinoStub } => {
-                    HardwareView::new_stub_tofino(true)
+                    HardwareView::new(
+                        baseboard,
+                        TofinoView::Stub { active: true },
+                        cpu_family,
+                    )
                 }
 
                 // Treat as scrimlet (w/ SoftNPU) and use the stub Tofino device.
@@ -752,23 +844,27 @@ impl HardwareManager {
                     asic:
                         DendriteAsic::SoftNpuZone
                         | DendriteAsic::SoftNpuPropolisDevice,
-                } => HardwareView::new_stub_tofino(true),
+                } => HardwareView::new(
+                    baseboard,
+                    TofinoView::Stub { active: true },
+                    cpu_family,
+                ),
             }
             .map_err(|e| e.to_string())?;
-        let inner = Arc::new(Mutex::new(hw));
+        let (hardware_view_tx, hardware_view_rx) = watch::channel(hw);
 
         // Force the device tree to be polled at least once before returning.
         // This mitigates issues where the Sled Agent could try to propagate
         // an "empty" view of hardware to other consumers before the first
         // query.
-        match poll_device_tree(&log, &inner, &nongimlet_observed_disks, &tx) {
+        match poll_device_tree(&log, &hardware_view_tx, &external_disks) {
             Ok(_) => (),
-            // Allow non-gimlet devices to proceed with a "null" view of
+            // Allow non-sled devices to proceed with a "null" view of
             // hardware, otherwise they won't be able to start.
-            Err(Error::NotAGimlet(root)) => {
+            Err(Error::NotAnOxideSled(root)) => {
                 warn!(
                     log,
-                    "Device is not a Gimlet ({root}), proceeding with null hardware view"
+                    "Device is not an Oxide sled ({root}), proceeding with null hardware view"
                 );
             }
             Err(err) => {
@@ -776,68 +872,105 @@ impl HardwareManager {
             }
         };
 
+        // We poll the device tree to detect new tofinos and disks.  This
+        // polling also detects devices that have gone away, but we need to
+        // respond to a tofino disappearance more quickly than a regular polling
+        // interval will allow.  To that end, we fire off a task that maintains
+        // a device contract with the kernel to handle those disappearances.
         let log2 = log.clone();
-        let inner2 = inner.clone();
-        let tx2 = tx.clone();
-        tokio::task::spawn(async move {
-            hardware_tracking_task(log2, inner2, nongimlet_observed_disks, tx2)
-                .await
+        let tx2 = hardware_view_tx.clone();
+        std::thread::spawn(move || {
+            monitor_tofino(log2, tx2);
         });
 
-        Ok(Self { log, inner, tx })
+        std::thread::spawn(move || {
+            hardware_tracking_task(log, hardware_view_tx, external_disks);
+        });
+
+        Ok(Self { hardware_view_rx })
     }
 
     pub fn baseboard(&self) -> Baseboard {
-        self.inner
-            .lock()
-            .unwrap()
-            .baseboard
-            .as_ref()
-            .cloned()
-            .unwrap_or_else(|| Baseboard::unknown())
+        self.hardware_view_rx.borrow().baseboard()
+    }
+
+    pub fn cpu_family(&self) -> SledCpuFamily {
+        self.hardware_view_rx.borrow().cpu_family()
     }
 
     pub fn online_processor_count(&self) -> u32 {
-        self.inner.lock().unwrap().online_processor_count
+        self.hardware_view_rx.borrow().online_processor_count()
     }
 
     pub fn usable_physical_pages(&self) -> u64 {
-        self.inner.lock().unwrap().usable_physical_pages
+        self.hardware_view_rx.borrow().usable_physical_pages()
     }
 
     pub fn usable_physical_ram_bytes(&self) -> u64 {
-        self.inner.lock().unwrap().usable_physical_ram_bytes
+        self.hardware_view_rx.borrow().usable_physical_ram_bytes()
     }
 
     pub fn disks(&self) -> HashMap<DiskIdentity, UnparsedDisk> {
-        self.inner.lock().unwrap().disks.clone()
+        self.hardware_view_rx.borrow().disks()
     }
 
     pub fn is_scrimlet(&self) -> bool {
-        let inner = self.inner.lock().unwrap();
-        match inner.tofino {
-            TofinoView::Real(TofinoSnapshot { exists, .. }) => exists,
-            TofinoView::Stub { active } => active,
-        }
+        self.hardware_view_rx.borrow().is_scrimlet()
     }
 
-    pub fn is_scrimlet_driver_loaded(&self) -> bool {
-        let inner = self.inner.lock().unwrap();
-        match inner.tofino {
-            TofinoView::Real(TofinoSnapshot { driver_loaded, .. }) => {
-                driver_loaded
-            }
-            TofinoView::Stub { active } => active,
-        }
+    pub fn subscribe(&self) -> watch::Receiver<HardwareView> {
+        self.hardware_view_rx.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::illumos::parse_smbios_output;
+    use omicron_test_utils::dev::test_setup_log;
+
+    #[test]
+    fn parse_smbios_valid() {
+        let logctx = test_setup_log("parse_smbios_valid");
+
+        let output = "\
+ID    SIZE TYPE
+1     372  SMB_TYPE_SYSTEM (type 1) (system information)
+
+  Manufacturer: a4x2
+  Product: PPP-PPPPPPP
+  Version: 0
+  Serial Number: 0000000000
+
+  UUID: faaad566-debf-d311-01a6-9c6b00871b75
+  UUID (Endian-corrected): 66d5aafa-bfde-11d3-01a6-9c6b00871b75
+  Wake-Up Event: 0x6 (power switch)
+  SKU Number: To be filled by O.E.M.
+  Family: To be filled by O.E.M.
+"
+        .to_string();
+
+        let baseboard = parse_smbios_output(&logctx.log, output).unwrap();
+        assert_eq!(baseboard.model(), "PPP-PPPPPPP");
+        assert_eq!(baseboard.identifier(), "0000000000");
+        logctx.cleanup_successful();
     }
 
-    pub fn monitor(&self) -> broadcast::Receiver<HardwareUpdate> {
-        info!(self.log, "Monitoring for hardware updates");
-        self.tx.subscribe()
-        // TODO: Do we want to send initial messages, based on the existing
-        // state? Or should we leave this responsibility to the caller, to
-        // start monitoring, and then query for the initial state?
-        //
-        // This could simplify the `SledAgent::monitor` function?
+    #[test]
+    fn parse_smbios_invalid() {
+        let logctx = test_setup_log("parse_smbios_invalid");
+
+        let output = "\
+ID    SIZE TYPE
+1     372  SMB_TYPE_SYSTEM (type 1) (system information)
+
+dfadfasdfasdfdf  Manufacturer: a4x2
+  Product: PPP-PPPPPPP
+  Version: 0
+  Serial Number: 0000000000
+"
+        .to_string();
+
+        assert!(parse_smbios_output(&logctx.log, output).is_none());
+        logctx.cleanup_successful();
     }
 }

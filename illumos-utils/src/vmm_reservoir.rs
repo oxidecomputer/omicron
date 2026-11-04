@@ -30,8 +30,15 @@ pub enum Error {
     #[error("Reservoir size must be aligned to 2 MiB: {0}")]
     InvalidSize(ByteCount),
 
-    #[error("Failed to resize reservoir: {0}")]
-    ReservoirError(#[from] std::io::Error),
+    #[error("Failed to open vmm ctl fd")]
+    VmCtlOpen(#[source] std::io::Error),
+
+    #[error("Failed to resize reservoir")]
+    ReservoirError {
+        #[source]
+        error: std::io::Error,
+        current_size: Option<ByteCount>,
+    },
 }
 
 /// Controls the size of the memory reservoir
@@ -46,12 +53,19 @@ impl ReservoirControl {
             return Err(Error::InvalidSize(size));
         }
 
-        let ctl = bhyve_api::VmmCtlFd::open()?;
+        let ctl =
+            bhyve_api::VmmCtlFd::open().map_err(|e| Error::VmCtlOpen(e))?;
         ctl.reservoir_resize(
             size.to_bytes().try_into().map_err(|_| Error::InvalidSize(size))?,
             RESERVOIR_CHUNK_SZ,
         )
-        .map_err(std::io::Error::from)?;
+        .map_err(|e| Error::ReservoirError {
+            error: e.into(),
+            current_size: ctl.reservoir_query().ok().and_then(|v| {
+                ByteCount::try_from((v.vrq_free_sz + v.vrq_alloc_sz) as u64)
+                    .ok()
+            }),
+        })?;
 
         Ok(())
     }
@@ -62,5 +76,5 @@ pub fn align_reservoir_size(size_bytes: u64) -> u64 {
 }
 
 pub fn reservoir_size_is_aligned(size_bytes: u64) -> bool {
-    (size_bytes % RESERVOIR_SZ_ALIGN) == 0
+    size_bytes.is_multiple_of(RESERVOIR_SZ_ALIGN)
 }

@@ -140,6 +140,10 @@ use super::{
     ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
     SagaInitError,
 };
+use crate::app::crucible::UpstairsHealth;
+use crate::app::crucible::UpstairsHealthDegradedDetails;
+use crate::app::crucible::propolis_client_upstairs_health;
+use crate::app::db::datastore::CrucibleDisk;
 use crate::app::db::datastore::InstanceAndActiveVmm;
 use crate::app::sagas::common_storage::get_pantry_address;
 use crate::app::sagas::declare_saga_actions;
@@ -148,7 +152,9 @@ use chrono::DateTime;
 use chrono::Utc;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::VmmState;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
+use omicron_common::http_client::internal_http_client;
 use omicron_uuid_kinds::VolumeUuid;
 use propolis_client::types::ReplaceResult;
 use serde::Deserialize;
@@ -255,7 +261,7 @@ async fn srrd_set_saga_id(
         .datastore()
         .set_region_replacement_driving(&opctx, params.request.id, saga_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -322,7 +328,7 @@ async fn srrd_drive_region_replacement_check(
         .datastore()
         .volume_deleted(params.request.volume_id())
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     if volume_deleted {
         info!(
@@ -339,7 +345,7 @@ async fn srrd_drive_region_replacement_check(
         .datastore()
         .current_region_replacement_request_step(&opctx, params.request.id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let Some(last_request_step) = last_request_step else {
         // This is the first time this saga was invoked for this particular
@@ -379,13 +385,13 @@ async fn srrd_drive_region_replacement_check(
                     .instance_id(step_instance_id)
                     .lookup_for(authz::Action::Read)
                     .await
-                    .map_err(ActionError::action_failed)?;
+                    .map_err(saga_action_failed)?;
 
             let instance_and_vmm = osagactx
                 .datastore()
                 .instance_fetch_with_vmm(&opctx, &authz_instance)
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             check_from_previous_propolis_step(
                 log,
@@ -435,9 +441,11 @@ async fn srrd_drive_region_replacement_check(
             };
 
             let Some(new_region_id) = params.request.new_region_id else {
-                return Err(ActionError::action_failed(format!(
-                    "region replacement request {} has new_region_id = None",
-                    params.request.id,
+                return Err(saga_action_failed(Error::internal_error(
+                    &format!(
+                        "region replacement request {} has new_region_id = None",
+                        params.request.id,
+                    ),
                 )));
             };
 
@@ -445,7 +453,7 @@ async fn srrd_drive_region_replacement_check(
                 .datastore()
                 .get_region(new_region_id)
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             let volume_id = new_region.volume_id().to_string();
 
@@ -575,7 +583,7 @@ async fn check_from_previous_propolis_step(
     } else {
         // The VMM has not changed: check if the VMM is still active.
 
-        let state = current_vmm.runtime.state;
+        let state = current_vmm.state;
 
         info!(
             log,
@@ -610,9 +618,9 @@ async fn check_from_previous_propolis_step(
             // returned `DriveCheck::Wait` above.
             | VmmState::Migrating => {
 
-                return Err(ActionError::action_failed(format!(
+                return Err(saga_action_failed(Error::internal_error(&format!(
                     "vmm {step_vmm_id} propolis is {state}",
-                )));
+                ))));
             }
             VmmState::Stopping
             | VmmState::Stopped
@@ -646,7 +654,10 @@ async fn check_from_previous_pantry_step(
     // requested activation in a background job. Is it finished?
 
     let endpoint = format!("http://{}", pantry_address);
-    let client = crucible_pantry_client::Client::new(&endpoint);
+    let client = crucible_pantry_client::Client::new_with_client(
+        &endpoint,
+        internal_http_client(),
+    );
 
     match client.is_job_finished(&job_id.to_string()).await {
         Ok(status) => {
@@ -770,7 +781,8 @@ async fn check_from_previous_pantry_step(
 
                             error!(
                                 log,
-                                "pantry returned an error checking on volume: {e}";
+                                "pantry returned an error checking on volume: \
+                                {e}";
                                 "region replacement id" => %request_id,
                                 "last replacement drive time" => ?step_time,
                                 "last replacement drive step" => "pantry",
@@ -818,7 +830,7 @@ enum DriveAction {
 
     /// If the Volume is currently running in a Propolis server, then send the
     /// volume replacement request there.
-    Propolis { step: db::model::RegionReplacementStep, disk: db::model::Disk },
+    Propolis { step: db::model::RegionReplacementStep, disk: CrucibleDisk },
 }
 
 async fn srrd_drive_region_replacement_prepare(
@@ -850,23 +862,23 @@ async fn srrd_drive_region_replacement_prepare(
     let nexus = osagactx.nexus();
 
     let Some(new_region_id) = params.request.new_region_id else {
-        return Err(ActionError::action_failed(format!(
+        return Err(saga_action_failed(Error::internal_error(&format!(
             "region replacement request {} has new_region_id = None",
             params.request.id,
-        )));
+        ))));
     };
 
     let new_region: db::model::Region = osagactx
         .datastore()
         .get_region(new_region_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let maybe_disk = osagactx
         .datastore()
         .disk_for_volume_id(new_region.volume_id())
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     // Does this volume back a disk?
     let drive_action = if let Some(disk) = maybe_disk {
@@ -878,13 +890,13 @@ async fn srrd_drive_region_replacement_prepare(
                         .instance_id(*instance_id)
                         .lookup_for(authz::Action::Read)
                         .await
-                        .map_err(ActionError::action_failed)?;
+                        .map_err(saga_action_failed)?;
 
                 let instance_and_vmm = osagactx
                     .datastore()
                     .instance_fetch_with_vmm(&opctx, &authz_instance)
                     .await
-                    .map_err(ActionError::action_failed)?;
+                    .map_err(saga_action_failed)?;
 
                 if let Some(migration_id) =
                     instance_and_vmm.instance().runtime().migration_id
@@ -905,9 +917,9 @@ async fn srrd_drive_region_replacement_prepare(
                         "instance id" => ?instance_id,
                     );
 
-                    return Err(ActionError::action_failed(
-                        "instance is undergoing migration".to_string(),
-                    ));
+                    return Err(saga_action_failed(Error::internal_error(
+                        "instance is undergoing migration",
+                    )));
                 }
 
                 match instance_and_vmm.vmm() {
@@ -917,7 +929,7 @@ async fn srrd_drive_region_replacement_prepare(
                         // request to the running Volume there if the runtime
                         // state is either running or rebooting.
 
-                        let state = vmm.runtime.state;
+                        let state = vmm.state;
 
                         info!(
                             log,
@@ -944,11 +956,11 @@ async fn srrd_drive_region_replacement_prepare(
                             | VmmState::Creating => {
                                 // Propolis server is not ok to receive volume
                                 // replacement requests, bail out
-                                return Err(ActionError::action_failed(
-                                    format!(
+                                return Err(saga_action_failed(
+                                    Error::internal_error(&format!(
                                         "vmm {} propolis not in a state to receive request",
                                         vmm.id,
-                                    ),
+                                    )),
                                 ));
                             }
                         }
@@ -1020,11 +1032,13 @@ async fn srrd_drive_region_replacement_prepare(
                 // The disk is not attached to an instance. Is it attached to a
                 // Pantry right now (aka performing bulk import)?
 
-                if let Some(address) = &disk.pantry_address {
+                if let Some(address) = &disk.pantry_address() {
                     // TODO currently unsupported
-                    return Err(ActionError::action_failed(format!(
-                        "disk {} attached to {address}, not supported",
-                        disk.id(),
+                    return Err(saga_action_failed(Error::internal_error(
+                        &format!(
+                            "disk {} attached to {address}, not supported",
+                            disk.id(),
+                        ),
                     )));
                 }
 
@@ -1073,7 +1087,7 @@ async fn srrd_drive_region_replacement_prepare(
                 new_region.volume_id(),
             )
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
         if maybe_snapshot.is_some() {
             // Volume is the destination that snapshot blocks should be scrubbed
@@ -1110,10 +1124,10 @@ async fn srrd_drive_region_replacement_prepare(
             }
         } else {
             // XXX what other volumes are created?
-            return Err(ActionError::action_failed(format!(
+            return Err(saga_action_failed(Error::internal_error(&format!(
                 "don't know what to do with volume {}",
                 new_region.volume_id(),
-            )));
+            ))));
         }
     };
 
@@ -1155,7 +1169,7 @@ async fn srrd_drive_region_replacement_execute(
 
         DriveAction::Pantry { step, volume_id } => {
             let Some(pantry_address) = step.pantry_address() else {
-                return Err(ActionError::action_failed(String::from(
+                return Err(saga_action_failed(Error::internal_error(
                     "pantry step does not have an address",
                 )));
             };
@@ -1181,7 +1195,7 @@ async fn srrd_drive_region_replacement_execute(
         DriveAction::Propolis { step, disk } => {
             let Some((instance_id, vmm_id)) = step.instance_and_vmm_ids()
             else {
-                return Err(ActionError::action_failed(Error::internal_error(
+                return Err(saga_action_failed(Error::internal_error(
                     "propolis step does not have instance and vmm ids",
                 )));
             };
@@ -1191,13 +1205,13 @@ async fn srrd_drive_region_replacement_execute(
                     .instance_id(instance_id)
                     .lookup_for(authz::Action::Read)
                     .await
-                    .map_err(ActionError::action_failed)?;
+                    .map_err(saga_action_failed)?;
 
             let instance_and_vmm = osagactx
                 .datastore()
                 .instance_fetch_with_vmm(&opctx, &authz_instance)
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             if let Some(migration_id) =
                 instance_and_vmm.instance().runtime().migration_id
@@ -1219,9 +1233,9 @@ async fn srrd_drive_region_replacement_execute(
                     "instance id" => ?instance_id,
                 );
 
-                return Err(ActionError::action_failed(
-                    "instance is undergoing migration".to_string(),
-                ));
+                return Err(saga_action_failed(Error::internal_error(
+                    "instance is undergoing migration",
+                )));
             }
 
             // The disk is attached to an instance and there's an active
@@ -1234,14 +1248,14 @@ async fn srrd_drive_region_replacement_execute(
                 .datastore()
                 .volume_get(disk.volume_id())
                 .await
-                .map_err(ActionError::action_failed)?
+                .map_err(saga_action_failed)?
             {
                 Some(volume) => volume.data().to_string(),
 
                 None => {
-                    return Err(ActionError::action_failed(
-                        Error::internal_error("new volume is gone!"),
-                    ));
+                    return Err(saga_action_failed(Error::internal_error(
+                        "new volume is gone!",
+                    )));
                 }
             };
 
@@ -1256,7 +1270,30 @@ async fn srrd_drive_region_replacement_execute(
                     authz::Action::Modify,
                 )
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
+
+            let Some(new_region_id) = params.request.new_region_id else {
+                return Err(saga_action_failed(Error::internal_error(
+                    &format!(
+                        "region replacement request {} has new_region_id = None",
+                        params.request.id,
+                    ),
+                )));
+            };
+
+            let Some(new_region_addr) = osagactx
+                .datastore()
+                .region_addr(new_region_id)
+                .await
+                .map_err(saga_action_failed)?
+            else {
+                return Err(saga_action_failed(Error::internal_error(
+                    &format!(
+                        "new region {} has a None region_addr result",
+                        new_region_id,
+                    ),
+                )));
+            };
 
             let replacement_done = execute_propolis_drive_action(
                 log,
@@ -1266,6 +1303,7 @@ async fn srrd_drive_region_replacement_execute(
                 client,
                 disk,
                 disk_new_volume_vcr,
+                new_region_addr,
             )
             .await?;
 
@@ -1290,7 +1328,10 @@ async fn execute_pantry_drive_action(
     // hang on the activation.
 
     let endpoint = format!("http://{}", pantry_address);
-    let client = crucible_pantry_client::Client::new(&endpoint);
+    let client = crucible_pantry_client::Client::new_with_client(
+        &endpoint,
+        internal_http_client(),
+    );
 
     // Check pantry first, to see if this volume is attached already. This can
     // occur if:
@@ -1350,7 +1391,7 @@ async fn execute_pantry_drive_action(
                                 "endpoint" => endpoint.clone(),
                             );
 
-                            return Err(ActionError::action_failed(
+                            return Err(saga_action_failed(
                                 Error::internal_error(&format!(
                                     "unexpected error from volume_status: {e}"
                                 )),
@@ -1368,11 +1409,9 @@ async fn execute_pantry_drive_action(
                         "endpoint" => endpoint.clone(),
                     );
 
-                    return Err(ActionError::action_failed(
-                        Error::internal_error(&format!(
-                            "unexpected error from volume_status: {e}"
-                        )),
-                    ));
+                    return Err(saga_action_failed(Error::internal_error(
+                        &format!("unexpected error from volume_status: {e}"),
+                    )));
                 }
             }
         }
@@ -1414,11 +1453,11 @@ async fn execute_pantry_drive_action(
                 // job id. Bail out here: hopefully the next time this saga
                 // runs, it will select a different Pantry.
 
-                return Err(ActionError::action_failed(
-                    Error::invalid_request(String::from(
+                return Err(saga_action_failed(Error::invalid_request(
+                    String::from(
                         "cannot proceed, pantry will reject our request",
-                    )),
-                ));
+                    ),
+                )));
             }
         }
     } else {
@@ -1444,12 +1483,12 @@ async fn execute_pantry_drive_action(
     let disk_volume = datastore
         .volume_checkout(volume_id, db::datastore::VolumeCheckoutReason::Pantry)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let volume_construction_request:
         crucible_pantry_client::types::VolumeConstructionRequest =
         serde_json::from_str(&disk_volume.data()).map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&format!(
+            saga_action_failed(Error::internal_error(&format!(
                 "failed to deserialize volume {volume_id} data: {e}",
             )))
         })?;
@@ -1464,32 +1503,34 @@ async fn execute_pantry_drive_action(
         .attach_activate_background(&volume_id.to_string(), &attach_request)
         .await
         .map_err(|e| {
-            ActionError::action_failed(format!(
+            saga_action_failed(Error::internal_error(&format!(
                 "pantry attach failed with {:?}",
                 e,
-            ))
+            )))
         })?;
 
     Ok(())
 }
 
 /// Execute a prepared Propolis step
+#[allow(clippy::too_many_arguments)]
 async fn execute_propolis_drive_action(
     log: &Logger,
     request_id: Uuid,
     step_vmm_id: Uuid,
     vmm: db::model::Vmm,
     client: propolis_client::Client,
-    disk: db::model::Disk,
+    disk: CrucibleDisk,
     disk_new_volume_vcr: String,
+    new_region_addr: SocketAddrV6,
 ) -> Result<bool, ActionError> {
     // This client could be for a different VMM than the step was
     // prepared for. Bail out if this is true
     if vmm.id != step_vmm_id {
-        return Err(ActionError::action_failed(format!(
+        return Err(saga_action_failed(Error::internal_error(&format!(
             "propolis client vmm {} does not match step vmm {}",
             vmm.id, step_vmm_id,
-        )));
+        ))));
     }
 
     info!(
@@ -1511,13 +1552,13 @@ async fn execute_propolis_drive_action(
         .await
         .map_err(|e| match e {
             propolis_client::Error::ErrorResponse(rv) => {
-                ActionError::action_failed(rv.message.clone())
+                saga_action_failed(Error::internal_error(&rv.message))
             }
 
-            _ => ActionError::action_failed(format!(
+            _ => saga_action_failed(Error::internal_error(&format!(
                 "unexpected failure during \
                         `instance_issue_crucible_vcr_request`: {e}",
-            )),
+            ))),
         })?;
 
     let replace_result = result.into_inner();
@@ -1579,38 +1620,73 @@ async fn execute_propolis_drive_action(
                 .await
                 .map_err(|e| match e {
                     propolis_client::Error::ErrorResponse(rv) => {
-                        ActionError::action_failed(rv.message.clone())
+                        saga_action_failed(Error::internal_error(&rv.message))
                     }
 
-                    _ => ActionError::action_failed(format!(
+                    _ => saga_action_failed(Error::internal_error(&format!(
                         "unexpected failure during \
                                 `disk_volume_status`: {e}",
-                    )),
+                    ))),
                 })?;
 
-            // If the Volume is active, then reconciliation finished
-            // successfully.
+            // If the part of the Volume containing the replaced region is
+            // healthy, then reconciliation finished successfully.
             //
-            // There's a few reasons it may not be active yet:
+            // There's a few reasons it may not be healthy yet:
             //
             // - Propolis could be shutting down, and tearing down the Upstairs
-            //   in the process (which deactivates the Volume)
+            //   in the process (which deactivates the whole Volume)
             //
             // - reconciliation could still be going on
             //
             // - reconciliation could have failed
             //
-            // If it's not active, wait until the next invocation of this saga
+            // If it's not healthy, wait until the next invocation of this saga
             // to decide what to do next.
 
-            result.into_inner().active
+            let health = propolis_client_upstairs_health(
+                &log,
+                &result.into_inner().volume_info,
+                new_region_addr,
+            );
+
+            match health {
+                None => {
+                    let m = format!(
+                        "did not find {new_region_addr} in volume info!",
+                    );
+
+                    error!(log, "{m}");
+
+                    return Err(saga_action_failed(Error::internal_error(m)));
+                }
+
+                Some(UpstairsHealth::Healthy { upstairs_id }) => {
+                    // If "healthy" is seen after we have replaced a downstairs,
+                    // then we're done waiting - the replacement is done
+                    info!(log, "upstairs {upstairs_id} is healthy");
+                    true
+                }
+
+                Some(UpstairsHealth::Degraded(details)) => {
+                    let UpstairsHealthDegradedDetails { upstairs_id, reason } =
+                        details;
+
+                    info!(
+                        log,
+                        "upstairs {upstairs_id} is not healthy: {reason}",
+                    );
+
+                    false
+                }
+            }
         }
 
         ReplaceResult::Missing => {
             // The disk's volume does not contain the region to be replaced.
             // This is an error!
 
-            return Err(ActionError::action_failed(String::from(
+            return Err(saga_action_failed(Error::internal_error(
                 "saw ReplaceResult::Missing",
             )));
         }
@@ -1646,7 +1722,7 @@ async fn srrd_drive_region_replacement_commit(
             .datastore()
             .add_region_replacement_request_step(&opctx, step)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
     } else {
         info!(
             log,
@@ -1750,7 +1826,7 @@ async fn srrd_finish_saga(
                 saga_id,
             )
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
     } else {
         osagactx
             .datastore()
@@ -1760,7 +1836,7 @@ async fn srrd_finish_saga(
                 saga_id,
             )
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
     }
 
     Ok(())

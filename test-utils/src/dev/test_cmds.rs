@@ -5,6 +5,7 @@
 //! Functions used for automated testing of command-line programs
 
 use std::env::temp_dir;
+use std::fmt;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -16,6 +17,8 @@ use subprocess::Exec;
 use subprocess::ExitStatus;
 use subprocess::NullFile;
 use subprocess::Redirection;
+use swrite::SWrite as _;
+use swrite::swrite;
 
 // Standard exit codes
 pub const EXIT_SUCCESS: u32 = libc::EXIT_SUCCESS as u32;
@@ -121,6 +124,43 @@ pub fn error_for_enoent() -> String {
     io::Error::from_raw_os_error(libc::ENOENT).to_string()
 }
 
+const SNAPSHOT_SEPARATOR: &str =
+    "---------------------------------------------\n";
+const SNAPSHOT_TERMINATOR: &str =
+    "=============================================\n";
+
+#[derive(Clone, Debug, Default)]
+pub struct OutputSnapshot {
+    text: String,
+}
+
+impl OutputSnapshot {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn push(
+        &mut self,
+        header: impl fmt::Display,
+        stdout: impl fmt::Display,
+        stderr: impl fmt::Display,
+    ) {
+        swrite!(
+            self.text,
+            "{header}\n{SNAPSHOT_SEPARATOR}stdout:\n{stdout}{SNAPSHOT_SEPARATOR}stderr:\n{stderr}{SNAPSHOT_TERMINATOR}"
+        );
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.text
+    }
+
+    #[track_caller]
+    pub fn assert_contents(&self, path: &str) {
+        expectorate::assert_contents(path, &self.text);
+    }
+}
+
 /// Redacts text from a string (usually stdout/stderr) that may change from
 /// invocation to invocation (e.g., assigned TCP port numbers, timestamps)
 ///
@@ -131,7 +171,25 @@ pub struct Redactor<'a> {
     uuids: bool,
     extra: Vec<(&'a str, String)>,
     extra_regex: Vec<(regex::Regex, String)>,
-    sections: Vec<&'a [&'a str]>,
+    sections: Vec<(&'a [&'a str], SectionMode)>,
+}
+
+/// How to handle a redacted section heading.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum SectionMode {
+    /// Redact the indented contents of the section, replacing them with
+    /// `<REDACTED_SECTION>` at the current indentation level.
+    ///
+    /// This is intended for sections which are always present but whose
+    /// contents may be variable.
+    RedactContents,
+    /// Totally remove the redacted section, including its heading, from the
+    /// output.
+    ///
+    /// This is intended for sections which may or may not be *present* across
+    /// invocations. Generally, this is a very blunt instrument that should
+    /// normally not be necessary.
+    TotallyAnnihilate,
 }
 
 impl Default for Redactor<'_> {
@@ -226,6 +284,19 @@ impl<'a> Redactor<'a> {
         self
     }
 
+    /// Replace any text matching `pattern` with `<NAME_REDACTED>`.
+    ///
+    /// More flexible than [`Self::field`], which requires a fixed
+    /// `name<spaces>value` shape. Use this when the entire variable substring
+    /// is itself a regex (e.g., the substring may take one of several
+    /// alternative forms across runs).
+    pub fn variable_regex(&mut self, name: &str, pattern: &str) -> &mut Self {
+        let re = regex::Regex::new(pattern).unwrap();
+        let replacement = format!("<{}_REDACTED>", name.to_uppercase());
+        self.extra_regex.push((re, replacement));
+        self
+    }
+
     /// Redact an entire indented section.
     ///
     /// This can be used if the shape of a section might change from run to run.
@@ -256,7 +327,26 @@ impl<'a> Redactor<'a> {
     /// order for the section to be redacted.
     pub fn section(&mut self, headings: &'a [&'a str]) -> &mut Self {
         assert!(!headings.is_empty(), "headings should not be empty");
-        self.sections.push(headings);
+        self.sections.push((headings, SectionMode::RedactContents));
+        self
+    }
+
+    /// Completely and utterly destroy an entire indented section.
+    ///
+    /// While [`Redactor::section`] will redact the _contents_ of an indented
+    /// section, this method will completely remove the section, including its
+    /// heading, from the output. This is a very blunt instrument, and is
+    /// intended for situations in which a section's *presence* may vary across
+    /// invocations.
+    ///
+    /// If only the section's *content* may vary, prefer to use
+    /// [`Redactor::section`].
+    pub fn totally_annihilate_section(
+        &mut self,
+        headings: &'a [&'a str],
+    ) -> &mut Self {
+        assert!(!headings.is_empty(), "headings should not be empty");
+        self.sections.push((headings, SectionMode::TotallyAnnihilate));
         self
     }
 
@@ -272,8 +362,8 @@ impl<'a> Redactor<'a> {
         for (regex, replacement) in &self.extra_regex {
             s = regex.replace_all(&s, replacement).into_owned();
         }
-        for headings in &self.sections {
-            s = redact_section(&s, headings);
+        for &(ref headings, mode) in &self.sections {
+            s = redact_section(&s, headings, mode);
         }
 
         if self.basic {
@@ -317,6 +407,16 @@ fn redact_basic(input: &str) -> String {
         .unwrap()
         .replace_all(&s, "<REDACTED_TIMESTAMP>")
         .to_string();
+    // HTTP Date headers contain timestamps in the following format:
+    // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Date
+    //
+    // Examples:
+    //   Fri, 02 Oct 2026 20:33:20 GMT
+    let s =
+        regex::Regex::new(r"(Mon|Tue|Wed|Thu|Fri|Sun|Sat), \d{2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT")
+            .unwrap()
+            .replace_all(&s, "<REDACTED_TIMESTAMP>")
+            .to_string();
 
     // Replace formatted durations.  These are pretty specific to the background
     // task output.
@@ -384,7 +484,7 @@ fn redact_uuids(input: &str) -> String {
         .to_string()
 }
 
-fn redact_section(input: &str, headings: &[&str]) -> String {
+fn redact_section(input: &str, headings: &[&str], mode: SectionMode) -> String {
     let mut output = String::new();
     let mut indent_stack = Vec::new();
     let mut print_redacted = false;
@@ -399,20 +499,27 @@ fn redact_section(input: &str, headings: &[&str]) -> String {
             }
         }
         if indent_stack.len() == headings.len() {
-            if print_redacted {
+            if print_redacted && mode == SectionMode::RedactContents {
                 print_redacted = false;
                 output.push_str(&line[..indent]);
                 output.push_str("<REDACTED_SECTION>\n");
             }
             continue;
         }
-        output.push_str(line);
         if line[indent..].trim_end() == headings[indent_stack.len()] {
             indent_stack.push(indent);
             if indent_stack.len() == headings.len() {
+                // If we just found the section's heading line, and we have been
+                // instructed to totally annihilate the section, don't push the
+                // heading line to the output.
+                if mode == SectionMode::TotallyAnnihilate {
+                    continue;
+                }
                 print_redacted = true;
             }
         }
+
+        output.push_str(line);
     }
     output
 }
@@ -526,6 +633,37 @@ section B:
 
         let mut redactor = Redactor::default();
         redactor.section(&["section A:", "ringbuf:"]);
+        assert_eq!(redactor.do_redact(INPUT), OUTPUT);
+    }
+
+    #[test]
+    fn test_totally_annihilate_section() {
+        const INPUT: &str = "\
+section A:
+  nested:
+    ringbuf:
+      this should be redacted
+      a second line to be redacted
+
+      a line followed by an empty line
+    this line should not be redacted
+section B:
+  ringbuf:
+    this should not be redacted
+
+    a line followed by an empty line";
+        const OUTPUT: &str = "\
+section A:
+  nested:
+    this line should not be redacted
+section B:
+  ringbuf:
+    this should not be redacted
+
+    a line followed by an empty line";
+
+        let mut redactor = Redactor::default();
+        redactor.totally_annihilate_section(&["section A:", "ringbuf:"]);
         assert_eq!(redactor.do_redact(INPUT), OUTPUT);
     }
 }

@@ -1,8 +1,11 @@
 #!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #:
 #: name = "helios / package"
 #: variety = "basic"
-#: target = "helios-2.0"
+#: target = "helios-3.0-16c64gb"
 #: rust_toolchain = true
 #: output_rules = [
 #:	"=/work/package.tar.gz",
@@ -60,5 +63,7 @@ files=(
 	target/release/xtask
 	target/debug/bootstrap
 	tests/*
+	tools/opte_version
+	tools/opte_version_override
 )
 ptime -m tar cvzf $WORK/package.tar.gz "${files[@]}" "${packages[@]}"

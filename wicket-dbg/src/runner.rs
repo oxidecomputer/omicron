@@ -12,6 +12,7 @@ use crossterm::terminal::{
     enable_raw_mode,
 };
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::time::Duration;
 use tokio::fs::read;
@@ -106,7 +107,7 @@ impl Runner {
                         }
 
                         Cmd::Reset => self.restart(),
-                        Cmd::GetState => Rpy::State(self.core.state.clone()),
+                        Cmd::GetState => Rpy::State(Box::new(self.core.state.clone())),
                         Cmd::Break{event} => {
                             self.breakpoints.insert(event);
                             Rpy::Ok
@@ -234,7 +235,12 @@ impl Runner {
     pub async fn load(&mut self, path: Utf8PathBuf) -> Rpy {
         let contents = match read(&path).await {
             Ok(contents) => contents,
-            Err(e) => return Rpy::Err(format!("{e}: {}", path)),
+            Err(e) => {
+                return Rpy::Err(format!(
+                    "Failed to read from path \"{path}\": {}",
+                    InlineErrorChain::new(&e)
+                ));
+            }
         };
         match ciborium::de::from_reader(&contents[..]) {
             Ok(snapshot) => {

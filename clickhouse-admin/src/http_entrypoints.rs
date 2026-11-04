@@ -4,18 +4,25 @@
 
 use crate::context::{KeeperServerContext, ServerContext};
 use clickhouse_admin_api::*;
-use clickhouse_admin_types::{
-    ClickhouseKeeperClusterMembership, DistributedDdlQueue,
-    GenerateConfigResult, KeeperConf, KeeperConfigurableSettings, Lgif,
-    MetricInfoPath, RaftConfig, ServerConfigurableSettings, SystemTimeSeries,
-    SystemTimeSeriesSettings, TimeSeriesSettingsQuery,
+use clickhouse_admin_types::config::GenerateConfigResult;
+use clickhouse_admin_types::keeper::{
+    ClickhouseKeeperClusterMembership, KeeperConf, KeeperConfigurableSettings,
+    Lgif, RaftConfig,
 };
+use clickhouse_admin_types::retention::{
+    DatabaseRetentionPolicy, RetentionPolicyRequest,
+};
+use clickhouse_admin_types::server::{
+    DistributedDdlQueue, MetricInfoPath, ServerConfigurableSettings,
+    SystemTimeSeries, SystemTimeSeriesSettings, TimeSeriesSettingsQuery,
+};
+use clickhouse_admin_types::usage::DatabaseUsageResult;
 use dropshot::{
     ApiDescription, ClientErrorStatusCode, HttpError, HttpResponseCreated,
     HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
     TypedBody,
 };
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use std::sync::Arc;
 
 pub fn clickhouse_admin_server_api() -> ApiDescription<Arc<ServerContext>> {
@@ -54,7 +61,7 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Generation>, HttpError> {
         let ctx = rqctx.context();
-        let gen = match ctx.generation() {
+        let generation = match ctx.generation() {
             Some(g) => g,
             None => {
                 return Err(HttpError::for_client_error(
@@ -64,7 +71,7 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
                 ));
             }
         };
-        Ok(HttpResponseOk(gen))
+        Ok(HttpResponseOk(generation))
     }
 
     async fn distributed_ddl_queue(
@@ -98,6 +105,29 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         ctx.init_db(replicated).await?;
         Ok(HttpResponseUpdatedNoContent())
     }
+
+    async fn set_retention_policy(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<RetentionPolicyRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        rqctx
+            .context()
+            .set_retention_policy(policy.into_inner())
+            .await
+            .map(|_| HttpResponseUpdatedNoContent())
+    }
+
+    async fn retention_policy(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<DatabaseRetentionPolicy>, HttpError> {
+        rqctx.context().retention_policy().await.map(HttpResponseOk)
+    }
+
+    async fn database_usage(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<DatabaseUsageResult>, HttpError> {
+        Ok(HttpResponseOk(rqctx.context().database_usage()))
+    }
 }
 
 enum ClickhouseAdminKeeperImpl {}
@@ -120,7 +150,7 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Generation>, HttpError> {
         let ctx = rqctx.context();
-        let gen = match ctx.generation() {
+        let generation = match ctx.generation() {
             Some(g) => g,
             None => {
                 return Err(HttpError::for_client_error(
@@ -130,7 +160,7 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
                 ));
             }
         };
-        Ok(HttpResponseOk(gen))
+        Ok(HttpResponseOk(generation))
     }
 
     async fn lgif(
@@ -194,5 +224,28 @@ impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
         let output =
             ctx.clickhouse_cli().system_timeseries_avg(settings).await?;
         Ok(HttpResponseOk(output))
+    }
+
+    async fn set_retention_policy(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<RetentionPolicyRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        rqctx
+            .context()
+            .set_retention_policy(policy.into_inner())
+            .await
+            .map(|_| HttpResponseUpdatedNoContent())
+    }
+
+    async fn retention_policy(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<DatabaseRetentionPolicy>, HttpError> {
+        rqctx.context().retention_policy().await.map(HttpResponseOk)
+    }
+
+    async fn database_usage(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<DatabaseUsageResult>, HttpError> {
+        Ok(HttpResponseOk(rqctx.context().database_usage()))
     }
 }

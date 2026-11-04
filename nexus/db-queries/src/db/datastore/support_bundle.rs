@@ -11,25 +11,37 @@ use crate::db::model::RendezvousDebugDataset;
 use crate::db::model::SupportBundle;
 use crate::db::model::SupportBundleState;
 use crate::db::pagination::paginated;
+use crate::db::pagination::paginated_multicolumn;
+use crate::db::sitrep_guard::SitrepGuardedInsert;
+use crate::db::sitrep_guard::SitrepGuardedInsertOutcome;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use diesel::result::Error as DbError;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
+use nexus_db_schema::schema::support_bundle::dsl as support_bundle_dsl;
 use nexus_types::deployment::BlueprintDatasetDisposition;
-use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
+use nexus_types::support_bundle::BundleData;
+use nexus_types::support_bundle::BundleDataSelection;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_generation_kinds::SitrepSupportBundleGeneration;
+use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 const CANNOT_ALLOCATE_ERR_MSG: &'static str = "Current policy limits support bundle creation to 'one per external disk', and \
@@ -61,6 +73,47 @@ pub struct SupportBundleExpungementReport {
     pub bundles_reassigned: usize,
 }
 
+/// Parameters for creating a support bundle.
+pub struct SupportBundleCreateParams<'a> {
+    /// Why this bundle is being created.
+    pub reason: &'a str,
+    /// The Nexus instance responsible for collection.
+    pub nexus_id: OmicronZoneUuid,
+    /// Optional user-provided comment.
+    pub user_comment: Option<String>,
+    /// What data to include in the bundle.
+    pub data_selection: nexus_types::support_bundle::BundleDataSelection,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum FmSupportBundleCreateError {
+    /// No free debug dataset was available to hold the bundle.
+    #[error("insufficient capacity to allocate a support bundle")]
+    TooManyBundles,
+    /// A bundle with this id was already created by an earlier rendezvous
+    /// activation; the `rendezvous_support_bundle_created` marker
+    /// short-circuited the insert.
+    #[error(
+        "support bundle was already created by a previous rendezvous activation"
+    )]
+    AlreadyCreated,
+    /// The sitrep being executed is stale: its `support_bundle_generation` is
+    /// behind the current sitrep in the database, so no bundle was created.
+    #[error("cannot create support bundle for a stale sitrep")]
+    StaleSitrep,
+    /// An error occurred while accessing the database.
+    #[error(transparent)]
+    Other(#[from] Error),
+}
+
+#[derive(Debug, thiserror::Error)]
+enum CreateError {
+    #[error("insufficient capacity to allocate a support bundle")]
+    TooManyBundles,
+    #[error(transparent)]
+    Database(#[from] diesel::result::Error),
+}
+
 impl DataStore {
     /// Creates a new support bundle.
     ///
@@ -70,28 +123,213 @@ impl DataStore {
     /// Note that really any functioning Nexus would work as the "assignee",
     /// but it's clear that our instance will work, because we're currently
     /// running.
+    ///
+    /// Finds a free debug dataset, creates a `SupportBundle` in `Collecting`
+    /// state, and inserts it. If no free dataset is available, returns
+    /// [`Error::insufficient_capacity`].
     pub async fn support_bundle_create(
         &self,
         opctx: &OpContext,
-        reason_for_creation: &'static str,
-        this_nexus_id: OmicronZoneUuid,
+        params: SupportBundleCreateParams<'_>,
     ) -> CreateResult<SupportBundle> {
+        let SupportBundleCreateParams {
+            reason,
+            nexus_id,
+            user_comment,
+            data_selection,
+        } = params;
+        let id = SupportBundleUuid::new_v4();
+        let reason = reason.to_string();
+
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
+        self.support_bundle_create_impl(
+            &conn,
+            data_selection,
+            move |dataset, conn| {
+                Box::pin(async move {
+                    let bundle = SupportBundle::new(
+                        id,
+                        reason,
+                        dataset.pool_id(),
+                        dataset.id(),
+                        nexus_id,
+                        user_comment,
+                        None,
+                    );
+                    diesel::insert_into(support_bundle_dsl::support_bundle)
+                        .values(bundle.clone())
+                        .execute_async(conn)
+                        .await?;
+                    Ok(bundle)
+                })
+            },
+        )
+        .await
+        .map_err(|e| match e {
+            CreateError::TooManyBundles => {
+                external::Error::insufficient_capacity(
+                    CANNOT_ALLOCATE_ERR_MSG,
+                    "Support Bundle storage exhausted",
+                )
+            }
+            CreateError::Database(e) => {
+                public_error_from_diesel(e, ErrorHandler::Server)
+            }
+        })
+    }
 
-        #[derive(Debug)]
-        enum SupportBundleError {
-            TooManyBundles,
-        }
+    /// Creates a new support bundle (fault management rendezvous version)
+    ///
+    /// This method is intended to be used when creating a support bundle
+    /// requested by a case in the fault management sitrep. Unlike the
+    /// [`DataStore::support_bundle_create`] method, this method takes as
+    /// arguments the [`SupportBundleUuid`] of the support bundle to create,
+    /// the [`CaseUuid`] of the case requesting the bundle, and the expected
+    /// support bundle generation of the current sitrep. A support bundle is
+    /// not created if the requested bundle already exists, or if the current
+    /// sitrep is out of date (indicated by the generation counter advancing).
+    /// Creating a support bundle for an external API request should use
+    /// [`DataStore::support_bundle_create`] instead.
+    ///
+    /// Requires that the UUID of the calling Nexus be supplied as input -
+    /// this particular Zone is responsible for the collection process.
+    ///
+    /// Note that really any functioning Nexus would work as the "assignee",
+    /// but it's clear that our instance will work, because we're currently
+    /// running.
+    ///
+    /// Finds a free debug dataset, creates a `SupportBundle` in `Collecting`
+    /// state, and inserts it. If no free dataset is available, returns
+    /// [`FmSupportBundleCreateError::TooManyBundles`].
+    ///
+    /// # Arguments
+    ///
+    /// - `id`: The ID of the requested support bundle. If a support bundle with
+    ///   this ID already exists, this function returns
+    ///   [`FmSupportBundleCreateError::AlreadyCreated`].
+    /// - `case_id`: FM case that requested this bundle.
+    /// - `expected_generation`: Generation counter the FM rendezvous task
+    ///   expects to see in the latest sitrep's `support_bundle_generation`
+    ///   column. If the generation of the current sitrep in the database has
+    ///   advanced past this generation, this function returns
+    ///   [`FmSupportBundleCreateError::StaleSitrep`], and the support bundle
+    ///   is not created.
+    pub async fn fm_rendezvous_support_bundle_create(
+        &self,
+        opctx: &OpContext,
+        id: SupportBundleUuid,
+        case_id: CaseUuid,
+        expected_generation: SitrepSupportBundleGeneration,
+        params: SupportBundleCreateParams<'_>,
+    ) -> Result<SupportBundle, FmSupportBundleCreateError> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+        let SupportBundleCreateParams {
+            reason,
+            nexus_id,
+            user_comment,
+            data_selection,
+        } = params;
+        self.support_bundle_create_impl(&conn, data_selection, {
+            let err = err.clone();
+            let user_comment = user_comment.clone();
+            let reason = reason.to_string();
+            move |dataset, conn| {
+                let bundle = SupportBundle::new(
+                    id,
+                    reason,
+                    dataset.pool_id(),
+                    dataset.id(),
+                    nexus_id,
+                    user_comment,
+                    Some(case_id),
+                );
+                Box::pin(async move {
+                    let insert =
+                        diesel::insert_into(support_bundle_dsl::support_bundle)
+                            .values(bundle)
+                            .on_conflict(support_bundle_dsl::id)
+                            .do_nothing()
+                            .returning(SupportBundle::as_returning());
+                    let guarded = SitrepGuardedInsert::<SupportBundle, _>::new(
+                        id.into_untyped_uuid(),
+                        expected_generation,
+                        insert,
+                    );
+                    match guarded.execute_async(&conn).await? {
+                        SitrepGuardedInsertOutcome::Created(row) => Ok(row),
+                        SitrepGuardedInsertOutcome::AlreadyExists => Err(err
+                            .bail(FmSupportBundleCreateError::AlreadyCreated)),
+                        SitrepGuardedInsertOutcome::StaleSitrep => {
+                            Err(err
+                                .bail(FmSupportBundleCreateError::StaleSitrep))
+                        }
+                    }
+                })
+            }
+        })
+        .await
+        .map_err(|e| {
+            if let Some(err) = err.take() {
+                return err;
+            };
+            match e {
+                CreateError::TooManyBundles => {
+                    FmSupportBundleCreateError::TooManyBundles
+                }
+                CreateError::Database(err) => {
+                    let err =
+                        public_error_from_diesel(err, ErrorHandler::Server);
+                    FmSupportBundleCreateError::Other(err)
+                }
+            }
+        })
+    }
+
+    /// Shared implementation behind [`Self::support_bundle_create`] and
+    /// [`Self::fm_rendezvous_support_bundle_create`]. Runs the creation
+    /// transaction: find a free debug dataset, perform the caller-supplied
+    /// `insert`, then write the data-selection rows.
+    ///
+    /// `insert` performs the path-specific row insert: a plain insert for the
+    /// user path, or a [`SitrepGuardedInsert`] for the FM path. It may signal
+    /// path-specific outcomes (already-created, stale sitrep) by bailing
+    /// through its own [`OptionalError`].
+    async fn support_bundle_create_impl<I>(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        mut data_selection: BundleDataSelection,
+        insert: I,
+    ) -> Result<SupportBundle, CreateError>
+    where
+        I: for<'a> FnOnce(
+            RendezvousDebugDataset,
+            &'a async_bb8_diesel::Connection<DbConnection>,
+        )
+            -> BoxFuture<'a, Result<SupportBundle, DbError>>,
+        I: Clone + Send + Sync,
+    {
+        // When we persist the support bundle database record,
+        // we ensure that a start bound exists for it.
+        //
+        // If the caller supplies an explicit start bound, we'll use it, but
+        // otherwise, we set a default bound to avoid collecting too much data.
+        let start = data_selection.ensure_start_bound(
+            omicron_common::now_db_precision(),
+            BundleDataSelection::DEFAULT_LOOKBACK,
+        );
 
         let err = OptionalError::new();
         self.transaction_retry_wrapper("support_bundle_create")
             .transaction(&conn, |conn| {
                 let err = err.clone();
+                let data_selection = data_selection.clone();
+                let insert = insert.clone();
 
                 async move {
                     use nexus_db_schema::schema::rendezvous_debug_dataset::dsl as dataset_dsl;
-                    use nexus_db_schema::schema::support_bundle::dsl as support_bundle_dsl;
 
                     // Observe all "non-deleted, debug datasets".
                     //
@@ -110,12 +348,12 @@ impl DataStore {
 
                     let Some(dataset) = free_dataset else {
                         return Err(
-                            err.bail(SupportBundleError::TooManyBundles)
+                            err.bail(CreateError::TooManyBundles)
                         );
                     };
 
-                    // We could check that "this_nexus_id" is not expunged, but
-                    // we have some evidence that it is valid: this Nexus is
+                    // We could check that `nexus_id` is not expunged, but we
+                    // have some evidence that it is valid: this Nexus is
                     // currently running!
                     //
                     // Besides, we COULD be expunged immediately after inserting
@@ -123,34 +361,68 @@ impl DataStore {
                     // case of "clean up a bundle which is managed by an
                     // expunged Nexus" anyway.
 
-                    let bundle = SupportBundle::new(
-                        reason_for_creation,
-                        dataset.pool_id(),
-                        dataset.id(),
-                        this_nexus_id,
-                    );
+                    let inserted = insert(dataset, &conn).await?;
+                    Self::support_bundle_data_selection_insert_on_conn(
+                        &conn,
+                        inserted.id.into(),
+                        data_selection,
+                        start,
+                    )
+                    .await?;
 
-                    diesel::insert_into(support_bundle_dsl::support_bundle)
-                        .values(bundle.clone())
-                        .execute_async(&conn)
-                        .await?;
-
-                    Ok(bundle)
+                    Ok(inserted)
                 }
             })
             .await
+            .map_err(|e| err.take().unwrap_or(CreateError::Database(e)))
+    }
+
+    /// Returns the [`BundleDataSelection`] for a support bundle.
+    ///
+    /// [`BundleDataSelection`]: nexus_types::support_bundle::BundleDataSelection
+    pub async fn support_bundle_data_selection_get(
+        &self,
+        opctx: &OpContext,
+        authz_bundle: &authz::SupportBundle,
+    ) -> Result<nexus_types::support_bundle::BundleDataSelection, Error> {
+        opctx.authorize(authz::Action::Read, authz_bundle).await?;
+        let bundle_id: SupportBundleUuid = authz_bundle.id();
+
+        use crate::db::model::BundleDataSelection as DbBundleDataSelection;
+        use nexus_db_schema::schema::support_bundle_data_selection_ereports::dsl as ereports_dsl;
+        use nexus_db_schema::schema::support_bundle_data_selection_flags::dsl as flags_dsl;
+        use nexus_db_schema::schema::support_bundle_data_selection_host_info::dsl as host_info_dsl;
+        use nexus_db_schema::schema::support_bundle_data_selection_time_range::dsl as time_range_dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let bundle_uuid = bundle_id.into_untyped_uuid();
+
+        flags_dsl::support_bundle_data_selection_flags
+            .filter(flags_dsl::bundle_id.eq(bundle_uuid))
+            .left_join(
+                host_info_dsl::support_bundle_data_selection_host_info
+                    .on(host_info_dsl::bundle_id.eq(flags_dsl::bundle_id)),
+            )
+            .left_join(
+                ereports_dsl::support_bundle_data_selection_ereports
+                    .on(ereports_dsl::bundle_id.eq(flags_dsl::bundle_id)),
+            )
+            .left_join(
+                time_range_dsl::support_bundle_data_selection_time_range
+                    .on(time_range_dsl::bundle_id.eq(flags_dsl::bundle_id)),
+            )
+            .select(DbBundleDataSelection::as_select())
+            .first_async(&*conn)
+            .await
             .map_err(|e| {
-                if let Some(err) = err.take() {
-                    match err {
-                        SupportBundleError::TooManyBundles => {
-                            return external::Error::insufficient_capacity(
-                                CANNOT_ALLOCATE_ERR_MSG,
-                                "Support Bundle storage exhausted",
-                            );
-                        }
-                    }
-                }
                 public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to query data selection for bundle",
+                    )
+            })?
+            .try_into()
+            .map_err(|e: Error| {
+                e.internal_context("failed to convert data selection")
             })
     }
 
@@ -166,21 +438,25 @@ impl DataStore {
         Ok(db_bundle)
     }
 
-    /// Lists one page of support bundles
+    /// Lists one page of support bundles ordered by creation time
     pub async fn support_bundle_list(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, (chrono::DateTime<chrono::Utc>, Uuid)>,
     ) -> ListResultVec<SupportBundle> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use nexus_db_schema::schema::support_bundle::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        paginated(dsl::support_bundle, dsl::id, pagparams)
-            .select(SupportBundle::as_select())
-            .load_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        paginated_multicolumn(
+            dsl::support_bundle,
+            (dsl::time_created, dsl::id),
+            pagparams,
+        )
+        .select(SupportBundle::as_select())
+        .load_async(&*conn)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Lists one page of support bundles in a particular state, assigned to
@@ -219,14 +495,10 @@ impl DataStore {
         // For this blueprint: The set of all expunged Nexus zones that are
         // ready for cleanup
         let invalid_nexus_zones = blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_ready_for_cleanup)
-            .filter_map(|(_sled, zone)| {
-                if zone.zone_type.is_nexus() {
-                    Some(zone.id.into_untyped_uuid())
-                } else {
-                    None
-                }
-            })
+            .expunged_nexus_zones_ready_for_cleanup(
+                BlueprintExpungedZoneAccessReason::NexusSupportBundleReassign,
+            )
+            .map(|(_sled, zone, _nexus_config)| zone.id.into_untyped_uuid())
             .collect::<Vec<Uuid>>();
 
         // For this blueprint: The set of expunged debug datasets
@@ -301,6 +573,15 @@ impl DataStore {
                             ))
                             .execute_async(conn)
                             .await?;
+                    let bundle_uuids_to_delete: Vec<Uuid> = bundles_to_delete
+                        .iter()
+                        .map(|id| id.into_untyped_uuid())
+                        .collect();
+                    Self::support_bundle_data_selection_delete_on_conn(
+                        conn,
+                        bundle_uuids_to_delete,
+                    )
+                    .await?;
                     // For bundles that are in the process of being destroyed,
                     // the dataset expungement speeds up the process.
                     let bundles_deleted_missing_datasets =
@@ -316,7 +597,7 @@ impl DataStore {
                             .execute_async(conn)
                             .await?;
 
-                    // Find all bundles on nexuses that no longer exist.
+                    // Find all bundles managed by nexuses that no longer exist.
                     let bundles_with_bad_nexuses = dsl::support_bundle
                         .filter(dsl::assigned_nexus.eq_any(invalid_nexus_zones))
                         .select(SupportBundle::as_select())
@@ -325,15 +606,46 @@ impl DataStore {
 
                     let bundles_to_mark_failing = bundles_with_bad_nexuses
                         .iter()
-                        .map(|b| b.id)
+                        .filter_map(|bundle| {
+                            match bundle.state {
+                                // If the Nexus died mid-collection, we'll mark
+                                // this bundle failing. This should ensure that
+                                // any storage it might have been using is
+                                // cleaned up.
+                                SupportBundleState::Collecting => {
+                                    Some(bundle.id)
+                                }
+                                // If the bundle was marked "active", we need to
+                                // re-assign the "owning Nexus" so it can later
+                                // be deleted, but the bundle itself has already
+                                // been stored on a sled.
+                                //
+                                // There's no need to fail it.
+                                SupportBundleState::Active => None,
+                                // If the bundle has already been marked
+                                // "Destroying/Failing/Failed", it's already
+                                // irreversibly marked for deletion.
+                                SupportBundleState::Destroying
+                                | SupportBundleState::Failing
+                                | SupportBundleState::Failed => None,
+                            }
+                        })
                         .collect::<Vec<_>>();
+
                     let bundles_to_reassign = bundles_with_bad_nexuses
                         .iter()
                         .filter_map(|bundle| {
-                            if bundle.state != SupportBundleState::Failed {
-                                Some(bundle.id)
-                            } else {
-                                None
+                            match bundle.state {
+                                // If the bundle might be using any storage on
+                                // the provisioned sled, it gets assigned to a
+                                // new Nexus.
+                                SupportBundleState::Collecting
+                                | SupportBundleState::Active
+                                | SupportBundleState::Destroying
+                                | SupportBundleState::Failing => {
+                                    Some(bundle.id)
+                                }
+                                SupportBundleState::Failed => None,
                             }
                         })
                         .collect::<Vec<_>>();
@@ -363,29 +675,20 @@ impl DataStore {
                         bundles_reassigned: 0,
                     };
 
-                    // Exit a little early if there are no bundles to re-assign.
-                    //
-                    // This is a tiny optimization, but really, it means that
-                    // tests without Nexuses in their blueprints can succeed if
-                    // they also have no support bundles. In practice, this is
-                    // rare, but in our existing test framework, it's fairly
-                    // common.
-                    if bundles_to_reassign.is_empty() {
-                        return Ok(report);
+                    if !bundles_to_reassign.is_empty() {
+                        // Reassign bundles that haven't been marked "fully failed"
+                        // to ourselves, so we can free their storage if they have
+                        // been provisioned on a sled.
+                        report.bundles_reassigned =
+                            diesel::update(dsl::support_bundle)
+                                .filter(dsl::id.eq_any(bundles_to_reassign))
+                                .set(
+                                    dsl::assigned_nexus
+                                        .eq(our_nexus_id.into_untyped_uuid()),
+                                )
+                                .execute_async(conn)
+                                .await?;
                     }
-
-                    // Reassign bundles that haven't been marked "fully failed"
-                    // to ourselves, so we can free their storage if they have
-                    // been provisioned on a sled.
-                    report.bundles_reassigned =
-                        diesel::update(dsl::support_bundle)
-                            .filter(dsl::id.eq_any(bundles_to_reassign))
-                            .set(
-                                dsl::assigned_nexus
-                                    .eq(our_nexus_id.into_untyped_uuid()),
-                            )
-                            .execute_async(conn)
-                            .await?;
 
                     Ok(report)
                 }
@@ -433,10 +736,158 @@ impl DataStore {
         }
     }
 
+    /// Updates the user comment of a support bundle.
+    ///
+    /// Returns:
+    /// - "Ok" if the bundle was updated successfully.
+    /// - "Err::InvalidRequest" if the comment exceeds the maximum length.
+    pub async fn support_bundle_update_user_comment(
+        &self,
+        opctx: &OpContext,
+        authz_bundle: &authz::SupportBundle,
+        user_comment: Option<String>,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, authz_bundle).await?;
+
+        if let Some(ref comment) = user_comment {
+            if comment.len() > 4096 {
+                return Err(Error::invalid_request(
+                    "User comment cannot exceed 4096 bytes",
+                ));
+            }
+        }
+
+        use nexus_db_schema::schema::support_bundle::dsl;
+
+        let id = authz_bundle.id().into_untyped_uuid();
+        let conn = self.pool_connection_authorized(opctx).await?;
+        diesel::update(dsl::support_bundle)
+            .filter(dsl::id.eq(id))
+            .set(dsl::user_comment.eq(user_comment))
+            .execute_async(&*conn)
+            .await
+            .map(|_rows_modified| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
+    }
+
+    /// Decompose a [`BundleDataSelection`] into per-variant child table rows
+    /// and insert them for the given bundle.
+    ///
+    /// `start` is the time range's start bound, as returned by
+    /// [`BundleDataSelection::ensure_start_bound`]; it is passed separately
+    /// because the table requires one (start_time is NOT NULL).
+    ///
+    /// [`BundleDataSelection`]: nexus_types::support_bundle::BundleDataSelection
+    /// [`BundleDataSelection::ensure_start_bound`]: nexus_types::support_bundle::BundleDataSelection::ensure_start_bound
+    async fn support_bundle_data_selection_insert_on_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        bundle_id: SupportBundleUuid,
+        data_selection: BundleDataSelection,
+        start: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), DbError> {
+        use crate::db::model::{
+            DataSelectionFlags, Ereports, HostInfo, TimeRange,
+        };
+        use nexus_db_schema::schema::support_bundle_data_selection_ereports::dsl as ereports_dsl;
+        use nexus_db_schema::schema::support_bundle_data_selection_flags::dsl as flags_dsl;
+        use nexus_db_schema::schema::support_bundle_data_selection_host_info::dsl as host_info_dsl;
+        use nexus_db_schema::schema::support_bundle_data_selection_time_range::dsl as time_range_dsl;
+
+        // Always insert a flags row.
+        diesel::insert_into(flags_dsl::support_bundle_data_selection_flags)
+            .values(DataSelectionFlags {
+                bundle_id: bundle_id.into(),
+                include_reconfigurator: data_selection
+                    .contains_reconfigurator(),
+                include_sled_cubby_info: data_selection
+                    .contains_sled_cubby_info(),
+                include_sp_dumps: data_selection.contains_sp_dumps(),
+            })
+            .execute_async(conn)
+            .await?;
+
+        let end = data_selection.time_range().end();
+        diesel::insert_into(
+            time_range_dsl::support_bundle_data_selection_time_range,
+        )
+        .values(TimeRange::new(bundle_id, start, end))
+        .execute_async(conn)
+        .await?;
+
+        // Insert payload tables for variants that carry data.
+        for data in data_selection {
+            match data {
+                BundleData::Reconfigurator
+                | BundleData::SledCubbyInfo
+                | BundleData::SpDumps => {
+                    // Handled by flags row above.
+                }
+                BundleData::HostInfo(sleds) => {
+                    diesel::insert_into(
+                        host_info_dsl::support_bundle_data_selection_host_info,
+                    )
+                    .values(HostInfo::new(bundle_id, sleds))
+                    .execute_async(conn)
+                    .await?;
+                }
+                BundleData::Ereports(filters) => {
+                    diesel::insert_into(
+                        ereports_dsl::support_bundle_data_selection_ereports,
+                    )
+                    .values(Ereports::new(bundle_id, filters))
+                    .execute_async(conn)
+                    .await?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Delete all data selection rows associated with the given bundle IDs.
+    ///
+    /// Both callers run this within a transaction alongside the bundle row
+    /// delete, since the data selection tables have no ON DELETE CASCADE.
+    async fn support_bundle_data_selection_delete_on_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        bundle_ids: Vec<Uuid>,
+    ) -> Result<(), diesel::result::Error> {
+        use nexus_db_schema::schema::support_bundle_data_selection_ereports::dsl as ereports_dsl;
+        use nexus_db_schema::schema::support_bundle_data_selection_flags::dsl as flags_dsl;
+        use nexus_db_schema::schema::support_bundle_data_selection_host_info::dsl as host_info_dsl;
+        use nexus_db_schema::schema::support_bundle_data_selection_time_range::dsl as time_range_dsl;
+
+        diesel::delete(flags_dsl::support_bundle_data_selection_flags)
+            .filter(flags_dsl::bundle_id.eq_any(bundle_ids.clone()))
+            .execute_async(conn)
+            .await?;
+        diesel::delete(host_info_dsl::support_bundle_data_selection_host_info)
+            .filter(host_info_dsl::bundle_id.eq_any(bundle_ids.clone()))
+            .execute_async(conn)
+            .await?;
+        diesel::delete(ereports_dsl::support_bundle_data_selection_ereports)
+            .filter(ereports_dsl::bundle_id.eq_any(bundle_ids.clone()))
+            .execute_async(conn)
+            .await?;
+        diesel::delete(
+            time_range_dsl::support_bundle_data_selection_time_range,
+        )
+        .filter(time_range_dsl::bundle_id.eq_any(bundle_ids))
+        .execute_async(conn)
+        .await?;
+        Ok(())
+    }
+
     /// Deletes a support bundle.
     ///
     /// This should only be invoked after all storage for the support bundle has
     /// been cleared.
+    ///
+    /// Returns `Ok(())` if the bundle was deleted or did not exist
+    /// (idempotent). Returns an error if the bundle exists but is not in the
+    /// `Destroying` or `Failed` state.
     pub async fn support_bundle_delete(
         &self,
         opctx: &OpContext,
@@ -447,44 +898,126 @@ impl DataStore {
         use nexus_db_schema::schema::support_bundle::dsl;
 
         let id = authz_bundle.id().into_untyped_uuid();
+        let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
-        diesel::delete(dsl::support_bundle)
-            .filter(
-                dsl::state
-                    .eq(SupportBundleState::Destroying)
-                    .or(dsl::state.eq(SupportBundleState::Failed)),
-            )
-            .filter(dsl::id.eq(id))
-            .execute_async(&*conn)
+        self.transaction_retry_wrapper("support_bundle_delete")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    // Check the bundle's current state before deleting
+                    // anything.
+                    let bundle = dsl::support_bundle
+                        .filter(dsl::id.eq(id))
+                        .select(SupportBundle::as_select())
+                        .first_async(&conn)
+                        .await
+                        .optional()?;
+
+                    let Some(bundle) = bundle else {
+                        // Already gone — nothing to do.
+                        return Ok(());
+                    };
+
+                    match bundle.state {
+                        SupportBundleState::Destroying
+                        | SupportBundleState::Failed => {}
+                        state => {
+                            return Err(err.bail(Error::invalid_request(
+                                format!(
+                                    "cannot delete support bundle in \
+                                     state {state:?}"
+                                ),
+                            )));
+                        }
+                    }
+
+                    Self::support_bundle_data_selection_delete_on_conn(
+                        &conn,
+                        vec![id],
+                    )
+                    .await?;
+                    diesel::delete(dsl::support_bundle)
+                        .filter(dsl::id.eq(id))
+                        .execute_async(&conn)
+                        .await?;
+                    Ok(())
+                }
+            })
             .await
-            .map(|_rows_modified| ())
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    return err;
+                }
+                public_error_from_diesel(e, ErrorHandler::Server)
+            })?;
 
         Ok(())
+    }
+
+    /// Given a set of support bundle ids, returns those that have a creation
+    /// marker row in the FM `rendezvous_support_bundle_created` table (i.e. the
+    /// support bundles that FM rendezvous has already created). Used by FM
+    /// analysis to tell which support bundle requests on closed cases have been
+    /// satisfied, to determine whether any cases can be dropped (see
+    /// `nexus_fm::analysis_input::Builder::build`).
+    pub async fn fm_rendezvous_existing_support_bundle_markers(
+        &self,
+        opctx: &OpContext,
+        candidates: &[SupportBundleUuid],
+    ) -> Result<HashSet<SupportBundleUuid>, Error> {
+        if candidates.is_empty() {
+            return Ok(HashSet::new());
+        }
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use nexus_db_schema::schema::rendezvous_support_bundle_created::dsl as marker_dsl;
+
+        let candidate_uuids: Vec<Uuid> =
+            candidates.iter().map(|id| id.into_untyped_uuid()).collect();
+
+        let rows: Vec<Uuid> = marker_dsl::rendezvous_support_bundle_created
+            .filter(marker_dsl::support_bundle_id.eq_any(candidate_uuids))
+            .select(marker_dsl::support_bundle_id)
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(rows.into_iter().map(SupportBundleUuid::from_untyped_uuid).collect())
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
+    use diesel::ExpressionMethods;
+    use diesel::QueryDsl;
+    use nexus_db_schema::schema::rendezvous_support_bundle_created::dsl as marker_dsl;
+
     use crate::db::datastore::test::bp_insert_and_make_target;
     use crate::db::pub_test_utils::TestDatabase;
-    use nexus_db_model::Generation;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use nexus_db_model::SledBaseboard;
+    use nexus_db_model::SledCpuFamily;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
     use nexus_db_model::Zpool;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::example::SimRngState;
     use nexus_types::deployment::Blueprint;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneType;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::LookupType;
     use omicron_common::api::internal::shared::DatasetKind::Debug as DebugDatasetKind;
+    use omicron_generation_kinds::{
+        SitrepAlertGeneration, SledConfigGeneration, SledRegistrationGeneration,
+    };
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use rand::Rng;
@@ -554,16 +1087,16 @@ mod test {
             datastore: &DataStore,
             opctx: &OpContext,
         ) {
-            let rack_id = Uuid::new_v4();
+            let rack_id = RackUuid::new_v4();
             let blueprint_id = BlueprintUuid::new_v4();
             let sled = SledUpdate::new(
-                *self.sled.as_untyped_uuid(),
+                self.sled,
                 "[::1]:0".parse().unwrap(),
                 0,
                 SledBaseboard {
                     serial_number: format!(
                         "test-{}",
-                        rand::thread_rng().gen::<u64>()
+                        rand::rng().random::<u64>()
                     ),
                     part_number: "test-pn".to_string(),
                     revision: 0,
@@ -573,17 +1106,18 @@ mod test {
                     usable_hardware_threads: 128,
                     usable_physical_ram: (64 << 30).try_into().unwrap(),
                     reservoir_size: (16 << 30).try_into().unwrap(),
+                    cpu_family: SledCpuFamily::AmdMilan,
                 },
                 rack_id,
-                Generation::new(),
+                SledRegistrationGeneration::new(),
             );
-            datastore.sled_upsert(sled).await.expect("failed to upsert sled");
+            sled_upsert_expect_written(datastore, sled).await;
 
             // Create fake zpools that back our fake datasets.
             for pool in &self.pools {
                 let zpool = Zpool::new(
-                    *pool.pool.as_untyped_uuid(),
-                    *self.sled.as_untyped_uuid(),
+                    pool.pool,
+                    self.sled,
                     PhysicalDiskUuid::new_v4(),
                     ByteCount::from(0).into(),
                 );
@@ -623,7 +1157,15 @@ mod test {
         this_nexus_id: OmicronZoneUuid,
     ) {
         let err = datastore
-            .support_bundle_create(&opctx, "for tests", this_nexus_id)
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "for tests",
+                    nexus_id: this_nexus_id,
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
             .await
             .expect_err("Shouldn't provision bundle without datasets");
         let Error::InsufficientCapacity { message } = err else {
@@ -669,15 +1211,39 @@ mod test {
         // Create two bundles on "nexus A", one bundle on "nexus B"
 
         let bundle_a1 = datastore
-            .support_bundle_create(&opctx, "for the test", nexus_a)
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "for the test",
+                    nexus_id: nexus_a,
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
             .await
             .expect("Should be able to create bundle");
         let bundle_a2 = datastore
-            .support_bundle_create(&opctx, "for the test", nexus_a)
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "for the test",
+                    nexus_id: nexus_a,
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
             .await
             .expect("Should be able to create bundle");
         let bundle_b1 = datastore
-            .support_bundle_create(&opctx, "for the test", nexus_b)
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "for the test",
+                    nexus_id: nexus_b,
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
             .await
             .expect("Should be able to create bundle");
 
@@ -793,8 +1359,12 @@ mod test {
                 datastore
                     .support_bundle_create(
                         &opctx,
-                        "for the test",
-                        this_nexus_id,
+                        SupportBundleCreateParams {
+                            reason: "for the test",
+                            nexus_id: this_nexus_id,
+                            user_comment: None,
+                            data_selection: BundleDataSelection::all(),
+                        },
                     )
                     .await
                     .expect("Should be able to create bundle"),
@@ -841,7 +1411,15 @@ mod test {
             .await
             .expect("Should be able to destroy this bundle");
         datastore
-            .support_bundle_create(&opctx, "for the test", this_nexus_id)
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "for the test",
+                    nexus_id: this_nexus_id,
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
             .await
             .expect("Should be able to create bundle");
 
@@ -862,7 +1440,15 @@ mod test {
         // Create the bundle, then observe it through the "getter" APIs
 
         let mut bundle = datastore
-            .support_bundle_create(&opctx, reason, this_nexus_id)
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason,
+                    nexus_id: this_nexus_id,
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
             .await
             .expect("Should be able to create bundle");
         assert_eq!(bundle.reason_for_creation, reason);
@@ -906,7 +1492,25 @@ mod test {
 
         // Delete the bundle, observe that it's gone
 
+        // Verify data selection exists before delete
         let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
+        let selection = datastore
+            .support_bundle_data_selection_get(&opctx, &authz_bundle)
+            .await
+            .expect("Should be able to query data selection");
+        // The read-back selection is the one we passed in, plus the default
+        // start bound that creation stamps onto every persisted selection
+        // (see test_create_stamps_default_start_bound for the full contract).
+        assert_ne!(
+            selection,
+            BundleDataSelection::new(),
+            "Data selection should exist before delete"
+        );
+        assert!(
+            selection.time_range().start().is_some(),
+            "Persisted selection should carry a start bound"
+        );
+
         datastore
             .support_bundle_delete(&opctx, &authz_bundle)
             .await
@@ -916,6 +1520,207 @@ mod test {
             .await
             .expect("Should be able to query when no bundles exist");
         assert!(observed_bundles.is_empty());
+
+        // Verify data selection rows were also cleaned up. The bundle has
+        // been deleted, so querying its data selection should fail with
+        // not-found.
+        datastore
+            .support_bundle_data_selection_get(&opctx, &authz_bundle)
+            .await
+            .expect_err("Data selection should not exist after bundle delete");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_data_selection_read_without_time_range_row() {
+        let logctx = dev::test_setup_log(
+            "test_data_selection_read_without_time_range_row",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 1).await;
+        let this_nexus_id = OmicronZoneUuid::new_v4();
+
+        let bundle = datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "legacy bundle without a time range row",
+                    nexus_id: this_nexus_id,
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
+            .await
+            .expect("Should be able to create bundle");
+
+        // Bundles that were already collected before time ranges existed
+        // have no time_range row at all (the schema migration only creates
+        // rows for bundles still awaiting collection). Simulate one by
+        // deleting the row that creation stamped.
+        {
+            use nexus_db_schema::schema::support_bundle_data_selection_time_range::dsl;
+            diesel::delete(
+                dsl::support_bundle_data_selection_time_range
+                    .filter(dsl::bundle_id.eq(bundle.id.into_untyped_uuid())),
+            )
+            .execute_async(&*conn)
+            .await
+            .expect("Should be able to delete time range row");
+        }
+
+        // The read maps the absent row to the default (unbounded) range and
+        // preserves the rest of the selection.
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
+        let selection = datastore
+            .support_bundle_data_selection_get(&opctx, &authz_bundle)
+            .await
+            .expect("Should be able to read selection without time range row");
+        assert_eq!(selection.time_range(), &Default::default());
+        assert_eq!(selection, BundleDataSelection::all());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_create_stamps_default_start_bound() {
+        let logctx =
+            dev::test_setup_log("test_create_stamps_default_start_bound");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 2).await;
+        let this_nexus_id = OmicronZoneUuid::new_v4();
+
+        // A selection persisted without a time range comes back with the
+        // default start bound stamped at creation; everything else is
+        // unchanged.
+        let windowless = BundleDataSelection::all();
+        assert!(!windowless.time_range().has_bounds());
+        let bundle = datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "windowless selection",
+                    nexus_id: this_nexus_id,
+                    user_comment: None,
+                    data_selection: windowless.clone(),
+                },
+            )
+            .await
+            .expect("Should be able to create bundle");
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
+        let mut selection = datastore
+            .support_bundle_data_selection_get(&opctx, &authz_bundle)
+            .await
+            .expect("Should be able to query data selection");
+        let range = selection.time_range();
+        assert!(
+            range.start().is_some(),
+            "persisted selection should carry a start bound"
+        );
+        assert!(range.end().is_none(), "no end bound was supplied");
+        selection.set_time_range(Default::default());
+        assert_eq!(
+            selection, windowless,
+            "creation should change nothing but the time range"
+        );
+
+        // A selection with explicit bounds round-trips exactly: supplied
+        // bounds always win over the default.
+        let now = omicron_common::now_db_precision();
+        let bounded = BundleDataSelection::all().with_time_range(
+            nexus_types::support_bundle::BundleTimeRange::new(
+                Some(now - chrono::Duration::hours(2)),
+                Some(now - chrono::Duration::hours(1)),
+            )
+            .expect("valid range"),
+        );
+        let bundle = datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "bounded selection",
+                    nexus_id: this_nexus_id,
+                    user_comment: None,
+                    data_selection: bounded.clone(),
+                },
+            )
+            .await
+            .expect("Should be able to create bundle");
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
+        let selection = datastore
+            .support_bundle_data_selection_get(&opctx, &authz_bundle)
+            .await
+            .expect("Should be able to query data selection");
+        assert_eq!(
+            selection, bounded,
+            "explicit bounds should round-trip unmodified"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_bundle_delete_wrong_state_preserves_data_selection() {
+        let logctx = dev::test_setup_log(
+            "test_bundle_delete_wrong_state_preserves_data_selection",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 1).await;
+        let this_nexus_id = OmicronZoneUuid::new_v4();
+
+        // Create a bundle (starts in Collecting state).
+        let bundle = datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "test wrong-state delete",
+                    nexus_id: this_nexus_id,
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
+            .await
+            .expect("Should be able to create bundle");
+        assert_eq!(bundle.state, SupportBundleState::Collecting);
+
+        // Verify data selection exists.
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
+        let selection_before = datastore
+            .support_bundle_data_selection_get(&opctx, &authz_bundle)
+            .await
+            .expect("Data selection should exist");
+
+        // Try to delete the bundle while it's still Collecting — should fail.
+        datastore
+            .support_bundle_delete(&opctx, &authz_bundle)
+            .await
+            .expect_err(
+                "Should not be able to delete bundle in Collecting state",
+            );
+
+        // Verify the bundle still exists.
+        let observed = datastore
+            .support_bundle_get(&opctx, bundle.id.into())
+            .await
+            .expect("Bundle should still exist after failed delete");
+        assert_eq!(observed.state, SupportBundleState::Collecting);
+
+        // Verify data selection rows were not partially deleted.
+        let selection_after = datastore
+            .support_bundle_data_selection_get(&opctx, &authz_bundle)
+            .await
+            .expect("Data selection should still exist after failed delete");
+        assert_eq!(selection_before, selection_after);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -974,7 +1779,7 @@ mod test {
             for mut zone in &mut sled.zones {
                 if zone.id == bundle.assigned_nexus.unwrap().into() {
                     zone.disposition = BlueprintZoneDisposition::Expunged {
-                        as_of_generation: *Generation::new(),
+                        as_of_generation: SledConfigGeneration::new(),
                         ready_for_cleanup: true,
                     };
                 }
@@ -1026,7 +1831,15 @@ mod test {
         // When we create a bundle, it should exist on a dataset provisioned by
         // the blueprint.
         let bundle = datastore
-            .support_bundle_create(&opctx, "for the test", this_nexus_id)
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "for the test",
+                    nexus_id: this_nexus_id,
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
             .await
             .expect("Should be able to create bundle");
         assert_eq!(bundle.assigned_nexus, Some(this_nexus_id.into()));
@@ -1131,7 +1944,15 @@ mod test {
         // When we create a bundle, it should exist on a dataset provisioned by
         // the blueprint.
         let bundle = datastore
-            .support_bundle_create(&opctx, "for the test", this_nexus_id)
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "for the test",
+                    nexus_id: this_nexus_id,
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
             .await
             .expect("Should be able to create bundle");
         assert_eq!(bundle.assigned_nexus, Some(this_nexus_id.into()));
@@ -1195,6 +2016,13 @@ mod test {
             .expect("Should be able to query when no bundles exist");
         assert!(observed_bundles.is_empty());
 
+        // Verify data selection rows were also cleaned up.
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
+        datastore
+            .support_bundle_data_selection_get(&opctx, &authz_bundle)
+            .await
+            .expect_err("Data selection should not exist after bundle delete");
+
         db.terminate().await;
         logctx.cleanup_successful();
     }
@@ -1232,7 +2060,15 @@ mod test {
         // When we create a bundle, it should exist on a dataset provisioned by
         // the blueprint.
         let bundle = datastore
-            .support_bundle_create(&opctx, "for the test", nexus_ids[0])
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "for the test",
+                    nexus_id: nexus_ids[0],
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
             .await
             .expect("Should be able to create bundle");
 
@@ -1353,7 +2189,15 @@ mod test {
         // When we create a bundle, it should exist on a dataset provisioned by
         // the blueprint.
         let bundle = datastore
-            .support_bundle_create(&opctx, "for the test", nexus_ids[0])
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "for the test",
+                    nexus_id: nexus_ids[0],
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
             .await
             .expect("Should be able to create bundle");
 
@@ -1395,7 +2239,7 @@ mod test {
 
         assert_eq!(
             SupportBundleExpungementReport {
-                bundles_failing_missing_nexus: 1,
+                bundles_failing_missing_nexus: 0,
                 bundles_reassigned: 1,
                 ..Default::default()
             },
@@ -1405,14 +2249,356 @@ mod test {
         let observed_bundle = datastore
             .support_bundle_get(&opctx, bundle.id.into())
             .await
-            .expect("Should be able to get bundle we just failed");
-        assert_eq!(SupportBundleState::Failing, observed_bundle.state);
-        assert!(
-            observed_bundle
-                .reason_for_failure
-                .unwrap()
-                .contains(FAILURE_REASON_NO_NEXUS)
+            .expect("Should be able to get bundle we reassigned");
+        assert_eq!(SupportBundleState::Active, observed_bundle.state);
+        assert_eq!(
+            observed_bundle.assigned_nexus.unwrap(),
+            nexus_ids[1].into(),
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_bundle_list_time_ordering() {
+        let logctx = dev::test_setup_log("test_bundle_list_time_ordering");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 3).await;
+        let this_nexus_id = OmicronZoneUuid::new_v4();
+
+        // Create multiple bundles with slight time delays to ensure different creation times
+        let mut bundle_ids = Vec::new();
+        let mut bundle_times = Vec::new();
+
+        for _i in 0..3 {
+            let bundle = datastore
+                .support_bundle_create(
+                    &opctx,
+                    SupportBundleCreateParams {
+                        reason: "Bundle for time ordering test",
+                        nexus_id: this_nexus_id,
+                        user_comment: None,
+                        data_selection: BundleDataSelection::all(),
+                    },
+                )
+                .await
+                .expect("Should be able to create bundle");
+            bundle_ids.push(bundle.id);
+            bundle_times.push(bundle.time_created);
+
+            // Small delay to ensure different creation times
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+
+        // List bundles using time-based pagination
+        let pagparams = DataPageParams::max_page();
+        let observed_bundles = datastore
+            .support_bundle_list(&opctx, &pagparams)
+            .await
+            .expect("Should be able to list bundles");
+
+        assert_eq!(3, observed_bundles.len());
+
+        // Verify bundles are ordered by creation time (ascending)
+        for i in 0..observed_bundles.len() - 1 {
+            assert!(
+                observed_bundles[i].time_created
+                    <= observed_bundles[i + 1].time_created,
+                "Bundles should be ordered by creation time (ascending). Bundle at index {} has time {:?}, but bundle at index {} has time {:?}",
+                i,
+                observed_bundles[i].time_created,
+                i + 1,
+                observed_bundles[i + 1].time_created
+            );
+        }
+
+        // Verify that the bundles are our created bundles
+        let returned_ids: Vec<_> =
+            observed_bundles.iter().map(|b| b.id).collect();
+        for bundle_id in &bundle_ids {
+            assert!(
+                returned_ids.contains(bundle_id),
+                "Bundle ID {:?} should be in the returned list",
+                bundle_id
+            );
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    fn make_fm_sitrep(
+        support_bundle_generation: SitrepSupportBundleGeneration,
+    ) -> nexus_types::fm::Sitrep {
+        use nexus_types::fm::Sitrep;
+        use nexus_types::fm::SitrepMetadata;
+        use omicron_uuid_kinds::CollectionUuid;
+        use omicron_uuid_kinds::SitrepUuid;
+        Sitrep {
+            metadata: SitrepMetadata {
+                id: SitrepUuid::new_v4(),
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: String::new(),
+                time_created: chrono::Utc::now(),
+                parent_sitrep_id: None,
+                next_inv_min_time_started: chrono::Utc::now(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation,
+            },
+            cases: Default::default(),
+            ereports_by_id: Default::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn support_bundle_create_fm_created_writes_marker() {
+        use diesel::SelectableHelper;
+        use nexus_db_model::fm::RendezvousSupportBundleCreated;
+
+        let logctx = dev::test_setup_log(
+            "support_bundle_create_fm_created_writes_marker",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 1).await;
+        datastore
+            .fm_sitrep_insert(
+                opctx,
+                make_fm_sitrep(SitrepSupportBundleGeneration::from_u32(3)),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let bundle_id = SupportBundleUuid::new_v4();
+        let case_id = CaseUuid::new_v4();
+        let nexus_id = OmicronZoneUuid::new_v4();
+        let bundle = datastore
+            .fm_rendezvous_support_bundle_create(
+                &opctx,
+                bundle_id,
+                case_id,
+                SitrepSupportBundleGeneration::from_u32(3),
+                SupportBundleCreateParams {
+                    reason: "fm happy path",
+                    nexus_id,
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
+            .await
+            .expect(
+                "fm_rendezvous_support_bundle_create happy path should succeed",
+            );
+        assert_eq!(SupportBundleUuid::from(bundle.id), bundle_id);
+        assert_eq!(bundle.fm_case_id, Some(case_id.into()));
+        assert_eq!(bundle.state, SupportBundleState::Collecting);
+        assert_eq!(bundle.assigned_nexus, Some(nexus_id.into()));
+
+        let marker = marker_dsl::rendezvous_support_bundle_created
+            .filter(
+                marker_dsl::support_bundle_id.eq(bundle_id.into_untyped_uuid()),
+            )
+            .select(RendezvousSupportBundleCreated::as_select())
+            .first_async::<RendezvousSupportBundleCreated>(&*conn)
+            .await
+            .unwrap();
+        assert_eq!(
+            marker.created_at_generation(),
+            SitrepSupportBundleGeneration::from_u32(3)
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn support_bundle_create_fm_already_exists_without_marker() {
+        let logctx = dev::test_setup_log(
+            "support_bundle_create_fm_already_exists_without_marker",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // Two free datasets: the first backs the marker-free bundle row we
+        // plant below; the second lets the FM create reach the sitrep-guard
+        // (the free-dataset lookup precedes the guarded insert).
+        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 2).await;
+        datastore
+            .fm_sitrep_insert(
+                opctx,
+                make_fm_sitrep(SitrepSupportBundleGeneration::new()),
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Plant a bundle row with no marker by creating it through the
+        // non-FM (user) path, which never writes a
+        // `rendezvous_support_bundle_created` row. Reuse its id for the FM
+        // request so the inner INSERT conflicts on the primary key.
+        let planted = datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "marker-free row",
+                    nexus_id: OmicronZoneUuid::new_v4(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
+            .await
+            .expect("user-path create should succeed");
+        let bundle_id = SupportBundleUuid::from(planted.id);
+
+        let result = datastore
+            .fm_rendezvous_support_bundle_create(
+                &opctx,
+                bundle_id,
+                CaseUuid::new_v4(),
+                SitrepSupportBundleGeneration::new(),
+                SupportBundleCreateParams {
+                    reason: "should hit existing row",
+                    nexus_id: OmicronZoneUuid::new_v4(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
+            .await;
+        assert!(
+            matches!(result, Err(FmSupportBundleCreateError::AlreadyCreated)),
+            "expected Err(AlreadyCreated), got {result:?}"
+        );
+
+        // No marker may have been written: the `new_marker` CTE is gated by
+        // `WHERE EXISTS (SELECT 1 FROM new_resource)`.
+        let marker_count: i64 = marker_dsl::rendezvous_support_bundle_created
+            .filter(
+                marker_dsl::support_bundle_id.eq(bundle_id.into_untyped_uuid()),
+            )
+            .count()
+            .get_result_async(&*conn)
+            .await
+            .unwrap();
+        assert_eq!(marker_count, 0);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn support_bundle_create_fm_stale_sitrep() {
+        let logctx =
+            dev::test_setup_log("support_bundle_create_fm_stale_sitrep");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 1).await;
+        // Latest sitrep at generation 5; the rendezvous task expects the
+        // initial generation, which is stale.
+        datastore
+            .fm_sitrep_insert(
+                opctx,
+                make_fm_sitrep(SitrepSupportBundleGeneration::from_u32(5)),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let result = datastore
+            .fm_rendezvous_support_bundle_create(
+                &opctx,
+                SupportBundleUuid::new_v4(),
+                CaseUuid::new_v4(),
+                SitrepSupportBundleGeneration::new(),
+                SupportBundleCreateParams {
+                    reason: "stale activation",
+                    nexus_id: OmicronZoneUuid::new_v4(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
+            .await;
+        assert!(
+            matches!(result, Err(FmSupportBundleCreateError::StaleSitrep)),
+            "expected Err(StaleSitrep), got {result:?}"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn fm_rendezvous_existing_support_bundle_markers_returns_only_present_ids()
+     {
+        use nexus_db_model::fm::RendezvousSupportBundleCreated;
+
+        let logctx = dev::test_setup_log(
+            "fm_rendezvous_existing_support_bundle_markers_returns_only_present_ids",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let present_a = SupportBundleUuid::new_v4();
+        let present_b = SupportBundleUuid::new_v4();
+        let absent = SupportBundleUuid::new_v4();
+
+        // Insert markers for present_a and present_b only.
+        {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            diesel::insert_into(marker_dsl::rendezvous_support_bundle_created)
+                .values(vec![
+                    RendezvousSupportBundleCreated::new(
+                        present_a,
+                        SitrepSupportBundleGeneration::new(),
+                    ),
+                    RendezvousSupportBundleCreated::new(
+                        present_b,
+                        SitrepSupportBundleGeneration::new(),
+                    ),
+                ])
+                .execute_async(&*conn)
+                .await
+                .unwrap();
+        }
+
+        let candidates = vec![present_a, absent, present_b];
+        let existing = datastore
+            .fm_rendezvous_existing_support_bundle_markers(opctx, &candidates)
+            .await
+            .expect("query should succeed");
+
+        assert_eq!(existing.len(), 2);
+        assert!(existing.contains(&present_a));
+        assert!(existing.contains(&present_b));
+        assert!(!existing.contains(&absent));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn fm_rendezvous_existing_support_bundle_markers_empty_input_returns_empty()
+     {
+        let logctx = dev::test_setup_log(
+            "fm_rendezvous_existing_support_bundle_markers_empty_input_returns_empty",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let existing = datastore
+            .fm_rendezvous_existing_support_bundle_markers(opctx, &[])
+            .await
+            .expect("empty input must return Ok");
+
+        assert!(existing.is_empty(), "empty input returns empty result");
 
         db.terminate().await;
         logctx.cleanup_successful();

@@ -6,7 +6,9 @@
 //! tasks or sagas.
 
 mod firewall_rules;
+mod gateway_client;
 mod sled_client;
 
 pub use firewall_rules::*;
+pub use gateway_client::*;
 pub use sled_client::*;

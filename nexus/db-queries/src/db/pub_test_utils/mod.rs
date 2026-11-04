@@ -12,13 +12,35 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::DataStore;
+use crate::db::datastore::IdentityCheckPolicy;
+use omicron_git_version_types::GitVersion;
 use omicron_test_utils::dev::db::CockroachInstance;
+use omicron_uuid_kinds::RackUuid;
 use slog::Logger;
 use std::sync::Arc;
-use uuid::Uuid;
 
 pub mod crdb;
+pub mod explain;
+pub mod fm;
 pub mod helpers;
+pub mod multicast;
+pub mod simulated_sleds;
+
+/// A fixed Git version for datastores built by test utilities.
+///
+/// Notes:
+///
+/// * This is deliberately not `omicron_git_version::current()`, since that would
+///   introduce a lot of unnecessary recompiles. See #10692.
+/// * This is also not a commit hash, since we aren't trying to treat it as
+///   anything other than an opaque string. (There is an argument for
+///   parsing it as a 20-byte hex string. But as things currently stand, we
+///   don't do that.)
+/// * It is fine that this is a dummy value that's always the same regardless
+///   of the actual Git version, since the test database is not expected to
+///   emit any information that might be read by tools compiled with a different
+///   schema. (Or, at least that doing so would be quite strange.)
+pub const TEST_GIT_VERSION: GitVersion = GitVersion::new_static("test", false);
 
 enum Populate {
     Nothing,
@@ -34,7 +56,11 @@ enum Interface {
 
 fn new_pool(log: &Logger, db: &CockroachInstance) -> Arc<db::Pool> {
     let cfg = db::Config { url: db.pg_config().clone() };
-    Arc::new(db::Pool::new_single_host(log, &cfg))
+    Arc::new(db::Pool::new_single_host(
+        log,
+        &cfg,
+        db::ClaimBacktraceSetting::Capture,
+    ))
 }
 
 struct TestDatabaseBuilder {
@@ -114,7 +140,15 @@ impl TestDatabaseBuilder {
                     Interface::Datastore => {
                         let pool = new_pool(log, &db);
                         let datastore = Arc::new(
-                            DataStore::new(&log, pool, None).await.unwrap(),
+                            DataStore::new(
+                                &log,
+                                pool,
+                                None,
+                                IdentityCheckPolicy::DontCare,
+                                TEST_GIT_VERSION,
+                            )
+                            .await
+                            .unwrap(),
                         );
                         TestDatabase {
                             db,
@@ -239,6 +273,27 @@ impl TestDatabase {
         }
     }
 
+    /// Returns a new independent datastore atop a new pool atop the same
+    /// database
+    ///
+    /// This is normally not necessary.  You can clone the `Arc<DataStore>`
+    /// returned by `datastore()`.  However, this is important for tests that
+    /// need separate datastores to test their separate quiesce behaviors.
+    pub async fn extra_datastore(&self, log: &Logger) -> Arc<DataStore> {
+        let pool = new_pool(log, &self.db);
+        Arc::new(
+            DataStore::new(
+                &log,
+                pool,
+                None,
+                IdentityCheckPolicy::DontCare,
+                TEST_GIT_VERSION,
+            )
+            .await
+            .unwrap(),
+        )
+    }
+
     pub fn opctx(&self) -> &OpContext {
         match &self.kind {
             TestKind::NoPool
@@ -278,14 +333,13 @@ impl TestDatabase {
     }
 }
 
-pub const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
+pub use nexus_inventory::examples::RACK_UUID;
 
 async fn datastore_test_on_default_rack(
     log: &Logger,
     db: &CockroachInstance,
 ) -> (OpContext, Arc<DataStore>) {
-    let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
-    datastore_test(log, db, rack_id).await
+    datastore_test(log, db, RACK_UUID).await
 }
 
 // Constructs a DataStore for use in test suites that has preloaded the
@@ -294,13 +348,27 @@ async fn datastore_test_on_default_rack(
 async fn datastore_test(
     log: &Logger,
     db: &CockroachInstance,
-    rack_id: Uuid,
+    rack_id: RackUuid,
 ) -> (OpContext, Arc<DataStore>) {
     use crate::authn;
 
     let cfg = db::Config { url: db.pg_config().clone() };
-    let pool = Arc::new(db::Pool::new_single_host(&log, &cfg));
-    let datastore = Arc::new(DataStore::new(&log, pool, None).await.unwrap());
+    let pool = Arc::new(db::Pool::new_single_host(
+        &log,
+        &cfg,
+        db::ClaimBacktraceSetting::Capture,
+    ));
+    let datastore = Arc::new(
+        DataStore::new(
+            &log,
+            pool,
+            None,
+            IdentityCheckPolicy::DontCare,
+            TEST_GIT_VERSION,
+        )
+        .await
+        .unwrap(),
+    );
 
     // Create an OpContext with the credentials of "db-init" just for the
     // purpose of loading the built-in users, roles, and assignments.
@@ -313,7 +381,6 @@ async fn datastore_test(
 
     // TODO: Can we just call "Populate" instead of doing this?
     datastore.load_builtin_users(&opctx).await.unwrap();
-    datastore.load_builtin_roles(&opctx).await.unwrap();
     datastore.load_builtin_role_asgns(&opctx).await.unwrap();
     datastore.load_builtin_silos(&opctx).await.unwrap();
     datastore.load_builtin_projects(&opctx).await.unwrap();

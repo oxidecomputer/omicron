@@ -5,13 +5,12 @@
 //! Information about all top-level Oxide components (sleds, switches, PSCs)
 
 use anyhow::{Context as _, Result, bail};
-use omicron_common::api::external::SwitchLocation;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::iter::Iterator;
 use std::sync::LazyLock;
-use tufaceous_artifact::KnownArtifactKind;
 use wicket_common::inventory::{
     RackV1Inventory, RotInventory, RotSlot, SpComponentCaboose,
     SpComponentInfo, SpIgnition, SpState, SpType, Transceiver,
@@ -61,7 +60,7 @@ impl Inventory {
 
         for sp in mgs_inventory.sps {
             let i = sp.id.slot;
-            let type_ = sp.id.type_;
+            let type_ = sp.id.typ;
             let sp = Sp {
                 ignition: sp.ignition,
                 state: sp.state,
@@ -78,8 +77,8 @@ impl Inventory {
                 SpType::Switch => {
                     // Insert the switch's transceivers.
                     let switch_id = match i {
-                        0 => SwitchLocation::Switch0,
-                        1 => SwitchLocation::Switch1,
+                        0 => SwitchSlot::Switch0,
+                        1 => SwitchSlot::Switch1,
                         _ => unreachable!(),
                     };
                     let transceivers = transceiver_inventory
@@ -280,7 +279,7 @@ impl ComponentId {
         Ok(Self::Psc(slot))
     }
 
-    pub fn from_sp_type_and_slot(sp_type: SpType, slot: u32) -> Result<Self> {
+    pub fn from_sp_type_and_slot(sp_type: SpType, slot: u16) -> Result<Self> {
         let slot = slot.try_into().map_err(|_| {
             anyhow::anyhow!("invalid slot (must fit in a u8): {}", slot)
         })?;
@@ -293,30 +292,6 @@ impl ComponentId {
 
     pub fn name(&self) -> String {
         self.to_string()
-    }
-
-    pub fn sp_known_artifact_kind(&self) -> KnownArtifactKind {
-        match self {
-            ComponentId::Sled(_) => KnownArtifactKind::GimletSp,
-            ComponentId::Switch(_) => KnownArtifactKind::SwitchSp,
-            ComponentId::Psc(_) => KnownArtifactKind::PscSp,
-        }
-    }
-
-    pub fn rot_known_artifact_kind(&self) -> KnownArtifactKind {
-        match self {
-            ComponentId::Sled(_) => KnownArtifactKind::GimletRot,
-            ComponentId::Switch(_) => KnownArtifactKind::SwitchRot,
-            ComponentId::Psc(_) => KnownArtifactKind::PscRot,
-        }
-    }
-
-    pub fn rot_bootloader_known_artifact_kind(&self) -> KnownArtifactKind {
-        match self {
-            ComponentId::Sled(_) => KnownArtifactKind::GimletRotBootloader,
-            ComponentId::Switch(_) => KnownArtifactKind::SwitchRotBootloader,
-            ComponentId::Psc(_) => KnownArtifactKind::PscRotBootloader,
-        }
     }
 
     pub fn to_string_uppercase(&self) -> String {
@@ -333,24 +308,6 @@ impl Display for ComponentId {
             ComponentId::Sled(i) => write!(f, "sled {}", i),
             ComponentId::Switch(i) => write!(f, "switch {}", i),
             ComponentId::Psc(i) => write!(f, "PSC {}", i),
-        }
-    }
-}
-
-pub struct ParsableComponentId<'a> {
-    pub sp_type: &'a str,
-    pub i: &'a str,
-}
-
-impl<'a> TryFrom<ParsableComponentId<'a>> for ComponentId {
-    type Error = ();
-    fn try_from(value: ParsableComponentId<'a>) -> Result<Self, Self::Error> {
-        let i: u8 = value.i.parse().map_err(|_| ())?;
-        match (value.sp_type, i) {
-            ("sled", 0..=31) => Ok(ComponentId::Sled(i)),
-            ("switch", 0..=1) => Ok(ComponentId::Switch(i)),
-            ("power", 0..=1) => Ok(ComponentId::Psc(i)),
-            _ => Err(()),
         }
     }
 }

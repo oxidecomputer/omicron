@@ -6,22 +6,28 @@
 
 use anyhow::Context;
 use futures::StreamExt;
+use iddqd::IdOrdMap;
+use nexus_db_model::DbMetadataNexusState;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::DataStoreDnsTest;
-use nexus_db_queries::db::datastore::DataStoreInventoryTest;
 use nexus_db_queries::db::datastore::Discoverability;
+use nexus_db_queries::db::datastore::ExternalServiceNetworkingConfig;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
+use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
+use nexus_types::deployment::ExternalIpPolicy;
+use nexus_types::deployment::ExternalServiceNetworkingPolicy;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::OximeterReadPolicy;
+use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
@@ -29,41 +35,47 @@ use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
+use nexus_types::deployment::TargetReleaseDescription;
+use nexus_types::deployment::TufRepoPolicy;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use nexus_types::inventory::Collection;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
-use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_common::policy::OXIMETER_REDUNDANCY;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use omicron_uuid_kinds::SledUuid;
-use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::disk::DiskIdentity;
+use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog::error;
 use slog_error_chain::InlineErrorChain;
+use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 /// Given various pieces of database state that go into the blueprint planning
 /// process, produce a `PlanningInput` object encapsulating what the planner
 /// needs to generate a blueprint
 pub struct PlanningInputFromDb<'a> {
+    pub parent_blueprint: Arc<Blueprint>,
     pub sled_rows: &'a [nexus_db_model::Sled],
     pub zpool_rows:
         &'a [(nexus_db_model::Zpool, nexus_db_model::PhysicalDisk)],
     pub ip_pool_range_rows: &'a [nexus_db_model::IpPoolRange],
+    pub external_service_networking: ExternalServiceNetworkingConfig,
     pub external_ip_rows: &'a [nexus_db_model::ExternalIp],
     pub service_nic_rows: &'a [nexus_db_model::ServiceNetworkInterface],
     pub target_boundary_ntp_zone_count: usize,
@@ -78,13 +90,52 @@ pub struct PlanningInputFromDb<'a> {
     pub cockroachdb_settings: &'a CockroachDbSettings,
     pub clickhouse_policy: Option<ClickhousePolicy>,
     pub oximeter_read_policy: OximeterReadPolicy,
+    pub tuf_repo: TufRepoPolicy,
+    pub old_repo: TufRepoPolicy,
+    pub planner_config: PlannerConfig,
+    pub active_nexus_zones: BTreeSet<OmicronZoneUuid>,
+    pub not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
     pub log: &'a Logger,
 }
 
 impl PlanningInputFromDb<'_> {
+    /// Read the current set of database state needed to assemble a new
+    /// [`PlanningInput`].
+    ///
+    /// The caller is required to pass `parent_blueprint` in so that we
+    /// statically enforce that any `PlanningInput` information we read from the
+    /// database is _at least as new_ as the parent blueprint on which the
+    /// planner will operate. This is particularly important for the planner's
+    /// "garbage collection" phase where it drops expunged items for which all
+    /// cleanup is complete: if the `PlanningInput` is read before the parent
+    /// blueprint, some of the "is cleanup complete" information that doesn't
+    /// have explicit generation numbers (or equivalent) could show a state
+    /// where the planner believes cleanup is complete when actually it hasn't
+    /// yet had a chance to run; e.g..
+    ///
+    /// * Nexus A constructs a `PlanningInput` that has no record of zone Z.
+    /// * Nexus A goes out to lunch.
+    /// * Nexus B constructs a new blueprint that adds zone Z, makes it the
+    ///   target, and executes it.
+    /// * Zone Z runs, and inserts some records that we'd see in `PlanningInput`
+    ///   indicating it is not yet cleaned up.
+    /// * Nexus B constructs a new blueprint that expunges zone Z, makes it the
+    ///   target, and executes it.
+    /// * At this point zone Z is expunged and ready for cleanup, but cleanup is
+    ///   not yet complete - we still have records related to zone Z in the db.
+    /// * Nexus A resumes. It loads the current target blueprint (which shows
+    ///   zone Z is expunged) and has a `PlanningInput` with no records
+    ///   indicating zone Z is _not_ ready for cleanup, so incorrectly garbage
+    ///   collects zone Z.
+    ///
+    /// We could enforce this instead by loading `parent_blueprint` ourselves
+    /// with a note that it must come first, but in practice our caller has
+    /// already loaded it.
     pub async fn assemble(
         opctx: &OpContext,
         datastore: &DataStore,
+        planner_config: PlannerConfig,
+        parent_blueprint: Arc<Blueprint>,
     ) -> Result<PlanningInput, Error> {
         opctx.check_complex_operations_allowed()?;
         // Note we list *all* rows here including the ones for decommissioned
@@ -108,16 +159,18 @@ impl PlanningInputFromDb<'_> {
             .zpool_list_all_external_batched(opctx)
             .await
             .internal_context("fetching all external zpool rows")?;
-        let ip_pool_range_rows = {
-            let (authz_service_ip_pool, _) = datastore
-                .ip_pools_service_lookup(opctx)
-                .await
-                .internal_context("fetching IP services pool")?;
-            datastore
-                .ip_pool_list_ranges_batched(opctx, &authz_service_ip_pool)
-                .await
-                .internal_context("listing services IP pool ranges")?
-        };
+        let ip_pool_range_rows =
+            fetch_all_service_ip_pool_ranges(opctx, datastore).await?;
+        // TODO-correctness We ought to allow operators to update the upstream
+        // NTP and DNS servers, the external DNS listener IPs, and Nexus's TLS
+        // flag, but today they're frozen at rack-setup time. Until that
+        // changes, we lift them out of the current target blueprint here.
+        //
+        // See #8255, #10574, #3732.
+        let external_service_networking =
+            DataStore::blueprint_external_service_networking_config(
+                &parent_blueprint,
+            )?;
         let external_ip_rows = datastore
             .external_ip_list_service_all_batched(opctx)
             .await
@@ -140,21 +193,94 @@ impl PlanningInputFromDb<'_> {
             .cockroachdb_settings(opctx)
             .await
             .internal_context("fetching cockroachdb settings")?;
-
         let clickhouse_policy = datastore
             .clickhouse_policy_get_latest(opctx)
             .await
             .internal_context("fetching clickhouse policy")?;
+        let target_release = datastore
+            .target_release_get_current(opctx)
+            .await
+            .internal_context("fetching current target release")?;
+        let target_release_desc = match target_release.tuf_repo_id {
+            None => TargetReleaseDescription::Initial,
+            Some(repo_id) => TargetReleaseDescription::TufRepo(
+                datastore
+                    .tuf_repo_get_by_id(opctx, repo_id.into())
+                    .await
+                    .internal_context("fetching target release repo")?
+                    .into(),
+            ),
+        };
+        let tuf_repo = TufRepoPolicy {
+            target_release_generation: target_release.generation(),
+            description: target_release_desc,
+        };
+        // NOTE: We currently assume that only two generations are in play: the
+        // target release generation and its previous one. This depends on us
+        // not setting a new target release in the middle of an update: see
+        // https://github.com/oxidecomputer/omicron/issues/8056.
+        //
+        // We may need to revisit this decision in the future. See that issue
+        // for some discussion.
+        let old_repo = if let Some(prev) = target_release.generation().prev() {
+            let prev_release = datastore
+                .target_release_get_generation(opctx, prev)
+                .await
+                .internal_context("fetching previous target release")?;
+            let description = if let Some(prev_release) = prev_release {
+                if let Some(repo_id) = prev_release.tuf_repo_id {
+                    TargetReleaseDescription::TufRepo(
+                        datastore
+                            .tuf_repo_get_by_id(opctx, repo_id.into())
+                            .await
+                            .internal_context(
+                                "fetching previous target release repo",
+                            )?
+                            .into(),
+                    )
+                } else {
+                    TargetReleaseDescription::Initial
+                }
+            } else {
+                TargetReleaseDescription::Initial
+            };
+            TufRepoPolicy { target_release_generation: prev, description }
+        } else {
+            TufRepoPolicy::initial()
+        };
 
         let oximeter_read_policy = datastore
             .oximeter_read_policy_get_latest(opctx)
             .await
             .internal_context("fetching oximeter read policy")?;
 
+        let (active_nexus_zones, not_yet_nexus_zones): (Vec<_>, Vec<_>) =
+            datastore
+                .get_db_metadata_nexus_in_state(
+                    opctx,
+                    vec![
+                        DbMetadataNexusState::Active,
+                        DbMetadataNexusState::NotYet,
+                    ],
+                )
+                .await
+                .internal_context("fetching db_metadata_nexus records")?
+                .into_iter()
+                .partition(|nexus| {
+                    nexus.state() == DbMetadataNexusState::Active
+                });
+
+        let active_nexus_zones =
+            active_nexus_zones.into_iter().map(|n| n.nexus_id()).collect();
+        let not_yet_nexus_zones =
+            not_yet_nexus_zones.into_iter().map(|n| n.nexus_id()).collect();
+
         let planning_input = PlanningInputFromDb {
+            parent_blueprint,
             sled_rows: &sled_rows,
             zpool_rows: &zpool_rows,
             ip_pool_range_rows: &ip_pool_range_rows,
+            external_service_networking,
             target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
             target_nexus_zone_count: NEXUS_REDUNDANCY,
             target_internal_dns_zone_count: INTERNAL_DNS_REDUNDANCY,
@@ -171,6 +297,11 @@ impl PlanningInputFromDb<'_> {
             cockroachdb_settings: &cockroachdb_settings,
             clickhouse_policy,
             oximeter_read_policy,
+            tuf_repo,
+            old_repo,
+            planner_config,
+            active_nexus_zones,
+            not_yet_nexus_zones,
         }
         .build()
         .internal_context("assembling planning_input")?;
@@ -178,11 +309,56 @@ impl PlanningInputFromDb<'_> {
         Ok(planning_input)
     }
 
+    fn build_external_service_networking_policy(
+        &self,
+    ) -> Result<ExternalServiceNetworkingPolicy, Error> {
+        let mut ip_builder = ExternalIpPolicy::builder();
+        for range in self.ip_pool_range_rows {
+            let range = IpRange::try_from(range).map_err(|e| {
+                Error::internal_error(&format!(
+                    "invalid IP pool range in database: {}",
+                    InlineErrorChain::new(&e),
+                ))
+            })?;
+            ip_builder.push_service_pool_range(range).map_err(|e| {
+                Error::internal_error(&format!(
+                    "cannot construct external IP policy: {}",
+                    InlineErrorChain::new(&e),
+                ))
+            })?;
+        }
+        for &ip in &self.external_service_networking.external_dns_external_ips {
+            ip_builder.add_external_dns_ip(ip).map_err(|e| {
+                Error::internal_error(&format!(
+                    "cannot construct external IP policy: {}",
+                    InlineErrorChain::new(&e),
+                ))
+            })?;
+        }
+        Ok(ExternalServiceNetworkingPolicy {
+            external_ips: ip_builder.build(),
+            upstream_ntp_servers: self
+                .external_service_networking
+                .upstream_ntp_servers
+                .clone(),
+            upstream_ntp_domain: self
+                .external_service_networking
+                .upstream_ntp_domain
+                .clone(),
+            upstream_dns_servers: self
+                .external_service_networking
+                .upstream_dns_servers
+                .clone(),
+            nexus_external_tls: self
+                .external_service_networking
+                .nexus_external_tls,
+        })
+    }
+
     pub fn build(&self) -> Result<PlanningInput, Error> {
-        let service_ip_pool_ranges =
-            self.ip_pool_range_rows.iter().map(IpRange::from).collect();
         let policy = Policy {
-            service_ip_pool_ranges,
+            external_service_networking: self
+                .build_external_service_networking_policy()?,
             target_boundary_ntp_zone_count: self.target_boundary_ntp_zone_count,
             target_nexus_zone_count: self.target_nexus_zone_count,
             target_internal_dns_zone_count: self.target_internal_dns_zone_count,
@@ -194,12 +370,22 @@ impl PlanningInputFromDb<'_> {
                 .target_crucible_pantry_zone_count,
             clickhouse_policy: self.clickhouse_policy.clone(),
             oximeter_read_policy: self.oximeter_read_policy.clone(),
+            tuf_repo: self.tuf_repo.clone(),
+            old_repo: self.old_repo.clone(),
+            planner_config: self.planner_config,
         };
         let mut builder = PlanningInputBuilder::new(
+            Arc::clone(&self.parent_blueprint),
             policy,
             self.internal_dns_version.into(),
             self.external_dns_version.into(),
             self.cockroachdb_settings.clone(),
+        );
+        builder.set_active_nexus_zones(
+            self.active_nexus_zones.clone().into_iter().collect(),
+        );
+        builder.set_not_yet_nexus_zones(
+            self.not_yet_nexus_zones.clone().into_iter().collect(),
         );
 
         let mut zpools_by_sled_id = {
@@ -207,8 +393,7 @@ impl PlanningInputFromDb<'_> {
             let mut zpools = BTreeMap::new();
             for (zpool, disk) in self.zpool_rows {
                 let sled_zpool_names =
-                    zpools.entry(zpool.sled_id).or_insert_with(BTreeMap::new);
-                let zpool_id = ZpoolUuid::from_untyped_uuid(zpool.id());
+                    zpools.entry(zpool.sled_id()).or_insert_with(BTreeMap::new);
                 let disk = SledDisk {
                     disk_identity: DiskIdentity {
                         vendor: disk.vendor.clone(),
@@ -219,14 +404,14 @@ impl PlanningInputFromDb<'_> {
                     policy: disk.disk_policy.into(),
                     state: disk.disk_state.into(),
                 };
-                sled_zpool_names.insert(zpool_id, disk);
+                sled_zpool_names.insert(zpool.id(), disk);
             }
             zpools
         };
 
         for sled_row in self.sled_rows {
             let sled_id = sled_row.id();
-            let subnet = Ipv6Subnet::<SLED_PREFIX>::new(sled_row.ip());
+            let subnet = Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(sled_row.ip());
             let zpools = zpools_by_sled_id
                 .remove(&sled_id)
                 .unwrap_or_else(BTreeMap::new);
@@ -234,9 +419,11 @@ impl PlanningInputFromDb<'_> {
                 policy: sled_row.policy(),
                 state: sled_row.state().into(),
                 resources: SledResources { subnet, zpools },
+                baseboard_id: BaseboardId {
+                    part_number: sled_row.part_number().to_owned(),
+                    serial_number: sled_row.serial_number().to_owned(),
+                },
             };
-            // TODO-cleanup use `TypedUuid` everywhere
-            let sled_id = SledUuid::from_untyped_uuid(sled_id);
             builder.add_sled(sled_id, sled_details).map_err(|e| {
                 Error::internal_error(&format!(
                     "unexpectedly failed to add sled to planning input: {e}"
@@ -298,18 +485,53 @@ impl PlanningInputFromDb<'_> {
     }
 }
 
-/// Loads state for import into `reconfigurator-cli`
+async fn fetch_all_service_ip_pool_ranges(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> Result<Vec<nexus_db_model::IpPoolRange>, Error> {
+    let service_pools = datastore
+        .ip_pools_service_lookup_both_versions(opctx)
+        .await
+        .internal_context("fetching IP services pools")?;
+    let mut ranges = Vec::new();
+    for pool in service_pools.ipv4.iter().chain(service_pools.ipv6.iter()) {
+        let mut pool_ranges = datastore
+            .ip_pool_list_ranges_batched(opctx, &pool.authz_pool)
+            .await
+            .internal_context("listing services pool ranges")?;
+        ranges.append(&mut pool_ranges);
+    }
+    Ok(ranges)
+}
+
+/// Loads Reconfigurator-related state from a live system for debugging or
+/// import into `reconfigurator-cli`
 ///
-/// This is only to be used in omdb or tests.
+/// This is used in omdb, tests, and in Nexus to collect support bundles
 pub async fn reconfigurator_state_load(
     opctx: &OpContext,
     datastore: &DataStore,
+    nmax_blueprints: usize,
 ) -> Result<UnstableReconfiguratorState, anyhow::Error> {
     opctx.check_complex_operations_allowed()?;
-    let planning_input =
-        PlanningInputFromDb::assemble(opctx, datastore).await?;
+    let (_, current_target_blueprint) =
+        datastore.blueprint_target_get_current_full(opctx).await?;
+    let planner_config = datastore
+        .reconfigurator_config_get_latest(opctx)
+        .await?
+        .map_or_else(PlannerConfig::default, |c| c.config.planner_config);
+    let planning_input = PlanningInputFromDb::assemble(
+        opctx,
+        datastore,
+        planner_config,
+        Arc::new(current_target_blueprint),
+    )
+    .await?;
+
+    // We'll grab the most recent several inventory collections.
+    const NCOLLECTIONS: u8 = 5;
     let collection_ids = datastore
-        .inventory_collections()
+        .inventory_collections_latest(opctx, NCOLLECTIONS)
         .await
         .context("listing collections")?
         .into_iter()
@@ -324,16 +546,21 @@ pub async fn reconfigurator_state_load(
             // They can be removed since we fetched the list.
             read.ok()
         })
-        .collect::<Vec<Collection>>()
+        .collect::<IdOrdMap<Collection>>()
         .await;
 
+    // Grab the latest target blueprint.
     let target_blueprint = datastore
         .blueprint_target_get_current(opctx)
         .await
         .context("failed to read current target blueprint")?;
 
+    // Paginate through the list of all blueprints.
     let mut blueprint_ids = Vec::new();
-    let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+    let mut paginator = Paginator::new(
+        SQL_BATCH_SIZE,
+        omicron_common::api::external::PaginationOrder::Ascending,
+    );
     while let Some(p) = paginator.next() {
         let batch = datastore
             .blueprints_list(opctx, &p.current_pagparams())
@@ -342,9 +569,16 @@ pub async fn reconfigurator_state_load(
         paginator = p.found_batch(&blueprint_ids, &|b: &BlueprintMetadata| {
             b.id.into_untyped_uuid()
         });
-        blueprint_ids.extend(batch.into_iter());
+        blueprint_ids.extend(batch);
     }
 
+    // We'll only grab the most recent blueprints that fit within the limit that
+    // we were given.  This is a heuristic intended to grab what's most likely
+    // to be useful even when the system has a large number of blueprints.  But
+    // the intent is that callers provide a limit that should be large enough to
+    // cover everything.
+    blueprint_ids.sort_by_key(|bpm| Reverse(bpm.time_created));
+    let blueprint_ids = blueprint_ids.into_iter().take(nmax_blueprints);
     let blueprints = futures::stream::iter(blueprint_ids)
         .filter_map(|bpm| async move {
             let blueprint_id = bpm.id.into_untyped_uuid();
@@ -363,11 +597,42 @@ pub async fn reconfigurator_state_load(
             // They can be removed since we fetched the list.
             read.ok()
         })
-        .collect::<Vec<Blueprint>>()
+        .collect::<IdOrdMap<Blueprint>>()
         .await;
 
-    // It's also useful to include information about any DNS generations
-    // mentioned in any blueprints.
+    // Delegate the rest.
+    reconfigurator_state_assemble(
+        opctx,
+        datastore,
+        planning_input,
+        collections,
+        blueprints,
+        target_blueprint,
+        None,
+    )
+    .await
+}
+
+/// Assembles a reconfigurator state file with caller-provided planning input,
+/// inventory collections, blueprints, and target blueprint
+///
+/// These parts of the returned state file will be exactly as the caller
+/// provided them.  The other state that goes into the file will be loaded from
+/// the live system.
+///
+/// This is used to package up all the information that went into a specific
+/// planner run for future debugging.
+pub async fn reconfigurator_state_assemble(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    planning_input: PlanningInput,
+    collections: IdOrdMap<Collection>,
+    blueprints: IdOrdMap<Blueprint>,
+    target_blueprint: BlueprintTarget,
+    intended_target_blueprint: Option<BlueprintUuid>,
+) -> Result<UnstableReconfiguratorState, anyhow::Error> {
+    // Include information about any DNS generations mentioned in any
+    // blueprints.
     let blueprints_list = &blueprints;
     let fetch_dns_group = |dns_group: DnsGroup| async move {
         let latest_version = datastore
@@ -385,14 +650,14 @@ pub async fn reconfigurator_state_load(
             .chain(std::iter::once(*latest_version.version))
             .collect();
         let mut rv = BTreeMap::new();
-        for gen in dns_generations_needed {
+        for r#gen in dns_generations_needed {
             let config = datastore
-                .dns_config_read_version(&opctx, dns_group, gen)
+                .dns_config_read_version(&opctx, dns_group, r#gen)
                 .await
                 .with_context(|| {
-                    format!("reading {:?} DNS version {}", dns_group, gen)
+                    format!("reading {:?} DNS version {}", dns_group, r#gen)
                 })?;
-            rv.insert(gen, config);
+            rv.insert(r#gen, config);
         }
 
         Ok::<BTreeMap<_, _>, anyhow::Error>(rv)
@@ -417,7 +682,8 @@ pub async fn reconfigurator_state_load(
     Ok(UnstableReconfiguratorState {
         planning_input,
         collections,
-        target_blueprint: Some(target_blueprint),
+        target_blueprint,
+        intended_target_blueprint,
         blueprints,
         internal_dns,
         external_dns,

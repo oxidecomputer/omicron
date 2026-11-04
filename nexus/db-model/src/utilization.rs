@@ -1,14 +1,22 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use crate::ByteCount;
+use crate::DbTypedUuid;
 use crate::Name;
 use nexus_db_schema::schema::silo_utilization;
-use nexus_types::external_api::views;
+use nexus_types::external_api::ip_pool;
+use nexus_types::external_api::silo;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloKind;
+use omicron_uuid_kinds::SiloUuid;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 #[derive(Queryable, Debug, Clone, Selectable, Serialize, Deserialize)]
 #[diesel(table_name = silo_utilization)]
 pub struct SiloUtilization {
-    pub silo_id: Uuid,
+    pub silo_id: DbTypedUuid<SiloKind>,
     pub silo_name: Name,
     pub silo_discoverable: bool,
 
@@ -21,17 +29,23 @@ pub struct SiloUtilization {
     pub storage_provisioned: ByteCount,
 }
 
-impl From<SiloUtilization> for views::SiloUtilization {
+impl SiloUtilization {
+    pub fn silo_id(&self) -> SiloUuid {
+        self.silo_id.into()
+    }
+}
+
+impl From<SiloUtilization> for silo::SiloUtilization {
     fn from(silo_utilization: SiloUtilization) -> Self {
         Self {
-            silo_id: silo_utilization.silo_id,
+            silo_id: silo_utilization.silo_id.into_untyped_uuid(),
             silo_name: silo_utilization.silo_name.into(),
-            provisioned: views::VirtualResourceCounts {
+            provisioned: silo::VirtualResourceCounts {
                 cpus: silo_utilization.cpus_provisioned,
                 memory: silo_utilization.memory_provisioned.into(),
                 storage: silo_utilization.storage_provisioned.into(),
             },
-            allocated: views::VirtualResourceCounts {
+            allocated: silo::VirtualResourceCounts {
                 cpus: silo_utilization.cpus_allocated,
                 memory: silo_utilization.memory_allocated.into(),
                 storage: silo_utilization.storage_allocated.into(),
@@ -40,56 +54,32 @@ impl From<SiloUtilization> for views::SiloUtilization {
     }
 }
 
-impl From<SiloUtilization> for views::Utilization {
+impl From<SiloUtilization> for silo::Utilization {
     fn from(silo_utilization: SiloUtilization) -> Self {
         Self {
-            provisioned: views::VirtualResourceCounts {
+            provisioned: silo::VirtualResourceCounts {
                 cpus: silo_utilization.cpus_provisioned,
                 memory: silo_utilization.memory_provisioned.into(),
                 storage: silo_utilization.storage_provisioned.into(),
             },
-            capacity: views::VirtualResourceCounts {
+            capacity: silo::VirtualResourceCounts {
                 cpus: silo_utilization.cpus_allocated,
                 memory: silo_utilization.memory_allocated.into(),
                 storage: silo_utilization.storage_allocated.into(),
             },
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Ipv4Utilization {
-    pub allocated: u32,
-    pub capacity: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Ipv6Utilization {
-    pub allocated: u128,
-    pub capacity: u128,
 }
 
 // Not really a DB model, just the result of a datastore function
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IpPoolUtilization {
-    pub ipv4: Ipv4Utilization,
-    pub ipv6: Ipv6Utilization,
+    pub remaining: f64,
+    pub capacity: f64,
 }
 
-impl From<Ipv4Utilization> for views::Ipv4Utilization {
-    fn from(util: Ipv4Utilization) -> Self {
-        Self { allocated: util.allocated, capacity: util.capacity }
-    }
-}
-
-impl From<Ipv6Utilization> for views::Ipv6Utilization {
-    fn from(util: Ipv6Utilization) -> Self {
-        Self { allocated: util.allocated, capacity: util.capacity }
-    }
-}
-
-impl From<IpPoolUtilization> for views::IpPoolUtilization {
+impl From<IpPoolUtilization> for ip_pool::IpPoolUtilization {
     fn from(util: IpPoolUtilization) -> Self {
-        Self { ipv4: util.ipv4.into(), ipv6: util.ipv6.into() }
+        Self { remaining: util.remaining, capacity: util.capacity }
     }
 }

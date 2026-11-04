@@ -2,14 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::SledMode;
-use crate::disk::{DiskPaths, Partition, PooledDiskError, UnparsedDisk};
-use omicron_common::disk::{DiskIdentity, DiskVariant};
-use omicron_uuid_kinds::ZpoolUuid;
-use sled_hardware_types::Baseboard;
-use slog::Logger;
 use std::collections::HashMap;
-use tokio::sync::broadcast;
+
+use crate::disk::{DiskPaths, Partition, PooledDiskError, UnparsedDisk};
+use crate::{ExternalDisks, HardwareView, SledMode};
+use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::DiskVariant;
+use sled_hardware_types::{Baseboard, SledCpuFamily};
+use slog::Logger;
+use tokio::sync::watch;
 
 #[derive(Debug, thiserror::Error)]
 pub enum NvmeFormattingError {
@@ -32,12 +34,16 @@ impl HardwareManager {
     pub fn new(
         _log: &Logger,
         _sled_mode: SledMode,
-        _nongimlet_observed_disks: Vec<UnparsedDisk>,
+        _external_disks: ExternalDisks,
     ) -> Result<Self, String> {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
     pub fn baseboard(&self) -> Baseboard {
+        unimplemented!("Accessing hardware unsupported on non-illumos");
+    }
+
+    pub fn cpu_family(&self) -> SledCpuFamily {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
@@ -61,16 +67,12 @@ impl HardwareManager {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
-    pub fn is_scrimlet_driver_loaded(&self) -> bool {
-        unimplemented!("Accessing hardware unsupported on non-illumos");
-    }
-
-    pub fn monitor(&self) -> broadcast::Receiver<super::HardwareUpdate> {
+    pub fn subscribe(&self) -> watch::Receiver<HardwareView> {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 }
 
-pub fn ensure_partition_layout(
+pub async fn ensure_partition_layout(
     _log: &Logger,
     _paths: &DiskPaths,
     _variant: DiskVariant,
@@ -80,7 +82,14 @@ pub fn ensure_partition_layout(
     unimplemented!("Accessing hardware unsupported on non-illumos");
 }
 
-/// Return true if the host system is an Oxide Gimlet.
-pub fn is_gimlet() -> anyhow::Result<bool> {
+/// Return true if the host system is an Oxide sled.
+pub fn is_oxide_sled() -> anyhow::Result<bool> {
+    Ok(false)
+}
+
+/// No-op for non-illumos systems.
+pub fn find_softnpu_device(
+    _log: &Logger,
+) -> Result<bool, crate::SwitchDetectError> {
     Ok(false)
 }

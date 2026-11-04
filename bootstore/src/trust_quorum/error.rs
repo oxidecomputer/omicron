@@ -10,7 +10,11 @@ use thiserror::Error;
 #[derive(From, Debug, Error, PartialEq, Eq, Clone)]
 pub enum TrustQuorumError {
     // Temporary until the using code is written
-    #[error("Rack secret construction failed: {0:?}")]
+    #[error("Rack secret construction failed: {0}")]
+    // This inner error ought to be tagged with `#[source]` (and we shouldn't
+    // end our error string with `: {0}`), but (a) vsss_rs::Error doesn't
+    // implement StdError so `#[source]` isn't allowed and (b) it doesn't wrap
+    // any errors anyway, so this is okay.
     Vsssrs(vsss_rs::Error),
 
     // Failed to encrypt something

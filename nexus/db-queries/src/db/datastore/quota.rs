@@ -1,9 +1,16 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use diesel::result::DatabaseErrorKind;
+use diesel::result::Error as DieselError;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
@@ -16,6 +23,15 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
+
+fn constraint_to_error(constraint: &str) -> &str {
+    match constraint {
+        "cpus_not_negative" => "CPU quota must not be negative",
+        "memory_not_negative" => "Memory quota must not be negative",
+        "storage_not_negative" => "Storage quota must not be negative",
+        _ => "Unknown constraint",
+    }
+}
 
 impl DataStore {
     /// Creates new quotas for a silo. This is grouped with silo creation
@@ -38,14 +54,26 @@ impl DataStore {
             .values(quotas)
             .execute_async(conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(
+            .map_err(|e| match e {
+                DieselError::DatabaseError(
+                    DatabaseErrorKind::CheckViolation,
+                    ref info,
+                ) => {
+                    let msg = match info.constraint_name() {
+                        Some(constraint) => constraint_to_error(constraint),
+                        None => "Missing constraint name for Check Violation",
+                    };
+                    Error::invalid_request(&format!(
+                        "Cannot create silo quota: {msg}"
+                    ))
+                }
+                _ => public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::SiloQuotas,
                         &silo_id.to_string(),
                     ),
-                )
+                ),
             })
             .map(|_| ())
     }
@@ -62,7 +90,7 @@ impl DataStore {
 
         use nexus_db_schema::schema::silo_quotas::dsl;
         diesel::delete(dsl::silo_quotas)
-            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(authz_silo.id())))
             .execute_async(conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -80,19 +108,31 @@ impl DataStore {
         use nexus_db_schema::schema::silo_quotas::dsl;
         let silo_id = authz_silo.id();
         diesel::update(dsl::silo_quotas)
-            .filter(dsl::silo_id.eq(silo_id))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(silo_id)))
             .set(updates)
             .returning(SiloQuotas::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(
+            .map_err(|e| match e {
+                DieselError::DatabaseError(
+                    DatabaseErrorKind::CheckViolation,
+                    ref info,
+                ) => {
+                    let msg = match info.constraint_name() {
+                        Some(constraint) => constraint_to_error(constraint),
+                        None => "Missing constraint name for Check Violation",
+                    };
+                    Error::invalid_request(&format!(
+                        "Cannot update silo quota: {msg}"
+                    ))
+                }
+                _ => public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::SiloQuotas,
                         &silo_id.to_string(),
                     ),
-                )
+                ),
             })
     }
 
@@ -104,7 +144,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, authz_silo).await?;
         use nexus_db_schema::schema::silo_quotas::dsl;
         dsl::silo_quotas
-            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(authz_silo.id())))
             .first_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))

@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 
 set -eu
 
@@ -31,12 +35,14 @@ function usage
 
 ASSUME_YES="false"
 SKIP_PATH_CHECK="false"
+OMIT_SUDO="false"
 RETRY_ATTEMPTS=3
-while getopts ypr: flag
+while getopts ypsr: flag
 do
   case "${flag}" in
     y) ASSUME_YES="true" ;;
     p) SKIP_PATH_CHECK="true" ;;
+    s) OMIT_SUDO="true" ;;
     r) RETRY_ATTEMPTS=${OPTARG} ;;
     *) usage
   esac
@@ -115,7 +121,7 @@ HOST_OS=$(uname -s)
 function install_packages {
   if [[ "${HOST_OS}" == "Linux" ]]; then
     # If Nix is in use, we don't need to install any packagess here,
-    # as they're provided by the Nix flake. 
+    # as they're provided by the Nix flake.
     if [[ "${OMICRON_USE_FLAKE-}" = 1 ]] && nix flake show &> /dev/null; then
       echo "OMICRON_USE_FLAKE=1 in environment and nix detected in PATH, skipping package installation"
       return
@@ -130,18 +136,24 @@ function install_packages {
       'libclang-dev'
       'libsqlite3-dev'
     )
-    sudo apt-get update
-    if [[ "${ASSUME_YES}" == "true" ]]; then
-        sudo apt-get install -y "${packages[@]}"
+    if [[ "${OMIT_SUDO}" == "false" ]]; then
+      maybe_sudo="sudo"
     else
-        confirm "Install (or update) [${packages[*]}]?" && sudo apt-get install "${packages[@]}"
+      maybe_sudo=""
+    fi
+    $maybe_sudo apt-get update
+    if [[ "${ASSUME_YES}" == "true" ]]; then
+        $maybe_sudo apt-get install -y "${packages[@]}"
+    else
+        confirm "Install (or update) [${packages[*]}]?" && $maybe_sudo apt-get install "${packages[@]}"
     fi
   elif [[ "${HOST_OS}" == "SunOS" ]]; then
     CLANGVER=15
-    PGVER=13
+    PGVER=18
     packages=(
       "pkg:/package/pkg"
       "build-essential"
+      "cmake"
       "library/postgresql-$PGVER"
       "pkg-config"
       "library/libxmlsec1"
@@ -156,9 +168,7 @@ function install_packages {
     # latest.
     RTVER=13
     for p in system/library/gcc-runtime system/library/g++-runtime; do
-        # buildmat runners do not yet have a new enough `pkg` for -o
-        #v=$(pkg list -Ho release $p)
-        v=$(pkg list -H -F tsv $p | awk '{split($2, a, "-"); print a[1]}')
+        v=$(pkg list -Ho release "$p")
         ((v < RTVER)) && packages+=($p@latest)
     done
 
@@ -166,7 +176,8 @@ function install_packages {
     # Explicitly manage the return code using "rc" to observe the result of this
     # command without exiting the script entirely (due to bash's "errexit").
     rc=0
-    confirm "Install (or update) [${packages[*]}]?" && { pfexec pkg install -v "${packages[@]}" || rc=$?; }
+    confirm "Install (or update) [${packages[*]}]?" &&
+	{ pfexec pkg install -v "${packages[@]}" || rc=$?; }
     # Return codes:
     #  0: Normal Success
     #  4: Failure because we're already up-to-date. Also acceptable.
@@ -183,15 +194,21 @@ function install_packages {
     pkg publisher
     pkg list -afv "${packages[@]}"
   elif [[ "${HOST_OS}" == "Darwin" ]]; then
+    PGVER=18
     packages=(
-      'coreutils'
-      'postgresql'
-      'pkg-config'
-      'libxmlsec1'
+      "coreutils"
+      "postgresql@$PGVER"
+      "pkg-config"
+      "libxmlsec1"
     )
-    confirm "Install (or update) [${packages[*]}]?" && brew install "${packages[@]}"
+    confirm "Install (or update) [${packages[*]}]?" &&
+        brew install "${packages[@]}"
+    confirm "Set symlinks?" && {
+        brew unlink postgresql
+        brew link --force --overwrite postgresql@$PGVER
+    }
   else
-    echo "Unsupported OS: ${HOST_OS}"
+    echo "Skipping builder prereqs for unsupported OS: ${HOST_OS}"
     exit 1
   fi
 }
@@ -215,6 +232,7 @@ retry xtask download \
     console \
     dendrite-stub \
     maghemite-mgd \
+    maghemite-ddmd \
     transceiver-control
 
 # Validate the PATH:
@@ -231,12 +249,12 @@ function show_hint
   case "$1" in
     "pg_config")
       if [[ "${HOST_OS}" == "SunOS" ]]; then
-        echo "On illumos, $1 is typically found in '/opt/ooce/bin'"
+        echo "On helios, $1 is typically found in '/opt/ooce/bin'"
       fi
       ;;
     "pkg-config")
       if [[ "${HOST_OS}" == "SunOS" ]]; then
-        echo "On illumos, $1 is typically found in '/usr/bin'"
+        echo "On helios, $1 is typically found in '/usr/bin'"
       fi
       ;;
     "cockroach")

@@ -6,13 +6,21 @@
 
 mod api_metadata;
 mod cargo;
+mod errors;
+pub mod plural;
 mod system_apis;
 mod workspaces;
 
 pub use api_metadata::AllApiMetadata;
+pub use api_metadata::ApiConsumerStatus;
+pub use api_metadata::ApiExpectedConsumer;
 pub use api_metadata::ApiMetadata;
+pub use api_metadata::ServerComponent;
 pub use api_metadata::VersionedHow;
+pub use errors::LoadError;
+pub use errors::LoadErrors;
 pub use system_apis::ApiDependencyFilter;
+pub use system_apis::FailedConsumerCheck;
 pub use system_apis::SystemApis;
 
 use anyhow::{Context, Result};
@@ -25,7 +33,7 @@ use std::borrow::Borrow;
 #[macro_use]
 extern crate newtype_derive;
 
-#[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Clone, Deserialize, Hash, Ord, PartialOrd, Eq, PartialEq)]
 #[serde(transparent)]
 pub struct ClientPackageName(String);
 NewtypeDebug! { () pub struct ClientPackageName(String); }
@@ -41,15 +49,6 @@ impl Borrow<str> for ClientPackageName {
 
 #[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
 #[serde(transparent)]
-pub struct DeploymentUnitName(String);
-NewtypeDebug! { () pub struct DeploymentUnitName(String); }
-NewtypeDeref! { () pub struct DeploymentUnitName(String); }
-NewtypeDerefMut! { () pub struct DeploymentUnitName(String); }
-NewtypeDisplay! { () pub struct DeploymentUnitName(String); }
-NewtypeFrom! { () pub struct DeploymentUnitName(String); }
-
-#[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
-#[serde(transparent)]
 pub struct ServerPackageName(String);
 NewtypeDebug! { () pub struct ServerPackageName(String); }
 NewtypeDeref! { () pub struct ServerPackageName(String); }
@@ -62,7 +61,7 @@ impl Borrow<str> for ServerPackageName {
     }
 }
 
-#[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Clone, Deserialize, Hash, Ord, PartialOrd, Eq, PartialEq)]
 #[serde(transparent)]
 pub struct ServerComponentName(String);
 NewtypeDebug! { () pub struct ServerComponentName(String); }
@@ -78,8 +77,41 @@ impl Borrow<String> for ServerPackageName {
 
 /// Parameters for loading information about system APIs
 pub struct LoadArgs {
+    /// path to the root of the Omicron workspace
+    pub workspace_root: Utf8PathBuf,
+
     /// path to developer-maintained API metadata
     pub api_manifest_path: Utf8PathBuf,
+
+    /// how to treat dependencies that appear to have been overridden with a
+    /// local Cargo `[patch]` (see [`PatchedDepPolicy`])
+    pub patched_dep_policy: PatchedDepPolicy,
+}
+
+/// Specifies the behavior when looking for a package containing a specific Git
+/// commit SHA in a related repo (e.g., dendrite, crucible, etc.) when there no
+/// package is found with the exact Git SHA, but there _is_ a package found
+/// that appears to have been locally patched.
+///
+/// When a dependency has been patched to a local path, there is no reliable
+/// way for this tool to check that the local copy corresponds to the commit
+/// pinned in `package-manifest.toml`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PatchedDepPolicy {
+    /// Do not treat patched dependencies as matching the specific Git commit
+    /// SHA that we're looking for
+    ///
+    /// This will result in an error if there is no other version of the package
+    /// that does match the Git SHA that we're looking for.
+    Reject,
+
+    /// Assume that a local patched package does correspond to the commit that
+    /// we're looking for and use that package for further analysis
+    ///
+    /// Callers (i.e., users) may get wrong output if they're wrong about this,
+    /// but it's useful during development when you've got a local patch, you
+    /// want to use this tool, and you've verified the Git SHA.
+    AssumeMatch,
 }
 
 fn parse_toml_file<T: DeserializeOwned>(path: &Utf8Path) -> Result<T> {

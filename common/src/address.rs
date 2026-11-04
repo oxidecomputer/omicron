@@ -9,6 +9,7 @@
 
 use crate::api::external::{self, Error};
 use crate::policy::INTERNAL_DNS_REDUNDANCY;
+use daft::Diffable;
 use ipnetwork::Ipv6Network;
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
@@ -18,9 +19,205 @@ use std::{
     sync::LazyLock,
 };
 
-pub const AZ_PREFIX: u8 = 48;
-pub const RACK_PREFIX: u8 = 56;
-pub const SLED_PREFIX: u8 = 64;
+/// The routing prefix length of the bootstrap network /40.
+///
+/// This is distinct from [`BOOTSTRAP_SLED_SUBNET_PREFIX_LENGTH`], which is the
+/// prefix length of the /64 subnet for an individual sled's bootstrap
+/// addresses.
+pub const BOOTSTRAP_SUBNET_PREFIX_LENGTH: u8 = 40;
+pub const AZ_PREFIX_LENGTH: u8 = 48;
+pub const RACK_PREFIX_LENGTH: u8 = 56;
+pub const SLED_PREFIX_LENGTH: u8 = 64;
+
+/// Effective MTU for external-facing OPTE ports when jumbo frames have been
+/// opted into. 500 bytes of headroom under the 9000 byte underlay MTU leaves
+/// room for encapsulation overhead.
+pub const EXTERNAL_JUMBO_FRAMES_MTU: u32 = 8500;
+
+// Multicast constants
+
+/// IPv4 Source-Specific Multicast (SSM) subnet.
+///
+/// See [RFC 4607 §3] for the IPv4 SSM address range allocation (232.0.0.0/8).
+/// This is a single contiguous block, unlike IPv6 which has per-scope ranges.
+///
+/// [RFC 4607 §3]: https://www.rfc-editor.org/rfc/rfc4607#section-3
+pub const IPV4_SSM_SUBNET: Ipv4Net =
+    Ipv4Net::new_unchecked(Ipv4Addr::new(232, 0, 0, 0), 8);
+
+/// IPv6 Source-Specific Multicast (SSM) subnet.
+///
+/// See [RFC 4607 §3] for SSM scope allocation. The RFC specifies "ff3x::/32
+/// for each scope x" - meaning one /32 block per scope (ff30::/32, ff31::/32,
+/// ..., ff3f::/32).
+///
+/// We use /12 as an implementation convenience to match all these blocks with
+/// a single subnet. This works because all SSM addresses share the same first
+/// 12 bits:
+/// - Bits 0-7:  11111111 (0xff, multicast prefix)
+/// - Bits 8-11: 0011 (flag field = 3, indicating SSM)
+/// - Bits 12-15: xxxx (scope field, any value 0-f)
+///
+/// Thus ff30::/12 efficiently matches ff30:: through ff3f:ffff:...:ffff,
+/// covering all SSM scopes.
+///
+/// This superset is used only for contains-based classification and validation
+/// (e.g., `contains()` checks). It is not an allocation boundary.
+///
+/// [RFC 4607 §3]: https://www.rfc-editor.org/rfc/rfc4607#section-3
+pub const IPV6_SSM_SUBNET: Ipv6Net =
+    Ipv6Net::new_unchecked(Ipv6Addr::new(0xff30, 0, 0, 0, 0, 0, 0, 0), 12);
+
+/// Maximum source IPs per SSM group member (per [RFC 3376] IGMPv3).
+///
+/// [RFC 3376]: https://www.rfc-editor.org/rfc/rfc3376
+pub const MAX_SSM_SOURCE_IPS: usize = 64;
+
+/// Check if an IP is in the SSM (Source-Specific Multicast) range.
+///
+/// SSM ranges per [RFC 4607 §3]:
+/// - IPv4: 232.0.0.0/8
+/// - IPv6: ff3x::/32 (all SSM scopes)
+///
+/// [RFC 4607 §3]: https://www.rfc-editor.org/rfc/rfc4607#section-3
+pub fn is_ssm_address(ip: std::net::IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(addr) => IPV4_SSM_SUBNET.contains(addr),
+        IpAddr::V6(addr) => IPV6_SSM_SUBNET.contains(addr),
+    }
+}
+
+/// IPv4 multicast address range (224.0.0.0/4).
+///
+/// See [RFC 5771] for IPv4 multicast address assignments.
+///
+/// [RFC 5771]: https://www.rfc-editor.org/rfc/rfc5771
+pub const IPV4_MULTICAST_RANGE: Ipv4Net =
+    Ipv4Net::new_unchecked(Ipv4Addr::new(224, 0, 0, 0), 4);
+
+/// IPv4 link-local multicast subnet (224.0.0.0/24).
+///
+/// This range is reserved for local network control protocols and should not
+/// be routed beyond the local link. Includes addresses for protocols like
+/// OSPF (224.0.0.5), RIPv2 (224.0.0.9), and other local routing protocols.
+///
+/// See [RFC 5771 §4] for link-local multicast address assignments. The IANA
+/// IPv4 Multicast Address Space registry is the canonical source for
+/// assignments.
+///
+/// [RFC 5771 §4]: https://www.rfc-editor.org/rfc/rfc5771#section-4
+pub const IPV4_LINK_LOCAL_MULTICAST_SUBNET: Ipv4Net =
+    Ipv4Net::new_unchecked(Ipv4Addr::new(224, 0, 0, 0), 24);
+
+/// IPv6 multicast address range (ff00::/8).
+///
+/// See [RFC 4291] for IPv6 addressing architecture.
+///
+/// [RFC 4291]: https://www.rfc-editor.org/rfc/rfc4291
+pub const IPV6_MULTICAST_RANGE: Ipv6Net = Ipv6Net::new_unchecked(
+    Ipv6Addr::new(IPV6_MULTICAST_PREFIX, 0, 0, 0, 0, 0, 0, 0),
+    8,
+);
+
+/// IPv6 multicast prefix (ff00::/8) mask/value for scope checking.
+///
+/// See [RFC 4291 §2.7] for multicast address format.
+///
+/// [RFC 4291 §2.7]: https://www.rfc-editor.org/rfc/rfc4291#section-2.7
+pub const IPV6_MULTICAST_PREFIX: u16 = 0xff00;
+
+/// Admin-local IPv6 multicast prefix (ff04::/16) as u16 for address
+/// construction and normalization of underlay multicast addresses.
+///
+/// See [RFC 4291 §2.7] and [RFC 7346] for IPv6 multicast address format
+/// and scope definitions.
+///
+/// [RFC 4291 §2.7]: https://www.rfc-editor.org/rfc/rfc4291#section-2.7
+/// [RFC 7346]: https://www.rfc-editor.org/rfc/rfc7346
+pub const IPV6_ADMIN_SCOPED_MULTICAST_PREFIX: u16 = 0xff04;
+
+/// Fixed underlay admin-local IPv6 multicast subnet (ff04::/64) used for
+/// internal multicast group allocation and external→underlay mapping.
+///
+/// Admin-local scope (4) is defined in [RFC 7346] as "the smallest scope that
+/// must be administratively configured."
+///
+/// Static for consistency across racks. The XOR-fold algorithm maps external
+/// multicast IPs into this /64 with an 8-bit salt, guaranteeing 256 unique
+/// addresses per external IP for collision retries. IP pool validation rejects
+/// ranges overlapping this prefix.
+///
+/// External pools may use other admin-local prefixes (e.g., `ff04:0:0:1::/64`)
+/// outside this range or other administratively configured scopes
+/// (e.g., site-local `ff05::/16`).
+///
+/// [RFC 7346]: https://www.rfc-editor.org/rfc/rfc7346
+// TODO: Expose this subnet via rack API (e.g., in `Rack` view or a dedicated
+// networking info endpoint) so operators can see reserved address ranges.
+pub const UNDERLAY_MULTICAST_SUBNET: Ipv6Net = Ipv6Net::new_unchecked(
+    Ipv6Addr::new(IPV6_ADMIN_SCOPED_MULTICAST_PREFIX, 0, 0, 0, 0, 0, 0, 0),
+    64,
+);
+
+/// Last address in the underlay multicast subnet (ff04::ffff:ffff:ffff:ffff).
+pub const UNDERLAY_MULTICAST_SUBNET_LAST: Ipv6Addr = Ipv6Addr::new(
+    IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+    0,
+    0,
+    0,
+    0xffff,
+    0xffff,
+    0xffff,
+    0xffff,
+);
+
+/// IPv6 interface-local multicast subnet (ff01::/16).
+///
+/// These addresses are not routable and should not be added to IP pools.
+///
+/// See [RFC 4291 §2.7] for multicast scope field definitions.
+///
+/// [RFC 4291 §2.7]: https://www.rfc-editor.org/rfc/rfc4291#section-2.7
+pub const IPV6_INTERFACE_LOCAL_MULTICAST_SUBNET: Ipv6Net =
+    Ipv6Net::new_unchecked(Ipv6Addr::new(0xff01, 0, 0, 0, 0, 0, 0, 0), 16);
+
+/// Last address in the IPv6 interface-local multicast subnet.
+pub const IPV6_INTERFACE_LOCAL_MULTICAST_LAST: Ipv6Addr = Ipv6Addr::new(
+    0xff01, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+);
+
+/// IPv6 link-local multicast subnet (ff02::/16).
+///
+/// These addresses are not routable beyond the local link and should not be
+/// added to IP pools.
+///
+/// See [RFC 4291 §2.7] for multicast scope field definitions.
+///
+/// [RFC 4291 §2.7]: https://www.rfc-editor.org/rfc/rfc4291#section-2.7
+pub const IPV6_LINK_LOCAL_MULTICAST_SUBNET: Ipv6Net =
+    Ipv6Net::new_unchecked(Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 0), 16);
+
+/// Last address in the IPv6 link-local multicast subnet.
+pub const IPV6_LINK_LOCAL_MULTICAST_LAST: Ipv6Addr = Ipv6Addr::new(
+    0xff02, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+);
+
+/// IPv6 reserved-scope multicast subnet (ff00::/16).
+///
+/// Scope 0 is reserved - packets with this scope must not be originated and
+/// must be silently dropped if received. These addresses should not be added
+/// to IP pools.
+///
+/// See [RFC 4291 §2.7] for multicast scope field definitions.
+///
+/// [RFC 4291 §2.7]: https://www.rfc-editor.org/rfc/rfc4291#section-2.7
+pub const IPV6_RESERVED_SCOPE_MULTICAST_SUBNET: Ipv6Net =
+    Ipv6Net::new_unchecked(Ipv6Addr::new(0xff00, 0, 0, 0, 0, 0, 0, 0), 16);
+
+/// Last address in the IPv6 reserved-scope multicast subnet.
+pub const IPV6_RESERVED_SCOPE_MULTICAST_LAST: Ipv6Addr = Ipv6Addr::new(
+    0xff00, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+);
 
 /// maximum possible value for a tcp or udp port
 pub const MAX_PORT: u16 = u16::MAX;
@@ -31,7 +228,12 @@ pub const MIN_PORT: u16 = u16::MIN;
 pub const DNS_PORT: u16 = 53;
 pub const DNS_HTTP_PORT: u16 = 5353;
 pub const SLED_AGENT_PORT: u16 = 12345;
+pub const BOOTSTRAP_AGENT_RACK_INIT_PORT: u16 = 12346;
+pub const BOOTSTORE_PORT: u16 = 12347;
 pub const REPO_DEPOT_PORT: u16 = 12348;
+pub const TRUST_QUORUM_PORT: u16 = 12349;
+
+pub const BOOTSTRAP_AGENT_LOCKSTEP_PORT: u16 = 8080;
 
 pub const COCKROACH_PORT: u16 = 32221;
 pub const COCKROACH_ADMIN_PORT: u16 = 32222;
@@ -50,9 +252,11 @@ pub const DDMD_PORT: u16 = 8000;
 pub const MGS_PORT: u16 = 12225;
 pub const WICKETD_PORT: u16 = 12226;
 pub const BOOTSTRAP_ARTIFACT_PORT: u16 = 12227;
+pub const WICKETD_COMMISSION_PORT: u16 = 12234;
 pub const CRUCIBLE_PANTRY_PORT: u16 = 17000;
 pub const TFPORTD_PORT: u16 = 12231;
 pub const NEXUS_INTERNAL_PORT: u16 = 12221;
+pub const NEXUS_LOCKSTEP_PORT: u16 = 12232;
 
 /// The port on which Nexus exposes its external API on the underlay network.
 ///
@@ -64,13 +268,33 @@ pub const NEXUS_TECHPORT_EXTERNAL_PORT: u16 = 12228;
 /// interface(s).
 pub const WICKETD_NEXUS_PROXY_PORT: u16 = 12229;
 
+/// The port on which NTP runs
 pub const NTP_PORT: u16 = 123;
+
+/// The port on which the NTP admin service exposes an HTTP interface
+pub const NTP_ADMIN_PORT: u16 = 10123;
 
 /// The length for all VPC IPv6 prefixes
 pub const VPC_IPV6_PREFIX_LENGTH: u8 = 48;
 
 /// The prefix length for all VPC subnets
 pub const VPC_SUBNET_IPV6_PREFIX_LENGTH: u8 = 64;
+
+/// Minimum prefix size supported in IPv4 VPC Subnets.
+///
+/// NOTE: This is the minimum _prefix_, which sets the maximum subnet size.
+pub const MIN_VPC_IPV4_SUBNET_PREFIX_LENGTH: u8 = 8;
+
+/// The number of reserved addresses at the beginning of a subnet range.
+pub const NUM_INITIAL_RESERVED_IP_ADDRESSES: usize = 5;
+
+/// The maximum prefix size by default.
+///
+/// There are 6 Oxide reserved IP addresses, 5 at the beginning for DNS and the
+/// like, and the broadcast address at the end of the subnet. This size provides
+/// room for 2 ** 6 - 6 = 58 IP addresses, which seems like a reasonable size
+/// for the smallest subnet that's still useful in many contexts.
+pub const MAX_VPC_IPV4_SUBNET_PREFIX_LENGTH: u8 = 26;
 
 // The number of ports available to an SNAT IP.
 // Note that for static NAT, this value isn't used, and all ports are available.
@@ -98,14 +322,41 @@ pub const NUM_SOURCE_NAT_PORTS: u16 = 1 << 14;
 // The specific values aren't deployment-specific as they are virtualized
 // within OPTE.
 
+// VPC IPv6 prefixes are three octet-pairs, so we need three `u16` constants to
+// represent the service VPC subnet prefix of `fd77:e9d2:9cd9::/48`.
+//
+// These are used to construct the `SERVICE_VPC_IPV6_SUBNET` constant below,
+// which represents the entire /48, and the various constants for the individual
+// service /64s within this subnet.
+//
+// XXX(eliza): it would be nice to have a way to construct these subnets from
+// the shared prefix octet-pairs that is a bit less gross than having to scream
+// `SERVICE_VPC_IPV6_PREFIX_n` three times for each one, such as by taking the
+// `SERVICE_VPC_IPV6_SUBNET` value and just setting the value of the 4th
+// octet-pair for each service subnet, but I couldn't figure out a way to do
+// that with the current `oxnet` API. At least this way, we aren't hard-coding
+// the `u16` literals for each subnet...
+const SERVICE_VPC_IPV6_PREFIX_1: u16 = 0xfd77;
+const SERVICE_VPC_IPV6_PREFIX_2: u16 = 0xe9d2;
+const SERVICE_VPC_IPV6_PREFIX_3: u16 = 0x9cd9;
+
 /// The IPv6 prefix assigned to the built-in services VPC.
 // The specific prefix here was randomly chosen from the expected VPC
 // prefix range (`fd00::/48`). See `random_vpc_ipv6_prefix`.
 // Furthermore, all the below *_OPTE_IPV6_SUBNET constants are
 // /64's within this prefix.
-pub static SERVICE_VPC_IPV6_PREFIX: LazyLock<Ipv6Net> = LazyLock::new(|| {
+pub static SERVICE_VPC_IPV6_SUBNET: LazyLock<Ipv6Net> = LazyLock::new(|| {
     Ipv6Net::new(
-        Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 0, 0, 0, 0, 0),
+        Ipv6Addr::new(
+            SERVICE_VPC_IPV6_PREFIX_1,
+            SERVICE_VPC_IPV6_PREFIX_2,
+            SERVICE_VPC_IPV6_PREFIX_3,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ),
         VPC_IPV6_PREFIX_LENGTH,
     )
     .unwrap()
@@ -118,7 +369,16 @@ pub static DNS_OPTE_IPV4_SUBNET: LazyLock<Ipv4Net> =
 /// The IPv6 subnet for External DNS OPTE ports.
 pub static DNS_OPTE_IPV6_SUBNET: LazyLock<Ipv6Net> = LazyLock::new(|| {
     Ipv6Net::new(
-        Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 1, 0, 0, 0, 0),
+        Ipv6Addr::new(
+            SERVICE_VPC_IPV6_PREFIX_1,
+            SERVICE_VPC_IPV6_PREFIX_2,
+            SERVICE_VPC_IPV6_PREFIX_3,
+            1,
+            0,
+            0,
+            0,
+            0,
+        ),
         VPC_SUBNET_IPV6_PREFIX_LENGTH,
     )
     .unwrap()
@@ -131,7 +391,16 @@ pub static NEXUS_OPTE_IPV4_SUBNET: LazyLock<Ipv4Net> =
 /// The IPv6 subnet for Nexus OPTE ports.
 pub static NEXUS_OPTE_IPV6_SUBNET: LazyLock<Ipv6Net> = LazyLock::new(|| {
     Ipv6Net::new(
-        Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 2, 0, 0, 0, 0),
+        Ipv6Addr::new(
+            SERVICE_VPC_IPV6_PREFIX_1,
+            SERVICE_VPC_IPV6_PREFIX_2,
+            SERVICE_VPC_IPV6_PREFIX_3,
+            2,
+            0,
+            0,
+            0,
+            0,
+        ),
         VPC_SUBNET_IPV6_PREFIX_LENGTH,
     )
     .unwrap()
@@ -144,7 +413,16 @@ pub static NTP_OPTE_IPV4_SUBNET: LazyLock<Ipv4Net> =
 /// The IPv6 subnet for Boundary NTP OPTE ports.
 pub static NTP_OPTE_IPV6_SUBNET: LazyLock<Ipv6Net> = LazyLock::new(|| {
     Ipv6Net::new(
-        Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 3, 0, 0, 0, 0),
+        Ipv6Addr::new(
+            SERVICE_VPC_IPV6_PREFIX_1,
+            SERVICE_VPC_IPV6_PREFIX_2,
+            SERVICE_VPC_IPV6_PREFIX_3,
+            3,
+            0,
+            0,
+            0,
+            0,
+        ),
         VPC_SUBNET_IPV6_PREFIX_LENGTH,
     )
     .unwrap()
@@ -153,8 +431,9 @@ pub static NTP_OPTE_IPV6_SUBNET: LazyLock<Ipv6Net> = LazyLock::new(|| {
 // Anycast is a mechanism in which a single IP address is shared by multiple
 // devices, and the destination is located based on routing distance.
 //
-// This is covered by RFC 4291 in much more detail:
-// <https://datatracker.ietf.org/doc/html/rfc4291#section-2.6>
+// See [RFC 4291 §2.6] for anycast address allocation.
+//
+// [RFC 4291 §2.6]: https://www.rfc-editor.org/rfc/rfc4291#section-2.6
 //
 // Anycast addresses are always the "zeroeth" address within a subnet.  We
 // always explicitly skip these addresses within our network.
@@ -162,20 +441,45 @@ const _ANYCAST_ADDRESS_INDEX: usize = 0;
 const DNS_ADDRESS_INDEX: usize = 1;
 const GZ_ADDRESS_INDEX: usize = 2;
 
-/// The maximum number of addresses per sled reserved for RSS.
-pub const RSS_RESERVED_ADDRESSES: u16 = 32;
-
 // The maximum number of addresses per sled reserved for control plane services.
 pub const CP_SERVICES_RESERVED_ADDRESSES: u16 = 0xFFFF;
 
-// Number of addresses reserved (by the Nexus deployment planner) for allocation
-// by the sled itself.  This is currently used for the first two addresses of
-// the sled subnet, which are used for the sled global zone and the switch zone,
-// if any.  Note that RSS does not honor this yet (in fact, per the above
-// RSS_RESERVED_ADDRESSES, it will _only_ choose from this range).  And
-// historically, systems did not have this reservation at all.  So it's not safe
-// to assume that addresses in this subnet are available.
-pub const SLED_RESERVED_ADDRESSES: u16 = 32;
+/// Number of addresses reserved (by the Nexus deployment planner) for
+/// allocation by the sled itself.  The first two addresses of every sled subnet
+/// are reserved for the sled global zone and the switch zone (if it exists).
+/// Historically, systems did have any reservations beyond these two, so it's
+/// not safe to assume any other address above `$SLED_SUBNET::2` is available.
+///
+/// Nexus manages this at runtime via a "last allocated IP" field associated
+/// with each sled in the Reconfigurator blueprint.
+pub const SLED_RESERVED_ADDRESSES: u16 = 2;
+
+/// Initial octets of IPv6 for bootstrap addresses.
+pub const BOOTSTRAP_PREFIX: u16 = 0xfdb0;
+
+/// IPv6 subnet for the *entire* bootstrap network.
+///
+/// This is a /16 subnet with the prefix [`BOOTSTRAP_PREFIX`]. Individual sled
+/// bootstrap networks are /64 subnets within this range, with the rest of the
+/// prefix constructed from the sled's MAC address. This constant is intended to
+/// be used for checking whether an address is a bootstrap address on *any*
+/// sled's bootstrap network.
+pub const BOOTSTRAP_NETWORK_SUBNET: Ipv6Net = Ipv6Net::new_unchecked(
+    Ipv6Addr::new(BOOTSTRAP_PREFIX, 0, 0, 0, 0, 0, 0, 0),
+    16,
+);
+
+/// IPv6 prefix length for bootstrap network sled subnets.
+///
+/// This is the length of the prefix for the bootstrap network subnet *of an
+/// individual sled*. The prefix begins with [`BOOTSTRAP_PREFIX`], and the rest
+/// of the /64 prefix is constructed from the sled's MAC address.
+///
+/// This is distinct from the prefix length of [`BOOTSTRAP_NETWORK_SUBNET`],
+/// which is the /16 subnet that contains *all* sled bootstrap networks, and
+/// from [`BOOTSTRAP_SUBNET_PREFIX_LENGTH`], which is the prefix length of the
+/// announced bootstrap route.
+pub const BOOTSTRAP_SLED_SUBNET_PREFIX_LENGTH: u8 = 64;
 
 /// Wraps an [`Ipv6Net`] with a compile-time prefix length.
 #[derive(
@@ -189,10 +493,17 @@ pub const SLED_RESERVED_ADDRESSES: u16 = 32;
     Eq,
     PartialOrd,
     Ord,
+    Diffable,
 )]
 #[schemars(rename = "Ipv6Subnet")]
 pub struct Ipv6Subnet<const N: u8> {
     net: Ipv6Net,
+}
+
+impl<const N: u8> std::fmt::Display for Ipv6Subnet<N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.net.fmt(f)
+    }
 }
 
 impl<const N: u8> Ipv6Subnet<N> {
@@ -215,6 +526,14 @@ impl<const N: u8> From<Ipv6Network> for Ipv6Subnet<N> {
         // Ensure the address is set to within-prefix only components.
         let net = Ipv6Net::new(net.network(), N).unwrap();
         Self { net }
+    }
+}
+
+impl<const N: u8> From<Ipv6Subnet<N>> for Ipv6Network {
+    fn from(net: Ipv6Subnet<N>) -> Self {
+        // Ipv6Subnet::new() asserts that `N` is a valid IPv6 prefix, so it's
+        // okay to unwrap here.
+        Self::new(net.net.prefix(), N).unwrap()
     }
 }
 
@@ -242,16 +561,35 @@ impl<'de, const N: u8> Deserialize<'de> for Ipv6Subnet<N> {
     }
 }
 
+/// A rack's underlay subnet, along with the AZ-wide underlay subnet
+/// containing it.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct UnderlaySubnets {
+    pub rack_subnet: Ipv6Subnet<RACK_PREFIX_LENGTH>,
+    pub az_subnet: Ipv6Subnet<AZ_PREFIX_LENGTH>,
+}
+
+impl UnderlaySubnets {
+    /// Constructs a new `UnderlaySubnets` from the rack subnet, widening it to
+    /// determine the AZ subnet.
+    pub fn new(rack_subnet: Ipv6Subnet<RACK_PREFIX_LENGTH>) -> Self {
+        Self {
+            rack_subnet,
+            az_subnet: Ipv6Subnet::new(rack_subnet.net().addr()),
+        }
+    }
+}
+
 /// Represents a subnet which may be used for contacting DNS services.
 #[derive(
     Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord,
 )]
 pub struct DnsSubnet {
-    subnet: Ipv6Subnet<SLED_PREFIX>,
+    subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
 }
 
 impl DnsSubnet {
-    pub fn new(subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
+    pub fn new(subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>) -> Self {
         Self { subnet }
     }
 
@@ -261,7 +599,7 @@ impl DnsSubnet {
     }
 
     /// Returns the DNS subnet.
-    pub fn subnet(&self) -> Ipv6Subnet<SLED_PREFIX> {
+    pub fn subnet(&self) -> Ipv6Subnet<SLED_PREFIX_LENGTH> {
         self.subnet
     }
 
@@ -289,17 +627,19 @@ impl DnsSubnet {
 /// A wrapper around an IPv6 network, indicating it is a "reserved" rack
 /// subnet which can be used for AZ-wide services.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ReservedRackSubnet(pub Ipv6Subnet<RACK_PREFIX>);
+pub struct ReservedRackSubnet(pub Ipv6Subnet<RACK_PREFIX_LENGTH>);
 
 impl ReservedRackSubnet {
     /// Returns the subnet for the reserved rack subnet.
-    pub fn new(subnet: Ipv6Subnet<AZ_PREFIX>) -> Self {
-        ReservedRackSubnet(Ipv6Subnet::<RACK_PREFIX>::new(subnet.net().addr()))
+    pub fn new(subnet: Ipv6Subnet<AZ_PREFIX_LENGTH>) -> Self {
+        ReservedRackSubnet(Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
+            subnet.net().addr(),
+        ))
     }
 
     /// Infer the reserved rack subnet from a sled/AZ/DNS subnet.
     pub fn from_subnet<const N: u8>(subnet: Ipv6Subnet<N>) -> Self {
-        Self::new(Ipv6Subnet::<AZ_PREFIX>::new(subnet.net().addr()))
+        Self::new(Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(subnet.net().addr()))
     }
 
     /// Returns the `index`th DNS subnet from this reserved rack subnet.
@@ -310,7 +650,7 @@ impl ReservedRackSubnet {
     /// Returns the DNS addresses from this reserved rack subnet.
     ///
     /// These addresses will come from the first [`INTERNAL_DNS_REDUNDANCY`]
-    /// `/64s` of the [`RACK_PREFIX`] subnet.
+    /// `/64s` of this reserved rack subnet.
     pub fn get_dns_subnets(&self) -> Vec<DnsSubnet> {
         (0..INTERNAL_DNS_REDUNDANCY)
             .map(|idx| self.get_dns_subnet(u8::try_from(idx + 1).unwrap()))
@@ -321,7 +661,7 @@ impl ReservedRackSubnet {
 /// Return the list of DNS servers for the rack, given any address in the AZ
 /// subnet
 pub fn get_internal_dns_server_addresses(addr: Ipv6Addr) -> Vec<IpAddr> {
-    let az_subnet = Ipv6Subnet::<AZ_PREFIX>::new(addr);
+    let az_subnet = Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(addr);
     ReservedRackSubnet::new(az_subnet)
         .get_dns_subnets()
         .iter()
@@ -334,8 +674,10 @@ const SWITCH_ZONE_ADDRESS_INDEX: usize = 2;
 
 /// Return the sled agent address for a subnet.
 ///
-/// This address will come from the first address of the [`SLED_PREFIX`] subnet.
-pub fn get_sled_address(sled_subnet: Ipv6Subnet<SLED_PREFIX>) -> SocketAddrV6 {
+/// This address will come from the first address of the provided `sled_subnet`.
+pub fn get_sled_address(
+    sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
+) -> SocketAddrV6 {
     let sled_agent_ip =
         sled_subnet.net().nth(SLED_AGENT_ADDRESS_INDEX as u128).unwrap();
     SocketAddrV6::new(sled_agent_ip, SLED_AGENT_PORT, 0, 0)
@@ -343,9 +685,10 @@ pub fn get_sled_address(sled_subnet: Ipv6Subnet<SLED_PREFIX>) -> SocketAddrV6 {
 
 /// Return the switch zone address for a subnet.
 ///
-/// This address will come from the second address of the [`SLED_PREFIX`] subnet.
+/// This address will come from the second address of the provided
+/// `sled_subnet`.
 pub fn get_switch_zone_address(
-    sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+    sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
 ) -> Ipv6Addr {
     sled_subnet.net().nth(SWITCH_ZONE_ADDRESS_INDEX as u128).unwrap()
 }
@@ -354,14 +697,37 @@ pub fn get_switch_zone_address(
 ///
 /// The subnet at index == 0 is used for rack-local services.
 pub fn get_64_subnet(
-    rack_subnet: Ipv6Subnet<RACK_PREFIX>,
+    rack_subnet: Ipv6Subnet<RACK_PREFIX_LENGTH>,
     index: u8,
-) -> Ipv6Subnet<SLED_PREFIX> {
+) -> Ipv6Subnet<SLED_PREFIX_LENGTH> {
     let mut rack_network = rack_subnet.net().addr().octets();
 
     // To set bits distinguishing the /64 from the /56, we modify the 7th octet.
     rack_network[7] = index;
-    Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::from(rack_network))
+    Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(Ipv6Addr::from(rack_network))
+}
+
+/// The IP address version.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IpVersion {
+    V4,
+    V6,
+}
+
+impl IpVersion {
+    pub const fn v4() -> IpVersion {
+        IpVersion::V4
+    }
+}
+
+impl std::fmt::Display for IpVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Self::V4 => write!(f, "v4"),
+            Self::V6 => write!(f, "v6"),
+        }
+    }
 }
 
 /// An IP Range is a contiguous range of IP addresses, usually within an IP
@@ -369,7 +735,9 @@ pub fn get_64_subnet(
 ///
 /// The first address in the range is guaranteed to be no greater than the last
 /// address.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, Ord, PartialOrd,
+)]
 #[serde(untagged)]
 pub enum IpRange {
     V4(Ipv4Range),
@@ -386,18 +754,18 @@ impl JsonSchema for IpRange {
     }
 
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        generator: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
                 one_of: Some(vec![
                     external::label_schema(
                         "v4",
-                        gen.subschema_for::<Ipv4Range>(),
+                        generator.subschema_for::<Ipv4Range>(),
                     ),
                     external::label_schema(
                         "v6",
-                        gen.subschema_for::<Ipv6Range>(),
+                        generator.subschema_for::<Ipv6Range>(),
                     ),
                 ]),
                 ..Default::default()
@@ -444,6 +812,24 @@ impl IpRange {
         match self {
             IpRange::V4(ip4) => u128::from(ip4.len()),
             IpRange::V6(ip6) => ip6.len(),
+        }
+    }
+
+    /// Return true if this is an IPv4 range, and false for IPv6.
+    pub fn is_ipv4(&self) -> bool {
+        matches!(self, IpRange::V4(_))
+    }
+
+    /// Return true if this is an IPv6 range, and false for IPv4.
+    pub fn is_ipv6(&self) -> bool {
+        matches!(self, IpRange::V6(_))
+    }
+
+    /// Return the IP version of this range.
+    pub fn version(&self) -> IpVersion {
+        match self {
+            IpRange::V4(_) => IpVersion::V4,
+            IpRange::V6(_) => IpVersion::V6,
         }
     }
 }
@@ -503,7 +889,16 @@ impl From<Ipv6Range> for IpRange {
 ///
 /// The first address must be less than or equal to the last address.
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
 )]
 #[serde(try_from = "AnyIpv4Range")]
 pub struct Ipv4Range {
@@ -541,6 +936,16 @@ impl Ipv4Range {
         let end_num = u32::from(self.last);
         end_num - start_num + 1
     }
+
+    /// Returns `true` if `self` has any IPs in common with `other`; false
+    /// otherwise.
+    pub fn overlaps(&self, other: &Ipv4Range) -> bool {
+        // We're disjoint if we either end before other or begin after it; any
+        // other combination means we have some IP(s) in common.
+        let is_disjoint = self.last_address() < other.first_address()
+            || self.first_address() > other.last_address();
+        !is_disjoint
+    }
 }
 
 impl From<Ipv4Addr> for Ipv4Range {
@@ -567,7 +972,16 @@ impl TryFrom<AnyIpv4Range> for Ipv4Range {
 ///
 /// The first address must be less than or equal to the last address.
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+    PartialOrd,
+    Ord,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
 )]
 #[serde(try_from = "AnyIpv6Range")]
 pub struct Ipv6Range {
@@ -604,6 +1018,16 @@ impl Ipv6Range {
         let start_num = u128::from(self.first);
         let end_num = u128::from(self.last);
         end_num - start_num + 1
+    }
+
+    /// Returns `true` if `self` has any IPs in common with `other`; false
+    /// otherwise.
+    pub fn overlaps(&self, other: &Ipv6Range) -> bool {
+        // We're disjoint if we either end before other or begin after it; any
+        // other combination means we have some IP(s) in common.
+        let is_disjoint = self.last_address() < other.first_address()
+            || self.first_address() > other.last_address();
+        !is_disjoint
     }
 }
 
@@ -681,6 +1105,51 @@ impl Iterator for IpRangeIter {
     }
 }
 
+/// Trait for any IP address type.
+pub trait Ip:
+    Clone
+    + Copy
+    + std::fmt::Debug
+    + Diffable
+    + Eq
+    + JsonSchema
+    + std::hash::Hash
+    + PartialOrd
+    + PartialEq
+    + Ord
+    + Serialize
+{
+}
+impl Ip for Ipv4Addr {}
+impl Ip for Ipv6Addr {}
+impl Ip for IpAddr {}
+
+/// An IP address of a specific version, IPv4 or IPv6.
+pub trait ConcreteIp: Ip {
+    fn into_ipaddr(self) -> IpAddr;
+    fn into_ipnet(self) -> ipnetwork::IpNetwork;
+}
+
+impl ConcreteIp for Ipv4Addr {
+    fn into_ipaddr(self) -> IpAddr {
+        IpAddr::V4(self)
+    }
+
+    fn into_ipnet(self) -> ipnetwork::IpNetwork {
+        ipnetwork::IpNetwork::V4(ipnetwork::Ipv4Network::from(self))
+    }
+}
+
+impl ConcreteIp for Ipv6Addr {
+    fn into_ipaddr(self) -> IpAddr {
+        IpAddr::V6(self)
+    }
+
+    fn into_ipnet(self) -> ipnetwork::IpNetwork {
+        ipnetwork::IpNetwork::V6(ipnetwork::Ipv6Network::from(self))
+    }
+}
+
 #[cfg(test)]
 mod test {
     use serde_json::json;
@@ -689,7 +1158,7 @@ mod test {
 
     #[test]
     fn test_dns_subnets() {
-        let subnet = Ipv6Subnet::<AZ_PREFIX>::new(
+        let subnet = Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
             "fd00:1122:3344:0100::".parse::<Ipv6Addr>().unwrap(),
         );
         let rack_subnet = ReservedRackSubnet::new(subnet);
@@ -718,7 +1187,7 @@ mod test {
 
     #[test]
     fn test_sled_address() {
-        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(
+        let subnet = Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
             "fd00:1122:3344:0101::".parse::<Ipv6Addr>().unwrap(),
         );
         assert_eq!(
@@ -726,7 +1195,7 @@ mod test {
             get_sled_address(subnet)
         );
 
-        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(
+        let subnet = Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
             "fd00:1122:3344:0308::".parse::<Ipv6Addr>().unwrap(),
         );
         assert_eq!(

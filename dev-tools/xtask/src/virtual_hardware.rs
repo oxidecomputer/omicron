@@ -117,8 +117,8 @@ const ZPOOL: &'static str = "/usr/sbin/zpool";
 const ZONEADM: &'static str = "/usr/sbin/zoneadm";
 
 const SIDECAR_LITE_COMMIT: &'static str =
-    "de6fab7885a6bbc5327accffd2a872a31e2f1cb6";
-const SOFTNPU_COMMIT: &'static str = "3203c51cf4473d30991b522062ac0df2e045c2f2";
+    "69fae2ac230cd29f4ea2bf3bcbd6d99554c7bc47";
+const SOFTNPU_COMMIT: &'static str = "e4c3130538b192988737161f4a4dc97272f02b9c";
 const PXA_MAC_DEFAULT: &'static str = "a8:e1:de:01:70:1d";
 
 const PXA_WARNING: &'static str = r#"  You have not set up the proxy-ARP environment variables
@@ -496,8 +496,17 @@ fn get_gateway_mac(
 /// to parse these fields correctly.
 #[derive(Clone, Debug, Deserialize)]
 struct SledAgentConfig {
-    /// Optional list of virtual devices to be used as "discovered disks".
-    pub vdevs: Option<Vec<Utf8PathBuf>>,
+    external_disks: SledAgentExternalDisks,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+enum SledAgentExternalDisks {
+    Hardcoded {
+        vdevs: Vec<Utf8PathBuf>,
+    },
+    #[serde(other)]
+    Unknown,
 }
 
 impl SledAgentConfig {
@@ -515,7 +524,8 @@ fn ensure_vdevs(
 ) -> Result<()> {
     let config = SledAgentConfig::read(sled_agent_config)?;
 
-    let Some(vdevs) = &config.vdevs else {
+    let SledAgentExternalDisks::Hardcoded { vdevs } = &config.external_disks
+    else {
         bail!("No vdevs found in this configuration");
     };
 
@@ -565,7 +575,8 @@ fn destroy_vdevs(
 
     // Remove the vdev files themselves, if they are regular files
     let config = SledAgentConfig::read(sled_agent_config)?;
-    if let Some(vdevs) = &config.vdevs {
+    if let SledAgentExternalDisks::Hardcoded { vdevs } = &config.external_disks
+    {
         for vdev in vdevs {
             let vdev_path = if vdev.is_absolute() {
                 vdev.to_owned()

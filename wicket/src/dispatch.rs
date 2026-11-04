@@ -5,21 +5,29 @@
 //! Code that manages command dispatch from a shell for wicket.
 
 use std::net::{Ipv6Addr, SocketAddrV6};
+use std::process::ExitCode;
 
 use anyhow::{Context, Result, bail};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
-use omicron_common::{FileKv, address::WICKETD_PORT};
+use omicron_common::{
+    FileKv,
+    address::{WICKETD_COMMISSION_PORT, WICKETD_PORT},
+};
 use slog::Drain;
 
 use crate::{
     Runner,
     cli::{CommandOutput, ShellApp},
+    wicketd::WicketdAddrs,
 };
 
-pub fn exec() -> Result<()> {
-    let wicketd_addr =
-        SocketAddrV6::new(Ipv6Addr::LOCALHOST, WICKETD_PORT, 0, 0);
+pub fn exec() -> Result<ExitCode> {
+    let localhost = Ipv6Addr::LOCALHOST;
+    let addrs = WicketdAddrs {
+        wicketd: SocketAddrV6::new(localhost, WICKETD_PORT, 0, 0),
+        commission: SocketAddrV6::new(localhost, WICKETD_COMMISSION_PORT, 0, 0),
+    };
 
     // SSH_ORIGINAL_COMMAND contains additional arguments, if any.
     match std::env::var("SSH_ORIGINAL_COMMAND") {
@@ -30,17 +38,14 @@ pub fn exec() -> Result<()> {
 
             let runtime = tokio::runtime::Runtime::new()
                 .context("creating tokio runtime")?;
-            runtime.block_on(exec_with_args(
-                wicketd_addr,
-                args,
-                OutputKind::Terminal,
-            ))
+            runtime.block_on(exec_with_args(addrs, args, OutputKind::Terminal))
         }
         Err(_) => {
             // Do not expose log messages via standard error since they'll show up
             // on top of the TUI.
             let log = setup_log(&log_path()?, WithStderr::No)?;
-            Runner::new(log, wicketd_addr).run()
+            Runner::new(log, addrs).run()?;
+            Ok(ExitCode::SUCCESS)
         }
     }
 }
@@ -59,10 +64,10 @@ pub enum OutputKind<'a> {
 }
 
 pub async fn exec_with_args<S>(
-    wicketd_addr: SocketAddrV6,
+    addrs: WicketdAddrs,
     args: Vec<S>,
     output: OutputKind<'_>,
-) -> Result<()>
+) -> Result<ExitCode>
 where
     S: AsRef<str>,
 {
@@ -75,7 +80,7 @@ where
     match output {
         OutputKind::Captured { log, stdout, stderr } => {
             let output = CommandOutput { stdout, stderr };
-            app.exec(log, wicketd_addr, output).await
+            app.exec(log, addrs, output).await
         }
         OutputKind::Terminal => {
             let log = setup_log(
@@ -86,7 +91,7 @@ where
             let mut stderr = std::io::stderr();
             let output =
                 CommandOutput { stdout: &mut stdout, stderr: &mut stderr };
-            app.exec(log, wicketd_addr, output).await
+            app.exec(log, addrs, output).await
         }
     }
 }
@@ -136,7 +141,7 @@ fn log_path() -> Result<Utf8PathBuf> {
 fn stderr_env_drain(
     env_var: &str,
     use_color: bool,
-) -> impl Drain<Ok = (), Err = slog::Never> {
+) -> impl Drain<Ok = (), Err = slog::Never> + use<> {
     let mut builder = slog_term::TermDecorator::new();
     if use_color {
         builder = builder.force_color();

@@ -4,7 +4,10 @@
 
 //! Background task for realizing a plan blueprint
 
-use crate::app::background::{Activator, BackgroundTask};
+use crate::app::{
+    background::{Activator, BackgroundTask, LoadedTargetBlueprint},
+    quiesce::NexusQuiesceHandle,
+};
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
@@ -13,37 +16,36 @@ use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_execution::{
     RealizeBlueprintOutput, RequiredRealizeArgs,
 };
-use nexus_types::deployment::{
-    Blueprint, BlueprintTarget, PendingMgsUpdates, execution::EventBuffer,
-};
+use nexus_types::deployment::{PendingMgsUpdates, execution::EventBuffer};
 use omicron_uuid_kinds::OmicronZoneUuid;
+use oxide_update_engine_types::spec::SerializableError;
 use serde_json::json;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio::sync::watch;
-use update_engine::NestedError;
 
-/// Background task that takes a [`Blueprint`] and realizes the change to
+/// Background task that takes a `Blueprint` and realizes the change to
 /// the state of the system based on the `Blueprint`.
 pub struct BlueprintExecutor {
     datastore: Arc<DataStore>,
     resolver: Resolver,
-    rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+    rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
     nexus_id: OmicronZoneUuid,
     tx: watch::Sender<usize>,
     saga_recovery: Activator,
     mgs_update_tx: watch::Sender<PendingMgsUpdates>,
+    nexus_quiesce: NexusQuiesceHandle,
 }
 
 impl BlueprintExecutor {
     pub fn new(
         datastore: Arc<DataStore>,
         resolver: Resolver,
-        rx_blueprint: watch::Receiver<
-            Option<Arc<(BlueprintTarget, Blueprint)>>,
-        >,
+        rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
         nexus_id: OmicronZoneUuid,
         saga_recovery: Activator,
         mgs_update_tx: watch::Sender<PendingMgsUpdates>,
+        nexus_quiesce: NexusQuiesceHandle,
     ) -> BlueprintExecutor {
         let (tx, _) = watch::channel(0);
         BlueprintExecutor {
@@ -54,6 +56,7 @@ impl BlueprintExecutor {
             tx,
             saga_recovery,
             mgs_update_tx,
+            nexus_quiesce,
         }
     }
 
@@ -72,7 +75,7 @@ impl BlueprintExecutor {
         // on the watch.
         let update = self.rx_blueprint.borrow_and_update().clone();
 
-        let Some(update) = update else {
+        let Some(LoadedTargetBlueprint { target, blueprint }) = update else {
             warn!(
                 &opctx.log, "Blueprint execution: skipped";
                 "reason" => "no blueprint",
@@ -80,19 +83,60 @@ impl BlueprintExecutor {
             return json!({"error": "no blueprint" });
         };
 
-        let (bp_target, blueprint) = &*update;
-        if !bp_target.enabled {
-            warn!(&opctx.log,
-                      "Blueprint execution: skipped";
-                      "reason" => "blueprint disabled",
-                      "target_id" => %blueprint.id);
+        // Regardless of anything else: propagate whatever this blueprint
+        // says about our quiescing state.
+        //
+        // During startup under normal operation, the blueprint will reflect
+        // that we're not quiescing.  Propagating this will enable sagas to
+        // be created elsewhere in Nexus.
+        //
+        // At some point during an upgrade, we'll encounter a blueprint that
+        // reflects that we are quiescing.  Propagating this will disable sagas
+        // from being created.
+        //
+        // In all other cases, this will have no effect.
+        //
+        // We do this now, before doing anything else, for two reasons: (1)
+        // during startup, we want to do this ASAP to minimize unnecessary saga
+        // creation failures (i.e., don't wait until we try to execute the
+        // blueprint before enabling sagas, since we already know if we're
+        // quiescing or not); and (2) because we want to do it even if blueprint
+        // execution is disabled.
+        match blueprint.is_nexus_quiescing(self.nexus_id) {
+            Ok(quiescing) => {
+                debug!(
+                    &opctx.log,
+                    "blueprint execution: quiesce check";
+                    "quiescing" => quiescing
+                );
+                self.nexus_quiesce.set_quiescing(quiescing);
+            }
+            Err(error) => {
+                // This should be impossible.  But it doesn't really affect
+                // anything else so there's no reason to stop execution.
+                error!(
+                    &opctx.log,
+                    "blueprint execution: failed to determine if this Nexus \
+                     is quiescing";
+                    InlineErrorChain::new(&*error)
+                );
+            }
+        };
+
+        if !target.enabled {
+            warn!(
+                &opctx.log,
+                "Blueprint execution: skipped";
+                "reason" => "blueprint disabled",
+                "target_id" => %blueprint.id,
+            );
             return json!({
                 "target_id": blueprint.id.to_string(),
                 "enabled": false,
             });
         }
 
-        let (sender, mut receiver) = update_engine::channel();
+        let (sender, mut receiver) = oxide_update_engine::channel();
 
         let receiver_task = tokio::spawn(async move {
             // TODO: report progress
@@ -110,9 +154,10 @@ impl BlueprintExecutor {
                 datastore: &self.datastore,
                 resolver: &self.resolver,
                 creator: self.nexus_id,
-                blueprint,
+                blueprint: &blueprint,
                 sender,
                 mgs_updates: self.mgs_update_tx.clone(),
+                saga_quiesce: self.nexus_quiesce.sagas(),
             }
             .as_nexus(self.nexus_id),
         )
@@ -120,7 +165,7 @@ impl BlueprintExecutor {
 
         // Get the report for the receiver task.
         let event_report =
-            receiver_task.await.map_err(|error| NestedError::new(&error));
+            receiver_task.await.map_err(|error| SerializableError::new(&error));
 
         // Trigger anybody waiting for this to finish.
         self.tx.send_modify(|count| *count = *count + 1);
@@ -153,7 +198,7 @@ impl BlueprintExecutor {
                     // Note: The field "error" is treated as special by omdb,
                     // and if that field is present then nothing else is
                     // displayed.
-                    "execution_error": NestedError::new(error.as_ref()),
+                    "execution_error": SerializableError::new(error.as_ref()),
                     "event_report": event_report,
                 })
             }
@@ -173,47 +218,60 @@ impl BackgroundTask for BlueprintExecutor {
 #[cfg(test)]
 mod test {
     use super::BlueprintExecutor;
-    use crate::app::background::{Activator, BackgroundTask};
+    use crate::app::background::{
+        Activator, BackgroundTask, LoadedTargetBlueprint,
+    };
+    use crate::app::quiesce::NexusQuiesceHandle;
     use httptest::Expectation;
     use httptest::matchers::{not, request};
     use httptest::responders::status_code;
-    use id_map::IdMap;
+    use iddqd::{IdOrdMap, id_ord_map};
     use itertools::Itertools as _;
     use nexus_db_model::{
-        ByteCount, SledBaseboard, SledSystemHardware, SledUpdate, Zpool,
+        ByteCount, SledBaseboard, SledCpuFamily, SledSystemHardware,
+        SledUpdate, Zpool,
     };
     use nexus_db_queries::authn;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
-    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+    use nexus_db_queries::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::LastAllocatedSubnetIpOffset;
     use nexus_types::deployment::execution::{
         EventBuffer, EventReport, ExecutionComponent, ExecutionStepId,
         StepOutcome, StepStatus,
     };
     use nexus_types::deployment::{
-        Blueprint, BlueprintSledConfig, BlueprintTarget, BlueprintZoneConfig,
-        BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
+        Blueprint, BlueprintHostPhase2DesiredSlots, BlueprintMeasurements,
+        BlueprintSledConfig, BlueprintSledUpdateDisposition, BlueprintSource,
+        BlueprintTarget, BlueprintZoneConfig, BlueprintZoneDisposition,
+        BlueprintZoneImageSource, BlueprintZoneType,
         CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
         blueprint_zone_type,
     };
-    use nexus_types::external_api::views::SledState;
+    use nexus_types::external_api::sled::SledState;
+    use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external;
-    use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_generation_kinds::{
+        Generation, NexusGeneration, SledConfigGeneration,
+        SledRegistrationGeneration, TargetReleaseGeneration,
+    };
     use omicron_uuid_kinds::BlueprintUuid;
-    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use oxide_update_engine_types::buffer::{CompletionReason, TerminalKind};
+    use oxide_update_engine_types::spec::SerializableError;
     use serde_json::json;
+    use sled_agent_types::inventory::OmicronZoneDataset;
     use std::collections::BTreeMap;
+    use std::net::Ipv6Addr;
     use std::net::SocketAddr;
     use std::sync::Arc;
     use tokio::sync::watch;
-    use update_engine::{CompletionReason, NestedError, TerminalKind};
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -221,9 +279,9 @@ mod test {
     async fn create_blueprint(
         datastore: &DataStore,
         opctx: &OpContext,
-        blueprint_zones: BTreeMap<SledUuid, IdMap<BlueprintZoneConfig>>,
+        blueprint_zones: BTreeMap<SledUuid, IdOrdMap<BlueprintZoneConfig>>,
         dns_version: Generation,
-    ) -> (BlueprintTarget, Blueprint) {
+    ) -> LoadedTargetBlueprint {
         let id = BlueprintUuid::new_v4();
         // Assume all sleds are active with no disks or datasets.
         let blueprint_sleds = blueprint_zones
@@ -233,10 +291,20 @@ mod test {
                     sled_id,
                     BlueprintSledConfig {
                         state: SledState::Active,
-                        sled_agent_generation: Generation::new().next(),
-                        disks: IdMap::new(),
-                        datasets: IdMap::new(),
+                        update_disposition:
+                            BlueprintSledUpdateDisposition::initial(),
+                        subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                        last_allocated_ip_subnet_offset:
+                            LastAllocatedSubnetIpOffset::initial(),
+                        sled_agent_generation: SledConfigGeneration::new()
+                            .next(),
+                        disks: IdOrdMap::new(),
+                        datasets: IdOrdMap::new(),
                         zones,
+                        remove_mupdate_override: None,
+                        host_phase_2:
+                            BlueprintHostPhase2DesiredSlots::current_contents(),
+                        measurements: BlueprintMeasurements::InstallDataset,
                     },
                 )
             })
@@ -255,7 +323,7 @@ mod test {
             enabled: true,
             time_made_target: chrono::Utc::now(),
         };
-        let blueprint = Blueprint {
+        let blueprint = Arc::new(Blueprint {
             id,
             sleds: blueprint_sleds,
             pending_mgs_updates: PendingMgsUpdates::new(),
@@ -264,6 +332,9 @@ mod test {
             parent_blueprint_id: Some(current_target.target_id),
             internal_dns_version: dns_version,
             external_dns_version: dns_version,
+            target_release_minimum_generation: TargetReleaseGeneration::new(),
+            nexus_generation: NexusGeneration::new(),
+            external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
             oximeter_read_version: Generation::new(),
@@ -271,7 +342,8 @@ mod test {
             time_created: chrono::Utc::now(),
             creator: "test".to_string(),
             comment: "test blueprint".to_string(),
-        };
+            source: BlueprintSource::Test,
+        });
 
         datastore
             .blueprint_insert(opctx, &blueprint)
@@ -282,7 +354,7 @@ mod test {
             .await
             .expect("set new blueprint as current target");
 
-        (target, blueprint)
+        LoadedTargetBlueprint { target, blueprint }
     }
 
     #[nexus_test(server = crate::Server)]
@@ -332,7 +404,7 @@ mod test {
 
         let sled_id1 = SledUuid::new_v4();
         let sled_id2 = SledUuid::new_v4();
-        let rack_id = Uuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         for (i, (sled_id, server)) in
             [(sled_id1, &s1), (sled_id2, &s2)].iter().enumerate()
         {
@@ -341,7 +413,7 @@ mod test {
             };
             let bogus_repo_depot_port = 0;
             let update = SledUpdate::new(
-                sled_id.into_untyped_uuid(),
+                *sled_id,
                 addr,
                 bogus_repo_depot_port,
                 SledBaseboard {
@@ -354,14 +426,12 @@ mod test {
                     usable_hardware_threads: 4,
                     usable_physical_ram: ByteCount(1000.into()),
                     reservoir_size: ByteCount(999.into()),
+                    cpu_family: SledCpuFamily::AmdMilan,
                 },
                 rack_id,
-                nexus_db_model::Generation::new(),
+                SledRegistrationGeneration::new(),
             );
-            datastore
-                .sled_upsert(update)
-                .await
-                .expect("Failed to insert sled to db");
+            sled_upsert_expect_written(datastore, update).await;
         }
 
         let (blueprint_tx, blueprint_rx) = watch::channel(None);
@@ -369,10 +439,16 @@ mod test {
         let mut task = BlueprintExecutor::new(
             datastore.clone(),
             resolver.clone(),
-            blueprint_rx,
+            blueprint_rx.clone(),
             OmicronZoneUuid::new_v4(),
             Activator::new(),
             dummy_tx,
+            NexusQuiesceHandle::new(
+                datastore.clone(),
+                OmicronZoneUuid::new_v4(),
+                blueprint_rx,
+                opctx.child(BTreeMap::new()),
+            ),
         );
 
         // Now we're ready.
@@ -385,12 +461,11 @@ mod test {
         // With a target blueprint having no zones, the task should trivially
         // complete and report a successful (empty) summary.
         let generation = Generation::new();
-        let blueprint = Arc::new(
+        let loaded =
             create_blueprint(&datastore, &opctx, BTreeMap::new(), generation)
-                .await,
-        );
-        let blueprint_id = blueprint.1.id;
-        blueprint_tx.send(Some(blueprint)).unwrap();
+                .await;
+        let blueprint_id = loaded.blueprint.id;
+        blueprint_tx.send(Some(loaded)).unwrap();
         let mut value = task.activate(&opctx).await;
 
         let event_buffer = extract_event_buffer(&mut value);
@@ -413,30 +488,30 @@ mod test {
         // reporting success.
         fn make_zones(
             disposition: BlueprintZoneDisposition,
-        ) -> IdMap<BlueprintZoneConfig> {
+        ) -> IdOrdMap<BlueprintZoneConfig> {
             let pool_id = ZpoolUuid::new_v4();
             let zone_id = OmicronZoneUuid::new_v4();
-            [BlueprintZoneConfig {
-                disposition,
-                id: zone_id,
-                filesystem_pool: ZpoolName::new_external(pool_id),
-                zone_type: BlueprintZoneType::InternalDns(
-                    blueprint_zone_type::InternalDns {
-                        dataset: OmicronZoneDataset {
-                            pool_name: format!("oxp_{}", pool_id)
-                                .parse()
-                                .unwrap(),
+            id_ord_map! {
+                BlueprintZoneConfig {
+                    disposition,
+                    id: zone_id,
+                    filesystem_pool: ZpoolName::new_external(pool_id),
+                    zone_type: BlueprintZoneType::InternalDns(
+                        blueprint_zone_type::InternalDns {
+                            dataset: OmicronZoneDataset {
+                                pool_name: format!("oxp_{}", pool_id)
+                                    .parse()
+                                    .unwrap(),
+                            },
+                            dns_address: "[::1]:0".parse().unwrap(),
+                            gz_address: "::1".parse().unwrap(),
+                            gz_address_index: 0,
+                            http_address: "[::1]:12345".parse().unwrap(),
                         },
-                        dns_address: "[::1]:0".parse().unwrap(),
-                        gz_address: "::1".parse().unwrap(),
-                        gz_address_index: 0,
-                        http_address: "[::1]:12345".parse().unwrap(),
-                    },
-                ),
-                image_source: BlueprintZoneImageSource::InstallDataset,
-            }]
-            .into_iter()
-            .collect()
+                    ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
+                },
+            }
         }
 
         let generation = generation.next();
@@ -444,7 +519,7 @@ mod test {
         // In-service zones should be deployed.
         //
         // TODO: add expunged zones to the test (should not be deployed).
-        let mut blueprint = create_blueprint(
+        let mut loaded = create_blueprint(
             &datastore,
             &opctx,
             BTreeMap::from([
@@ -456,17 +531,15 @@ mod test {
         .await;
 
         // Insert records for the zpools backing the datasets in these zones.
-        for (sled_id, config) in
-            blueprint.1.all_omicron_zones(BlueprintZoneDisposition::any)
-        {
+        for (sled_id, config) in loaded.blueprint.in_service_zones() {
             let Some(dataset) = config.zone_type.durable_dataset() else {
                 continue;
             };
 
             let pool_id = dataset.dataset.pool_name.id();
             let zpool = Zpool::new(
-                pool_id.into_untyped_uuid(),
-                sled_id.into_untyped_uuid(),
+                pool_id,
+                sled_id,
                 PhysicalDiskUuid::new_v4(),
                 external::ByteCount::from(0).into(),
             );
@@ -476,7 +549,7 @@ mod test {
                 .expect("failed to upsert zpool");
         }
 
-        blueprint_tx.send(Some(Arc::new(blueprint.clone()))).unwrap();
+        blueprint_tx.send(Some(loaded.clone())).unwrap();
 
         // Make sure that requests get made to the sled agent.
         for s in [&mut s1, &mut s2] {
@@ -495,7 +568,7 @@ mod test {
         assert_eq!(
             value,
             json!({
-                "target_id": blueprint.1.id.to_string(),
+                "target_id": loaded.blueprint.id.to_string(),
                 "execution_error": null,
                 "enabled": true,
                 "needs_saga_recovery": false,
@@ -516,17 +589,20 @@ mod test {
         // Now, disable the target and make sure that we _don't_ invoke the sled
         // agent. It's enough to just not set expectations on
         // match_put_omicron_config().
-        blueprint.1.internal_dns_version =
-            blueprint.1.internal_dns_version.next();
-        blueprint.0.enabled = false;
-        blueprint_tx.send(Some(Arc::new(blueprint.clone()))).unwrap();
+        {
+            let blueprint = Arc::make_mut(&mut loaded.blueprint);
+            blueprint.internal_dns_version =
+                blueprint.internal_dns_version.next();
+        }
+        loaded.target.enabled = false;
+        blueprint_tx.send(Some(loaded.clone())).unwrap();
         let value = task.activate(&opctx).await;
         println!("when disabled: {:?}", value);
         assert_eq!(
             value,
             json!({
                 "enabled": false,
-                "target_id": blueprint.1.id.to_string()
+                "target_id": loaded.blueprint.id.to_string()
             })
         );
         s1.verify_and_clear();
@@ -541,8 +617,8 @@ mod test {
 
         // Do it all again, but configure one of the servers to fail so we can
         // verify the task's returned summary of what happened.
-        blueprint.0.enabled = true;
-        blueprint_tx.send(Some(Arc::new(blueprint))).unwrap();
+        loaded.target.enabled = true;
+        blueprint_tx.send(Some(loaded.clone())).unwrap();
         s1.expect(
             Expectation::matching(match_put_omicron_config())
                 .respond_with(status_code(204)),
@@ -609,7 +685,7 @@ mod test {
             .expect("value is an object")
             .remove("event_report")
             .expect("event_report exists");
-        let event_report: Result<EventReport, NestedError> =
+        let event_report: Result<EventReport, SerializableError> =
             serde_json::from_value(event_report)
                 .expect("event_report is valid");
         let event_report = event_report.expect("event_report is Ok");

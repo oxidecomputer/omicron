@@ -8,10 +8,9 @@ use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Parser, Subcommand};
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     let args = CertDevApp::parse();
-    args.exec().await
+    oxide_tokio_rt::run(args.exec())
 }
 
 /// Tools for working with certificates.

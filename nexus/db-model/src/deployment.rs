@@ -5,51 +5,85 @@
 //! Types for representing the deployed software and configuration in the
 //! database
 
-use crate::inventory::ZoneType;
+use crate::inventory::{HwRotSlot, SpMgsSlot, SpType, ZoneType};
 use crate::omicron_zone_config::{self, OmicronZoneNic};
+use crate::typed_generation::DbTypedGeneration;
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
-    ArtifactHash, ByteCount, DbOximeterReadMode, Generation, MacAddr, Name,
-    SledState, SqlU8, SqlU16, SqlU32, TufArtifact, impl_enum_type, ipv6,
+    ArtifactHash, ByteCount, DbArtifactVersion, DbOximeterReadMode,
+    DbReconfiguratorDisruptionPolicy, Generation, HwM2Slot, MacAddr, Name,
+    SledState, SqlU8, SqlU16, SqlU32, TufArtifactFile, impl_enum_type, ipv6,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Utc};
-use clickhouse_admin_types::{KeeperId, ServerId};
+use clickhouse_admin_types::keeper::KeeperId;
+use clickhouse_admin_types::server::ServerId;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{
     blueprint, bp_clickhouse_cluster_config,
     bp_clickhouse_keeper_zone_id_to_node_id,
     bp_clickhouse_server_zone_id_to_node_id, bp_omicron_dataset,
-    bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
-    bp_oximeter_read_policy, bp_sled_metadata, bp_target,
+    bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_external_ip,
+    bp_omicron_zone_nic, bp_oximeter_read_policy,
+    bp_pending_mgs_update_host_phase_1, bp_pending_mgs_update_rot,
+    bp_pending_mgs_update_rot_bootloader, bp_pending_mgs_update_sp,
+    bp_single_measurements, bp_sled_metadata, bp_target,
+    debug_log_blueprint_planning,
 };
-use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_types::deployment::BlueprintDatasetDisposition;
-use nexus_types::deployment::BlueprintPhysicalDiskConfig;
+use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
+use nexus_types::deployment::BlueprintSingleMeasurement;
+use nexus_types::deployment::BlueprintSledUpdateDisposition;
+use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
+use nexus_types::deployment::ExpectedActiveRotSlot;
+use nexus_types::deployment::PendingMgsUpdate;
+use nexus_types::deployment::PendingMgsUpdateDetails;
+use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
+use nexus_types::deployment::PendingMgsUpdateRotDetails;
+use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::{
-    BlueprintDatasetConfig, BlueprintZoneImageVersion, OximeterReadMode,
+    BlueprintArtifactVersion, BlueprintDatasetConfig, OximeterReadMode,
 };
+use nexus_types::deployment::{BlueprintDatasetDisposition, ExpectedVersion};
+use nexus_types::deployment::{
+    BlueprintHostPhase2DesiredContents, PendingMgsUpdateHostPhase1Details,
+};
+use nexus_types::deployment::{
+    BlueprintHostPhase2DesiredSlots, PlanningReport,
+};
+use nexus_types::deployment::{BlueprintPhysicalDiskConfig, BlueprintSource};
 use nexus_types::deployment::{BlueprintZoneImageSource, blueprint_zone_type};
 use nexus_types::deployment::{
-    OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
-    OmicronZoneExternalSnatIp,
+    OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingAddrs,
+    OmicronZoneExternalFloatingIp, OmicronZoneExternalFloatingIps,
+    OmicronZoneExternalSnat, OmicronZoneExternalSnatIp,
 };
-use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_common::disk::DiskIdentity;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::zpool_name::ZpoolName;
-use omicron_uuid_kinds::{
-    BlueprintKind, BlueprintUuid, DatasetKind, ExternalIpKind, ExternalIpUuid,
-    GenericUuid, OmicronZoneKind, OmicronZoneUuid, PhysicalDiskKind, SledKind,
-    SledUuid, ZpoolKind, ZpoolUuid,
+use omicron_generation_kinds::{
+    NexusGenerationKind, SledConfigGenerationKind, TargetReleaseGenerationKind,
+    UpdateDispositionGenerationKind,
 };
-use std::net::{IpAddr, SocketAddrV6};
+use omicron_git_version_types::GitVersion;
+use omicron_uuid_kinds::{
+    BlueprintKind, BlueprintUuid, DatasetKind, ExternalIpKind, GenericUuid,
+    MupdateOverrideKind, OmicronZoneKind, OmicronZoneUuid, PhysicalDiskKind,
+    SledKind, SledUuid, ZpoolKind, ZpoolUuid,
+};
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::inventory::NetworkInterface;
+use sled_agent_types::inventory::OmicronZoneDataset;
+use sled_agent_types::inventory::SourceNatConfigGeneric;
+use sled_hardware_types::BaseboardId;
+use std::net::{IpAddr, SocketAddr, SocketAddrV6};
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// See [`nexus_types::deployment::Blueprint`].
@@ -65,6 +99,11 @@ pub struct Blueprint {
     pub time_created: DateTime<Utc>,
     pub creator: String,
     pub comment: String,
+    pub target_release_minimum_generation:
+        DbTypedGeneration<TargetReleaseGenerationKind>,
+    pub nexus_generation: DbTypedGeneration<NexusGenerationKind>,
+    pub source: DbBpSource,
+    pub external_networking_generation: Generation,
 }
 
 impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
@@ -81,6 +120,14 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
             time_created: bp.time_created,
             creator: bp.creator.clone(),
             comment: bp.comment.clone(),
+            target_release_minimum_generation: bp
+                .target_release_minimum_generation
+                .into(),
+            nexus_generation: bp.nexus_generation.into(),
+            source: DbBpSource::from(&bp.source),
+            external_networking_generation: Generation(
+                bp.external_networking_generation,
+            ),
         }
     }
 }
@@ -92,6 +139,10 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
             parent_blueprint_id: value.parent_blueprint_id.map(From::from),
             internal_dns_version: *value.internal_dns_version,
             external_dns_version: *value.external_dns_version,
+            target_release_minimum_generation: value
+                .target_release_minimum_generation
+                .into(),
+            nexus_generation: value.nexus_generation.into(),
             cockroachdb_fingerprint: value.cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::from_optional_string(
@@ -101,12 +152,55 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
             time_created: value.time_created,
             creator: value.creator,
             comment: value.comment,
+            source: value.source.into(),
+            external_networking_generation: *value
+                .external_networking_generation,
+        }
+    }
+}
+
+impl_enum_type!(
+    BpSourceEnum:
+
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum DbBpSource;
+
+    // Enum values
+    Rss => b"rss"
+    Planner => b"planner"
+    ReconfiguratorCliEdit => b"reconfigurator_cli_edit"
+    Test => b"test"
+);
+
+impl From<&'_ BlueprintSource> for DbBpSource {
+    fn from(value: &'_ BlueprintSource) -> Self {
+        match value {
+            BlueprintSource::Rss => Self::Rss,
+            // We don't store planning reports, so both of these variants squish
+            // to `Planner`.
+            BlueprintSource::Planner(_)
+            | BlueprintSource::PlannerLoadedFromDatabase => Self::Planner,
+            BlueprintSource::ReconfiguratorCliEdit => {
+                Self::ReconfiguratorCliEdit
+            }
+            BlueprintSource::Test => Self::Test,
+        }
+    }
+}
+
+impl From<DbBpSource> for BlueprintSource {
+    fn from(value: DbBpSource) -> Self {
+        match value {
+            DbBpSource::Rss => Self::Rss,
+            DbBpSource::Planner => Self::PlannerLoadedFromDatabase,
+            DbBpSource::ReconfiguratorCliEdit => Self::ReconfiguratorCliEdit,
+            DbBpSource::Test => Self::Test,
         }
     }
 }
 
 /// See [`nexus_types::deployment::BlueprintTarget`].
-#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[derive(Queryable, Clone, Debug, Eq, PartialEq, Selectable, Insertable)]
 #[diesel(table_name = bp_target)]
 pub struct BpTarget {
     pub version: SqlU32,
@@ -136,6 +230,28 @@ impl From<BpTarget> for nexus_types::deployment::BlueprintTarget {
     }
 }
 
+impl_enum_type!(
+    BpSledMeasurementsEnum:
+
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum DbBpSledMeasurements;
+
+    // Enum values
+    Unknown => b"unknown"
+    InstallDataset => b"install_dataset"
+    Artifacts => b"artifacts"
+);
+
+impl From<&BlueprintMeasurements> for DbBpSledMeasurements {
+    fn from(value: &BlueprintMeasurements) -> Self {
+        match value {
+            BlueprintMeasurements::InstallDataset => Self::InstallDataset,
+            BlueprintMeasurements::Unknown => Self::Unknown,
+            BlueprintMeasurements::Artifacts { .. } => Self::Artifacts,
+        }
+    }
+}
+
 /// See [`nexus_types::deployment::BlueprintSledConfig::state`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_sled_metadata)]
@@ -143,7 +259,161 @@ pub struct BpSledMetadata {
     pub blueprint_id: DbTypedUuid<BlueprintKind>,
     pub sled_id: DbTypedUuid<SledKind>,
     pub sled_state: SledState,
-    pub sled_agent_generation: Generation,
+    pub sled_agent_generation: DbTypedGeneration<SledConfigGenerationKind>,
+    pub remove_mupdate_override: Option<DbTypedUuid<MupdateOverrideKind>>,
+    pub host_phase_2_desired_slot_a: Option<ArtifactHash>,
+    pub host_phase_2_desired_slot_b: Option<ArtifactHash>,
+    /// Public only for easy of writing queries; consumers should prefer the
+    /// `subnet()` method.
+    pub subnet: IpNetwork,
+    pub last_allocated_ip_subnet_offset: SqlU16,
+    pub measurements: DbBpSledMeasurements,
+    pub update_disposition_generation:
+        DbTypedGeneration<UpdateDispositionGenerationKind>,
+    pub update_availability: DbSledUpdateAvailability,
+    pub update_disruption_policy: Option<DbReconfiguratorDisruptionPolicy>,
+}
+
+impl BpSledMetadata {
+    pub fn subnet(&self) -> anyhow::Result<Ipv6Subnet<SLED_PREFIX_LENGTH>> {
+        let subnet = match self.subnet {
+            IpNetwork::V4(subnet) => bail!(
+                "invalid subnet for sled {}: {subnet} (should be Ipv6)",
+                self.sled_id
+            ),
+            IpNetwork::V6(subnet) => subnet,
+        };
+
+        Ok(subnet.into())
+    }
+
+    /// Splits a [`BlueprintSledUpdateDisposition`] into the columns stored on
+    /// `bp_sled_metadata`.
+    ///
+    /// See [`BpSledMetadata::update_disposition`] for the inverse.
+    pub fn update_disposition_columns(
+        update_disposition: BlueprintSledUpdateDisposition,
+    ) -> (
+        DbTypedGeneration<UpdateDispositionGenerationKind>,
+        DbSledUpdateAvailability,
+        Option<DbReconfiguratorDisruptionPolicy>,
+    ) {
+        let (availability, policy) = match update_disposition.kind {
+            BlueprintSledUpdateDispositionKind::Available => {
+                (DbSledUpdateAvailability::Available, None)
+            }
+            BlueprintSledUpdateDispositionKind::Evacuating { policy } => {
+                (DbSledUpdateAvailability::Evacuating, Some(policy.into()))
+            }
+        };
+        (update_disposition.generation.into(), availability, policy)
+    }
+
+    /// Reassembles the [`BlueprintSledUpdateDisposition`] from this row's
+    /// `(update_disposition_generation, update_availability,
+    /// update_disruption_policy)` columns.
+    pub fn update_disposition(
+        &self,
+    ) -> anyhow::Result<BlueprintSledUpdateDisposition> {
+        reassemble_update_disposition(
+            self.update_disposition_generation,
+            self.update_availability,
+            self.update_disruption_policy,
+        )
+        .with_context(|| {
+            format!("invalid bp_sled_metadata row for sled {}", self.sled_id)
+        })
+    }
+
+    pub fn host_phase_2(
+        &self,
+        slot_a_artifact_version: Option<DbArtifactVersion>,
+        slot_b_artifact_version: Option<DbArtifactVersion>,
+    ) -> BlueprintHostPhase2DesiredSlots {
+        // If we found an artifact version, use it; otherwise, use `Unknown`.
+        fn interpret_version(
+            maybe_version: Option<DbArtifactVersion>,
+        ) -> BlueprintArtifactVersion {
+            match maybe_version {
+                Some(version) => {
+                    BlueprintArtifactVersion::Available { version: version.0 }
+                }
+                None => BlueprintArtifactVersion::Unknown,
+            }
+        }
+
+        // If we have an artifact hash, use it (and attach a version).
+        // Otherwise, use `CurrentContents`.
+        fn interpret_slot(
+            maybe_hash: Option<ArtifactHash>,
+            maybe_version: Option<DbArtifactVersion>,
+        ) -> BlueprintHostPhase2DesiredContents {
+            match maybe_hash {
+                Some(hash) => BlueprintHostPhase2DesiredContents::Artifact {
+                    version: interpret_version(maybe_version),
+                    hash: hash.0,
+                },
+                None => BlueprintHostPhase2DesiredContents::CurrentContents,
+            }
+        }
+
+        BlueprintHostPhase2DesiredSlots {
+            slot_a: interpret_slot(
+                self.host_phase_2_desired_slot_a,
+                slot_a_artifact_version,
+            ),
+            slot_b: interpret_slot(
+                self.host_phase_2_desired_slot_b,
+                slot_b_artifact_version,
+            ),
+        }
+    }
+}
+
+impl_enum_type!(
+    SledUpdateAvailabilityEnum:
+
+    /// Database representation of the availability half of a sled's
+    /// `update_disposition`.
+    #[derive(
+        Copy,
+        Clone,
+        Debug,
+        PartialEq,
+        AsExpression,
+        FromSqlRow,
+    )]
+    pub enum DbSledUpdateAvailability;
+
+    Available => b"available"
+    Evacuating => b"evacuating"
+);
+
+fn reassemble_update_disposition(
+    generation: DbTypedGeneration<UpdateDispositionGenerationKind>,
+    availability: DbSledUpdateAvailability,
+    policy: Option<DbReconfiguratorDisruptionPolicy>,
+) -> anyhow::Result<BlueprintSledUpdateDisposition> {
+    let kind = match (availability, policy) {
+        (DbSledUpdateAvailability::Available, None) => {
+            BlueprintSledUpdateDispositionKind::Available
+        }
+        (DbSledUpdateAvailability::Evacuating, Some(policy)) => {
+            BlueprintSledUpdateDispositionKind::Evacuating {
+                policy: policy.into(),
+            }
+        }
+        // Invalid cases (there's a CHECK constraint to enforce this).
+        (DbSledUpdateAvailability::Available, Some(policy)) => bail!(
+            "update_availability is 'available' but update_disruption_policy \
+             is {policy:?} (expected NULL)"
+        ),
+        (DbSledUpdateAvailability::Evacuating, None) => bail!(
+            "update_availability is 'evacuating' but update_disruption_policy \
+             is NULL (expected a policy)"
+        ),
+    };
+    Ok(BlueprintSledUpdateDisposition { generation: generation.into(), kind })
 }
 
 impl_enum_type!(
@@ -165,7 +435,8 @@ impl_enum_type!(
 
 struct DbBpPhysicalDiskDispositionColumns {
     disposition: DbBpPhysicalDiskDisposition,
-    expunged_as_of_generation: Option<Generation>,
+    expunged_as_of_generation:
+        Option<DbTypedGeneration<SledConfigGenerationKind>>,
     expunged_ready_for_cleanup: bool,
 }
 
@@ -186,7 +457,7 @@ impl From<BlueprintPhysicalDiskDisposition>
                 ready_for_cleanup,
             } => (
                 DbBpPhysicalDiskDisposition::Expunged,
-                Some(Generation(as_of_generation)),
+                Some(as_of_generation.into()),
                 ready_for_cleanup,
             ),
         };
@@ -212,7 +483,7 @@ impl TryFrom<DbBpPhysicalDiskDispositionColumns>
             }
             (DbBpPhysicalDiskDisposition::Expunged, Some(as_of_generation)) => {
                 Ok(Self::Expunged {
-                    as_of_generation: *as_of_generation,
+                    as_of_generation: as_of_generation.into(),
                     ready_for_cleanup: value.expunged_ready_for_cleanup,
                 })
             }
@@ -242,7 +513,8 @@ pub struct BpOmicronPhysicalDisk {
     pub pool_id: Uuid,
 
     disposition: DbBpPhysicalDiskDisposition,
-    disposition_expunged_as_of_generation: Option<Generation>,
+    disposition_expunged_as_of_generation:
+        Option<DbTypedGeneration<SledConfigGenerationKind>>,
     disposition_expunged_ready_for_cleanup: bool,
 }
 
@@ -441,19 +713,18 @@ pub struct BpOmicronZone {
     pub ntp_domain: Option<String>,
     pub nexus_external_tls: Option<bool>,
     pub nexus_external_dns_servers: Option<Vec<IpNetwork>>,
-    pub snat_ip: Option<IpNetwork>,
-    pub snat_first_port: Option<SqlU16>,
-    pub snat_last_port: Option<SqlU16>,
 
     disposition: DbBpZoneDisposition,
-    disposition_expunged_as_of_generation: Option<Generation>,
+    disposition_expunged_as_of_generation:
+        Option<DbTypedGeneration<SledConfigGenerationKind>>,
     disposition_expunged_ready_for_cleanup: bool,
 
-    pub external_ip_id: Option<DbTypedUuid<ExternalIpKind>>,
     pub filesystem_pool: DbTypedUuid<ZpoolKind>,
 
     pub image_source: DbBpZoneImageSource,
     pub image_artifact_sha256: Option<ArtifactHash>,
+    pub nexus_generation: Option<DbTypedGeneration<NexusGenerationKind>>,
+    pub nexus_lockstep_port: Option<SqlU16>,
 }
 
 impl BpOmicronZone {
@@ -462,11 +733,6 @@ impl BpOmicronZone {
         sled_id: SledUuid,
         blueprint_zone: &BlueprintZoneConfig,
     ) -> anyhow::Result<Self> {
-        let external_ip_id = blueprint_zone
-            .zone_type
-            .external_networking()
-            .map(|(ip, _)| ip.id().into());
-
         let DbBpZoneDispositionColumns {
             disposition,
             expunged_as_of_generation: disposition_expunged_as_of_generation,
@@ -483,7 +749,6 @@ impl BpOmicronZone {
             blueprint_id: blueprint_id.into(),
             sled_id: sled_id.into(),
             id: blueprint_zone.id.into(),
-            external_ip_id,
             filesystem_pool: blueprint_zone.filesystem_pool.id().into(),
             disposition,
             disposition_expunged_as_of_generation,
@@ -512,9 +777,8 @@ impl BpOmicronZone {
             ntp_domain: None,
             nexus_external_tls: None,
             nexus_external_dns_servers: None,
-            snat_ip: None,
-            snat_first_port: None,
-            snat_last_port: None,
+            nexus_generation: None,
+            nexus_lockstep_port: None,
         };
 
         match &blueprint_zone.zone_type {
@@ -525,15 +789,15 @@ impl BpOmicronZone {
                     dns_servers,
                     domain,
                     nic,
-                    external_ip,
+                    // The SNAT external IP is stored in the
+                    // `bp_omicron_zone_external_ip` table, not here.
+                    external_ip: _,
                 },
             ) => {
                 // Set the common fields
                 bp_omicron_zone.set_primary_service_ip_and_port(address);
 
                 // Set the zone specific fields
-                let snat_cfg = external_ip.snat_cfg;
-                let (first_port, last_port) = snat_cfg.port_range_raw();
                 bp_omicron_zone.ntp_ntp_servers = Some(ntp_servers.clone());
                 bp_omicron_zone.ntp_dns_servers = Some(
                     dns_servers
@@ -543,10 +807,6 @@ impl BpOmicronZone {
                         .collect(),
                 );
                 bp_omicron_zone.ntp_domain.clone_from(domain);
-                bp_omicron_zone.snat_ip = Some(IpNetwork::from(snat_cfg.ip));
-                bp_omicron_zone.snat_first_port =
-                    Some(SqlU16::from(first_port));
-                bp_omicron_zone.snat_last_port = Some(SqlU16::from(last_port));
                 bp_omicron_zone.bp_nic_id = Some(nic.id);
             }
             BlueprintZoneType::Clickhouse(
@@ -595,7 +855,9 @@ impl BpOmicronZone {
                 blueprint_zone_type::ExternalDns {
                     dataset,
                     http_address,
-                    dns_address,
+                    // The external DNS address is stored in the
+                    // `bp_omicron_zone_external_ip` table, not here.
+                    dns_addresses: _,
                     nic,
                 },
             ) => {
@@ -605,10 +867,6 @@ impl BpOmicronZone {
 
                 // Set the zone specific fields
                 bp_omicron_zone.bp_nic_id = Some(nic.id);
-                bp_omicron_zone.second_service_ip =
-                    Some(IpNetwork::from(dns_address.addr.ip()));
-                bp_omicron_zone.second_service_port =
-                    Some(SqlU16::from(dns_address.addr.port()));
             }
             BlueprintZoneType::InternalDns(
                 blueprint_zone_type::InternalDns {
@@ -642,10 +900,14 @@ impl BpOmicronZone {
             }
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address,
-                external_ip,
+                lockstep_port,
+                // The external IP is stored in the
+                // `bp_omicron_zone_external_ip` table, not here.
+                external_ips: _,
                 nic,
                 external_tls,
                 external_dns_servers,
+                nexus_generation,
             }) => {
                 // Set the common fields
                 bp_omicron_zone
@@ -653,8 +915,8 @@ impl BpOmicronZone {
 
                 // Set the zone specific fields
                 bp_omicron_zone.bp_nic_id = Some(nic.id);
-                bp_omicron_zone.second_service_ip =
-                    Some(IpNetwork::from(external_ip.ip));
+                bp_omicron_zone.nexus_lockstep_port =
+                    Some(SqlU16::from(*lockstep_port));
                 bp_omicron_zone.nexus_external_tls = Some(*external_tls);
                 bp_omicron_zone.nexus_external_dns_servers = Some(
                     external_dns_servers
@@ -663,6 +925,8 @@ impl BpOmicronZone {
                         .map(IpNetwork::from)
                         .collect(),
                 );
+                bp_omicron_zone.nexus_generation =
+                    Some((*nexus_generation).into());
             }
             BlueprintZoneType::Oximeter(blueprint_zone_type::Oximeter {
                 address,
@@ -685,20 +949,12 @@ impl BpOmicronZone {
     fn set_zpool_name(&mut self, dataset: &OmicronZoneDataset) {
         self.dataset_zpool_name = Some(dataset.pool_name.to_string());
     }
-    /// Convert an external ip from a `BpOmicronZone` to a `BlueprintZoneType`
-    /// representation.
-    fn external_ip_to_blueprint_zone_type(
-        external_ip: Option<DbTypedUuid<ExternalIpKind>>,
-    ) -> anyhow::Result<ExternalIpUuid> {
-        external_ip
-            .map(Into::into)
-            .ok_or_else(|| anyhow!("expected an external IP ID"))
-    }
 
     pub fn into_blueprint_zone_config(
         self,
         nic_row: Option<BpOmicronZoneNic>,
-        image_artifact_row: Option<TufArtifact>,
+        image_artifact_row: Option<TufArtifactFile>,
+        external_ip_rows: Vec<BpOmicronZoneExternalIp>,
     ) -> anyhow::Result<BlueprintZoneConfig> {
         // Build up a set of common fields for our `BlueprintZoneType`s
         //
@@ -724,9 +980,11 @@ impl BpOmicronZone {
             nic_row.map(Into::into),
         )?;
 
-        let external_ip_id =
-            Self::external_ip_to_blueprint_zone_type(self.external_ip_id);
+        let zone_id = self.id.into();
 
+        // NOTE: this is the *internal* DNS underlay address, held in
+        // `second_service_ip` / `second_service_port`. External DNS's external
+        // address comes from `external_ip_rows` above.
         let dns_address =
             omicron_zone_config::secondary_ip_and_port_to_dns_address(
                 self.second_service_ip,
@@ -744,24 +1002,11 @@ impl BpOmicronZone {
 
         let zone_type = match self.zone_type {
             ZoneType::BoundaryNtp => {
-                let snat_cfg = match (
-                    self.snat_ip,
-                    self.snat_first_port,
-                    self.snat_last_port,
-                ) {
-                    (Some(ip), Some(first_port), Some(last_port)) => {
-                        nexus_types::inventory::SourceNatConfig::new(
-                            ip.ip(),
-                            *first_port,
-                            *last_port,
-                        )
-                        .context("bad SNAT config for boundary NTP")?
-                    }
-                    _ => bail!(
-                        "expected non-NULL snat properties, \
-                         found at least one NULL"
-                    ),
-                };
+                let external_ip =
+                    BpOmicronZoneExternalIp::into_boundary_ntp_snat(
+                        external_ip_rows,
+                        zone_id,
+                    )?;
                 BlueprintZoneType::BoundaryNtp(
                     blueprint_zone_type::BoundaryNtp {
                         address: primary_address,
@@ -769,10 +1014,7 @@ impl BpOmicronZone {
                         dns_servers: ntp_dns_servers?,
                         domain: self.ntp_domain,
                         nic: nic?,
-                        external_ip: OmicronZoneExternalSnatIp {
-                            id: external_ip_id?,
-                            snat_cfg,
-                        },
+                        external_ip,
                     },
                 )
             }
@@ -812,17 +1054,21 @@ impl BpOmicronZone {
                     address: primary_address,
                 },
             ),
-            ZoneType::ExternalDns => BlueprintZoneType::ExternalDns(
-                blueprint_zone_type::ExternalDns {
-                    dataset: dataset?,
-                    http_address: primary_address,
-                    dns_address: OmicronZoneExternalFloatingAddr {
-                        id: external_ip_id?,
-                        addr: dns_address?,
+            ZoneType::ExternalDns => {
+                let dns_addresses =
+                    BpOmicronZoneExternalIp::into_external_dns_addrs(
+                        external_ip_rows,
+                        zone_id,
+                    )?;
+                BlueprintZoneType::ExternalDns(
+                    blueprint_zone_type::ExternalDns {
+                        dataset: dataset?,
+                        http_address: primary_address,
+                        dns_addresses,
+                        nic: nic?,
                     },
-                    nic: nic?,
-                },
-            ),
+                )
+            }
             ZoneType::InternalDns => BlueprintZoneType::InternalDns(
                 blueprint_zone_type::InternalDns {
                     dataset: dataset?,
@@ -845,17 +1091,17 @@ impl BpOmicronZone {
                 blueprint_zone_type::InternalNtp { address: primary_address },
             ),
             ZoneType::Nexus => {
+                let external_ips =
+                    BpOmicronZoneExternalIp::into_nexus_external_ips(
+                        external_ip_rows,
+                        zone_id,
+                    )?;
                 BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                     internal_address: primary_address,
-                    external_ip: OmicronZoneExternalFloatingIp {
-                        id: external_ip_id?,
-                        ip: self
-                            .second_service_ip
-                            .ok_or_else(|| {
-                                anyhow!("expected second service IP")
-                            })?
-                            .ip(),
-                    },
+                    lockstep_port: *self.nexus_lockstep_port.ok_or_else(
+                        || anyhow!("expected 'nexus_lockstep_port'"),
+                    )?,
+                    external_ips,
                     nic: nic?,
                     external_tls: self
                         .nexus_external_tls
@@ -868,6 +1114,10 @@ impl BpOmicronZone {
                         .into_iter()
                         .map(|i| i.ip())
                         .collect(),
+                    nexus_generation: self
+                        .nexus_generation
+                        .ok_or_else(|| anyhow!("expected 'nexus_generation'"))?
+                        .into(),
                 })
             }
             ZoneType::Oximeter => {
@@ -903,6 +1153,192 @@ impl BpOmicronZone {
     }
 }
 
+/// A single external IP address of a blueprint zone.
+///
+/// Each zone with external networking has one or more rows in the
+/// `bp_omicron_zone_external_ip` table. Each EIP here is an _allocated_
+/// external IP, so it carries the `external_ip_id` as an FK into the
+/// `external_ip` table. The kind is inferred from the owning zone and which of
+/// the port columns are set:
+///
+///  - Nexus:        a floating IP (`ip` only).
+///  - External DNS: a floating IP with a port (`ip` + `port`).
+///  - Boundary NTP: a source-NAT IP (`ip` + `snat_first_port`/`snat_last_port`).
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_omicron_zone_external_ip)]
+pub struct BpOmicronZoneExternalIp {
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub zone_id: DbTypedUuid<OmicronZoneKind>,
+    pub external_ip_id: DbTypedUuid<ExternalIpKind>,
+    pub ip: IpNetwork,
+    pub port: Option<SqlU16>,
+    pub snat_first_port: Option<SqlU16>,
+    pub snat_last_port: Option<SqlU16>,
+}
+
+impl BpOmicronZoneExternalIp {
+    /// Build the external IP child rows for a blueprint zone.
+    ///
+    /// Returns one row per external IP: Nexus and external DNS may each have
+    /// several, and boundary NTP may have a source-NAT address per IP family
+    /// (with at least one address).
+    pub fn for_zone(
+        blueprint_id: BlueprintUuid,
+        blueprint_zone: &BlueprintZoneConfig,
+    ) -> Vec<Self> {
+        let blueprint_id = blueprint_id.into();
+        let zone_id = blueprint_zone.id.into();
+        match &blueprint_zone.zone_type {
+            BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                external_ips,
+                ..
+            }) => external_ips
+                .iter()
+                .map(|external_ip| Self {
+                    blueprint_id,
+                    zone_id,
+                    external_ip_id: external_ip.id.into(),
+                    ip: IpNetwork::from(external_ip.ip),
+                    port: None,
+                    snat_first_port: None,
+                    snat_last_port: None,
+                })
+                .collect(),
+            BlueprintZoneType::ExternalDns(
+                blueprint_zone_type::ExternalDns { dns_addresses, .. },
+            ) => dns_addresses
+                .iter()
+                .map(|dns_address| Self {
+                    blueprint_id,
+                    zone_id,
+                    external_ip_id: dns_address.id.into(),
+                    ip: IpNetwork::from(dns_address.addr.ip()),
+                    port: Some(SqlU16::from(dns_address.addr.port())),
+                    snat_first_port: None,
+                    snat_last_port: None,
+                })
+                .collect(),
+            BlueprintZoneType::BoundaryNtp(
+                blueprint_zone_type::BoundaryNtp { external_ip, .. },
+            ) => external_ip
+                .iter()
+                .map(|snat| {
+                    let (first_port, last_port) =
+                        snat.snat_cfg.port_range_raw();
+                    Self {
+                        blueprint_id,
+                        zone_id,
+                        external_ip_id: snat.id.into(),
+                        ip: IpNetwork::from(snat.snat_cfg.ip),
+                        port: None,
+                        snat_first_port: Some(SqlU16::from(first_port)),
+                        snat_last_port: Some(SqlU16::from(last_port)),
+                    }
+                })
+                .collect(),
+            BlueprintZoneType::Clickhouse(_)
+            | BlueprintZoneType::ClickhouseKeeper(_)
+            | BlueprintZoneType::ClickhouseServer(_)
+            | BlueprintZoneType::CockroachDb(_)
+            | BlueprintZoneType::Crucible(_)
+            | BlueprintZoneType::CruciblePantry(_)
+            | BlueprintZoneType::InternalDns(_)
+            | BlueprintZoneType::InternalNtp(_)
+            | BlueprintZoneType::Oximeter(_) => vec![],
+        }
+    }
+
+    /// Reconstruct a Nexus zone's external IPs from its child rows.
+    fn into_nexus_external_ips(
+        rows: Vec<Self>,
+        zone_id: OmicronZoneUuid,
+    ) -> anyhow::Result<OmicronZoneExternalFloatingIps> {
+        let ips =
+            iddqd::IdOrdMap::from_iter_unique(rows.into_iter().map(|row| {
+                OmicronZoneExternalFloatingIp {
+                    id: row.external_ip_id.into(),
+                    ip: row.ip.ip(),
+                }
+            }))
+            .map_err(|dup| {
+                anyhow!(
+                    "zone {zone_id} has a duplicate external IP: {}",
+                    dup.new_item().ip
+                )
+            })?;
+        OmicronZoneExternalFloatingIps::new(ips).with_context(|| {
+            format!("zone {zone_id} has invalid Nexus external IPs")
+        })
+    }
+
+    /// Reconstruct an external DNS zone's addresses from its child rows.
+    fn into_external_dns_addrs(
+        rows: Vec<Self>,
+        zone_id: OmicronZoneUuid,
+    ) -> anyhow::Result<OmicronZoneExternalFloatingAddrs> {
+        let addrs = rows
+            .into_iter()
+            .map(|row| {
+                Ok(OmicronZoneExternalFloatingAddr {
+                    id: row.external_ip_id.into(),
+                    addr: row.to_floating_addr()?,
+                })
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let addrs =
+            iddqd::IdOrdMap::from_iter_unique(addrs).map_err(|dup| {
+                anyhow!(
+                    "zone {zone_id} has a duplicate external DNS IP: {}",
+                    dup.new_item().addr.ip()
+                )
+            })?;
+        OmicronZoneExternalFloatingAddrs::new(addrs).with_context(|| {
+            format!("zone {zone_id} has invalid external DNS addresses")
+        })
+    }
+
+    /// Reconstruct a boundary NTP zone's SNAT configuration from its child rows.
+    fn into_boundary_ntp_snat(
+        rows: Vec<Self>,
+        zone_id: OmicronZoneUuid,
+    ) -> anyhow::Result<OmicronZoneExternalSnat> {
+        let snat_ips = rows
+            .into_iter()
+            .map(|row| {
+                Ok(OmicronZoneExternalSnatIp {
+                    id: row.external_ip_id.into(),
+                    snat_cfg: row.to_snat_config()?,
+                })
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        OmicronZoneExternalSnat::from_ips(snat_ips).with_context(|| {
+            format!("zone {zone_id} has invalid boundary NTP SNAT config")
+        })
+    }
+
+    /// Interpret this row as a boundary NTP source-NAT configuration.
+    fn to_snat_config(&self) -> anyhow::Result<SourceNatConfigGeneric> {
+        let (Some(first_port), Some(last_port)) =
+            (self.snat_first_port, self.snat_last_port)
+        else {
+            bail!(
+                "expected non-NULL SNAT ports for boundary NTP external IP, \
+                 found at least one NULL"
+            );
+        };
+        SourceNatConfigGeneric::new(self.ip.ip(), *first_port, *last_port)
+            .context("bad SNAT config for boundary NTP")
+    }
+
+    /// Interpret this row as an external DNS floating address (IP + port).
+    fn to_floating_addr(&self) -> anyhow::Result<SocketAddr> {
+        let port = self.port.ok_or_else(|| {
+            anyhow!("expected a port for external DNS external IP")
+        })?;
+        Ok(SocketAddr::new(self.ip.ip(), *port))
+    }
+}
+
 impl_enum_type!(
     BpZoneDispositionEnum:
 
@@ -922,7 +1358,8 @@ impl_enum_type!(
 
 struct DbBpZoneDispositionColumns {
     disposition: DbBpZoneDisposition,
-    expunged_as_of_generation: Option<Generation>,
+    expunged_as_of_generation:
+        Option<DbTypedGeneration<SledConfigGenerationKind>>,
     expunged_ready_for_cleanup: bool,
 }
 
@@ -941,7 +1378,7 @@ impl From<BlueprintZoneDisposition> for DbBpZoneDispositionColumns {
                 ready_for_cleanup,
             } => (
                 DbBpZoneDisposition::Expunged,
-                Some(Generation(as_of_generation)),
+                Some(as_of_generation.into()),
                 ready_for_cleanup,
             ),
         };
@@ -963,7 +1400,7 @@ impl TryFrom<DbBpZoneDispositionColumns> for BlueprintZoneDisposition {
             (DbBpZoneDisposition::InService, None) => Ok(Self::InService),
             (DbBpZoneDisposition::Expunged, Some(as_of_generation)) => {
                 Ok(Self::Expunged {
-                    as_of_generation: *as_of_generation,
+                    as_of_generation: as_of_generation.into(),
                     ready_for_cleanup: value.expunged_ready_for_cleanup,
                 })
             }
@@ -996,23 +1433,23 @@ struct DbBpZoneImageSourceColumns {
     // The BlueprintZoneImageVersion is not actually stored in bp_omicron_zone
     // table directly, but is instead looked up from the tuf_artifact table at
     // blueprint load time.
-    image_artifact_data: Option<(BlueprintZoneImageVersion, ArtifactHash)>,
+    image_artifact_data: Option<(BlueprintArtifactVersion, ArtifactHash)>,
 }
 
 impl DbBpZoneImageSourceColumns {
     fn new(
         image_source: DbBpZoneImageSource,
         image_artifact_sha256: Option<ArtifactHash>,
-        image_artifact_row: Option<TufArtifact>,
+        image_artifact_row: Option<TufArtifactFile>,
     ) -> Self {
         // Note that artifact_row can only be Some if image_artifact_sha256 is
         // Some.
         let image_artifact_data = image_artifact_sha256.map(|hash| {
             let version = match image_artifact_row {
-                Some(artifact_row) => BlueprintZoneImageVersion::Available {
+                Some(artifact_row) => BlueprintArtifactVersion::Available {
                     version: artifact_row.version.0,
                 },
-                None => BlueprintZoneImageVersion::Unknown,
+                None => BlueprintArtifactVersion::Unknown,
             };
             (version, hash)
         });
@@ -1066,17 +1503,62 @@ impl TryFrom<DbBpZoneImageSourceColumns> for BlueprintZoneImageSource {
 }
 
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_single_measurements)]
+pub struct BpSingleMeasurement {
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+
+    pub image_artifact_sha256: ArtifactHash,
+}
+
+impl BpSingleMeasurement {
+    pub fn new(
+        blueprint_id: BlueprintUuid,
+        sled_id: SledUuid,
+        measurement: &BlueprintSingleMeasurement,
+    ) -> Self {
+        Self {
+            blueprint_id: blueprint_id.into(),
+            sled_id: sled_id.into(),
+            image_artifact_sha256: measurement.hash.into(),
+        }
+    }
+
+    pub fn to_measurement(
+        self,
+        artifact: Option<TufArtifactFile>,
+    ) -> BlueprintSingleMeasurement {
+        BlueprintSingleMeasurement {
+            version: match artifact {
+                Some(a) => {
+                    BlueprintArtifactVersion::Available { version: a.version.0 }
+                }
+                None => BlueprintArtifactVersion::Unknown,
+            },
+            hash: *self.image_artifact_sha256,
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_omicron_zone_nic)]
 pub struct BpOmicronZoneNic {
     blueprint_id: DbTypedUuid<BlueprintKind>,
     pub id: Uuid,
     name: Name,
-    ip: IpNetwork,
+    // The `ipv4`/`ipv4_subnet` fields map to the `ip`/`subnet` columns, which
+    // predate dual-stack support: CRDB can't idempotently rename columns, so we
+    // keep the original names rather than rename them to `ipv4`/`ipv4_subnet`.
+    #[diesel(column_name = ip)]
+    ipv4: Option<IpNetwork>,
+    #[diesel(column_name = subnet)]
+    ipv4_subnet: Option<IpNetwork>,
     mac: MacAddr,
-    subnet: IpNetwork,
     vni: SqlU32,
     is_primary: bool,
     slot: SqlU8,
+    ipv6: Option<IpNetwork>,
+    ipv6_subnet: Option<IpNetwork>,
 }
 
 impl BpOmicronZoneNic {
@@ -1084,17 +1566,19 @@ impl BpOmicronZoneNic {
         blueprint_id: BlueprintUuid,
         zone: &BlueprintZoneConfig,
     ) -> Result<Option<BpOmicronZoneNic>, anyhow::Error> {
-        let Some((_, nic)) = zone.zone_type.external_networking() else {
+        let Some(networking) = zone.zone_type.external_networking() else {
             return Ok(None);
         };
-        let nic = OmicronZoneNic::new(zone.id, nic)?;
+        let nic = OmicronZoneNic::new(zone.id, networking.nic())?;
         Ok(Some(Self {
             blueprint_id: blueprint_id.into(),
             id: nic.id,
             name: nic.name,
-            ip: nic.ip,
+            ipv4: nic.ipv4,
+            ipv4_subnet: nic.ipv4_subnet,
+            ipv6: nic.ipv6,
+            ipv6_subnet: nic.ipv6_subnet,
             mac: nic.mac,
-            subnet: nic.subnet,
             vni: nic.vni,
             is_primary: nic.is_primary,
             slot: nic.slot,
@@ -1115,9 +1599,11 @@ impl From<BpOmicronZoneNic> for OmicronZoneNic {
         OmicronZoneNic {
             id: value.id,
             name: value.name,
-            ip: value.ip,
+            ipv4: value.ipv4,
+            ipv4_subnet: value.ipv4_subnet,
+            ipv6: value.ipv6,
+            ipv6_subnet: value.ipv6_subnet,
             mac: value.mac,
-            subnet: value.subnet,
             vni: value.vni,
             is_primary: value.is_primary,
             slot: value.slot,
@@ -1236,5 +1722,299 @@ impl BpOximeterReadPolicy {
             version,
             oximeter_read_mode: DbOximeterReadMode::from(read_mode),
         }
+    }
+}
+
+pub trait BpPendingMgsUpdateComponent {
+    /// Converts a BpMgsUpdate into a PendingMgsUpdate
+    fn into_generic(self, baseboard_id: Arc<BaseboardId>) -> PendingMgsUpdate;
+
+    /// Retrieves the baseboard ID
+    fn hw_baseboard_id(&self) -> &Uuid;
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_pending_mgs_update_rot_bootloader)]
+pub struct BpPendingMgsUpdateRotBootloader {
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub hw_baseboard_id: Uuid,
+    pub sp_type: SpType,
+    pub sp_slot: SpMgsSlot,
+    pub artifact_sha256: ArtifactHash,
+    pub artifact_version: DbArtifactVersion,
+    pub expected_stage0_version: DbArtifactVersion,
+    pub expected_stage0_next_version: Option<DbArtifactVersion>,
+}
+
+impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateRotBootloader {
+    fn hw_baseboard_id(&self) -> &Uuid {
+        &self.hw_baseboard_id
+    }
+
+    fn into_generic(self, baseboard_id: Arc<BaseboardId>) -> PendingMgsUpdate {
+        PendingMgsUpdate {
+            baseboard_id,
+            sp_type: self.sp_type.into(),
+            slot_id: **self.sp_slot,
+            artifact_hash: self.artifact_sha256.into(),
+            artifact_version: (*self.artifact_version).clone(),
+            details: PendingMgsUpdateDetails::RotBootloader(
+                PendingMgsUpdateRotBootloaderDetails {
+                    expected_stage0_version: (*self.expected_stage0_version)
+                        .clone(),
+                    expected_stage0_next_version: match self
+                        .expected_stage0_next_version
+                    {
+                        Some(v) => ExpectedVersion::Version((*v).clone()),
+                        None => ExpectedVersion::NoValidVersion,
+                    },
+                },
+            ),
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_pending_mgs_update_sp)]
+pub struct BpPendingMgsUpdateSp {
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub hw_baseboard_id: Uuid,
+    pub sp_type: SpType,
+    pub sp_slot: SpMgsSlot,
+    pub artifact_sha256: ArtifactHash,
+    pub artifact_version: DbArtifactVersion,
+    pub expected_active_version: DbArtifactVersion,
+    pub expected_inactive_version: Option<DbArtifactVersion>,
+}
+
+impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateSp {
+    fn hw_baseboard_id(&self) -> &Uuid {
+        &self.hw_baseboard_id
+    }
+
+    fn into_generic(self, baseboard_id: Arc<BaseboardId>) -> PendingMgsUpdate {
+        PendingMgsUpdate {
+            baseboard_id,
+            sp_type: self.sp_type.into(),
+            slot_id: **self.sp_slot,
+            artifact_hash: self.artifact_sha256.into(),
+            artifact_version: (*self.artifact_version).clone(),
+            details: PendingMgsUpdateDetails::Sp(PendingMgsUpdateSpDetails {
+                expected_active_version: (*self.expected_active_version)
+                    .clone(),
+                expected_inactive_version: match self.expected_inactive_version
+                {
+                    Some(v) => ExpectedVersion::Version((*v).clone()),
+                    None => ExpectedVersion::NoValidVersion,
+                },
+            }),
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_pending_mgs_update_rot)]
+pub struct BpPendingMgsUpdateRot {
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub hw_baseboard_id: Uuid,
+    pub sp_type: SpType,
+    pub sp_slot: SpMgsSlot,
+    pub artifact_sha256: ArtifactHash,
+    pub artifact_version: DbArtifactVersion,
+    pub expected_active_slot: HwRotSlot,
+    pub expected_active_version: DbArtifactVersion,
+    pub expected_inactive_version: Option<DbArtifactVersion>,
+    pub expected_persistent_boot_preference: HwRotSlot,
+    pub expected_pending_persistent_boot_preference: Option<HwRotSlot>,
+    pub expected_transient_boot_preference: Option<HwRotSlot>,
+}
+
+impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateRot {
+    fn hw_baseboard_id(&self) -> &Uuid {
+        &self.hw_baseboard_id
+    }
+
+    fn into_generic(self, baseboard_id: Arc<BaseboardId>) -> PendingMgsUpdate {
+        PendingMgsUpdate {
+            baseboard_id,
+            sp_type: self.sp_type.into(),
+            slot_id: **self.sp_slot,
+            artifact_hash: self.artifact_sha256.into(),
+            artifact_version: (*self.artifact_version).clone(),
+            details: PendingMgsUpdateDetails::Rot(PendingMgsUpdateRotDetails {
+                expected_active_slot: ExpectedActiveRotSlot {
+                    slot: self.expected_active_slot.into(),
+                    version: (*self.expected_active_version).clone(),
+                },
+                expected_inactive_version: self
+                    .expected_inactive_version
+                    .map(|v| ExpectedVersion::Version(v.into()))
+                    .unwrap_or(ExpectedVersion::NoValidVersion),
+                expected_persistent_boot_preference: self
+                    .expected_persistent_boot_preference
+                    .into(),
+                expected_pending_persistent_boot_preference: self
+                    .expected_pending_persistent_boot_preference
+                    .map(|s| s.into()),
+                expected_transient_boot_preference: self
+                    .expected_transient_boot_preference
+                    .map(|s| s.into()),
+            }),
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_pending_mgs_update_host_phase_1)]
+pub struct BpPendingMgsUpdateHostPhase1 {
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub hw_baseboard_id: Uuid,
+    pub sp_type: SpType,
+    pub sp_slot: SpMgsSlot,
+    pub artifact_sha256: ArtifactHash,
+    pub artifact_version: DbArtifactVersion,
+    pub expected_active_phase_1_slot: HwM2Slot,
+    pub expected_boot_disk: HwM2Slot,
+    pub expected_active_phase_1_hash: ArtifactHash,
+    pub expected_active_phase_2_hash: ArtifactHash,
+    pub expected_inactive_phase_1_hash: ArtifactHash,
+    pub expected_inactive_phase_2_hash: ArtifactHash,
+    sled_agent_ip: ipv6::Ipv6Addr,
+    sled_agent_port: SqlU16,
+}
+
+impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateHostPhase1 {
+    fn hw_baseboard_id(&self) -> &Uuid {
+        &self.hw_baseboard_id
+    }
+
+    fn into_generic(self, baseboard_id: Arc<BaseboardId>) -> PendingMgsUpdate {
+        PendingMgsUpdate {
+            baseboard_id,
+            sp_type: self.sp_type.into(),
+            slot_id: **self.sp_slot,
+            artifact_hash: self.artifact_sha256.into(),
+            artifact_version: (*self.artifact_version).clone(),
+            details: PendingMgsUpdateDetails::HostPhase1(
+                PendingMgsUpdateHostPhase1Details {
+                    expected_active_phase_1_slot: self
+                        .expected_active_phase_1_slot
+                        .into(),
+                    expected_boot_disk: self.expected_boot_disk.into(),
+                    expected_active_phase_1_hash: self
+                        .expected_active_phase_1_hash
+                        .into(),
+                    expected_active_phase_2_hash: self
+                        .expected_active_phase_2_hash
+                        .into(),
+                    expected_inactive_phase_1_hash: self
+                        .expected_inactive_phase_1_hash
+                        .into(),
+                    expected_inactive_phase_2_hash: self
+                        .expected_inactive_phase_2_hash
+                        .into(),
+                    sled_agent_address: SocketAddrV6::new(
+                        self.sled_agent_ip.into(),
+                        *self.sled_agent_port,
+                        0,
+                        0,
+                    ),
+                },
+            ),
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = debug_log_blueprint_planning)]
+pub struct DebugLogBlueprintPlanning {
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub debug_blob: serde_json::Value,
+}
+
+impl DebugLogBlueprintPlanning {
+    pub fn new(
+        blueprint_id: BlueprintUuid,
+        report: Arc<PlanningReport>,
+        git_commit: &GitVersion,
+    ) -> Result<Self, serde_json::Error> {
+        let report = serde_json::to_value(report)?;
+
+        // We explicitly _don't_ define a struct describing the format of
+        // `debug_blob`, because we don't want anyone to attempt to parse it. It
+        // should only be useful to humans, potentially via omdb, and they (and
+        // omdb) can duplicate these fields to understand it.
+        let debug_blob = serde_json::json!({
+            "git-commit": git_commit,
+            "report": report,
+        });
+
+        Ok(Self { blueprint_id: blueprint_id.into(), debug_blob })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+    use omicron_generation_kinds::UpdateDispositionGeneration;
+
+    #[test]
+    fn update_disposition_columns_roundtrip() {
+        // Set this to a non-initial generation so that we cover roundtripping
+        // the generation column away from its default value.
+        let evacuating_generation =
+            BlueprintSledUpdateDisposition::initial().generation.next();
+        let mut dispositions = vec![BlueprintSledUpdateDisposition::initial()];
+        dispositions.extend(
+            ReconfiguratorDisruptionPolicy::ALL_VARIANTS.iter().copied().map(
+                |policy| BlueprintSledUpdateDisposition {
+                    generation: evacuating_generation,
+                    kind: BlueprintSledUpdateDispositionKind::Evacuating {
+                        policy,
+                    },
+                },
+            ),
+        );
+
+        for disposition in dispositions {
+            let (generation, availability, policy) =
+                BpSledMetadata::update_disposition_columns(disposition);
+            let reassembled = reassemble_update_disposition(
+                generation,
+                availability,
+                policy,
+            )
+            .expect("columns from update_disposition_columns are consistent");
+            assert_eq!(reassembled, disposition, "{disposition:?} roundtrips");
+        }
+    }
+
+    #[test]
+    fn reassemble_rejects_inconsistent_columns() {
+        // The generation is not relevant to these consistency checks.
+        let generation = UpdateDispositionGeneration::new().into();
+        // Available must not carry a disruption policy.
+        for &policy in ReconfiguratorDisruptionPolicy::ALL_VARIANTS {
+            assert!(
+                reassemble_update_disposition(
+                    generation,
+                    DbSledUpdateAvailability::Available,
+                    Some(policy.into()),
+                )
+                .is_err(),
+                "available + {policy:?} should be rejected",
+            );
+        }
+        // Evacuating must carry a disruption policy.
+        assert!(
+            reassemble_update_disposition(
+                generation,
+                DbSledUpdateAvailability::Evacuating,
+                None,
+            )
+            .is_err(),
+            "evacuating + NULL policy should be rejected",
+        );
     }
 }

@@ -20,8 +20,9 @@ impl Zpool {
     }
 }
 
+#[async_trait::async_trait]
 impl Api for Zpool {
-    fn create(
+    async fn create(
         &self,
         _name: &ZpoolName,
         _vdev: &Utf8Path,

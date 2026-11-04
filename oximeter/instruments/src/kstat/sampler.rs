@@ -20,6 +20,7 @@ use kstat_rs::Kstat;
 use oximeter::Metric;
 use oximeter::MetricsError;
 use oximeter::Sample;
+use oximeter::queue::BoundedQueue;
 use oximeter::types::Cumulative;
 use slog::Logger;
 use slog::debug;
@@ -27,6 +28,7 @@ use slog::error;
 use slog::o;
 use slog::trace;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::btree_map::Entry;
@@ -108,7 +110,7 @@ pub enum ExpirationBehavior {
     Duration(Duration),
 }
 
-/// Details about the collection and expiration intervals for a target.
+/// Details about how to collect from a single target.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct CollectionDetails {
     /// The interval on which data from the target is collected.
@@ -121,22 +123,43 @@ pub struct CollectionDetails {
     /// The latter can occur if the physical resource (such as a datalink) that
     /// underlies the kstat has disappeared, for example.
     pub expiration: ExpirationBehavior,
+    /// The number of samples to retain before dropping the oldest.
+    ///
+    /// This avoids memory issues when data is produced more rapidly than it's
+    /// collected.
+    pub n_max_samples: usize,
 }
 
 impl CollectionDetails {
     /// Return collection details with no expiration.
-    pub fn never(interval: Duration) -> Self {
-        Self { interval, expiration: ExpirationBehavior::Never }
+    pub fn never(interval: Duration, n_max_samples: usize) -> Self {
+        Self { interval, expiration: ExpirationBehavior::Never, n_max_samples }
     }
 
     /// Return collection details that expires after a number of attempts.
-    pub fn attempts(interval: Duration, count: usize) -> Self {
-        Self { interval, expiration: ExpirationBehavior::Attempts(count) }
+    pub fn attempts(
+        interval: Duration,
+        count: usize,
+        n_max_samples: usize,
+    ) -> Self {
+        Self {
+            interval,
+            expiration: ExpirationBehavior::Attempts(count),
+            n_max_samples,
+        }
     }
 
     /// Return collection details that expires after a duration has elapsed.
-    pub fn duration(interval: Duration, duration: Duration) -> Self {
-        Self { interval, expiration: ExpirationBehavior::Duration(duration) }
+    pub fn duration(
+        interval: Duration,
+        duration: Duration,
+        n_max_samples: usize,
+    ) -> Self {
+        Self {
+            interval,
+            expiration: ExpirationBehavior::Duration(duration),
+            n_max_samples,
+        }
     }
 }
 
@@ -187,6 +210,10 @@ enum Request {
     CreationTimes {
         reply_tx: oneshot::Sender<BTreeMap<KstatPath, DateTime<Utc>>>,
     },
+    /// Return the list of IDs and intervals in the set of futures the sampler
+    /// is tracking.
+    #[cfg(all(test, target_os = "illumos"))]
+    FutureDetails { reply_tx: oneshot::Sender<Vec<(TargetId, Duration)>> },
 }
 
 /// Data about a single kstat target.
@@ -267,6 +294,17 @@ impl core::future::Future for YieldIdAfter {
     }
 }
 
+// The operation we want to take on a future in our set, after handling an inbox
+// message.
+enum Operation {
+    // We want to add a new future.
+    Add(YieldIdAfter),
+    // Remove a future with the existing ID.
+    Remove(TargetId),
+    // We want to update an existing future.
+    Update((TargetId, Duration)),
+}
+
 /// An owned type used to keep track of the creation time for each kstat in
 /// which interest has been signaled.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -326,14 +364,10 @@ struct KstatSamplerWorker {
 
     /// The per-target queue of samples, pulled by the main `KstatSampler` type
     /// when producing metrics.
-    samples: Arc<Mutex<BTreeMap<TargetId, Vec<Sample>>>>,
+    samples: Arc<Mutex<BTreeMap<TargetId, BoundedQueue<Sample>>>>,
 
     /// Inbox channel on which the `KstatSampler` sends messages.
     inbox: mpsc::Receiver<Request>,
-
-    /// The maximum number of samples we allow in each per-target buffer, to
-    /// avoid huge allocations when we produce data faster than it's collected.
-    sample_limit: usize,
 
     /// Outbound queue on which to publish self statistics, which are expected to
     /// be low-volume.
@@ -345,6 +379,9 @@ struct KstatSamplerWorker {
     /// at construction time. In that case, we'll try again the next time we
     /// need it.
     self_stats: Option<self_stats::SelfStats>,
+
+    /// The futures that resolve when it's time to sample the next target.
+    sample_timeouts: FuturesUnordered<YieldIdAfter>,
 }
 
 fn hostname() -> Option<String> {
@@ -358,7 +395,7 @@ fn hostname() -> Option<String> {
 
 /// Stores the number of samples taken, used for testing.
 #[cfg(all(test, target_os = "illumos"))]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct SampleCounts {
     pub total: usize,
     pub overflow: usize,
@@ -378,8 +415,7 @@ impl KstatSamplerWorker {
         log: Logger,
         inbox: mpsc::Receiver<Request>,
         self_stat_queue: broadcast::Sender<Sample>,
-        samples: Arc<Mutex<BTreeMap<TargetId, Vec<Sample>>>>,
-        sample_limit: usize,
+        samples: Arc<Mutex<BTreeMap<TargetId, BoundedQueue<Sample>>>>,
     ) -> Result<Self, Error> {
         let ctl = Some(Ctl::new().map_err(Error::Kstat)?);
         let self_stats = hostname().map(self_stats::SelfStats::new);
@@ -390,9 +426,9 @@ impl KstatSamplerWorker {
             creation_times: BTreeMap::new(),
             samples,
             inbox,
-            sample_limit,
             self_stat_queue,
             self_stats,
+            sample_timeouts: FuturesUnordered::new(),
         })
     }
 
@@ -405,7 +441,6 @@ impl KstatSamplerWorker {
         #[cfg(all(test, target_os = "illumos"))]
         sample_count_tx: mpsc::UnboundedSender<SampleCounts>,
     ) {
-        let mut sample_timeouts = FuturesUnordered::new();
         let mut creation_prune_interval =
             interval(CREATION_TIME_PRUNE_INTERVAL);
         creation_prune_interval.tick().await; // Completes immediately.
@@ -416,11 +451,11 @@ impl KstatSamplerWorker {
                         error!(
                             self.log,
                             "failed to prune creation times";
-                            "error" => ?e,
+                            InlineErrorChain::new(&e),
                         );
                     }
                 }
-                maybe_id = sample_timeouts.next(), if !sample_timeouts.is_empty() => {
+                maybe_id = self.sample_timeouts.next(), if !self.sample_timeouts.is_empty() => {
                     let Some((id, interval)) = maybe_id else {
                         unreachable!();
                     };
@@ -430,7 +465,7 @@ impl KstatSamplerWorker {
                         #[cfg(all(test, target_os = "illumos"))]
                         &sample_count_tx,
                     ) {
-                        sample_timeouts.push(next_timeout);
+                        self.sample_timeouts.push(next_timeout);
                     }
                 }
                 maybe_request = self.inbox.recv() => {
@@ -443,8 +478,45 @@ impl KstatSamplerWorker {
                         "received request on inbox";
                         "request" => ?request,
                     );
-                    if let Some(next_timeout) = self.handle_inbox_request(request) {
-                        sample_timeouts.push(next_timeout);
+                    if let Some(next_op) = self.handle_inbox_request(request) {
+                        self.update_sample_timeouts(next_op);
+                    }
+                }
+            }
+        }
+    }
+
+    fn update_sample_timeouts(&mut self, next_op: Operation) {
+        match next_op {
+            Operation::Add(fut) => self.sample_timeouts.push(fut),
+            Operation::Remove(id) => {
+                // Swap out all futures, and then filter out the one we're now
+                // removing.
+                let old = std::mem::take(&mut self.sample_timeouts);
+                self.sample_timeouts
+                    .extend(old.into_iter().filter(|fut| fut.id != id));
+            }
+            Operation::Update((new_id, new_interval)) => {
+                // Update just the one future, if it exists, or insert one.
+                //
+                // NOTE: we update the _interval_, not the sleep object itself,
+                // which means this won't take effect until the next tick.
+                match self
+                    .sample_timeouts
+                    .iter_mut()
+                    .find(|fut| fut.id == new_id)
+                {
+                    Some(old) => old.interval = new_interval,
+                    None => {
+                        warn!(
+                            &self.log,
+                            "attempting to update the samping future \
+                            for a target, but no active future found \
+                            in the set, it will be added directly";
+                            "id" => %&new_id,
+                        );
+                        self.sample_timeouts
+                            .push(YieldIdAfter::new(new_id, new_interval));
                     }
                 }
             }
@@ -452,10 +524,7 @@ impl KstatSamplerWorker {
     }
 
     // Handle a message on the worker's inbox.
-    fn handle_inbox_request(
-        &mut self,
-        request: Request,
-    ) -> Option<YieldIdAfter> {
+    fn handle_inbox_request(&mut self, request: Request) -> Option<Operation> {
         match request {
             Request::AddTarget { target, details, reply_tx } => {
                 match self.add_target(target, details) {
@@ -468,27 +537,28 @@ impl KstatSamplerWorker {
                         );
                         match reply_tx.send(Ok(id)) {
                             Ok(_) => trace!(self.log, "sent reply"),
-                            Err(e) => error!(
+                            Err(_) => error!(
                                 self.log,
-                                "failed to send reply";
+                                "failed to send reply (channel closed)";
                                 "id" => ?id,
-                                "error" => ?e,
                             ),
                         }
-                        Some(YieldIdAfter::new(id, details.interval))
+                        Some(Operation::Add(YieldIdAfter::new(
+                            id,
+                            details.interval,
+                        )))
                     }
                     Err(e) => {
                         error!(
                             self.log,
                             "failed to add target";
-                            "error" => ?e,
+                            InlineErrorChain::new(&e),
                         );
                         match reply_tx.send(Err(e)) {
                             Ok(_) => trace!(self.log, "sent reply"),
-                            Err(e) => error!(
+                            Err(_) => error!(
                                 self.log,
-                                "failed to send reply";
-                                "error" => ?e,
+                                "failed to send reply (channel closed)";
                             ),
                         }
                         None
@@ -506,27 +576,25 @@ impl KstatSamplerWorker {
                         );
                         match reply_tx.send(Ok(id)) {
                             Ok(_) => trace!(self.log, "sent reply"),
-                            Err(e) => error!(
+                            Err(_) => error!(
                                 self.log,
-                                "failed to send reply";
+                                "failed to send reply (channel closed)";
                                 "id" => ?id,
-                                "error" => ?e,
                             ),
                         }
-                        Some(YieldIdAfter::new(id, details.interval))
+                        Some(Operation::Update((id, details.interval)))
                     }
                     Err(e) => {
                         error!(
                             self.log,
                             "failed to update target";
-                            "error" => ?e,
+                            InlineErrorChain::new(&e),
                         );
                         match reply_tx.send(Err(e)) {
                             Ok(_) => trace!(self.log, "sent reply"),
-                            Err(e) => error!(
+                            Err(_) => error!(
                                 self.log,
-                                "failed to send reply";
-                                "error" => ?e,
+                                "failed to send reply (channel closed)";
                             ),
                         }
                         None
@@ -534,11 +602,11 @@ impl KstatSamplerWorker {
                 }
             }
             Request::RemoveTarget { id, reply_tx } => {
-                self.targets.remove(&id);
+                let do_remove = self.targets.remove(&id).is_some();
                 if let Some(remaining_samples) =
                     self.samples.lock().unwrap().remove(&id)
                 {
-                    if !remaining_samples.is_empty() {
+                    if remaining_samples.len() > 0 {
                         warn!(
                             self.log,
                             "target removed with queued samples";
@@ -549,13 +617,12 @@ impl KstatSamplerWorker {
                 }
                 match reply_tx.send(Ok(())) {
                     Ok(_) => trace!(self.log, "sent reply"),
-                    Err(e) => error!(
+                    Err(_) => error!(
                         self.log,
-                        "failed to send reply";
-                        "error" => ?e,
+                        "failed to send reply (channel closed)";
                     ),
                 }
-                None
+                if do_remove { Some(Operation::Remove(id)) } else { None }
             }
             Request::TargetStatus { id, reply_tx } => {
                 trace!(
@@ -578,11 +645,10 @@ impl KstatSamplerWorker {
                 };
                 match reply_tx.send(response) {
                     Ok(_) => trace!(self.log, "sent reply"),
-                    Err(e) => error!(
+                    Err(_) => error!(
                         self.log,
-                        "failed to send reply";
+                        "failed to send reply (channel closed)";
                         "id" => ?id,
-                        "error" => ?e,
                     ),
                 }
                 None
@@ -592,6 +658,18 @@ impl KstatSamplerWorker {
                 debug!(self.log, "request for creation times");
                 reply_tx.send(self.creation_times.clone()).unwrap();
                 debug!(self.log, "sent reply for creation times");
+                None
+            }
+            #[cfg(all(test, target_os = "illumos"))]
+            Request::FutureDetails { reply_tx } => {
+                debug!(self.log, "request for future details");
+                let details = self
+                    .sample_timeouts
+                    .iter()
+                    .map(|fut| (fut.id, fut.interval))
+                    .collect();
+                reply_tx.send(details).unwrap();
+                debug!(self.log, "sent reply for future details");
                 None
             }
         }
@@ -682,7 +760,7 @@ impl KstatSamplerWorker {
                     "expiring kstat after too many failures";
                     "id" => ?id,
                     "reason" => ?expiration.reason,
-                    "error" => ?expiration.error,
+                    InlineErrorChain::new(&expiration.error),
                 );
                 let _ =
                     self.targets.insert(id, SampledObject::Expired(expiration));
@@ -694,7 +772,7 @@ impl KstatSamplerWorker {
                     self.log,
                     "failed to sample kstat target, requeueing";
                     "id" => ?id,
-                    "error" => ?e,
+                    InlineErrorChain::new(&e),
                 );
                 Some(YieldIdAfter::new(id, interval))
             }
@@ -704,7 +782,7 @@ impl KstatSamplerWorker {
     fn append_per_target_samples(
         &self,
         id: TargetId,
-        mut samples: Vec<Sample>,
+        samples: Vec<Sample>,
     ) -> Option<usize> {
         // Limit the number of samples we actually contain
         // in the sample queue. This is to avoid huge
@@ -723,36 +801,17 @@ impl KstatSamplerWorker {
         };
         let n_new_samples = samples.len();
         let n_current_samples = current_samples.len();
-        let n_total_samples = n_new_samples + n_current_samples;
-        let n_overflow_samples =
-            n_total_samples.saturating_sub(self.sample_limit);
-        if n_overflow_samples > 0 {
+        let n_dropped_samples = current_samples.extend(samples);
+        if n_dropped_samples > 0 {
             warn!(
                 self.log,
                 "sample queue is too full, dropping oldest samples";
                 "n_new_samples" => n_new_samples,
                 "n_current_samples" => n_current_samples,
-                "n_overflow_samples" => n_overflow_samples,
+                "n_dropped_samples" => n_dropped_samples,
             );
-            // It's possible that the number of new samples
-            // is big enough to overflow the current
-            // capacity, and also require removing new
-            // samples.
-            if n_overflow_samples < n_current_samples {
-                let _ = current_samples.drain(..n_overflow_samples);
-            } else {
-                // Clear all the current samples, and some
-                // of the new ones. The subtraction below
-                // cannot panic, because
-                // `n_overflow_samples` is computed above by
-                // adding `n_current_samples`.
-                current_samples.clear();
-                let _ =
-                    samples.drain(..(n_overflow_samples - n_current_samples));
-            }
         }
-        current_samples.extend(samples);
-        Some(n_overflow_samples)
+        Some(n_dropped_samples)
     }
 
     /// Add samples for one target to the internal queue.
@@ -874,7 +933,7 @@ impl KstatSamplerWorker {
                     error!(
                         self.log,
                         "could not generate sample for dropped sample counter";
-                        "error" => ?e,
+                        InlineErrorChain::new(&e),
                     );
                     return;
                 }
@@ -903,7 +962,7 @@ impl KstatSamplerWorker {
                     error!(
                         self.log,
                         "could not generate sample for expired target counter";
-                        "error" => ?e,
+                        InlineErrorChain::new(&e),
                     );
                     return;
                 }
@@ -913,7 +972,7 @@ impl KstatSamplerWorker {
                 Err(e) => error!(
                     self.log,
                     "failed to send target counter to self stat queue";
-                    "error" => ?e,
+                    InlineErrorChain::new(&e),
                 ),
             }
         } else {
@@ -1046,8 +1105,8 @@ impl KstatSamplerWorker {
                     "replacing expired kstat target";
                     "id" => ?id,
                     "expiration_reason" => ?e.reason,
-                    "error" => ?e.error,
                     "expired_at" => ?e.expired_at,
+                    InlineErrorChain::new(&e.error),
                 );
             }
             None => {}
@@ -1071,8 +1130,8 @@ impl KstatSamplerWorker {
                     "replacing expired kstat target";
                     "id" => ?id,
                     "expiration_reason" => ?e.reason,
-                    "error" => ?e.error,
                     "expired_at" => ?e.expired_at,
+                    InlineErrorChain::new(&e.error),
                 );
             }
             Some(_) => {}
@@ -1108,26 +1167,36 @@ impl KstatSamplerWorker {
         };
         let _ = self.targets.insert(id, SampledObject::Kstat(item));
 
-        // Add to the per-target queues, making sure to keep any samples that
-        // were already there previously. This would be a bit odd, since it
-        // means that the target expired, but we hadn't been polled by oximeter.
-        // Nonetheless keep these samples anyway.
-        let n_samples =
-            self.samples.lock().unwrap().entry(id).or_default().len();
-        match n_samples {
-            0 => debug!(
-                self.log,
-                "inserted empty per-target sample queue";
-                "id" => ?id,
-            ),
-            n => debug!(
-                self.log,
-                "per-target queue appears to have old samples";
-                "id" => ?id,
-                "n_samples" => n,
-            ),
-        }
-
+        // Add to the per-target queues, possibly updating the _size_ of the
+        // queue if the caller requested it. Report any samples that were
+        // already there, and any we needed to drop to handle the new request.
+        let (n_samples_retained, n_samples_dropped) =
+            match self.samples.lock().unwrap().entry(id) {
+                Entry::Vacant(vacant) => {
+                    vacant.insert(BoundedQueue::new(details.n_max_samples));
+                    (0, 0)
+                }
+                Entry::Occupied(mut occupied) => {
+                    // Swap the queues and drain anything that was there into the
+                    // new one.
+                    let mut old_q = occupied
+                        .insert(BoundedQueue::new(details.n_max_samples));
+                    let n_total_existing_samples = old_q.len();
+                    let n_dropped =
+                        occupied.get_mut().extend(old_q.drain().into());
+                    let n_samples_retained =
+                        n_total_existing_samples - n_dropped;
+                    (n_samples_retained, n_dropped)
+                }
+            };
+        debug!(
+            self.log,
+            "inserted per-target sample queue";
+            "id" => ?id,
+            "n_samples_retained" => n_samples_retained,
+            "n_samples_dropped" => n_samples_dropped,
+            "n_max_samples" => details.n_max_samples,
+        );
         Ok(id)
     }
 }
@@ -1136,7 +1205,7 @@ impl KstatSamplerWorker {
 #[derive(Clone, Debug)]
 pub struct KstatSampler {
     log: Logger,
-    samples: Arc<Mutex<BTreeMap<TargetId, Vec<Sample>>>>,
+    samples: Arc<Mutex<BTreeMap<TargetId, BoundedQueue<Sample>>>>,
     outbox: mpsc::Sender<Request>,
     // NOTE: We're using a broadcast MPMC channel here intentionally, even
     // though there is only one receiver. That's to make use of its ring-buffer
@@ -1153,25 +1222,8 @@ pub struct KstatSampler {
 const SELF_STAT_QUEUE_SIZE: usize = 4096;
 
 impl KstatSampler {
-    /// The maximum number of samples allowed in the internal buffer, before
-    /// oldest samples are dropped.
-    ///
-    /// This is to avoid unbounded allocations in situations where data is
-    /// produced faster than it is collected.
-    ///
-    /// Note that this is a _per-target_ sample limit!
-    pub const DEFAULT_SAMPLE_LIMIT: usize = 500;
-
     /// Create a new sampler.
     pub fn new(log: &Logger) -> Result<Self, Error> {
-        Self::with_sample_limit(log, Self::DEFAULT_SAMPLE_LIMIT)
-    }
-
-    /// Create a new sampler with a sample limit.
-    pub fn with_sample_limit(
-        log: &Logger,
-        limit: usize,
-    ) -> Result<Self, Error> {
         let samples = Arc::new(Mutex::new(BTreeMap::new()));
         let (self_stat_tx, self_stat_rx) =
             broadcast::channel(SELF_STAT_QUEUE_SIZE);
@@ -1181,7 +1233,6 @@ impl KstatSampler {
             inbox,
             self_stat_tx,
             samples.clone(),
-            limit,
         )?;
         #[cfg(all(test, target_os = "illumos"))]
         let (sample_count_rx, _worker_task) = {
@@ -1296,18 +1347,27 @@ impl KstatSampler {
         self.outbox.send(request).await.map_err(|_| Error::SendError).unwrap();
         reply_rx.await.map_err(|_| Error::RecvError).unwrap()
     }
+
+    /// Return the IDs and sampling intervals for all futures in the sampler.
+    #[cfg(all(test, target_os = "illumos"))]
+    pub(crate) async fn future_details(&self) -> Vec<(TargetId, Duration)> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let request = Request::FutureDetails { reply_tx };
+        self.outbox.send(request).await.map_err(|_| Error::SendError).unwrap();
+        reply_rx.await.map_err(|_| Error::RecvError).unwrap()
+    }
 }
 
 impl oximeter::Producer for KstatSampler {
     fn produce(
         &mut self,
-    ) -> Result<Box<(dyn Iterator<Item = Sample>)>, MetricsError> {
+    ) -> Result<Box<dyn Iterator<Item = Sample>>, MetricsError> {
         // Swap the _entries_ of all the existing per-target sample queues, but
         // we need to leave empty queues in their place. I.e., we can't remove
         // keys.
         let mut samples = Vec::new();
         for (_id, queue) in self.samples.lock().unwrap().iter_mut() {
-            samples.append(queue);
+            samples.extend(queue.drain());
         }
 
         // Append any self-stat samples as well.

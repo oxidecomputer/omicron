@@ -39,7 +39,6 @@ use std::sync::LazyLock;
 pub mod allow_list;
 pub mod project;
 pub mod role_assignment;
-pub mod role_builtin;
 pub mod silo;
 pub mod silo_user;
 pub mod user_builtin;
@@ -65,6 +64,18 @@ fn assert_valid_uuid(id: &uuid::Uuid) {
         uuid::Variant::RFC4122 => (),
         _ => panic!("unexpected variant in uuid: {:?}", id),
     };
+}
+
+#[cfg(test)]
+use omicron_uuid_kinds::GenericUuid;
+#[cfg(test)]
+use omicron_uuid_kinds::TypedUuid;
+#[cfg(test)]
+use omicron_uuid_kinds::TypedUuidKind;
+
+#[cfg(test)]
+fn assert_valid_typed_uuid<T: TypedUuidKind>(id: &TypedUuid<T>) {
+    assert_valid_uuid(&id.into_untyped_uuid());
 }
 
 #[cfg(test)]
