@@ -7,6 +7,7 @@ use crate::typed_uuid::DbTypedUuid;
 use chrono::DateTime;
 use chrono::Utc;
 use nexus_db_schema::schema::sled_expunge_request;
+use nexus_types::sled_expunge::FinishedSledExpungeRequestState;
 use omicron_common::now_db_precision;
 use omicron_uuid_kinds::RackKind;
 use omicron_uuid_kinds::RackUuid;
@@ -61,6 +62,16 @@ impl SledExpungeRequestState {
                 Some(SledExpungeRequestUnfinishedState::Expunging)
             }
             Self::Done | Self::Failed => None,
+        }
+    }
+
+    pub fn as_finished(&self) -> Option<FinishedSledExpungeRequestState> {
+        match self {
+            Self::Done => Some(FinishedSledExpungeRequestState::Done),
+            Self::Failed => Some(FinishedSledExpungeRequestState::Failed),
+            Self::WaitingForTrustQuorum
+            | Self::PoweringOff
+            | Self::Expunging => None,
         }
     }
 

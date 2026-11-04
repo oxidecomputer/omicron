@@ -214,6 +214,7 @@ pub use silo_user::SiloUserScim;
 pub use sled::SledTransition;
 pub use sled::TransitionError;
 pub use sled_expunge_request::SledExpungeRequestCompleteOutcome;
+pub use sled_expunge_request::SledExpungeRequestCreateOutcome;
 pub use sled_expunge_request::SledExpungeRequestUpdateOutcome;
 pub use support_bundle::FmSupportBundleCreateError;
 pub use support_bundle::SupportBundleCreateParams;

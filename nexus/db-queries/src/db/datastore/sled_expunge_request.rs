@@ -6,6 +6,7 @@ use super::DataStore;
 use super::SQL_BATCH_SIZE;
 use super::ValidateTransition;
 use super::sled::TransitionError;
+use super::trust_quorum::epoch_to_i64;
 use super::trust_quorum::i64_to_epoch;
 use crate::authz;
 use crate::authz::ApiResource;
@@ -18,6 +19,7 @@ use crate::db::update_and_check::UpdateAndQueryResult;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
@@ -33,7 +35,17 @@ use nexus_db_model::SledExpungeRequestTransition;
 use nexus_db_model::SledExpungeRequestUnfinishedState;
 use nexus_db_schema::schema::sled_expunge_request::dsl;
 use nexus_types::external_api::sled::SledPolicy;
+use nexus_types::external_api::sled::SledProvisionPolicy;
+use nexus_types::inventory::Collection;
+use nexus_types::sled_expunge::FinishedSledExpungeRequest;
+use nexus_types::sled_expunge::SledExpungeScrimletEvidence;
+use nexus_types::sled_expunge::check_sled_expunge_not_scrimlet;
+use nexus_types::sled_expunge::check_sled_expunge_policy_and_state;
+use nexus_types::sled_expunge::check_sled_expunge_serial_acknowledged;
+use nexus_types::sled_expunge::sled_expunge_removal_refusal;
+use nexus_types::trust_quorum::ProposedTrustQuorumConfig;
 use nexus_types::trust_quorum::SledExpungeTaskGate;
+use nexus_types::trust_quorum::TrustQuorumConfig;
 use nexus_types::trust_quorum::TrustQuorumConfigState;
 use nexus_types::trust_quorum::check_sled_expunge_task_gate;
 use nexus_types::trust_quorum::sled_expunge_task_gate_base_epoch;
@@ -47,6 +59,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledExpungeRequestUuid;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::inventory::SledRole;
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use trust_quorum_types::types::Epoch;
@@ -79,6 +92,108 @@ pub enum SledExpungeRequestCompleteOutcome {
     NotExpunging { current: SledExpungeRequest },
     ReAddPreparing { epoch: Epoch },
     ReAdded { epoch: Epoch, state: TrustQuorumConfigState },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[must_use]
+pub enum SledExpungeRequestCreateOutcome {
+    Created {
+        request: SledExpungeRequest,
+        removal_config: Box<TrustQuorumConfig>,
+    },
+    AlreadyOutstanding {
+        request: SledExpungeRequest,
+    },
+}
+
+const TRUST_QUORUM_CONFIGURATION_PKEY: &str = "trust_quorum_configuration_pkey";
+const TRUST_QUORUM_ACTIVE_CONFIGURATIONS_INDEX: &str =
+    "trust_quorum_active_configurations";
+const UNFINISHED_BY_SLED_INDEX: &str =
+    "lookup_unfinished_sled_expunge_request_by_sled";
+const UNFINISHED_BY_BASEBOARD_INDEX: &str =
+    "lookup_unfinished_sled_expunge_request_by_baseboard";
+
+// TODO-RAINCLAUDE: why sled_expunge_request_create's transaction rolled back without a database error: Refused carries the public error as is; UniqueViolation carries what the database said about the constraint an insert hit (at 2.7 or 2.9), and the sled's baseboard, classified by CreateUniqueViolation after the rollback.
+#[derive(Debug)]
+enum CreateTransactionError {
+    Refused(Error),
+    UniqueViolation(CreateUniqueViolationInfo),
+}
+
+#[derive(Debug)]
+struct CreateUniqueViolationInfo {
+    constraint: Option<String>,
+    message: String,
+    details: Option<String>,
+    baseboard_id: BaseboardId,
+}
+
+// TODO-RAINCLAUDE: Raced: a concurrent insert took the trust quorum epoch (primary key or active-configurations index) or created this sled's unfinished request, so re-read. BaseboardRequest: the unfinished-by-baseboard index, which the explicit check before 2.2 normally reports first. Unexpected: any other constraint (for example (rack_id, tq_epoch) or a trust_quorum_member row) is an internal error naming it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CreateUniqueViolation {
+    Raced,
+    BaseboardRequest,
+    Unexpected,
+}
+
+impl CreateUniqueViolation {
+    fn classify(constraint: Option<&str>) -> Self {
+        match constraint {
+            Some(
+                TRUST_QUORUM_CONFIGURATION_PKEY
+                | TRUST_QUORUM_ACTIVE_CONFIGURATIONS_INDEX
+                | UNFINISHED_BY_SLED_INDEX,
+            ) => Self::Raced,
+            Some(UNFINISHED_BY_BASEBOARD_INDEX) => Self::BaseboardRequest,
+            Some(_) | None => Self::Unexpected,
+        }
+    }
+}
+
+// TODO-RAINCLAUDE: check 2.1's replay of the sled's unfinished request, shared by the transaction and the re-read after a rolled-back unique violation: the request must be for the authorized rack and carry the acknowledged serial number.
+fn sled_expunge_request_replay_outstanding(
+    sled_id: SledUuid,
+    rack_id: RackUuid,
+    acknowledged_serial: &str,
+    request: SledExpungeRequest,
+) -> Result<SledExpungeRequestCreateOutcome, Error> {
+    if RackUuid::from(request.rack_id) != rack_id {
+        return Err(Error::internal_error(&format!(
+            "creating an expunge request for sled {sled_id}: its unfinished \
+             request {} is for rack {}, but the trust quorum config \
+             authorized is for rack {rack_id}",
+            request.id, request.rack_id,
+        )));
+    }
+    check_sled_expunge_serial_acknowledged(
+        sled_id,
+        &request.serial_number,
+        acknowledged_serial,
+    )?;
+    Ok(SledExpungeRequestCreateOutcome::AlreadyOutstanding { request })
+}
+
+fn sled_expunge_request_raced_conflict(sled_id: SledUuid) -> Error {
+    Error::conflict(format!(
+        "Cannot expunge sled {sled_id}: a concurrent trust quorum \
+         reconfiguration or sled expunge request conflicted with this one. \
+         Retry the request; if this persists, contact Oxide support."
+    ))
+}
+
+fn sled_expunge_request_baseboard_conflict(
+    sled_id: SledUuid,
+    baseboard_id: &BaseboardId,
+    blocking: &SledExpungeRequest,
+) -> Error {
+    Error::conflict(format!(
+        "Cannot expunge sled {sled_id}: its baseboard {baseboard_id} already \
+         has an unfinished expunge request, {}, for sled {} (state {}). Wait \
+         for that request to finish, then retry; if it is not making \
+         progress, contact Oxide support.",
+        blocking.id, blocking.sled_id, blocking.state,
+    ))
 }
 
 // TODO-RAINCLAUDE: the transitions sled_expunge_request_transition may write; Done is left out so that only sled_expunge_request_complete enters it, in the same transaction that expunges the sled.
@@ -174,6 +289,418 @@ impl DataStore {
             requests.extend(batch);
         }
         Ok(requests)
+    }
+
+    // TODO-RAINCLAUDE: RFD 747 request creation, one retried transaction running checks 2.1 to 2.9 in order. 2.1 comes first so that a retry after a lost response finds the sled's unfinished request, even once the sled has left the trust quorum; it still needs the same serial number. Database errors stay retryable; every refusal rolls back all of the writes. Modify on the sled and on the rack's trust quorum config is checked here, once each, before the transaction; authz_tq must be for the sled's rack.
+    pub async fn sled_expunge_request_create(
+        &self,
+        opctx: &OpContext,
+        authz_sled: &authz::Sled,
+        authz_tq: &authz::TrustQuorumConfig,
+        acknowledged_serial: &str,
+        latest_collection: Option<&Collection>,
+    ) -> Result<SledExpungeRequestCreateOutcome, Error> {
+        opctx.authorize(authz::Action::Modify, authz_sled).await?;
+        opctx.authorize(authz::Action::Modify, authz_tq).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let sled_id = authz_sled.id();
+        let rack_id = authz_tq.rack().id();
+
+        let err = OptionalError::new();
+        let result = self
+            .transaction_retry_wrapper("sled_expunge_request_create")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    Self::sled_expunge_request_create_conn(
+                        &conn,
+                        authz_sled,
+                        authz_tq,
+                        acknowledged_serial,
+                        latest_collection,
+                        &err,
+                    )
+                    .await
+                }
+            })
+            .await;
+        let error = match result {
+            Ok(outcome) => return Ok(outcome),
+            Err(error) => error,
+        };
+        let violation = match err.take() {
+            None => {
+                return Err(public_error_from_diesel(
+                    error,
+                    ErrorHandler::Server,
+                ));
+            }
+            Some(CreateTransactionError::Refused(error)) => return Err(error),
+            Some(CreateTransactionError::UniqueViolation(violation)) => {
+                violation
+            }
+        };
+        let classified =
+            CreateUniqueViolation::classify(violation.constraint.as_deref());
+        let log_message = "unique violation creating a sled expunge request";
+        match classified {
+            CreateUniqueViolation::Raced
+            | CreateUniqueViolation::BaseboardRequest => warn!(
+                opctx.log, "{log_message}";
+                "sled_id" => %sled_id,
+                "constraint" => ?violation.constraint,
+                "classified" => ?classified,
+            ),
+            CreateUniqueViolation::Unexpected => error!(
+                opctx.log, "{log_message}";
+                "sled_id" => %sled_id,
+                "constraint" => ?violation.constraint,
+                "message" => &violation.message,
+                "details" => ?violation.details,
+            ),
+        }
+        let baseboard_violation = match classified {
+            CreateUniqueViolation::Raced => None,
+            CreateUniqueViolation::BaseboardRequest => {
+                Some(&violation.baseboard_id)
+            }
+            CreateUniqueViolation::Unexpected => {
+                let details = match &violation.details {
+                    Some(details) => format!(" ({details})"),
+                    None => String::new(),
+                };
+                return Err(Error::internal_error(&format!(
+                    "creating an expunge request for sled {sled_id}: \
+                     unexpected unique violation of {}: {}{details}",
+                    violation
+                        .constraint
+                        .as_deref()
+                        .unwrap_or("an unnamed constraint"),
+                    violation.message,
+                )));
+            }
+        };
+        Self::sled_expunge_request_create_raced_conn(
+            &conn,
+            sled_id,
+            rack_id,
+            acknowledged_serial,
+            baseboard_violation,
+        )
+        .await
+    }
+
+    async fn sled_expunge_request_create_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        authz_sled: &authz::Sled,
+        authz_tq: &authz::TrustQuorumConfig,
+        acknowledged_serial: &str,
+        latest_collection: Option<&Collection>,
+        err: &OptionalError<CreateTransactionError>,
+    ) -> Result<SledExpungeRequestCreateOutcome, DieselError> {
+        let sled_id = authz_sled.id();
+        let rack_id = authz_tq.rack().id();
+        let refuse =
+            |error: Error| err.bail(CreateTransactionError::Refused(error));
+
+        if let Some(request) =
+            Self::sled_expunge_request_unfinished_for_sled_conn(conn, sled_id)
+                .await?
+        {
+            return sled_expunge_request_replay_outstanding(
+                sled_id,
+                rack_id,
+                acknowledged_serial,
+                request,
+            )
+            .map_err(refuse);
+        }
+
+        let sled = {
+            use nexus_db_schema::schema::sled::dsl;
+            dsl::sled
+                .filter(dsl::time_deleted.is_null())
+                .filter(dsl::id.eq(to_db_typed_uuid(sled_id)))
+                .select(Sled::as_select())
+                .get_result_async(conn)
+                .await
+                .optional()?
+        };
+        let Some(sled) = sled else {
+            return Err(refuse(authz_sled.not_found()));
+        };
+        if sled.rack_id() != rack_id {
+            return Err(refuse(Error::internal_error(&format!(
+                "creating an expunge request for sled {sled_id}: the sled is \
+                 in rack {}, but the trust quorum config authorized is for \
+                 rack {rack_id}",
+                sled.rack_id(),
+            ))));
+        }
+        let baseboard_id = BaseboardId {
+            part_number: sled.part_number().to_string(),
+            serial_number: sled.serial_number().to_string(),
+        };
+        // TODO-RAINCLAUDE: the unfinished-by-baseboard unique index would otherwise fail the insert at 2.9; another sled row with this baseboard (for example one decommissioned since its request was created) still has an unfinished request.
+        if let Some(blocking) =
+            Self::sled_expunge_request_unfinished_for_baseboard_conn(
+                conn,
+                &baseboard_id,
+            )
+            .await?
+        {
+            return Err(refuse(sled_expunge_request_baseboard_conflict(
+                sled_id,
+                &baseboard_id,
+                &blocking,
+            )));
+        }
+        let unique_violation_or = |error: DieselError| {
+            if let DieselError::DatabaseError(
+                DatabaseErrorKind::UniqueViolation,
+                info,
+            ) = &error
+            {
+                err.bail(CreateTransactionError::UniqueViolation(
+                    CreateUniqueViolationInfo {
+                        constraint: info.constraint_name().map(str::to_string),
+                        message: info.message().to_string(),
+                        details: info.details().map(str::to_string),
+                        baseboard_id: baseboard_id.clone(),
+                    },
+                ))
+            } else {
+                error
+            }
+        };
+
+        if let Err(refusal) = check_sled_expunge_policy_and_state(
+            sled_id,
+            sled.policy(),
+            sled.state().into(),
+        ) {
+            let latest_finished =
+                Self::sled_expunge_request_latest_for_sled_conn(conn, sled_id)
+                    .await?;
+            let latest_finished = match latest_finished {
+                None => None,
+                Some(request) => {
+                    let Some(state) = request.state.as_finished() else {
+                        return Err(refuse(Error::internal_error(&format!(
+                            "creating an expunge request for sled {sled_id}: \
+                             request {} is {}, but this transaction found no \
+                             unfinished request for the sled",
+                            request.id, request.state,
+                        ))));
+                    };
+                    Some(FinishedSledExpungeRequest { id: request.id(), state })
+                }
+            };
+            return Err(refuse(refusal.into_error(latest_finished)));
+        }
+
+        check_sled_expunge_serial_acknowledged(
+            sled_id,
+            sled.serial_number(),
+            acknowledged_serial,
+        )
+        .map_err(refuse)?;
+
+        let sled_row_role = if sled.is_scrimlet() {
+            SledRole::Scrimlet
+        } else {
+            SledRole::Gimlet
+        };
+        check_sled_expunge_not_scrimlet(
+            sled_id,
+            &SledExpungeScrimletEvidence::from_collection(
+                latest_collection,
+                sled_id,
+                &baseboard_id,
+            ),
+            sled_row_role,
+        )
+        .map_err(refuse)?;
+
+        let base = Self::tq_load_reconfiguration_base_conn(conn, rack_id)
+            .await
+            .map_err(|error| match error {
+                TransactionError::Database(error) => error,
+                TransactionError::CustomError(error) => refuse(error),
+            })?;
+        let (last_committed_config, latest_epoch) =
+            base.require_last_committed().map_err(refuse)?;
+
+        let proposed = ProposedTrustQuorumConfig::remove_sled(
+            last_committed_config,
+            latest_epoch.next(),
+            &baseboard_id,
+        )
+        .map_err(|refusal| {
+            refuse(sled_expunge_removal_refusal(
+                sled_id,
+                last_committed_config,
+                refusal,
+            ))
+        })?;
+        let removal_config =
+            Self::tq_insert_config_on_base_conn(conn, authz_tq, base, proposed)
+                .await
+                .map_err(|error| match error {
+                    TransactionError::Database(error) => {
+                        unique_violation_or(error)
+                    }
+                    TransactionError::CustomError(error) => refuse(error),
+                })?;
+
+        let policy_err = OptionalError::new();
+        Self::sled_set_policy_conn(
+            conn,
+            sled_id,
+            SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::NonProvisionable,
+            },
+            ValidateTransition::Yes,
+            &policy_err,
+        )
+        .await
+        .map_err(|error| match policy_err.take() {
+            Some(TransitionError::External(error)) => refuse(error),
+            Some(error @ TransitionError::InvalidTransition { .. }) => {
+                refuse(Error::internal_error(&format!(
+                    "creating an expunge request for sled {sled_id}: making \
+                     the sled non-provisionable after checking that it is in \
+                     service and active: {}",
+                    InlineErrorChain::new(&error),
+                )))
+            }
+            None => error,
+        })?;
+
+        let tq_epoch = epoch_to_i64(removal_config.epoch).map_err(refuse)?;
+        let request = diesel::insert_into(dsl::sled_expunge_request)
+            .values(SledExpungeRequest::new(
+                rack_id,
+                sled_id,
+                baseboard_id.clone(),
+                tq_epoch,
+            ))
+            .returning(SledExpungeRequest::as_returning())
+            .get_result_async(conn)
+            .await
+            .map_err(unique_violation_or)?;
+
+        Ok(SledExpungeRequestCreateOutcome::Created {
+            request,
+            removal_config: Box::new(removal_config),
+        })
+    }
+
+    // TODO-RAINCLAUDE: after a Raced or BaseboardRequest unique violation rolled the creation back. This sled's unfinished request is read first, so a concurrent create for this sled that committed first is replayed as at 2.1 rather than reported as the blocker; then, for a baseboard violation, another sled row's unfinished request for the baseboard is named; otherwise (for example, another reconfiguration took the epoch) it is a conflict, which a retry resolves through the checks.
+    async fn sled_expunge_request_create_raced_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        sled_id: SledUuid,
+        rack_id: RackUuid,
+        acknowledged_serial: &str,
+        baseboard_violation: Option<&BaseboardId>,
+    ) -> Result<SledExpungeRequestCreateOutcome, Error> {
+        let to_public =
+            |error| public_error_from_diesel(error, ErrorHandler::Server);
+        if let Some(request) =
+            Self::sled_expunge_request_unfinished_for_sled_conn(conn, sled_id)
+                .await
+                .map_err(to_public)?
+        {
+            return sled_expunge_request_replay_outstanding(
+                sled_id,
+                rack_id,
+                acknowledged_serial,
+                request,
+            );
+        }
+        let Some(baseboard_id) = baseboard_violation else {
+            return Err(sled_expunge_request_raced_conflict(sled_id));
+        };
+        let blocking =
+            Self::sled_expunge_request_unfinished_for_baseboard_conn(
+                conn,
+                baseboard_id,
+            )
+            .await
+            .map_err(to_public)?;
+        Err(match blocking {
+            Some(blocking) => sled_expunge_request_baseboard_conflict(
+                sled_id,
+                baseboard_id,
+                &blocking,
+            ),
+            None => sled_expunge_request_raced_conflict(sled_id),
+        })
+    }
+
+    async fn sled_expunge_request_unfinished_for_sled_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        sled_id: SledUuid,
+    ) -> Result<Option<SledExpungeRequest>, DieselError> {
+        dsl::sled_expunge_request
+            .filter(dsl::sled_id.eq(to_db_typed_uuid(sled_id)))
+            .filter(dsl::state.eq_any(SledExpungeRequestState::UNFINISHED))
+            .select(SledExpungeRequest::as_select())
+            .get_result_async(conn)
+            .await
+            .optional()
+    }
+
+    async fn sled_expunge_request_unfinished_for_baseboard_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        baseboard_id: &BaseboardId,
+    ) -> Result<Option<SledExpungeRequest>, DieselError> {
+        dsl::sled_expunge_request
+            .filter(dsl::part_number.eq(baseboard_id.part_number.clone()))
+            .filter(dsl::serial_number.eq(baseboard_id.serial_number.clone()))
+            .filter(dsl::state.eq_any(SledExpungeRequestState::UNFINISHED))
+            .select(SledExpungeRequest::as_select())
+            .get_result_async(conn)
+            .await
+            .optional()
+    }
+
+    async fn sled_expunge_request_latest_for_sled_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        sled_id: SledUuid,
+    ) -> Result<Option<SledExpungeRequest>, DieselError> {
+        dsl::sled_expunge_request
+            .filter(dsl::sled_id.eq(to_db_typed_uuid(sled_id)))
+            .order_by((dsl::time_created.desc(), dsl::id.desc()))
+            .select(SledExpungeRequest::as_select())
+            .first_async(conn)
+            .await
+            .optional()
+    }
+
+    // TODO-RAINCLAUDE: the API calls this once the coordinator send is confirmed, or once the coordinator lookup finds the coordinator is not an in-service sled, so nothing was sent (trust_quorum_manager then aborts the config). It records a delivery fact rather than a state transition, so it applies in any state, finished ones included; requests start with send_uncertain set.
+    pub async fn sled_expunge_request_clear_send_uncertain(
+        &self,
+        opctx: &OpContext,
+        authz_request: &authz::SledExpungeRequest,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, authz_request).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let updated = diesel::update(dsl::sled_expunge_request)
+            .filter(dsl::id.eq(to_db_typed_uuid(authz_request.id())))
+            .set((
+                dsl::send_uncertain.eq(false),
+                dsl::time_modified.eq(now_db_precision()),
+            ))
+            .execute_async(&*conn)
+            .await
+            .map_err(|error| {
+                public_error_from_diesel(error, ErrorHandler::Server)
+            })?;
+        if updated == 0 {
+            return Err(authz_request.not_found());
+        }
+        Ok(())
     }
 
     pub async fn sled_expunge_request_advance(
@@ -571,8 +1098,14 @@ fn error_text(error: &Error) -> String {
 mod test {
     use super::SQL_BATCH_SIZE;
     use super::SledExpungeRequestCompleteOutcome;
+    use super::SledExpungeRequestCreateOutcome;
     use super::SledExpungeRequestUpdateOutcome;
+    use super::TRUST_QUORUM_CONFIGURATION_PKEY;
     use super::TransitionError;
+    use super::UNFINISHED_BY_BASEBOARD_INDEX;
+    use super::UNFINISHED_BY_SLED_INDEX;
+    use super::sled_expunge_request_baseboard_conflict;
+    use super::sled_expunge_request_raced_conflict;
     use super::tq_load_error_into_diesel;
     use crate::authn;
     use crate::authz;
@@ -591,6 +1124,7 @@ mod test {
     use diesel::prelude::*;
     use diesel::result::DatabaseErrorKind;
     use diesel::result::Error as DieselError;
+    use gateway_types::component::SpState;
     use itertools::iproduct;
     use nexus_db_errors::OptionalError;
     use nexus_db_errors::TransactionError;
@@ -608,10 +1142,25 @@ mod test {
     use nexus_db_model::SledExpungeRequestUnfinishedState;
     use nexus_db_model::to_db_typed_uuid;
     use nexus_db_schema::schema::sled_expunge_request::dsl;
+    use nexus_inventory::CollectionBuilder;
+    use nexus_inventory::examples as inventory_examples;
+    use nexus_inventory::examples::OmicronFileSourceResolverExampleKind;
     use nexus_types::external_api::sled::SledPolicy;
     use nexus_types::external_api::sled::SledProvisionPolicy;
+    use nexus_types::external_api::sled::SledState;
+    use nexus_types::inventory::Collection;
+    use nexus_types::inventory::SpType;
+    use nexus_types::sled_expunge::FinishedSledExpungeRequest;
+    use nexus_types::sled_expunge::FinishedSledExpungeRequestState;
+    use nexus_types::sled_expunge::SledExpungeScrimletEvidence;
+    use nexus_types::sled_expunge::check_sled_expunge_not_scrimlet;
+    use nexus_types::sled_expunge::check_sled_expunge_policy_and_state;
+    use nexus_types::sled_expunge::check_sled_expunge_serial_acknowledged;
+    use nexus_types::sled_expunge::sled_expunge_removal_refusal;
     use nexus_types::trust_quorum::IsLrtqUpgrade;
     use nexus_types::trust_quorum::ProposedTrustQuorumConfig;
+    use nexus_types::trust_quorum::RemoveSledError;
+    use nexus_types::trust_quorum::TrustQuorumConfig;
     use nexus_types::trust_quorum::TrustQuorumConfigState;
     use omicron_common::api::external::DataPageParams;
     use omicron_common::api::external::Error;
@@ -625,6 +1174,8 @@ mod test {
     use omicron_uuid_kinds::SledExpungeRequestKind;
     use omicron_uuid_kinds::SledExpungeRequestUuid;
     use omicron_uuid_kinds::SledUuid;
+    use sled_agent_types::inventory::SledRole;
+    use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
     use sled_hardware_types::BaseboardId;
     use std::collections::BTreeSet;
     use std::sync::Arc;
@@ -637,13 +1188,8 @@ mod test {
     const POWER_OFF_OUTCOME_MATCHES_STATE: &str =
         "power_off_outcome_matches_state";
     const LAST_ERROR_ONLY_IF_UNFINISHED: &str = "last_error_only_if_unfinished";
-    const UNFINISHED_BY_SLED_INDEX: &str =
-        "lookup_unfinished_sled_expunge_request_by_sled";
-    const UNFINISHED_BY_BASEBOARD_INDEX: &str =
-        "lookup_unfinished_sled_expunge_request_by_baseboard";
     const BY_RACK_AND_EPOCH_INDEX: &str =
         "lookup_sled_expunge_request_by_rack_and_epoch";
-
     type Conn = async_bb8_diesel::Connection<nexus_db_lookup::DbConnection>;
 
     fn unique_baseboard() -> BaseboardId {
@@ -835,7 +1381,7 @@ mod test {
     async fn test_sled_expunge_request_unique_indexes() {
         let logctx =
             dev::test_setup_log("test_sled_expunge_request_unique_indexes");
-        let db = TestDatabase::new_with_raw_datastore(&logctx.log).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let conn = db.datastore().pool_connection_for_tests().await.unwrap();
 
         for (&existing_state, &new_state) in iproduct!(
@@ -930,6 +1476,35 @@ mod test {
             "same rack and epoch",
         );
         assert_eq!(constraint, BY_RACK_AND_EPOCH_INDEX);
+
+        // TODO-RAINCLAUDE: creation classifies a unique violation by constraint name, so the trust quorum config primary key's name is pinned here too.
+        let fixture = CompleteFixture::new(&db).await;
+        let configs = db
+            .datastore()
+            .tq_list_config(
+                db.opctx(),
+                make_authz_tq(fixture.rack_id),
+                &DataPageParams::max_page(),
+            )
+            .await
+            .expect("listed the trust quorum configs");
+        let [epoch_1] = configs.as_slice() else {
+            panic!("the fixture has one trust quorum config: {configs:?}");
+        };
+        let result = diesel::insert_into(
+            nexus_db_schema::schema::trust_quorum_configuration::dsl::trust_quorum_configuration,
+        )
+        .values(epoch_1.clone())
+        .execute_async(&*conn)
+        .await;
+        assert_eq!(
+            expect_violation(
+                &result,
+                DatabaseErrorKind::UniqueViolation,
+                "a second config at epoch 1",
+            ),
+            TRUST_QUORUM_CONFIGURATION_PKEY,
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1070,7 +1645,32 @@ mod test {
                 .expect_err("a fleet viewer is denied complete"),
             not_found,
         );
+        assert_eq!(
+            datastore
+                .sled_expunge_request_clear_send_uncertain(
+                    &opctx,
+                    &authz_request,
+                )
+                .await
+                .expect_err("a fleet viewer is denied clear_send_uncertain"),
+            not_found,
+        );
         assert_eq!(read(datastore, &request).await, request);
+        assert_eq!(
+            create(
+                &db,
+                &CreateInput {
+                    opctx: &opctx,
+                    sled_id: SledUuid::new_v4(),
+                    rack_id: RackUuid::new_v4(),
+                    serial: "serial".to_string(),
+                    collection: None,
+                },
+            )
+            .await
+            .expect_err("a fleet viewer is denied create"),
+            Error::Forbidden,
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1298,8 +1898,14 @@ mod test {
     impl CompleteFixture {
         // TODO-RAINCLAUDE: a rack whose epoch 1 trust quorum holds ten baseboards, the last of which (never the coordinator) has a sled with one physical disk, and the first of which has a sled so that it can coordinate.
         async fn new(db: &TestDatabase) -> Self {
+            Self::with_members(db, 10).await
+        }
+
+        // TODO-RAINCLAUDE: as new, with only the first `members` of the ten baseboards in the trust quorum and in the fixture.
+        async fn with_members(db: &TestDatabase, members: usize) -> Self {
             let (opctx, datastore) = (db.opctx(), db.datastore());
-            let hw_ids = insert_hw_baseboard_ids(db).await;
+            let mut hw_ids = insert_hw_baseboard_ids(db).await;
+            hw_ids.truncate(members);
             let rack_id = RackUuid::new_v4();
             let target_hw = hw_ids.last().expect("at least one baseboard");
             let sled_id =
@@ -1972,5 +2578,1059 @@ mod test {
             bailed,
             Error::internal_error("context: loading a config: no configs"),
         );
+    }
+
+    fn authz_sled(sled_id: SledUuid) -> authz::Sled {
+        authz::Sled::new(authz::FLEET, sled_id, LookupType::by_id(sled_id))
+    }
+
+    // TODO-RAINCLAUDE: the scrimlet refusal creation should report for this sled and collection, or None if the rule allows it.
+    fn scrimlet_refusal(
+        sled_id: SledUuid,
+        baseboard_id: &BaseboardId,
+        collection: Option<&Collection>,
+        sled_row_role: SledRole,
+    ) -> Option<Error> {
+        check_sled_expunge_not_scrimlet(
+            sled_id,
+            &SledExpungeScrimletEvidence::from_collection(
+                collection,
+                sled_id,
+                baseboard_id,
+            ),
+            sled_row_role,
+        )
+        .err()
+    }
+
+    fn example_sled_agent(
+        sled_id: SledUuid,
+        baseboard_id: &BaseboardId,
+        role: SledRole,
+    ) -> sled_agent_types::inventory::Inventory {
+        inventory_examples::sled_agent(
+            sled_id,
+            baseboard_id.clone(),
+            role,
+            vec![],
+            vec![],
+            vec![],
+            None,
+            inventory_examples::file_source_resolver(
+                OmicronFileSourceResolverExampleKind::Success {
+                    deserialized_zone_manifest: false,
+                    has_mupdate_override: false,
+                },
+            ),
+            SvcsEnabledNotOnlineResult::DataUnavailable,
+        )
+    }
+
+    fn collection_with_sled_agent(
+        sled_id: SledUuid,
+        baseboard_id: &BaseboardId,
+        role: SledRole,
+    ) -> Collection {
+        let mut builder = CollectionBuilder::new("test");
+        builder
+            .found_sled_inventory(
+                "test",
+                example_sled_agent(sled_id, baseboard_id, role),
+            )
+            .expect("recorded the sled agent");
+        builder.build()
+    }
+
+    fn collection_with_sled_sp(
+        baseboard_id: &BaseboardId,
+        slot: u16,
+    ) -> Collection {
+        let mut builder = CollectionBuilder::new("test");
+        builder.found_sp_state(
+            "test",
+            RackUuid::new_v4(),
+            SpType::Sled,
+            slot,
+            SpState {
+                serial_number: baseboard_id.serial_number.clone(),
+                model: baseboard_id.part_number.clone(),
+                ..inventory_examples::sp_state("test")
+            },
+        );
+        builder.build()
+    }
+
+    #[derive(Clone)]
+    struct CreateInput<'a> {
+        opctx: &'a OpContext,
+        sled_id: SledUuid,
+        rack_id: RackUuid,
+        serial: String,
+        collection: Option<Collection>,
+    }
+
+    async fn create(
+        db: &TestDatabase,
+        input: &CreateInput<'_>,
+    ) -> Result<SledExpungeRequestCreateOutcome, Error> {
+        db.datastore()
+            .sled_expunge_request_create(
+                input.opctx,
+                &authz_sled(input.sled_id),
+                &make_authz_tq(input.rack_id),
+                &input.serial,
+                input.collection.as_ref(),
+            )
+            .await
+    }
+
+    // TODO-RAINCLAUDE: what creation may write that the tests can see for one sled: its request rows, its policy, and every trust quorum config of its rack (epoch and state), which covers a new removal config and a base moved to CommittedPartially.
+    #[derive(Debug, PartialEq, Eq)]
+    struct CreateWrites {
+        requests: Vec<SledExpungeRequest>,
+        sled_policy: SledPolicy,
+        configs: Vec<(i64, TrustQuorumConfigState)>,
+    }
+
+    impl CompleteFixture {
+        fn create_input<'a>(&self, opctx: &'a OpContext) -> CreateInput<'a> {
+            self.create_input_for(opctx, self.sled_id, &self.target)
+        }
+
+        fn create_input_for<'a>(
+            &self,
+            opctx: &'a OpContext,
+            sled_id: SledUuid,
+            baseboard_id: &BaseboardId,
+        ) -> CreateInput<'a> {
+            CreateInput {
+                opctx,
+                sled_id,
+                rack_id: self.rack_id,
+                serial: baseboard_id.serial_number.clone(),
+                collection: None,
+            }
+        }
+
+        async fn create_as_admin(
+            &self,
+            db: &TestDatabase,
+        ) -> Result<SledExpungeRequestCreateOutcome, Error> {
+            create(db, &self.create_input(db.opctx())).await
+        }
+
+        async fn create_writes(&self, db: &TestDatabase) -> CreateWrites {
+            let sled_id = self.sled_id;
+            let (opctx, datastore) = (db.opctx(), db.datastore());
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            let requests = dsl::sled_expunge_request
+                .filter(dsl::sled_id.eq(to_db_typed_uuid(sled_id)))
+                .order_by(dsl::id)
+                .select(SledExpungeRequest::as_select())
+                .load_async(&*conn)
+                .await
+                .expect("listed the sled's requests");
+            let configs = datastore
+                .tq_list_config(
+                    opctx,
+                    make_authz_tq(self.rack_id),
+                    &DataPageParams::max_page(),
+                )
+                .await
+                .expect("listed the trust quorum configs")
+                .into_iter()
+                .map(|config| {
+                    (config.epoch, TrustQuorumConfigState::from(config.state))
+                })
+                .collect();
+            CreateWrites {
+                requests,
+                sled_policy: sled_policy(db, sled_id).await,
+                configs,
+            }
+        }
+
+        // TODO-RAINCLAUDE: asserts that creating with input fails with expected and writes nothing visible for the fixture's sled and rack.
+        async fn expect_create_refused(
+            &self,
+            db: &TestDatabase,
+            input: &CreateInput<'_>,
+            expected: Error,
+        ) {
+            let before = self.create_writes(db).await;
+            assert_eq!(
+                create(db, input).await.expect_err("creation is refused"),
+                expected,
+            );
+            assert_eq!(self.create_writes(db).await, before, "{expected}");
+        }
+
+        async fn config(
+            &self,
+            db: &TestDatabase,
+            epoch: u64,
+        ) -> TrustQuorumConfig {
+            db.datastore()
+                .tq_get_config(
+                    db.opctx(),
+                    make_authz_tq(self.rack_id),
+                    Epoch(epoch),
+                )
+                .await
+                .expect("read a trust quorum config")
+                .unwrap_or_else(|| panic!("epoch {epoch} exists"))
+        }
+
+        async fn set_is_scrimlet(&self, db: &TestDatabase, is_scrimlet: bool) {
+            use nexus_db_schema::schema::sled::dsl;
+            let conn =
+                db.datastore().pool_connection_for_tests().await.unwrap();
+            let updated = diesel::update(dsl::sled)
+                .filter(dsl::id.eq(to_db_typed_uuid(self.sled_id)))
+                .set(dsl::is_scrimlet.eq(is_scrimlet))
+                .execute_async(&*conn)
+                .await
+                .expect("set is_scrimlet");
+            assert_eq!(updated, 1);
+        }
+
+        async fn expunge_sled(&self, db: &TestDatabase) {
+            db.datastore()
+                .sled_set_policy_to_expunged(
+                    db.opctx(),
+                    &authz_sled(self.sled_id),
+                )
+                .await
+                .expect("expunged the sled");
+        }
+    }
+
+    #[track_caller]
+    fn expect_created(
+        outcome: SledExpungeRequestCreateOutcome,
+    ) -> (SledExpungeRequest, TrustQuorumConfig) {
+        match outcome {
+            SledExpungeRequestCreateOutcome::Created {
+                request,
+                removal_config,
+            } => (request, *removal_config),
+            SledExpungeRequestCreateOutcome::AlreadyOutstanding { request } => {
+                panic!("expected a new request, found outstanding {request:?}")
+            }
+        }
+    }
+
+    fn unexpected_violation(
+        sled_id: SledUuid,
+        constraint: &str,
+        details: &str,
+    ) -> Error {
+        Error::internal_error(&format!(
+            "creating an expunge request for sled {sled_id}: unexpected unique \
+             violation of {constraint}: duplicate key value violates unique \
+             constraint \"{constraint}\" ({details})"
+        ))
+    }
+
+    fn serial_mismatch(sled_id: SledUuid, serial: &str, given: &str) -> Error {
+        check_sled_expunge_serial_acknowledged(sled_id, serial, given)
+            .expect_err("the serial numbers differ")
+    }
+
+    #[tokio::test]
+    async fn test_sled_expunge_request_create() {
+        let logctx = dev::test_setup_log("test_sled_expunge_request_create");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let fixture = CompleteFixture::new(&db).await;
+
+        let (request, removal_config) = expect_created(
+            fixture.create_as_admin(&db).await.expect("created a request"),
+        );
+        assert_eq!(
+            request,
+            SledExpungeRequest {
+                id: request.id,
+                time_created: request.time_created,
+                time_modified: request.time_created,
+                rack_id: fixture.rack_id.into(),
+                sled_id: fixture.sled_id.into(),
+                part_number: fixture.target.part_number.clone(),
+                serial_number: fixture.target.serial_number.clone(),
+                tq_epoch: 2,
+                state: SledExpungeRequestState::WaitingForTrustQuorum,
+                power_off_outcome: None,
+                send_uncertain: true,
+                last_error: None,
+                failure_reason: None,
+                time_completed: None,
+            },
+        );
+        assert_eq!(read(datastore, &request).await, request);
+
+        assert_eq!(removal_config.rack_id, fixture.rack_id);
+        assert_eq!(removal_config.epoch, Epoch(2));
+        assert_eq!(removal_config.last_committed_epoch, Some(Epoch(1)));
+        assert_eq!(removal_config.state, TrustQuorumConfigState::Preparing);
+        assert_eq!(
+            removal_config.members.keys().cloned().collect::<BTreeSet<_>>(),
+            fixture.members_without(&[&fixture.target]),
+        );
+        let mut stored = fixture.config(&db, 2).await;
+        // TODO-RAINCLAUDE: the returned config's time_created is Rust-side, at a finer resolution than the stored one.
+        stored.time_created = removal_config.time_created;
+        assert_eq!(stored, removal_config);
+
+        assert_eq!(
+            fixture.sled_and_disk_policy(&db).await,
+            (
+                SledPolicy::InService {
+                    provision_policy: SledProvisionPolicy::NonProvisionable,
+                },
+                PhysicalDiskPolicy::InService,
+            ),
+        );
+
+        let writes = fixture.create_writes(&db).await;
+        assert_eq!(
+            fixture.create_as_admin(&db).await.expect("create succeeds"),
+            SledExpungeRequestCreateOutcome::AlreadyOutstanding {
+                request: request.clone(),
+            },
+        );
+        assert_eq!(fixture.create_writes(&db).await, writes);
+        let wrong_serial = CreateInput {
+            serial: "not-the-serial".to_string(),
+            ..fixture.create_input(db.opctx())
+        };
+        fixture
+            .expect_create_refused(
+                &db,
+                &wrong_serial,
+                serial_mismatch(
+                    fixture.sled_id,
+                    &fixture.target.serial_number,
+                    "not-the-serial",
+                ),
+            )
+            .await;
+
+        fixture.commit(&db, 2).await;
+        let writes = fixture.create_writes(&db).await;
+        assert_eq!(
+            fixture
+                .create_as_admin(&db)
+                .await
+                .expect("create succeeds once the sled is not a member"),
+            SledExpungeRequestCreateOutcome::AlreadyOutstanding {
+                request: request.clone(),
+            },
+        );
+        assert_eq!(fixture.create_writes(&db).await, writes);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[track_caller]
+    fn split_outcomes(
+        outcomes: [&SledExpungeRequestCreateOutcome; 2],
+    ) -> (Vec<&SledExpungeRequest>, Vec<&SledExpungeRequest>) {
+        let mut created = Vec::new();
+        let mut outstanding = Vec::new();
+        for outcome in outcomes {
+            match outcome {
+                SledExpungeRequestCreateOutcome::Created {
+                    request, ..
+                } => created.push(request),
+                SledExpungeRequestCreateOutcome::AlreadyOutstanding {
+                    request,
+                } => outstanding.push(request),
+            }
+        }
+        (created, outstanding)
+    }
+
+    #[tokio::test]
+    async fn test_sled_expunge_request_create_concurrent() {
+        let logctx =
+            dev::test_setup_log("test_sled_expunge_request_create_concurrent");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+
+        // TODO-RAINCLAUDE: a fresh rack per trial, since a successful create uses up the sled; several trials so that more of the runs interleave inside the two transactions.
+        for _ in 0..5 {
+            let fixture = CompleteFixture::new(&db).await;
+            let (first, second) = tokio::join!(
+                fixture.create_as_admin(&db),
+                fixture.create_as_admin(&db),
+            );
+            let first = first.expect("the first create succeeds");
+            let second = second.expect("the second create succeeds");
+            let (created, outstanding) = split_outcomes([&first, &second]);
+            assert_eq!(
+                (created.len(), outstanding.len()),
+                (1, 1),
+                "exactly one concurrent create makes a request: {first:?}, \
+                 {second:?}",
+            );
+            assert_eq!(created[0], outstanding[0]);
+
+            let writes = fixture.create_writes(&db).await;
+            assert_eq!(writes.requests, vec![created[0].clone()]);
+            assert_eq!(
+                writes.configs,
+                vec![
+                    (1, TrustQuorumConfigState::Committed),
+                    (2, TrustQuorumConfigState::Preparing),
+                ],
+                "exactly one removal config was proposed",
+            );
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sled_expunge_request_create_raced_conn() {
+        let logctx =
+            dev::test_setup_log("test_sled_expunge_request_create_raced_conn");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let sled_id = SledUuid::new_v4();
+        let rack_id = RackUuid::new_v4();
+        let baseboard_id = unique_baseboard();
+        let serial = baseboard_id.serial_number.as_str();
+        let raced =
+            async |rack_id: RackUuid,
+                   serial: &str,
+                   baseboard_violation: Option<&BaseboardId>| {
+                DataStore::sled_expunge_request_create_raced_conn(
+                    &conn,
+                    sled_id,
+                    rack_id,
+                    serial,
+                    baseboard_violation,
+                )
+                .await
+            };
+        let baseboard = &baseboard_id;
+        let raced_conflict = sled_expunge_request_raced_conflict(sled_id);
+
+        insert_sled_expunge_request_for_sled(
+            datastore,
+            rack_id,
+            sled_id,
+            &baseboard_id,
+            1,
+            SledExpungeRequestState::Failed,
+        )
+        .await;
+        assert_eq!(
+            raced(rack_id, serial, Some(baseboard)).await,
+            Err(raced_conflict.clone()),
+            "a finished request does not count",
+        );
+
+        let blocking = insert_sled_expunge_request(
+            datastore,
+            RackUuid::new_v4(),
+            &baseboard_id,
+            2,
+            SledExpungeRequestState::PoweringOff,
+        )
+        .await;
+        assert_eq!(
+            raced(rack_id, serial, Some(baseboard)).await,
+            Err(sled_expunge_request_baseboard_conflict(
+                sled_id,
+                &baseboard_id,
+                &blocking,
+            )),
+            "another sled row's request blocks the baseboard",
+        );
+        assert_eq!(
+            raced(rack_id, serial, None).await,
+            Err(raced_conflict.clone()),
+            "the baseboard is only consulted for a baseboard violation",
+        );
+        diesel::delete(dsl::sled_expunge_request)
+            .filter(dsl::id.eq(blocking.id))
+            .execute_async(&*conn)
+            .await
+            .expect("deleted the blocking request");
+
+        // TODO-RAINCLAUDE: a concurrent create for this same sled also trips the baseboard index; it is replayed as this sled's request, never named as the blocker.
+        let unfinished = insert_sled_expunge_request_for_sled(
+            datastore,
+            rack_id,
+            sled_id,
+            &baseboard_id,
+            3,
+            SledExpungeRequestState::WaitingForTrustQuorum,
+        )
+        .await;
+        assert_eq!(
+            raced(rack_id, serial, Some(baseboard)).await,
+            Ok(SledExpungeRequestCreateOutcome::AlreadyOutstanding {
+                request: unfinished,
+            }),
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    fn still_preparing_conflict(epoch: u64) -> Error {
+        Error::conflict(format!(
+            "Trust quorum reconfiguration in progress: still preparing in \
+             epoch {epoch}. Wait for it to finish and retry, or abort it to \
+             reconfigure now."
+        ))
+    }
+
+    fn below_commit_threshold_conflict(
+        committing: &TrustQuorumConfig,
+    ) -> Error {
+        let min_acks = usize::from(committing.threshold.0)
+            + usize::from(committing.commit_crash_tolerance);
+        Error::conflict(format!(
+            "Trust quorum reconfiguration in progress: not enough nodes have \
+             acked commit in epoch {}. Expected at least {min_acks} acks, Got \
+             {} acks. If this persists please contact Oxide support.",
+            committing.epoch,
+            committing.acked_commits(),
+        ))
+    }
+
+    #[tokio::test]
+    async fn test_sled_expunge_request_create_in_flight_reconfiguration() {
+        let logctx = dev::test_setup_log(
+            "test_sled_expunge_request_create_in_flight_reconfiguration",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let fixture = CompleteFixture::new(&db).await;
+        let input = fixture.create_input(db.opctx());
+
+        // TODO-RAINCLAUDE: epoch 2 removes the target without a request, so the target is not a member of the latest config: each in-flight 409 below is reported before the membership 400 would be.
+        fixture.propose_removal(&db).await;
+        fixture
+            .expect_create_refused(&db, &input, still_preparing_conflict(2))
+            .await;
+
+        fixture.start_committing(&db, 2).await;
+        let committing = fixture.config(&db, 2).await;
+        assert_eq!(committing.acked_commits(), 0);
+        fixture
+            .expect_create_refused(
+                &db,
+                &input,
+                below_commit_threshold_conflict(&committing),
+            )
+            .await;
+
+        fixture.finish_committing(&db, 2).await;
+        fixture
+            .expect_create_refused(
+                &db,
+                &input,
+                sled_expunge_removal_refusal(
+                    fixture.sled_id,
+                    &fixture.config(&db, 2).await,
+                    RemoveSledError::NotMember { sled: fixture.target.clone() },
+                ),
+            )
+            .await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sled_expunge_request_create_commits_base_partially() {
+        let logctx = dev::test_setup_log(
+            "test_sled_expunge_request_create_commits_base_partially",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let fixture = CompleteFixture::new(&db).await;
+        let other = BaseboardId::from(fixture.hw_ids[1].clone());
+        fixture.propose(&db, 2, 1, fixture.members_without(&[&other])).await;
+        fixture.start_committing(&db, 2).await;
+        let committing = fixture.config(&db, 2).await;
+        let min_acks = usize::from(committing.threshold.0)
+            + usize::from(committing.commit_crash_tolerance);
+        assert!(min_acks < committing.members.len());
+        assert_eq!(
+            datastore
+                .tq_update_commit_status(
+                    opctx,
+                    make_authz_tq(fixture.rack_id),
+                    Epoch(2),
+                    committing.members.keys().take(min_acks).cloned().collect(),
+                )
+                .await
+                .expect("acked K+Z commits"),
+            TrustQuorumConfigState::Committing,
+        );
+
+        // TODO-RAINCLAUDE: a 2.9 failure rolls back tq_insert_config_on_base_conn's move of epoch 2 to CommittedPartially, not only the new config.
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let at_epoch = insert_sled_expunge_request(
+            datastore,
+            fixture.rack_id,
+            &unique_baseboard(),
+            3,
+            SledExpungeRequestState::Done,
+        )
+        .await;
+        fixture
+            .expect_create_refused(
+                &db,
+                &fixture.create_input(opctx),
+                unexpected_violation(
+                    fixture.sled_id,
+                    BY_RACK_AND_EPOCH_INDEX,
+                    &format!(
+                        "Key (rack_id,tq_epoch)=('{}',3) already exists.",
+                        fixture.rack_id,
+                    ),
+                ),
+            )
+            .await;
+        assert_eq!(
+            fixture.create_writes(&db).await.configs,
+            vec![
+                (1, TrustQuorumConfigState::Committed),
+                (2, TrustQuorumConfigState::Committing),
+            ],
+        );
+        diesel::delete(dsl::sled_expunge_request)
+            .filter(dsl::id.eq(at_epoch.id))
+            .execute_async(&*conn)
+            .await
+            .expect("deleted the request at the removal epoch");
+
+        let (request, removal_config) = expect_created(
+            fixture.create_as_admin(&db).await.expect("created a request"),
+        );
+        assert_eq!(request.tq_epoch, 3);
+        assert_eq!(removal_config.last_committed_epoch, Some(Epoch(2)));
+        assert_eq!(
+            fixture.create_writes(&db).await.configs,
+            vec![
+                (1, TrustQuorumConfigState::Committed),
+                (2, TrustQuorumConfigState::CommittedPartially),
+                (3, TrustQuorumConfigState::Preparing),
+            ],
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sled_expunge_request_create_sled_not_in_service() {
+        let logctx = dev::test_setup_log(
+            "test_sled_expunge_request_create_sled_not_in_service",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let fixture = CompleteFixture::new(&db).await;
+        let input = fixture.create_input(db.opctx());
+        fixture.expunge_sled(&db).await;
+        let refusal = check_sled_expunge_policy_and_state(
+            fixture.sled_id,
+            SledPolicy::Expunged,
+            SledState::Active,
+        )
+        .expect_err("an expunged sled is refused");
+
+        fixture
+            .expect_create_refused(&db, &input, refusal.into_error(None))
+            .await;
+
+        let failed = fixture
+            .insert_request(&db, 5, SledExpungeRequestState::Failed)
+            .await;
+        let done =
+            fixture.insert_request(&db, 6, SledExpungeRequestState::Done).await;
+        // TODO-RAINCLAUDE: two inserts can share a time_created at the database's resolution, so make the order explicit, one way and then the other.
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        for (older, newer, newer_state) in [
+            (&failed, &done, FinishedSledExpungeRequestState::Done),
+            (&done, &failed, FinishedSledExpungeRequestState::Failed),
+        ] {
+            diesel::update(dsl::sled_expunge_request)
+                .filter(dsl::id.eq(older.id))
+                .set(
+                    dsl::time_created
+                        .eq(newer.time_created - chrono::Duration::hours(1)),
+                )
+                .execute_async(&*conn)
+                .await
+                .expect("backdated the older request");
+            diesel::update(dsl::sled_expunge_request)
+                .filter(dsl::id.eq(newer.id))
+                .set(dsl::time_created.eq(newer.time_created))
+                .execute_async(&*conn)
+                .await
+                .expect("restored the newer request's time_created");
+            fixture
+                .expect_create_refused(
+                    &db,
+                    &input,
+                    refusal.into_error(Some(FinishedSledExpungeRequest {
+                        id: newer.id(),
+                        state: newer_state,
+                    })),
+                )
+                .await;
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sled_expunge_request_create_keeps_minimum_members() {
+        let logctx = dev::test_setup_log(
+            "test_sled_expunge_request_create_keeps_minimum_members",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let fixture = CompleteFixture::with_members(&db, 3).await;
+        fixture
+            .expect_create_refused(
+                &db,
+                &fixture.create_input(db.opctx()),
+                sled_expunge_removal_refusal(
+                    fixture.sled_id,
+                    &fixture.config(&db, 1).await,
+                    RemoveSledError::TooFewMembers {
+                        rack_id: fixture.rack_id,
+                        sled: fixture.target.clone(),
+                        remaining: 2,
+                    },
+                ),
+            )
+            .await;
+
+        let fixture = CompleteFixture::with_members(&db, 4).await;
+        expect_created(
+            fixture
+                .create_as_admin(&db)
+                .await
+                .expect("a 4-member trust quorum can lose a member"),
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sled_expunge_request_create_after_failed_request() {
+        let logctx = dev::test_setup_log(
+            "test_sled_expunge_request_create_after_failed_request",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let fixture = CompleteFixture::new(&db).await;
+        fixture.propose_removal(&db).await;
+        datastore
+            .tq_abort_config(
+                opctx,
+                make_authz_tq(fixture.rack_id),
+                Epoch(2),
+                "test abort".to_string(),
+            )
+            .await
+            .expect("aborted epoch 2");
+        let failed = fixture
+            .insert_request(&db, 2, SledExpungeRequestState::Failed)
+            .await;
+        datastore
+            .sled_set_provision_policy(
+                opctx,
+                &authz_sled(fixture.sled_id),
+                SledProvisionPolicy::NonProvisionable,
+            )
+            .await
+            .expect("made the sled non-provisionable");
+
+        let (request, removal_config) = expect_created(
+            fixture
+                .create_as_admin(&db)
+                .await
+                .expect("created after a failed request and aborted removal"),
+        );
+        assert_ne!(request.id, failed.id);
+        assert_eq!(request.tq_epoch, 3);
+        assert_eq!(removal_config.epoch, Epoch(3));
+        assert_eq!(removal_config.last_committed_epoch, Some(Epoch(1)));
+        let writes = fixture.create_writes(&db).await;
+        assert_eq!(
+            writes.requests.len(),
+            2,
+            "the failed request and the new one",
+        );
+        assert_eq!(
+            writes.configs,
+            vec![
+                (1, TrustQuorumConfigState::Committed),
+                (2, TrustQuorumConfigState::Aborted),
+                (3, TrustQuorumConfigState::Preparing),
+            ],
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sled_expunge_request_create_refusals() {
+        let logctx =
+            dev::test_setup_log("test_sled_expunge_request_create_refusals");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let fixture = CompleteFixture::new(&db).await;
+        let sled_id = fixture.sled_id;
+        let input = fixture.create_input(opctx);
+        let serial = input.serial.clone();
+
+        fixture
+            .expect_create_refused(
+                &db,
+                &CreateInput {
+                    serial: "not-the-serial".to_string(),
+                    ..input.clone()
+                },
+                serial_mismatch(sled_id, &serial, "not-the-serial"),
+            )
+            .await;
+
+        let scrimlet_refusals = [
+            (
+                "inventory role",
+                collection_with_sled_agent(
+                    sled_id,
+                    &fixture.target,
+                    SledRole::Scrimlet,
+                ),
+            ),
+            ("slot 14", collection_with_sled_sp(&fixture.target, 14)),
+        ];
+        for (why, collection) in scrimlet_refusals {
+            fixture
+                .expect_create_refused(
+                    &db,
+                    &CreateInput {
+                        collection: Some(collection.clone()),
+                        ..input.clone()
+                    },
+                    scrimlet_refusal(
+                        sled_id,
+                        &fixture.target,
+                        Some(&collection),
+                        SledRole::Gimlet,
+                    )
+                    .unwrap_or_else(|| panic!("refused by {why}")),
+                )
+                .await;
+        }
+
+        fixture.set_is_scrimlet(&db, true).await;
+        fixture
+            .expect_create_refused(
+                &db,
+                &input,
+                scrimlet_refusal(
+                    sled_id,
+                    &fixture.target,
+                    None,
+                    SledRole::Scrimlet,
+                )
+                .expect("refused by is_scrimlet"),
+            )
+            .await;
+        fixture.set_is_scrimlet(&db, false).await;
+
+        let wrong_rack = RackUuid::new_v4();
+        fixture
+            .expect_create_refused(
+                &db,
+                &CreateInput { rack_id: wrong_rack, ..input.clone() },
+                Error::internal_error(&format!(
+                    "creating an expunge request for sled {sled_id}: the sled \
+                     is in rack {}, but the trust quorum config authorized is \
+                     for rack {wrong_rack}",
+                    fixture.rack_id,
+                )),
+            )
+            .await;
+
+        let missing_sled = SledUuid::new_v4();
+        fixture
+            .expect_create_refused(
+                &db,
+                &CreateInput { sled_id: missing_sled, ..input.clone() },
+                Error::ObjectNotFound {
+                    type_name: ResourceType::Sled,
+                    lookup_type: LookupType::ById(
+                        missing_sled.into_untyped_uuid(),
+                    ),
+                },
+            )
+            .await;
+
+        // TODO-RAINCLAUDE: a sled on a rack with no trust quorum config (an LRTQ rack) is refused with the loader's own message.
+        let lrtq_rack = RackUuid::new_v4();
+        let lrtq_hw = HwBaseboardId::from(unique_baseboard());
+        let lrtq_sled =
+            insert_sled_for_baseboard(datastore, lrtq_rack, &lrtq_hw).await;
+        fixture
+            .expect_create_refused(
+                &db,
+                &CreateInput {
+                    opctx,
+                    sled_id: lrtq_sled,
+                    rack_id: lrtq_rack,
+                    serial: lrtq_hw.serial_number.clone(),
+                    collection: None,
+                },
+                Error::invalid_request(format!(
+                    "Missing trust quorum configurations for rack {lrtq_rack}. \
+                     Upgrade to trust quorum required."
+                )),
+            )
+            .await;
+
+        let (request, _) = expect_created(
+            fixture.create_as_admin(&db).await.expect("created a request"),
+        );
+
+        // TODO-RAINCLAUDE: the 2.1 replay also refuses a request that is not for the authorized rack.
+        fixture
+            .expect_create_refused(
+                &db,
+                &CreateInput { rack_id: wrong_rack, ..input.clone() },
+                Error::internal_error(&format!(
+                    "creating an expunge request for sled {sled_id}: its \
+                     unfinished request {} is for rack {}, but the trust \
+                     quorum config authorized is for rack {wrong_rack}",
+                    request.id, fixture.rack_id,
+                )),
+            )
+            .await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sled_expunge_request_create_check_order() {
+        let logctx =
+            dev::test_setup_log("test_sled_expunge_request_create_check_order");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+
+        // TODO-RAINCLAUDE: an outstanding request is replayed before the policy check, so a retry after the sled was expunged still gets its request back.
+        let fixture = CompleteFixture::new(&db).await;
+        let (request, _) = expect_created(
+            fixture.create_as_admin(&db).await.expect("created a request"),
+        );
+        fixture.expunge_sled(&db).await;
+        assert_eq!(
+            fixture.create_as_admin(&db).await.expect("create succeeds"),
+            SledExpungeRequestCreateOutcome::AlreadyOutstanding { request },
+        );
+
+        // TODO-RAINCLAUDE: another sled row's unfinished request for the same baseboard is reported before the policy check.
+        let fixture = CompleteFixture::new(&db).await;
+        let blocking = insert_sled_expunge_request(
+            db.datastore(),
+            RackUuid::new_v4(),
+            &fixture.target,
+            7,
+            SledExpungeRequestState::PoweringOff,
+        )
+        .await;
+        fixture.expunge_sled(&db).await;
+        fixture
+            .expect_create_refused(
+                &db,
+                &fixture.create_input(db.opctx()),
+                sled_expunge_request_baseboard_conflict(
+                    fixture.sled_id,
+                    &fixture.target,
+                    &blocking,
+                ),
+            )
+            .await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sled_expunge_request_clear_send_uncertain() {
+        let logctx = dev::test_setup_log(
+            "test_sled_expunge_request_clear_send_uncertain",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let opctx = &opctx_as(&db, authn::Context::internal_api());
+
+        // TODO-RAINCLAUDE: send_uncertain records a delivery fact, so it is cleared on a finished request too.
+        for state in [
+            SledExpungeRequestState::WaitingForTrustQuorum,
+            SledExpungeRequestState::Failed,
+        ] {
+            let request =
+                insert_in_state(&db, RackUuid::new_v4(), 1, state).await;
+            assert!(request.send_uncertain);
+            let before = backdated(datastore, &request).await;
+            datastore
+                .sled_expunge_request_clear_send_uncertain(
+                    opctx,
+                    &authz_for(&before),
+                )
+                .await
+                .expect("cleared send_uncertain");
+            let cleared = read(datastore, &before).await;
+            assert!(cleared.time_modified > before.time_modified, "{state}");
+            assert_eq!(
+                cleared,
+                SledExpungeRequest {
+                    send_uncertain: false,
+                    time_modified: cleared.time_modified,
+                    ..before
+                },
+                "{state}",
+            );
+        }
+
+        let missing = new_sled_expunge_request(
+            RackUuid::new_v4(),
+            SledUuid::new_v4(),
+            unique_baseboard(),
+            1,
+            SledExpungeRequestState::WaitingForTrustQuorum,
+        );
+        assert_eq!(
+            datastore
+                .sled_expunge_request_clear_send_uncertain(
+                    opctx,
+                    &authz_for(&missing),
+                )
+                .await
+                .expect_err("a missing request is not found"),
+            Error::ObjectNotFound {
+                type_name: ResourceType::SledExpungeRequest,
+                lookup_type: LookupType::ById(missing.id().into_untyped_uuid()),
+            },
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 }

@@ -130,7 +130,7 @@ pub(super) fn i64_to_epoch(val: i64) -> Result<Epoch, Error> {
     Ok(Epoch(epoch))
 }
 
-fn epoch_to_i64(epoch: Epoch) -> Result<i64, Error> {
+pub(super) fn epoch_to_i64(epoch: Epoch) -> Result<i64, Error> {
     epoch.0.try_into().map_err(|_| {
         Error::internal_error(&format!(
             "Failed to convert trust quorum epoch to i64 in attempt to insert \
@@ -226,6 +226,36 @@ impl ReconfigurationBase {
             }) => Some(config),
         }
     }
+
+    // TODO-RAINCLAUDE: for a caller that needs a last committed configuration to build on: it and the latest epoch, like tq_load_latest_possible_committed_config_conn, with that loader's 400s for no configurations and for an aborted latest with no last committed epoch; a missing last committed row is already a 500 from tq_load_reconfiguration_base_conn, where that loader returns a 400.
+    pub(super) fn require_last_committed(
+        &self,
+    ) -> Result<(&TrustQuorumConfig, Epoch), Error> {
+        match &self.latest {
+            None => Err(missing_tq_configs_error(self.rack_id)),
+            Some(LatestConfig::Aborted { last_committed: None, .. }) => {
+                Err(no_committed_tq_config_error(self.rack_id))
+            }
+            Some(LatestConfig::Committed(config)) => Ok((config, config.epoch)),
+            Some(LatestConfig::Aborted {
+                epoch,
+                last_committed: Some(config),
+            }) => Ok((config, *epoch)),
+        }
+    }
+}
+
+fn missing_tq_configs_error(rack_id: RackUuid) -> Error {
+    Error::invalid_request(format!(
+        "Missing trust quorum configurations for rack {rack_id}. Upgrade to \
+         trust quorum required."
+    ))
+}
+
+fn no_committed_tq_config_error(rack_id: RackUuid) -> Error {
+    Error::invalid_request(format!(
+        "No committed trust quorum configuration for rack {rack_id}."
+    ))
 }
 
 // TODO-RAINCLAUDE: the latest trust quorum configuration for a rack, never preparing.
@@ -389,12 +419,9 @@ impl DataStore {
         let Some(latest_config) =
             Self::tq_get_latest_config_with_members_conn(conn, rack_id).await?
         else {
-            return Err(TransactionError::CustomError(Error::invalid_request(
-                format!(
-                    "Missing trust quorum configurations for rack {rack_id}. \
-                    Upgrade to trust quorum required."
-                ),
-            )));
+            return Err(TransactionError::CustomError(
+                missing_tq_configs_error(rack_id),
+            ));
         };
 
         let highest_epoch = latest_config.epoch;
@@ -406,10 +433,7 @@ impl DataStore {
         let latest_committed_config = if latest_config.state.is_aborted() {
             let Some(epoch) = latest_config.last_committed_epoch else {
                 return Err(TransactionError::CustomError(
-                    Error::invalid_request(format!(
-                        "No committed trust quorum configuration for \
-                        rack {rack_id}."
-                    )),
+                    no_committed_tq_config_error(rack_id),
                 ));
             };
 
