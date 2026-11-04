@@ -23,7 +23,9 @@ use crate::v2026_06_08_00;
 use crate::v2026_06_08_00::instance::InstanceCpuPlatform;
 
 /// Instance-stopping method choices
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
+)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum InstanceShutdownPolicy {
     /// Instance's VM is forcefully terminated immediately.

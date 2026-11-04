@@ -26,11 +26,13 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::ApplySledFilterExt;
+use nexus_db_model::InstanceShutdownPolicyColumns;
 use nexus_db_schema::enums::SledBpAvailabilityEnum;
 use nexus_db_schema::enums::VmmStateEnum;
 use nexus_db_schema::schema::vmm;
 use nexus_db_schema::schema::vmm::dsl;
 use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::instance::InstanceShutdownPolicy;
 use nexus_types::instance::Migrations;
 use nexus_types::instance::VmmRuntimeState;
 use omicron_common::api::external::CreateResult;
@@ -79,6 +81,19 @@ pub struct VmmBulkMarkStopForUpdateResult {
     pub batches: usize,
     /// The maximum number of VMMs marked per batch.
     pub batch_size: NonZeroU32,
+}
+
+/// The combination of a VMM that should be stopped for its hosting sled to be
+/// evacuated for an update, paired with its instance's shutdown policy.
+///
+/// This is returned by [`DataStore::vmm_list_stoppable_for_update_by_sled_id`].
+#[derive(Debug, Clone)]
+pub struct VmmStoppableForUpdate {
+    /// The stoppable VMM.
+    pub vmm: Vmm,
+
+    /// The shutdown policy for this VMM's instance.
+    pub shutdown_policy: InstanceShutdownPolicy,
 }
 
 /// Changeset for a VMM's runtime state.
@@ -574,7 +589,8 @@ impl DataStore {
     }
 
     /// Lists VMMs that have been marked as needing to be stopped for a sled
-    /// update, and that *can* be stopped.
+    /// update, and that *can* be stopped. Returns each such VMM with its
+    /// instance's shutdown policy.
     ///
     /// The query performed by this function is paginated by the sled and
     /// VMM UUIDs, in that order.
@@ -582,19 +598,42 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, (Uuid, Uuid)>,
-    ) -> ListResultVec<Vmm> {
+    ) -> ListResultVec<VmmStoppableForUpdate> {
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
         use nexus_db_schema::schema::sled::dsl as sled_dsl;
 
-        paginated_multicolumn(dsl::vmm, (dsl::sled_id, dsl::id), pagparams)
-            .inner_join(sled_dsl::sled.on(sled_dsl::id.eq(dsl::sled_id)))
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::stop_for_update_disposition_generation.is_not_null())
-            .filter(dsl::state.eq_any(DbVmmState::SHOULD_STOP_FOR_EVACUATION))
-            .sled_filter(SledFilter::InService)
-            .select(Vmm::as_select())
-            .load_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        let vmms_and_instances =
+            paginated_multicolumn(dsl::vmm, (dsl::sled_id, dsl::id), pagparams)
+                .inner_join(sled_dsl::sled.on(sled_dsl::id.eq(dsl::sled_id)))
+                .inner_join(
+                    instance_dsl::instance
+                        .on(instance_dsl::id.eq(dsl::instance_id)),
+                )
+                .filter(dsl::time_deleted.is_null())
+                .filter(
+                    dsl::stop_for_update_disposition_generation.is_not_null(),
+                )
+                .filter(
+                    dsl::state.eq_any(DbVmmState::SHOULD_STOP_FOR_EVACUATION),
+                )
+                .sled_filter(SledFilter::InService)
+                .select((
+                    Vmm::as_select(),
+                    InstanceShutdownPolicyColumns::as_select(),
+                ))
+                .load_async(&*self.pool_connection_authorized(opctx).await?)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+        vmms_and_instances
+            .into_iter()
+            .map(|(vmm, instance)| {
+                let shutdown_policy = instance.shutdown_policy()?;
+                Ok(VmmStoppableForUpdate { vmm, shutdown_policy })
+            })
+            .collect()
     }
 }
 
@@ -611,19 +650,30 @@ mod tests {
     use iddqd::IdOrdMap;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::ActiveSledBpAvailability;
+    use nexus_db_model::Instance;
+    use nexus_db_model::Project;
     use nexus_db_model::SledBlueprintAvailabilityInput;
     use nexus_db_model::SledBpAvailabilityState;
     use nexus_db_model::VmmCpuPlatform;
+    use nexus_types::external_api::instance::InstanceCreate;
+    use nexus_types::external_api::instance::InstanceNetworkInterfaceAttachment;
+    use nexus_types::external_api::project::ProjectCreate;
     use nexus_types::instance::VmmFailureReason;
     use nexus_types::instance::VmmState;
+    use nexus_types::silo::DEFAULT_SILO_ID;
+    use omicron_common::api::external::ByteCount;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_generation_kinds::UpdateDispositionGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::InstanceUuid;
+    use omicron_uuid_kinds::ProjectUuid;
     use omicron_uuid_kinds::SledUuid;
     use sled_agent_types::instance::MigrationState;
+    use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
+    use std::iter;
 
     #[tokio::test]
     async fn test_vmm_and_migration_update_runtime() {
@@ -1366,25 +1416,63 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-        // The states from which a VMM can still be stopped for an update. Only
-        // marked VMMs in these states should be listed by
-        // `vmm_list_stoppable_for_update_by_sled_id`.
-        let is_stoppable = |state: DbVmmState| {
-            matches!(
-                state,
-                DbVmmState::Starting
-                    | DbVmmState::Running
-                    | DbVmmState::Rebooting
+        // Create a test project to host all our fake instances.
+        let (authz_project, _) = datastore
+            .project_create(
+                &opctx,
+                Project::new_with_id(
+                    ProjectUuid::new_v4(),
+                    DEFAULT_SILO_ID,
+                    ProjectCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "test-project".parse().unwrap(),
+                            description: "".into(),
+                        },
+                        defaults: None,
+                    },
+                ),
             )
-        };
+            .await
+            .expect("created project");
+
+        // For each stoppable VMM we insert, pick a different shutdown policy
+        // and record the choice to check below.
+        let mut shutdown_policy_iter = iter::once(
+            InstanceShutdownPolicy::HardOff,
+        )
+        .chain((1000..).step_by(100).map(|timeout_secs| {
+            InstanceShutdownPolicy::PowerButton { timeout_secs }
+        }));
+        let mut expected_shutdown_policies =
+            BTreeMap::<Uuid, InstanceShutdownPolicy>::new();
 
         // Insert 2 VMMs (one marked to stop, one not) in each state per sled
-        // (2 in-service and 1 expunged).
+        // (2 in-service and 1 expunged). Each VMM also gets an associated
+        // instance, required by `vmm_list_stoppable_for_update_by_sled_id`'s
+        // join against the instance table to look up the shutdown policy.
         let generation = UpdateDispositionGeneration::from(1);
         let sled_a = SledUuid::new_v4();
         let sled_b = SledUuid::new_v4();
         let sled_expunged = SledUuid::new_v4();
         let mut vmms = Vec::new();
+
+        // Do we expect a given VMM to be stoppable (i.e., listed by
+        // `vmm_list_stoppable_for_update_by_sled_id()`)? That requires:
+        //
+        // 1. It has been marked to be stopped
+        // 2. It's not on the sled we're marking expunged
+        // 3. Its state is stoppable
+        let is_stoppable = |vmm: &Vmm| {
+            vmm.stop_for_update_disposition_generation.is_some()
+                && vmm.sled_id() != sled_expunged
+                && matches!(
+                    vmm.state,
+                    DbVmmState::Starting
+                        | DbVmmState::Running
+                        | DbVmmState::Rebooting
+                )
+        };
+
         for sled_id in [sled_a, sled_b, sled_expunged] {
             // The query only returns VMMs on in-service sleds. We store the
             // three sleds in the db.
@@ -1409,28 +1497,77 @@ mod tests {
 
             for &state in DbVmmState::ALL_STATES {
                 for marker in [Some(generation), None] {
+                    let instance_id = InstanceUuid::new_v4();
                     let failure_reason = (state == DbVmmState::Failed)
                         .then_some(db::model::VmmFailureReason::FromSledAgent);
-                    let vmm = datastore
-                        .vmm_insert(
-                            &opctx,
-                            Vmm {
-                                id: Uuid::new_v4(),
-                                time_created: Utc::now(),
-                                time_deleted: None,
-                                instance_id: Uuid::new_v4(),
-                                sled_id: sled_id.into(),
-                                propolis_ip: "10.1.9.32".parse().unwrap(),
-                                propolis_port: 420.into(),
-                                cpu_platform: VmmCpuPlatform::SledDefault,
-                                time_state_updated: Utc::now(),
-                                generation: Generation::new(),
-                                state,
-                                failure_reason,
-                                stop_for_update_disposition_generation: marker
-                                    .map(Into::into),
+                    let vmm = Vmm {
+                        id: Uuid::new_v4(),
+                        time_created: Utc::now(),
+                        time_deleted: None,
+                        instance_id: instance_id.into_untyped_uuid(),
+                        sled_id: sled_id.into(),
+                        propolis_ip: "10.1.9.32".parse().unwrap(),
+                        propolis_port: 420.into(),
+                        cpu_platform: VmmCpuPlatform::SledDefault,
+                        time_state_updated: Utc::now(),
+                        generation: Generation::new(),
+                        state,
+                        failure_reason,
+                        stop_for_update_disposition_generation: marker
+                            .map(Into::into),
+                    };
+
+                    // If this VMM is stoppable, pick a unique shutdown policy
+                    // from our iterator and record the choice for our assertion
+                    // later. Otherwise, pick an arbitrary policy.
+                    let shutdown_policy = if is_stoppable(&vmm) {
+                        let policy = shutdown_policy_iter
+                            .next()
+                            .expect("iter is effectively infinite");
+                        expected_shutdown_policies.insert(vmm.id, policy);
+                        policy
+                    } else {
+                        InstanceShutdownPolicy::HardOff
+                    };
+
+                    datastore.project_create_instance(
+                        &opctx,
+                        &authz_project,
+                        Instance::new(
+                            instance_id,
+                            authz_project.id(),
+                            &InstanceCreate {
+                                identity: IdentityMetadataCreateParams {
+                                    name: format!("instance-{}", vmm.id)
+                                        .parse()
+                                        .unwrap(),
+                                    description: "".into(),
+                                },
+                                ncpus: 2i64.try_into().unwrap(),
+                                memory: ByteCount::from_gibibytes_u32(16),
+                                hostname: "myhostname".try_into().unwrap(),
+                                user_data: Vec::new(),
+                                network_interfaces:
+                                    InstanceNetworkInterfaceAttachment::None,
+                                external_ips: Vec::new(),
+                                disks: Vec::new(),
+                                boot_disk: None,
+                                cpu_platform: None,
+                                ssh_public_keys: None,
+                                start: false,
+                                auto_restart_policy: Default::default(),
+                                anti_affinity_groups: Vec::new(),
+                                multicast_groups: Vec::new(),
+                                enable_jumbo_frames: false,
+                                shutdown_policy: Some(shutdown_policy),
                             },
-                        )
+                        ),
+                    )
+                    .await
+                    .expect("instance created successfully");
+
+                    let vmm = datastore
+                        .vmm_insert(&opctx, vmm)
                         .await
                         .expect("VMM should be inserted successfully");
                     vmms.push(vmm);
@@ -1450,15 +1587,8 @@ mod tests {
         assert_eq!(row_count, 60);
 
         // Check there are 6 stoppable VMMs (3 per in-service sled).
-        let expected_ids: BTreeSet<Uuid> = vmms
-            .iter()
-            .filter(|vmm| {
-                vmm.sled_id() != sled_expunged
-                    && vmm.stop_for_update_disposition_generation.is_some()
-                    && is_stoppable(vmm.state)
-            })
-            .map(|vmm| vmm.id)
-            .collect();
+        let expected_ids: BTreeSet<Uuid> =
+            expected_shutdown_policies.keys().copied().collect();
         assert_eq!(expected_ids.len(), 6);
 
         // Check the retrieved ids for stoppable VMMs are the same as the
@@ -1472,8 +1602,16 @@ mod tests {
             .expect("marked VMMs should be listed");
         assert_eq!(listed.len(), expected_ids.len());
         let listed_ids: BTreeSet<Uuid> =
-            listed.iter().map(|vmm| vmm.id).collect();
+            listed.iter().map(|stoppable_vmm| stoppable_vmm.vmm.id).collect();
         assert_eq!(listed_ids, expected_ids);
+        let listed_shutdown_policies: BTreeMap<Uuid, InstanceShutdownPolicy> =
+            listed
+                .iter()
+                .map(|stoppable_vmm| {
+                    (stoppable_vmm.vmm.id, stoppable_vmm.shutdown_policy)
+                })
+                .collect();
+        assert_eq!(listed_shutdown_policies, expected_shutdown_policies);
 
         // Clean up.
         db.terminate().await;

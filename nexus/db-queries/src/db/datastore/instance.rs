@@ -115,8 +115,10 @@ impl From<(Instance, Option<Vmm>)> for InstanceAndActiveVmm {
     }
 }
 
-impl From<InstanceAndActiveVmm> for instance_types::Instance {
-    fn from(value: InstanceAndActiveVmm) -> Self {
+impl TryFrom<InstanceAndActiveVmm> for instance_types::Instance {
+    type Error = Error;
+
+    fn try_from(value: InstanceAndActiveVmm) -> Result<Self, Self::Error> {
         let time_run_state_updated = value
             .vmm
             .as_ref()
@@ -162,7 +164,8 @@ impl From<InstanceAndActiveVmm> for instance_types::Instance {
             }
         };
 
-        Self {
+        let shutdown_policy = value.instance.shutdown_policy()?;
+        Ok(Self {
             identity: value.instance.identity(),
             project_id: value.instance.project_id().into_untyped_uuid(),
             ncpus: value.instance.ncpus.into(),
@@ -183,8 +186,8 @@ impl From<InstanceAndActiveVmm> for instance_types::Instance {
             },
             auto_restart_status,
             enable_jumbo_frames: value.instance.enable_jumbo_frames,
-            shutdown_policy: value.instance.shutdown_policy(),
-        }
+            shutdown_policy: Some(shutdown_policy),
+        })
     }
 }
 
