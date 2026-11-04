@@ -94,10 +94,25 @@ pub enum SledExpungeRequestCompleteOutcome {
     ReAdded { epoch: Epoch, state: TrustQuorumConfigState },
 }
 
+// TODO-RAINCLAUDE: what sled_expunge_request_check_task_gate found. Inconsistent means the rack's trust quorum records contradict the request or each other (a loader or gate error, or a missing base config); it will not resolve by retrying, unlike the Err database errors. message is internal text, not for operators.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[must_use]
+pub enum SledExpungeTaskGateOutcome {
+    RemovalConfigMissing,
+    Gate(SledExpungeTaskGate),
+    Inconsistent { message: String },
+}
+
 // TODO-RAINCLAUDE: what sled_expunge_task_gate_conn found without bailing; inconsistent inputs bail instead.
 enum TaskGateConnOutcome {
     RemovalConfigMissing,
     Gate(SledExpungeTaskGate),
+}
+
+pub fn authz_sled_expunge_request_from_id(
+    id: SledExpungeRequestUuid,
+) -> authz::SledExpungeRequest {
+    authz::SledExpungeRequest::new(authz::FLEET, id, LookupType::by_id(id))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -980,7 +995,73 @@ impl DataStore {
             })
     }
 
-    // TODO-RAINCLAUDE: loads the task gate's inputs (the removal config, the latest non-aborted config, and the base sled_expunge_task_gate_base_epoch names) and runs the gate, for sled_expunge_request_complete. A missing removal config is an outcome rather than bailed, so that the caller decides what it means (complete reports an internal error); a missing base config, like every other inconsistent input, bails as an internal error prefixed with context.
+    // TODO-RAINCLAUDE: the waiting_for_trust_quorum step's gate check (RFD 747), outside sled_expunge_request_complete: every gate input is read in one transaction so the gate sees one snapshot of the rack's configs, and it uses the same loader as complete so the two cannot drift. It writes nothing; acting on SledRemoved relies on check_no_new_member_being_expunged_conn refusing re-adds and on complete re-running the gate in its own transaction. Database errors stay retryable inside the transaction; loader and gate errors are internal errors naming the request.
+    pub async fn sled_expunge_request_check_task_gate(
+        &self,
+        opctx: &OpContext,
+        request: &SledExpungeRequest,
+    ) -> Result<SledExpungeTaskGateOutcome, Error> {
+        // TODO-RAINCLAUDE: taking the listed row rather than re-reading it is fine: rack_id, tq_epoch and the baseboard never change after insert, and the request's state is not a gate input.
+        let rack_id = RackUuid::from(request.rack_id);
+        let authz_request = authz_sled_expunge_request_from_id(request.id());
+        opctx.authorize(authz::Action::Read, &authz_request).await?;
+        opctx
+            .authorize(
+                authz::Action::Read,
+                &authz::TrustQuorumConfig::for_rack_id(rack_id),
+            )
+            .await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let context = sled_expunge_request_context(request);
+        let tq_epoch = i64_to_epoch(request.tq_epoch)
+            .map_err(|error| error.internal_context(context.clone()))?;
+        let baseboard_id = request.baseboard_id();
+
+        let err = OptionalError::new();
+        let result = self
+            .transaction_retry_wrapper("sled_expunge_request_check_task_gate")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let baseboard_id = baseboard_id.clone();
+                let context = context.clone();
+                async move {
+                    Self::sled_expunge_task_gate_conn(
+                        &conn,
+                        &err,
+                        &context,
+                        rack_id,
+                        tq_epoch,
+                        &baseboard_id,
+                    )
+                    .await
+                }
+            })
+            .await;
+        match result {
+            Ok(TaskGateConnOutcome::RemovalConfigMissing) => {
+                Ok(SledExpungeTaskGateOutcome::RemovalConfigMissing)
+            }
+            Ok(TaskGateConnOutcome::Gate(gate)) => {
+                Ok(SledExpungeTaskGateOutcome::Gate(gate))
+            }
+            // TODO-RAINCLAUDE: every External error sled_expunge_task_gate_conn bails is an internal error about the trust quorum records; it becomes an outcome so the task can tell it from a retryable database error. complete instead returns it as an internal error.
+            Err(error) => match err.take() {
+                Some(TransitionError::External(error)) => {
+                    Ok(SledExpungeTaskGateOutcome::Inconsistent {
+                        message: error_text(&error),
+                    })
+                }
+                taken @ (Some(TransitionError::InvalidTransition {
+                    ..
+                })
+                | None) => {
+                    Err(sled_expunge_transaction_error(taken, error, &context))
+                }
+            },
+        }
+    }
+
+    // TODO-RAINCLAUDE: loads the task gate's inputs (the removal config, the latest non-aborted config, and the base sled_expunge_task_gate_base_epoch names) and runs the gate, for sled_expunge_request_complete and sled_expunge_request_check_task_gate. A missing removal config is an outcome rather than bailed, so that each caller decides what it means (the task fails the request; complete reports an internal error); a missing base config, like every other inconsistent input, bails as an internal error prefixed with context.
     async fn sled_expunge_task_gate_conn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         err: &OptionalError<TransitionError>,
@@ -1109,7 +1190,7 @@ fn sled_expunge_transaction_error(
     }
 }
 
-// TODO-RAINCLAUDE: maps a trust quorum loader's error inside sled_expunge_request_complete's transaction: database errors are returned untouched so restarts stay retryable, and the loader's own errors roll back as internal errors carrying the request context.
+// TODO-RAINCLAUDE: maps a trust quorum loader's error inside the transaction of whichever caller runs sled_expunge_task_gate_conn (sled_expunge_request_complete or sled_expunge_request_check_task_gate): database errors are returned untouched so restarts stay retryable, and the loader's own errors roll back as internal errors carrying the request context.
 fn tq_load_error_into_diesel(
     err: &OptionalError<TransitionError>,
     context: &str,
@@ -1153,10 +1234,12 @@ mod test {
     use super::SledExpungeRequestCompleteOutcome;
     use super::SledExpungeRequestCreateOutcome;
     use super::SledExpungeRequestUpdateOutcome;
+    use super::SledExpungeTaskGateOutcome;
     use super::TRUST_QUORUM_CONFIGURATION_PKEY;
     use super::TransitionError;
     use super::UNFINISHED_BY_BASEBOARD_INDEX;
     use super::UNFINISHED_BY_SLED_INDEX;
+    use super::authz_sled_expunge_request_from_id;
     use super::sled_expunge_request_baseboard_conflict;
     use super::sled_expunge_request_raced_conflict;
     use super::tq_load_error_into_diesel;
@@ -1173,6 +1256,7 @@ mod test {
     use crate::db::pub_test_utils::sled_expunge_request::insert_sled_expunge_request;
     use crate::db::pub_test_utils::sled_expunge_request::insert_sled_expunge_request_for_sled;
     use crate::db::pub_test_utils::sled_expunge_request::new_sled_expunge_request;
+    use crate::db::pub_test_utils::sled_expunge_request::set_sled_expunge_request_state;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::prelude::*;
     use diesel::result::DatabaseErrorKind;
@@ -1213,6 +1297,7 @@ mod test {
     use nexus_types::trust_quorum::IsLrtqUpgrade;
     use nexus_types::trust_quorum::ProposedTrustQuorumConfig;
     use nexus_types::trust_quorum::RemoveSledError;
+    use nexus_types::trust_quorum::SledExpungeTaskGate;
     use nexus_types::trust_quorum::TrustQuorumConfig;
     use nexus_types::trust_quorum::TrustQuorumConfigState;
     use omicron_common::api::external::DataPageParams;
@@ -1708,6 +1793,13 @@ mod test {
                 .expect_err("a fleet viewer is denied clear_send_uncertain"),
             not_found,
         );
+        assert_eq!(
+            datastore
+                .sled_expunge_request_check_task_gate(&opctx, &request)
+                .await
+                .expect_err("a fleet viewer is denied the task gate check"),
+            not_found,
+        );
         assert_eq!(read(datastore, &request).await, request);
         assert_eq!(
             create(
@@ -1730,11 +1822,7 @@ mod test {
     }
 
     fn authz_for(request: &SledExpungeRequest) -> authz::SledExpungeRequest {
-        authz::SledExpungeRequest::new(
-            authz::FLEET,
-            request.id(),
-            LookupType::by_id(request.id()),
-        )
+        authz_sled_expunge_request_from_id(request.id())
     }
 
     async fn read(
@@ -2115,11 +2203,19 @@ mod test {
             request: &SledExpungeRequest,
             message: &str,
         ) -> Error {
-            Error::internal_error(&format!(
+            Error::internal_error(&self.context_message(request, message))
+        }
+
+        fn context_message(
+            &self,
+            request: &SledExpungeRequest,
+            message: &str,
+        ) -> String {
+            format!(
                 "sled expunge request {} for {} (rack {}, removal epoch {}): \
                  {message}",
                 request.id, self.target, self.rack_id, request.tq_epoch,
-            ))
+            )
         }
 
         async fn sled_and_disk_policy(
@@ -2585,6 +2681,219 @@ mod test {
                 ),
             }
         }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[derive(Debug)]
+    enum TaskGateCase {
+        RemovalPreparing,
+        RemovalAborted,
+        RemovalConfigMissing,
+        UnrelatedPreparingOnRemoval,
+        UnrelatedPreparingOnLaterBase,
+        ReAdded,
+    }
+
+    #[tokio::test]
+    async fn test_sled_expunge_request_check_task_gate() {
+        let logctx =
+            dev::test_setup_log("test_sled_expunge_request_check_task_gate");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let opctx = &opctx_as(&db, authn::Context::internal_api());
+
+        for case in [
+            TaskGateCase::RemovalPreparing,
+            TaskGateCase::RemovalAborted,
+            TaskGateCase::RemovalConfigMissing,
+            TaskGateCase::UnrelatedPreparingOnRemoval,
+            TaskGateCase::UnrelatedPreparingOnLaterBase,
+            TaskGateCase::ReAdded,
+        ] {
+            let fixture = CompleteFixture::new(&db).await;
+            fixture.propose_removal(&db).await;
+            // TODO-RAINCLAUDE: not hw_ids[0], the fixture's only member with an in-service sled, which must stay in every config so that one can be proposed.
+            let other = BaseboardId::from(fixture.hw_ids[1].clone());
+            let without_both =
+                fixture.members_without(&[&fixture.target, &other]);
+            // TODO-RAINCLAUDE: every trust quorum change is made before the request row exists, since check_no_new_member_being_expunged_conn refuses re-adding a sled with an unfinished request.
+            let (tq_epoch, expected) = match case {
+                TaskGateCase::RemovalPreparing => (
+                    2,
+                    SledExpungeTaskGateOutcome::Gate(
+                        SledExpungeTaskGate::RemovalPreparing,
+                    ),
+                ),
+                TaskGateCase::RemovalAborted => {
+                    datastore
+                        .tq_abort_config(
+                            db.opctx(),
+                            make_authz_tq(fixture.rack_id),
+                            Epoch(2),
+                            "test".to_string(),
+                        )
+                        .await
+                        .expect("aborted the removal");
+                    (
+                        2,
+                        SledExpungeTaskGateOutcome::Gate(
+                            SledExpungeTaskGate::RemovalAborted,
+                        ),
+                    )
+                }
+                TaskGateCase::RemovalConfigMissing => {
+                    (9, SledExpungeTaskGateOutcome::RemovalConfigMissing)
+                }
+                TaskGateCase::UnrelatedPreparingOnRemoval => {
+                    fixture.commit(&db, 2).await;
+                    fixture.propose(&db, 3, 2, without_both).await;
+                    (
+                        2,
+                        SledExpungeTaskGateOutcome::Gate(
+                            SledExpungeTaskGate::SledRemoved,
+                        ),
+                    )
+                }
+                TaskGateCase::UnrelatedPreparingOnLaterBase => {
+                    fixture.commit(&db, 2).await;
+                    fixture
+                        .propose(
+                            &db,
+                            3,
+                            2,
+                            fixture.members_without(&[&fixture.target]),
+                        )
+                        .await;
+                    fixture.commit(&db, 3).await;
+                    fixture.propose(&db, 4, 3, without_both).await;
+                    (
+                        2,
+                        SledExpungeTaskGateOutcome::Gate(
+                            SledExpungeTaskGate::SledRemoved,
+                        ),
+                    )
+                }
+                TaskGateCase::ReAdded => {
+                    fixture.commit(&db, 2).await;
+                    fixture.propose(&db, 3, 2, fixture.members.clone()).await;
+                    fixture.commit(&db, 3).await;
+                    (
+                        2,
+                        SledExpungeTaskGateOutcome::Gate(
+                            SledExpungeTaskGate::ReAdded {
+                                epoch: Epoch(3),
+                                state: TrustQuorumConfigState::Committed,
+                            },
+                        ),
+                    )
+                }
+            };
+            let request = fixture
+                .insert_request(
+                    &db,
+                    tq_epoch,
+                    SledExpungeRequestState::WaitingForTrustQuorum,
+                )
+                .await;
+
+            assert_eq!(
+                datastore
+                    .sled_expunge_request_check_task_gate(opctx, &request)
+                    .await
+                    .unwrap_or_else(|error| {
+                        panic!("{case:?}: checked the gate: {error}")
+                    }),
+                expected,
+                "{case:?}",
+            );
+            assert_eq!(read(datastore, &request).await, request, "{case:?}");
+            assert_eq!(
+                fixture.sled_and_disk_policy(&db).await,
+                IN_SERVICE,
+                "{case:?}",
+            );
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sled_expunge_request_task_gate_missing_base_config() {
+        let logctx = dev::test_setup_log(
+            "test_sled_expunge_request_task_gate_missing_base_config",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let opctx = &opctx_as(&db, authn::Context::internal_api());
+        let fixture = CompleteFixture::new(&db).await;
+        fixture.propose_removal(&db).await;
+        fixture.commit(&db, 2).await;
+        fixture
+            .propose(&db, 3, 2, fixture.members_without(&[&fixture.target]))
+            .await;
+        fixture.commit(&db, 3).await;
+        fixture
+            .propose(&db, 4, 3, fixture.members_without(&[&fixture.target]))
+            .await;
+        // TODO-RAINCLAUDE: deleting epoch 3, the base of the Preparing epoch 4, is the only way to reach this inconsistency; nothing in Nexus deletes trust quorum configs.
+        {
+            use nexus_db_schema::schema::trust_quorum_configuration::dsl as config_dsl;
+            use nexus_db_schema::schema::trust_quorum_member::dsl as member_dsl;
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            let rack_id = fixture.rack_id.into_untyped_uuid();
+            diesel::delete(member_dsl::trust_quorum_member)
+                .filter(member_dsl::rack_id.eq(rack_id))
+                .filter(member_dsl::epoch.eq(3))
+                .execute_async(&*conn)
+                .await
+                .expect("deleted the epoch 3 members");
+            diesel::delete(config_dsl::trust_quorum_configuration)
+                .filter(config_dsl::rack_id.eq(rack_id))
+                .filter(config_dsl::epoch.eq(3))
+                .execute_async(&*conn)
+                .await
+                .expect("deleted the epoch 3 config");
+        }
+        let request = fixture
+            .insert_request(
+                &db,
+                2,
+                SledExpungeRequestState::WaitingForTrustQuorum,
+            )
+            .await;
+        let message = "no trust quorum configuration exists at epoch 3, the \
+                       base of the latest configuration (epoch 4)";
+
+        assert_eq!(
+            datastore
+                .sled_expunge_request_check_task_gate(opctx, &request)
+                .await
+                .expect("checked the gate"),
+            SledExpungeTaskGateOutcome::Inconsistent {
+                message: fixture.context_message(&request, message),
+            },
+        );
+
+        // TODO-RAINCLAUDE: complete loads the same inputs and reports the inconsistency as an internal error.
+        set_sled_expunge_request_state(
+            datastore,
+            &request,
+            SledExpungeRequestState::Expunging,
+        )
+        .await;
+        let expunging = read(datastore, &request).await;
+        assert_eq!(
+            datastore
+                .sled_expunge_request_complete(opctx, &authz_for(&expunging))
+                .await
+                .expect_err("a missing base config is an internal error"),
+            fixture.internal_error(&expunging, message),
+        );
+        assert_eq!(read(datastore, &request).await, expunging);
+        assert_eq!(fixture.sled_and_disk_policy(&db).await, IN_SERVICE);
 
         db.terminate().await;
         logctx.cleanup_successful();
