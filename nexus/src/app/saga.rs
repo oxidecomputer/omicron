@@ -67,6 +67,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::DemoSagaUuid;
+use omicron_uuid_kinds::GenericUuid;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -236,7 +237,7 @@ impl SagaExecutor {
         &self,
         dag: SagaDag,
     ) -> Result<RunnableSaga, Error> {
-        let saga_id = SagaId(Uuid::new_v4());
+        let saga_id = SagaId::new_v4();
         let saga_name = dag.saga_name();
 
         // Record this new saga in the quiesce state.  This will fail if saga
@@ -494,7 +495,7 @@ impl super::Nexus {
             pagparams.direction == dropshot::PaginationOrder::Ascending
         );
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        let marker = pagparams.marker.map(|s| SagaId::from(*s));
+        let marker = pagparams.marker.map(|s| SagaId::from_untyped_uuid(*s));
         let saga_list = self
             .sagas
             .sec_client
@@ -510,17 +511,20 @@ impl super::Nexus {
     pub(crate) async fn saga_get(
         &self,
         opctx: &OpContext,
-        id: Uuid,
+        id: SagaId,
     ) -> LookupResult<nexus_types::internal_api::views::Saga> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.sagas
             .sec_client
-            .saga_get(SagaId::from(id))
+            .saga_get(id)
             .await
             .map(nexus_types::internal_api::views::Saga::from)
             .map(Ok)
             .map_err(|_: ()| {
-                Error::not_found_by_id(ResourceType::SagaDbg, &id)
+                Error::not_found_by_id(
+                    ResourceType::SagaDbg,
+                    id.as_untyped_uuid(),
+                )
             })?
     }
 
@@ -537,7 +541,7 @@ impl super::Nexus {
         let saga_params = demo::Params { id: demo_saga_id };
         let saga_dag = create_saga_dag::<demo::SagaDemo>(saga_params)?;
         let runnable_saga = self.sagas.saga_prepare(saga_dag).await?;
-        let saga_id = runnable_saga.id().0;
+        let saga_id = runnable_saga.id();
         // We don't need the handle that runnable_saga.start() returns because
         // we're not going to wait for the saga to finish here.
         let _ = runnable_saga.start().await?;

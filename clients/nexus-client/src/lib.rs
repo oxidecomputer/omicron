@@ -10,18 +10,10 @@ progenitor::generate_api!(
     interface = Positional,
     derives = [schemars::JsonSchema, PartialEq],
     inner_type = slog::Logger,
-    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-        slog::debug!(log, "client request";
-            "method" => %request.method(),
-            "uri" => %request.url(),
-            "body" => ?&request.body(),
-        );
-    }),
-    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-        slog::debug!(log, "client response"; "result" => ?result);
-    }),
+    hooks = Expected,
     crates = {
         "iddqd" = "*",
+        "omicron-generation-kinds" = "*",
         "omicron-uuid-kinds" = "*",
         "oxnet" = "0.1.0",
     },
@@ -29,8 +21,14 @@ progenitor::generate_api!(
         Generation = omicron_generation_kinds::Generation,
         MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
-        NetworkInterface = sled_agent_types::inventory::NetworkInterface,
-        NetworkInterfaceKind = sled_agent_types::inventory::NetworkInterfaceKind,
+        // These `replace`s are against the `v1` fixed identifier, *not* the
+        // floating `latest` identifiers, because nexus-internal is
+        // client-side-versioned. Do not use floating identifiers here!
+        NetworkInterface =
+            sled_agent_types_versions::v1::inventory::NetworkInterface,
+        NetworkInterfaceKind =
+            sled_agent_types_versions::v1::inventory::NetworkInterfaceKind,
+        SledRole = sled_agent_types_versions::v1::inventory::SledRole,
     },
     patch = {
         SledAgentInfo = { derives = [PartialEq, Eq] },
@@ -38,6 +36,8 @@ progenitor::generate_api!(
         Baseboard = { derives = [PartialEq, Eq] }
     }
 );
+
+progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
 
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {

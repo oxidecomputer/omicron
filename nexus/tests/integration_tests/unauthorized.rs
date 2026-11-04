@@ -209,7 +209,7 @@ async fn test_unauthorized() {
             time_created: now,
             time_deleted: None,
             time_expires: None,
-            silo_id: DEFAULT_SILO_ID,
+            silo_id: DEFAULT_SILO_ID.into(),
             bearer_token: String::from("test-scim-token"),
         };
 
@@ -532,6 +532,12 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
         // Create a Certificate
         SetupReq::Post {
             url: &DEMO_CERTIFICATES_URL,
+            body: serde_json::to_value(&*DEMO_CERTIFICATE_CREATE).unwrap(),
+            id_routes: vec![],
+        },
+        // Create a Certificate in a non-default Silo
+        SetupReq::Post {
+            url: &DEMO_SYSTEM_CERTIFICATES_URL,
             body: serde_json::to_value(&*DEMO_CERTIFICATE_CREATE).unwrap(),
             id_routes: vec![],
         },

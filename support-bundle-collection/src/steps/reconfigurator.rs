@@ -5,18 +5,19 @@
 //! Collect reconfigurator state for support bundles
 
 use crate::collection::BundleCollection;
+use crate::output::BundleOutput;
 use crate::step::CollectionStepOutput;
+use crate::step::StepError;
 
 use anyhow::Context;
-use camino::Utf8Path;
 use nexus_reconfigurator_preparation::reconfigurator_state_load;
 use slog::info;
 use slog::warn;
 
 pub async fn collect(
     collection: &BundleCollection,
-    dir: &Utf8Path,
-) -> anyhow::Result<CollectionStepOutput> {
+    output: &BundleOutput,
+) -> Result<CollectionStepOutput, StepError> {
     let (log, opctx, datastore) =
         (collection.log(), collection.opctx(), collection.datastore());
 
@@ -26,7 +27,7 @@ pub async fn collect(
 
     const NMAX_BLUEPRINTS: usize = 300;
     let state = tokio::select! {
-        _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
+        _ = collection.stopped() => return Err(StepError::Stopped),
         result = reconfigurator_state_load(&opctx, &datastore, NMAX_BLUEPRINTS) => {
             match result {
                 Ok(state) => state,
@@ -42,24 +43,17 @@ pub async fn collect(
         }
     };
 
-    // serde_json's serialization API is synchronous, so use
-    // spawn_blocking to avoid blocking the async runtime.
-    let file_path = dir.join("reconfigurator_state.json");
+    // serde_json's serialization API is synchronous, so `write_with` runs it
+    // on a blocking thread, to avoid blocking the async runtime.
     let target_blueprint = state.target_blueprint;
     let num_blueprints = state.blueprints.len();
     let num_collections = state.collections.len();
-    tokio::task::spawn_blocking(move || {
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&file_path)
-            .with_context(|| format!("failed to open {}", file_path))?;
-        serde_json::to_writer_pretty(&file, &state).with_context(|| {
-            format!("failed to serialize reconfigurator state to {}", file_path)
+    output
+        .write_with("reconfigurator_state.json", move |w| {
+            serde_json::to_writer_pretty(w, &state)
+                .context("failed to serialize reconfigurator state")
         })
-    })
-    .await??;
+        .await?;
     info!(
         log,
         "Support bundle: collected reconfigurator state";

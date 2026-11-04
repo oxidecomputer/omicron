@@ -30,6 +30,7 @@ use nexus_types::external_api::silo::SiloIdentityMode;
 use nexus_types::external_api::user;
 use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
+use omicron_uuid_kinds::GenericUuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -219,8 +220,13 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
         "/device/success",
         "/device/verify",
         "/images",
+        "/images/irrelevant-path",
         "/utilization",
         "/access",
+        "/users",
+        "/users/irrelevant-path",
+        "/groups",
+        "/groups/irrelevant-path",
         "/lookup/",
         "/lookup/abc",
     ];
@@ -435,7 +441,7 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         priv_user.user.display_name,
         USER_TEST_PRIVILEGED.external_id.clone().unwrap()
     );
-    assert_eq!(priv_user.user.silo_id, DEFAULT_SILO.id());
+    assert_eq!(priv_user.user.silo_id, DEFAULT_SILO.id().into_untyped_uuid());
     assert_eq!(priv_user.silo_name, DEFAULT_SILO.name().clone());
     assert!(priv_user.fleet_viewer);
     assert!(priv_user.silo_admin);
@@ -452,7 +458,7 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         unpriv_user.user.display_name,
         USER_TEST_UNPRIVILEGED.external_id.clone().unwrap()
     );
-    assert_eq!(unpriv_user.user.silo_id, DEFAULT_SILO.id());
+    assert_eq!(unpriv_user.user.silo_id, DEFAULT_SILO.id().into_untyped_uuid());
     assert_eq!(unpriv_user.silo_name, DEFAULT_SILO.name().clone());
     assert!(!unpriv_user.fleet_viewer);
     assert!(!unpriv_user.silo_admin);
@@ -609,14 +615,11 @@ async fn test_login_redirect_multiple_silos(
 
     let client = &cptestctx.external_client;
     let silo_saml0 =
-        create_silo(&client, "saml-0-idps", false, SiloIdentityMode::SamlJit)
-            .await;
+        create_silo(&client, "saml-0-idps", SiloIdentityMode::SamlJit).await;
     let silo_saml1 =
-        create_silo(&client, "saml-1-idp", false, SiloIdentityMode::SamlJit)
-            .await;
+        create_silo(&client, "saml-1-idp", SiloIdentityMode::SamlJit).await;
     let silo_saml2 =
-        create_silo(&client, "saml-2-idps", false, SiloIdentityMode::SamlJit)
-            .await;
+        create_silo(&client, "saml-2-idps", SiloIdentityMode::SamlJit).await;
 
     for (i, silo) in [&silo_saml1, &silo_saml2].into_iter().enumerate() {
         let nidps = i + 1;

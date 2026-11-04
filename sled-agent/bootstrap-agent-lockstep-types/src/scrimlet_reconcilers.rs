@@ -12,6 +12,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+pub mod ddmd;
 pub mod dpd;
 pub mod lldpd;
 pub mod mgd;
@@ -149,5 +150,6 @@ pub enum ScrimletReconcilersStatus {
         lldpd_reconciler: ReconcilerStatus<lldpd::LldpdReconcilerStatus>,
         mgd_reconciler: ReconcilerStatus<mgd::MgdReconcilerStatus>,
         uplinkd_reconciler: ReconcilerStatus<uplinkd::UplinkdReconcilerStatus>,
+        ddmd_reconciler: ReconcilerStatus<ddmd::DdmdReconcilerStatus>,
     },
 }

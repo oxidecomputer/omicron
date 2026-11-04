@@ -10,6 +10,7 @@ use std::time::Instant;
 
 use crate::ROT_STAGING_DEVEL_SIGN;
 use crate::SIM_GIMLET_BOARD;
+use crate::SIM_PSC_BOARD;
 use crate::SIM_ROT_BOARD;
 use crate::SIM_SIDECAR_BOARD;
 use crate::config::SpCabooses;
@@ -598,7 +599,7 @@ impl SimSpUpdate {
     }
 
     pub(crate) fn get_component_caboose_value(
-        &mut self,
+        &self,
         component: SpComponent,
         slot: u16,
         key: [u8; 4],
@@ -707,6 +708,7 @@ impl SimSpUpdate {
 pub enum BaseboardKind {
     Gimlet,
     Sidecar,
+    Psc,
 }
 
 impl BaseboardKind {
@@ -714,6 +716,7 @@ impl BaseboardKind {
         match self {
             BaseboardKind::Gimlet => &SIM_GIMLET_BOARD,
             BaseboardKind::Sidecar => &SIM_SIDECAR_BOARD,
+            BaseboardKind::Psc => &SIM_PSC_BOARD,
         }
     }
 
@@ -721,6 +724,7 @@ impl BaseboardKind {
         match self {
             BaseboardKind::Gimlet => "SimGimlet",
             BaseboardKind::Sidecar => "SimSidecar",
+            BaseboardKind::Psc => "SimPsc",
         }
     }
 

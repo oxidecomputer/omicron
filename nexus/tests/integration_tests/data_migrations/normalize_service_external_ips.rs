@@ -19,6 +19,8 @@ use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_model::Name;
 use nexus_db_model::SqlU16;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ProjectUuid;
 use oxnet::Ipv4Net;
 use rand::seq::IndexedRandom as _;
 use std::net::IpAddr;
@@ -113,7 +115,7 @@ async fn before_impl(ctx: &MigrationContext<'_>) {
                     &each.ip.ip(),
                     &i32::from(each.first_port.0),
                     &i32::from(each.last_port.0),
-                    &each.project_id,
+                    &each.project_id.map(|id| id.into_untyped_uuid()),
                     &state,
                     &each.is_probe,
                 ],
@@ -261,7 +263,7 @@ fn create_untouched_instance_records() -> Vec<ExternalIp> {
                     (
                         Some(Name(format!("inst-{i}").parse().unwrap())),
                         Some(String::new()),
-                        Some(Uuid::new_v4()),
+                        Some(ProjectUuid::new_v4().into()),
                     )
                 } else {
                     (None, None, None)

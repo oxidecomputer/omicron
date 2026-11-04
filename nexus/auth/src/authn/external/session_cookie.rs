@@ -16,8 +16,8 @@ use nexus_types::authn::cookies::parse_cookies;
 use omicron_uuid_kinds::ConsoleSessionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::SiloUuid;
 use slog::debug;
-use uuid::Uuid;
 
 // many parts of the implementation will reference this OWASP guide
 // https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
@@ -25,7 +25,7 @@ use uuid::Uuid;
 pub trait Session {
     fn id(&self) -> ConsoleSessionUuid;
     fn silo_user_id(&self) -> SiloUserUuid;
-    fn silo_id(&self) -> Uuid;
+    fn silo_id(&self) -> SiloUuid;
     fn time_last_used(&self) -> DateTime<Utc>;
     fn time_created(&self) -> DateTime<Utc>;
 }
@@ -209,9 +209,9 @@ mod test {
     use http;
     use omicron_uuid_kinds::ConsoleSessionUuid;
     use omicron_uuid_kinds::SiloUserUuid;
+    use omicron_uuid_kinds::SiloUuid;
     use slog;
     use std::sync::Mutex;
-    use uuid::Uuid;
 
     // the mutex is annoying, but we need it in order to mutate the hashmap
     // without passing TestServerContext around as mutable
@@ -224,7 +224,7 @@ mod test {
         id: ConsoleSessionUuid,
         token: String,
         silo_user_id: SiloUserUuid,
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         time_created: DateTime<Utc>,
         time_last_used: DateTime<Utc>,
     }
@@ -236,7 +236,7 @@ mod test {
         fn silo_user_id(&self) -> SiloUserUuid {
             self.silo_user_id
         }
-        fn silo_id(&self) -> Uuid {
+        fn silo_id(&self) -> SiloUuid {
             self.silo_id
         }
         fn time_created(&self) -> DateTime<Utc> {
@@ -339,7 +339,7 @@ mod test {
                 id: ConsoleSessionUuid::new_v4(),
                 token: "abc".to_string(),
                 silo_user_id: SiloUserUuid::new_v4(),
-                silo_id: Uuid::new_v4(),
+                silo_id: SiloUuid::new_v4(),
                 time_last_used: Utc::now() - Duration::hours(2),
                 time_created: Utc::now() - Duration::hours(2),
             }]),
@@ -365,7 +365,7 @@ mod test {
                 id: ConsoleSessionUuid::new_v4(),
                 token: "abc".to_string(),
                 silo_user_id: SiloUserUuid::new_v4(),
-                silo_id: Uuid::new_v4(),
+                silo_id: SiloUuid::new_v4(),
                 time_last_used: Utc::now(),
                 time_created: Utc::now() - Duration::hours(20),
             }]),
@@ -392,7 +392,7 @@ mod test {
                 id: ConsoleSessionUuid::new_v4(),
                 token: "abc".to_string(),
                 silo_user_id: SiloUserUuid::new_v4(),
-                silo_id: Uuid::new_v4(),
+                silo_id: SiloUuid::new_v4(),
                 time_last_used,
                 time_created: Utc::now(),
             }]),

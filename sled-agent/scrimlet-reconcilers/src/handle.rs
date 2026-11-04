@@ -6,6 +6,7 @@
 //! it provides a suitable handle for `sled-agent`'s "long running tasks", and
 //! contains a handle to each of the inner service-specific reconcilers.
 
+use crate::ddmd_reconciler::DdmdReconciler;
 use crate::dpd_reconciler::DpdReconciler;
 use crate::lldpd_reconciler::LldpdReconciler;
 use crate::mgd_reconciler::MgdReconciler;
@@ -16,19 +17,61 @@ use crate::status::ScrimletStatus;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
 use crate::uplinkd_reconciler::UplinkdReconciler;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers as api_status;
+use omicron_common::address::DDMD_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
+use omicron_common::http_client::internal_http_client_builder;
 use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use slog::info;
+use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::sync::watch;
+
+pub(crate) const BGP_PORT: u16 = 179;
+
+/// Configures how mgd's BGP socket is set up.
+///
+/// In production mgd listens on `[::]:179` and connects to peers on
+/// port 179. In test environments a different address/port is
+/// used to avoid requiring elevated privileges.
+#[derive(Debug, Clone, Copy)]
+pub struct BgpSocketConfig {
+    /// Address mgd's BGP dispatcher listens on.
+    listen_addr: SocketAddr,
+}
+
+impl Default for BgpSocketConfig {
+    /// Production default: listen on `[::]:179`, peers on port 179.
+    fn default() -> Self {
+        let listen_addr =
+            SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, BGP_PORT, 0, 0).into();
+        Self { listen_addr }
+    }
+}
+
+impl BgpSocketConfig {
+    /// Test override: derive both listen address and peer port from `addr`.
+    pub fn for_test(listen_addr: SocketAddr) -> Self {
+        Self { listen_addr }
+    }
+
+    /// Returns the router listen address string for mgd configuration.
+    pub(crate) fn router_listen_addr(&self) -> SocketAddr {
+        self.listen_addr
+    }
+
+    /// Returns the port to use for BGP peers.
+    pub(crate) fn peer_port(&self) -> u16 {
+        self.listen_addr.port()
+    }
+}
 
 /// Mode in which the scrimlet reconcilers should run.
 ///
@@ -42,11 +85,12 @@ use tokio::sync::watch;
 #[derive(Debug, Clone, Copy)]
 pub enum ScrimletReconcilersMode {
     SwitchZone(ThisSledSwitchZoneUnderlayIpAddr),
-    #[cfg(any(test, feature = "testing"))]
     Test {
         mgs_addr: SocketAddr,
         dpd_addr: SocketAddr,
         mgd_addr: SocketAddr,
+        ddmd_addr: SocketAddr,
+        bgp_socket_config: BgpSocketConfig,
     },
 }
 
@@ -68,13 +112,12 @@ impl ScrimletReconcilersMode {
                 //
                 // The 15 second connect and read timeout are consistent with
                 // progenitor's normal defaults.
-                reqwest::ClientBuilder::new()
+                internal_http_client_builder()
                     .connect_timeout(Duration::from_secs(15))
                     .pool_idle_timeout(Duration::from_secs(10))
                     .build()
                     .expect("reqwest parameters are valid")
             }
-            #[cfg(any(test, feature = "testing"))]
             ScrimletReconcilersMode::Test { .. } => {
                 // Some of our tests use tokio's paused time. We want to
                 // construct a reqwest client that does not specify any timeouts
@@ -95,7 +138,6 @@ impl ScrimletReconcilersMode {
             ScrimletReconcilersMode::SwitchZone(ip) => {
                 SocketAddrV6::new(ip.into(), MGS_PORT, 0, 0).into()
             }
-            #[cfg(any(test, feature = "testing"))]
             ScrimletReconcilersMode::Test { mgs_addr, .. } => mgs_addr,
         };
         let baseurl = format!("http://{addr}");
@@ -114,7 +156,6 @@ impl ScrimletReconcilersMode {
             ScrimletReconcilersMode::SwitchZone(ip) => {
                 SocketAddrV6::new(ip.into(), DENDRITE_PORT, 0, 0).into()
             }
-            #[cfg(any(test, feature = "testing"))]
             ScrimletReconcilersMode::Test { dpd_addr, .. } => dpd_addr,
         };
         let baseurl = format!("http://{addr}");
@@ -137,7 +178,6 @@ impl ScrimletReconcilersMode {
             ScrimletReconcilersMode::SwitchZone(ip) => {
                 SocketAddrV6::new(ip.into(), MGD_PORT, 0, 0).into()
             }
-            #[cfg(any(test, feature = "testing"))]
             ScrimletReconcilersMode::Test { mgd_addr, .. } => mgd_addr,
         };
         let baseurl = format!("http://{addr}");
@@ -145,6 +185,24 @@ impl ScrimletReconcilersMode {
             &baseurl,
             self.reqwest_client(),
             parent_log.new(slog::o!("component" => "MgdReconcilerClient")),
+        )
+    }
+
+    pub(crate) fn ddmd_client(
+        self,
+        parent_log: &Logger,
+    ) -> ddm_admin_client::Client {
+        let addr: SocketAddr = match self {
+            ScrimletReconcilersMode::SwitchZone(ip) => {
+                SocketAddrV6::new(ip.into(), DDMD_PORT, 0, 0).into()
+            }
+            ScrimletReconcilersMode::Test { ddmd_addr, .. } => ddmd_addr,
+        };
+        let baseurl = format!("http://{addr}");
+        ddm_admin_client::Client::new_with_client(
+            &baseurl,
+            self.reqwest_client(),
+            parent_log.new(slog::o!("component" => "DdmdReconcilerClient")),
         )
     }
 }
@@ -228,12 +286,14 @@ impl ScrimletReconcilers {
                 lldpd_reconciler,
                 mgd_reconciler,
                 uplinkd_reconciler,
+                ddmd_reconciler,
             } = running;
             ScrimletReconcilersStatus::Running {
                 dpd_reconciler: dpd_reconciler.status(),
                 lldpd_reconciler: lldpd_reconciler.status(),
                 mgd_reconciler: mgd_reconciler.status(),
                 uplinkd_reconciler: uplinkd_reconciler.status(),
+                ddmd_reconciler: ddmd_reconciler.status(),
             }
         }
         // Otherwise, have we started determining our switch slot?
@@ -367,6 +427,7 @@ struct RunningReconcilers {
     lldpd_reconciler: ReconcilerTaskHandle<LldpdReconciler>,
     mgd_reconciler: ReconcilerTaskHandle<MgdReconciler>,
     uplinkd_reconciler: ReconcilerTaskHandle<UplinkdReconciler>,
+    ddmd_reconciler: ReconcilerTaskHandle<DdmdReconciler>,
 }
 
 impl RunningReconcilers {
@@ -399,17 +460,25 @@ impl RunningReconcilers {
         );
         let uplinkd_reconciler =
             ReconcilerTaskHandle::<UplinkdReconciler>::spawn(
-                scrimlet_status_rx,
-                networking_info.system_networking_config_rx,
+                scrimlet_status_rx.clone(),
+                networking_info.system_networking_config_rx.clone(),
                 networking_info.mode,
                 this_sled_switch_slot,
                 parent_log,
             );
+        let ddmd_reconciler = ReconcilerTaskHandle::<DdmdReconciler>::spawn(
+            scrimlet_status_rx,
+            networking_info.system_networking_config_rx,
+            networking_info.mode,
+            this_sled_switch_slot,
+            parent_log,
+        );
         Self {
             dpd_reconciler,
             lldpd_reconciler,
             mgd_reconciler,
             uplinkd_reconciler,
+            ddmd_reconciler,
         }
     }
 }

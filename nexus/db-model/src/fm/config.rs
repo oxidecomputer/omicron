@@ -27,6 +27,7 @@ pub struct FmConfig {
     pub analysis_enabled: Option<bool>,
     pub sitrep_limit: Option<SqlU32>,
     pub history_pruning_threshold: Option<SqlU32>,
+    pub certificate_expiry_warning_days: Option<SqlU32>,
 }
 
 impl FmConfig {
@@ -40,6 +41,7 @@ impl FmConfig {
                     analysis_enabled,
                     sitrep_limit,
                     history_pruning_threshold,
+                    certificate_expiry_warning_days,
                 },
         } = param;
         Ok(Self {
@@ -49,6 +51,8 @@ impl FmConfig {
             analysis_enabled: analysis_enabled.into_override(),
             sitrep_limit: sitrep_limit.map_override(|v| v.get().into()),
             history_pruning_threshold: history_pruning_threshold
+                .map_override(|v| v.get().into()),
+            certificate_expiry_warning_days: certificate_expiry_warning_days
                 .map_override(|v| v.get().into()),
         })
     }
@@ -69,6 +73,7 @@ impl TryFrom<FmConfig> for fm::FmConfigView {
             analysis_enabled,
             sitrep_limit,
             history_pruning_threshold,
+            certificate_expiry_warning_days,
             time_modified,
         } = value;
 
@@ -94,6 +99,10 @@ impl TryFrom<FmConfig> for fm::FmConfigView {
             analysis_enabled: analysis_enabled.into(),
             sitrep_limit: nz!(sitrep_limit)?.into(),
             history_pruning_threshold: nz!(history_pruning_threshold)?.into(),
+            certificate_expiry_warning_days: nz!(
+                certificate_expiry_warning_days
+            )?
+            .into(),
         };
         let version = NonZeroU32::new(version.into()).ok_or_else(|| {
             Error::invalid_value(

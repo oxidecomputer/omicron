@@ -10,6 +10,7 @@ use clap::Parser;
 use futures::StreamExt;
 use omicron_common::cmd::{CmdError, fatal};
 use omicron_gateway::{Config, MgsArguments, start_server};
+use omicron_uuid_kinds::RackUuid;
 use signal_hook::consts::signal;
 use signal_hook_tokio::Signals;
 use std::net::SocketAddrV6;
@@ -54,7 +55,7 @@ enum Args {
 struct ConfigProperties {
     id: Uuid,
     addresses: Vec<SocketAddrV6>,
-    rack_id: Option<Uuid>,
+    rack_id: Option<RackUuid>,
 }
 
 fn main() {
@@ -167,7 +168,8 @@ fn read_smf_config() -> Result<ConfigProperties, CmdError> {
         None
     } else {
         Some(
-            Uuid::try_parse(&prop_rack_id)
+            prop_rack_id
+                .parse::<RackUuid>()
                 .with_context(|| {
                     format!(
                         "failed to parse `{CONFIG_PG}/{PROP_RACK_ID}` \

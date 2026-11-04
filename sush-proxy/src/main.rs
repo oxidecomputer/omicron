@@ -9,8 +9,8 @@ use std::net::{SocketAddr, SocketAddrV6};
 use anyhow::Context;
 use camino::Utf8PathBuf;
 use clap::Parser;
+use omicron_sush_proxy::{Config, Tls, run};
 use slog::{Drain, o};
-use sush_proxy::{Config, Tls, run};
 
 #[derive(Debug, Parser)]
 #[clap(name = "sush-proxy", about = "sush switch zone proxy")]

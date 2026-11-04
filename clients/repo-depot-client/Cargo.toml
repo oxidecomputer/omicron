@@ -10,6 +10,7 @@ workspace = true
 [dependencies]
 omicron-workspace-hack.workspace = true
 progenitor.workspace = true
+progenitor-extras = { workspace = true, features = ["slog"] }
 reqwest.workspace = true
 schemars.workspace = true
 serde.workspace = true

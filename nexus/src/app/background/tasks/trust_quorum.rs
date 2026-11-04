@@ -22,6 +22,7 @@ use nexus_types::trust_quorum::{
     TrustQuorumConfig as NexusTrustQuorumConfig, TrustQuorumMemberState,
 };
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX_LENGTH, get_64_subnet};
+use omicron_common::http_client::internal_http_client_builder;
 use omicron_uuid_kinds::{RackUuid, SledUuid};
 use parallel_task_set::ParallelTaskSet;
 use rand::seq::SliceRandom;
@@ -32,6 +33,7 @@ use sled_agent_client::types::StartSledAgentRequestBody;
 use sled_agent_client::types::{
     ProxyCommitRequest, ProxyPrepareAndCommitRequest,
 };
+use sled_agent_types::trust_quorum::TrustQuorumCoordinatorStatusResponse;
 use sled_hardware_types::BaseboardId;
 use slog::{Logger, error, info, o};
 use slog_error_chain::InlineErrorChain;
@@ -333,7 +335,7 @@ async fn prepare(
         ));
     };
 
-    let status = coordinator_sa
+    let response = coordinator_sa
         .trust_quorum_coordinator_status()
         .await
         .with_context(|| {
@@ -343,6 +345,23 @@ async fn prepare(
             )
         })?
         .into_inner();
+    let status = match response {
+        TrustQuorumCoordinatorStatusResponse::Coordinating { status } => status,
+        TrustQuorumCoordinatorStatusResponse::NotCoordinating {
+            latest_config_epoch,
+        } => {
+            let latest_config_epoch = match latest_config_epoch {
+                Some(epoch) => epoch.to_string(),
+                None => "none".to_string(),
+            };
+            bail!(
+                "Coordinator {} reported no coordinator status: it is not \
+                 currently coordinating a reconfiguration (latest persisted \
+                 configuration epoch: {latest_config_epoch}).",
+                config.coordinator,
+            );
+        }
+    };
 
     // Write state back to DB
     let state = datastore
@@ -678,7 +697,7 @@ async fn get_sled_agent_clients(
     randomized.shuffle(&mut rand::rng());
     let mut clients = Vec::with_capacity(num_clients);
 
-    let reqwest_client = reqwest::ClientBuilder::new()
+    let reqwest_client = internal_http_client_builder()
         .connect_timeout(timeout)
         .timeout(timeout)
         .build()

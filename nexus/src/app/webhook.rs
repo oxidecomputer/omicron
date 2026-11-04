@@ -267,7 +267,7 @@ impl Nexus {
             );
 
             let deliveries = datastore
-                .webhook_rx_list_resendable_events(opctx, &rx_id)
+                .webhook_rx_list_resendable_alerts(opctx, &rx_id)
                 .await
                 .map_err(|e| {
                     e.internal_context("error listing events to resend")

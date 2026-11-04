@@ -54,7 +54,7 @@ use crate::job::Jobs;
 /// to as "v8", "version 8", or "release 8" to customers). The use of semantic
 /// versioning is mostly to hedge for perhaps wanting something more granular in
 /// the future.
-const BASE_VERSION: Version = Version::new(23, 0, 0);
+const BASE_VERSION: Version = Version::new(24, 0, 0);
 
 const RETRY_ATTEMPTS: usize = 3;
 
@@ -1197,6 +1197,8 @@ fn generate_version(commit: &str) -> Result<Version> {
     // Avoid bothering with "what does Cockroach mean by Unicode code points"
     // and just assume the version is entirely ASCII.
     ensure!(version_str.is_ascii(), "{version_str} is not ASCII");
+    // This becomes 128 in R24, but we still need to support uploading to older
+    // versions for a bit.
     ensure!(version_str.len() <= 64, "{version_str} is longer than 64 bytes");
 
     Ok(version)

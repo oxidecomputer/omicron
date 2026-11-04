@@ -372,6 +372,7 @@ use omicron_common::backoff::BackoffError;
 use omicron_generation_kinds::InstanceStateGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use serde::{Deserialize, Serialize};
@@ -526,7 +527,7 @@ enum NetworkConfigUpdate {
 /// VMM.
 #[derive(Debug, Deserialize, Serialize)]
 struct Deprovision {
-    project_id: Uuid,
+    project_id: ProjectUuid,
     cpus_diff: i64,
     ram_diff: ByteCount,
 }
@@ -545,6 +546,7 @@ impl UpdatesRequired {
 
         let mut update_required = false;
         let mut active_vmm_failed = false;
+        let mut active_vmm_update_disposition_gen = None;
         let mut network_config = None;
         let mut update_sled_reservations_for_migration_success = None;
 
@@ -555,8 +557,8 @@ impl UpdatesRequired {
                     let id = PropolisUuid::from_untyped_uuid(active_vmm.id);
                     // Unlink the active VMM ID. If the active VMM was destroyed
                     // because a migration out completed, the next block, which
-                    // handles migration updates, will set this to the new VMM's ID,
-                    // instead.
+                    // handles migration updates, will set this to the new VMM's
+                    // ID, instead.
                     new_runtime.propolis_id = None;
                     update_required = true;
 
@@ -564,13 +566,22 @@ impl UpdatesRequired {
                     // instance's new state to `Failed` rather than to `NoVmm`.
                     if active_vmm.state == VmmState::Failed {
                         active_vmm_failed = true;
+                    }
+                    // If the active VMM is marked as stopped for an update, its
+                    // sled is being evacuated. Move the instance's new state to
+                    // `SledEvacuating` rather than to `NoVmm`.
+                    else if let Some(generation) = active_vmm
+                    .stop_for_update_disposition_generation {
+                        active_vmm_update_disposition_gen = Some(generation);
+
                     } else if snapshot.instance.intended_state
                         == InstanceIntendedState::Running
                         && snapshot.migration.is_none()
                     {
                         // Did the active VMM shut itself down, when it was
                         // intended to be running *and* we were not migrating
-                        // out? If so, update the instance's intended state to
+                        // out, or destroying it intentionally for an update?
+                        // If so, update the instance's intended state to
                         // indicate that it stopped itself.
                         new_intent = Some(InstanceIntendedState::GuestShutdown);
                         info!(
@@ -740,6 +751,16 @@ impl UpdatesRequired {
             // We no longer have a VMM.
             new_runtime.nexus_state = if active_vmm_failed {
                 InstanceState::Failed
+            } else if let Some(g) = active_vmm_update_disposition_gen {
+                info!(
+                    log,
+                    "instance update: VMM was stopped due to its sled being \
+                     evacuated for an update. Setting new runtime instance \
+                     state to SledEvacuating.";
+                    "instance_id" => %instance_id,
+                    "update_disposition_generation" => ?g
+                );
+                InstanceState::SledEvacuating
             } else {
                 InstanceState::NoVmm
             };
@@ -755,7 +776,7 @@ impl UpdatesRequired {
             // set of virtual provisioning counters to deallocate also indicates
             // that the instance's oximeter producer should be cleaned up.
             Some(Deprovision {
-                project_id: snapshot.instance.project_id,
+                project_id: snapshot.instance.project_id(),
                 cpus_diff: i64::from(snapshot.instance.ncpus.0.0),
                 ram_diff: snapshot.instance.memory,
             })
@@ -1792,6 +1813,7 @@ mod test {
     use nexus_types::instance::Migrations;
     use nexus_types::instance::VmmFailureReason;
     use nexus_types::instance::VmmState as NexusVmmState;
+    use nexus_types::internal_api::params::InstanceMigrateDestination;
     use nexus_types::internal_api::params::InstanceMigrateRequest;
     use omicron_common::api::external::{
         ByteCount, DataPageParams, IdentityMetadataCreateParams, Name,
@@ -3308,13 +3330,17 @@ mod test {
 
             let vmm = state.vmm().as_ref().unwrap();
             let dst_sled_id = cptestctx
-                .find_sled_agent(vmm.sled_id())
+                .find_sled_id_other_than(vmm.sled_id())
                 .expect("need at least one other sled");
             let params = instance_migrate::Params {
                 serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
                 instance: state.instance().clone(),
                 src_vmm: vmm.clone(),
-                migrate_params: InstanceMigrateRequest { dst_sled_id },
+                migrate_params: InstanceMigrateRequest {
+                    destination: InstanceMigrateDestination::ById {
+                        dst_sled_id,
+                    },
+                },
             };
 
             nexus

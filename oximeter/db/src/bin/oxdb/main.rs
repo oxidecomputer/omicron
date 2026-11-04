@@ -13,9 +13,9 @@ use oximeter::{
     Metric, Target,
     types::{Cumulative, Sample},
 };
-use oximeter_db::{Client, DbWrite, make_client, query};
+use oximeter_db::{Client, DbWrite, User, query};
 use slog::{Drain, Level, Logger, debug, info, o};
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use uuid::Uuid;
 
 /// Samples are inserted in chunks of this size, to avoid large allocations when inserting huge
@@ -218,7 +218,11 @@ async fn populate(
     args: PopulateArgs,
 ) -> Result<(), anyhow::Error> {
     info!(log, "populating Oximeter database");
-    let client = make_client(address, port, &log).await?;
+    let client = Client::new(User::Admin, SocketAddr::new(address, port), &log);
+    client
+        .init_single_node_db()
+        .await
+        .context("Failed to initialize timeseries database")?;
     let n_timeseries = args.n_projects * args.n_instances * args.n_cpus;
     debug!(
         log,
@@ -270,8 +274,10 @@ async fn wipe_single_node_db(
     port: u16,
     log: Logger,
 ) -> Result<(), anyhow::Error> {
-    let client = make_client(address, port, &log).await?;
-    client.wipe_single_node_db().await.context("Failed to wipe database")
+    Client::new(User::Admin, SocketAddr::new(address, port), &log)
+        .wipe_single_node_db()
+        .await
+        .context("Failed to wipe database")
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -284,7 +290,8 @@ async fn query(
     start: Option<query::Timestamp>,
     end: Option<query::Timestamp>,
 ) -> Result<(), anyhow::Error> {
-    let client = make_client(address, port, &log).await?;
+    let client =
+        Client::new(User::Reader, SocketAddr::new(address, port), &log);
     let filters = filters.iter().map(|s| s.as_str()).collect::<Vec<_>>();
     let timeseries = client
         .select_timeseries_with(

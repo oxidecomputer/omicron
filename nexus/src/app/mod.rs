@@ -8,7 +8,6 @@ use self::external_endpoints::NexusCertResolver;
 use self::saga::SagaExecutor;
 use crate::DropshotServer;
 use crate::app::background::BackgroundTasksData;
-use crate::app::background::CurrentSitrep;
 use crate::app::background::SagaRecoveryHelpers;
 use crate::app::update::UpdateStatusHandle;
 use crate::populate::PopulateArgs;
@@ -32,10 +31,13 @@ use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ReconfiguratorConfigParam;
+use nexus_types::fm::CurrentSitrep;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::UnderlaySubnets;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
+use omicron_common::http_client::internal_http_client;
+use omicron_common::http_client::internal_http_client_builder;
 use omicron_debug_dropbox::DebugDropbox;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::RackUuid;
@@ -99,6 +101,7 @@ mod scim;
 mod session;
 mod silo;
 pub(crate) mod sled;
+mod sled_add_checks;
 mod sled_instance;
 mod snapshot;
 mod ssh_key;
@@ -284,6 +287,9 @@ pub struct Nexus {
     // https://github.com/oxidecomputer/omicron/issues/3732
     external_dns_servers: Vec<IpAddr>,
 
+    /// Configuration for external HTTP clients.
+    external_http_client_config: nexus_config::ExternalHttpClientConfig,
+
     /// Background task driver
     background_tasks_driver: OnceLock<background::Driver>,
 
@@ -369,6 +375,7 @@ impl Nexus {
                 all_versions.as_ref(),
                 config.pkg.tunables.load_timeout,
                 IdentityCheckPolicy::CheckAndTakeover { nexus_id },
+                omicron_git_version::current(),
             )
             .await?,
         );
@@ -443,7 +450,7 @@ impl Nexus {
         let (tuf_artifact_replication_tx, tuf_artifact_replication_rx) =
             mpsc::channel(16);
 
-        let reqwest_client = reqwest::ClientBuilder::new()
+        let reqwest_client = internal_http_client_builder()
             .connect_timeout(std::time::Duration::from_secs(15))
             .timeout(std::time::Duration::from_secs(15))
             .build()
@@ -455,12 +462,17 @@ impl Nexus {
                 let native_resolver =
                     qorb_resolver.for_service(ServiceName::OximeterReader);
                 oximeter_db::Client::new_with_resolver(
+                    oximeter_db::User::Reader,
                     native_resolver,
                     "nexus-oximeter-reader",
                     &log,
                 )
             }
-            Some(address) => oximeter_db::Client::new(*address, &log),
+            Some(address) => oximeter_db::Client::new(
+                oximeter_db::User::Reader,
+                *address,
+                &log,
+            ),
         };
 
         // TODO-cleanup We may want to make the populator a first-class
@@ -604,6 +616,10 @@ impl Nexus {
             external_dns_servers: config
                 .deployment
                 .external_dns_servers
+                .clone(),
+            external_http_client_config: config
+                .deployment
+                .external_http_clients
                 .clone(),
             background_tasks_driver: OnceLock::new(),
             background_tasks,
@@ -1232,8 +1248,9 @@ impl Nexus {
             self.resolver().lookup_all_socket_v6(ServiceName::Mgd).await?;
         let mut clients = HashMap::new();
         for addr in mgd_addrs {
-            let client = mg_admin_client::Client::new(
+            let client = mg_admin_client::Client::new_with_client(
                 &format!("http://{addr}"),
+                internal_http_client(),
                 self.log.clone(),
             );
             let switch_slot = match client.switch_identifiers().await {
@@ -1355,8 +1372,9 @@ pub(crate) async fn dpd_clients(
                 )),
             };
 
-            let client = dpd_client::Client::new(
+            let client = dpd_client::Client::new_with_client(
                 &format!("http://{socket_addr}"),
+                internal_http_client(),
                 client_state,
             );
 
@@ -1414,8 +1432,9 @@ pub(crate) async fn lldpd_clients(
     let clients: HashMap<SwitchSlot, lldpd_client::Client> = mappings
         .iter()
         .map(|(location, addr)| {
-            let lldpd_client = lldpd_client::Client::new(
+            let lldpd_client = lldpd_client::Client::new_with_client(
                 &format!("http://[{addr}]:{port}"),
+                internal_http_client(),
                 log.clone(),
             );
             (*location, lldpd_client)
@@ -1495,8 +1514,9 @@ async fn map_switch_zone_addrs(
             }
         };
 
-        let mgs_client = MgsClient::new(
+        let mgs_client = MgsClient::new_with_client(
             &format!("http://[{}]:{}", addr, port),
+            internal_http_client(),
             log.new(o!("component" => "MgsClient")),
         );
 

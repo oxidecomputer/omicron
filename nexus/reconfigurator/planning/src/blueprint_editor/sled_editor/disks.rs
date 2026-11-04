@@ -131,7 +131,7 @@ impl DisksEditor {
         &mut self,
         disk_id: &PhysicalDiskUuid,
     ) -> Result<(bool, ZpoolUuid), DisksEditError> {
-        let mut config = self.disks.get_mut(disk_id).ok_or_else(|| {
+        let mut config = self.disks.get_mut(*disk_id).ok_or_else(|| {
             DisksEditError::ExpungeNonexistentDisk { id: *disk_id }
         })?;
 
@@ -164,7 +164,7 @@ impl DisksEditor {
         &mut self,
         disk_id: &PhysicalDiskUuid,
     ) -> Result<bool, DisksEditError> {
-        let mut config = self.disks.get_mut(disk_id).ok_or_else(|| {
+        let mut config = self.disks.get_mut(*disk_id).ok_or_else(|| {
             DisksEditError::DecommissionNonexistentDisk { id: *disk_id }
         })?;
 

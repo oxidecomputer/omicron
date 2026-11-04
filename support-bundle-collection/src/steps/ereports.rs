@@ -5,61 +5,63 @@
 //! Collect ereports for support bundles
 
 use crate::collection::BundleCollection;
+use crate::output::BundleOutput;
 use crate::step::CollectionStepOutput;
+use crate::step::StepError;
+use crate::step::StepResultExt;
 use nexus_types::fm::ereport::EreportFilters;
+use nexus_types::support_bundle::BundleTimeRange;
 
 use anyhow::Context;
-use camino::Utf8Path;
-use camino::Utf8PathBuf;
 use dropshot::PaginationOrder;
-use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::fm::Ereport;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use omicron_uuid_kinds::GenericUuid;
-use slog::Logger;
 use slog::debug;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
-use std::sync::Arc;
 
 pub async fn collect(
     collection: &BundleCollection,
-    dir: &Utf8Path,
-) -> anyhow::Result<CollectionStepOutput> {
-    let (log, opctx, datastore) =
-        (collection.log(), collection.opctx(), collection.datastore());
+    output: &BundleOutput,
+) -> Result<CollectionStepOutput, StepError> {
+    let log = collection.log();
     let ereport_filters = collection.data_selection().ereport_filters();
 
     let Some(ereport_filters) = ereport_filters else {
         debug!(log, "Support bundle: ereports not requested");
         return Ok(CollectionStepOutput::Skipped);
     };
-    let ereports_dir = dir.join("ereports");
+    let time_range = collection.data_selection().time_range().clone();
+    let ereports_dir = output.join("ereports");
     let mut status = SupportBundleEreportStatus::default();
-    if let Err(err) = save_ereports(
+    match save_ereports(
         collection,
-        log,
-        opctx,
-        datastore,
         ereport_filters.clone(),
+        time_range,
         ereports_dir,
         &mut status,
     )
     .await
     {
-        warn!(
-            log,
-            "Support bundle: ereport collection failed \
-             ({} collected successfully)",
-             status.n_collected;
-            InlineErrorChain::new(err.as_ref())
-        );
-        status.errors.push(InlineErrorChain::new(err.as_ref()).to_string());
-    };
+        Ok(()) => {}
+        Err(err @ (StepError::WriteRefused(_) | StepError::Stopped)) => {
+            return Err(err);
+        }
+        Err(StepError::Other(err)) => {
+            warn!(
+                log,
+                "Support bundle: ereport collection failed \
+                 ({} collected successfully)",
+                 status.n_collected;
+                InlineErrorChain::new(err.as_ref())
+            );
+            status.errors.push(InlineErrorChain::new(err.as_ref()).to_string());
+        }
+    }
 
     let details = serde_json::to_value(&status)
         .context("failed to serialize ereport collection status")?;
@@ -70,29 +72,27 @@ pub async fn collect(
 //
 // # Cancel safety
 //
-// Cancel-**unsafe**: writes to the filesystem via `tokio::fs`.
+// Cancel-**unsafe**: writes to the bundle.
 // DB queries are eagerly cancelled via `select!`.
 async fn save_ereports(
     collection: &BundleCollection,
-    log: &Logger,
-    opctx: &OpContext,
-    datastore: &Arc<DataStore>,
     filters: EreportFilters,
-    dir: Utf8PathBuf,
+    time_range: BundleTimeRange,
+    dir: BundleOutput,
     status: &mut SupportBundleEreportStatus,
-) -> anyhow::Result<()> {
+) -> Result<(), StepError> {
+    let (log, opctx, datastore) =
+        (collection.log(), collection.opctx(), collection.datastore());
     let mut paginator =
         Paginator::new(datastore::SQL_BATCH_SIZE, PaginationOrder::Ascending);
     while let Some(p) = paginator.next() {
         let pagparams = p.current_pagparams();
         let ereports = tokio::select! {
-            _ = collection.cancelled() => return Ok(()),
+            _ = collection.stopped() => return Err(StepError::Stopped),
             result = datastore.ereport_fetch_matching(
-                &opctx, &filters, &pagparams
+                &opctx, &filters, &time_range, &pagparams
             ) => {
-                result.map_err(|e| {
-                    e.internal_context("failed to query for ereports")
-                })?
+                result.context("failed to query for ereports")?
             }
         };
         paginator = p.found_batch(&ereports, &|ereport| {
@@ -130,7 +130,10 @@ async fn save_ereports(
     Ok(())
 }
 
-async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
+async fn write_ereport(
+    ereport: Ereport,
+    dir: &BundleOutput,
+) -> Result<(), StepError> {
     // Here's where we construct the file path for each ereport JSON file,
     // given the top-level ereport directory path.  Each ereport is stored in a
     // subdirectory for the part and serial numbers of the system that produced
@@ -165,22 +168,20 @@ async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
         .unwrap_or("unknown_serial");
     let id = &ereport.id;
 
-    let dir = dir
-        .join(format!("{pn}-{sn}"))
+    let file_path = format!(
+        "{pn}-{sn}/{}/{}.json",
         // N.B. that we call `into_untyped_uuid()` here, as the `Display`
         // implementation for a typed UUID appends " (ereporter_restart)", which
         // we don't want.
-        .join(id.restart_id.into_untyped_uuid().to_string());
-    tokio::fs::create_dir_all(&dir)
-        .await
-        .with_context(|| format!("failed to create directory '{dir}'"))?;
-    let file_path = dir.join(format!("{}.json", id.ena));
+        id.restart_id.into_untyped_uuid(),
+        id.ena,
+    );
     let json = serde_json::to_vec(&ereport).with_context(|| {
         format!("failed to serialize ereport {pn}:{sn}/{id}")
     })?;
-    tokio::fs::write(&file_path, json)
+    dir.write(&file_path, json)
         .await
-        .with_context(|| format!("failed to write '{file_path}'"))
+        .with_context(|| format!("failed to write ereport '{file_path}'"))
 }
 
 fn is_fs_safe_single_path_component(s: &str) -> bool {

@@ -23,6 +23,7 @@ pub mod api;
 pub mod backoff;
 pub mod cmd;
 pub mod disk;
+pub mod http_client;
 pub mod policy;
 pub mod resolvable_files;
 pub mod snake_case_result;

@@ -27,6 +27,7 @@ use nexus_db_model::Project;
 use nexus_db_model::ProjectImage;
 use nexus_db_model::ProjectImageIdentity;
 use nexus_db_model::Resources;
+use nexus_db_model::Sled;
 use nexus_db_model::SledBaseboard;
 use nexus_db_model::SledCpuFamily;
 use nexus_db_model::SledSystemHardware;
@@ -42,6 +43,7 @@ use nexus_types::identity::Resource;
 use nexus_types::tuf_repo::TufRepoDescription;
 use omicron_common::api::external;
 use omicron_generation_kinds::InstanceStateGeneration;
+use omicron_generation_kinds::SledRegistrationGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -215,9 +217,78 @@ impl SledUpdateBuilder {
             sled_baseboard_for_test(),
             self.sled_hardware.build(),
             self.rack_id,
-            Generation::new(),
+            SledRegistrationGeneration::new(),
         )
     }
+}
+
+/// Upsert a sled and ensure that a row was written.
+///
+/// A row is written when:
+///
+/// * The sled is new.
+/// * The sled is existing, not decommissioned, and at a newer
+///   `SledRegistrationGeneration`.
+pub async fn sled_upsert_expect_written(
+    datastore: &DataStore,
+    sled_update: SledUpdate,
+) -> Sled {
+    let sled_id = sled_update.id();
+    datastore
+        .sled_upsert(sled_update)
+        .await
+        .unwrap_or_else(|e| panic!("upserted sled {sled_id}: {e}"))
+}
+
+/// Asserts that a sled upsert was rejected by one or more of the ON
+/// CONFLICT filters.
+pub async fn sled_upsert_expect_filtered(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    sled_update: SledUpdate,
+) {
+    let sled_id = sled_update.id();
+    let sled_agent_gen = sled_update.sled_agent_gen;
+    let (_, before) = LookupPath::new(opctx, datastore)
+        .sled_id(sled_id)
+        .fetch_for(authz::Action::Modify)
+        .await
+        .unwrap_or_else(|e| {
+            panic!("fetched sled {sled_id} before the upsert: {e}")
+        });
+
+    match datastore.sled_upsert(sled_update).await {
+        Ok(value) => panic!(
+            "upsert of sled {sled_id} at registration generation \
+             {sled_agent_gen} should have been filtered out and returned \
+             an error, but it returned Ok: {value:?}"
+        ),
+        Err(error) => assert_eq!(
+            error,
+            external::Error::InternalError {
+                internal_message: format!(
+                    "Unknown diesel error creating Sled called \
+                     \"{sled_id}\": Record not found"
+                ),
+            },
+            "filtered upsert of sled {sled_id} at registration \
+             generation {sled_agent_gen} should surface as diesel \
+             NotFound through public_error_from_diesel with \
+             ErrorHandler::Conflict"
+        ),
+    }
+
+    let (_, after) = LookupPath::new(opctx, datastore)
+        .sled_id(sled_id)
+        .fetch_for(authz::Action::Modify)
+        .await
+        .unwrap_or_else(|e| {
+            panic!("fetched sled {sled_id} after the upsert: {e}")
+        });
+    assert_eq!(
+        after, before,
+        "filtered upsert of sled {sled_id} should not change the sled row"
+    );
 }
 
 pub fn small_resource_request() -> Resources {
@@ -457,7 +528,7 @@ pub async fn create_project_snapshot(
                     time_deleted: None,
                 },
 
-                project_id: authz_project.id(),
+                project_id: authz_project.id().into(),
                 disk_id,
                 volume_id: VolumeUuid::new_v4().into(),
                 destination_volume_id: VolumeUuid::new_v4().into(),
@@ -498,8 +569,8 @@ pub async fn create_project_image(
                     time_deleted: None,
                 },
 
-                silo_id: authz_silo.id(),
-                project_id: authz_project.id(),
+                silo_id: authz_silo.id().into(),
+                project_id: authz_project.id().into(),
                 volume_id: VolumeUuid::new_v4().into(),
 
                 url: None,

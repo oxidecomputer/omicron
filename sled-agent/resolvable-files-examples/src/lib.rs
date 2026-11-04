@@ -116,7 +116,7 @@ impl WriteInstallDatasetContext {
 
         // For clickhouse, change the size.
         {
-            let mut zone2 = self.zones.get_mut(&ZoneKind::Clickhouse).unwrap();
+            let mut zone2 = self.zones.get_mut(ZoneKind::Clickhouse).unwrap();
             zone2.json_size = 1024;
             errors
                 .insert_unique(ZoneContentError {
@@ -133,7 +133,7 @@ impl WriteInstallDatasetContext {
 
         // For crucible, change the hash.
         {
-            let mut zone3 = self.zones.get_mut(&ZoneKind::Crucible).unwrap();
+            let mut zone3 = self.zones.get_mut(ZoneKind::Crucible).unwrap();
             let replaced_hash =
                 std::mem::replace(&mut zone3.json_hash, ArtifactHash([0; 32]));
             errors
@@ -150,7 +150,7 @@ impl WriteInstallDatasetContext {
         }
 
         // Don't write out internal DNS but include it in the JSON.
-        self.zones.get_mut(&ZoneKind::InternalDns).unwrap().write_to_disk =
+        self.zones.get_mut(ZoneKind::InternalDns).unwrap().write_to_disk =
             false;
         errors
             .insert_unique(ZoneContentError {
@@ -162,7 +162,7 @@ impl WriteInstallDatasetContext {
             .unwrap();
 
         // Write out nexus but don't include it in the JSON.
-        self.zones.get_mut(&ZoneKind::Nexus).unwrap().include_in_json = false;
+        self.zones.get_mut(ZoneKind::Nexus).unwrap().include_in_json = false;
         errors
             .insert_unique(ZoneContentError {
                 zone_kind: ZoneKind::Nexus,

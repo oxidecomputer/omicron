@@ -8,18 +8,19 @@ use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
 use nexus_db_model::EreporterRestart;
 use nexus_types::fm::analysis_reports::ClosedCaseReport;
-use nexus_types::fm::{self, Sitrep, SitrepVersion};
+use nexus_types::fm::{self, CurrentSitrep, FmConfig, Sitrep};
 use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::inventory;
+use nexus_types::observed_certificate::ObservedSiloCertificates;
 use nexus_types::observed_saga::ObservedSaga;
 use omicron_uuid_kinds::AlertUuid;
-use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+pub use nexus_types::fm::InventoryStale;
 pub use nexus_types::fm::analysis_reports::InputReport as Report;
 
 /// A complete set of inputs to a fault management analysis phase.
@@ -39,7 +40,7 @@ pub use nexus_types::fm::analysis_reports::InputReport as Report;
 /// [`Input::builder`].
 #[derive(Debug)]
 pub struct Input {
-    parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
+    parent_sitrep: Option<CurrentSitrep>,
     inv: Arc<inventory::Collection>,
     /// Ereports which are new and should be input to analysis in the next
     /// sitrep.
@@ -64,6 +65,10 @@ pub struct Input {
     /// All non-terminal (running, unwinding, or abandoned) sagas, annotated
     /// with their latest node-event time and owning-Nexus state.
     observed_sagas: Arc<IdOrdMap<ObservedSaga>>,
+    /// Every silo, with its installed external TLS certificates.
+    observed_silo_certificates: Arc<IdOrdMap<ObservedSiloCertificates>>,
+    /// The fault management configuration in effect for this analysis.
+    config: FmConfig,
 }
 
 impl Input {
@@ -125,16 +130,41 @@ impl Input {
         &self.observed_sagas
     }
 
+    /// Every silo observed in the database, with its installed external TLS
+    /// certificates, indexed by silo ID. See the certificate diagnosis engine
+    /// for how a silo's absence drives case closure.
+    pub fn observed_silo_certificates(
+        &self,
+    ) -> &IdOrdMap<ObservedSiloCertificates> {
+        &self.observed_silo_certificates
+    }
+
+    /// The fault management configuration in effect for this analysis.
+    ///
+    /// Diagnosis engines read their tunable thresholds from here rather than
+    /// from any global state, so a given input always produces the same
+    /// sitrep.
+    pub fn config(&self) -> &FmConfig {
+        &self.config
+    }
+
     /// Returns a [`Builder`] for constructing a new `Input` from the provided
     /// `parent_sitrep` and inventory collection.
     ///
-    /// The queried input collections (in-service disks, observed sagas) are
-    /// provided via the builder's setters; [`Builder::build`] fails if any
-    /// was never provided.
+    /// The queried input collections (in-service disks, observed sagas,
+    /// observed silo certificates) and the FM configuration are provided via
+    /// the builder's setters; [`Builder::build`] fails if any was never
+    /// provided.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InventoryStale`] if `inv` is a different collection from the
+    /// parent sitrep's, and did not start recently enough to be considered
+    /// newer than the parent sitrep's inventory.
     pub fn builder(
-        parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
+        parent_sitrep: Option<CurrentSitrep>,
         inv: Arc<inventory::Collection>,
-    ) -> Result<Builder, InvalidInputs> {
+    ) -> Result<Builder, InventoryStale> {
         // Before preparing analysis inputs, check that the proposed input
         // inventory collection is at least as new as the parent sitrep's
         // inventory collection.
@@ -148,7 +178,7 @@ impl Input {
             // newer than the parent's.
                 && inv.time_started < parent.next_inv_min_time_started
             {
-                return Err(InvalidInputs::InventoryStale {
+                return Err(InventoryStale {
                     parent_inv_id: parent.inv_collection_id,
                     next_inv_min_time_started: parent.next_inv_min_time_started,
                     input_inv_time_started: inv.time_started,
@@ -160,6 +190,8 @@ impl Input {
             inv,
             in_service_disks: None,
             observed_sagas: None,
+            observed_silo_certificates: None,
+            config: None,
             new_ereports: IdOrdMap::default(),
             ereporter_restarts: IdOrdMap::default(),
             unmarked_seen_ereports: BTreeSet::default(),
@@ -169,24 +201,16 @@ impl Input {
     }
 }
 
+/// A required input was never provided to the [`Builder`].
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
-pub enum InvalidInputs {
-    #[error(
-        "inventory collection from {input_inv_time_started} is not new \
-         enough: must have started at {next_inv_min_time_started} or later"
-    )]
-    InventoryStale {
-        parent_inv_id: CollectionUuid,
-        next_inv_min_time_started: DateTime<Utc>,
-        input_inv_time_started: DateTime<Utc>,
-    },
-    #[error("required analysis input `{name}` was never provided")]
-    MissingInput { name: &'static str },
+#[error("required analysis input `{name}` was never provided")]
+pub struct MissingInput {
+    pub name: &'static str,
 }
 
 #[must_use]
 pub struct Builder {
-    parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
+    parent_sitrep: Option<CurrentSitrep>,
     inv: Arc<inventory::Collection>,
     // The queried input collections. Each is required: `build()` fails on
     // any still-`None` input, so a caller cannot forget one and silently
@@ -194,6 +218,11 @@ pub struct Builder {
     // e.g. an empty `observed_sagas` reads as "every saga case may close").
     in_service_disks: Option<Arc<IdOrdMap<InServiceDisk>>>,
     observed_sagas: Option<Arc<IdOrdMap<ObservedSaga>>>,
+    observed_silo_certificates: Option<Arc<IdOrdMap<ObservedSiloCertificates>>>,
+    /// The FM configuration. Required for the same reason as the queried
+    /// collections: analysis must not silently run against defaults when an
+    /// operator has overridden them.
+    config: Option<FmConfig>,
     /// Ereports which are new and should be input to analysis in the next
     /// sitrep.
     new_ereports: IdOrdMap<Arc<fm::Ereport>>,
@@ -233,6 +262,13 @@ pub struct Builder {
 }
 
 impl Builder {
+    /// Borrows the parent sitrep passed to this builder when it was
+    /// constructed, or `None` if we are constructing the inputs to the first
+    /// sitrep.
+    pub fn parent_sitrep(&self) -> Option<&CurrentSitrep> {
+        self.parent_sitrep.as_ref()
+    }
+
     /// Adds a set of ereports which have not been marked as "seen" in the
     /// database to the inputs under construction.
     ///
@@ -286,6 +322,11 @@ impl Builder {
     }
 
     /// Adds a set of ereport restart IDs to the input.
+    ///
+    /// During [`Self::build`], any ereport passed to
+    /// [`Self::add_unmarked_ereports`] whose restart ID is not among these is
+    /// recorded in the [`Report`]'s `unknown_restart_ereport_ids`. Ereports and
+    /// restarts may therefore be added in either order.
     pub fn add_ereporter_restarts<I>(
         &mut self,
         restarts: impl IntoIterator<Item = I>,
@@ -323,7 +364,25 @@ impl Builder {
         self
     }
 
-    /// Fills every required input not yet provided with an empty collection.
+    /// Provides the silos and their external TLS certificates queried from
+    /// the database. Required; [`Builder::build`] fails without it.
+    pub fn observed_silo_certificates(
+        mut self,
+        silos: Arc<IdOrdMap<ObservedSiloCertificates>>,
+    ) -> Self {
+        self.observed_silo_certificates = Some(silos);
+        self
+    }
+
+    /// Provides the fault management configuration in effect.
+    /// Required; [`Builder::build`] fails without it.
+    pub fn config(mut self, config: FmConfig) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    /// Fills every required input not yet provided with an empty collection
+    /// (or, for the configuration, the default configuration).
     ///
     /// Test-only: lets a test populate just the inputs it exercises while
     /// still declaring, explicitly, that the rest are empty. Production
@@ -332,16 +391,22 @@ impl Builder {
     pub fn with_empty_defaults(mut self) -> Self {
         self.in_service_disks.get_or_insert_with(Default::default);
         self.observed_sagas.get_or_insert_with(Default::default);
+        self.observed_silo_certificates.get_or_insert_with(Default::default);
+        self.config.get_or_insert_with(Default::default);
         self
     }
 
-    pub fn build(self) -> Result<(Input, Report), InvalidInputs> {
+    pub fn build(self) -> Result<(Input, Report), MissingInput> {
         let in_service_disks = self
             .in_service_disks
-            .ok_or(InvalidInputs::MissingInput { name: "in_service_disks" })?;
+            .ok_or(MissingInput { name: "in_service_disks" })?;
         let observed_sagas = self
             .observed_sagas
-            .ok_or(InvalidInputs::MissingInput { name: "observed_sagas" })?;
+            .ok_or(MissingInput { name: "observed_sagas" })?;
+        let observed_silo_certificates = self
+            .observed_silo_certificates
+            .ok_or(MissingInput { name: "observed_silo_certificates" })?;
+        let config = self.config.ok_or(MissingInput { name: "config" })?;
         let parent_sitrep = self.parent_sitrep.as_ref().map(|s| &s.1);
         let (parent_sitrep_id, parent_inv_id) = match parent_sitrep {
             Some(sitrep) => {
@@ -352,12 +417,26 @@ impl Builder {
             None => (None, None),
         };
 
+        // Every unmarked ereport should come from a reporter restart recorded
+        // in the `ereporter_restart` table. This is checked here, rather than
+        // as ereports are added, so that callers may load ereports and
+        // restarts concurrently.
+        let unknown_restart_ereport_ids = self
+            .new_ereports
+            .iter()
+            .map(|e| e.id)
+            .chain(self.unmarked_seen_ereports.iter().copied())
+            .filter(|id| !self.ereporter_restarts.contains_key(&id.restart_id))
+            .collect();
+
         let mut report = Report {
             parent_sitrep_id,
             parent_inv_id,
             inv_id: self.inv.id,
+            reference_time: Some(self.inv.time_done),
             new_ereport_ids: self.new_ereports.iter().map(|e| e.id).collect(),
             num_ereporter_restarts: self.ereporter_restarts.len(),
+            unknown_restart_ereport_ids,
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
             in_service_disks: in_service_disks
@@ -378,6 +457,32 @@ impl Builder {
                     )
                 })
                 .collect(),
+            observed_silo_certificates: observed_silo_certificates
+                .iter()
+                .map(|silo| {
+                    (
+                        silo.silo_id,
+                        fm::analysis_reports::SiloCertificatesReport {
+                            silo_name: silo.silo_name.to_string(),
+                            certificates: silo
+                                .certificates
+                                .iter()
+                                .map(|cert| {
+                                    (
+                                        cert.id,
+                                        fm::analysis_reports::ObservedCertificateReport {
+                                            name: cert.name.to_string(),
+                                            not_before: cert.not_before,
+                                            not_after: cert.not_after,
+                                        },
+                                    )
+                                })
+                                .collect(),
+                        },
+                    )
+                })
+                .collect(),
+            config: Some(fm::analysis_reports::ConfigReport::from(&config)),
         };
 
         // Determine which cases must be copied forwards into the next sitrep.
@@ -476,6 +581,8 @@ impl Builder {
             support_bundles_changed,
             in_service_disks,
             observed_sagas,
+            observed_silo_certificates,
+            config,
         };
 
         Ok((input, report))
@@ -497,8 +604,8 @@ mod tests {
     use nexus_types::fm::{DiagnosisEngineKind, SitrepVersion};
     use nexus_types::inventory::SpType;
     use nexus_types::support_bundle::BundleDataSelection;
-    use omicron_generation_kinds::AlertGeneration;
-    use omicron_generation_kinds::SupportBundleGeneration;
+    use omicron_generation_kinds::SitrepAlertGeneration;
+    use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_uuid_kinds::{
         CaseEreportUuid, CaseUuid, OmicronZoneUuid, SitrepUuid,
     };
@@ -700,8 +807,9 @@ mod tests {
                     comment: "parent sitrep for test".to_string(),
                     time_created: chrono::Utc::now(),
                     next_inv_min_time_started: inv.time_done,
-                    alert_generation: AlertGeneration::new(),
-                    support_bundle_generation: SupportBundleGeneration::new(),
+                    alert_generation: SitrepAlertGeneration::new(),
+                    support_bundle_generation:
+                        SitrepSupportBundleGeneration::new(),
                 },
                 cases,
                 ereports_by_id,
@@ -943,6 +1051,93 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// Ereports whose restart ID is absent from the ereporter restart input
+    /// are recorded in the report, whether they are new or were already in
+    /// the parent sitrep, and regardless of whether the restarts were added
+    /// before or after the ereports. The latter guards the FM analysis task's
+    /// ability to load ereports and restarts concurrently.
+    #[test]
+    fn build_reports_ereports_with_unknown_restart_ids() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "build_reports_ereports_with_unknown_restart_ids",
+        );
+        let fm_test = FmTest::new(
+            "build_reports_ereports_with_unknown_restart_ids",
+            &logctx.log,
+        );
+        let mut reporters = fm_test.reporters;
+        let mut known =
+            reporters.reporter(Reporter::Sp { sp_type: SpType::Sled, slot: 0 });
+        let mut unknown =
+            reporters.reporter(Reporter::Sp { sp_type: SpType::Sled, slot: 1 });
+
+        let now = chrono::Utc::now();
+        let known_new = known.mk_ereport(now, Default::default());
+        let unknown_new = unknown.mk_ereport(now, Default::default());
+        let unknown_seen = unknown.mk_ereport(now, Default::default());
+        assert_ne!(known_new.id.restart_id, unknown_new.id.restart_id);
+
+        // `unknown_seen` was input to the parent sitrep, but has not yet been
+        // marked seen, so it is passed to `add_unmarked_ereports` again.
+        let inv =
+            Arc::new(nexus_inventory::CollectionBuilder::new("test").build());
+        let parent_sitrep_id = SitrepUuid::new_v4();
+        let parent = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: parent_sitrep_id,
+                parent_sitrep_id: None,
+                inv_collection_id: inv.id,
+                next_inv_min_time_started: inv.time_done,
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: String::new(),
+                time_created: chrono::Utc::now(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
+            },
+            cases: IdOrdMap::new(),
+            ereports_by_id: [Arc::new(unknown_seen.clone())]
+                .into_iter()
+                .collect(),
+        };
+        let parent_version = SitrepVersion {
+            id: parent_sitrep_id,
+            version: 1,
+            time_made_current: chrono::Utc::now(),
+        };
+        let mut builder =
+            Input::builder(Some(Arc::new((parent_version, parent))), inv)
+                .expect("collection start time check should always pass")
+                .with_empty_defaults();
+
+        // Add the ereports *before* the restarts.
+        builder.add_unmarked_ereports([
+            known_new.clone(),
+            unknown_new.clone(),
+            unknown_seen.clone(),
+        ]);
+        builder.add_ereporter_restarts(
+            reporters
+                .ereporter_restarts()
+                .iter()
+                .filter(|r| *r.id() == known_new.id.restart_id)
+                .cloned(),
+        );
+        let (input, report) = builder.build().expect("all inputs provided");
+        eprintln!("{}", report.display_multiline(0));
+
+        assert_eq!(report.num_ereporter_restarts, 1);
+        assert_eq!(
+            report.unknown_restart_ereport_ids,
+            BTreeSet::from([unknown_new.id, unknown_seen.id]),
+        );
+        // Ereports from unknown restarts are still input to analysis.
+        assert!(input.new_ereports().contains_key(&known_new.id));
+        assert!(input.new_ereports().contains_key(&unknown_new.id));
+        assert_eq!(input.new_ereports().len(), 2);
+
+        logctx.cleanup_successful();
+    }
+
     /// Helper for the closed-case-filter tests below: build a parent sitrep
     /// containing a single closed `case`, then construct a `Builder` pointing
     /// at it. The caller can optionally add existing alert markers before
@@ -963,8 +1158,8 @@ mod tests {
                 creator_id: OmicronZoneUuid::new_v4(),
                 comment: String::new(),
                 time_created: chrono::Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: [case].into_iter().collect(),
             ereports_by_id: IdOrdMap::new(),

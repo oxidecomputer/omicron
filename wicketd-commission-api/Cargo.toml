@@ -8,9 +8,11 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
+anyhow.workspace = true
 dropshot.workspace = true
 dropshot-api-manager-types.workspace = true
 iddqd.workspace = true
 omicron-uuid-kinds.workspace = true
+slog-error-chain.workspace = true
 wicketd-commission-types-versions.workspace = true
 omicron-workspace-hack.workspace = true

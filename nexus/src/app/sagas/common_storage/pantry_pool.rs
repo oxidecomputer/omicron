@@ -8,6 +8,7 @@ use anyhow::Context;
 use anyhow::anyhow;
 use internal_dns_resolver::QorbResolver;
 use internal_dns_types::names::ServiceName;
+use omicron_common::http_client::internal_http_client;
 use qorb::backend;
 use qorb::pool;
 use std::net::SocketAddr;
@@ -53,8 +54,10 @@ impl backend::Connector for PantryConnector {
                 )));
             }
         };
-        let client =
-            crucible_pantry_client::Client::new(&format!("http://{address}"));
+        let client = crucible_pantry_client::Client::new_with_client(
+            &format!("http://{address}"),
+            internal_http_client(),
+        );
         let mut conn = PooledPantryClient { client, address };
         self.is_valid(&mut conn).await?;
         Ok(conn)

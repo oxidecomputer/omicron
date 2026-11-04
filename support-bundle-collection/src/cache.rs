@@ -8,6 +8,7 @@
 //! otherwise independent steps.
 
 use crate::collection::BundleCollection;
+use omicron_common::http_client::internal_http_client;
 
 use gateway_client::Client as MgsClient;
 use internal_dns_types::names::ServiceName;
@@ -85,7 +86,11 @@ async fn create_mgs_client(
         .await
         .map(|sockaddr| {
             let url = format!("http://{}", sockaddr);
-            gateway_client::Client::new(&url, log.clone())
+            gateway_client::Client::new_with_client(
+                &url,
+                internal_http_client(),
+                log.clone(),
+            )
         }).map_err(|e| {
             error!(log, "failed to resolve MGS address"; "error" => InlineErrorChain::new(&e));
             e.into()

@@ -15,6 +15,7 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
 use nexus_types::deployment::planning_report::FailedHostOsUpdateReason;
+use nexus_types::deployment::planning_report::HostOsTargetArtifactError;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::SpType;
 use nexus_types::tuf_repo::TufRepoDescription;
@@ -74,6 +75,7 @@ impl PendingHostPhase2Changes {
         );
     }
 
+    #[cfg(test)]
     pub(super) fn is_empty(&self) -> bool {
         self.by_sled.is_empty()
     }
@@ -376,52 +378,10 @@ pub(super) fn try_make_update(
         );
     };
 
-    let Some(sled_type) = OxideSled::try_from_model(&baseboard_id.part_number)
-    else {
-        return Err(FailedHostOsUpdateReason::UnableToDetermineSledModel(
-            baseboard_id.part_number.clone(),
-        ));
-    };
-
-    let phase_1_artifact = current_artifacts.artifacts.get_only(
-        &OsPhase1Tags {
-            os_board: match sled_type {
-                OxideSled::Gimlet => OsBoard::GIMLET,
-                OxideSled::Cosmo => OsBoard::COSMO,
-            },
-            os_variant: OsVariant::Host,
-        }
-        .into(),
-    );
-    let phase_2_artifact = current_artifacts
-        .artifacts
-        .get_only(&OsPhase2Tags { os_variant: OsVariant::Host }.into());
-    let (phase_1_artifact, phase_2_artifact) =
-        match (phase_1_artifact, phase_2_artifact) {
-            // Common case: Exactly 1 of each artifact.
-            (Ok(p1), Ok(p2)) => (p1, p2),
-            // "TUF is broken" cases: missing both, one or the other.
-            (Err(GetError::NotFound), Err(GetError::NotFound)) => {
-                return Err(FailedHostOsUpdateReason::NoMatchingArtifactsFound);
-            }
-            (Err(GetError::NotFound), Ok(_)) => {
-                return Err(
-                    FailedHostOsUpdateReason::NoMatchingPhase1ArtifactFound,
-                );
-            }
-            (Ok(_), Err(GetError::NotFound)) => {
-                return Err(
-                    FailedHostOsUpdateReason::NoMatchingPhase2ArtifactFound,
-                );
-            }
-            // "TUF is broken" cases: have multiple of one or the other. This
-            // should be impossible unless we shipped a TUF repo with multiple
-            // host OS images. We can't proceed, because we don't know how to
-            // pair up which phase 1 matches which phase 2.
-            (Err(GetError::TooMany), _) | (_, Err(GetError::TooMany)) => {
-                return Err(FailedHostOsUpdateReason::TooManyMatchingArtifacts);
-            }
-        };
+    let HostOsTargetArtifacts {
+        phase_1: phase_1_artifact,
+        phase_2: phase_2_artifact,
+    } = HostOsTargetArtifacts::for_board(baseboard_id, current_artifacts)?;
 
     // If the artifact matches what's deployed, then no update is needed. We
     // only need to look at the running phase 2; that tells us what we're
@@ -480,8 +440,77 @@ pub(super) fn try_make_update(
     ))
 }
 
+/// Host OS phase 1 and phase 2 artifacts that a TUF repo specifies for a sled
+pub(super) struct HostOsTargetArtifacts<'a> {
+    pub(super) phase_1: &'a Artifact,
+    pub(super) phase_2: &'a Artifact,
+}
+
+impl<'a> HostOsTargetArtifacts<'a> {
+    /// Finds the host OS artifacts in `current_artifacts` that apply to the
+    /// sled identified by `baseboard_id`
+    pub(super) fn for_board(
+        baseboard_id: &BaseboardId,
+        current_artifacts: &'a TufRepoDescription,
+    ) -> Result<Self, HostOsTargetArtifactError> {
+        let Some(sled_type) =
+            OxideSled::try_from_model(&baseboard_id.part_number)
+        else {
+            return Err(HostOsTargetArtifactError::UnableToDetermineSledModel(
+                baseboard_id.part_number.clone(),
+            ));
+        };
+
+        let phase_1_artifact = current_artifacts.artifacts.get_only(
+            &OsPhase1Tags {
+                os_board: match sled_type {
+                    OxideSled::Gimlet => OsBoard::GIMLET,
+                    OxideSled::Cosmo => OsBoard::COSMO,
+                },
+                os_variant: OsVariant::Host,
+            }
+            .into(),
+        );
+        let phase_2_artifact = current_artifacts
+            .artifacts
+            .get_only(&OsPhase2Tags { os_variant: OsVariant::Host }.into());
+        let (phase_1, phase_2) = match (phase_1_artifact, phase_2_artifact) {
+            // Common case: Exactly 1 of each artifact.
+            (Ok(p1), Ok(p2)) => (p1, p2),
+            // "TUF is broken" cases: missing both, one or the other.
+            (Err(GetError::NotFound), Err(GetError::NotFound)) => {
+                return Err(
+                    HostOsTargetArtifactError::NoMatchingArtifactsFound,
+                );
+            }
+            (Err(GetError::NotFound), Ok(_)) => {
+                return Err(
+                    HostOsTargetArtifactError::NoMatchingPhase1ArtifactFound,
+                );
+            }
+            (Ok(_), Err(GetError::NotFound)) => {
+                return Err(
+                    HostOsTargetArtifactError::NoMatchingPhase2ArtifactFound,
+                );
+            }
+            // "TUF is broken" cases: have multiple of one or the other. This
+            // should be impossible unless we shipped a TUF repo with multiple
+            // host OS images. We can't proceed, because we don't know how to
+            // pair up which phase 1 matches which phase 2.
+            (Err(GetError::TooMany), _) | (_, Err(GetError::TooMany)) => {
+                return Err(
+                    HostOsTargetArtifactError::TooManyMatchingArtifacts,
+                );
+            }
+        };
+
+        Ok(HostOsTargetArtifacts { phase_1, phase_2 })
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::mgs_updates::EvacuatingSleds;
     use crate::mgs_updates::ImpossibleUpdatePolicy;
     use crate::mgs_updates::MgsUpdatePlanner;
     use crate::mgs_updates::UpdateableBoard;
@@ -499,12 +528,18 @@ mod tests {
     use dropshot::test_util::LogContext;
     use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
+    use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
     use nexus_types::deployment::PendingMgsUpdates;
+    use nexus_types::deployment::PlannerConfig;
+    use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+    use nexus_types::deployment::SledUpdateRebootPolicy;
     use nexus_types::deployment::TargetReleaseDescription;
     use nexus_types::inventory::SpType;
+    use omicron_generation_kinds::SledConfigGeneration;
     use sled_agent_types::disk::M2Slot;
+    use std::collections::BTreeMap;
     use std::collections::BTreeSet;
 
     // Short hand-rolled update sequence that exercises some basic behavior for
@@ -518,11 +553,20 @@ mod tests {
         );
         let log = &logctx.log;
         let test_boards = TestBoards::new(test_name);
+        let sled_0_evacuating = EvacuatingSleds::new_for_test([(
+            test_boards.sled_id(0).expect("have sled 0"),
+            SledConfigGeneration::new(),
+        )]);
+        let planner_config = PlannerConfig {
+            sled_update_reboot_policy: SledUpdateRebootPolicy::Evacuate,
+            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
+        };
 
         // Test that with no updates pending and no TUF repo specified, there
         // will remain no updates pending.
         let collection = test_boards
             .collection_builder()
+            .sled_evacuated(0, SledConfigGeneration::new())
             .host_active_exception(
                 0,
                 ARTIFACT_HASH_HOST_PHASE_1_V1,
@@ -538,9 +582,11 @@ mod tests {
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
         let planned = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards,
             zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &sled_0_evacuating,
             current_updates: &initial_updates,
             current_artifacts: &TargetReleaseDescription::Initial,
             nmax_updates,
@@ -555,9 +601,11 @@ mod tests {
         let repo = test_boards.tuf_repo();
         let planned = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards,
             zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &sled_0_evacuating,
             current_updates: &initial_updates,
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -595,9 +643,11 @@ mod tests {
         // makes no changes.
         let later_planned = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards,
             zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &sled_0_evacuating,
             current_updates: &planned.pending_updates,
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -614,6 +664,7 @@ mod tests {
         // nmax_updates).
         let later_collection = test_boards
             .collection_builder()
+            .sled_evacuated(0, SledConfigGeneration::new())
             .host_active_exception(
                 0,
                 ARTIFACT_HASH_HOST_PHASE_1_V1,
@@ -627,9 +678,11 @@ mod tests {
             .build();
         let later_planned = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &later_collection,
             current_boards,
             zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &sled_0_evacuating,
             current_updates: &planned.pending_updates,
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -642,9 +695,15 @@ mod tests {
         // At this point, we're ready to test that when the first update
         // completes, then the second one *is* started.  This tests two
         // different things: first that we noticed the first one completed, and
-        // second that we noticed another thing needed an update
+        // second that we noticed another thing needed an update.
+        //
+        // This takes two planning passes: the first notices sled 0 is done (and
+        // restores its update disposition to `Available`) and marks sled 1 for
+        // evacuation; the second (once sled 1 reports it has evacuated)
+        // schedules sled 1's update.
         let later_collection = test_boards
             .collection_builder()
+            .sled_evacuated(0, SledConfigGeneration::new())
             .host_active_exception(
                 1,
                 ARTIFACT_HASH_HOST_PHASE_1_V1,
@@ -653,15 +712,63 @@ mod tests {
             .build();
         let later_planned = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &later_collection,
             current_boards,
             zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &sled_0_evacuating,
             current_updates: &planned.pending_updates,
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
             impossible_update_policy,
         }
         .plan();
+        assert!(later_planned.pending_updates.is_empty());
+        assert!(later_planned.pending_host_phase_2_changes.is_empty());
+        assert_eq!(
+            later_planned
+                .pending_update_disposition_changes
+                .iter()
+                .map(|(sled_id, kind)| (*sled_id, *kind))
+                .collect::<BTreeMap<_, _>>(),
+            BTreeMap::from([
+                (sled_0_id, BlueprintSledUpdateDispositionKind::Available),
+                (
+                    sled_1_id,
+                    BlueprintSledUpdateDispositionKind::Evacuating {
+                        policy: ReconfiguratorDisruptionPolicy::default(),
+                    }
+                ),
+            ])
+        );
+
+        let sled_1_evacuating = EvacuatingSleds::new_for_test([(
+            sled_1_id,
+            SledConfigGeneration::new(),
+        )]);
+        let later_collection = test_boards
+            .collection_builder()
+            .sled_evacuated(1, SledConfigGeneration::new())
+            .host_active_exception(
+                1,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+            )
+            .build();
+        let later_planned = MgsUpdatePlanner {
+            log,
+            planner_config: &planner_config,
+            inventory: &later_collection,
+            current_boards,
+            zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &sled_1_evacuating,
+            current_updates: &later_planned.pending_updates,
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        }
+        .plan();
+        assert!(later_planned.pending_update_disposition_changes.is_empty());
         assert_eq!(later_planned.pending_updates.len(), 1);
         let first_update = later_planned
             .pending_updates
@@ -692,13 +799,18 @@ mod tests {
         );
 
         // Finally, test that when all OSs are in spec, then no updates are
-        // configured.
-        let updated_collection = test_boards.collection_builder().build();
+        // configured (and the evacuated sled is restored to `Available`).
+        let updated_collection = test_boards
+            .collection_builder()
+            .sled_evacuated(1, SledConfigGeneration::new())
+            .build();
         let later_planned = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &updated_collection,
             current_boards,
             zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &sled_1_evacuating,
             current_updates: &later_planned.pending_updates,
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -707,11 +819,23 @@ mod tests {
         .plan();
         assert!(later_planned.pending_updates.is_empty());
         assert!(later_planned.pending_host_phase_2_changes.is_empty());
+        assert_eq!(
+            later_planned
+                .pending_update_disposition_changes
+                .iter()
+                .map(|(sled_id, kind)| (*sled_id, *kind))
+                .collect::<BTreeMap<_, _>>(),
+            BTreeMap::from([(
+                sled_1_id,
+                BlueprintSledUpdateDispositionKind::Available
+            )])
+        );
 
         // Test that we don't try to update boards that aren't in
         // `current_boards`, even if they're in inventory and outdated.
         let collection = test_boards
             .collection_builder()
+            .sled_evacuated(0, SledConfigGeneration::new())
             .host_active_exception(
                 0,
                 ARTIFACT_HASH_HOST_PHASE_1_V1,
@@ -720,9 +844,11 @@ mod tests {
             .build();
         let planned = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &BTreeSet::new(),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &sled_0_evacuating,
             current_updates: &PendingMgsUpdates::new(),
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -731,11 +857,14 @@ mod tests {
         .plan();
         assert!(planned.pending_updates.is_empty());
         assert!(planned.pending_host_phase_2_changes.is_empty());
+        assert!(planned.pending_update_disposition_changes.is_empty());
         let planned = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &UpdateableBoard::all_from_collection(&collection),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &sled_0_evacuating,
             current_updates: &PendingMgsUpdates::new(),
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -747,6 +876,7 @@ mod tests {
         // update was generated.
         assert_eq!(planned.pending_updates.len(), 1);
         assert_eq!(planned.pending_host_phase_2_changes.len(), 1);
+        assert!(planned.pending_update_disposition_changes.is_empty());
 
         // Verify the precondition details of an ordinary update.
         let old_update = planned
@@ -789,6 +919,7 @@ mod tests {
         // a new update reflecting that.
         let collection = test_boards
             .collection_builder()
+            .sled_evacuated(0, SledConfigGeneration::new())
             .gimlet_host_phase_1_artifacts(
                 ARTIFACT_HASH_GIMLET_HOST_PHASE_1,
                 ARTIFACT_HASH_HOST_PHASE_1_V1_5,
@@ -801,9 +932,11 @@ mod tests {
             .build();
         let new_planned = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &UpdateableBoard::all_from_collection(&collection),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &sled_0_evacuating,
             current_updates: &planned.pending_updates,
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -857,6 +990,7 @@ mod tests {
         // a new update reflecting that.
         let collection = test_boards
             .collection_builder()
+            .sled_evacuated(0, SledConfigGeneration::new())
             .host_active_exception(
                 0,
                 ARTIFACT_HASH_HOST_PHASE_1_V1_5,
@@ -865,9 +999,11 @@ mod tests {
             .build();
         let new_planned = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &UpdateableBoard::all_from_collection(&collection),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &sled_0_evacuating,
             current_updates: &planned.pending_updates,
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -929,12 +1065,18 @@ mod tests {
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
         let test_boards = TestBoards::new(test_name);
+        let sled_0_evacuating = EvacuatingSleds::new_for_test([(
+            test_boards.sled_id(0).expect("have sled 0"),
+            SledConfigGeneration::new(),
+        )]);
+        let planner_config = PlannerConfig::default();
 
         // Configure an update for one SP.
         let log = &logctx.log;
         let repo = test_boards.tuf_repo();
         let mut collection = test_boards
             .collection_builder()
+            .sled_evacuated(0, SledConfigGeneration::new())
             .host_active_exception(
                 0,
                 ARTIFACT_HASH_HOST_PHASE_1_V1,
@@ -945,9 +1087,11 @@ mod tests {
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
         let planned = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &UpdateableBoard::all_from_collection(&collection),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &sled_0_evacuating,
             current_updates: &PendingMgsUpdates::new(),
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -975,9 +1119,11 @@ mod tests {
         // new location.
         let new_planned = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &UpdateableBoard::all_from_collection(&collection),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &sled_0_evacuating,
             current_updates: &planned.pending_updates,
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,

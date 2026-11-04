@@ -12,6 +12,7 @@ use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
+use omicron_common::http_client::internal_http_client_builder;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
@@ -86,7 +87,9 @@ impl CockroachAdminApi for CockroachAdminImpl {
             ctx.cockroach_cli().cockroach_http_address();
         let url = format!("http://{}/_status/vars", cockroach_http_address);
 
-        let client = reqwest::Client::new();
+        let client = internal_http_client_builder()
+            .build()
+            .expect("building a client without TLS roots does no I/O");
         let response = client.get(&url).send().await.map_err(|e| {
             HttpError::for_internal_error(format!(
                 "Failed to proxy to CockroachDB: {}",
@@ -128,7 +131,9 @@ impl CockroachAdminApi for CockroachAdminImpl {
             ctx.cockroach_cli().cockroach_http_address();
         let url = format!("http://{}/_status/nodes", cockroach_http_address);
 
-        let client = reqwest::Client::new();
+        let client = internal_http_client_builder()
+            .build()
+            .expect("building a client without TLS roots does no I/O");
         let response = client.get(&url).send().await.map_err(|e| {
             HttpError::for_internal_error(format!(
                 "Failed to proxy to CockroachDB: {}",

@@ -8,15 +8,15 @@ Oximeter is the system use to describe, generate, and store metrics and
 telemetry data in the Oxide Rack. The overall functionality is provided by a set
 of Rust crates:
 
-- [`oximeter`](1): The core crate, for describing and generating metric data
+- [`oximeter`][1]: The core crate, for describing and generating metric data
   samples
-- [`collector`](2): The `oximeter` binary program run by the control plane,
+- [`collector`][2]: The `oximeter` binary program run by the control plane,
   which pulls metrics from other sources.
-- [`producer`](3): A library that allows a program to produce its metric data for
+- [`producer`][3]: A library that allows a program to produce its metric data for
   the control plane. This allows consumers to register with the control plane,
   and provide an HTTP endpoint from which the `oximeter` binary will pull data.
-- [`db`](4): A library for interacting with the telemetry database,
-  [ClickHouse](5)
+- [`db`][4]: A library for interacting with the telemetry database,
+  [ClickHouse][5]
 
 In general, as a program or library wishing to _produce_ data, one would use the
 `oximeter` crate to define the metrics, and the `producer` crate to communicate
@@ -25,7 +25,7 @@ it to the collection program.
 ## Defining metrics
 
 The `oximeter` library crate provides two traits for describing data,
-[`Target`](target) and [`Metric`](metric). A _target_ is something that we're
+[`Target`][target] and [`Metric`][metric]. A _target_ is something that we're
 monitoring or collecting data about, such as an HTTP service or other program,
 or a hardware component like a fan. A _metric_ describes a feature of the target
 that we're measuring. Keeping with the above examples, a metric could be: the
@@ -37,7 +37,7 @@ structs define the schema for each. The fields of those structs can be one of
 several supported types, such as `String`s, `i64`s, or `std::net::IpAddr`s. The
 `Metric` struct must have one additional field, which is the _datum_, the actual
 data value of the metric. There are many supported types for that too, such as
-`f64`s or [`oximeter::Histogram`](hist)s.
+`f64`s or [`oximeter::Histogram`][hist]s.
 
 Together, the `Target` and `Metric` define one _timeseries_. One produces
 `Sample`s from the timeseries, and these samples are what are pulled by the
@@ -46,14 +46,14 @@ Together, the `Target` and `Metric` define one _timeseries_. One produces
 ## Generating samples
 
 After defining a timeseries, applications will want to generate actual samples
-from that. This is done by implementing the [`oximeter::Producer`](producer)
-trait. The only method required here is [`produce()`](produce), which generates
-a stream of [`oximeter::Sample`](sample)s. This is a single, timestamped
+from that. This is done by implementing the [`oximeter::Producer`][producer]
+trait. The only method required here is [`produce()`][produce], which generates
+a stream of [`oximeter::Sample`][sample]s. This is a single, timestamped
 datapoint from a single timeseries. A `Producer` implementor can generate as
 many samples as needed, from as many timeseries as needed.
 
 To simplify the generation of data from many timeseries, consumers can use the
-[`oximeter::ProducerRegistry`](registry). This is just a collection of types
+[`oximeter::ProducerRegistry`][registry]. This is just a collection of types
 that implement `Producer`; it has its own `collect()` method, which concatenates
 the samples from each of its contained producers.
 
@@ -126,8 +126,8 @@ ClickHouse.
 
 ### Nexus registration API
 
-Registration with Nexus is done with the [`oximeter_producer::register`](register)
-function. That accepts a [`ProducerEndpoint`](prod-end) and an address for
+Registration with Nexus is done with the `oximeter_producer::register`
+function. That accepts a [`ProducerEndpoint`][prod-end] and an address for
 Nexus, and communicates the relevant details to Nexus.
 
 ### Creating a server
@@ -137,9 +137,9 @@ As mentioned above, the application generating metrics is a _server_ for the
 can make requests to, which returns a list of `Samples`.
 
 If the application does _not_ already run an HTTP server, the simplest thing is
-to use [`oximeter_producer::Server`](server). This starts a Dropshot server for
+to use [`oximeter_producer::Server`][server]. This starts a Dropshot server for
 you with the right endpoint. The server's
-[`oximeter_producer::Server::registry`](srv-registry) method returns a reference
+[`oximeter_producer::Server::registry`][srv-registry] method returns a reference
 to its `ProducerRegistry`, to which you can add your `Producer` implementations.
 These can be added at any point, even after the server starts running.
 
@@ -148,14 +148,14 @@ endpoint rather than spinning up a whole new server. There's no builtin way
 (yet) to do this, since Dropshot servers are parametrized by their context type,
 and must be defined inside a macro. The easiest thing to do at this point is to
 create an endpoint that looks like the private function
-[`oximeter_producer::collect_endpoint`](collect-end). That just calls the function
-[`oximeter_producer::collect`](collect), which _is_ public. That takes a
+`oximeter_producer::collect_endpoint`. That just calls the function
+`oximeter_producer::collect`, which _is_ public. That takes a
 `ProducerRegistry`, and just spits out all the samples from its producers.
 
 ## Example
 
 There's a complete, self-contained example in
-[`./oximeter/producer/examples/producer.rs`](example). That shows how to:
+[`./oximeter/producer/examples/producer.rs`][example]. That shows how to:
 
 - Define a `Target` and `Metric` type
 - Create a `Producer` implementation that generates samples from a timeseries
@@ -163,22 +163,19 @@ There's a complete, self-contained example in
 - Add the `Producer` implementation to the server.
 - Register with nexus.
 
-[1]: ../target/doc/oximeter/index.html
-[2]: ../target/doc/oximeter_collector/index.html
-[3]: ../target/doc/oximeter_producer/index.html
-[4]: ../target/doc/oximeter_db/index.html
+[1]: oximeter
+[2]: collector
+[3]: producer
+[4]: db
 [5]: https://clickhouse.com
-[target]: ../target/doc/oximeter/traits/trait.Target.html
-[metric]: ../target/doc/oximeter/traits/trait.Metric.html
-[hist]: ../target/doc/oximeter/histogram/struct.Histogram.html
-[producer]: ../target/doc/oximeter/traits/trait.Producer.html
-[produce]: ../target/doc/oximeter/traits/trait.Producer.html#tymethod.produce
-[sample]: ../target/doc/oximeter/types/struct.Sample.html
-[registry]: ../target/doc/oximeter/types/struct.ProducerRegistry.html
-[register]: ../target/doc/oximeter_producer/fn.register.html
-[prod-end]: ../target/doc/omicron_common/api/internal/nexus/struct.ProducerEndpoint.html
-[server]: ../target/doc/oximeter_producer/struct.Server.html
-[srv-registry]: ../target/doc/oximeter_producer/struct.Server.html#method.registry
-[collect-end]: ../target/doc/oximeter_producer/struct.collect_endpoint.html
-[collect]: ../target/doc/oximeter_producer/fn.collect.html
-[example]: oximeter/producer/examples/producer.rs
+[target]: types/versions/src/impls/traits.rs
+[metric]: types/versions/src/impls/traits.rs
+[hist]: types/versions/src/initial/histogram.rs
+[producer]: types/versions/src/impls/traits.rs
+[produce]: types/versions/src/impls/traits.rs
+[sample]: types/versions/src/initial/types.rs
+[registry]: types/versions/src/initial/types.rs
+[prod-end]: ../common/src/api/internal/nexus.rs
+[server]: producer/src/lib.rs
+[srv-registry]: producer/src/lib.rs
+[example]: producer/examples/producer.rs

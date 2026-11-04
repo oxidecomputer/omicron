@@ -631,7 +631,7 @@ mod test {
             to_recover.into_iter().zip(found_to_recover)
         {
             assert_eq!(expected_saga_id, *found_saga_id);
-            assert_eq!(expected_saga_id, found_saga_record.id.0);
+            assert_eq!(expected_saga_id, found_saga_record.id);
             assert_eq!("dummy", found_saga_record.name);
         }
         assert_eq!(

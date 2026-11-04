@@ -48,9 +48,9 @@ use wicketd_api::CurrentRssUserConfigSensitive;
 use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::CertificatePem;
 use wicketd_commission_types::rack_setup::CertificateUploadResponse;
-use wicketd_commission_types::rack_setup::ManualPortConfig;
 use wicketd_commission_types::rack_setup::PrivateKeyPem;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
+use wicketd_commission_types::rack_setup::UserSpecifiedPortConfig;
 use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
 use wicketd_commission_types::rack_setup::UserSpecifiedRouterPeerAddr;
 
@@ -522,9 +522,9 @@ fn validate_rack_network_config(
     // TODO Add more client side checks on `rack_network_config` contents?
 
     let ports = match config
-        .iter_uplinks()
+        .iter_port_configs()
         .map(|(switch, port, config)| {
-            build_port_config(switch, port, config, bgp_auth_keys)
+            build_port_config(switch, port, &config, bgp_auth_keys)
         })
         .collect::<Result<Vec<_>, AddressFamilyMismatchError>>()
     {
@@ -532,8 +532,14 @@ fn validate_rack_network_config(
         Err(e) => bail!(e),
     };
 
-    let ports = UplinkPorts::new(ports)
-        .context("rack network config must specify at least one uplink port")?;
+    // We only want to run this check in RSS, because it's not necessarily true
+    // that joining multiracks will each have an uplink. Therfore we don't make
+    // it part of the `UplinkPorts` constructor .
+    if !ports.iter().any(|p| !p.allow_ddm_traffic) {
+        bail!("rack network config must specify at least one uplink port");
+    }
+
+    let ports = UplinkPorts::new(ports).expect("ports not empty");
 
     Ok(bootstrap_agent_lockstep_client::types::RackNetworkConfig {
         rack_subnet,
@@ -606,15 +612,18 @@ pub fn validate_rack_subnet(
 fn build_port_config(
     switch: SwitchSlot,
     port: &str,
-    config: &ManualPortConfig,
+    config: &UserSpecifiedPortConfig,
     bgp_auth_keys: &BgpAuthKeys,
 ) -> Result<PortConfig, AddressFamilyMismatchError> {
     use sled_agent_types::early_networking::BgpPeerConfig;
 
-    let mut bgp_peers = vec![];
-    for p in &config.bgp_peers {
-        let md5_auth_key = p.auth_key_id.as_ref().map(|key_id| {
-            let BgpAuthKey::TcpMd5 { key } = bgp_auth_keys
+    let port_config = match config {
+        UserSpecifiedPortConfig::Uplink(uplink_config) => {
+            let mut bgp_peers = vec![];
+            for p in &uplink_config.bgp_peers {
+                let md5_auth_key =
+                    p.auth_key_id.as_ref().map(|key_id| {
+                        let BgpAuthKey::TcpMd5 { key } = bgp_auth_keys
                 .get(key_id)
                 .unwrap_or_else(|| {
                     panic!("invariant violation: auth key ID {} exists", key_id)
@@ -626,55 +635,78 @@ fn build_port_config(
                         key_id
                     )
                 });
-            key
-        });
+                        key
+                    });
 
-        let addr = match p.addr {
-            UserSpecifiedRouterPeerAddr::Unnumbered => {
-                UnnumberedRouter { router_lifetime: p.router_lifetime }.into()
+                let addr = match p.addr {
+                    UserSpecifiedRouterPeerAddr::Unnumbered => {
+                        UnnumberedRouter { router_lifetime: p.router_lifetime }
+                            .into()
+                    }
+                    UserSpecifiedRouterPeerAddr::Numbered(ip) => {
+                        NumberedRouter::new(ip, p.src_addr)?.into()
+                    }
+                };
+
+                let config = BgpPeerConfig {
+                    addr,
+                    asn: p.asn,
+                    port: p.port.clone(),
+                    hold_time: p.hold_time,
+                    connect_retry: p.connect_retry,
+                    delay_open: p.delay_open,
+                    idle_hold_time: p.idle_hold_time,
+                    keepalive: p.keepalive,
+                    communities: Vec::new(),
+                    enforce_first_as: p.enforce_first_as,
+                    local_pref: p.local_pref,
+                    md5_auth_key,
+                    min_ttl: p.min_ttl,
+                    multi_exit_discriminator: p.multi_exit_discriminator,
+                    remote_asn: p.remote_asn,
+                    allowed_export: p.allowed_export.clone().into(),
+                    allowed_import: p.allowed_import.clone().into(),
+                    vlan_id: p.vlan_id,
+                };
+
+                bgp_peers.push(config);
             }
-            UserSpecifiedRouterPeerAddr::Numbered(ip) => {
-                NumberedRouter::new(ip, p.src_addr)?.into()
+
+            PortConfig {
+                port: port.to_owned(),
+                routes: uplink_config.routes.clone(),
+                addresses: uplink_config
+                    .addresses
+                    .iter()
+                    .copied()
+                    .map(From::from)
+                    .collect(),
+                bgp_peers,
+                switch,
+                uplink_port_speed: uplink_config.uplink_port_speed,
+                uplink_port_fec: uplink_config.uplink_port_fec,
+                autoneg: uplink_config.autoneg,
+                lldp: uplink_config.lldp.clone(),
+                tx_eq: uplink_config.tx_eq,
+                allow_ddm_traffic: false,
             }
-        };
+        }
+        UserSpecifiedPortConfig::Ddm(l1_config) => PortConfig {
+            port: port.to_owned(),
+            routes: Vec::new(),
+            addresses: Vec::new(),
+            bgp_peers: Vec::new(),
+            switch,
+            uplink_port_speed: l1_config.speed,
+            uplink_port_fec: l1_config.fec,
+            autoneg: l1_config.autoneg,
+            lldp: l1_config.lldp.clone(),
+            tx_eq: l1_config.tx_eq,
+            allow_ddm_traffic: true,
+        },
+    };
 
-        let config = BgpPeerConfig {
-            addr,
-            asn: p.asn,
-            port: p.port.clone(),
-            hold_time: p.hold_time,
-            connect_retry: p.connect_retry,
-            delay_open: p.delay_open,
-            idle_hold_time: p.idle_hold_time,
-            keepalive: p.keepalive,
-            communities: Vec::new(),
-            enforce_first_as: p.enforce_first_as,
-            local_pref: p.local_pref,
-            md5_auth_key,
-            min_ttl: p.min_ttl,
-            multi_exit_discriminator: p.multi_exit_discriminator,
-            remote_asn: p.remote_asn,
-            allowed_export: p.allowed_export.clone().into(),
-            allowed_import: p.allowed_import.clone().into(),
-            vlan_id: p.vlan_id,
-        };
-
-        bgp_peers.push(config);
-    }
-
-    Ok(PortConfig {
-        port: port.to_owned(),
-        routes: config.routes.clone(),
-        addresses: config.addresses.iter().copied().map(From::from).collect(),
-        bgp_peers,
-        switch,
-        uplink_port_speed: config.uplink_port_speed,
-        uplink_port_fec: config.uplink_port_fec,
-        autoneg: config.autoneg,
-        lldp: config.lldp.clone(),
-        tx_eq: config.tx_eq,
-        allow_ddm_traffic: false,
-    })
+    Ok(port_config)
 }
 
 // Thin wrapper around an `omicron_certificates::CertificateValidator` that we
@@ -757,7 +789,7 @@ mod tests {
                 .first_key_value()
                 .expect("at least one switch0 port")
                 .1
-                .manual()
+                .uplink()
                 .unwrap()
                 .bgp_peers
                 .is_empty()
@@ -771,7 +803,7 @@ mod tests {
                 .first_entry()
                 .unwrap()
                 .into_mut()
-                .manual_mut()
+                .uplink_mut()
                 .unwrap()
                 .bgp_peers
                 .get_mut(0)
@@ -791,7 +823,7 @@ mod tests {
                 .first_entry()
                 .unwrap()
                 .into_mut()
-                .manual_mut()
+                .uplink_mut()
                 .unwrap()
                 .bgp_peers
                 .get_mut(0)
@@ -819,7 +851,7 @@ mod tests {
                 .first_entry()
                 .unwrap()
                 .into_mut()
-                .manual_mut()
+                .uplink_mut()
                 .unwrap()
                 .bgp_peers
                 .get_mut(0)
@@ -873,8 +905,8 @@ mod tests {
         let mut config_b = example.put_insensitive.clone();
         config_b.ntp_servers = vec!["ntp.config-b.example.com".to_owned()];
         for (_, _, port) in config_b.rack_network_config.iter_uplinks_mut() {
-            if let Some(manual) = port.manual_mut() {
-                manual.bgp_peers.clear();
+            if let Some(uplink) = port.uplink_mut() {
+                uplink.bgp_peers.clear();
             }
         }
         config_b.bootstrap_sleds.insert(999);

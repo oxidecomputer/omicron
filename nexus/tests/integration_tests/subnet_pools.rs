@@ -40,6 +40,7 @@ use omicron_common::address::IpVersion;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::SimpleIdentityOrName as _;
+use omicron_uuid_kinds::GenericUuid;
 use std::collections::BTreeSet;
 
 type ControlPlaneTestContext =
@@ -226,7 +227,6 @@ async fn test_subnet_pool_silo_list(cptestctx: &ControlPlaneTestContext) {
         let silo = create_silo(
             client,
             &format!("test-silo-{i}"),
-            true,
             SiloIdentityMode::LocalOnly,
         )
         .await;
@@ -312,8 +312,7 @@ async fn test_silo_subnet_pool_list(cptestctx: &ControlPlaneTestContext) {
 
     // Create a silo and a bunch of pools.
     let silo =
-        create_silo(client, SILO_NAME, false, SiloIdentityMode::LocalOnly)
-            .await;
+        create_silo(client, SILO_NAME, SiloIdentityMode::LocalOnly).await;
     let n_pools = 100;
     let mut pools = Vec::with_capacity(n_pools);
     for i in 0..n_pools {
@@ -410,8 +409,7 @@ async fn test_current_silo_subnet_pool_list(
     let client = &cptestctx.external_client;
 
     let silo =
-        create_silo(client, SILO_NAME, false, SiloIdentityMode::LocalOnly)
-            .await;
+        create_silo(client, SILO_NAME, SiloIdentityMode::LocalOnly).await;
     let silo_url = format!("{}/{}", SILO_URL, SILO_NAME);
 
     let default_name = "default-subnet-pool";
@@ -465,8 +463,7 @@ async fn test_current_silo_subnet_pool_view(
     let client = &cptestctx.external_client;
 
     let silo =
-        create_silo(client, SILO_NAME, false, SiloIdentityMode::LocalOnly)
-            .await;
+        create_silo(client, SILO_NAME, SiloIdentityMode::LocalOnly).await;
     let silo_url = format!("{}/{}", SILO_URL, SILO_NAME);
 
     let default_name = "default-subnet-pool";
@@ -539,11 +536,17 @@ async fn test_subnet_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     let pool_id = pool.identity.id;
 
     // Link as non-default, then promote.
-    link_subnet_pool(client, SUBNET_POOL_NAME, &DEFAULT_SILO_ID, false).await;
+    link_subnet_pool(
+        client,
+        SUBNET_POOL_NAME,
+        &DEFAULT_SILO_ID.into_untyped_uuid(),
+        false,
+    )
+    .await;
     assert_silos_for_pool(
         client,
         SUBNET_POOL_NAME,
-        &[(DEFAULT_SILO_ID, false)],
+        &[(DEFAULT_SILO_ID.into_untyped_uuid(), false)],
     )
     .await;
 
@@ -555,21 +558,24 @@ async fn test_subnet_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     );
     let link: SubnetPoolSiloLink = object_put(client, &link_url, &update).await;
     assert_eq!(link.subnet_pool_id, pool_id);
-    assert_eq!(link.silo_id, DEFAULT_SILO_ID);
+    assert_eq!(link.silo_id, DEFAULT_SILO_ID.into_untyped_uuid());
     assert!(link.is_default);
-    assert_silos_for_pool(client, SUBNET_POOL_NAME, &[(DEFAULT_SILO_ID, true)])
-        .await;
+    assert_silos_for_pool(
+        client,
+        SUBNET_POOL_NAME,
+        &[(DEFAULT_SILO_ID.into_untyped_uuid(), true)],
+    )
+    .await;
 
     // Link to another silo as default.
     let new_silo =
-        create_silo(client, "new-guy", false, SiloIdentityMode::LocalOnly)
-            .await;
+        create_silo(client, "new-guy", SiloIdentityMode::LocalOnly).await;
     let new_silo_id = new_silo.identity.id;
     link_subnet_pool(client, SUBNET_POOL_NAME, &new_silo_id, true).await;
     assert_silos_for_pool(
         client,
         SUBNET_POOL_NAME,
-        &[(DEFAULT_SILO_ID, true), (new_silo_id, true)],
+        &[(DEFAULT_SILO_ID.into_untyped_uuid(), true), (new_silo_id, true)],
     )
     .await;
 
@@ -607,7 +613,7 @@ async fn test_subnet_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     assert_silos_for_pool(
         client,
         SUBNET_POOL_NAME,
-        &[(DEFAULT_SILO_ID, true), (new_silo_id, false)],
+        &[(DEFAULT_SILO_ID.into_untyped_uuid(), true), (new_silo_id, false)],
     )
     .await;
     assert_pools_for_silo(
@@ -697,11 +703,19 @@ async fn cannot_link_multiple_times(cptestctx: &ControlPlaneTestContext) {
         create_subnet_pool(client, SUBNET_POOL_NAME, IpVersion::V6).await;
 
     // Link it to the default silo.
-    link_subnet_pool(client, SUBNET_POOL_NAME, &DEFAULT_SILO_ID, false).await;
+    link_subnet_pool(
+        client,
+        SUBNET_POOL_NAME,
+        &DEFAULT_SILO_ID.into_untyped_uuid(),
+        false,
+    )
+    .await;
 
     // Doing that again should fail.
     let link_params = subnet_pool::SubnetPoolLinkSilo {
-        silo: omicron_common::api::external::NameOrId::Id(DEFAULT_SILO_ID),
+        silo: omicron_common::api::external::NameOrId::Id(
+            DEFAULT_SILO_ID.into_untyped_uuid(),
+        ),
         is_default: false,
     };
     let url = format!("{}/{}/silos", SUBNET_POOLS_URL, SUBNET_POOL_NAME);

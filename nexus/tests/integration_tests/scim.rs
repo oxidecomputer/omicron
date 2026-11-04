@@ -36,6 +36,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
 use uuid::Uuid;
 
+use omicron_uuid_kinds::SiloUuid;
 use scim2_test_client::Tester;
 
 type ControlPlaneTestContext =
@@ -47,8 +48,7 @@ async fn test_create_a_saml_scim_silo(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlScim).await;
     let silo: silo::Silo = NexusRequest::object_get(
         &client,
         &format!("/v1/system/silos/{SILO_NAME}"),
@@ -162,8 +162,7 @@ async fn test_no_jit_for_saml_scim_silos(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlScim).await;
 
     let _silo_saml_idp: identity_provider::SamlIdentityProvider =
         object_create(
@@ -234,8 +233,7 @@ async fn test_scim_client_token_crud(cptestctx: &ControlPlaneTestContext) {
     // Create a Silo, then grant the PrivilegedUser the Admin role on it
 
     const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlScim).await;
 
     grant_iam(
         client,
@@ -353,11 +351,9 @@ async fn test_scim_client_token_tenancy(cptestctx: &ControlPlaneTestContext) {
     const SILO_1_NAME: &str = "saml-scim-silo-1";
     const SILO_2_NAME: &str = "saml-scim-silo-2";
 
-    create_silo(&client, SILO_1_NAME, true, silo::SiloIdentityMode::SamlScim)
-        .await;
+    create_silo(&client, SILO_1_NAME, silo::SiloIdentityMode::SamlScim).await;
 
-    create_silo(&client, SILO_2_NAME, true, silo::SiloIdentityMode::SamlScim)
-        .await;
+    create_silo(&client, SILO_2_NAME, silo::SiloIdentityMode::SamlScim).await;
 
     grant_iam(
         client,
@@ -432,8 +428,7 @@ async fn test_scim_client_token_bearer_auth(
     // Create a Silo, then grant the PrivilegedUser the Admin role on it
 
     const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlScim).await;
 
     grant_iam(
         client,
@@ -479,8 +474,7 @@ async fn test_scim_client_no_auth_with_expired_token(
     const SILO_NAME: &str = "saml-scim-silo";
 
     let silo =
-        create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
-            .await;
+        create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlScim).await;
 
     // Manually create an expired token
 
@@ -492,7 +486,7 @@ async fn test_scim_client_no_auth_with_expired_token(
             time_created: now,
             time_deleted: None,
             time_expires: Some(now),
-            silo_id: silo.identity.id,
+            silo_id: SiloUuid::from_untyped_uuid(silo.identity.id).into(),
             bearer_token: String::from("testpost"),
         };
 
@@ -529,8 +523,7 @@ async fn test_scim2_crate_self_test(cptestctx: &ControlPlaneTestContext) {
     // Create a Silo, then grant the PrivilegedUser the Admin role on it
 
     const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlScim).await;
 
     grant_iam(
         client,
@@ -575,8 +568,7 @@ async fn test_disabling_scim_user(cptestctx: &ControlPlaneTestContext) {
     // Create the Silo
 
     const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlScim).await;
 
     // Create a SAML IDP
 
@@ -820,8 +812,7 @@ async fn test_scim_user_search(cptestctx: &ControlPlaneTestContext) {
     // Create the Silo
 
     const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlScim).await;
 
     // Grant permissions on this silo for the PrivilegedUser
 
@@ -998,8 +989,7 @@ async fn test_scim_group_search(cptestctx: &ControlPlaneTestContext) {
     // Create the Silo
 
     const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlScim).await;
 
     // Grant permissions on this silo for the PrivilegedUser
 
@@ -1185,8 +1175,7 @@ async fn test_scim_user_unique(cptestctx: &ControlPlaneTestContext) {
     // Create the Silo
 
     const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlScim).await;
 
     // Grant permissions on this silo for the PrivilegedUser
 
@@ -1327,8 +1316,7 @@ async fn test_scim_group_unique(cptestctx: &ControlPlaneTestContext) {
     // Create the Silo
 
     const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlScim).await;
 
     // Grant permissions on this silo for the PrivilegedUser
 
@@ -1472,7 +1460,6 @@ async fn test_scim_user_admin_group_priv(cptestctx: &ControlPlaneTestContext) {
     create_silo_with_admin_group_name(
         &client,
         SILO_NAME,
-        true,
         silo::SiloIdentityMode::SamlScim,
         Some(String::from("scranton_admins")),
     )
@@ -1889,7 +1876,6 @@ async fn test_scim_user_admin_group_priv_conflict(
     create_silo_with_admin_group_name(
         &client,
         SILO_NAME,
-        true,
         silo::SiloIdentityMode::SamlScim,
         Some(String::from("assistant_to_assistant_to_regional_manager")),
     )
@@ -2010,8 +1996,7 @@ async fn test_time_modified_updated_on_scim_user_and_group_update(
     );
 
     const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
-        .await;
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlScim).await;
 
     grant_iam(
         client,
