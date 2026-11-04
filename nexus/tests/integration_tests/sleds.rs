@@ -5,6 +5,7 @@
 //! Tests for APIs against sled-based endpoints.
 
 use dropshot::test_util::ClientTestContext;
+use http::Method;
 use http::StatusCode;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::PhysicalDisk as DbPhysicalDisk;
@@ -21,6 +22,9 @@ use nexus_lockstep_client::types::SledSelector;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::background::activate_background_task_with_timeout;
 use nexus_test_utils::background::run_inventory_collection;
+use nexus_test_utils::http_testing::AuthnMode;
+use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
@@ -28,6 +32,7 @@ use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::trust_quorum::commission_fake_trust_quorum_member;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::physical_disk::PhysicalDisk;
+use nexus_types::external_api::rack::RackMembershipStatus;
 use nexus_types::external_api::sled::Sled;
 use nexus_types::external_api::sled::SledInstance;
 use nexus_types::internal_api::background::TrustQuorumManagerStatus;
@@ -720,4 +725,99 @@ async fn test_trust_quorum_manager_aborts_config_with_coordinator_not_in_service
         ),
         "activation details: {details}",
     );
+}
+
+async fn rack_membership_abort(
+    client: &ClientTestContext,
+    rack_id: RackUuid,
+    version: Option<u64>,
+    old_api_version: Option<semver::Version>,
+) -> Result<serde_json::Value, (StatusCode, String)> {
+    let url = match version {
+        None => format!("/v1/system/hardware/racks/{rack_id}/membership/abort"),
+        Some(version) => format!(
+            "/v1/system/hardware/racks/{rack_id}/membership/abort\
+             ?version={version}"
+        ),
+    };
+    let mut request = RequestBuilder::new(client, Method::POST, &url);
+    if let Some(old_api_version) = old_api_version {
+        request = request.header(
+            omicron_common::api::VERSION_HEADER,
+            old_api_version.to_string(),
+        );
+    }
+    let response = NexusRequest::new(request)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap_or_else(|error| {
+            panic!("sent rack membership abort request to {url}: {error}")
+        });
+    if response.status == StatusCode::OK {
+        Ok(response.parsed_body().expect("parsed rack membership status"))
+    } else {
+        let error = response
+            .parsed_body::<dropshot::HttpErrorResponseBody>()
+            .expect("parsed error response body");
+        Err((response.status, error.message))
+    }
+}
+
+#[track_caller]
+fn assert_abort_returned(
+    result: Result<serde_json::Value, (StatusCode, String)>,
+    config: &TrustQuorumConfig,
+) {
+    assert_eq!(config.state, TrustQuorumConfigState::Aborted);
+    let expected =
+        serde_json::to_value(RackMembershipStatus::from(config.clone()))
+            .expect("serialized rack membership status");
+    assert_eq!(result.expect("abort succeeded"), expected);
+}
+
+#[nexus_test]
+async fn test_rack_membership_abort_version(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let rack_id = cptestctx.server.server_context().nexus.rack_id();
+    let tq = TrustQuorumConfigDriver { opctx: &opctx, datastore, rack_id };
+    let abort = |version: Option<u64>| {
+        rack_membership_abort(client, rack_id, version, None)
+    };
+
+    let initial_config = tq.config(1).await;
+    assert_eq!(initial_config.state, TrustQuorumConfigState::Committed);
+    let members: BTreeSet<_> = initial_config.members.keys().cloned().collect();
+    commission_fake_trust_quorum_member(cptestctx).await;
+    tq.propose(2, 1, &members).await;
+
+    assert_eq!(
+        abort(Some(1)).await.expect_err("aborting a committed config fails"),
+        (
+            StatusCode::CONFLICT,
+            format!(
+                "Cannot abort the trust quorum configuration at epoch 1 for \
+                 rack {rack_id}: it is already committed and can no longer be \
+                 aborted."
+            ),
+        ),
+    );
+
+    let result = abort(Some(2)).await;
+    assert_abort_returned(result, &tq.config(2).await);
+
+    tq.propose(3, 1, &members).await;
+    let result = rack_membership_abort(
+        client,
+        rack_id,
+        Some(2),
+        Some(nexus_external_api::VERSION_UNADOPTED_RACK_LIST),
+    )
+    .await;
+    assert_abort_returned(result, &tq.config(3).await);
 }

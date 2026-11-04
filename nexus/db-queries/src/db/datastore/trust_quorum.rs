@@ -1199,8 +1199,9 @@ impl DataStore {
     /// configuration has already been aborted, it is returned unchanged,
     /// whether or not it is still the latest configuration.
     ///
-    /// Returns a 409 if the configuration is committing or later, and a 404 if
-    /// there is no configuration at `epoch`.
+    /// Returns a 409 if the configuration is committing or later, a 404 if
+    /// there is no configuration at `epoch`, and a 400 if `epoch` is greater
+    /// than `i64::MAX`.
     pub async fn tq_abort_config(
         &self,
         opctx: &OpContext,
@@ -1212,7 +1213,13 @@ impl DataStore {
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
         let rack_id = authz_tq.rack().id();
-        let db_epoch = epoch_to_i64(epoch)?;
+        let db_epoch = epoch_to_i64(epoch).map_err(|_| {
+            Error::invalid_request(format!(
+                "Rack membership version {epoch} is out of range: it must be \
+                 at most {}.",
+                i64::MAX
+            ))
+        })?;
 
         let err = OptionalError::new();
 
@@ -3142,6 +3149,15 @@ mod tests {
                 "Cannot abort the trust quorum configuration at epoch 3 for \
                  rack {rack_id}: it is already committing and can no longer be \
                  aborted."
+            )),
+        );
+        assert_eq!(
+            abort(u64::MAX).await.unwrap_err(),
+            Error::invalid_request(format!(
+                "Rack membership version {} is out of range: it must be at \
+                 most {}.",
+                u64::MAX,
+                i64::MAX
             )),
         );
 

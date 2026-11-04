@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026110500.0.0"
+    "version": "2026111000.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -8142,6 +8142,13 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "schema": {
+              "$ref": "#/components/schemas/RackMembershipVersion"
             }
           }
         ],

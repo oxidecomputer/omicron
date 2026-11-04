@@ -21,6 +21,8 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 use trust_quorum_types::types::Epoch;
 
+const API_ABORT_REASON: &str = "Aborted via API request";
+
 impl super::Nexus {
     /// Add a set of sleds to the trust quorum
     ///
@@ -120,30 +122,36 @@ impl super::Nexus {
         Ok(new_epoch)
     }
 
-    /// Abort the latest trust quorum configuration if it is still in the
-    /// preparing state.
-    pub(crate) async fn tq_abort_latest_config(
+    // TODO-RAINCLAUDE: replace the old "abort the latest config if still preparing" doc: aborts the config at `epoch`, or the latest if `None` (404 if the rack has no config); refusal semantics come from DataStore::tq_abort_config.
+    pub(crate) async fn tq_abort_config(
         &self,
         opctx: &OpContext,
         rack_id: RackUuid,
+        epoch: Option<Epoch>,
     ) -> Result<TrustQuorumConfig, Error> {
         let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
-        let Some(latest_config) = self
-            .db_datastore
-            .tq_get_latest_config(opctx, authz_tq.clone())
-            .await?
-        else {
-            return Err(Error::non_resourcetype_not_found(
-                "No trust quorum configuration exists for this rack",
-            ));
+        let epoch = match epoch {
+            Some(epoch) => epoch,
+            None => {
+                let Some(latest_config) = self
+                    .db_datastore
+                    .tq_get_latest_config(opctx, authz_tq.clone())
+                    .await?
+                else {
+                    return Err(Error::non_resourcetype_not_found(
+                        "No trust quorum configuration exists for this rack",
+                    ));
+                };
+                latest_config.epoch
+            }
         };
 
         self.db_datastore
             .tq_abort_config(
                 opctx,
                 authz_tq,
-                latest_config.epoch,
-                "Aborted via API request".to_string(),
+                epoch,
+                API_ABORT_REASON.to_string(),
             )
             .await
     }
