@@ -16,6 +16,8 @@ use crate::trust_quorum::TrustQuorumConfigState;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::SledExpungeRequestUuid;
 use omicron_uuid_kinds::SledUuid;
+use serde::Deserialize;
+use serde::Serialize;
 use sled_agent_types::inventory::SledRole;
 use sled_hardware_types::BaseboardId;
 use std::fmt;
@@ -247,6 +249,25 @@ pub fn sled_expunge_removal_refusal(
                  from it. Contact Oxide support.",
                 remaining + 1,
             ))
+        }
+    }
+}
+
+// TODO-RAINCLAUDE: the stage at which one MGS failed to power the sled off; the caller moves on to the next MGS, and failing that, a later activation retries. RecheckFailed means the slot's identity could not be read, so nothing was sent. PowerOffFailed means the A2 command failed and may have landed: the SP's reply can be lost after it acted, and after a client-side timeout MGS's detached handler and the per-SP serial queue can still deliver the command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MgsPowerOffFailure {
+    RecheckFailed,
+    PowerOffFailed,
+}
+
+impl fmt::Display for MgsPowerOffFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::RecheckFailed => {
+                f.write_str("identity re-check failed; nothing sent")
+            }
+            Self::PowerOffFailed => f.write_str("power-off command failed"),
         }
     }
 }
