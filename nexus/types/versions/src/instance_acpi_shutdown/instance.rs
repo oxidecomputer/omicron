@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use anyhow::bail;
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
     ByteCount, Hostname, IdentityMetadata, IdentityMetadataCreateParams,
@@ -24,25 +25,82 @@ use crate::v2026_06_08_00::instance::InstanceCpuPlatform;
 
 /// Instance-stopping method choices
 #[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
+    Clone,
+    Copy,
+    Default,
+    Debug,
+    Eq,
+    PartialEq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
 )]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum InstanceShutdownPolicy {
     /// Instance's VM is forcefully terminated immediately.
+    // default to hard-off, preserving the existing behavior of our system prior
+    // to ACPI shutdown support
+    #[default]
     HardOff,
     /// Instance is sent PWRBTN_STS as described in ACPI chapter 4. If the VM
-    /// guest has not stopped itself with a power event within the given timeout,
-    /// it is *then* forcefully terminated.
-    PowerButton {
-        #[schemars(range(min = 1, max = 3600))]
-        timeout_secs: u64,
-    },
+    /// guest has not stopped itself with a power event within the given
+    /// timeout, it is *then* forcefully terminated.
+    PowerButton { timeout_secs: AcpiTimeoutSecs },
 }
+
+/// ACPI power button timeout in seconds.
+// RFD 622: "A user-configurable timeout for the instance to finish stopping
+// itself should be present, bounded between 1 and 3600 seconds, inclusive."
+// This is enforced at the API level (by this type and its `Deserialize` impl)
+// and as a crdb constraint.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(try_from = "u64", into = "u64")]
+pub struct AcpiTimeoutSecs(#[schemars(range(min = 1, max = 3600))] u64);
 
 // schemars(range(max)) above is required to be a *literal*. if the constant
 // changes, and you're here because of the assertion, change it accordingly.
-const _: () =
-    const { assert!(nexus_defaults::MAX_ACPI_SHUTDOWN_TIMEOUT_SECS == 3600) };
+const _: () = const { assert!(AcpiTimeoutSecs::MIN == 1) };
+const _: () = const { assert!(AcpiTimeoutSecs::MAX == 3600) };
+
+// All the impls on `AcpiTimeoutSecs` live here instead of `crate::impls`
+// because they're required as a part of implementing `Deserialize`.
+
+impl AcpiTimeoutSecs {
+    const MIN: u64 = 1;
+    const MAX: u64 = 3600;
+}
+
+impl From<AcpiTimeoutSecs> for u64 {
+    fn from(value: AcpiTimeoutSecs) -> Self {
+        value.0
+    }
+}
+
+// Some consumers of this need it to be an `i64` (e.g., to convert it to a
+// `TimeDelta` for storage in the db). We can provide an infallible conversion
+// for it since we know the range we enforce is valid for both u64 and i64.
+impl From<AcpiTimeoutSecs> for i64 {
+    fn from(value: AcpiTimeoutSecs) -> Self {
+        value.0.try_into().expect("AcpiTimeoutSecs range is always a valid i64")
+    }
+}
+
+impl TryFrom<u64> for AcpiTimeoutSecs {
+    type Error = anyhow::Error;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        if value < Self::MIN || value > Self::MAX {
+            bail!(
+                "timeout_secs must be between {} and {} (got {value})",
+                Self::MIN,
+                Self::MAX
+            );
+        }
+        Ok(Self(value))
+    }
+}
 
 /// View of an Instance
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -84,7 +142,7 @@ pub struct Instance {
     /// The method by which the instance will be powered down when transitioning
     /// to the stopped state, either forcefully or by giving the guest an ACPI
     /// power button signal first.
-    pub shutdown_policy: Option<InstanceShutdownPolicy>,
+    pub shutdown_policy: InstanceShutdownPolicy,
 }
 
 impl From<v2026_06_08_00::instance::Instance> for Instance {
@@ -100,36 +158,46 @@ impl From<v2026_06_08_00::instance::Instance> for Instance {
             auto_restart_status: value.auto_restart_status,
             cpu_platform: value.cpu_platform,
             enable_jumbo_frames: value.enable_jumbo_frames,
-            shutdown_policy: None,
+            shutdown_policy: InstanceShutdownPolicy::default(),
         }
     }
 }
 
-impl TryFrom<Instance> for v2026_06_08_00::instance::Instance {
-    type Error = dropshot::HttpError;
+impl From<Instance> for v2026_06_08_00::instance::Instance {
+    fn from(value: Instance) -> Self {
+        let Instance {
+            identity,
+            project_id,
+            ncpus,
+            memory,
+            hostname,
+            boot_disk_id,
+            runtime,
+            auto_restart_status,
+            cpu_platform,
+            enable_jumbo_frames,
+            // `shutdown_policy` was added in this API version, so can't be
+            // returned to older clients. We omit it - this means they can't
+            // tell the difference between instances that have the default
+            // policy (e.g., that they created) and instances with a different
+            // policy (e.g., created by a newer client). Our only other option
+            // here is to make this fallible and only show them instances whose
+            // policy matches the default, which doesn't seem very sporting.
+            shutdown_policy: _,
+        } = value;
 
-    fn try_from(value: Instance) -> Result<Self, Self::Error> {
-        if let Some(policy) = value.shutdown_policy
-            && policy != InstanceShutdownPolicy::HardOff
-        {
-            return Err(dropshot::HttpError::for_internal_error(
-                "Instance with shutdown_policy cannot be represented in \
-                API version prior to shutdown_policy support"
-                    .to_string(),
-            ));
+        v2026_06_08_00::instance::Instance {
+            identity,
+            project_id,
+            ncpus,
+            memory,
+            hostname,
+            boot_disk_id,
+            runtime,
+            auto_restart_status,
+            cpu_platform,
+            enable_jumbo_frames,
         }
-        Ok(v2026_06_08_00::instance::Instance {
-            identity: value.identity,
-            project_id: value.project_id,
-            ncpus: value.ncpus,
-            memory: value.memory,
-            hostname: value.hostname,
-            boot_disk_id: value.boot_disk_id,
-            runtime: value.runtime,
-            auto_restart_status: value.auto_restart_status,
-            cpu_platform: value.cpu_platform,
-            enable_jumbo_frames: value.enable_jumbo_frames,
-        })
     }
 }
 
@@ -242,11 +310,10 @@ pub struct InstanceCreate {
     /// restarted in order to update system software on the sled that was
     /// hosting it.
     ///
-    /// If not provided, new instances will be created with a default of an
-    /// ACPI fixed power button press, with a 10-minute timeout for the guest OS
-    /// to shut itself down before the instance is forcibly terminated.
+    /// If not provided, the current default policy will be selected (hard power
+    /// off without an ACPI soft shutdown).
     #[serde(default)]
-    pub shutdown_policy: Option<InstanceShutdownPolicy>,
+    pub shutdown_policy: InstanceShutdownPolicy,
 }
 
 impl From<v2026_06_08_00::instance::InstanceCreate> for InstanceCreate {
@@ -268,7 +335,7 @@ impl From<v2026_06_08_00::instance::InstanceCreate> for InstanceCreate {
             anti_affinity_groups: old.anti_affinity_groups,
             cpu_platform: old.cpu_platform,
             enable_jumbo_frames: old.enable_jumbo_frames,
-            shutdown_policy: None,
+            shutdown_policy: InstanceShutdownPolicy::default(),
         }
     }
 }
@@ -370,4 +437,39 @@ pub struct InstanceStopOrRebootParams {
     // TODO(lif): rename to 'force' before undrafting PR?
     // (easier to grep for 'skip_os_shutdown' than 'force' in codebase)
     pub skip_os_shutdown: Option<bool>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_acpi_timeout_secs_range() {
+        // Test some numbers outside `AcpiTimeoutSecs`'s range in both
+        // directions: deserialization and the `TryFrom<u64>` should only accept
+        // values in the valid range.
+        for i in -100..(AcpiTimeoutSecs::MAX as i64) + 10 {
+            let deserialize_result =
+                serde_json::from_str::<AcpiTimeoutSecs>(&i.to_string());
+
+            if matches!(
+                u64::try_from(i),
+                Ok(AcpiTimeoutSecs::MIN..=AcpiTimeoutSecs::MAX)
+            ) {
+                let expected = AcpiTimeoutSecs(i as u64);
+                assert_eq!(deserialize_result.unwrap(), expected);
+                assert_eq!(
+                    AcpiTimeoutSecs::try_from(i as u64).unwrap(),
+                    expected
+                );
+                assert_eq!(u64::from(expected), i as u64);
+                assert_eq!(i64::from(expected), i);
+            } else {
+                assert!(deserialize_result.is_err());
+                if let Ok(i) = u64::try_from(i) {
+                    assert!(AcpiTimeoutSecs::try_from(i).is_err());
+                }
+            }
+        }
+    }
 }

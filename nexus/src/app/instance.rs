@@ -41,7 +41,6 @@ use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::VmmStateUpdateResult;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::model::InstanceStateComputer;
-use nexus_defaults::MAX_ACPI_SHUTDOWN_TIMEOUT_SECS;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_ip;
 use nexus_types::external_api::instance;
@@ -587,7 +586,6 @@ impl super::Nexus {
         } = params;
 
         check_instance_cpu_memory_sizes(*ncpus, *memory)?;
-        check_instance_shutdown_policy_valid(shutdown_policy)?;
 
         // Opting in to jumbo frames requires the fleet-wide opt-in. Opting out
         // (`Some(false)`) is always allowed.
@@ -626,37 +624,15 @@ impl super::Nexus {
             None => None,
         };
 
-        let auto_restart_policy = auto_restart_policy.map(Into::into);
-        let ncpus = (*ncpus).into();
-        let memory = (*memory).into();
-        let cpu_platform = cpu_platform.map(Into::into);
-
-        let (shutdown_policy_action, shutdown_policy_timeout) =
-            match shutdown_policy {
-                Some(instance::InstanceShutdownPolicy::HardOff) => (
-                    Some(nexus_db_model::InstanceShutdownAction::HardOff),
-                    None,
-                ),
-                Some(instance::InstanceShutdownPolicy::PowerButton {
-                    timeout_secs,
-                }) => (
-                    Some(nexus_db_model::InstanceShutdownAction::PowerButton),
-                    Some(chrono::TimeDelta::seconds((*timeout_secs) as i64)),
-                ),
-                // if policy action omitted from the update request, leave as-is
-                None => (None, None),
-            };
-
-        let update = InstanceUpdate {
+        let update = InstanceUpdate::new(
             boot_disk_id,
-            auto_restart_policy,
-            ncpus,
-            memory,
-            cpu_platform,
-            enable_jumbo_frames: *enable_jumbo_frames,
-            shutdown_policy_action,
-            shutdown_policy_timeout,
-        };
+            **auto_restart_policy,
+            *ncpus,
+            *memory,
+            **cpu_platform,
+            *enable_jumbo_frames,
+            *shutdown_policy,
+        );
 
         // Update the instance configuration
         let result = self
@@ -695,7 +671,6 @@ impl super::Nexus {
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
         check_instance_cpu_memory_sizes(params.ncpus, params.memory)?;
-        check_instance_shutdown_policy_valid(&params.shutdown_policy)?;
 
         let all_disks: Vec<&instance::InstanceDiskAttachment> =
             params.boot_disk.iter().chain(params.disks.iter()).collect();
@@ -826,13 +801,6 @@ impl super::Nexus {
         )
         .await?;
 
-        // Default to hard-poweroff when instance stop or reboot is requested,
-        // consistent with the behavior prior to ACPI shutdown support.
-        let shutdown_policy =
-            Some(params.shutdown_policy.to_owned().unwrap_or(
-                instance::InstanceShutdownPolicy::HardOff,
-            ));
-
         // It is deceptively inconvenient to do an early check that the boot
         // disk is valid here! We accept boot disk by name or ID, but disk
         // creation and attachment requests as part of instance creation all
@@ -847,7 +815,6 @@ impl super::Nexus {
             create_params: instance::InstanceCreate {
                 ssh_public_keys: ssh_keys,
                 anti_affinity_groups,
-                shutdown_policy,
                 ..params.clone()
             },
             boundary_switches: self
@@ -1541,7 +1508,7 @@ impl super::Nexus {
                             instance::InstanceShutdownPolicy::HardOff => None,
                             instance::InstanceShutdownPolicy::PowerButton {
                                 timeout_secs,
-                            } => Some(timeout_secs),
+                            } => Some(u64::from(timeout_secs)),
                         }
                     }
                     _ => None,
@@ -3159,25 +3126,6 @@ fn check_instance_cpu_memory_sizes(
     Ok(())
 }
 
-fn check_instance_shutdown_policy_valid(
-    policy: &Option<instance::InstanceShutdownPolicy>,
-) -> Result<(), Error> {
-    const MAX_PLUS_1: u64 = MAX_ACPI_SHUTDOWN_TIMEOUT_SECS + 1;
-    if let Some(instance::InstanceShutdownPolicy::PowerButton {
-        timeout_secs: 0 | MAX_PLUS_1..,
-    }) = policy
-    {
-        return Err(Error::invalid_value(
-            "timeout_secs",
-            format!(
-                "shutdown timeout must be between \
-                1 and {MAX_ACPI_SHUTDOWN_TIMEOUT_SECS}"
-            ),
-        ));
-    }
-    Ok(())
-}
-
 /// Effective MTU for an instance's primary OPTE port. Jumbo frames are only
 /// applied when both the fleet-wide opt-in is enabled and the per-instance bit
 /// is set; otherwise this returns `None` and OPTE applies the default MTU.
@@ -3287,6 +3235,7 @@ mod tests {
     use core::time::Duration;
     use futures::{SinkExt, StreamExt};
     use instance::InstanceNetworkInterfaceAttachment;
+    use instance::InstanceShutdownPolicy;
     use nexus_db_model::{
         Instance as DbInstance, InstanceState as DbInstanceState,
         VmmCpuPlatform, VmmState as DbVmmState,
@@ -3419,7 +3368,7 @@ mod tests {
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
             enable_jumbo_frames: false,
-            shutdown_policy: None,
+            shutdown_policy: InstanceShutdownPolicy::default(),
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
@@ -3779,7 +3728,7 @@ mod tests {
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
             enable_jumbo_frames,
-            shutdown_policy: None,
+            shutdown_policy: InstanceShutdownPolicy::default(),
         };
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
         let project_id = ProjectUuid::new_v4();

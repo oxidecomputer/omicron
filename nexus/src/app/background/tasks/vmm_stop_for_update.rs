@@ -299,7 +299,7 @@ impl VmmStopForUpdate {
                             InstanceShutdownPolicy::HardOff => None,
                             InstanceShutdownPolicy::PowerButton {
                                 timeout_secs,
-                            } => Some(timeout_secs),
+                            } => Some(u64::from(timeout_secs)),
                         },
                     },
                 )
@@ -773,7 +773,7 @@ mod tests {
                 )],
                 multicast_groups: Vec::new(),
                 enable_jumbo_frames: false,
-                shutdown_policy: Some(InstanceShutdownPolicy::HardOff),
+                shutdown_policy: InstanceShutdownPolicy::HardOff,
             },
         )
         .await;

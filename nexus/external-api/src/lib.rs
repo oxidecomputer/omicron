@@ -3878,11 +3878,7 @@ pub trait NexusExternalApi {
         let resp = Self::instance_list(rqctx, query_params).await?;
         let inner = resp.0;
         Ok(HttpResponseOk(ResultsPage {
-            items: inner
-                .items
-                .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<Vec<_>, _>>()?,
+            items: inner.items.into_iter().map(From::from).collect(),
             next_page: inner.next_page,
         }))
     }
@@ -3975,7 +3971,7 @@ pub trait NexusExternalApi {
             new_instance.map(Into::into),
         )
         .await?;
-        Ok(HttpResponseCreated(resp.0.try_into()?))
+        Ok(HttpResponseCreated(resp.0.into()))
     }
 
     #[endpoint {
@@ -4216,7 +4212,7 @@ pub trait NexusExternalApi {
     {
         let resp =
             Self::instance_view(rqctx, query_params, path_params).await?;
-        Ok(HttpResponseOk(resp.0.try_into()?))
+        Ok(HttpResponseOk(resp.0.into()))
     }
 
     #[endpoint {
@@ -4311,7 +4307,7 @@ pub trait NexusExternalApi {
             instance_config.map(Into::into),
         )
         .await?;
-        Ok(HttpResponseOk(resp.0.try_into()?))
+        Ok(HttpResponseOk(resp.0.into()))
     }
 
     /// Update instance
@@ -4426,7 +4422,7 @@ pub trait NexusExternalApi {
             path_params,
         )
         .await?;
-        Ok(HttpResponseAccepted(resp.0.try_into()?))
+        Ok(HttpResponseAccepted(resp.0.into()))
     }
 
     #[endpoint {
@@ -4507,7 +4503,7 @@ pub trait NexusExternalApi {
     > {
         let resp =
             Self::instance_start(rqctx, query_params, path_params).await?;
-        Ok(HttpResponseAccepted(resp.0.try_into()?))
+        Ok(HttpResponseAccepted(resp.0.into()))
     }
 
     #[endpoint {
@@ -4596,7 +4592,7 @@ pub trait NexusExternalApi {
             path_params,
         )
         .await?;
-        Ok(HttpResponseAccepted(resp.0.try_into()?))
+        Ok(HttpResponseAccepted(resp.0.into()))
     }
 
     #[endpoint {

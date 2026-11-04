@@ -518,7 +518,7 @@ async fn test_vpc_routers_custom_delivered_to_instance(
             Default::default(),
             None,
             Vec::new(),
-            None,
+            instance::InstanceShutdownPolicy::default(),
         )
         .await;
         instance_simulate(
