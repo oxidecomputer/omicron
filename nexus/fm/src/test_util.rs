@@ -82,6 +82,7 @@ impl FmTest {
     // TODO(eliza): eventually it would be nice if the inventory collection and
     // in-service-disks were generated from the `ExampleSystemBuilder`
     // somehow...
+    #[allow(clippy::too_many_arguments)]
     pub fn input_builder(
         &self,
         parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
