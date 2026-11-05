@@ -19,6 +19,7 @@ use nexus_types::external_api;
 use nexus_types::external_api::path_params;
 use nexus_types::external_api::physical_disk::PhysicalDiskPolicy;
 use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
+use nexus_types::trust_quorum::check_trust_quorum_allows_expunge;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -231,16 +232,11 @@ impl super::Nexus {
             part_number: sled.part_number().to_string(),
             serial_number: sled.serial_number().to_string(),
         };
-        if tq_latest_committed_config.members.contains_key(&baseboard_id) {
-            let epoch = tq_latest_committed_config.epoch;
-            let state = tq_latest_committed_config.state;
-            return Err(Error::conflict(format!(
-                "Cannot expunge sled {sled_id}, as its baseboard \
-                {baseboard_id} is still a member of the latest trust quorum \
-                configuration for rack {rack_id} (epoch {epoch}, state \
-                {state:?})"
-            )));
-        }
+        check_trust_quorum_allows_expunge(
+            sled_id,
+            &baseboard_id,
+            &tq_latest_committed_config,
+        )?;
 
         let prev_policy = self
             .db_datastore
