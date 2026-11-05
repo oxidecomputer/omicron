@@ -14,7 +14,8 @@ use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::DiskVariant;
 use sled_hardware::{
-    DiskFirmware, Partition, PooledDisk, PooledDiskError, UnparsedDisk,
+    DiskFirmware, DiskLocation, Partition, PooledDisk, PooledDiskError,
+    UnparsedDisk,
 };
 use slog::{Logger, info};
 
@@ -107,7 +108,7 @@ pub struct RawSyntheticDisk {
     /// A chassis location spelled the way real hardware spells it, such as
     /// "N3" or "M.2 East", so that anything keyed on those labels treats a
     /// synthetic disk like a real one. See [`UnparsedDisk::location`].
-    pub location: String,
+    pub location: DiskLocation,
 }
 
 impl RawSyntheticDisk {
@@ -158,16 +159,7 @@ impl RawSyntheticDisk {
         };
 
         let ordinal = serial.parse::<i64>().unwrap_or(pcie_slot);
-        let location = match variant {
-            DiskVariant::U2 => format!("N{ordinal}"),
-            DiskVariant::M2 => match ordinal {
-                0 => "M.2 East".to_string(),
-                1 => "M.2 West".to_string(),
-                // Real sleds have two M.2 sockets, but a test may number its
-                // vdevs with one counter across both variants.
-                n => format!("M.2 {n}"),
-            },
-        };
+        let location = synthetic_disk_location(variant, ordinal);
 
         let firmware = DiskFirmware::new(
             1,
@@ -186,6 +178,27 @@ impl RawSyntheticDisk {
             location,
         })
     }
+}
+
+/// The chassis location a fake disk reports, spelled the way real hardware
+/// spells it so that anything keyed on those labels treats a fake disk like a
+/// real one: the `ordinal`th U.2 sits in bay `N<ordinal>`, and M.2s 0 and 1
+/// are "M.2 East" and "M.2 West".
+///
+/// Real sleds have two M.2 sockets, but a test may number its disks with one
+/// counter across both variants, so a later M.2 is labelled `M.2 <ordinal>`.
+pub fn synthetic_disk_location(
+    variant: DiskVariant,
+    ordinal: i64,
+) -> DiskLocation {
+    DiskLocation::new(match variant {
+        DiskVariant::U2 => format!("N{ordinal}"),
+        DiskVariant::M2 => match ordinal {
+            0 => "M.2 East".to_string(),
+            1 => "M.2 West".to_string(),
+            n => format!("M.2 {n}"),
+        },
+    })
 }
 
 // An [`UnparsedDisk`] disk learned about from the hardware or a wrapped zpool
@@ -260,10 +273,10 @@ impl RawDisk {
     }
 
     /// See [`UnparsedDisk::location`].
-    pub fn location(&self) -> Option<&str> {
+    pub fn location(&self) -> &DiskLocation {
         match self {
             Self::Real(disk) => disk.location(),
-            Self::Synthetic(disk) => Some(&disk.location),
+            Self::Synthetic(disk) => &disk.location,
         }
     }
 
@@ -414,20 +427,22 @@ impl Disk {
     }
 
     /// See [`UnparsedDisk::location`].
-    pub fn location(&self) -> Option<&str> {
+    pub fn location(&self) -> &DiskLocation {
         match self {
-            Self::Real(disk) => disk.location.as_deref(),
-            Self::Synthetic(disk) => Some(&disk.raw.location),
+            Self::Real(disk) => &disk.location,
+            Self::Synthetic(disk) => &disk.raw.location,
         }
     }
 
-    /// Copies the properties that may legitimately change over a disk's
-    /// lifetime (firmware metadata and chassis location) from `raw_disk`.
+    /// Copies the properties that may change while a disk stays in place
+    /// from `raw_disk`: its firmware metadata, which a firmware update
+    /// changes, and its chassis location, which is re-read from the hardware
+    /// topology on every poll.
     pub fn update_mutable_properties(&mut self, raw_disk: &RawDisk) {
         match self {
             Disk::Real(pooled_disk) => {
                 pooled_disk.firmware = raw_disk.firmware().clone();
-                pooled_disk.location = raw_disk.location().map(str::to_string);
+                pooled_disk.location = raw_disk.location().clone();
             }
             Disk::Synthetic(synthetic_disk) => {
                 synthetic_disk.raw.firmware = raw_disk.firmware().clone();
@@ -446,18 +461,16 @@ impl Disk {
 impl From<Disk> for RawDisk {
     fn from(disk: Disk) -> RawDisk {
         match disk {
-            Disk::Real(pooled_disk) => RawDisk::Real(
-                UnparsedDisk::new(
-                    pooled_disk.paths.devfs_path,
-                    pooled_disk.paths.dev_path,
-                    pooled_disk.pcie_slot,
-                    pooled_disk.zpool_name.kind().into(),
-                    pooled_disk.identity,
-                    pooled_disk.is_boot_disk,
-                    pooled_disk.firmware,
-                )
-                .with_location(pooled_disk.location),
-            ),
+            Disk::Real(pooled_disk) => RawDisk::Real(UnparsedDisk::new(
+                pooled_disk.paths.devfs_path,
+                pooled_disk.paths.dev_path,
+                pooled_disk.pcie_slot,
+                pooled_disk.zpool_name.kind().into(),
+                pooled_disk.identity,
+                pooled_disk.is_boot_disk,
+                pooled_disk.firmware,
+                pooled_disk.location,
+            )),
             Disk::Synthetic(synthetic_disk) => {
                 RawDisk::Synthetic(synthetic_disk.raw)
             }
@@ -473,6 +486,7 @@ mod tests {
         RawSyntheticDisk::load(Utf8Path::new(vdev), slot)
             .expect("vdev name parses")
             .location
+            .to_string()
     }
 
     #[test]
@@ -497,6 +511,6 @@ mod tests {
         let disk = RawDisk::Synthetic(
             RawSyntheticDisk::load(Utf8Path::new("u2_3.vdev"), 0).unwrap(),
         );
-        assert_eq!(disk.location(), Some("N3"));
+        assert_eq!(disk.location().as_str(), "N3");
     }
 }

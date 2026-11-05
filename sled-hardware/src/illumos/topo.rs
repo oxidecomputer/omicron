@@ -5,131 +5,177 @@
 //! Queries against the illumos hardware topology (libtopo).
 //!
 //! libtopo describes the platform as a tree of nodes with labels and
-//! properties, built from platform topology maps, devinfo, and other
-//! sources. This module holds sled-hardware's lookups against that tree.
+//! properties, built from platform topology maps, devinfo, libnvme, and
+//! other sources. This module copies the nodes that can describe disk bays
+//! into [`TopoNode`]s without interpreting them; `topo_bays` decides what
+//! they mean.
 
-use crate::nvme_instance::NvmeInstance;
-use libtopo::{Error, Node, Scheme, TopoHdl, WalkAction, hc};
-use slog::{Logger, debug, warn};
-use std::collections::HashMap;
-use std::collections::hash_map::Entry;
+use crate::disk_bay::ObservedBay;
+use crate::topo_bays::{BayIdentError, assemble_bays};
+use crate::topo_nodes::{BayProps, NodeKey, Prop, TopoNode, TopoNodeKind};
+use libtopo::{Error, Node, Scheme, Snapshot, WalkAction, hc};
+use slog::{Logger, debug};
 use std::time::Instant;
 
-/// Takes a fresh topology snapshot and returns the chassis label of every
-/// NVMe controller that has one, keyed by driver instance.
-///
-/// This mirrors what `nvmeadm list -L` does. Each `nvme` node in the `hc`
-/// scheme is located by its `io/instance` property. Its label is its own
-/// `protocol/label` if it has one, else its parent's label if the parent is
-/// a `bay` (a U.2 bay) or a `slot` (an M.2 socket). Controllers with neither
-/// are omitted from the result.
-///
-/// A new handle is opened on every call: the wrapper allows one snapshot per
-/// handle (see <https://github.com/oxidecomputer/libtopo/issues/14>), and a
-/// snapshot costs far more than the handle anyway.
-pub(super) fn read_disk_locations(
-    log: &Logger,
-) -> Result<HashMap<NvmeInstance, String>, libtopo::Error> {
-    let start = Instant::now();
-    let hdl = TopoHdl::open()?;
-    let snap = hdl.snapshot()?;
+const TOPO_STORAGE_SERIAL_NUM: &str = "serial-number";
+const TOPO_STORAGE_LOGICAL_DISK_NAME: &str = "logical-disk";
 
-    let mut labels = HashMap::new();
+#[derive(Debug, thiserror::Error)]
+pub(super) enum TopoError {
+    #[error("failed to read the hardware topology")]
+    Topo(#[from] libtopo::Error),
+
+    #[error(transparent)]
+    Bay(#[from] BayIdentError),
+}
+
+/// Returns every U.2 bay and M.2 socket in the snapshot with what the
+/// topology found behind it, in walk order. See [`assemble_bays`].
+pub(super) fn read_disk_bays(
+    log: &Logger,
+    snap: &Snapshot<'_>,
+) -> Result<Vec<ObservedBay>, TopoError> {
+    let start = Instant::now();
+
+    let mut nodes = Vec::new();
     snap.walk(Scheme::Hc, |node| {
-        if node.name() != hc::NVME {
-            return Ok(WalkAction::Continue);
-        }
-        let Some(instance) = nvme_instance_of(log, &node) else {
-            return Ok(WalkAction::Continue);
-        };
-        match location_label_of(&node) {
-            Some(label) => match labels.entry(instance) {
-                Entry::Vacant(entry) => {
-                    entry.insert(label);
-                }
-                Entry::Occupied(entry) => warn!(
-                    log,
-                    "hardware topology has two nvme nodes with the same \
-                     instance; keeping the first label";
-                    "nvme_instance" => %instance,
-                    "kept" => entry.get(),
-                    "ignored" => &label,
-                ),
-            },
-            None => debug!(
-                log,
-                "nvme topology node has no location label";
-                "nvme_instance" => %instance,
-            ),
+        if let Some(node) = read_node(&node) {
+            nodes.push(node);
         }
         Ok(WalkAction::Continue)
     })?;
+    let bays = assemble_bays(log, &nodes)?;
 
     debug!(
         log,
-        "read disk locations from hardware topology";
-        "count" => labels.len(),
+        "read disk bays from hardware topology";
+        "count" => bays.len(),
         "elapsed" => ?start.elapsed(),
     );
-    Ok(labels)
+    Ok(bays)
 }
 
-/// The driver instance of an `nvme` node, from its `io/instance` property.
-/// `None`, with a log line, if the node has no such property or it is not the
-/// uint32 topo documents it as.
-fn nvme_instance_of(log: &Logger, node: &Node<'_>) -> Option<NvmeInstance> {
-    let value =
-        match node.property_u32(hc::TOPO_PGROUP_IO, hc::TOPO_IO_INSTANCE) {
-            Ok(value) => value,
-            Err(Error::PropertyNotFound { .. }) => {
-                debug!(
-                    log,
-                    "nvme topology node has no io/instance property";
-                    "node_instance" => node.instance(),
-                );
-                return None;
-            }
-            Err(err) => {
-                warn!(
-                    log,
-                    "ignoring nvme topology node with unreadable io/instance";
-                    "err" => %err,
-                );
-                return None;
-            }
-        };
-    match NvmeInstance::from_topo(value) {
-        Ok(instance) => Some(instance),
-        Err(err) => {
-            warn!(
-                log,
-                "ignoring nvme topology node with unusable instance";
-                "err" => %err,
-            );
-            None
-        }
-    }
-}
-
-/// The chassis location label for an `nvme` node.
-///
-/// On Oxide platforms the label is carried by the enclosing `bay` (a U.2 bay)
-/// or `slot` (an M.2 socket) node rather than by the nvme node itself, so fall
-/// back to the parent. Only those two node types count: a label further up the
-/// tree would describe something unrelated to this disk. This is the same rule
-/// nvmeadm(8) applies for `-L`.
-fn location_label_of(node: &Node<'_>) -> Option<String> {
-    label_of(node).or_else(|| {
-        node.parent()
-            .filter(|parent| {
-                let name = parent.name();
-                name == hc::BAY || name == hc::SLOT
-            })
-            .and_then(|parent| label_of(&parent))
+/// Copies out the properties of a node that may describe part of a disk
+/// bay, or `None` for any other node. Nodes are matched by name wherever
+/// they are in the tree. A `Node` lives only for the walk callback, so
+/// parents are recorded as [`NodeKey`] paths.
+fn read_node(node: &Node<'_>) -> Option<TopoNode> {
+    let kind = match node.name().as_ref() {
+        hc::BAY => TopoNodeKind::Bay(read_bay_props(node)),
+        hc::SLOT => TopoNodeKind::Slot {
+            slot_type: optional_u32(
+                node,
+                hc::TOPO_PGROUP_SLOT,
+                hc::TOPO_PROP_SLOT_TYPE,
+            ),
+            props: read_bay_props(node),
+        },
+        hc::NVME => TopoNodeKind::Nvme {
+            instance: optional_u32(
+                node,
+                hc::TOPO_PGROUP_IO,
+                hc::TOPO_IO_INSTANCE,
+            ),
+            driver: optional_string(
+                node,
+                hc::TOPO_PGROUP_IO,
+                hc::TOPO_IO_DRIVER,
+            ),
+            devfs_path: optional_string(
+                node,
+                hc::TOPO_PGROUP_IO,
+                hc::TOPO_IO_DEV_PATH,
+            ),
+        },
+        hc::DISK => TopoNodeKind::Disk {
+            manufacturer: optional_string(
+                node,
+                hc::TOPO_PGROUP_STORAGE,
+                hc::TOPO_STORAGE_MANUFACTURER,
+            ),
+            model: optional_string(
+                node,
+                hc::TOPO_PGROUP_STORAGE,
+                hc::TOPO_STORAGE_MODEL,
+            ),
+            serial: optional_string(
+                node,
+                hc::TOPO_PGROUP_STORAGE,
+                TOPO_STORAGE_SERIAL_NUM,
+            ),
+            devfs_path: optional_string(
+                node,
+                hc::TOPO_PGROUP_IO,
+                hc::TOPO_IO_DEV_PATH,
+            ),
+            logical_disk: optional_string(
+                node,
+                hc::TOPO_PGROUP_STORAGE,
+                TOPO_STORAGE_LOGICAL_DISK_NAME,
+            ),
+        },
+        hc::BOARD => TopoNodeKind::Board,
+        hc::IC => TopoNodeKind::Ic {
+            driver: optional_string(
+                node,
+                hc::TOPO_PGROUP_IO,
+                hc::TOPO_IO_DRIVER,
+            ),
+            devfs_path: optional_string(
+                node,
+                hc::TOPO_PGROUP_IO,
+                hc::TOPO_IO_DEV_PATH,
+            ),
+        },
+        _ => return None,
+    };
+    Some(TopoNode {
+        key: node_key(node),
+        parent: node.parent().map(|parent| node_key(&parent)),
+        kind,
     })
 }
 
-/// A node's label, treating "no label" and an empty label alike.
-fn label_of(node: &Node<'_>) -> Option<String> {
-    node.label().ok().filter(|label| !label.is_empty())
+fn read_bay_props(node: &Node<'_>) -> BayProps {
+    BayProps {
+        label: node.label().map_err(|err| err.to_string()),
+        binding_driver: optional_string(
+            node,
+            hc::TOPO_PGROUP_BINDING,
+            hc::TOPO_BINDING_DRIVER,
+        ),
+        binding_slot: optional_u32(
+            node,
+            hc::TOPO_PGROUP_BINDING,
+            hc::TOPO_BINDING_SLOT,
+        ),
+    }
+}
+
+/// The names and instances of `node` and all its ancestors.
+fn node_key(node: &Node<'_>) -> NodeKey {
+    let mut parts = vec![format!("{}[{}]", node.name(), node.instance())];
+    let mut cursor = node.parent();
+    while let Some(ancestor) = cursor {
+        parts.push(format!("{}[{}]", ancestor.name(), ancestor.instance()));
+        cursor = ancestor.parent();
+    }
+    parts.reverse();
+    NodeKey::new(parts.join("/"))
+}
+
+fn optional_string(node: &Node<'_>, group: &str, name: &str) -> Prop<String> {
+    match node.property_string(group, name) {
+        Ok(value) => Ok(Some(value)),
+        Err(Error::PropertyNotFound { .. }) => Ok(None),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+fn optional_u32(node: &Node<'_>, group: &str, name: &str) -> Prop<u32> {
+    match node.property_u32(group, name) {
+        Ok(value) => Ok(Some(value)),
+        Err(Error::PropertyNotFound { .. }) => Ok(None),
+        Err(err) => Err(err.to_string()),
+    }
 }

@@ -6673,9 +6673,9 @@ dependencies = [
 
 [[package]]
 name = "libtopo"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92b90fcffd6cba36f39a92ac8bad23d80ad4de13d8c15f217585364875e6dbdf"
+checksum = "2525ce69ea8c5af2664250c184b61c3d84d266491eb6fe3c700be8614fe23ce5"
 dependencies = [
  "illumos-nvpair",
  "illumos-nvpair-sys",
@@ -14943,6 +14943,7 @@ dependencies = [
  "cfg-if",
  "futures",
  "gethostname",
+ "iddqd",
  "illumos-devinfo",
  "illumos-utils",
  "libc",
