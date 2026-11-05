@@ -2036,6 +2036,10 @@ impl DataStore {
 
     /// Load up the trust quorum configuration, ensure that it allows this sled
     /// to be expunged, and expunge it if it does.
+    ///
+    /// This method is idempotent: if the sled is already expunged, it returns
+    /// `Ok(SledPolicy::Expunged)`. (The upcoming background task that's part of
+    /// RFD 747 relies on this behavior.)
     pub async fn sled_set_policy_to_expunged_if_trust_quorum_allows(
         &self,
         opctx: &OpContext,
@@ -2057,26 +2061,45 @@ impl DataStore {
             let err = err.clone();
 
             async move {
-                async {
-                    let (config, _) =
-                        Self::tq_load_latest_possible_committed_config_conn(
-                            &conn, rack_id,
-                        )
-                        .await?;
-                    check_trust_quorum_allows_expunge(
-                        sled_id,
-                        baseboard_id,
-                        &config,
-                    )?;
-                    Ok::<_, TransactionError<Error>>(())
-                }
-                .await
-                .map_err(|error| match error {
-                    TransactionError::Database(error) => error,
-                    TransactionError::CustomError(error) => {
-                        err.bail(TransitionError::External(error))
+                let current = {
+                    use nexus_db_schema::schema::sled::dsl;
+                    dsl::sled
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(to_db_typed_uuid(sled_id)))
+                        .select(Sled::as_select())
+                        .get_result_async(&conn)
+                        .await
+                        .optional()?
+                };
+                // If the sled is already expunged, skip the trust quorum check.
+                // This way, expungement is idempotent.
+                let already_expunged = match current.as_ref().map(Sled::policy)
+                {
+                    Some(SledPolicy::Expunged) => true,
+                    Some(SledPolicy::InService { .. }) | None => false,
+                };
+                if !already_expunged {
+                    async {
+                        let (config, _) =
+                            Self::tq_load_latest_possible_committed_config_conn(
+                                &conn, rack_id,
+                            )
+                            .await?;
+                        check_trust_quorum_allows_expunge(
+                            sled_id,
+                            baseboard_id,
+                            &config,
+                        )?;
+                        Ok::<_, TransactionError<Error>>(())
                     }
-                })?;
+                    .await
+                    .map_err(|error| match error {
+                        TransactionError::Database(error) => error,
+                        TransactionError::CustomError(error) => {
+                            err.bail(TransitionError::External(error))
+                        }
+                    })?;
+                }
 
                 Self::sled_set_policy_conn(
                     &conn,
