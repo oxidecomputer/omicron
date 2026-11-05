@@ -530,9 +530,9 @@ async fn sis_move_to_starting_undo(
     );
 
     // If an instance was being restarted due to its VMM's sled being evacuated,
-    // and its intended state is currently `Running` we return it to
+    // and its intended state is currently `Running`, we return it to
     // `SledEvacuating`. We want the instance reincarnation task to attempt to
-    // restart it again. Any other reason returns the instance to `NoVmm`. In
+    // restart it again. Any other case returns the instance to `NoVmm`. In
     // this state, the reincarnation task will no longer attempt to reincarnate
     // it, and will remain stopped for the end user.
     retry_notify_ext(
@@ -1826,9 +1826,10 @@ mod test {
             paused.resume();
         }
 
-        next_put_state.wait_for_request(Duration::from_secs(60)).await.fail(
-            Error::internal_error("injected by test_ensure_running_unwind"),
-        );
+        next_put_state
+            .wait_for_request(Duration::from_secs(60))
+            .await
+            .fail(Error::internal_error(format!("injected by {test_name}")));
 
         let saga_error = running_saga
             .wait_until_stopped()
