@@ -29,6 +29,7 @@ pub use disk_bay::{DiskBay, DiskBayOccupant, UnusableReason};
 pub mod nvme_instance;
 pub mod softnpu;
 mod topo_bays;
+mod topo_nodes;
 pub mod underlay;
 
 /// Failure while probing for switch hardware at startup.

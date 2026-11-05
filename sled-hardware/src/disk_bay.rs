@@ -5,9 +5,7 @@
 //! The U.2 bays and M.2 sockets of a sled's chassis, and what occupies each.
 //!
 //! On an Oxide sled the hardware topology (libtopo) is the source of truth
-//! for which bays exist and what sits behind each one. sled-hardware turns
-//! that into a [`DiskBay`] per bay and, where the occupant is an NVMe disk
-//! with a namespace, an [`UnparsedDisk`] to manage. The pieces that need the
+//! for which bays exist and what sits behind each one. The pieces that need the
 //! platform (walking the topology, asking libnvme about a controller) live in
 //! the illumos module; the join between them, `classify_bay`, is plain data
 //! manipulation and is kept here so it can be tested anywhere.

@@ -11,10 +11,8 @@
 //! they mean.
 
 use crate::disk_bay::ObservedBay;
-use crate::topo_bays::{
-    BayIdentError, BayProps, NodeKey, Prop, TopoNode, TopoNodeKind,
-    assemble_bays,
-};
+use crate::topo_bays::{BayIdentError, assemble_bays};
+use crate::topo_nodes::{BayProps, NodeKey, Prop, TopoNode, TopoNodeKind};
 use libtopo::{Error, Node, Scheme, Snapshot, WalkAction, hc};
 use slog::{Logger, debug};
 use std::time::Instant;
