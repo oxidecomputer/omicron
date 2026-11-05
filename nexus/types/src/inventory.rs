@@ -9,6 +9,8 @@
 //! nexus/inventory does not currently know about nexus/db-model and it's
 //! convenient to separate these concerns.)
 
+use crate::external_api::multirack::UnadoptedRack;
+use crate::external_api::multirack::UnadoptedSled;
 use crate::external_api::physical_disk::PhysicalDiskKind;
 use chrono::DateTime;
 use chrono::Utc;
@@ -23,8 +25,6 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use newtype_uuid::GenericUuid;
-use nexus_types_versions::latest::multirack::UnadoptedRack;
-use nexus_types_versions::latest::multirack::UnadoptedSled;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::{RACK_PREFIX_LENGTH, SLED_PREFIX_LENGTH};
 use omicron_common::api::external::ByteCount;
