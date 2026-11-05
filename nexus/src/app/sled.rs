@@ -231,11 +231,13 @@ impl super::Nexus {
             serial_number: sled.serial_number().to_string(),
         };
         if tq_latest_committed_config.members.contains_key(&baseboard_id) {
+            let epoch = tq_latest_committed_config.epoch;
+            let state = tq_latest_committed_config.state;
             return Err(Error::conflict(format!(
                 "Cannot expunge sled {sled_id}, as its baseboard \
-                {baseboard_id} is still a member of the latest committed \
-                trust quorum configuration at epoch {} for rack {rack_id}",
-                tq_latest_committed_config.epoch
+                {baseboard_id} is still a member of the latest trust quorum \
+                configuration for rack {rack_id} (epoch {epoch}, state \
+                {state:?})"
             )));
         }
 
