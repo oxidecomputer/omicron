@@ -4827,11 +4827,15 @@
                   },
                   "details": {
                     "$ref": "#/components/schemas/WaitingOnSledEvacuationDetails"
+                  },
+                  "sled_id": {
+                    "$ref": "#/components/schemas/SledUuid"
                   }
                 },
                 "required": [
                   "component",
-                  "details"
+                  "details",
+                  "sled_id"
                 ]
               }
             },
@@ -7983,10 +7987,22 @@
             "$ref": "#/components/schemas/PendingMgsUpdates"
           },
           "update_disposition_changes": {
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/BlueprintSledUpdateDispositionKind"
-            }
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SledUpdateDispositionChange"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SledUpdateDispositionChange"
+            },
+            "uniqueItems": true
           }
         },
         "required": [
@@ -9903,6 +9919,41 @@
           }
         ]
       },
+      "SledUpdateDispositionChange": {
+        "description": "Describes a change to a sled's update disposition (e.g., marking it for evacuation so that it can be updated)",
+        "type": "object",
+        "properties": {
+          "baseboard_id": {
+            "description": "id of the sled's baseboard",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          },
+          "kind": {
+            "description": "the sled's new update disposition",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BlueprintSledUpdateDispositionKind"
+              }
+            ]
+          },
+          "sled_id": {
+            "description": "id of the sled whose update disposition is changing",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledUuid"
+              }
+            ]
+          }
+        },
+        "required": [
+          "baseboard_id",
+          "kind",
+          "sled_id"
+        ]
+      },
       "SledUpdateRebootPolicy": {
         "description": "Controls how the planner interacts with sleds that it needs to reboot to perform an update (e.g., of the SP or host OS).",
         "oneOf": [
@@ -11089,6 +11140,14 @@
             "description": "Waiting on zones to propagate to inventory.",
             "type": "object",
             "properties": {
+              "kinds": {
+                "description": "kinds of the zones whose blueprint config is not yet reflected in inventory",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ZoneKind"
+                },
+                "uniqueItems": true
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -11097,6 +11156,7 @@
               }
             },
             "required": [
+              "kinds",
               "type"
             ]
           },

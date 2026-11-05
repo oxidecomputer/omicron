@@ -15,8 +15,14 @@ use crate::deployment::MgsUpdateComponent;
 use crate::inventory::CabooseVersionError;
 use crate::inventory::CabooseWhich;
 
+use crate::deployment::PendingMgsUpdateDetails;
+use crate::external_api::update::OperatorStatus;
+use crate::external_api::update::SledEvacuationProgress;
+use crate::external_api::update::UpdateWait;
+use crate::internal_api::views::QuiesceState;
 use daft::Diffable;
 use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use indent_write::fmt::IndentWriter;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
@@ -113,8 +119,12 @@ impl PlanningReport {
 
 impl fmt::Display for PlanningReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // Code that prints a planning report doesn't generally know whether
+        // Nexus is quiescing, so the notes can't describe a handoff.
+        let status = self.operator_status(QuiesceInfo::Unknown);
         if self.is_empty() {
             writeln!(f, "empty planning report")?;
+            writeln!(f, "status for operators: {status}")?;
         } else {
             let Self {
                 planner_config,
@@ -129,6 +139,7 @@ impl fmt::Display for PlanningReport {
                 measurement_updates,
             } = self;
             writeln!(f, "planning report:")?;
+            writeln!(f, "status for operators: {status}")?;
             if *planner_config != PlannerConfig::default() {
                 writeln!(f, "planner config:\n{}", planner_config.display())?;
             }
@@ -574,6 +585,7 @@ pub enum FailedMgsUpdateReason {
     /// for the sled to evacuate
     #[error("cannot update {component} until sled is evacuated")]
     WaitingOnSledEvacuation {
+        sled_id: SledUuid,
         component: MgsUpdateComponent,
         #[source]
         details: WaitingOnSledEvacuationDetails,
@@ -955,9 +967,31 @@ impl fmt::Display for PlanningMeasurementUpdatesStepReport {
 pub struct PlanningMgsUpdatesStepReport {
     pub blocked_mgs_updates: Vec<BlockedMgsUpdate>,
     pub pending_mgs_updates: PendingMgsUpdates,
-    #[cfg_attr(test, any(((0, 16).into(), Default::default(), Default::default())))]
-    pub update_disposition_changes:
-        BTreeMap<SledUuid, BlueprintSledUpdateDispositionKind>,
+    #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+    pub update_disposition_changes: IdOrdMap<SledUpdateDispositionChange>,
+}
+
+/// Describes a change to a sled's update disposition (e.g., marking it for
+/// evacuation so that it can be updated)
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub struct SledUpdateDispositionChange {
+    /// id of the sled whose update disposition is changing
+    pub sled_id: SledUuid,
+    /// id of the sled's baseboard
+    pub baseboard_id: Arc<BaseboardId>,
+    /// the sled's new update disposition
+    pub kind: BlueprintSledUpdateDispositionKind,
+}
+
+impl IdOrdItem for SledUpdateDispositionChange {
+    type Key<'a> = SledUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.sled_id
+    }
+    id_upcast!();
 }
 
 impl PlanningMgsUpdatesStepReport {
@@ -965,7 +999,7 @@ impl PlanningMgsUpdatesStepReport {
         Self {
             blocked_mgs_updates: Vec::new(),
             pending_mgs_updates: PendingMgsUpdates::new(),
-            update_disposition_changes: BTreeMap::new(),
+            update_disposition_changes: IdOrdMap::new(),
         }
     }
 
@@ -978,6 +1012,99 @@ impl PlanningMgsUpdatesStepReport {
         pending_mgs_updates.is_empty()
             && blocked_mgs_updates.is_empty()
             && update_disposition_changes.is_empty()
+    }
+
+    pub fn is_waiting(&self) -> Option<OperatorStatus> {
+        // A single blueprint can both mark one sled for evacuation and bring
+        // another sled back into service.  In that case, report the
+        // evacuation, since that's what the planner is actually waiting for.
+        // So first, sort the disposition changes by kind.
+        let mut evacuating = None;
+        let mut available = None;
+        for change in self.update_disposition_changes.iter() {
+            match change.kind {
+                BlueprintSledUpdateDispositionKind::Evacuating { .. } => {
+                    evacuating.get_or_insert(change);
+                }
+                BlueprintSledUpdateDispositionKind::Available => {
+                    available.get_or_insert(change);
+                }
+            }
+        }
+
+        // If this blueprint marks a sled for evacuation, then we're waiting
+        // for that sled to be evacuated.  This is the case only for the first
+        // blueprint in which we wait for a particular sled.  See the next
+        // block.
+        if let Some(change) = evacuating {
+            return Some(OperatorStatus::WaitingForUpdate(
+                UpdateWait::SledEvacuation {
+                    sled_id: change.sled_id,
+                    baseboard_id: (*change.baseboard_id).clone(),
+                    progress: SledEvacuationProgress::Starting,
+                },
+            ));
+        }
+
+        // We can also be waiting for sled evacuation if there's an MGS update
+        // that's blocked on it.  This is what happens for blueprints after the
+        // first one where we changed the sled's disposition.
+        let blocked_on_evacuation =
+            self.blocked_mgs_updates.iter().find_map(|blocked| match &blocked
+                .reason
+            {
+                FailedMgsUpdateReason::WaitingOnSledEvacuation {
+                    sled_id,
+                    component: _,
+                    details,
+                } => Some((blocked, *sled_id, details)),
+                FailedMgsUpdateReason::HostOs(..)
+                | FailedMgsUpdateReason::Rot(..)
+                | FailedMgsUpdateReason::RotBootloader(..)
+                | FailedMgsUpdateReason::Sp(..) => None,
+            });
+        if let Some((blocked, sled_id, details)) = blocked_on_evacuation {
+            return Some(OperatorStatus::WaitingForUpdate(
+                UpdateWait::SledEvacuation {
+                    sled_id,
+                    baseboard_id: (*blocked.baseboard_id).clone(),
+                    progress: SledEvacuationProgress::from(details),
+                },
+            ));
+        }
+
+        // If we're looking at a blueprint in which the planner is bringing a
+        // sled back into service, then it's fair to say that the planner is
+        // waiting for that to happen, in that it won't plan anything else in
+        // this blueprint.  There is no analogous case to the blocked update
+        // above for later blueprints.  The planner doesn't wait for the change
+        // to be propagated anywhere else.  If we ran it again, it would
+        // immediately plan the next step.
+        if let Some(change) = available {
+            return Some(OperatorStatus::WaitingForUpdate(
+                UpdateWait::SledAvailable {
+                    baseboard_id: (*change.baseboard_id).clone(),
+                },
+            ));
+        }
+
+        // Check whether we're waiting for a pending MGS update.
+        if let Some(update) = self.pending_mgs_updates.iter().next() {
+            let baseboard_id = (*update.baseboard_id).clone();
+            let component = match update.details {
+                // XXX-dap
+                PendingMgsUpdateDetails::Sp(..) => "SP",
+                PendingMgsUpdateDetails::Rot(..) => "RoT",
+                PendingMgsUpdateDetails::RotBootloader(..) => "RoT bootloader",
+                PendingMgsUpdateDetails::HostPhase1(..) => "Host OS",
+            };
+            return Some(OperatorStatus::WaitingForUpdate(UpdateWait::Mgs {
+                baseboard_id,
+                component: component.to_string(),
+            }));
+        }
+
+        None
     }
 }
 
@@ -1019,8 +1146,8 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
             let n = update_disposition_changes.len();
             let s = plural(n);
             writeln!(f, "* {n} sled{s} changed update disposition:")?;
-            for (sled_id, new_disposition) in update_disposition_changes {
-                writeln!(f, "  * {sled_id}: {new_disposition}")?;
+            for change in update_disposition_changes.iter() {
+                writeln!(f, "  * {}: {}", change.sled_id, change.kind)?;
             }
         }
 
@@ -1237,6 +1364,13 @@ impl PlanningAddStepReport {
                     source: image_source.to_string(),
                 }]
             });
+    }
+
+    pub fn is_blocked_on_mupdate(&self) -> bool {
+        // XXX-dap Currently, the only reasons in this list are MUPdate-related.
+        // We should do something so that if that changes, we'll notice this
+        // needs to change.
+        !self.add_update_blocked_reasons.is_empty()
     }
 }
 
@@ -1522,6 +1656,64 @@ impl PlanningZoneUpdatesStepReport {
     ) {
         self.waiting_zones.insert(zone.id, reason);
     }
+
+    pub fn is_waiting(&self) -> Option<OperatorStatus> {
+        // Check for pending zone updates and expungements.
+        let mut changed_zone_kinds = self
+            .updated_zones
+            .values()
+            .flatten()
+            .map(|z| z.kind)
+            .chain(self.expunged_zones.values().flatten().map(|z| z.kind))
+            .peekable();
+        if changed_zone_kinds.peek().is_some() {
+            return Some(OperatorStatus::WaitingForUpdate(
+                UpdateWait::for_zones(changed_zone_kinds),
+            ));
+        }
+
+        if let Some(waiting) = &self.waiting_on {
+            match waiting {
+                ZoneUpdatesWaitingOn::InventoryPropagation { kinds } => {
+                    // Note that although other types of zone-related activities
+                    // can be waiting on inventory propagation, the specific
+                    // thing we're checking here only applies to zone updates,
+                    // so we can say with confidence that this is part of an
+                    // update.
+                    return Some(OperatorStatus::WaitingForUpdate(
+                        UpdateWait::for_zones(kinds.iter().copied()),
+                    ));
+                }
+                ZoneUpdatesWaitingOn::PendingMgsUpdates
+                | ZoneUpdatesWaitingOn::BlockedMgsUpdates
+                | ZoneUpdatesWaitingOn::DiscretionaryZones
+                | ZoneUpdatesWaitingOn::SledUpdateDispositionChanges
+                | ZoneUpdatesWaitingOn::ZoneAddBlockers
+                | ZoneUpdatesWaitingOn::Measurements => (),
+            }
+        }
+
+        if let Some((_zone_id, why)) = self.unsafe_zones.first_key_value() {
+            return Some(OperatorStatus::WaitingForUpdate(
+                UpdateWait::ServiceRecovery {
+                    service: match why {
+                        ZoneUnsafeToShutdown::Cockroachdb { .. } => {
+                            "CockroachDB"
+                        }
+                        ZoneUnsafeToShutdown::BoundaryNtp { .. } => {
+                            "Boundary NTP"
+                        }
+                        ZoneUnsafeToShutdown::InternalDns { .. } => {
+                            "Internal DNS"
+                        }
+                    }
+                    .to_string(),
+                },
+            ));
+        }
+
+        None
+    }
 }
 
 impl fmt::Display for PlanningZoneUpdatesStepReport {
@@ -1625,7 +1817,12 @@ pub enum ZoneUpdatesWaitingOn {
     DiscretionaryZones,
 
     /// Waiting on zones to propagate to inventory.
-    InventoryPropagation,
+    InventoryPropagation {
+        /// kinds of the zones whose blueprint config is not yet reflected in
+        /// inventory
+        #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+        kinds: BTreeSet<ZoneKind>,
+    },
 
     /// Waiting on updates to RoT bootloader / RoT / SP / Host OS.
     PendingMgsUpdates,
@@ -1647,7 +1844,9 @@ impl ZoneUpdatesWaitingOn {
                 "blocked MGS updates (RoT bootloader / RoT / SP / Host OS)"
             }
             Self::DiscretionaryZones => "discretionary zones",
-            Self::InventoryPropagation => "zone propagation to inventory",
+            Self::InventoryPropagation { .. } => {
+                "zone propagation to inventory"
+            }
             Self::PendingMgsUpdates => {
                 "pending MGS updates (RoT bootloader / RoT / SP / Host OS)"
             }
@@ -1912,12 +2111,101 @@ fn plural_map_of_vec<K, V>(map: &BTreeMap<K, Vec<V>>) -> (usize, &'static str) {
     (n, plural(n))
 }
 
+/// What the caller knows about whether Nexus is quiescing for handoff
+///
+/// Operator notes can only report that the system is waiting for handoff when
+/// the caller knows Nexus's quiesce state.  Code that prints a planning report
+/// by itself (e.g., from a saved blueprint) does not know it.
+#[derive(Clone, Copy, Debug)]
+pub enum QuiesceInfo<'a> {
+    /// the caller knows Nexus's current quiesce state
+    Known(&'a QuiesceState),
+    /// the caller does not know whether Nexus is quiescing
+    Unknown,
+}
+
+impl PlanningReport {
+    /// Returns a summary of what the system is doing, intended for operators
+    pub fn operator_status(&self, quiesce: QuiesceInfo<'_>) -> OperatorStatus {
+        if self.add.is_blocked_on_mupdate() {
+            return OperatorStatus::WaitingForMupdateResolution;
+        }
+
+        if let Some(status) = self.mgs_updates.is_waiting() {
+            return status;
+        }
+
+        // Check for pending zone updates.
+        if let Some(status) = self.zone_updates.is_waiting() {
+            return status;
+        }
+
+        // Check if we're in the middle of handoff.  If we don't know the
+        // quiesce state, we can't tell, so we skip this check.
+        match quiesce {
+            QuiesceInfo::Known(QuiesceState::DrainingSagas { .. }) => {
+                return OperatorStatus::WaitingForUpdate(
+                    UpdateWait::HandoffSagas,
+                );
+            }
+            QuiesceInfo::Known(
+                QuiesceState::DrainingDb { .. }
+                | QuiesceState::RecordingQuiesce { .. }
+                | QuiesceState::Quiesced { .. },
+            ) => {
+                return OperatorStatus::WaitingForUpdate(
+                    UpdateWait::HandoffFinal,
+                );
+            }
+            QuiesceInfo::Known(
+                QuiesceState::Undetermined | QuiesceState::Running,
+            )
+            | QuiesceInfo::Unknown => (),
+        };
+
+        // At this point, we've determined that we're not doing any of the
+        // things that we've explicitly broken out a status variant for.  It's
+        // possible that we're doing something else.
+        if self.is_empty() {
+            OperatorStatus::AtRest
+        } else {
+            OperatorStatus::Busy
+        }
+    }
+}
+
+impl From<&WaitingOnSledEvacuationDetails> for SledEvacuationProgress {
+    fn from(details: &WaitingOnSledEvacuationDetails) -> Self {
+        match details {
+            WaitingOnSledEvacuationDetails::InstanceManagerRegisteredVmms {
+                num_registered_vmms,
+            } => SledEvacuationProgress::RegisteredVmms {
+                count: *num_registered_vmms,
+            },
+            WaitingOnSledEvacuationDetails::MissingFromInventory
+            | WaitingOnSledEvacuationDetails::MissingLedgeredSledConfig
+            | WaitingOnSledEvacuationDetails::WaitingForSledConfigGeneration {
+                ..
+            }
+            | WaitingOnSledEvacuationDetails::InstanceManagerNoConfig
+            | WaitingOnSledEvacuationDetails::InstanceManagerAvailable => {
+                SledEvacuationProgress::Other {
+                    message: InlineErrorChain::new(details).to_string(),
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    use crate::deployment::ReconfiguratorDisruptionPolicy;
+    use omicron_uuid_kinds::GenericUuid;
     use proptest::prelude::*;
     use test_strategy::proptest;
+    use uuid::Uuid;
 
     // Test that planning reports can be serialized and deserialized.
     #[proptest]
@@ -1929,5 +2217,83 @@ mod tests {
             deserialized,
             "input and output are equal"
         );
+    }
+
+    // When one blueprint both marks a sled for evacuation and brings another
+    // sled back into service, the operator status should describe the
+    // evacuation, regardless of which sled id sorts first.
+    #[test]
+    fn evacuation_takes_priority_over_return_to_service() {
+        let available_board = Arc::new(BaseboardId {
+            part_number: String::from("913-0000019"),
+            serial_number: String::from("serial0"),
+        });
+        let evacuating_board = Arc::new(BaseboardId {
+            part_number: String::from("913-0000019"),
+            serial_number: String::from("serial1"),
+        });
+
+        // Give the sled returning to service the lower sled id so that it
+        // comes first when iterating over the changes.
+        let evacuating_sled_id =
+            SledUuid::from_untyped_uuid(Uuid::from_u128(2));
+        let mut report = PlanningMgsUpdatesStepReport::new();
+        report
+            .update_disposition_changes
+            .insert_unique(SledUpdateDispositionChange {
+                sled_id: SledUuid::from_untyped_uuid(Uuid::from_u128(1)),
+                baseboard_id: Arc::clone(&available_board),
+                kind: BlueprintSledUpdateDispositionKind::Available,
+            })
+            .expect("sled ids are unique");
+        report
+            .update_disposition_changes
+            .insert_unique(SledUpdateDispositionChange {
+                sled_id: evacuating_sled_id,
+                baseboard_id: Arc::clone(&evacuating_board),
+                kind: BlueprintSledUpdateDispositionKind::Evacuating {
+                    policy: ReconfiguratorDisruptionPolicy::default(),
+                },
+            })
+            .expect("sled ids are unique");
+
+        match report.is_waiting() {
+            Some(OperatorStatus::WaitingForUpdate(
+                UpdateWait::SledEvacuation { sled_id, baseboard_id, progress },
+            )) => {
+                assert_eq!(sled_id, evacuating_sled_id);
+                assert_eq!(baseboard_id, *evacuating_board);
+                assert!(matches!(progress, SledEvacuationProgress::Starting));
+            }
+            Some(other) => panic!("unexpected operator status: {other}"),
+            None => panic!("expected an operator status, found none"),
+        }
+    }
+
+    // Evacuation details about remaining VMMs become a VMM count, and all
+    // other details become a message.
+    #[test]
+    fn sled_evacuation_progress_from_details() {
+        let details =
+            WaitingOnSledEvacuationDetails::InstanceManagerRegisteredVmms {
+                num_registered_vmms: NonZeroUsize::new(3).unwrap(),
+            };
+        let progress = SledEvacuationProgress::from(&details);
+        match &progress {
+            SledEvacuationProgress::RegisteredVmms { count } => {
+                assert_eq!(count.get(), 3);
+            }
+            other => panic!("unexpected progress: {other}"),
+        }
+        assert_eq!(progress.to_string(), "3 VMMs remaining");
+
+        let details = WaitingOnSledEvacuationDetails::MissingFromInventory;
+        let progress = SledEvacuationProgress::from(&details);
+        match &progress {
+            SledEvacuationProgress::Other { message } => {
+                assert_eq!(message, "sled is missing from inventory");
+            }
+            other => panic!("unexpected progress: {other}"),
+        }
     }
 }

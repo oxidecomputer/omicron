@@ -53,4 +53,5 @@ mod saml;
 mod silo;
 mod sled;
 mod switch;
+mod update;
 mod user;

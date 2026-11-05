@@ -129,7 +129,9 @@ pub fn run_repl_on_stdin_customized<C: Parser>(
     // Ensure new Signal variants would trigger a compile error.
     #[allow(clippy::while_let_loop)]
     loop {
-        match ed.read_line(prompt).context("unexpected error")? {
+        match ed.read_line(prompt).context(
+            "unexpected error from reedline while reading line from stdin",
+        )? {
             Signal::Success(buffer) => {
                 // Strip everything after '#' as a comment.
                 let entry = match buffer.split_once('#') {

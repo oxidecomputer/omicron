@@ -38,6 +38,7 @@ use nexus_types_versions::v2026_01_31_00;
 use nexus_types_versions::v2026_02_13_01;
 use nexus_types_versions::v2026_04_16_00;
 use nexus_types_versions::v2026_05_07_00;
+use nexus_types_versions::v2026_05_20_00;
 use nexus_types_versions::v2026_06_05_00;
 use nexus_types_versions::v2026_08_14_00;
 use omicron_common::address::IpRange;
@@ -89,6 +90,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_11_05_00, ADD_OPERATOR_NOTES_TO_UPDATE_STATUS),
     (2026_11_02_00, LAST_CERTIFICATE_DOCS),
     (2026_10_29_00, SLED_ADD_PRECHECK_OVERRIDES),
     (2026_10_21_00, BYTE_WRAPPER_0_2_BUMP),
@@ -8368,11 +8370,31 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/update/status",
         tags = ["system/update"],
-        versions = VERSION_ADD_CONTACT_SUPPORT_TO_UPDATE_STATUS..,
+        versions = VERSION_ADD_OPERATOR_NOTES_TO_UPDATE_STATUS..,
     }]
     async fn system_update_status(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::update::UpdateStatus>, HttpError>;
+
+    /// Fetch system update status
+    ///
+    /// Returns information about the current target release and the
+    /// progress of system software updates.
+    #[endpoint {
+        operation_id = "system_update_status",
+        method = GET,
+        path = "/v1/system/update/status",
+        tags = ["system/update"],
+        versions = VERSION_ADD_CONTACT_SUPPORT_TO_UPDATE_STATUS..VERSION_ADD_OPERATOR_NOTES_TO_UPDATE_STATUS,
+    }]
+    async fn system_update_status_v2026_05_20_00(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v2026_05_20_00::update::UpdateStatus>, HttpError>
+    {
+        Ok(Self::system_update_status(rqctx)
+            .await?
+            .map(v2026_05_20_00::update::UpdateStatus::from))
+    }
 
     /// Fetch system update status
     ///
@@ -8389,7 +8411,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v2025_11_20_00::update::UpdateStatus>, HttpError>
     {
-        Ok(Self::system_update_status(rqctx)
+        Ok(Self::system_update_status_v2026_05_20_00(rqctx)
             .await?
             .map(v2025_11_20_00::update::UpdateStatus::from))
     }

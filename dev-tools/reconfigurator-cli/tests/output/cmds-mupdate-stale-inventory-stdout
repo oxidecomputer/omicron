@@ -103,6 +103,7 @@ INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0
 generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 blueprint source: planner with report:
 planning report:
+status for operators: Waiting for operator to resolve MUPdate
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - current target release generation (2) is lower than minimum required by blueprint (3)
@@ -269,6 +270,7 @@ INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0
 generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 blueprint source: planner with report:
 planning report:
+status for operators: Waiting for operator to resolve MUPdate
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - current target release generation (2) is lower than minimum required by blueprint (3)

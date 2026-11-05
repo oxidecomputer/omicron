@@ -40,6 +40,7 @@ INFO skipping noop image source check for all sleds, reason: no target release i
 generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 blueprint source: planner with report:
 planning report:
+status for operators: Waiting for operator to resolve MUPdate
 * zone adds and updates are blocked:
   - sleds have deployment units with image sources not set to Artifact:
     - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 9 zones
@@ -355,6 +356,7 @@ parent:    dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 
 blueprint source: planner with report:
 planning report:
+status for operators: Waiting for operator to resolve MUPdate
 * zone adds and updates are blocked:
   - sleds have deployment units with image sources not set to Artifact:
     - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 9 zones

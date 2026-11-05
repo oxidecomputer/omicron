@@ -53,6 +53,7 @@ INFO skipping noop image source check for all sleds, reason: no target release i
 generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 blueprint source: planner with report:
 planning report:
+status for operators: Waiting for operator to resolve MUPdate
 * zone adds and updates are blocked:
   - current target release generation (1) is lower than minimum required by blueprint (2)
   - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
@@ -214,6 +215,7 @@ INFO skipping noop image source check for all sleds, reason: no target release i
 generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 blueprint source: planner with report:
 planning report:
+status for operators: Waiting for operator to resolve MUPdate
 * zone adds and updates are blocked:
   - current target release generation (1) is lower than minimum required by blueprint (2)
   - sleds have deployment units with image sources not set to Artifact:

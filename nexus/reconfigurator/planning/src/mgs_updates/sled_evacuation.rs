@@ -5,8 +5,10 @@
 //! Facilities for making decisions about sled evacuation during reboot-inducing
 //! updates.
 
+use iddqd::IdOrdMap;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
+use nexus_types::deployment::planning_report::SledUpdateDispositionChange;
 use nexus_types::deployment::planning_report::WaitingOnSledEvacuationDetails;
 use nexus_types::inventory::Collection;
 use omicron_generation_kinds::SledConfigGeneration;
@@ -14,8 +16,10 @@ use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::inventory::CurrentUpdateDisposition;
 use sled_agent_types::inventory::InstanceManagerStatus;
 use sled_agent_types::inventory::OmicronSledUpdateDisposition;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 
 use crate::mgs_updates::UpdateableBoard;
 
@@ -158,12 +162,12 @@ impl EvacuatingSleds {
 /// for a number of sleds
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PendingUpdateDispositionChanges {
-    by_sled: BTreeMap<SledUuid, BlueprintSledUpdateDispositionKind>,
+    by_sled: IdOrdMap<SledUpdateDispositionChange>,
 }
 
 impl PendingUpdateDispositionChanges {
     pub(super) fn empty() -> Self {
-        Self { by_sled: BTreeMap::new() }
+        Self { by_sled: IdOrdMap::new() }
     }
 
     #[cfg(test)]
@@ -179,26 +183,37 @@ impl PendingUpdateDispositionChanges {
     pub(super) fn insert(
         &mut self,
         sled_id: SledUuid,
+        baseboard_id: Arc<BaseboardId>,
         kind: BlueprintSledUpdateDispositionKind,
     ) {
-        let previous = self.by_sled.insert(sled_id, kind);
-        assert_eq!(
-            previous, None,
-            "recorded multiple changes for sled {sled_id}"
-        );
+        let change =
+            SledUpdateDispositionChange { sled_id, baseboard_id, kind };
+        if self.by_sled.insert_unique(change).is_err() {
+            panic!("recorded multiple changes for sled {sled_id}");
+        }
     }
 
     pub(crate) fn iter(
         &self,
-    ) -> impl Iterator<Item = (&SledUuid, &BlueprintSledUpdateDispositionKind)>
-    {
+    ) -> impl Iterator<Item = &SledUpdateDispositionChange> {
         self.by_sled.iter()
     }
 
-    pub(crate) fn into_map(
-        self,
+    pub(crate) fn into_inner(self) -> IdOrdMap<SledUpdateDispositionChange> {
+        self.by_sled
+    }
+
+    /// Returns a map from sled id to the new disposition for that sled
+    ///
+    /// This is a convenience for tests that do not care about baseboard ids.
+    #[cfg(test)]
+    pub(super) fn kinds_by_sled(
+        &self,
     ) -> BTreeMap<SledUuid, BlueprintSledUpdateDispositionKind> {
         self.by_sled
+            .iter()
+            .map(|change| (change.sled_id, change.kind))
+            .collect()
     }
 }
 
@@ -206,7 +221,6 @@ impl PendingUpdateDispositionChanges {
 mod tests {
     use super::*;
     use crate::mgs_updates::test_helpers::TestBoards;
-    use iddqd::IdOrdMap;
 
     #[test]
     fn test_evacuation_status() {

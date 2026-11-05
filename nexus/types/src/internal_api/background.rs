@@ -3,7 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::deployment::PlanningReport;
+use crate::deployment::planning_report::QuiesceInfo;
 use crate::external_api::alert;
+use crate::external_api::update::OperatorStatus;
+use crate::external_api::update::UnknownReason;
 use chrono::DateTime;
 use chrono::Utc;
 use gateway_types::component::SpType;
@@ -938,6 +941,100 @@ pub enum InventoryLoadStatus {
         time_started: DateTime<Utc>,
         time_loaded: DateTime<Utc>,
     },
+}
+
+/// Most recent results from this Nexus's `blueprint_planner` background task
+///
+/// The task publishes this over a watch channel so that other parts of Nexus
+/// (e.g., the update status endpoint) can report what the system is doing.
+#[derive(Clone, Debug)]
+pub enum BlueprintPlannerLatest {
+    /// the planner has not run since this Nexus started
+    NotYetRun,
+    /// the planner has run, but it has never produced a report
+    NeverSucceeded { error: String },
+    /// the most recent planner activation succeeded
+    Succeeded { report: TimestampedPlanningReport },
+    /// the most recent planner activation failed
+    ///
+    /// `last_report` is the most recent report that the planner produced.  It
+    /// may come from an earlier activation, or from this one (if the planner
+    /// produced a report but then hit an error, as when it reaches the
+    /// blueprint limit).
+    Failed { last_report: TimestampedPlanningReport, error: String },
+}
+
+impl BlueprintPlannerLatest {
+    /// Returns a summary of what the system is doing, intended for operators
+    ///
+    /// If the planner has not produced a report, the status says why it is
+    /// unknown.
+    pub fn operator_status(&self, quiesce: QuiesceInfo<'_>) -> OperatorStatus {
+        match self {
+            BlueprintPlannerLatest::NotYetRun => {
+                OperatorStatus::Unknown(UnknownReason::PlannerNotYetRun)
+            }
+            BlueprintPlannerLatest::NeverSucceeded { error } => {
+                OperatorStatus::Unknown(UnknownReason::PlannerFailed {
+                    error: error.clone(),
+                })
+            }
+            BlueprintPlannerLatest::Succeeded { report }
+            | BlueprintPlannerLatest::Failed { last_report: report, .. } => {
+                report.report.operator_status(quiesce)
+            }
+        }
+    }
+
+    /// Returns the most recent report that the planner produced, if any
+    pub fn latest_report(&self) -> Option<&TimestampedPlanningReport> {
+        match self {
+            BlueprintPlannerLatest::NotYetRun
+            | BlueprintPlannerLatest::NeverSucceeded { .. } => None,
+            BlueprintPlannerLatest::Succeeded { report }
+            | BlueprintPlannerLatest::Failed { last_report: report, .. } => {
+                Some(report)
+            }
+        }
+    }
+
+    /// Returns the error from the most recent planner activation, if it
+    /// failed
+    pub fn last_error(&self) -> Option<&str> {
+        match self {
+            BlueprintPlannerLatest::NotYetRun
+            | BlueprintPlannerLatest::Succeeded { .. } => None,
+            BlueprintPlannerLatest::NeverSucceeded { error }
+            | BlueprintPlannerLatest::Failed { error, .. } => Some(error),
+        }
+    }
+
+    /// Records a failed activation that produced no report
+    ///
+    /// This keeps the most recent report, if any.
+    pub fn record_error(&mut self, error: String) {
+        *self = match self {
+            BlueprintPlannerLatest::NotYetRun
+            | BlueprintPlannerLatest::NeverSucceeded { .. } => {
+                BlueprintPlannerLatest::NeverSucceeded { error }
+            }
+            BlueprintPlannerLatest::Succeeded { report: last_report }
+            | BlueprintPlannerLatest::Failed { last_report, .. } => {
+                BlueprintPlannerLatest::Failed {
+                    last_report: last_report.clone(),
+                    error,
+                }
+            }
+        };
+    }
+}
+
+/// Planning report along with when the planner produced it
+#[derive(Clone, Debug)]
+pub struct TimestampedPlanningReport {
+    /// when the planning activation that produced this report started
+    pub time_planned: DateTime<Utc>,
+    pub report: Arc<PlanningReport>,
 }
 
 /// The status of a `blueprint_planner` background task activation.
