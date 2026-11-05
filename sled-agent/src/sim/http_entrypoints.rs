@@ -62,7 +62,9 @@ use sled_agent_types::instance::{
 use sled_agent_types::inventory::{
     Inventory, OmicronSledConfig, SledRegistrationInfo,
 };
-use sled_agent_types::multirack::MultirackJoinServiceStatus;
+use sled_agent_types::multirack::{
+    MultirackJoinCompleteResponse, MultirackJoinServiceStatus,
+};
 use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::rot::{
     Attestation, CertificateChain, MeasurementLog, Nonce, RotPathParams,
@@ -1168,7 +1170,7 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn multirack_join_complete(
         _request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    ) -> Result<HttpResponseOk<MultirackJoinCompleteResponse>, HttpError> {
         method_unimplemented()
     }
 
