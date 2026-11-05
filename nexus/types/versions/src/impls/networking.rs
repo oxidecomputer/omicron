@@ -62,7 +62,6 @@ impl latest::networking::SwitchPortSettingsCreate {
             port_config: latest::networking::SwitchPortConfigCreate {
                 geometry: latest::networking::SwitchPortGeometry::Qsfp28x1,
             },
-            groups: Vec::new(),
             links: Vec::new(),
             interfaces: Vec::new(),
             routes: Vec::new(),

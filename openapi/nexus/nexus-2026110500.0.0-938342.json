@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026110200.0.0"
+    "version": "2026110500.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -29928,13 +29928,6 @@
             "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
-          "groups": {
-            "description": "Switch port settings included from other switch port settings groups.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchPortSettingsGroups"
-            }
-          },
           "id": {
             "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
@@ -29992,7 +29985,6 @@
           "addresses",
           "bgp_peers",
           "description",
-          "groups",
           "id",
           "interfaces",
           "links",
@@ -30024,13 +30016,6 @@
           },
           "description": {
             "type": "string"
-          },
-          "groups": {
-            "default": [],
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
           },
           "interfaces": {
             "description": "Interface configurations.",
@@ -30068,26 +30053,6 @@
           "links",
           "name",
           "port_config"
-        ]
-      },
-      "SwitchPortSettingsGroups": {
-        "description": "This structure maps a port settings object to a port settings groups. Port settings objects may inherit settings from groups. This mapping defines the relationship between settings objects and the groups they reference.",
-        "type": "object",
-        "properties": {
-          "port_settings_group_id": {
-            "description": "The id of a port settings group being referenced by a port settings object.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "port_settings_id": {
-            "description": "The id of a port settings object referencing a port settings group.",
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "port_settings_group_id",
-          "port_settings_id"
         ]
       },
       "SwitchPortSettingsIdentity": {

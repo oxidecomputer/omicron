@@ -12,8 +12,8 @@ use crate::db::model::{
     LldpLinkConfig, Name, SwitchInterfaceConfig, SwitchLinkFec,
     SwitchLinkSpeed, SwitchPort, SwitchPortAddressConfig,
     SwitchPortBgpPeerConfig, SwitchPortConfig, SwitchPortLinkConfig,
-    SwitchPortRouteConfig, SwitchPortSettings, SwitchPortSettingsGroups,
-    SwitchVlanInterfaceConfig, TxEqConfig,
+    SwitchPortRouteConfig, SwitchPortSettings, SwitchVlanInterfaceConfig,
+    TxEqConfig,
 };
 use crate::db::pagination::paginated;
 use async_bb8_diesel::{AsyncRunQueryDsl, Connection};
@@ -161,7 +161,6 @@ impl BgpPeerFromDbBuilder<'_> {
 #[derive(Clone, Debug)]
 pub struct SwitchPortSettingsCombinedResult {
     pub settings: SwitchPortSettings,
-    pub groups: Vec<SwitchPortSettingsGroups>,
     pub port: SwitchPortConfig,
     pub links: Vec<LinkConfigCombinedResult>,
     pub link_lldp: Vec<LldpLinkConfig>,
@@ -178,7 +177,6 @@ impl SwitchPortSettingsCombinedResult {
         SwitchPortSettingsCombinedResult {
             settings,
             port,
-            groups: Vec::new(),
             links: Vec::new(),
             link_lldp: Vec::new(),
             tx_eq: Vec::new(),
@@ -258,7 +256,6 @@ impl TryFrom<SwitchPortSettingsCombinedResult>
         Ok(networking::SwitchPortSettings {
             identity: result.settings.identity(),
             port: result.port.into(),
-            groups: result.groups.into_iter().map(Into::into).collect(),
             links: result.links.into_iter().map(Into::into).collect(),
             interfaces,
             routes: result.routes.into_iter().map(Into::into).collect(),
@@ -1675,7 +1672,6 @@ async fn do_switch_port_settings_create(
 
     let mut result = SwitchPortSettingsCombinedResult {
         settings: db_port_settings,
-        groups: Vec::new(),
         port: db_port_config,
         links: Vec::new(),
         link_lldp: Vec::new(),
@@ -2464,7 +2460,6 @@ mod test {
             port_config: SwitchPortConfigCreate {
                 geometry: SwitchPortGeometry::Qsfp28x1,
             },
-            groups: Vec::new(),
             links: vec![],
             interfaces: vec![],
             routes: vec![],
@@ -2576,12 +2571,6 @@ mod test {
         );
 
         assert_eq!(settings.port_config.geometry, db_settings.port.geometry);
-
-        assert_eq!(
-            db_settings.groups.len(),
-            0,
-            "groups are not currently used and should be empty"
-        );
 
         assert_eq!(settings.links.len(), db_settings.links.len());
         let mut db_links = HashMap::new();
@@ -2877,7 +2866,6 @@ mod test {
             port_config: SwitchPortConfigCreate {
                 geometry: SwitchPortGeometry::Qsfp28x1,
             },
-            groups: Vec::new(),
             links: vec![],
             interfaces: vec![],
             routes: vec![],
@@ -3123,7 +3111,6 @@ mod test {
             port_config: SwitchPortConfigCreate {
                 geometry: SwitchPortGeometry::Qsfp28x1,
             },
-            groups: Vec::new(),
             links: vec![],
             interfaces: vec![],
             routes: vec![],

@@ -150,25 +150,6 @@ table! {
 }
 
 table! {
-    switch_port_settings_group (id) {
-        id -> Uuid,
-        port_settings_id -> Uuid,
-        name -> Text,
-        description -> Text,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-        time_deleted -> Nullable<Timestamptz>,
-    }
-}
-
-table! {
-    switch_port_settings_groups (port_settings_id, port_settings_group_id) {
-        port_settings_id -> Uuid,
-        port_settings_group_id -> Uuid,
-    }
-}
-
-table! {
     switch_port_settings (id) {
         id -> Uuid,
         name -> Text,

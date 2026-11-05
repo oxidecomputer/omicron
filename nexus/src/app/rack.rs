@@ -483,7 +483,6 @@ impl super::Nexus {
                 networking::SwitchPortSettingsCreate {
                     identity,
                     port_config,
-                    groups: vec![],
                     links: vec![],
                     interfaces: vec![],
                     routes: vec![],

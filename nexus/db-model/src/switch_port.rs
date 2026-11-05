@@ -15,7 +15,6 @@ use nexus_db_schema::schema::{
     switch_port_settings_bgp_peer_config_allow_export,
     switch_port_settings_bgp_peer_config_allow_import,
     switch_port_settings_bgp_peer_config_communities,
-    switch_port_settings_group, switch_port_settings_groups,
     switch_port_settings_interface_config, switch_port_settings_link_config,
     switch_port_settings_port_config, switch_port_settings_route_config,
     tx_eq_config,
@@ -385,54 +384,6 @@ impl Into<networking_types::SwitchPortSettingsIdentity> for SwitchPortSettings {
     fn into(self) -> networking_types::SwitchPortSettingsIdentity {
         networking_types::SwitchPortSettingsIdentity {
             identity: self.identity(),
-        }
-    }
-}
-
-#[derive(
-    Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
-)]
-#[diesel(table_name = switch_port_settings_groups)]
-pub struct SwitchPortSettingsGroups {
-    pub port_settings_id: DbTypedUuid<SwitchPortSettingsKind>,
-    pub port_settings_group_id: Uuid,
-}
-
-impl Into<networking_types::SwitchPortSettingsGroups>
-    for SwitchPortSettingsGroups
-{
-    fn into(self) -> networking_types::SwitchPortSettingsGroups {
-        networking_types::SwitchPortSettingsGroups {
-            port_settings_id: self.port_settings_id.into_untyped_uuid(),
-            port_settings_group_id: self.port_settings_group_id,
-        }
-    }
-}
-
-#[derive(
-    Queryable,
-    Insertable,
-    Selectable,
-    Clone,
-    Debug,
-    Resource,
-    Serialize,
-    Deserialize,
-)]
-#[diesel(table_name = switch_port_settings_group)]
-pub struct SwitchPortSettingsGroup {
-    #[diesel(embed)]
-    pub identity: SwitchPortSettingsGroupIdentity,
-    pub port_settings_id: DbTypedUuid<SwitchPortSettingsKind>,
-}
-
-impl Into<networking_types::SwitchPortSettingsGroup>
-    for SwitchPortSettingsGroup
-{
-    fn into(self) -> networking_types::SwitchPortSettingsGroup {
-        networking_types::SwitchPortSettingsGroup {
-            identity: self.identity(),
-            port_settings_id: self.port_settings_id.into_untyped_uuid(),
         }
     }
 }

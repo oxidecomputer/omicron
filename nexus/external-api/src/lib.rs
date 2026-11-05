@@ -40,6 +40,7 @@ use nexus_types_versions::v2026_04_16_00;
 use nexus_types_versions::v2026_05_07_00;
 use nexus_types_versions::v2026_06_05_00;
 use nexus_types_versions::v2026_08_14_00;
+use nexus_types_versions::v2026_08_14_01;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::{
     http_pagination::{
@@ -89,6 +90,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_11_05_00, REMOVE_PORT_SETTINGS_GROUPS),
     (2026_11_02_00, LAST_CERTIFICATE_DOCS),
     (2026_10_29_00, SLED_ADD_PRECHECK_OVERRIDES),
     (2026_10_21_00, BYTE_WRAPPER_0_2_BUMP),
@@ -5386,7 +5388,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/networking/switch-port-settings",
         tags = ["system/networking"],
-        versions = VERSION_BGP_PEER_SRC_ADDR..,
+        versions = VERSION_REMOVE_PORT_SETTINGS_GROUPS..,
     }]
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<Self::Context>,
@@ -5395,6 +5397,30 @@ pub trait NexusExternalApi {
         HttpResponseCreated<latest::networking::SwitchPortSettings>,
         HttpError,
     >;
+
+    #[endpoint {
+        operation_id = "networking_switch_port_settings_create",
+        method = POST,
+        path = "/v1/system/networking/switch-port-settings",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_PEER_SRC_ADDR..VERSION_REMOVE_PORT_SETTINGS_GROUPS,
+    }]
+    async fn networking_switch_port_settings_create_v2026_08_14_01(
+        rqctx: RequestContext<Self::Context>,
+        new_settings: TypedBody<
+            v2026_08_14_01::networking::SwitchPortSettingsCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026_08_14_01::networking::SwitchPortSettings>,
+        HttpError,
+    > {
+        Self::networking_switch_port_settings_create(
+            rqctx,
+            new_settings.map(Into::into),
+        )
+        .await
+        .map(|response| response.map(From::from))
+    }
 
     #[endpoint {
         operation_id = "networking_switch_port_settings_create",
@@ -5412,7 +5438,7 @@ pub trait NexusExternalApi {
         HttpResponseCreated<v2026_05_07_00::networking::SwitchPortSettings>,
         HttpError,
     > {
-        Self::networking_switch_port_settings_create(
+        Self::networking_switch_port_settings_create_v2026_08_14_01(
             rqctx,
             new_settings.map(Into::into),
         )
@@ -5443,7 +5469,7 @@ pub trait NexusExternalApi {
         HttpResponseCreated<v2026_04_16_00::networking::SwitchPortSettings>,
         HttpError,
     > {
-        Self::networking_switch_port_settings_create(
+        Self::networking_switch_port_settings_create_v2026_08_14_01(
             rqctx,
             new_settings.try_map(TryFrom::try_from).map_err(|err| {
                 HttpError::for_bad_request(
@@ -5556,12 +5582,31 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/switch-port-settings/{port}",
         tags = ["system/networking"],
-        versions = VERSION_BGP_PEER_SRC_ADDR..,
+        versions = VERSION_REMOVE_PORT_SETTINGS_GROUPS..,
     }]
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
     ) -> Result<HttpResponseOk<latest::networking::SwitchPortSettings>, HttpError>;
+
+    #[endpoint {
+        operation_id = "networking_switch_port_settings_view",
+        method = GET,
+        path = "/v1/system/networking/switch-port-settings/{port}",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_PEER_SRC_ADDR..VERSION_REMOVE_PORT_SETTINGS_GROUPS,
+    }]
+    async fn networking_switch_port_settings_view_v2026_08_14_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
+    ) -> Result<
+        HttpResponseOk<v2026_08_14_01::networking::SwitchPortSettings>,
+        HttpError,
+    > {
+        Self::networking_switch_port_settings_view(rqctx, path_params)
+            .await
+            .map(|response| response.map(From::from))
+    }
 
     #[endpoint {
         operation_id = "networking_switch_port_settings_view",
@@ -5577,16 +5622,19 @@ pub trait NexusExternalApi {
         HttpResponseOk<v2026_05_07_00::networking::SwitchPortSettings>,
         HttpError,
     > {
-        Self::networking_switch_port_settings_view(rqctx, path_params)
-            .await
-            .and_then(|response| {
-                response.try_map(TryFrom::try_from).map_err(|err| {
-                    HttpError::for_internal_error(format!(
-                        "switch port settings contain configuration that \
+        Self::networking_switch_port_settings_view_v2026_08_14_01(
+            rqctx,
+            path_params,
+        )
+        .await
+        .and_then(|response| {
+            response.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_internal_error(format!(
+                    "switch port settings contain configuration that \
                          cannot be represented in this API version: {err:#}"
-                    ))
-                })
+                ))
             })
+        })
     }
 
     #[endpoint {
@@ -5603,16 +5651,19 @@ pub trait NexusExternalApi {
         HttpResponseOk<v2026_04_16_00::networking::SwitchPortSettings>,
         HttpError,
     > {
-        Self::networking_switch_port_settings_view(rqctx, path_params)
-            .await
-            .and_then(|response| {
-                response.try_map(TryFrom::try_from).map_err(|err| {
-                    HttpError::for_internal_error(format!(
-                        "switch port settings contain configuration that \
+        Self::networking_switch_port_settings_view_v2026_08_14_01(
+            rqctx,
+            path_params,
+        )
+        .await
+        .and_then(|response| {
+            response.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_internal_error(format!(
+                    "switch port settings contain configuration that \
                          cannot be represented in this API version: {err:#}"
-                    ))
-                })
+                ))
             })
+        })
     }
 
     #[endpoint {
