@@ -136,6 +136,57 @@ fn epoch_to_i64(epoch: Epoch) -> Result<i64, Error> {
     })
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum TqAbortAction {
+    AlreadyAborted,
+    Abort,
+}
+
+/// Decide what [`DataStore::tq_abort_config`] does with the config at `epoch`,
+/// given its state (None if there is no config at that epoch) and the latest
+/// epoch for the rack.
+fn classify_tq_abort(
+    rack_id: RackUuid,
+    epoch: i64,
+    latest_epoch: Option<i64>,
+    state_at_epoch: Option<DbTrustQuorumConfigurationState>,
+) -> Result<TqAbortAction, Error> {
+    let (Some(state), Some(latest_epoch)) = (state_at_epoch, latest_epoch)
+    else {
+        return Err(Error::non_resourcetype_not_found(format!(
+            "No trust quorum configuration exists at epoch {epoch} for rack \
+             {rack_id}."
+        )));
+    };
+    let state = match state {
+        DbTrustQuorumConfigurationState::Aborted => {
+            return Ok(TqAbortAction::AlreadyAborted);
+        }
+        DbTrustQuorumConfigurationState::Preparing
+        | DbTrustQuorumConfigurationState::PreparingLrtqUpgrade => {
+            if latest_epoch == epoch {
+                return Ok(TqAbortAction::Abort);
+            }
+            // Inserting a newer config is refused while the latest one is still
+            // preparing, so this is an internal error.
+            return Err(Error::internal_error(&format!(
+                "Trust quorum configuration at epoch {epoch} for rack \
+                 {rack_id} is still in state {state:?}, but the latest \
+                 epoch is {latest_epoch}"
+            )));
+        }
+        DbTrustQuorumConfigurationState::Committing => "committing",
+        DbTrustQuorumConfigurationState::Committed => "committed",
+        DbTrustQuorumConfigurationState::CommittedPartially => {
+            "partially committed"
+        }
+    };
+    Err(Error::conflict(format!(
+        "Cannot abort the trust quorum configuration at epoch {epoch} for \
+         rack {rack_id}: it is already {state} and can no longer be aborted."
+    )))
+}
+
 // A configuration returned from `validate_new_config_conn` that is safe to
 // be inserted into the database inside a transaction.
 struct ValidatedConfig {
@@ -1138,12 +1189,15 @@ impl DataStore {
             })
     }
 
-    /// Abort the configuration for a trust quorum if `epoch` is the latest per `rack_id`
-    /// and the configuration has not been committed.
+    /// Abort the configuration for a trust quorum if `epoch` is the latest per
+    /// `rack_id` and the configuration has not started committing.
     ///
     /// Returns the configuration as read at the end of the transaction. If the
-    /// configuration has already been aborted and it is still the latest
-    /// configuration, it is returned unchanged.
+    /// configuration has already been aborted, it is returned unchanged,
+    /// whether or not it is still the latest configuration.
+    ///
+    /// Returns a 409 if the configuration is committing or later, and a 404 if
+    /// there is no configuration at `epoch`.
     pub async fn tq_abort_config(
         &self,
         opctx: &OpContext,
@@ -1164,58 +1218,32 @@ impl DataStore {
                 let err = err.clone();
                 let abort_reason = abort_reason.clone();
                 async move {
-                    // First, retrieve our configuration if there is one.
                     let latest = Self::tq_get_latest_config_conn(&c, rack_id)
                         .await
                         .map_err(|txn_error| txn_error.into_diesel(&err))?;
-
-                    let Some(db_config) = latest else {
-                        bail_txn!(
-                            err,
-                            "No trust quorum config for rack_id {} at epoch {}",
-                            rack_id,
-                            db_epoch
-                        );
-                    };
-
-                    if db_config.epoch != db_epoch {
-                        let actual = db_config.epoch;
-                        bail_txn!(
-                            err,
-                            "Cannot abort trust quorum config. \
-                             Latest epoch does not match. Expected {}, Got {}",
-                            db_epoch,
-                            actual
-                        );
-                    }
-
-                    // Abort is idempotent
-                    if db_config.state
-                        != DbTrustQuorumConfigurationState::Aborted
-                    {
-                        // If we've already started committing , we can't abort
-                        if db_config.state
-                            == DbTrustQuorumConfigurationState::Committing
-                            || db_config.state
-                                == DbTrustQuorumConfigurationState::Committed
-                        {
-                            let state = db_config.state;
-                            bail_txn!(
-                                err,
-                                "Invalid update of trust quorum abort status. \
-                                Expected `Preparing`, got `{:?}`",
-                                state
-                            );
-                        }
-
-                        Self::update_tq_abort_state_conn(
-                            &c,
-                            db_config.rack_id,
-                            db_config.epoch,
-                            abort_reason,
-                        )
+                    let at_epoch = Self::tq_get_config_conn(&c, rack_id, epoch)
                         .await
                         .map_err(|txn_error| txn_error.into_diesel(&err))?;
+
+                    let action = classify_tq_abort(
+                        rack_id,
+                        db_epoch,
+                        latest.map(|config| config.epoch),
+                        at_epoch.map(|config| config.state),
+                    )
+                    .map_err(|error| err.bail(error.into()))?;
+                    match action {
+                        TqAbortAction::AlreadyAborted => {}
+                        TqAbortAction::Abort => {
+                            Self::update_tq_abort_state_conn(
+                                &c,
+                                rack_id.into(),
+                                db_epoch,
+                                abort_reason,
+                            )
+                            .await
+                            .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                        }
                     }
 
                     let aborted_config =
@@ -2883,6 +2911,72 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    #[test]
+    fn test_classify_tq_abort() {
+        let rack_id = RackUuid::new_v4();
+        let not_found = |epoch: i64| {
+            Err(Error::non_resourcetype_not_found(format!(
+                "No trust quorum configuration exists at epoch {epoch} for \
+                 rack {rack_id}."
+            )))
+        };
+        let already = |epoch: i64, state: &str| {
+            Err(Error::conflict(format!(
+                "Cannot abort the trust quorum configuration at epoch {epoch} \
+                 for rack {rack_id}: it is already {state} and can no longer \
+                 be aborted."
+            )))
+        };
+
+        assert_eq!(classify_tq_abort(rack_id, 5, None, None), not_found(5));
+        assert_eq!(classify_tq_abort(rack_id, 7, Some(6), None), not_found(7));
+
+        for state in [
+            DbTrustQuorumConfigurationState::Preparing,
+            DbTrustQuorumConfigurationState::PreparingLrtqUpgrade,
+            DbTrustQuorumConfigurationState::Committing,
+            DbTrustQuorumConfigurationState::Committed,
+            DbTrustQuorumConfigurationState::CommittedPartially,
+            DbTrustQuorumConfigurationState::Aborted,
+        ] {
+            let (expected_latest, expected_older) = match state {
+                DbTrustQuorumConfigurationState::Preparing
+                | DbTrustQuorumConfigurationState::PreparingLrtqUpgrade => (
+                    Ok(TqAbortAction::Abort),
+                    Err(Error::internal_error(&format!(
+                        "Trust quorum configuration at epoch 5 for rack \
+                         {rack_id} is still in state {state:?}, but the \
+                         latest epoch is 6"
+                    ))),
+                ),
+                DbTrustQuorumConfigurationState::Aborted => (
+                    Ok(TqAbortAction::AlreadyAborted),
+                    Ok(TqAbortAction::AlreadyAborted),
+                ),
+                DbTrustQuorumConfigurationState::Committing => {
+                    (already(6, "committing"), already(5, "committing"))
+                }
+                DbTrustQuorumConfigurationState::Committed => {
+                    (already(6, "committed"), already(5, "committed"))
+                }
+                DbTrustQuorumConfigurationState::CommittedPartially => (
+                    already(6, "partially committed"),
+                    already(5, "partially committed"),
+                ),
+            };
+            assert_eq!(
+                classify_tq_abort(rack_id, 6, Some(6), Some(state)),
+                expected_latest,
+                "latest in state {state:?}",
+            );
+            assert_eq!(
+                classify_tq_abort(rack_id, 5, Some(6), Some(state)),
+                expected_older,
+                "older in state {state:?}",
+            );
+        }
+    }
+
     #[tokio::test]
     async fn test_tq_abort() {
         let logctx = test_setup_log("test_tq_abort");
@@ -3008,16 +3102,14 @@ mod tests {
             .await
             .unwrap();
 
-        // Trying to abort the old config will fail because it's stale
-        datastore
-            .tq_abort_config(
-                opctx,
-                make_authz_tq(config.rack_id),
-                config.epoch,
-                "test".into(),
-            )
-            .await
-            .unwrap_err();
+        // The old config is already aborted, so aborting it again succeeds
+        // idempotently.
+        assert_eq!(
+            abort(2).await.expect(
+                "aborting an older, already aborted epoch is idempotent"
+            ),
+            aborted
+        );
 
         // Commit the new config
         let coordinator_config2 =
@@ -3043,15 +3135,14 @@ mod tests {
             .unwrap();
 
         // Abort of latest config should fail because it has already committed
-        datastore
-            .tq_abort_config(
-                opctx,
-                make_authz_tq(config2.rack_id),
-                config2.epoch,
-                "test".into(),
-            )
-            .await
-            .unwrap_err();
+        assert_eq!(
+            abort(3).await.unwrap_err(),
+            Error::conflict(format!(
+                "Cannot abort the trust quorum configuration at epoch 3 for \
+                 rack {rack_id}: it is already committing and can no longer be \
+                 aborted."
+            )),
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
