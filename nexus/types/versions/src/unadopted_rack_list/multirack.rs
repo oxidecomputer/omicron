@@ -9,6 +9,7 @@ use std::net::Ipv6Addr;
 use oxnet::Ipv6Net;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_hardware_types::BaseboardId;
 use uuid::Uuid;
 
 pub use sled_agent_types_versions::latest::multirack::SledAgentStartState;
@@ -29,8 +30,7 @@ pub struct UnadoptedRack {
 pub struct UnadoptedSled {
     pub sled_id: Uuid,
 
-    pub part_number: String,
-    pub serial_number: String,
+    pub baseboard_id: BaseboardId,
     pub sled_subnet: Ipv6Net,
 
     pub sled_agent_start_state: SledAgentStartState,

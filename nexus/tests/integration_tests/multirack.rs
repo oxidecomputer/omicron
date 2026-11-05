@@ -172,12 +172,8 @@ async fn test_rack_list_unadopted(cptestctx: &ControlPlaneTestContext) {
                     expected_sled.sled_id.into_untyped_uuid()
                 );
                 assert_eq!(
-                    actual_sled.part_number,
-                    expected_sled.baseboard_id.part_number
-                );
-                assert_eq!(
-                    actual_sled.serial_number,
-                    expected_sled.baseboard_id.serial_number
+                    actual_sled.baseboard_id,
+                    expected_sled.baseboard_id
                 );
                 assert_eq!(
                     actual_sled.sled_subnet,

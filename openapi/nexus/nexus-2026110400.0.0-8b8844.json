@@ -30682,11 +30682,8 @@
         "description": "View of an unadopted sled in an unadopted rack",
         "type": "object",
         "properties": {
-          "part_number": {
-            "type": "string"
-          },
-          "serial_number": {
-            "type": "string"
+          "baseboard_id": {
+            "$ref": "#/components/schemas/BaseboardId"
           },
           "sled_agent_start_state": {
             "$ref": "#/components/schemas/SledAgentStartState"
@@ -30700,8 +30697,7 @@
           }
         },
         "required": [
-          "part_number",
-          "serial_number",
+          "baseboard_id",
           "sled_agent_start_state",
           "sled_id",
           "sled_subnet"

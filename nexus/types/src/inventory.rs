@@ -1353,11 +1353,9 @@ impl IdOrdItem for DiscoveredSled {
 
 impl From<DiscoveredSled> for UnadoptedSled {
     fn from(value: DiscoveredSled) -> Self {
-        let BaseboardId { part_number, serial_number } = value.baseboard_id;
         Self {
             sled_id: value.sled_id.into_untyped_uuid(),
-            part_number,
-            serial_number,
+            baseboard_id: value.baseboard_id,
             sled_subnet: value.sled_subnet.net(),
             sled_agent_start_state: value.sled_agent_start_state,
         }
