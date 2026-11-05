@@ -42,8 +42,10 @@ use std::collections::HashMap;
 /// `Err` with libtopo's message if it could not be read.
 pub(crate) type Prop<T> = Result<Option<T>, String>;
 
-/// `TOPO_SLOT_TYPE_M2` in `<fm/topo_hc.h>`, which libtopo does not yet
-/// export by name.
+#[cfg(target_os = "illumos")]
+use libtopo::hc::TOPO_SLOT_TYPE_M2;
+// Stand-in so classification can be tested off illumos.
+#[cfg(not(target_os = "illumos"))]
 const TOPO_SLOT_TYPE_M2: u32 = 3;
 
 /// A topology node's identity within one snapshot: the names and instances
@@ -470,6 +472,12 @@ fn topology_problem(node: &NodeKey, error: &str) -> BayProblem {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "illumos")]
+    use libtopo::hc::TOPO_SLOT_TYPE_CEM;
+    // Stand-in off illumos; must differ from `TOPO_SLOT_TYPE_M2`.
+    #[cfg(not(target_os = "illumos"))]
+    const TOPO_SLOT_TYPE_CEM: u32 = 4;
+
     fn log() -> Logger {
         Logger::root(slog::Discard, slog::o!())
     }
@@ -636,8 +644,6 @@ mod tests {
 
     #[test]
     fn m2_slots_are_bays_and_other_slots_are_not() {
-        // `TOPO_SLOT_TYPE_CEM` in `<fm/topo_hc.h>`.
-        const CEM: u32 = 4;
         let bays = Tree::default()
             .add(
                 "chassis[0]/systemboard[0]/slot[0]",
@@ -646,7 +652,7 @@ mod tests {
             .add("chassis[0]/systemboard[0]/slot[1]", slot("No type", Ok(None)))
             .add(
                 "chassis[0]/systemboard[0]/slot[5]",
-                slot("CEM 5", Ok(Some(CEM))),
+                slot("CEM 5", Ok(Some(TOPO_SLOT_TYPE_CEM))),
             )
             .add(
                 "chassis[0]/systemboard[0]/slot[5]/board[0]",

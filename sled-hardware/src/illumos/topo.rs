@@ -19,8 +19,6 @@ use libtopo::{Error, Node, Scheme, Snapshot, WalkAction, hc};
 use slog::{Logger, debug};
 use std::time::Instant;
 
-/// `storage` property names from `<fm/topo_hc.h>` that libtopo does not yet
-/// export in `libtopo::hc`.
 const TOPO_STORAGE_SERIAL_NUM: &str = "serial-number";
 const TOPO_STORAGE_LOGICAL_DISK_NAME: &str = "logical-disk";
 
