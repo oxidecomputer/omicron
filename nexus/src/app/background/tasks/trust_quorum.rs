@@ -923,6 +923,7 @@ mod tests {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use nexus_db_model::HwBaseboardId;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
+    use nexus_db_queries::db::pub_test_utils::helpers::sled_upsert_for_baseboard;
     use nexus_types::trust_quorum::{
         IsLrtqUpgrade, ProposedTrustQuorumConfig, TrustQuorumConfigState,
     };
@@ -979,6 +980,9 @@ mod tests {
             hw_ids.into_iter().map(BaseboardId::from).collect();
 
         let rack_id = RackUuid::new_v4();
+        for baseboard_id in &members {
+            sled_upsert_for_baseboard(datastore, rack_id, baseboard_id).await;
+        }
         DataStore::tq_insert_rss_config_after_handoff(
             opctx,
             &conn,

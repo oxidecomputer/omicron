@@ -50,6 +50,40 @@ use trust_quorum_types::{
     types::{Epoch, Threshold},
 };
 
+/// Return the error corresponding to no in-service sleds being available in this rack.
+///
+///
+/// Conflict rather than ServiceUnavailable because dropshot replaces a 503's
+/// message with "Service Unavailable", and the operator needs this one.
+fn no_in_service_coordinator_error(
+    proposed: &ProposedTrustQuorumConfig,
+    candidates: &BTreeSet<BaseboardId>,
+) -> Error {
+    let candidate_rule = match proposed.is_lrtq_upgrade {
+        IsLrtqUpgrade::No { last_committed_epoch } => format!(
+            "a member of the proposed configuration that acknowledged the \
+             commit of epoch {last_committed_epoch}"
+        ),
+        IsLrtqUpgrade::Yes => {
+            String::from("a member of the proposed LRTQ upgrade configuration")
+        }
+    };
+    let candidates = itertools::join(candidates, ", ");
+    let ProposedTrustQuorumConfig { rack_id, epoch, .. } = proposed;
+
+    // We return Conflict (409) rather than Service Unavailable (503) because we
+    // hide 5xx errors and the operator would benefit from this message.
+    Error::conflict(format!(
+        "Cannot propose trust quorum configuration at epoch \
+         {epoch} for rack {rack_id}, since no sled can coordinate it. A \
+         coordinator must be {candidate_rule}, with an in-service sled in \
+         this rack, and none of the candidates ({candidates}) has one. If \
+         the rack was just initialized or these sleds were just added, wait \
+         for them to register with the control plane and retry. Otherwise, \
+         contact Oxide support."
+    ))
+}
+
 macro_rules! bail_txn {
     ($err:ident, $($arg:tt),*) => {
         return Err($err.bail(
@@ -780,11 +814,26 @@ impl DataStore {
             proposed.epoch
         );
 
-        // Pick a random coordinator from our set of possibilities.
-        //
-        // Safe to unwrap, as we check for emptiness above
-        let coordinator =
-            possible_coordinators.into_iter().choose(&mut rng()).unwrap();
+        // Pick a random coordinator from our set of possibilities, narrowed
+        // to members with an in-service sled in this rack.
+        let in_service_baseboards =
+            Self::sled_list_in_service_baseboards_in_rack_conn(
+                conn,
+                proposed.rack_id,
+            )
+            .await?;
+        let Some(coordinator) = possible_coordinators
+            .intersection(&in_service_baseboards)
+            .cloned()
+            .choose(&mut rng())
+        else {
+            return Err(TransactionError::CustomError(
+                no_in_service_coordinator_error(
+                    &proposed,
+                    &possible_coordinators,
+                ),
+            ));
+        };
 
         // Convert proposal to a new `TrustQuorumConfig`
         Ok(ValidatedConfig {
@@ -1766,6 +1815,16 @@ mod tests {
         .id()
     }
 
+    async fn insert_sleds_for_baseboards(
+        datastore: &DataStore,
+        rack_id: RackUuid,
+        hw_ids: &[HwBaseboardId],
+    ) {
+        for hw in hw_ids {
+            insert_sled_for_baseboard(datastore, rack_id, hw).await;
+        }
+    }
+
     #[tokio::test]
     async fn test_tq_insert_latest_errors() {
         let logctx = test_setup_log("test_tq_insert_latest_errors");
@@ -1920,6 +1979,7 @@ mod tests {
 
         let hw_ids = insert_hw_baseboard_ids(&db).await;
         let rack_id = RackUuid::new_v4();
+        insert_sleds_for_baseboards(datastore, rack_id, &hw_ids).await;
         let members: BTreeSet<_> =
             hw_ids.iter().cloned().map(BaseboardId::from).collect();
 
@@ -1999,6 +2059,7 @@ mod tests {
 
         let hw_ids = insert_hw_baseboard_ids(&db).await;
         let rack_id = RackUuid::new_v4();
+        insert_sleds_for_baseboards(datastore, rack_id, &hw_ids).await;
         let members: BTreeSet<_> =
             hw_ids.iter().cloned().map(BaseboardId::from).collect();
 
@@ -2037,6 +2098,108 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_tq_insert_requires_in_service_coordinator() {
+        let logctx =
+            test_setup_log("test_tq_insert_requires_in_service_coordinator");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let hw_ids = insert_hw_baseboard_ids(&db).await;
+        let rack_id = RackUuid::new_v4();
+        let committed_members: BTreeSet<_> =
+            hw_ids[..5].iter().cloned().map(BaseboardId::from).collect();
+        let proposed_members: BTreeSet<_> =
+            hw_ids[..7].iter().cloned().map(BaseboardId::from).collect();
+
+        DataStore::tq_insert_rss_config_after_handoff(
+            opctx,
+            &conn,
+            make_authz_tq(rack_id),
+            committed_members.clone(),
+            committed_members.first().unwrap().clone(),
+        )
+        .await
+        .unwrap();
+
+        // | baseboard  | candidate?          | sled row                     | can coordinate?                |
+        // |------------|---------------------|------------------------------|--------------------------------|
+        // | 0, 2, 3, 4 | yes                 | none                         | no                             |
+        // | 1          | yes                 | expunged, state still active | no (expunged isn't in service) |
+        // | 5, 6       | no (not in epoch 1) | in service                   | not eligible                   |
+        let expunged =
+            insert_sled_for_baseboard(datastore, rack_id, &hw_ids[1]).await;
+        let (authz_sled, _) = LookupPath::new(opctx, datastore)
+            .sled_id(expunged)
+            .fetch_for(authz::Action::Modify)
+            .await
+            .expect("looked up sled");
+        datastore
+            .sled_set_policy_to_expunged(opctx, &authz_sled)
+            .await
+            .expect("expunged sled");
+        insert_sleds_for_baseboards(datastore, rack_id, &hw_ids[5..7]).await;
+
+        let proposal = ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: Epoch(2),
+            is_lrtq_upgrade: IsLrtqUpgrade::No {
+                last_committed_epoch: Epoch(1),
+            },
+            members: proposed_members,
+        };
+        // TODO:
+        assert_conflict(
+            datastore.tq_insert_latest_config(opctx, proposal.clone()).await,
+            &format!(
+                "Cannot propose trust quorum configuration at epoch 2 for \
+                 rack {rack_id}, since no sled can coordinate it. A \
+                 coordinator must be a member of the proposed configuration \
+                 that acknowledged the commit of epoch 1, with an in-service \
+                 sled in this rack, and none of the candidates ({}) has one. \
+                 If the rack was just initialized or these sleds were just \
+                 added, wait for them to register with the control plane and \
+                 retry. Otherwise, contact Oxide support.",
+                // insert_hw_baseboard_ids returns the baseboards in sorted
+                // order, so we don't need to sort them.
+                hw_ids[..5]
+                    .iter()
+                    .map(|hw| format!(
+                        "{}:{}",
+                        hw.part_number, hw.serial_number
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+        );
+        let latest = datastore
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
+            .await
+            .expect("read the latest config")
+            .expect("a latest config exists");
+        assert_eq!(latest.epoch, Epoch(1));
+        assert_eq!(latest.state, TrustQuorumConfigState::Committed);
+
+        // Now make baseboard 3 in-service. Then this is the only one that can
+        // be selected as the coordinator.
+        insert_sled_for_baseboard(datastore, rack_id, &hw_ids[3]).await;
+        datastore
+            .tq_insert_latest_config(opctx, proposal)
+            .await
+            .expect("inserted the proposal once a candidate is in service");
+        let inserted = datastore
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
+            .await
+            .expect("read the latest config")
+            .expect("a latest config exists");
+        assert_eq!(inserted.epoch, Epoch(2));
+        assert_eq!(inserted.coordinator, BaseboardId::from(hw_ids[3].clone()));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn test_tq_update_prepare_and_commit() {
         let logctx = test_setup_log("test_tq_update_prepare_and_commit");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
@@ -2044,6 +2207,7 @@ mod tests {
 
         let hw_ids = insert_hw_baseboard_ids(&db).await;
         let rack_id = RackUuid::new_v4();
+        insert_sleds_for_baseboards(datastore, rack_id, &hw_ids).await;
         let members: BTreeSet<_> =
             hw_ids.iter().cloned().map(BaseboardId::from).collect();
 
@@ -2299,6 +2463,7 @@ mod tests {
 
         let hw_ids = insert_hw_baseboard_ids(&db).await;
         let rack_id = RackUuid::new_v4();
+        insert_sleds_for_baseboards(datastore, rack_id, &hw_ids).await;
         let members: BTreeSet<_> =
             hw_ids.iter().cloned().map(BaseboardId::from).collect();
 
@@ -2666,6 +2831,7 @@ mod tests {
 
         let hw_ids = insert_hw_baseboard_ids(&db).await;
         let rack_id = RackUuid::new_v4();
+        insert_sleds_for_baseboards(datastore, rack_id, &hw_ids).await;
         let members: BTreeSet<_> =
             hw_ids.iter().cloned().map(BaseboardId::from).collect();
 
@@ -2853,6 +3019,7 @@ mod tests {
         // Create an initial config for 3 diff racks
         for rack_id in [rack_id1, rack_id2, rack_id3] {
             let hw_ids = insert_hw_baseboard_ids(&db).await;
+            insert_sleds_for_baseboards(datastore, rack_id, &hw_ids).await;
             let members: BTreeSet<_> =
                 hw_ids.iter().cloned().map(BaseboardId::from).collect();
             if rack_id == rack_id2 {
@@ -3048,6 +3215,7 @@ mod tests {
             insert_sled_for_baseboard(datastore, rack_id, non_member_hw).await;
         let member_sled =
             insert_sled_for_baseboard(datastore, rack_id, member_hw).await;
+        insert_sleds_for_baseboards(datastore, rack_id, &hw_ids[2..]).await;
 
         let insert_disk = |sled_id: SledUuid| async move {
             let disk = PhysicalDisk::from_parts(
@@ -3259,6 +3427,7 @@ mod tests {
             hw_ids[1..].iter().cloned().map(BaseboardId::from).collect();
         let sled_id =
             insert_sled_for_baseboard(datastore, rack_id, sled_hw).await;
+        insert_sleds_for_baseboards(datastore, rack_id, &hw_ids[1..]).await;
 
         DataStore::tq_insert_rss_config_after_handoff(
             opctx,
