@@ -41,7 +41,6 @@ use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::VmmStateUpdateResult;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::model::InstanceStateComputer;
-use nexus_defaults::DEFAULT_ACPI_SHUTDOWN_TIMEOUT_SECS;
 use nexus_defaults::MAX_ACPI_SHUTDOWN_TIMEOUT_SECS;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_ip;
@@ -827,14 +826,11 @@ impl super::Nexus {
         )
         .await?;
 
-        // RFD 622: default newly created instances to ACPI shutdown with
-        // 600-second timeout (rather than the previous behavior of
-        // hard-poweroff when instance stop state is requested).
+        // Default to hard-poweroff when instance stop or reboot is requested,
+        // consistent with the behavior prior to ACPI shutdown support.
         let shutdown_policy =
             Some(params.shutdown_policy.to_owned().unwrap_or(
-                instance::InstanceShutdownPolicy::PowerButton {
-                    timeout_secs: DEFAULT_ACPI_SHUTDOWN_TIMEOUT_SECS,
-                },
+                instance::InstanceShutdownPolicy::HardOff,
             ));
 
         // It is deceptively inconvenient to do an early check that the boot

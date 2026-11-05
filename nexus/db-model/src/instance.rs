@@ -195,9 +195,6 @@ impl Instance {
         let (shutdown_policy_action, shutdown_policy_timeout) = match params
             .shutdown_policy
         {
-            Some(InstanceShutdownPolicy::HardOff) => {
-                (InstanceShutdownAction::HardOff, None)
-            }
             // RFD 622: "A user-configurable timeout for the instance to
             // finish stopping itself should be present, bounded between
             // 1 and 3600 seconds, inclusive." This is enforced at the API
@@ -208,16 +205,11 @@ impl Instance {
                 InstanceShutdownAction::PowerButton,
                 Some(TimeDelta::seconds(timeout_secs as i64)),
             ),
-            // RFD 622: "To generally match the behavior of other cloud
-            // providers, the default action for an instance that does not
-            // have an explicit policy should be graceful-stop with a
-            // timeout of 600 seconds."
-            None => (
-                InstanceShutdownAction::PowerButton,
-                Some(TimeDelta::seconds(
-                    nexus_defaults::DEFAULT_ACPI_SHUTDOWN_TIMEOUT_SECS as i64,
-                )),
-            ),
+            // None: Default to hard-off, preserving the existing behavior of
+            // our system prior to ACPI shutdown support.
+            None | Some(InstanceShutdownPolicy::HardOff) => {
+                (InstanceShutdownAction::HardOff, None)
+            }
         };
 
         Self {
@@ -816,16 +808,13 @@ mod tests {
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
         let project_id = ProjectUuid::from_untyped_uuid(Uuid::new_v4());
 
-        // when shutdown policy omitted at creation, default to 600 seconds
+        // when shutdown policy omitted at creation, default to HardOff
         let db_instance = Instance::new(instance_id, project_id, &params);
         assert_eq!(
             db_instance.shutdown_policy_action,
-            InstanceShutdownAction::PowerButton
+            InstanceShutdownAction::HardOff
         );
-        assert_eq!(
-            db_instance.shutdown_policy_timeout.unwrap().num_seconds(),
-            600
-        );
+        assert_eq!(db_instance.shutdown_policy_timeout, None);
 
         // explicitly set hard-off
         params.shutdown_policy =
