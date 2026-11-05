@@ -5,14 +5,23 @@
 //! Builds the disk bays from the nodes of the hardware topology.
 //!
 //! On Oxide boards the U.2 bays are `bay` nodes under the chassis and the
-//! M.2 sockets are `slot` nodes whose slot type is M.2; other slots, such as
-//! CEM slots, are not disk bays. The `oxhc`
-//! enumerator fills each of those in from the PCIe bridge behind it. An
-//! empty bay has no children. A bay holding an NVMe device gets
-//! `binding/driver = "nvme"` and, if the disk enumerator succeeds, an `nvme`
-//! child carrying the driver instance, with one `disk` child per namespace
-//! the nvme driver does not ignore. A bay holding anything else gets a
-//! `board` child with an `ic` under it as a placeholder.
+//! M.2 sockets are `slot` nodes, with slot type M.2, under the system
+//! board. Other slots, such as CEM slots, are not disk bays. Instance
+//! numbers differ between boards (the M.2s are `slot=26` and `27` on Gimlet
+//! and `slot=22` and `23` on Cosmo), so bays are identified by node name and
+//! slot type, and named by their labels.
+//!
+//! The `oxhc` enumerator fills in each bay from the device behind its PCIe
+//! bridge (`topo_oxhc_enum_pcie_child` in illumos):
+//!
+//! - No device: the bay has no children.
+//! - A device bound to `nvme`: the bay gets `binding/driver = "nvme"` and,
+//!   if the disk enumerator succeeds, an `nvme` child with one `disk` child
+//!   per namespace the nvme driver does not ignore.
+//! - Any other device, including an NVMe controller the driver failed to
+//!   attach to: a `board` child with an `ic` under it as a placeholder,
+//!   carrying the device's driver, if any, and path. `binding/driver` is
+//!   not set.
 //!
 //! The illumos module reads the topology into [`TopoNode`]s; everything
 //! here is plain data manipulation so it can be tested anywhere.
@@ -177,6 +186,8 @@ pub(crate) fn assemble_bays(
                     }
                 }
                 TopoNodeKind::Board => {
+                    // oxhc's placeholder for a device not bound to `nvme`;
+                    // see the module docs.
                     occupy(
                         &mut bay,
                         ObservedOccupant::Other {

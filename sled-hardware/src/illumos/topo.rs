@@ -60,7 +60,9 @@ pub(super) fn read_disk_bays(
 }
 
 /// Copies out the properties of a node that may describe part of a disk
-/// bay, or `None` for any other node.
+/// bay, or `None` for any other node. Nodes are matched by name wherever
+/// they are in the tree. A `Node` lives only for the walk callback, so
+/// parents are recorded as [`NodeKey`] paths.
 fn read_node(node: &Node<'_>) -> Option<TopoNode> {
     let kind = match node.name().as_ref() {
         hc::BAY => TopoNodeKind::Bay(read_bay_props(node)),
