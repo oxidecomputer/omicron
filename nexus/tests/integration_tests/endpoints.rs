@@ -156,7 +156,7 @@ pub static SLED_INSTANCES_URL: LazyLock<String> = LazyLock::new(|| {
 });
 
 pub const MULTIRACK_RACKS_UNADOPTED_URL: &'static str =
-    "/v1/system/multirack/racks-unadopted";
+    "/v1/system/hardware/racks-unadopted";
 
 pub const SUPPORT_BUNDLES_URL: &'static str = "/v1/system/support-bundles";
 pub static SUPPORT_BUNDLE_URL: LazyLock<String> =

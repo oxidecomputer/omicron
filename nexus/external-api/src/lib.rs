@@ -7996,7 +7996,7 @@ pub trait NexusExternalApi {
     /// adopted into the regional cluster.
     #[endpoint {
         method = GET,
-        path = "/v1/system/multirack/racks-unadopted",
+        path = "/v1/system/hardware/racks-unadopted",
         tags = ["system/hardware"],
         versions = VERSION_UNADOPTED_RACK_LIST..
     }]
