@@ -5,10 +5,17 @@
 //! The U.2 bays and M.2 sockets of a sled's chassis, and what occupies each.
 //!
 //! On an Oxide sled the hardware topology (libtopo) is the source of truth
-//! for which bays exist and what sits behind each one. The pieces that need the
-//! platform (walking the topology, asking libnvme about a controller) live in
-//! the illumos module; the join between them, `describe_bay`, is plain data
-//! manipulation and is kept here so it can be tested anywhere.
+//! for which bays exist and what sits behind each one.
+//!
+//! This module describes what can exist in disk bays, and provides utilities
+//! for:
+//! - combining that with auxiliary information (e.g. NVMe info in
+//!   `describe_bay`),
+//! - deciding when to update disk/bay information, based on recently-polled
+//!   information (in `resolve_bays`). Note that this is slightly more
+//!   complicated than "show the most recent polled info" - e.g., if we fail to
+//!   determine what exists in a bay, we may want to be cautious saying
+//!   "the disk which was previously there is gone".
 
 // The observed types below are only produced on illumos.
 #![cfg_attr(not(target_os = "illumos"), allow(dead_code))]
@@ -348,11 +355,9 @@ impl PolledBay {
 /// Combines one poll's bays, or the error that kept the poll from reading
 /// any, with the previous view into the disks and bays to report.
 ///
-/// Bays describe only this poll. A bay this poll could not describe is
-/// reported as unreadable, and so is a previous bay this poll did not report
-/// at all. Either way the disk previously seen at its location stays in the
-/// disk list, so a fault in one bay neither drops its disk nor holds up the
-/// others.
+/// A bay this poll could not describe is reported as unreadable.
+/// The disk previously seen at its location stays in the disk list, so a fault
+/// in one bay neither drops its disk nor holds up the others.
 ///
 /// If two bays claim the same disk identity, a bay that saw the disk on this
 /// poll wins over one carrying it over from the previous disks (the disk may
