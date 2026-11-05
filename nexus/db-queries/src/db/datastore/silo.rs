@@ -452,6 +452,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Delete, authz_silo).await?;
 
         use nexus_db_schema::schema::project;
+        use nexus_db_schema::schema::role_assignment;
         use nexus_db_schema::schema::silo;
         use nexus_db_schema::schema::silo_group;
         use nexus_db_schema::schema::silo_group_membership;
@@ -561,17 +562,31 @@ impl DataStore {
             "deleted {} password hashes for silo {}", updated_rows, id
         );
 
-        let deleted_user_ids: Vec<Uuid> =
-            diesel::update(silo_user::dsl::silo_user)
-                .filter(silo_user::dsl::silo_id.eq(to_db_typed_uuid(id)))
-                .filter(silo_user::dsl::time_deleted.is_null())
+        // delete role assignments held by the silo's users (on any resource,
+        // including the fleet, which outlives the silo). This must run before
+        // the users are marked deleted, since the subquery filters on that.
+        let updated_rows =
+            diesel::delete(role_assignment::dsl::role_assignment)
                 .filter(
-                    silo_user::dsl::user_provision_type
-                        .eq(db_silo.user_provision_type),
+                    role_assignment::dsl::identity_type
+                        .eq(db::model::IdentityType::SiloUser),
                 )
-                .set(silo_user::dsl::time_deleted.eq(now))
-                .returning(silo_user::dsl::id)
-                .get_results_async(&*conn)
+                .filter(
+                    role_assignment::dsl::identity_id.eq_any(
+                        silo_user::dsl::silo_user
+                            .filter(
+                                silo_user::dsl::silo_id
+                                    .eq(to_db_typed_uuid(id)),
+                            )
+                            .filter(silo_user::dsl::time_deleted.is_null())
+                            .filter(
+                                silo_user::dsl::user_provision_type
+                                    .eq(db_silo.user_provision_type),
+                            )
+                            .select(silo_user::dsl::id),
+                    ),
+                )
+                .execute_async(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
@@ -579,26 +594,26 @@ impl DataStore {
 
         debug!(
             opctx.log,
-            "deleted {} silo users for silo {}",
-            deleted_user_ids.len(),
+            "deleted {} silo user role assignments for silo {}",
+            updated_rows,
             id
         );
 
-        // delete role assignments held by the silo's users
-        let updated_rows = self
-            .role_assignment_delete_by_identity(
-                &conn,
-                db::model::IdentityType::SiloUser,
-                &deleted_user_ids,
+        let updated_rows = diesel::update(silo_user::dsl::silo_user)
+            .filter(silo_user::dsl::silo_id.eq(to_db_typed_uuid(id)))
+            .filter(silo_user::dsl::time_deleted.is_null())
+            .filter(
+                silo_user::dsl::user_provision_type
+                    .eq(db_silo.user_provision_type),
             )
+            .set(silo_user::dsl::time_deleted.eq(now))
+            .execute_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         debug!(
             opctx.log,
-            "deleted {} silo user role assignments for silo {}",
-            updated_rows,
-            id
+            "deleted {} silo users for silo {}", updated_rows, id
         );
 
         // delete all silo group memberships
@@ -630,18 +645,30 @@ impl DataStore {
             "deleted {} silo group memberships for silo {}", updated_rows, id
         );
 
-        // delete all silo groups
-        let deleted_group_ids: Vec<Uuid> =
-            diesel::update(silo_group::dsl::silo_group)
-                .filter(silo_group::dsl::silo_id.eq(to_db_typed_uuid(id)))
-                .filter(silo_group::dsl::time_deleted.is_null())
+        // delete role assignments held by the silo's groups, before the groups
+        // are marked deleted (same reasoning as for users above)
+        let updated_rows =
+            diesel::delete(role_assignment::dsl::role_assignment)
                 .filter(
-                    silo_group::dsl::user_provision_type
-                        .eq(db_silo.user_provision_type),
+                    role_assignment::dsl::identity_type
+                        .eq(db::model::IdentityType::SiloGroup),
                 )
-                .set(silo_group::dsl::time_deleted.eq(now))
-                .returning(silo_group::dsl::id)
-                .get_results_async(&*conn)
+                .filter(
+                    role_assignment::dsl::identity_id.eq_any(
+                        silo_group::dsl::silo_group
+                            .filter(
+                                silo_group::dsl::silo_id
+                                    .eq(to_db_typed_uuid(id)),
+                            )
+                            .filter(silo_group::dsl::time_deleted.is_null())
+                            .filter(
+                                silo_group::dsl::user_provision_type
+                                    .eq(db_silo.user_provision_type),
+                            )
+                            .select(silo_group::dsl::id),
+                    ),
+                )
+                .execute_async(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
@@ -649,25 +676,27 @@ impl DataStore {
 
         debug!(
             opctx.log,
-            "deleted {} silo groups for silo {}",
-            deleted_group_ids.len(),
+            "deleted {} silo group role assignments for silo {}",
+            updated_rows,
             id
         );
 
-        let updated_rows = self
-            .role_assignment_delete_by_identity(
-                &conn,
-                db::model::IdentityType::SiloGroup,
-                &deleted_group_ids,
+        // delete all silo groups
+        let updated_rows = diesel::update(silo_group::dsl::silo_group)
+            .filter(silo_group::dsl::silo_id.eq(to_db_typed_uuid(id)))
+            .filter(silo_group::dsl::time_deleted.is_null())
+            .filter(
+                silo_group::dsl::user_provision_type
+                    .eq(db_silo.user_provision_type),
             )
+            .set(silo_group::dsl::time_deleted.eq(now))
+            .execute_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         debug!(
             opctx.log,
-            "deleted {} silo group role assignments for silo {}",
-            updated_rows,
-            id
+            "deleted {} silo groups for silo {}", updated_rows, id
         );
 
         // delete all silo identity providers

@@ -5,7 +5,6 @@
 //! [`DataStore`] methods related to roles.
 
 use super::DataStore;
-use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::authz::AuthorizedResource;
 use crate::context::OpContext;
@@ -106,8 +105,8 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Delete all role assignments held by the given identities, on any
-    /// resource. Used when deleting users, groups, and silos so that deleted
+    /// Delete all role assignments held by the given identity, on any
+    /// resource. Used when deleting users and groups so that deleted
     /// identities don't linger in policies.
     ///
     /// Returns the raw diesel error so this can run inside a transaction;
@@ -118,19 +117,15 @@ impl DataStore {
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         identity_type: IdentityType,
-        identity_ids: &[Uuid],
+        identity_id: Uuid,
     ) -> Result<usize, DieselError> {
         use nexus_db_schema::schema::role_assignment::dsl;
 
-        let mut deleted = 0;
-        for batch in identity_ids.chunks(SQL_BATCH_SIZE.get() as usize) {
-            deleted += diesel::delete(dsl::role_assignment)
-                .filter(dsl::identity_type.eq(identity_type.clone()))
-                .filter(dsl::identity_id.eq_any(batch.to_vec()))
-                .execute_async(conn)
-                .await?;
-        }
-        Ok(deleted)
+        diesel::delete(dsl::role_assignment)
+            .filter(dsl::identity_type.eq(identity_type))
+            .filter(dsl::identity_id.eq(identity_id))
+            .execute_async(conn)
+            .await
     }
 
     /// Removes all existing externally-visble role assignments on
