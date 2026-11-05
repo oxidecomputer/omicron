@@ -264,7 +264,6 @@ pub mod multicast {
 }
 
 pub mod multirack {
-    pub use crate::v2026_11_04_00::multirack::SledAgentStartState;
     pub use crate::v2026_11_04_00::multirack::UnadoptedRack;
     pub use crate::v2026_11_04_00::multirack::UnadoptedSled;
 }

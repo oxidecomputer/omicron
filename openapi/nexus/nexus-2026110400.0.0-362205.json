@@ -28558,42 +28558,6 @@
           }
         }
       },
-      "SledAgentStartState": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "last_error": {
-                "nullable": true,
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "in_progress"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "started"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          }
-        ]
-      },
       "SledInstance": {
         "description": "An operator's view of an instance running on a given sled",
         "type": "object",
@@ -30680,8 +30644,12 @@
           "baseboard_id": {
             "$ref": "#/components/schemas/BaseboardId"
           },
-          "sled_agent_start_state": {
-            "$ref": "#/components/schemas/SledAgentStartState"
+          "last_start_err": {
+            "nullable": true,
+            "type": "string"
+          },
+          "sled_agent_started": {
+            "type": "boolean"
           },
           "sled_id": {
             "type": "string",
@@ -30690,7 +30658,7 @@
         },
         "required": [
           "baseboard_id",
-          "sled_agent_start_state",
+          "sled_agent_started",
           "sled_id"
         ]
       },

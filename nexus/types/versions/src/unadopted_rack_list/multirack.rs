@@ -10,8 +10,6 @@ use serde::{Deserialize, Serialize};
 use sled_hardware_types::BaseboardId;
 use uuid::Uuid;
 
-pub use sled_agent_types_versions::latest::multirack::SledAgentStartState;
-
 /// View of a rack that's joined the underlay network but hasn't been adopted
 /// into the regional cluster yet
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -30,5 +28,7 @@ pub struct UnadoptedRack {
 pub struct UnadoptedSled {
     pub sled_id: Uuid,
     pub baseboard_id: BaseboardId,
-    pub sled_agent_start_state: SledAgentStartState,
+
+    pub sled_agent_started: bool,
+    pub last_start_err: Option<String>,
 }

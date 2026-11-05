@@ -1352,10 +1352,18 @@ impl IdOrdItem for DiscoveredSled {
 
 impl From<DiscoveredSled> for UnadoptedSled {
     fn from(value: DiscoveredSled) -> Self {
+        let (sled_agent_started, last_start_err) =
+            match value.sled_agent_start_state {
+                SledAgentStartState::Started => (true, None),
+                SledAgentStartState::InProgress { last_error } => {
+                    (false, last_error)
+                }
+            };
         Self {
             sled_id: value.sled_id.into_untyped_uuid(),
             baseboard_id: value.baseboard_id,
-            sled_agent_start_state: value.sled_agent_start_state,
+            sled_agent_started,
+            last_start_err,
         }
     }
 }

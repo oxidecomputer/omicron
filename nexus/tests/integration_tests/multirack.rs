@@ -174,10 +174,16 @@ async fn test_rack_list_unadopted(cptestctx: &ControlPlaneTestContext) {
                     actual_sled.baseboard_id,
                     expected_sled.baseboard_id
                 );
-                assert_eq!(
-                    actual_sled.sled_agent_start_state,
-                    expected_sled.sled_agent_start_state
-                );
+                match &expected_sled.sled_agent_start_state {
+                    SledAgentStartState::Started => {
+                        assert!(actual_sled.sled_agent_started);
+                        assert_eq!(actual_sled.last_start_err, None);
+                    }
+                    SledAgentStartState::InProgress { last_error } => {
+                        assert!(!actual_sled.sled_agent_started);
+                        assert_eq!(&actual_sled.last_start_err, last_error);
+                    }
+                }
             }
         }
         assert!(
