@@ -36,6 +36,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (62, ADD_SLED_REGISTRATION_INFO),
     (61, TRUST_QUORUM_NULLABLE_RESPONSES),
     (60, ADD_MULTIRACK_JOIN_SERVICE_STATUS),
     (59, INSTANCE_ATTACHED_SUBNETS_MAP),
@@ -1865,6 +1866,22 @@ pub trait SledAgentApi {
         request_context: RequestContext<Self::Context>,
     ) -> Result<
         HttpResponseOk<latest::multirack::MultirackJoinServiceStatus>,
+        HttpError,
+    >;
+
+    /// Return this sled's registration identity.
+    ///
+    /// Nexus calls this method synchronously while handling this sled's
+    /// `sled_agent_put`.
+    #[endpoint {
+        method = GET,
+        path = "/sled-registration-info",
+        versions = VERSION_ADD_SLED_REGISTRATION_INFO..,
+    }]
+    async fn sled_registration_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::inventory::SledRegistrationInfo>,
         HttpError,
     >;
 }

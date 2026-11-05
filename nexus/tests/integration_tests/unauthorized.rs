@@ -8,6 +8,9 @@
 use super::endpoints::*;
 use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
 use crate::integration_tests::updates::TestTrustRoot;
+use anyhow::Context;
+use anyhow::bail;
+use anyhow::ensure;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use dropshot::HttpErrorResponseBody;
@@ -229,7 +232,9 @@ async fn test_unauthorized() {
     print!("{}", VERIFY_HEADER);
     for endpoint in &*VERIFY_ENDPOINTS {
         let setup_response = setup_results.get(&endpoint.url);
-        verify_endpoint(&log, client, endpoint, setup_response).await;
+        verify_endpoint(&log, client, endpoint, setup_response)
+            .await
+            .unwrap_or_else(|e| panic!("verifying {}: {e:#}", endpoint.url));
     }
 
     cptestctx.teardown().await;
@@ -642,7 +647,7 @@ async fn verify_endpoint(
     client: &ClientTestContext,
     endpoint: &VerifyEndpoint,
     setup_response: Option<&TestResponse>,
-) {
+) -> anyhow::Result<()> {
     let log = log.new(o!("url" => endpoint.url));
     info!(log, "test: begin endpoint");
 
@@ -675,7 +680,7 @@ async fn verify_endpoint(
         match setup_response {
             Some(response) => endpoint.url.replace(
                 "{id}",
-                response.parsed_body::<IdMetadata>().unwrap().id.as_str(),
+                response.parsed_body::<IdMetadata>()?.id.as_str(),
             ),
             None => endpoint
                 .url
@@ -713,9 +718,8 @@ async fn verify_endpoint(
                 request
                     .execute()
                     .await
-                    .unwrap_or_else(|e| panic!("Failed to GET: {uri}: {e}"))
-                    .parsed_body::<serde_json::Value>()
-                    .unwrap(),
+                    .context("privileged GET")?
+                    .parsed_body::<serde_json::Value>()?,
             )
         }
         Some(AllowedMethod::GetUnimplemented) => {
@@ -731,7 +735,7 @@ async fn verify_endpoint(
             .authn_as(privileged_authn.clone())
             .execute()
             .await
-            .unwrap();
+            .context("privileged GET")?;
             None
         }
         Some(AllowedMethod::GetVolatile) => {
@@ -749,9 +753,8 @@ async fn verify_endpoint(
             request
                 .execute()
                 .await
-                .unwrap_or_else(|e| panic!("Failed to GET: {uri}: {e}"))
-                .parsed_body::<serde_json::Value>()
-                .unwrap();
+                .context("privileged GET")?
+                .parsed_body::<serde_json::Value>()?;
             None
         }
         Some(AllowedMethod::GetWebsocket) => {
@@ -764,7 +767,7 @@ async fn verify_endpoint(
                 .websocket_handshake()
                 .execute()
                 .await
-                .unwrap();
+                .context("privileged GET (websocket)")?;
             None
         }
         Some(_) => unimplemented!(),
@@ -825,10 +828,8 @@ async fn verify_endpoint(
             if let Some(&AllowedMethod::GetWebsocket) = allowed {
                 request = request.websocket_handshake();
             }
-            let response = request.execute().await.unwrap_or_else(|e| {
-                panic!("Failed making {method} request to {uri}: {e}")
-            });
-            verify_response(&response, &method);
+            verify_response(request.execute().await, &method)
+                .with_context(|| format!("unprivileged {method}"))?;
             record_operation(WhichTest::Unprivileged(&expected_status));
         } else {
             // "This door is opened elsewhere."
@@ -851,8 +852,8 @@ async fn verify_endpoint(
         if let Some(&AllowedMethod::GetWebsocket) = allowed {
             request = request.expect_websocket_handshake();
         }
-        let response = request.execute().await.unwrap();
-        verify_response(&response, &method);
+        verify_response(request.execute().await, &method)
+            .with_context(|| format!("unauthenticated {method}"))?;
         record_operation(WhichTest::Unauthenticated(&expected_status));
 
         // Now try a few requests with bogus credentials.  We should get the
@@ -884,8 +885,8 @@ async fn verify_endpoint(
         if let Some(&AllowedMethod::GetWebsocket) = allowed {
             request = request.expect_websocket_handshake();
         }
-        let response = request.execute().await.unwrap();
-        verify_response(&response, &method);
+        verify_response(request.execute().await, &method)
+            .with_context(|| format!("{method} with unknown actor"))?;
         record_operation(WhichTest::UnknownUser(&expected_status));
 
         // Now try a syntactically invalid authn header.
@@ -902,8 +903,8 @@ async fn verify_endpoint(
         if let Some(&AllowedMethod::GetWebsocket) = allowed {
             request = request.expect_websocket_handshake();
         }
-        let response = request.execute().await.unwrap();
-        verify_response(&response, &method);
+        verify_response(request.execute().await, &method)
+            .with_context(|| format!("{method} with malformed credentials"))?;
         record_operation(WhichTest::InvalidHeader(&expected_status));
 
         print!(" ");
@@ -928,12 +929,12 @@ async fn verify_endpoint(
                 .authn_as(AuthnMode::PrivilegedUser)
                 .execute()
                 .await
-                .unwrap()
-                .parsed_body()
-                .unwrap();
-        assert_eq!(
-            resource_before, resource_after,
-            "resource changed after making a bunch of failed requests"
+                .context("privileged GET (recheck)")?
+                .parsed_body()?;
+        ensure!(
+            resource_before == resource_after,
+            "resource changed after making a bunch of failed requests\n\
+            before: {resource_before:#}\nafter: {resource_after:#}"
         );
         record_operation(WhichTest::PrivilegedGetCheck(Some(
             &http::StatusCode::OK,
@@ -943,43 +944,48 @@ async fn verify_endpoint(
     }
 
     println!("  {}", endpoint.url);
+    Ok(())
 }
 
 /// Verifies the body of an HTTP response for status codes 401, 403, 404, or 405
-fn verify_response(response: &TestResponse, method: &Method) {
+fn verify_response(
+    response: anyhow::Result<TestResponse>,
+    method: &Method,
+) -> anyhow::Result<()> {
+    let response = response?;
     if response.status == StatusCode::SWITCHING_PROTOCOLS {
         // websocket handshake. avoid trying to parse absent body as json.
-        return;
+        return Ok(());
     }
     if *method == Method::HEAD {
         // HEAD requests have no body to parse.
-        return;
+        return Ok(());
     }
-    let error: HttpErrorResponseBody = response.parsed_body().unwrap();
-    match response.status {
+    let error: HttpErrorResponseBody = response.parsed_body()?;
+    let code = error.error_code.as_deref();
+    let message = error.message.as_str();
+    let body_ok = match response.status {
         StatusCode::UNAUTHORIZED => {
-            assert_eq!(error.error_code.unwrap(), "Unauthorized");
-            assert_eq!(error.message, "credentials missing or invalid");
+            code == Some("Unauthorized")
+                && message == "credentials missing or invalid"
         }
         StatusCode::FORBIDDEN => {
-            assert_eq!(error.error_code.unwrap(), "Forbidden");
-            assert_eq!(error.message, "Forbidden");
+            code == Some("Forbidden") && message == "Forbidden"
         }
         StatusCode::NOT_FOUND => {
-            assert_eq!(error.error_code.unwrap(), "ObjectNotFound");
-            assert!(error.message.starts_with("not found: "));
-            assert!(
-                error.message.contains(" with name \"")
-                    || error.message.contains(" with id \"")
-            );
-            assert!(error.message.ends_with('\"'));
+            code == Some("ObjectNotFound")
+                && message.starts_with("not found: ")
+                && (message.contains(" with name \"")
+                    || message.contains(" with id \""))
+                && message.ends_with('"')
         }
         StatusCode::METHOD_NOT_ALLOWED => {
-            assert!(error.error_code.is_none());
-            assert_eq!(error.message, "Method Not Allowed");
+            code.is_none() && message == "Method Not Allowed"
         }
-        _ => unimplemented!(),
-    }
+        status => bail!("unexpected status {status}"),
+    };
+    ensure!(body_ok, "unexpected {} response body: {error:?}", response.status);
+    Ok(())
 }
 
 /// Describes the tests run by [`verify_endpoint()`].

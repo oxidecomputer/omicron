@@ -59,7 +59,9 @@ use sled_agent_types::instance::{
     VmmIssueDiskSnapshotRequestResponse, VmmPathParam, VmmPutStateBody,
     VmmPutStateResponse, VmmUnregisterResponse, VpcPathParam,
 };
-use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
+use sled_agent_types::inventory::{
+    Inventory, OmicronSledConfig, SledRegistrationInfo,
+};
 use sled_agent_types::multirack::MultirackJoinServiceStatus;
 use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::rot::{
@@ -1174,6 +1176,12 @@ impl SledAgentApi for SledAgentSimImpl {
         _request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<MultirackJoinServiceStatus>, HttpError> {
         method_unimplemented()
+    }
+
+    async fn sled_registration_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledRegistrationInfo>, HttpError> {
+        Ok(HttpResponseOk(request_context.context().sled_registration_info()))
     }
 }
 
