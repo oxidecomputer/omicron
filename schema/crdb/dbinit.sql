@@ -8703,9 +8703,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_certificate (
     PRIMARY KEY (sitrep_id, id)
 );
 
--- The SMF service diagnosis engine's facts. See the comment on the
--- physical-disk engine above: one table per engine, fact content as typed
--- columns.
+-- The SMF service diagnosis engine's facts.
 CREATE TYPE IF NOT EXISTS omicron.public.fm_fact_smf_service_kind AS ENUM (
     'in_maintenance'
 );
