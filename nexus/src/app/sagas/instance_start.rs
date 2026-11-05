@@ -540,10 +540,14 @@ async fn sis_move_to_starting_undo(
         || async {
             let nexus_state = match params.reason {
                 Reason::SledEvacuation => {
-                    // To avoid a race where a user may have stopped the
-                    // instance while this saga was running, we check the
-                    // instance first to make sure the intended state is still
-                    // `Running`.
+                    // At the time of writing this comment, there is a
+                    // possibility of a race where a user may have stopped the
+                    // instance while this saga was running. More details in
+                    // https://github.com/oxidecomputer/omicron/issues/11706
+                    //
+                    // Meanwhile, to reduce the chance of this happening, we
+                    // check the instance first to make sure the intended state
+                    // is still `Running`.
                     match LookupPath::new(&opctx, osagactx.datastore())
                         .instance_id(instance_id.into_untyped_uuid())
                         .fetch()

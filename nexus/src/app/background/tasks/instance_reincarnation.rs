@@ -1195,10 +1195,11 @@ mod test {
             tasks.instance_reincarnation.disable = true;
             // Increase the intervals for background tasks that could modify
             // VMM records while this test is running.
-            tasks.instance_watcher.period_secs = Duration::MAX;
-            tasks.abandoned_vmm_reaper.period_secs = Duration::MAX;
-            tasks.vmm_mark_stop_for_update.period_secs = Duration::MAX;
-            tasks.vmm_stop_for_update.period_secs = Duration::MAX;
+            tasks.instance_watcher.period_secs = Duration::from_hours(24);
+            tasks.abandoned_vmm_reaper.period_secs = Duration::from_hours(24);
+            tasks.vmm_mark_stop_for_update.period_secs =
+                Duration::from_hours(24);
+            tasks.vmm_stop_for_update.period_secs = Duration::from_hours(24);
         })
         .start::<crate::Server>()
         .await;
