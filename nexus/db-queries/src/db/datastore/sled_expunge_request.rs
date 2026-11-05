@@ -94,6 +94,12 @@ pub enum SledExpungeRequestCompleteOutcome {
     ReAdded { epoch: Epoch, state: TrustQuorumConfigState },
 }
 
+// TODO-RAINCLAUDE: what sled_expunge_task_gate_conn found without bailing; inconsistent inputs bail instead.
+enum TaskGateConnOutcome {
+    RemovalConfigMissing,
+    Gate(SledExpungeTaskGate),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[must_use]
 pub enum SledExpungeRequestCreateOutcome {
@@ -822,10 +828,7 @@ impl DataStore {
             .await?;
         let tq_epoch = i64_to_epoch(request.tq_epoch)?;
         let baseboard_id = request.baseboard_id();
-        let context = format!(
-            "sled expunge request {id} for {baseboard_id} (rack {rack_id}, \
-             removal epoch {tq_epoch})"
-        );
+        let context = sled_expunge_request_context(&request);
 
         let err = OptionalError::new();
         self.transaction_retry_wrapper("sled_expunge_request_complete")
@@ -861,84 +864,25 @@ impl DataStore {
                         );
                     }
 
-                    // TODO-RAINCLAUDE: the loaders' own errors (for example a rack with no trust quorum config) are internal errors here, since the request was created against these configs; database errors pass through untouched so that restarts stay retryable.
-                    let Some(removal_config) =
-                        Self::tq_get_config_with_members_from_epoch_conn(
-                            &conn, rack_id, tq_epoch,
-                        )
-                        .await
-                        .map_err(|error| {
-                            tq_load_error_into_diesel(
-                                &err,
-                                &context,
-                                "the removal trust quorum configuration",
-                                error,
-                            )
-                        })?
-                    else {
-                        return Err(internal_error(
-                            "no trust quorum configuration exists at the \
-                             removal epoch"
-                                .to_string(),
-                        ));
-                    };
-                    let (latest_non_aborted_config, _) =
-                        Self::tq_load_latest_possible_committed_config_conn(
-                            &conn, rack_id,
-                        )
-                        .await
-                        .map_err(|error| {
-                            tq_load_error_into_diesel(
-                                &err,
-                                &context,
-                                "the latest non-aborted trust quorum \
-                                 configuration",
-                                error,
-                            )
-                        })?;
-                    let base_epoch = sled_expunge_task_gate_base_epoch(
-                        &removal_config,
-                        &latest_non_aborted_config,
-                    )
-                    .map_err(|error| internal_error(error.to_string()))?;
-                    // TODO-RAINCLAUDE: when the Preparing latest config builds directly on the removal, the removal config already loaded is its base.
-                    let loaded_base_config = match base_epoch {
-                        Some(base_epoch) if base_epoch != tq_epoch => {
-                            let Some(base_config) =
-                                Self::tq_get_config_with_members_from_epoch_conn(
-                                    &conn, rack_id, base_epoch,
-                                )
-                                .await
-                                .map_err(|error| {
-                                    tq_load_error_into_diesel(
-                                        &err,
-                                        &context,
-                                        "the base trust quorum configuration",
-                                        error,
-                                    )
-                                })?
-                            else {
-                                return Err(internal_error(format!(
-                                    "no trust quorum configuration exists at \
-                                     epoch {base_epoch}, the base of the \
-                                     latest configuration (epoch {})",
-                                    latest_non_aborted_config.epoch,
-                                )));
-                            };
-                            Some(base_config)
-                        }
-                        None | Some(_) => None,
-                    };
-                    let latest_base_config = loaded_base_config
-                        .as_ref()
-                        .or(base_epoch.map(|_| &removal_config));
-                    let gate = check_sled_expunge_task_gate(
-                        &removal_config,
-                        &latest_non_aborted_config,
-                        latest_base_config,
+                    let gate = match Self::sled_expunge_task_gate_conn(
+                        &conn,
+                        &err,
+                        &context,
+                        rack_id,
+                        tq_epoch,
                         &baseboard_id,
                     )
-                    .map_err(|error| internal_error(error.to_string()))?;
+                    .await?
+                    {
+                        TaskGateConnOutcome::RemovalConfigMissing => {
+                            return Err(internal_error(
+                                "no trust quorum configuration exists at the \
+                                 removal epoch"
+                                    .to_string(),
+                            ));
+                        }
+                        TaskGateConnOutcome::Gate(gate) => gate,
+                    };
                     // TODO-RAINCLAUDE: RemovalPreparing and RemovalAborted are internal errors here: the task contract (not enforced here) is that a request only reaches expunging after the gate saw its removal past Preparing, and a config past Preparing can never go back or be aborted.
                     match gate {
                         SledExpungeTaskGate::SledRemoved => {}
@@ -1031,17 +975,97 @@ impl DataStore {
                 }
             })
             .await
-            .map_err(|error| match err.take() {
-                Some(TransitionError::External(error)) => error,
-                Some(error @ TransitionError::InvalidTransition { .. }) => {
-                    Error::internal_error(&format!(
-                        "{context}: {}",
-                        InlineErrorChain::new(&error),
-                    ))
-                }
-                None => public_error_from_diesel(error, ErrorHandler::Server)
-                    .internal_context(context),
+            .map_err(|error| {
+                sled_expunge_transaction_error(err.take(), error, &context)
             })
+    }
+
+    // TODO-RAINCLAUDE: loads the task gate's inputs (the removal config, the latest non-aborted config, and the base sled_expunge_task_gate_base_epoch names) and runs the gate, for sled_expunge_request_complete. A missing removal config is an outcome rather than bailed, so that the caller decides what it means (complete reports an internal error); a missing base config, like every other inconsistent input, bails as an internal error prefixed with context.
+    async fn sled_expunge_task_gate_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        err: &OptionalError<TransitionError>,
+        context: &str,
+        rack_id: RackUuid,
+        tq_epoch: Epoch,
+        baseboard_id: &BaseboardId,
+    ) -> Result<TaskGateConnOutcome, DieselError> {
+        let internal_error = |message: String| {
+            err.bail(TransitionError::External(Error::internal_error(
+                &format!("{context}: {message}"),
+            )))
+        };
+
+        // TODO-RAINCLAUDE: the loaders' own errors (for example a rack with no trust quorum config) are internal errors here, since the request was created against these configs; database errors pass through untouched so that restarts stay retryable.
+        let Some(removal_config) =
+            Self::tq_get_config_with_members_from_epoch_conn(
+                conn, rack_id, tq_epoch,
+            )
+            .await
+            .map_err(|error| {
+                tq_load_error_into_diesel(
+                    err,
+                    context,
+                    "the removal trust quorum configuration",
+                    error,
+                )
+            })?
+        else {
+            return Ok(TaskGateConnOutcome::RemovalConfigMissing);
+        };
+        let (latest_non_aborted_config, _) =
+            Self::tq_load_latest_possible_committed_config_conn(conn, rack_id)
+                .await
+                .map_err(|error| {
+                    tq_load_error_into_diesel(
+                        err,
+                        context,
+                        "the latest non-aborted trust quorum configuration",
+                        error,
+                    )
+                })?;
+        let base_epoch = sled_expunge_task_gate_base_epoch(
+            &removal_config,
+            &latest_non_aborted_config,
+        )
+        .map_err(|error| internal_error(error.to_string()))?;
+        // TODO-RAINCLAUDE: when the Preparing latest config builds directly on the removal, the removal config already loaded is its base.
+        let loaded_base_config = match base_epoch {
+            Some(base_epoch) if base_epoch != tq_epoch => {
+                let Some(base_config) =
+                    Self::tq_get_config_with_members_from_epoch_conn(
+                        conn, rack_id, base_epoch,
+                    )
+                    .await
+                    .map_err(|error| {
+                        tq_load_error_into_diesel(
+                            err,
+                            context,
+                            "the base trust quorum configuration",
+                            error,
+                        )
+                    })?
+                else {
+                    return Err(internal_error(format!(
+                        "no trust quorum configuration exists at epoch \
+                         {base_epoch}, the base of the latest configuration \
+                         (epoch {})",
+                        latest_non_aborted_config.epoch,
+                    )));
+                };
+                Some(base_config)
+            }
+            None | Some(_) => None,
+        };
+        let latest_base_config =
+            loaded_base_config.as_ref().or(base_epoch.map(|_| &removal_config));
+        let gate = check_sled_expunge_task_gate(
+            &removal_config,
+            &latest_non_aborted_config,
+            latest_base_config,
+            baseboard_id,
+        )
+        .map_err(|error| internal_error(error.to_string()))?;
+        Ok(TaskGateConnOutcome::Gate(gate))
     }
 
     async fn sled_expunge_request_get_conn(
@@ -1053,6 +1077,35 @@ impl DataStore {
             .select(SledExpungeRequest::as_select())
             .get_result_async(conn)
             .await
+    }
+}
+
+fn sled_expunge_request_context(request: &SledExpungeRequest) -> String {
+    format!(
+        "sled expunge request {} for {} (rack {}, removal epoch {})",
+        request.id,
+        request.baseboard_id(),
+        request.rack_id,
+        request.tq_epoch,
+    )
+}
+
+// TODO-RAINCLAUDE: maps a sled expunge request transaction's failure to the public error: a bailed External error as is, an InvalidTransition or a database error as an internal error carrying the request context.
+fn sled_expunge_transaction_error(
+    taken: Option<TransitionError>,
+    error: DieselError,
+    context: &str,
+) -> Error {
+    match taken {
+        Some(TransitionError::External(error)) => error,
+        Some(error @ TransitionError::InvalidTransition { .. }) => {
+            Error::internal_error(&format!(
+                "{context}: {}",
+                InlineErrorChain::new(&error),
+            ))
+        }
+        None => public_error_from_diesel(error, ErrorHandler::Server)
+            .internal_context(context.to_string()),
     }
 }
 
