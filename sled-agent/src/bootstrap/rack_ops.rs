@@ -289,7 +289,7 @@ impl RssAccess {
     ///
     /// Waits for the multirack join task to exit and returns the final
     /// bootstore generation it wrote. If the join has already completed
-    /// succcessfully we treat this as idempotent.
+    /// successfully we treat this as idempotent.
     pub(crate) async fn complete_multirack_join(
         &self,
     ) -> Result<u64, RssAccessError> {
@@ -350,9 +350,9 @@ impl RssAccess {
 
                 // We haven't sent the completion signal yet.
                 if let Some(tx) = rack_join_successful_tx.take() {
-                    tx.send(()).map_err(|_| {
-                        RssAccessError::MultirackJoinTaskExitedUnexpectedly
-                    })?;
+                    // If the task already exited, this fails and we return
+                    // its result below.
+                    _ = tx.send(());
                 }
 
                 // We've either sent the completion signal this time, or we did
@@ -660,13 +660,13 @@ pub struct RssConflictError;
 type MultirackJoinResultRx =
     Shared<oneshot::Receiver<Result<u64, RssAccessError>>>;
 
-/// Wait for the multira join result published by the supervisor
+/// Wait for the multirack join result published by the supervisor
 async fn wait_for_multirack_join_result(
     result_rx: MultirackJoinResultRx,
 ) -> Result<u64, RssAccessError> {
-    // The supervisor exited without publishing a result
     result_rx
         .await
+        // The supervisor exited without publishing a result
         .unwrap_or(Err(RssAccessError::MultirackJoinTaskExitedUnexpectedly))
 }
 
