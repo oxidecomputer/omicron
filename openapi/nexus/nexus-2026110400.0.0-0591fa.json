@@ -30632,10 +30632,6 @@
         "description": "View of a rack that's joined the underlay network but hasn't been adopted into the regional cluster yet",
         "type": "object",
         "properties": {
-          "join_service_ip": {
-            "type": "string",
-            "format": "ipv6"
-          },
           "rack_id": {
             "type": "string",
             "format": "uuid"
@@ -30651,7 +30647,6 @@
           }
         },
         "required": [
-          "join_service_ip",
           "rack_id",
           "rack_subnet",
           "unadopted_sleds"
@@ -30691,16 +30686,12 @@
           "sled_id": {
             "type": "string",
             "format": "uuid"
-          },
-          "sled_subnet": {
-            "$ref": "#/components/schemas/Ipv6Net"
           }
         },
         "required": [
           "baseboard_id",
           "sled_agent_start_state",
-          "sled_id",
-          "sled_subnet"
+          "sled_id"
         ]
       },
       "UninitializedSled": {

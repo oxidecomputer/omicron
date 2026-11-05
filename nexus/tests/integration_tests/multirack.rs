@@ -156,7 +156,6 @@ async fn test_rack_list_unadopted(cptestctx: &ControlPlaneTestContext) {
                 "racks out of order or unexpected with page size {page_size}"
             );
             assert_eq!(actual.rack_subnet, expected.rack_subnet.net());
-            assert_eq!(actual.join_service_ip, expected.join_service_ip);
 
             assert_eq!(
                 actual.unadopted_sleds.len(),
@@ -174,10 +173,6 @@ async fn test_rack_list_unadopted(cptestctx: &ControlPlaneTestContext) {
                 assert_eq!(
                     actual_sled.baseboard_id,
                     expected_sled.baseboard_id
-                );
-                assert_eq!(
-                    actual_sled.sled_subnet,
-                    expected_sled.sled_subnet.net()
                 );
                 assert_eq!(
                     actual_sled.sled_agent_start_state,

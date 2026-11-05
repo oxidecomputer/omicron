@@ -4,8 +4,6 @@
 
 //! Nexus types for external APIs related to multirack.
 
-use std::net::Ipv6Addr;
-
 use oxnet::Ipv6Net;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -20,8 +18,6 @@ pub use sled_agent_types_versions::latest::multirack::SledAgentStartState;
 pub struct UnadoptedRack {
     pub rack_id: Uuid,
     pub rack_subnet: Ipv6Net,
-    pub join_service_ip: Ipv6Addr,
-
     pub unadopted_sleds: Vec<UnadoptedSled>,
 }
 
@@ -33,9 +29,6 @@ pub struct UnadoptedRack {
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct UnadoptedSled {
     pub sled_id: Uuid,
-
     pub baseboard_id: BaseboardId,
-    pub sled_subnet: Ipv6Net,
-
     pub sled_agent_start_state: SledAgentStartState,
 }

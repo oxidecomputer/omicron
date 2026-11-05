@@ -1319,7 +1319,6 @@ impl From<DiscoveredRack> for UnadoptedRack {
         Self {
             rack_id: value.rack_id.into_untyped_uuid(),
             rack_subnet: value.rack_subnet.net(),
-            join_service_ip: value.join_service_ip,
             unadopted_sleds: value
                 .discovered_sleds
                 .into_iter()
@@ -1356,7 +1355,6 @@ impl From<DiscoveredSled> for UnadoptedSled {
         Self {
             sled_id: value.sled_id.into_untyped_uuid(),
             baseboard_id: value.baseboard_id,
-            sled_subnet: value.sled_subnet.net(),
             sled_agent_start_state: value.sled_agent_start_state,
         }
     }
