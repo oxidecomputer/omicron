@@ -5,7 +5,8 @@
 //! Builds the disk bays from the nodes of the hardware topology.
 //!
 //! On Oxide boards the U.2 bays are `bay` nodes under the chassis and the
-//! M.2 sockets are `slot` nodes whose slot type is M.2. The `oxhc`
+//! M.2 sockets are `slot` nodes whose slot type is M.2; other slots, such as
+//! CEM slots, are not disk bays. The `oxhc`
 //! enumerator fills each of those in from the PCIe bridge behind it. An
 //! empty bay has no children. A bay holding an NVMe device gets
 //! `binding/driver = "nvme"` and, if the disk enumerator succeeds, an `nvme`
@@ -31,6 +32,10 @@ use std::collections::HashMap;
 /// A property of a topology node: `Ok(None)` if the node does not have it,
 /// `Err` with libtopo's message if it could not be read.
 pub(crate) type Prop<T> = Result<Option<T>, String>;
+
+/// `TOPO_SLOT_TYPE_M2` in `<fm/topo_hc.h>`, which libtopo does not yet
+/// export by name.
+const TOPO_SLOT_TYPE_M2: u32 = 3;
 
 /// A topology node's identity within one snapshot: the names and instances
 /// of the node and all its ancestors, such as `chassis[0]/bay[9]/board[0]`.
@@ -61,22 +66,27 @@ pub(crate) struct TopoNode {
     pub kind: TopoNodeKind,
 }
 
+/// Properties oxhc sets on a `bay`, and on a `slot` it fills in from a PCIe
+/// bridge.
+#[derive(Clone, Debug)]
+pub(crate) struct BayProps {
+    /// `protocol/label`.
+    pub label: Result<String, String>,
+    /// `binding/driver`: the driver bound to the device behind the bay.
+    /// oxhc records it before it tries to enumerate the device.
+    pub binding_driver: Prop<String>,
+    /// `binding/slot`: the PCIe physical slot number of the bridge.
+    pub binding_slot: Prop<u32>,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) enum TopoNodeKind {
-    /// A `bay`, or a `slot` whose slot type is M.2.
-    Bay {
-        variant: DiskVariant,
-        /// `protocol/label`.
-        label: Result<String, String>,
-        /// `binding/driver`: the driver bound to the device behind the bay.
-        /// oxhc records it before it tries to enumerate the device.
-        binding_driver: Prop<String>,
-        /// `binding/slot`: the PCIe physical slot number of the bridge.
-        binding_slot: Prop<u32>,
-    },
-    /// A `slot` whose slot type could not be read.
-    UnknownSlot {
-        error: String,
+    /// A U.2 bay.
+    Bay(BayProps),
+    /// Only a slot whose `slot/slot-type` is M.2 is a disk bay.
+    Slot {
+        slot_type: Prop<u32>,
+        props: BayProps,
     },
     Nvme {
         /// `io/instance`.
@@ -148,30 +158,11 @@ pub(crate) fn assemble_bays(
 
     let mut bays: Vec<ObservedBay> = Vec::new();
     for node in nodes {
-        let mut bay = match &node.kind {
-            TopoNodeKind::Bay {
-                variant,
-                label,
-                binding_driver,
-                binding_slot,
-            } => {
-                let location = identify_bay(&node.key, label, &bays)?;
-                new_bay(
-                    &node.key,
-                    location,
-                    *variant,
-                    binding_driver,
-                    binding_slot,
-                )
-            }
-            TopoNodeKind::UnknownSlot { error } => {
-                return Err(BayIdentError::SlotType {
-                    node: node.key.to_string(),
-                    error: error.clone(),
-                });
-            }
-            _ => continue,
+        let Some((kind, props)) = bay_kind(node)? else {
+            continue;
         };
+        let location = identify_bay(&node.key, &props.label, &bays)?;
+        let mut bay = new_bay(&node.key, location, kind, props);
 
         for child in children_of(&node.key) {
             match &child.kind {
@@ -215,6 +206,24 @@ pub(crate) fn assemble_bays(
     Ok(bays)
 }
 
+/// Whether `node` is a disk bay, and of which kind.
+fn bay_kind(
+    node: &TopoNode,
+) -> Result<Option<(DiskVariant, &BayProps)>, BayIdentError> {
+    match &node.kind {
+        TopoNodeKind::Bay(props) => Ok(Some((DiskVariant::U2, props))),
+        TopoNodeKind::Slot { slot_type, props } => match slot_type {
+            Ok(Some(TOPO_SLOT_TYPE_M2)) => Ok(Some((DiskVariant::M2, props))),
+            Ok(_) => Ok(None),
+            Err(error) => Err(BayIdentError::SlotType {
+                node: node.key.to_string(),
+                error: error.clone(),
+            }),
+        },
+        _ => Ok(None),
+    }
+}
+
 fn identify_bay(
     key: &NodeKey,
     label: &Result<String, String>,
@@ -245,14 +254,13 @@ fn new_bay(
     key: &NodeKey,
     location: DiskLocation,
     kind: DiskVariant,
-    binding_driver: &Prop<String>,
-    binding_slot: &Prop<u32>,
+    props: &BayProps,
 ) -> ObservedBay {
-    let (binding_driver, driver_problem) = match binding_driver {
+    let (binding_driver, driver_problem) = match &props.binding_driver {
         Ok(driver) => (driver.clone(), None),
         Err(error) => (None, Some(topology_problem(key, error))),
     };
-    let pcie_slot = match binding_slot {
+    let pcie_slot = match &props.binding_slot {
         Ok(Some(slot)) => Ok(i64::from(*slot)),
         Ok(None) => Err(BayProblem::NoPcieSlot),
         Err(error) => Err(topology_problem(key, error)),
@@ -486,11 +494,21 @@ mod tests {
     const N3_IC: &str = "chassis[0]/bay[3]/board[0]/ic[0]";
 
     fn u2(label: &str, driver: Option<&str>) -> TopoNodeKind {
-        TopoNodeKind::Bay {
-            variant: DiskVariant::U2,
+        TopoNodeKind::Bay(BayProps {
             label: Ok(label.to_string()),
             binding_driver: Ok(driver.map(str::to_string)),
             binding_slot: Ok(Some(3)),
+        })
+    }
+
+    fn slot(label: &str, slot_type: Prop<u32>) -> TopoNodeKind {
+        TopoNodeKind::Slot {
+            slot_type,
+            props: BayProps {
+                label: Ok(label.to_string()),
+                binding_driver: Ok(None),
+                binding_slot: Ok(Some(17)),
+            },
         }
     }
 
@@ -607,16 +625,18 @@ mod tests {
 
     #[test]
     fn m2_slots_are_bays_and_other_slots_are_not() {
-        let m2 = TopoNodeKind::Bay {
-            variant: DiskVariant::M2,
-            label: Ok("M.2 East".to_string()),
-            binding_driver: Ok(None),
-            binding_slot: Ok(Some(17)),
-        };
-        // The reader only records M.2 slots, so a sharkfin's CEM slot
-        // appears only through its children, which must be ignored.
+        // `TOPO_SLOT_TYPE_CEM` in `<fm/topo_hc.h>`.
+        const CEM: u32 = 4;
         let bays = Tree::default()
-            .add("chassis[0]/systemboard[0]/slot[0]", m2)
+            .add(
+                "chassis[0]/systemboard[0]/slot[0]",
+                slot("M.2 East", Ok(Some(TOPO_SLOT_TYPE_M2))),
+            )
+            .add("chassis[0]/systemboard[0]/slot[1]", slot("No type", Ok(None)))
+            .add(
+                "chassis[0]/systemboard[0]/slot[5]",
+                slot("CEM 5", Ok(Some(CEM))),
+            )
             .add(
                 "chassis[0]/systemboard[0]/slot[5]/board[0]",
                 TopoNodeKind::Board,
@@ -846,12 +866,11 @@ mod tests {
             Tree::default()
                 .add(
                     N3,
-                    TopoNodeKind::Bay {
-                        variant: DiskVariant::U2,
+                    TopoNodeKind::Bay(BayProps {
                         label: Ok("N3".to_string()),
                         binding_driver: driver,
                         binding_slot: slot,
-                    },
+                    }),
                 )
                 .bay()
         };
@@ -877,11 +896,12 @@ mod tests {
 
     #[test]
     fn unidentifiable_bays_fail_the_read() {
-        let labelled = |label: Result<String, String>| TopoNodeKind::Bay {
-            variant: DiskVariant::U2,
-            label,
-            binding_driver: Ok(None),
-            binding_slot: Ok(Some(3)),
+        let labelled = |label: Result<String, String>| {
+            TopoNodeKind::Bay(BayProps {
+                label,
+                binding_driver: Ok(None),
+                binding_slot: Ok(Some(3)),
+            })
         };
 
         let err = Tree::default()
@@ -915,16 +935,16 @@ mod tests {
             }
         );
 
-        let slot = "chassis[0]/systemboard[0]/slot[0]";
+        let key = "chassis[0]/systemboard[0]/slot[0]";
         let err = Tree::default()
             .add(N3, u2("N3", None))
-            .add(slot, TopoNodeKind::UnknownSlot { error: "bad".to_string() })
+            .add(key, slot("M.2 East", Err("bad".to_string())))
             .assemble()
             .unwrap_err();
         assert_eq!(
             err,
             BayIdentError::SlotType {
-                node: slot.to_string(),
+                node: key.to_string(),
                 error: "bad".to_string(),
             }
         );

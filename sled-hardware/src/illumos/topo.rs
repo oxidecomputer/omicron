@@ -6,21 +6,18 @@
 //!
 //! libtopo describes the platform as a tree of nodes with labels and
 //! properties, built from platform topology maps, devinfo, libnvme, and
-//! other sources. This module reads the nodes that can describe disk bays
-//! into [`TopoNode`]s; `topo_bays` decides what they mean.
+//! other sources. This module copies the nodes that can describe disk bays
+//! into [`TopoNode`]s without interpreting them; `topo_bays` decides what
+//! they mean.
 
 use crate::disk_bay::ObservedBay;
 use crate::topo_bays::{
-    BayIdentError, NodeKey, Prop, TopoNode, TopoNodeKind, assemble_bays,
+    BayIdentError, BayProps, NodeKey, Prop, TopoNode, TopoNodeKind,
+    assemble_bays,
 };
 use libtopo::{Error, Node, Scheme, Snapshot, WalkAction, hc};
-use sled_agent_types::disk::DiskVariant;
 use slog::{Logger, debug};
 use std::time::Instant;
-
-/// The `slot/slot-type` of an M.2 socket: `TOPO_SLOT_TYPE_M2` in
-/// `<fm/topo_hc.h>`, which libtopo does not yet export by name.
-const TOPO_SLOT_TYPE_M2: u32 = 3;
 
 /// `storage` property names from `<fm/topo_hc.h>` that libtopo does not yet
 /// export in `libtopo::hc`.
@@ -66,15 +63,14 @@ pub(super) fn read_disk_bays(
 /// bay, or `None` for any other node.
 fn read_node(node: &Node<'_>) -> Option<TopoNode> {
     let kind = match node.name().as_ref() {
-        hc::BAY => read_bay(node, DiskVariant::U2),
-        hc::SLOT => match optional_u32(
-            node,
-            hc::TOPO_PGROUP_SLOT,
-            hc::TOPO_PROP_SLOT_TYPE,
-        ) {
-            Ok(Some(TOPO_SLOT_TYPE_M2)) => read_bay(node, DiskVariant::M2),
-            Ok(_) => return None,
-            Err(error) => TopoNodeKind::UnknownSlot { error },
+        hc::BAY => TopoNodeKind::Bay(read_bay_props(node)),
+        hc::SLOT => TopoNodeKind::Slot {
+            slot_type: optional_u32(
+                node,
+                hc::TOPO_PGROUP_SLOT,
+                hc::TOPO_PROP_SLOT_TYPE,
+            ),
+            props: read_bay_props(node),
         },
         hc::NVME => TopoNodeKind::Nvme {
             instance: optional_u32(
@@ -142,9 +138,8 @@ fn read_node(node: &Node<'_>) -> Option<TopoNode> {
     })
 }
 
-fn read_bay(node: &Node<'_>, variant: DiskVariant) -> TopoNodeKind {
-    TopoNodeKind::Bay {
-        variant,
+fn read_bay_props(node: &Node<'_>) -> BayProps {
+    BayProps {
         label: node.label().map_err(|err| err.to_string()),
         binding_driver: optional_string(
             node,
