@@ -721,13 +721,23 @@ impl DataStore {
                 }
 
                 // Delete silo group
-                use nexus_db_schema::schema::silo_group::dsl;
-                diesel::update(dsl::silo_group)
-                    .filter(dsl::id.eq(to_db_typed_uuid(group_id)))
-                    .filter(dsl::time_deleted.is_null())
-                    .set(dsl::time_deleted.eq(Utc::now()))
-                    .execute_async(&conn)
-                    .await?;
+                {
+                    use nexus_db_schema::schema::silo_group::dsl;
+                    diesel::update(dsl::silo_group)
+                        .filter(dsl::id.eq(to_db_typed_uuid(group_id)))
+                        .filter(dsl::time_deleted.is_null())
+                        .set(dsl::time_deleted.eq(Utc::now()))
+                        .execute_async(&conn)
+                        .await?;
+                }
+
+                // delete group's role assignments
+                self.role_assignments_delete_for_identities(
+                    &conn,
+                    model::IdentityType::SiloGroup,
+                    &[group_id.into_untyped_uuid()],
+                )
+                .await?;
 
                 Ok(())
             })

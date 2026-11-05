@@ -19,9 +19,9 @@ use nexus_db_queries::db::identity::Asset;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_ip_pool, create_local_user, create_project, create_silo,
-    create_subnet_pool, grant_iam, link_ip_pool, link_subnet_pool,
-    object_create, object_delete, objects_list_page_authz, projects_list,
-    test_params,
+    create_subnet_pool, grant_iam, grant_iam_for_group, link_ip_pool,
+    link_subnet_pool, object_create, object_delete, objects_list_page_authz,
+    projects_list, test_params,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::certificate;
@@ -51,12 +51,15 @@ use hickory_resolver::proto::ProtoErrorKind;
 use http::StatusCode;
 use http::method::Method;
 use httptest::{Expectation, Server, matchers::*, responders::*};
-use nexus_types::external_api::policy::{FleetRole, SiloRole};
+use nexus_types::external_api::policy::{
+    self, FleetRole, ProjectRole, SiloRole,
+};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloUuid;
 use std::convert::Infallible;
 use std::net::Ipv4Addr;
 use std::time::Duration;
+use uuid::Uuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -1469,6 +1472,283 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
         .fetch()
         .await
         .expect_err("user found");
+}
+
+/// Fetch a resource's policy and return the identity ids it names
+async fn policy_identity_ids<T: serde::de::DeserializeOwned>(
+    client: &dropshot::test_util::ClientTestContext,
+    policy_url: &str,
+    authn_as: AuthnMode,
+) -> Vec<Uuid> {
+    let policy: policy::Policy<T> =
+        NexusRequest::object_get(client, policy_url)
+            .authn_as(authn_as)
+            .execute()
+            .await
+            .expect("failed to fetch policy")
+            .parsed_body()
+            .expect("failed to parse policy");
+    policy.role_assignments.into_iter().map(|r| r.identity_id).collect()
+}
+
+#[nexus_test]
+async fn test_silo_user_delete_clean_up_role_assignments(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let silo =
+        create_silo(client, "test-silo", silo::SiloIdentityMode::LocalOnly)
+            .await;
+    let fleet_policy_url = "/v1/system/policy";
+    let silo_policy_url = "/v1/system/silos/test-silo/policy";
+
+    let user = create_local_user(
+        client,
+        &silo,
+        &"role-user".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+    let user_id = user.id.into_untyped_uuid();
+
+    // Give the user roles on the silo, on the fleet, and on a project inside
+    // the silo, so that deletion has to clean up assignments on resources
+    // both inside and outside the silo.
+    grant_iam(
+        client,
+        "/v1/system/silos/test-silo",
+        SiloRole::Admin,
+        user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    grant_iam(
+        client,
+        "/v1/system",
+        FleetRole::Viewer,
+        user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let project: project::Project = NexusRequest::objects_post(
+        client,
+        "/v1/projects",
+        &project::ProjectCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "role-project".parse().unwrap(),
+                description: String::new(),
+            },
+            defaults: None,
+        },
+    )
+    .authn_as(AuthnMode::SiloUser(user.id))
+    .execute()
+    .await
+    .expect("failed to create project")
+    .parsed_body()
+    .unwrap();
+    let project_url = format!("/v1/projects/{}", project.identity.name);
+    let project_policy_url = format!("{project_url}/policy");
+    grant_iam(
+        client,
+        &project_url,
+        ProjectRole::Admin,
+        user.id,
+        AuthnMode::SiloUser(user.id),
+    )
+    .await;
+
+    // A second silo admin, so we can still read the project's policy after
+    // the first user is gone, and to confirm their assignments are untouched.
+    let admin = create_local_user(
+        client,
+        &silo,
+        &"admin-user".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+    let admin_id = admin.id.into_untyped_uuid();
+    grant_iam(
+        client,
+        "/v1/system/silos/test-silo",
+        SiloRole::Admin,
+        admin.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let fleet_ids = policy_identity_ids::<FleetRole>(
+        client,
+        fleet_policy_url,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    let silo_ids = policy_identity_ids::<SiloRole>(
+        client,
+        silo_policy_url,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    let project_ids = policy_identity_ids::<ProjectRole>(
+        client,
+        &project_policy_url,
+        AuthnMode::SiloUser(admin.id),
+    )
+    .await;
+    assert!(fleet_ids.contains(&user_id));
+    assert!(silo_ids.contains(&user_id));
+    assert!(silo_ids.contains(&admin_id));
+    assert!(project_ids.contains(&user_id));
+
+    object_delete(
+        client,
+        &format!(
+            "/v1/system/identity-providers/local/users/{}?silo=test-silo",
+            user.id
+        ),
+    )
+    .await;
+
+    let fleet_ids = policy_identity_ids::<FleetRole>(
+        client,
+        fleet_policy_url,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    let silo_ids = policy_identity_ids::<SiloRole>(
+        client,
+        silo_policy_url,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    let project_ids = policy_identity_ids::<ProjectRole>(
+        client,
+        &project_policy_url,
+        AuthnMode::SiloUser(admin.id),
+    )
+    .await;
+    assert!(!fleet_ids.contains(&user_id));
+    assert!(!silo_ids.contains(&user_id));
+    assert!(!project_ids.contains(&user_id));
+    assert!(silo_ids.contains(&admin_id));
+}
+
+#[nexus_test]
+async fn test_silo_delete_clean_up_role_assignments(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+
+    let silo =
+        create_silo(client, "test-silo", silo::SiloIdentityMode::SamlJit).await;
+
+    let opctx_external_authn = nexus.opctx_external_authn();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let (authz_silo, db_silo) = LookupPath::new(&opctx, datastore)
+        .silo_name(&silo.identity.name.into())
+        .fetch()
+        .await
+        .unwrap();
+
+    // Add a user with a group membership
+    let silo_user = nexus
+        .silo_user_from_authenticated_subject(
+            &opctx_external_authn,
+            &authz_silo,
+            &db_silo,
+            &AuthenticatedSubject {
+                external_id: "user@company.com".into(),
+                groups: vec!["sre".into()],
+            },
+        )
+        .await
+        .expect("silo_user_from_authenticated_subject");
+    let silo_group = datastore
+        .silo_group_optional_lookup(
+            &opctx_external_authn,
+            &authz_silo,
+            &SiloGroupLookup::Jit { external_id: "sre" },
+        )
+        .await
+        .expect("silo_group_optional_lookup")
+        .expect("group should exist");
+    let user_id = silo_user.id().into_untyped_uuid();
+    let group_id = silo_group.id().into_untyped_uuid();
+
+    // Give both the user and the group roles on the silo and on the fleet.
+    // The fleet outlives the silo, so assignments there are the ones that
+    // would otherwise be left dangling.
+    let silo_url = "/v1/system/silos/test-silo";
+    let fleet_url = "/v1/system";
+    grant_iam(
+        client,
+        silo_url,
+        SiloRole::Viewer,
+        silo_user.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    grant_iam_for_group(
+        client,
+        silo_url,
+        SiloRole::Viewer,
+        silo_group.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    grant_iam(
+        client,
+        fleet_url,
+        FleetRole::Viewer,
+        silo_user.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    grant_iam_for_group(
+        client,
+        fleet_url,
+        FleetRole::Viewer,
+        silo_group.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let fleet_ids = policy_identity_ids::<FleetRole>(
+        client,
+        "/v1/system/policy",
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    assert!(fleet_ids.contains(&user_id));
+    assert!(fleet_ids.contains(&group_id));
+
+    object_delete(client, silo_url).await;
+
+    let fleet_ids = policy_identity_ids::<FleetRole>(
+        client,
+        "/v1/system/policy",
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    assert!(!fleet_ids.contains(&user_id));
+    assert!(!fleet_ids.contains(&group_id));
+
+    // The silo's policy can no longer be fetched through the API, so check
+    // the database directly.
+    let silo_assignments = datastore
+        .role_assignment_fetch_visible(&opctx, &authz_silo)
+        .await
+        .expect("role_assignment_fetch_visible");
+    assert!(
+        silo_assignments.is_empty(),
+        "unexpected role assignments: {silo_assignments:?}"
+    );
 }
 
 // Test ensuring the same group from different users

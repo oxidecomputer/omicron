@@ -5,6 +5,7 @@
 //! [`DataStore`] methods related to roles.
 
 use super::DataStore;
+use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::authz::AuthorizedResource;
 use crate::context::OpContext;
@@ -16,6 +17,7 @@ use crate::db::model::IdentityType;
 use crate::db::model::RoleAssignment;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use diesel::result::Error as DieselError;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
@@ -25,6 +27,7 @@ use nexus_types::external_api::policy;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::bail_unless;
+use uuid::Uuid;
 
 impl DataStore {
     /// Load role assignments for built-in users and built-in roles into the
@@ -101,6 +104,33 @@ impl DataStore {
             .load_async::<RoleAssignment>(conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Delete all role assignments held by the given identities, on any
+    /// resource. Used when deleting users, groups, and silos so that deleted
+    /// identities don't linger in policies.
+    ///
+    /// Returns the raw diesel error so this can run inside a transaction;
+    /// callers outside one should map it with `public_error_from_diesel`.
+    ///
+    /// Returns the number of rows deleted.
+    pub(super) async fn role_assignments_delete_for_identities(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        identity_type: IdentityType,
+        identity_ids: &[Uuid],
+    ) -> Result<usize, DieselError> {
+        use nexus_db_schema::schema::role_assignment::dsl;
+
+        let mut deleted = 0;
+        for batch in identity_ids.chunks(SQL_BATCH_SIZE.get() as usize) {
+            deleted += diesel::delete(dsl::role_assignment)
+                .filter(dsl::identity_type.eq(identity_type.clone()))
+                .filter(dsl::identity_id.eq_any(batch.to_vec()))
+                .execute_async(conn)
+                .await?;
+        }
+        Ok(deleted)
     }
 
     /// Removes all existing externally-visble role assignments on
