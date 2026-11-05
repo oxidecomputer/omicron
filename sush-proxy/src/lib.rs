@@ -5,12 +5,15 @@
 //! The Support Shell proxy for the switch zone (RFD 620).
 //!
 //! The proxy terminates technician-port connections and routes each
-//! request to a sled's `sush` server. It discovers sleds by probing
-//! the addresses behind the bootstrap and underlay prefixes DDM
-//! advertises, and learns the cubby numbering from MGS.
+//! request to a `sush` server running in some sled's global zone.
+//! It discovers servers by probing the address prefixes advertised
+//! by DDM, and learns the cubby map (cubby number → baseboard ID)
+//! from the local MGS, using the same polling code as the servers.
 //!
 //! The code that verifies the proxy's TLS identity lives in sush's
 //! `client/src/tls.rs`.
+
+pub mod cubbies;
 
 use std::collections::BTreeMap;
 use std::net::{SocketAddr, SocketAddrV6};
@@ -20,18 +23,19 @@ use anyhow::{Context, Result, bail};
 use camino::Utf8PathBuf;
 use futures::future::join_all;
 use gateway_client::Client as MgsClient;
-use gateway_types::component::SpType;
 use omicron_common::address::SUSH_API_PORT;
 use omicron_ddm_admin_client::Client as DdmClient;
 use sled_hardware_types::BaseboardId;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::{Logger, debug, warn};
-use sush_common::targets::{Cubbies, MAX_CUBBY};
+use sush_common::targets::Cubbies;
 use sush_proxy::{ProxyServer, Sleds, Targets, platform_tls};
 use tokio::spawn;
 use tokio::sync::watch;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
+
+use crate::cubbies::{merge_cubbies, poll_cubbies};
 
 const POLL_INTERVAL: Duration = Duration::from_secs(30);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -78,26 +82,22 @@ pub async fn run(log: &Logger, config: Config) -> Result<()> {
     .context("starting the proxy")?;
 
     let ddm = DdmClient::localhost(log).context("reaching ddmd")?;
-    let mgs = mgs_client(log, config.mgs_address);
-    let sleds = spawn(sleds(log.clone(), ddm, tx_sleds));
-    let cubbies = spawn(cubbies(log.clone(), mgs, tx_cubbies));
-    tokio::select! {
-        result = sleds => bail!("sled discovery loop died: {result:?}"),
-        result = cubbies => bail!("cubby discovery loop died: {result:?}"),
-    }
-}
-
-fn mgs_client(log: &Logger, address: SocketAddrV6) -> MgsClient {
     let client = reqwest::ClientBuilder::new()
         .connect_timeout(PROBE_TIMEOUT)
         .timeout(PROBE_TIMEOUT)
         .build()
-        .expect("failed to build an HTTP client");
-    MgsClient::new_with_client(
-        &format!("http://{address}"),
-        client,
+        .context("building an HTTP client")?;
+    let mgs = MgsClient::new_with_client(
+        &format!("http://{}", config.mgs_address),
+        client.clone(),
         log.clone(),
-    )
+    );
+    let sleds = spawn(update_sleds(log.clone(), ddm, client, tx_sleds));
+    let cubbies = spawn(update_cubbies(log.clone(), mgs, tx_cubbies));
+    tokio::select! {
+        result = sleds => bail!("sled discovery loop died: {result:?}"),
+        result = cubbies => bail!("cubby discovery loop died: {result:?}"),
+    }
 }
 
 /// Keep `Targets::sleds` current. Every DDM-advertised address that
@@ -106,14 +106,14 @@ fn mgs_client(log: &Logger, address: SocketAddrV6) -> MgsClient {
 /// assigns them. We probe both, and underlay wins. Each round's
 /// answers merge into the existing map, so a missed probe never
 /// evicts a sled; a stale address fails at forwarding time instead.
-async fn sleds(log: Logger, ddm: DdmClient, targets: watch::Sender<Sleds>) {
-    let probe = reqwest::ClientBuilder::new()
-        .connect_timeout(PROBE_TIMEOUT)
-        .timeout(PROBE_TIMEOUT)
-        .build()
-        .expect("failed to build an HTTP client");
+async fn update_sleds(
+    log: Logger,
+    ddm: DdmClient,
+    probe: reqwest::Client,
+    tx_sleds: watch::Sender<Sleds>,
+) {
     loop {
-        let mut sleds = BTreeMap::new();
+        let mut answers = BTreeMap::new();
         match ddm
             .derive_bootstrap_addrs_from_prefixes(&[
                 BootstrapInterface::GlobalZone,
@@ -123,7 +123,7 @@ async fn sleds(log: Logger, ddm: DdmClient, targets: watch::Sender<Sleds>) {
             Ok(addrs) => {
                 let addrs =
                     addrs.map(|ip| SocketAddrV6::new(ip, SUSH_API_PORT, 0, 0));
-                discover(&log, &probe, addrs, &mut sleds).await;
+                probe_sleds(&log, &probe, addrs, &mut answers).await;
             }
             Err(err) => {
                 warn!(log, "unable to fetch bootstrap prefixes"; "error" => %err)
@@ -133,20 +133,20 @@ async fn sleds(log: Logger, ddm: DdmClient, targets: watch::Sender<Sleds>) {
             Ok(addrs) => {
                 let addrs = addrs
                     .map(|a| SocketAddrV6::new(*a.ip(), SUSH_API_PORT, 0, 0));
-                discover(&log, &probe, addrs, &mut sleds).await;
+                probe_sleds(&log, &probe, addrs, &mut answers).await;
             }
             Err(err) => {
                 warn!(log, "unable to fetch underlay prefixes"; "error" => %err)
             }
         }
-        targets.send_modify(|t| t.extend(sleds));
+        tx_sleds.send_modify(|sleds| sleds.extend(answers));
         sleep(POLL_INTERVAL).await;
     }
 }
 
 /// Probe candidate addresses concurrently and record the sleds that
 /// answer. The `/target` endpoint just returns the sled's baseboard ID.
-async fn discover(
+async fn probe_sleds(
     log: &Logger,
     probe: &reqwest::Client,
     addrs: impl Iterator<Item = SocketAddrV6>,
@@ -178,88 +178,15 @@ async fn discover(
 }
 
 /// Keep `Targets::cubbies` current from MGS's view of the SPs.
-async fn cubbies(log: Logger, mgs: MgsClient, targets: watch::Sender<Cubbies>) {
+async fn update_cubbies(
+    log: Logger,
+    mgs: MgsClient,
+    tx_cubbies: watch::Sender<Cubbies>,
+) {
     loop {
-        let polls = (0..=MAX_CUBBY).map(|cubby| {
-            let mgs = &mgs;
-            async move {
-                let state = mgs.sp_get(&SpType::Sled, cubby.into()).await;
-                (cubby, state)
-            }
-        });
-        let mut cubbies = Cubbies::new();
-        for (cubby, result) in join_all(polls).await {
-            match result {
-                Ok(state) => {
-                    let state = state.into_inner();
-                    cubbies.insert(
-                        cubby,
-                        BaseboardId {
-                            part_number: state.model,
-                            serial_number: state.serial_number,
-                        },
-                    );
-                }
-                Err(err) => {
-                    debug!(
-                        log,
-                        "no SP state for cubby";
-                        "cubby" => cubby,
-                        "error" => %err,
-                    );
-                }
-            }
+        if let Some(states) = poll_cubbies(&log, &mgs).await {
+            tx_cubbies.send_modify(|cubbies| merge_cubbies(cubbies, states));
         }
-        targets.send_modify(|t| merge_cubbies(t, cubbies));
         sleep(POLL_INTERVAL).await;
-    }
-}
-
-/// Fold one round of SP answers into the cubby map. Cubbies that don't
-/// answer keep their entries (for reboots or transient outages), but a
-/// baseboard that answers from a new cubby leaves its old one (for moved
-/// or swapped sleds).
-fn merge_cubbies(cubbies: &mut Cubbies, answers: Cubbies) {
-    cubbies.retain(|_, b| !answers.values().any(|a| a == b));
-    cubbies.extend(answers);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn baseboard(n: u32) -> BaseboardId {
-        BaseboardId {
-            part_number: "913-0000019".into(),
-            serial_number: format!("BRM{n:08}"),
-        }
-    }
-
-    #[test]
-    fn merged_cubbies_survive_outages_and_moves() {
-        let mut cubbies =
-            Cubbies::from([(14, baseboard(1)), (15, baseboard(2))]);
-
-        // A quiet round erases nothing.
-        merge_cubbies(&mut cubbies, Cubbies::new());
-        assert_eq!(
-            cubbies,
-            Cubbies::from([(14, baseboard(1)), (15, baseboard(2))])
-        );
-
-        // Sled 1 moves to cubby 20 and leaves cubby 14; sled 2
-        // misses the round and keeps its entry.
-        merge_cubbies(&mut cubbies, Cubbies::from([(20, baseboard(1))]));
-        assert_eq!(
-            cubbies,
-            Cubbies::from([(15, baseboard(2)), (20, baseboard(1))])
-        );
-
-        // Sled 3 takes over cubby 15.
-        merge_cubbies(&mut cubbies, Cubbies::from([(15, baseboard(3))]));
-        assert_eq!(
-            cubbies,
-            Cubbies::from([(15, baseboard(3)), (20, baseboard(1))])
-        );
     }
 }

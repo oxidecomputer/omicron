@@ -712,6 +712,7 @@ omicron-pins = { path = "dev-tools/pins" }
 omicron-repl-utils = { path = "dev-tools/repl-utils" }
 omicron-rpaths = { path = "rpaths" }
 omicron-sled-agent = { path = "sled-agent" }
+omicron-sush-proxy = { path = "sush-proxy" }
 omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.3"

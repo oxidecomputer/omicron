@@ -10062,6 +10062,7 @@ dependencies = [
  "omicron-generation-kinds",
  "omicron-ledger",
  "omicron-rpaths",
+ "omicron-sush-proxy",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",

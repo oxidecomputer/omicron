@@ -54,17 +54,19 @@ use anyhow::{Context, ensure};
 use camino::{Utf8Path, Utf8PathBuf};
 use dice_verifier::verify_cert_chain;
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer, ServerBuilder};
+use futures::StreamExt as _;
+use futures::stream::FuturesUnordered;
 use gateway_client::Client as MgsClient;
-use gateway_types::component::SpType;
 use omicron_common::address::{
     MGS_PORT, SUSH_API_PORT, SUSH_GOSSIP_PORT, get_switch_zone_address,
 };
 use omicron_common::api::external::ByteCount;
 use omicron_ddm_admin_client::Client as DdmClient;
+use omicron_sush_proxy::cubbies::{merge_cubbies, poll_cubbies};
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_hardware_types::BaseboardId;
-use slog::{Logger, debug, error, info, o, warn};
+use slog::{Logger, error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use sprockets_tls::ipcc::Ipcc;
 use sprockets_tls::keys::SprocketsConfig;
@@ -87,7 +89,7 @@ use x509_cert::der::{Decode as _, DecodePem as _, Reader as _, SliceReader};
 use x509_cert::time::{Time, Validity};
 
 use sush_common::keys::{EphemeralKey, KeyType, pem_cert_chain};
-use sush_common::targets::{Cubbies, MAX_CUBBY};
+use sush_common::targets::Cubbies;
 use sush_server::executor::PathIsolation;
 use sush_server::gossip::{
     GossipConfig, LinkedBaseboards, Universe, spawn_gossip,
@@ -303,10 +305,7 @@ pub async fn spawn_sush_tasks(
             return None;
         }
     };
-    spawn(poll_mgs_for_cubbies(
-        log.new(o!("component" => "cubby map")),
-        tx_cubbies,
-    ));
+    spawn(update_cubbies(log.new(o!("component" => "cubby map")), tx_cubbies));
 
     // The state manager runs until shutdown and nothing waits on it,
     // so all we can usefully do with its handle is notice when it stops.
@@ -399,37 +398,32 @@ async fn promote_output_dir(
     }
 }
 
-/// Discovers the baseboard identity in each cubby in the rack and publishes the
-/// map over the provided watch channel.
-///
-/// This map is used to resolve the sled identity when a job specifies its
-/// target sled cubby number.
-///
-/// This function may start while one or more MGS services are not available,
-/// and must handle failures of both the MGS service or the entire scrimlet
-/// gracefully. Therefore, on every poll, this function will attempt to use the
-/// fixed MGS address on every subnet currently known to `ddmd`, and accepts any
-/// responses it receives. If a response that contains at least one sled is
-/// received, the previously-discovered map is overwritten to avoid leaving
-/// behind stale entries for sleds that are no longer present. Multiple
-/// responses received within the same poll are merged to produce a single map.
-/// If we cannot contact any MGS instance during a poll, the map does not change
-/// until a subsequent poll receives a response.
-async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
-    let clients = || -> anyhow::Result<(DdmClient, reqwest::Client)> {
-        let ddm = DdmClient::localhost(&log)?;
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(MGS_PROBE_TIMEOUT)
-            .timeout(MGS_PROBE_TIMEOUT)
-            .build()?;
-        Ok((ddm, client))
-    };
-    let (ddm, client) = match clients() {
-        Ok(clients) => clients,
+/// Periodically poll each MGS for the sled in each cubby, and merge the
+/// answer from the first MGS to respond into the cubby map. Look for MGS
+/// at the switch zone address in every underlay subnet that DDM knows.
+/// Try every address at once, because most subnets have no switch zone,
+/// and a request to an address with no MGS hangs until it times out.
+async fn update_cubbies(log: Logger, tx_cubbies: watch::Sender<Cubbies>) {
+    let ddm = match DdmClient::localhost(&log) {
+        Ok(ddm) => ddm,
         Err(error) => {
             error!(
-                log, "not polling MGS, cubby-targeted jobs will not run here";
-                "error" => #%error,
+                log, "not polling MGS: cannot build a DDM client";
+                "error" => InlineErrorChain::new(&error),
+            );
+            return;
+        }
+    };
+    let client = match reqwest::ClientBuilder::new()
+        .connect_timeout(MGS_PROBE_TIMEOUT)
+        .timeout(MGS_PROBE_TIMEOUT)
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            error!(
+                log, "not polling MGS: cannot build an HTTP client";
+                "error" => InlineErrorChain::new(&error),
             );
             return;
         }
@@ -437,54 +431,34 @@ async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
     loop {
         match ddm.derive_underlay_subnets_from_prefixes().await {
             Ok(subnets) => {
-                let mut map = Cubbies::new();
-                for subnet in subnets {
-                    let addr = SocketAddrV6::new(
-                        get_switch_zone_address(subnet),
-                        MGS_PORT,
-                        0,
-                        0,
-                    );
-                    let mgs = MgsClient::new_with_client(
-                        &format!("http://{addr}"),
-                        client.clone(),
-                        log.clone(),
-                    );
-                    if mgs.sp_local_switch_id().await.is_err() {
-                        continue;
+                let mgs_clients: Vec<_> = subnets
+                    .into_iter()
+                    .map(|subnet| {
+                        let ip = get_switch_zone_address(subnet);
+                        MgsClient::new_with_client(
+                            &format!("http://[{ip}]:{MGS_PORT}"),
+                            client.clone(),
+                            log.clone(),
+                        )
+                    })
+                    .collect();
+                let mut polls: FuturesUnordered<_> = mgs_clients
+                    .iter()
+                    .map(|mgs| poll_cubbies(&log, mgs))
+                    .collect();
+                while let Some(poll) = polls.next().await {
+                    if let Some(states) = poll {
+                        tx_cubbies.send_modify(|cubbies| {
+                            merge_cubbies(cubbies, states)
+                        });
+                        break;
                     }
-                    for cubby in 0..=MAX_CUBBY {
-                        match mgs.sp_get(&SpType::Sled, cubby.into()).await {
-                            Ok(state) => {
-                                let state = state.into_inner();
-                                map.insert(
-                                    cubby,
-                                    BaseboardId {
-                                        part_number: state.model,
-                                        serial_number: state.serial_number,
-                                    },
-                                );
-                            }
-                            Err(err) => {
-                                debug!(
-                                    log, "no SP state for cubby";
-                                    "cubby" => cubby, "error" => %err,
-                                );
-                            }
-                        }
-                    }
-                }
-                // If this code is running, there must be at least one sled in
-                // the rack, so we reject any response that does not have at
-                // least one sled.
-                if !map.is_empty() {
-                    cubbies.send_replace(map);
                 }
             }
-            Err(err) => {
+            Err(error) => {
                 warn!(
-                    log, "unable to fetch prefixes";
-                    "error" => InlineErrorChain::new(&err),
+                    log, "cannot fetch underlay prefixes from DDM";
+                    "error" => InlineErrorChain::new(&error),
                 );
             }
         }
