@@ -235,6 +235,13 @@ pub struct InstanceCreate {
     #[serde(default)]
     pub enable_jumbo_frames: bool,
     /// The method by which the instance should be stopped.
+    ///
+    /// This determines what action the control plane performs when stopping
+    /// this instance, either due to a request to the `instance_stop` or
+    /// `instance_reboot` API endpoints, or because the instance must be
+    /// restarted in order to update system software on the sled that was
+    /// hosting it.
+    ///
     /// If not provided, new instances will be created with a default of an
     /// ACPI fixed power button press, with a 10-minute timeout for the guest OS
     /// to shut itself down before the instance is forcibly terminated.
