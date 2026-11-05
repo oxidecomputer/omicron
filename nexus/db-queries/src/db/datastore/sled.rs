@@ -49,6 +49,7 @@ use nexus_db_model::DbTypedUuid;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
 use nexus_types::identity::Asset;
+use nexus_types::trust_quorum::check_trust_quorum_allows_expunge;
 use nonempty::NonEmpty;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
@@ -2031,6 +2032,73 @@ impl DataStore {
                 ))
             })?;
         Ok(policy)
+    }
+
+    /// Load up the trust quorum configuration, ensure that it allows this sled
+    /// to be expunged, and expunge it if it does.
+    pub async fn sled_set_policy_to_expunged_if_trust_quorum_allows(
+        &self,
+        opctx: &OpContext,
+        authz_sled: &authz::Sled,
+        authz_tq: &authz::TrustQuorumConfig,
+        baseboard_id: &BaseboardId,
+    ) -> Result<SledPolicy, external::Error> {
+        opctx.authorize(authz::Action::Modify, authz_sled).await?;
+        opctx.authorize(authz::Action::Read, authz_tq).await?;
+
+        let sled_id = authz_sled.id();
+        let rack_id = authz_tq.rack().id();
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.transaction_retry_wrapper(
+            "sled_set_policy_to_expunged_if_trust_quorum_allows",
+        )
+        .transaction(&conn, |conn| {
+            let err = err.clone();
+
+            async move {
+                async {
+                    let (config, _) =
+                        Self::tq_load_latest_possible_committed_config_conn(
+                            &conn, rack_id,
+                        )
+                        .await?;
+                    check_trust_quorum_allows_expunge(
+                        sled_id,
+                        baseboard_id,
+                        &config,
+                    )?;
+                    Ok::<_, TransactionError<Error>>(())
+                }
+                .await
+                .map_err(|error| match error {
+                    TransactionError::Database(error) => error,
+                    TransactionError::CustomError(error) => {
+                        err.bail(TransitionError::External(error))
+                    }
+                })?;
+
+                Self::sled_set_policy_conn(
+                    &conn,
+                    sled_id,
+                    SledPolicy::Expunged,
+                    ValidateTransition::Yes,
+                    &err,
+                )
+                .await
+            }
+        })
+        .await
+        .map_err(|e| {
+            if let Some(err) = err.take() {
+                return err;
+            }
+            TransitionError::from(public_error_from_diesel(
+                e,
+                ErrorHandler::Server,
+            ))
+        })
+        .map_err(|error| error.into_external_error())
     }
 
     async fn sled_set_policy_conn(

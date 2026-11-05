@@ -1599,12 +1599,19 @@ impl DataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::datastore::sled::SledTransition;
+    use crate::db::datastore::sled::TransitionError;
+    use crate::db::model::to_db_typed_uuid;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledSystemHardwareBuilder;
     use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use async_bb8_diesel::AsyncSimpleConnection;
     use diesel::result::Error as DieselError;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::HwBaseboardId;
+    use nexus_db_model::PhysicalDisk;
+    use nexus_db_model::PhysicalDiskKind;
+    use nexus_db_model::PhysicalDiskPolicy;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledState;
     use nexus_db_model::SledUpdate;
@@ -1614,6 +1621,7 @@ mod tests {
     };
     use omicron_generation_kinds::SledRegistrationGeneration;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use std::net::{Ipv6Addr, SocketAddrV6};
@@ -2737,6 +2745,224 @@ mod tests {
         }
         let expected = BTreeSet::new();
         assert_eq!(missing_members().await, expected);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sled_set_policy_to_expunged_if_trust_quorum_allows() {
+        let logctx = test_setup_log(
+            "test_sled_set_policy_to_expunged_if_trust_quorum_allows",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let hw_ids = insert_hw_baseboard_ids(&db).await;
+        let rack_id = RackUuid::new_v4();
+        let non_member_hw = &hw_ids[0];
+        let member_hw = &hw_ids[1];
+        let members: BTreeSet<_> =
+            hw_ids[1..].iter().cloned().map(BaseboardId::from).collect();
+        let coordinator = members.first().unwrap().clone();
+
+        let non_member_sled =
+            insert_sled_for_baseboard(datastore, rack_id, non_member_hw).await;
+        let member_sled =
+            insert_sled_for_baseboard(datastore, rack_id, member_hw).await;
+
+        let insert_disk = |sled_id: SledUuid| async move {
+            let disk = PhysicalDisk::from_parts(
+                PhysicalDiskUuid::new_v4(),
+                "vendor".to_string(),
+                format!("serial-{sled_id}"),
+                "model".to_string(),
+                PhysicalDiskKind::U2,
+                sled_id,
+            );
+            let disk_id = disk.id();
+            datastore
+                .physical_disk_insert(opctx, disk)
+                .await
+                .expect("inserted physical disk");
+            disk_id
+        };
+        let non_member_disk = insert_disk(non_member_sled).await;
+        let member_disk = insert_disk(member_sled).await;
+
+        let expunge = |sled_id: SledUuid, hw: HwBaseboardId| async move {
+            let (authz_sled, _) = LookupPath::new(opctx, datastore)
+                .sled_id(sled_id)
+                .fetch_for(authz::Action::Modify)
+                .await
+                .expect("looked up sled");
+            datastore
+                .sled_set_policy_to_expunged_if_trust_quorum_allows(
+                    opctx,
+                    &authz_sled,
+                    &make_authz_tq(rack_id),
+                    &BaseboardId::from(hw),
+                )
+                .await
+        };
+        let policy = |sled_id: SledUuid| async move {
+            let (_, sled) = LookupPath::new(opctx, datastore)
+                .sled_id(sled_id)
+                .fetch()
+                .await
+                .expect("looked up sled");
+            sled.policy()
+        };
+        let disk_policy = |disk_id: PhysicalDiskUuid| async move {
+            use nexus_db_schema::schema::physical_disk::dsl;
+            dsl::physical_disk
+                .filter(dsl::id.eq(to_db_typed_uuid(disk_id)))
+                .select(PhysicalDisk::as_select())
+                .get_result_async(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
+                .await
+                .expect("looked up physical disk")
+                .disk_policy
+        };
+        let in_service = SledPolicy::InService {
+            provision_policy: SledProvisionPolicy::Provisionable,
+        };
+
+        match expunge(non_member_sled, non_member_hw.clone()).await {
+            Err(Error::InvalidRequest { message }) => {
+                assert_eq!(
+                    message.external_message(),
+                    format!(
+                        "Missing trust quorum configurations for rack \
+                         {rack_id}. Upgrade to trust quorum required."
+                    ),
+                );
+            }
+            other => panic!("expected InvalidRequest, got {other:?}"),
+        }
+        assert_eq!(policy(non_member_sled).await, in_service);
+        assert_eq!(
+            disk_policy(non_member_disk).await,
+            PhysicalDiskPolicy::InService
+        );
+
+        DataStore::tq_insert_rss_config_after_handoff(
+            opctx,
+            &conn,
+            make_authz_tq(rack_id),
+            members.clone(),
+            coordinator,
+        )
+        .await
+        .unwrap();
+
+        let assert_member_conflict =
+            |result: Result<SledPolicy, Error>, epoch: Epoch| {
+                let member_baseboard = BaseboardId::from(member_hw.clone());
+                match result {
+                    Err(Error::Conflict { message }) => {
+                        assert_eq!(
+                            message.external_message(),
+                            format!(
+                                "Cannot expunge sled {member_sled}, as its \
+                                 baseboard {member_baseboard} is still a \
+                                 member of the latest trust quorum \
+                                 configuration for rack {rack_id} (epoch \
+                                 {epoch}, state Committed)"
+                            ),
+                        );
+                    }
+                    other => panic!("expected Conflict, got {other:?}"),
+                }
+            };
+
+        assert_member_conflict(
+            expunge(member_sled, member_hw.clone()).await,
+            Epoch(1),
+        );
+        assert_eq!(policy(member_sled).await, in_service);
+        assert_eq!(
+            disk_policy(member_disk).await,
+            PhysicalDiskPolicy::InService
+        );
+
+        assert_eq!(
+            expunge(non_member_sled, non_member_hw.clone()).await,
+            Ok(in_service),
+        );
+        assert_eq!(policy(non_member_sled).await, SledPolicy::Expunged);
+        assert_eq!(
+            disk_policy(non_member_disk).await,
+            PhysicalDiskPolicy::Expunged
+        );
+        assert_eq!(
+            expunge(non_member_sled, non_member_hw.clone()).await,
+            Ok(SledPolicy::Expunged),
+        );
+
+        let (authz_non_member_sled, _) = LookupPath::new(opctx, datastore)
+            .sled_id(non_member_sled)
+            .fetch_for(authz::Action::Modify)
+            .await
+            .expect("looked up sled");
+        datastore
+            .sled_set_state_to_decommissioned(opctx, &authz_non_member_sled)
+            .await
+            .expect("decommissioned sled");
+        let (_, decommissioned) = LookupPath::new(opctx, datastore)
+            .sled_id(non_member_sled)
+            .fetch()
+            .await
+            .expect("looked up sled");
+        let expected_message = TransitionError::InvalidTransition {
+            current: decommissioned,
+            transition: SledTransition::Policy(SledPolicy::Expunged),
+        }
+        .to_string();
+        match expunge(non_member_sled, non_member_hw.clone()).await {
+            Err(Error::Conflict { message }) => {
+                assert_eq!(message.external_message(), expected_message);
+            }
+            other => panic!("expected Conflict, got {other:?}"),
+        }
+
+        let without_member: BTreeSet<_> =
+            hw_ids[2..].iter().cloned().map(BaseboardId::from).collect();
+        datastore
+            .tq_insert_latest_config(
+                opctx,
+                ProposedTrustQuorumConfig {
+                    rack_id,
+                    epoch: Epoch(2),
+                    is_lrtq_upgrade: IsLrtqUpgrade::No {
+                        last_committed_epoch: Epoch(1),
+                    },
+                    members: without_member,
+                },
+            )
+            .await
+            .unwrap();
+        datastore
+            .tq_abort_config(
+                opctx,
+                make_authz_tq(rack_id),
+                Epoch(2),
+                "test".into(),
+            )
+            .await
+            .unwrap();
+
+        assert_member_conflict(
+            expunge(member_sled, member_hw.clone()).await,
+            Epoch(1),
+        );
+        assert_eq!(policy(member_sled).await, in_service);
+        assert_eq!(
+            disk_policy(member_disk).await,
+            PhysicalDiskPolicy::InService
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

@@ -19,7 +19,6 @@ use nexus_types::external_api;
 use nexus_types::external_api::path_params;
 use nexus_types::external_api::physical_disk::PhysicalDiskPolicy;
 use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
-use nexus_types::trust_quorum::check_trust_quorum_allows_expunge;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -209,12 +208,8 @@ impl super::Nexus {
         // If the sled still exists in the latest committed trust quorum
         // configuration, it cannot be expunged.
         //
-        // This is just a sanity check. There is an inherent TOCTUO here, since
-        // we aren't combining the check with with the policy change inside
-        // a transaction. However, it is unlikely that an operator would be
-        // creating a different trust quorum configuration while trying to
-        // expunge this sled, since both have to be done from omdb by an oxide
-        // employee right now.
+        // The membership check and the change to expunged are run in a single
+        // transaction.
         //
         // When we add an external API, we'll probably want to come back and add
         // some extra safeguards including checking that there are no ongoing
@@ -224,23 +219,18 @@ impl super::Nexus {
         // the last configuration wasn't aborted. This is probably good enough
         // for now given that the user already has to confirm a bunch of prompts
         // before kicking off the operation.
-        let (tq_latest_committed_config, _) = self
-            .db_datastore
-            .tq_load_latest_possible_committed_config(opctx, authz_tq)
-            .await?;
         let baseboard_id = BaseboardId {
             part_number: sled.part_number().to_string(),
             serial_number: sled.serial_number().to_string(),
         };
-        check_trust_quorum_allows_expunge(
-            sled_id,
-            &baseboard_id,
-            &tq_latest_committed_config,
-        )?;
-
         let prev_policy = self
             .db_datastore
-            .sled_set_policy_to_expunged(opctx, &authz_sled)
+            .sled_set_policy_to_expunged_if_trust_quorum_allows(
+                opctx,
+                &authz_sled,
+                &authz_tq,
+                &baseboard_id,
+            )
             .await?;
 
         // The instance-watcher background task is responsible for marking any
