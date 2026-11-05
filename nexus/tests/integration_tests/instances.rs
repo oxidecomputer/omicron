@@ -10813,3 +10813,75 @@ async fn test_instances_shutdown_policy_unchanged_when_omitted_in_update(
     );
 }
 
+#[nexus_test]
+async fn test_instances_shutdown_policy_reboot(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "resonance-cascade";
+    const CUSTOM_TIMEOUT_SECS: u64 = 531;
+    const CUSTOM_POLICY: Option<instance::InstanceShutdownPolicy> =
+        Some(instance::InstanceShutdownPolicy::PowerButton {
+            timeout_secs: CUSTOM_TIMEOUT_SECS,
+        });
+
+    let (instance, propolis_addr) =
+        setup_shutdown_test_instance_and_mock_propolis(
+            &cptestctx,
+            instance_name,
+            CUSTOM_POLICY,
+        )
+        .await;
+
+    assert_eq!(instance.shutdown_policy, CUSTOM_POLICY);
+
+    expect_instance_reboot_ok(client, instance_name).await;
+    assert_matches::assert_matches!(
+        mock_get_last_state_requested(propolis_addr).await,
+        propolis_client::types::InstanceStateChange {
+            acpi_timeout_secs: Some(CUSTOM_TIMEOUT_SECS),
+            state: PropolisStateRequested::AcpiReboot
+        }
+    );
+}
+
+#[nexus_test]
+async fn test_instances_shutdown_policy_reboot_after_stop(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "resonance-cascade";
+    const CUSTOM_TIMEOUT_SECS: u64 = 531;
+    const CUSTOM_POLICY: Option<instance::InstanceShutdownPolicy> =
+        Some(instance::InstanceShutdownPolicy::PowerButton {
+            timeout_secs: CUSTOM_TIMEOUT_SECS,
+        });
+
+    let (instance, propolis_addr) =
+        setup_shutdown_test_instance_and_mock_propolis(
+            &cptestctx,
+            instance_name,
+            CUSTOM_POLICY,
+        )
+        .await;
+
+    assert_eq!(instance.shutdown_policy, CUSTOM_POLICY);
+
+    expect_instance_stop_ok(client, instance_name, false).await;
+    assert_matches::assert_matches!(
+        mock_get_last_state_requested(propolis_addr).await,
+        propolis_client::types::InstanceStateChange {
+            acpi_timeout_secs: Some(CUSTOM_TIMEOUT_SECS),
+            state: PropolisStateRequested::AcpiStop
+        }
+    );
+
+    expect_instance_reboot_ok(client, instance_name).await;
+    assert_matches::assert_matches!(
+        mock_get_last_state_requested(propolis_addr).await,
+        propolis_client::types::InstanceStateChange {
+            acpi_timeout_secs: Some(CUSTOM_TIMEOUT_SECS),
+            state: PropolisStateRequested::AcpiReboot
+        }
+    );
+}
