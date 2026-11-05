@@ -22,6 +22,7 @@ pub use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::{RACK_PREFIX_LENGTH, SLED_PREFIX_LENGTH};
 use omicron_common::api::external::ByteCount;
@@ -208,6 +209,19 @@ pub struct Collection {
     pub ntp_timesync: IdOrdMap<TimeSync>,
     /// The generation status of internal DNS servers
     pub internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
+}
+
+/// Returns whether `zone_name` names a Propolis zone.
+///
+/// Propolis zones come and go with their VMMs, so SMF services in them are
+/// excluded when judging sled health from
+/// [`SledAgent::smf_services_enabled_not_online`].
+///
+/// This matches on the zone name prefix. If that prefix ever changed without
+/// [`PROPOLIS_ZONE_PREFIX`] following, Propolis services would be reported as
+/// false positives.
+pub fn is_propolis_zone(zone_name: &str) -> bool {
+    zone_name.starts_with(PROPOLIS_ZONE_PREFIX)
 }
 
 impl Collection {
