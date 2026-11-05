@@ -26,6 +26,10 @@ pub struct UnadoptedRack {
 }
 
 /// View of an unadopted sled in an unadopted rack
+///
+/// This is distinct from an `UninitializedSled`, which represents an
+/// uninitialized sled in an *adopted* rack; by contrast, this represents a sled
+/// in a rack that hasn't been adopted yet.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct UnadoptedSled {
     pub sled_id: Uuid,
