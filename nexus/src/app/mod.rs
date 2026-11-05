@@ -89,7 +89,6 @@ mod lldp;
 mod login;
 mod metrics;
 pub(crate) mod multicast;
-mod multirack;
 mod network_interface;
 pub(crate) mod oximeter;
 mod probe;
