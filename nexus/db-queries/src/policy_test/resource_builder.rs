@@ -299,6 +299,7 @@ impl_dyn_authorized_resource_for_resource!(authz::Vpc);
 impl_dyn_authorized_resource_for_resource!(authz::VpcRouter);
 impl_dyn_authorized_resource_for_resource!(authz::VpcSubnet);
 impl_dyn_authorized_resource_for_resource!(authz::Alert);
+impl_dyn_authorized_resource_for_resource!(authz::ActiveProblem);
 impl_dyn_authorized_resource_for_resource!(authz::AlertReceiver);
 impl_dyn_authorized_resource_for_resource!(authz::WebhookSecret);
 impl_dyn_authorized_resource_for_resource!(authz::Zpool);

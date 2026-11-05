@@ -1925,6 +1925,14 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "ActiveProblem",
+    parent = "Fleet",
+    primary_key = { uuid_kind = ActiveProblemKind },
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
     name = "AlertReceiver",
     parent = "Fleet",
     primary_key = { uuid_kind = AlertReceiverKind },

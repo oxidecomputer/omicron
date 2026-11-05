@@ -2686,6 +2686,27 @@ resource: Alert id "31cb17da-4164-4cbf-b9a3-b3e4a687c08b"
   internal-api                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   external-authn                    ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
 
+resource: ActiveProblem id "5b2e9e47-6a1c-4f0d-9d3e-7c8a1f2b4e60"
+
+  USER                              Q  R LC RP  M MP CC  D
+  fleet-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  fleet-collaborator                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  fleet-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-admin                       ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-collaborator                ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-limited-collaborator        ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-viewer                      ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-user-self                   ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-admin                 ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-collaborator          ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-limited-collaborator  ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-viewer                ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  unauthenticated                   !  !  !  !  !  !  !  !
+  scim                              ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  db-init                           ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  internal-api                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  external-authn                    ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+
 resource: AlertReceiver "webhooked-on-phonics"
 
   USER                              Q  R LC RP  M MP CC  D
