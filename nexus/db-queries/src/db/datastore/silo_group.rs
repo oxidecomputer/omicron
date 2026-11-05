@@ -732,7 +732,7 @@ impl DataStore {
                 }
 
                 // delete group's role assignments
-                self.role_assignments_delete_for_identities(
+                self.role_assignment_delete_by_identity(
                     &conn,
                     model::IdentityType::SiloGroup,
                     &[group_id.into_untyped_uuid()],

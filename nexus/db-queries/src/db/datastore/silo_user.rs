@@ -551,7 +551,7 @@ impl DataStore {
                 }
 
                 // delete the user's role assignments
-                self.role_assignments_delete_for_identities(
+                self.role_assignment_delete_by_identity(
                     &conn,
                     model::IdentityType::SiloUser,
                     &[authz_silo_user_id.into_untyped_uuid()],

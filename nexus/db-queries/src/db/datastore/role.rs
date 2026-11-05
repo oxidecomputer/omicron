@@ -114,7 +114,7 @@ impl DataStore {
     /// callers outside one should map it with `public_error_from_diesel`.
     ///
     /// Returns the number of rows deleted.
-    pub(super) async fn role_assignments_delete_for_identities(
+    pub(super) async fn role_assignment_delete_by_identity(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         identity_type: IdentityType,

@@ -586,7 +586,7 @@ impl DataStore {
 
         // delete role assignments held by the silo's users
         let updated_rows = self
-            .role_assignments_delete_for_identities(
+            .role_assignment_delete_by_identity(
                 &conn,
                 db::model::IdentityType::SiloUser,
                 &deleted_user_ids,
@@ -655,7 +655,7 @@ impl DataStore {
         );
 
         let updated_rows = self
-            .role_assignments_delete_for_identities(
+            .role_assignment_delete_by_identity(
                 &conn,
                 db::model::IdentityType::SiloGroup,
                 &deleted_group_ids,
