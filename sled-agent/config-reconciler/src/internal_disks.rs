@@ -544,7 +544,7 @@ impl From<&'_ Disk> for InternalDiskDetails {
                 is_boot_disk: disk.is_boot_disk(),
             },
             zpool_id,
-            slot: M2Slot::from_chassis_location(disk.location()),
+            slot: M2Slot::from_chassis_location(disk.location().as_str()),
             boot_image_raw_devfs_path: disk
                 .boot_image_devfs_path(true)
                 .map_err(Arc::new),
@@ -996,7 +996,7 @@ mod tests {
                 pcie_slot: raw_disk.pcie_slot(),
                 identity: raw_disk.identity().clone(),
                 is_boot_disk: raw_disk.is_boot_disk(),
-                location: raw_disk.location().to_string(),
+                location: raw_disk.location().clone(),
                 partitions: vec![],
                 zpool_name: ZpoolName::Internal(InternalZpoolUuid::new_v4()),
                 firmware: raw_disk.firmware().clone(),

@@ -151,6 +151,7 @@ mod tests {
     use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::disk::DiskVariant;
     use sled_hardware::DiskFirmware;
+    use sled_hardware::DiskLocation;
     use sled_hardware::UnparsedDisk;
     use sled_storage::disk::RawSyntheticDisk;
     use std::collections::BTreeMap;
@@ -191,7 +192,7 @@ mod tests {
                     let variant = DiskVariant::U2;
                     let firmware =
                         DiskFirmware::new(0, None, false, 255, Vec::new());
-                    let location = "N0".to_string();
+                    let location = DiskLocation::new("N0");
 
                     match kind {
                         ArbitraryDiskKind::Real => {

@@ -122,11 +122,12 @@ impl WriteDestination {
         let mut drives = BTreeMap::new();
 
         for disk in hardware.m2_disks() {
-            let Some(slot) = M2Slot::from_chassis_location(disk.location())
+            let Some(slot) =
+                M2Slot::from_chassis_location(disk.location().as_str())
             else {
                 warn!(
                     log, "skipping M.2 drive with unexpected chassis location";
-                    "location" => disk.location(),
+                    "location" => %disk.location(),
                 );
                 continue;
             };

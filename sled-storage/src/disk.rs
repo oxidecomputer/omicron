@@ -14,7 +14,8 @@ use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::DiskVariant;
 use sled_hardware::{
-    DiskFirmware, Partition, PooledDisk, PooledDiskError, UnparsedDisk,
+    DiskFirmware, DiskLocation, Partition, PooledDisk, PooledDiskError,
+    UnparsedDisk,
 };
 use slog::{Logger, info};
 
@@ -107,7 +108,7 @@ pub struct RawSyntheticDisk {
     /// A chassis location spelled the way real hardware spells it, such as
     /// "N3" or "M.2 East", so that anything keyed on those labels treats a
     /// synthetic disk like a real one. See [`UnparsedDisk::location`].
-    pub location: String,
+    pub location: DiskLocation,
 }
 
 impl RawSyntheticDisk {
@@ -186,15 +187,18 @@ impl RawSyntheticDisk {
 ///
 /// Real sleds have two M.2 sockets, but a test may number its disks with one
 /// counter across both variants, so a later M.2 is labelled `M.2 <ordinal>`.
-pub fn synthetic_disk_location(variant: DiskVariant, ordinal: i64) -> String {
-    match variant {
+pub fn synthetic_disk_location(
+    variant: DiskVariant,
+    ordinal: i64,
+) -> DiskLocation {
+    DiskLocation::new(match variant {
         DiskVariant::U2 => format!("N{ordinal}"),
         DiskVariant::M2 => match ordinal {
             0 => "M.2 East".to_string(),
             1 => "M.2 West".to_string(),
             n => format!("M.2 {n}"),
         },
-    }
+    })
 }
 
 // An [`UnparsedDisk`] disk learned about from the hardware or a wrapped zpool
@@ -269,7 +273,7 @@ impl RawDisk {
     }
 
     /// See [`UnparsedDisk::location`].
-    pub fn location(&self) -> &str {
+    pub fn location(&self) -> &DiskLocation {
         match self {
             Self::Real(disk) => disk.location(),
             Self::Synthetic(disk) => &disk.location,
@@ -423,7 +427,7 @@ impl Disk {
     }
 
     /// See [`UnparsedDisk::location`].
-    pub fn location(&self) -> &str {
+    pub fn location(&self) -> &DiskLocation {
         match self {
             Self::Real(disk) => &disk.location,
             Self::Synthetic(disk) => &disk.raw.location,
@@ -438,7 +442,7 @@ impl Disk {
         match self {
             Disk::Real(pooled_disk) => {
                 pooled_disk.firmware = raw_disk.firmware().clone();
-                pooled_disk.location = raw_disk.location().to_string();
+                pooled_disk.location = raw_disk.location().clone();
             }
             Disk::Synthetic(synthetic_disk) => {
                 synthetic_disk.raw.firmware = raw_disk.firmware().clone();
@@ -482,6 +486,7 @@ mod tests {
         RawSyntheticDisk::load(Utf8Path::new(vdev), slot)
             .expect("vdev name parses")
             .location
+            .to_string()
     }
 
     #[test]
@@ -506,6 +511,6 @@ mod tests {
         let disk = RawDisk::Synthetic(
             RawSyntheticDisk::load(Utf8Path::new("u2_3.vdev"), 0).unwrap(),
         );
-        assert_eq!(disk.location(), "N3");
+        assert_eq!(disk.location().as_str(), "N3");
     }
 }
