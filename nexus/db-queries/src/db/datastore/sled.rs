@@ -37,6 +37,7 @@ use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::result::Error as DieselError;
 use iddqd::IdOrdMap;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
@@ -2000,7 +2001,7 @@ impl DataStore {
     ) -> Result<SledPolicy, TransitionError> {
         opctx.authorize(authz::Action::Modify, authz_sled).await?;
 
-        let sled_id = to_db_typed_uuid(authz_sled.id());
+        let sled_id = authz_sled.id();
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
         let policy = self
@@ -2009,101 +2010,14 @@ impl DataStore {
                 let err = err.clone();
 
                 async move {
-                    let t = SledTransition::Policy(new_sled_policy);
-                    let valid_old_policies = t.valid_old_policies();
-                    let valid_old_states = t.valid_old_states();
-
-                    use nexus_db_schema::schema::sled::dsl;
-                    let query = diesel::update(dsl::sled)
-                        .filter(dsl::time_deleted.is_null())
-                        .filter(dsl::id.eq(sled_id));
-
-                    let query = match check {
-                        ValidateTransition::Yes => query
-                            .filter(
-                                dsl::sled_policy.eq_any(
-                                    valid_old_policies
-                                        .into_iter()
-                                        .map(to_db_sled_policy),
-                                ),
-                            )
-                            .filter(
-                                dsl::sled_state
-                                    .eq_any(valid_old_states.iter().copied()),
-                            )
-                            .into_boxed(),
-                        #[cfg(test)]
-                        ValidateTransition::No => query.into_boxed(),
-                    };
-
-                    let query = query
-                        .set((
-                            dsl::sled_policy
-                                .eq(to_db_sled_policy(new_sled_policy)),
-                            dsl::time_modified.eq(Utc::now()),
-                        ))
-                        .check_if_exists::<Sled>(sled_id);
-
-                    let result = query.execute_and_check(&conn).await?;
-
-                    let old_policy = match (check, result.status) {
-                        (ValidateTransition::Yes, UpdateStatus::Updated) => {
-                            result.found.policy()
-                        }
-                        (
-                            ValidateTransition::Yes,
-                            UpdateStatus::NotUpdatedButExists,
-                        ) => {
-                            // Two reasons this can happen:
-                            // 1. An idempotent update: this is treated as a
-                            //    success.
-                            // 2. Invalid state transition: a failure.
-                            //
-                            // To differentiate between the two, check that the
-                            // new policy is the same as the old policy, and
-                            // that the old state is valid.
-                            if result.found.policy() == new_sled_policy
-                                && valid_old_states
-                                    .contains(&result.found.state())
-                            {
-                                result.found.policy()
-                            } else {
-                                return Err(err.bail(
-                                    TransitionError::InvalidTransition {
-                                        current: result.found,
-                                        transition: SledTransition::Policy(
-                                            new_sled_policy,
-                                        ),
-                                    },
-                                ));
-                            }
-                        }
-                        #[cfg(test)]
-                        (ValidateTransition::No, _) => result.found.policy(),
-                    };
-
-                    // When a sled is expunged, the associated disks with that
-                    // sled should also be implicitly set to expunged.
-                    let new_disk_policy = match new_sled_policy {
-                        SledPolicy::InService { .. } => None,
-                        SledPolicy::Expunged => {
-                            Some(nexus_db_model::PhysicalDiskPolicy::Expunged)
-                        }
-                    };
-                    if let Some(new_disk_policy) = new_disk_policy {
-                        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
-                        diesel::update(physical_disk_dsl::physical_disk)
-                            .filter(physical_disk_dsl::time_deleted.is_null())
-                            .filter(physical_disk_dsl::sled_id.eq(sled_id))
-                            .set(
-                                physical_disk_dsl::disk_policy
-                                    .eq(new_disk_policy),
-                            )
-                            .execute_async(&conn)
-                            .await?;
-                    }
-
-                    Ok(old_policy)
+                    Self::sled_set_policy_conn(
+                        &conn,
+                        sled_id,
+                        new_sled_policy,
+                        check,
+                        &err,
+                    )
+                    .await
                 }
             })
             .await
@@ -2117,6 +2031,94 @@ impl DataStore {
                 ))
             })?;
         Ok(policy)
+    }
+
+    async fn sled_set_policy_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        sled_id: SledUuid,
+        new_sled_policy: SledPolicy,
+        check: ValidateTransition,
+        err: &OptionalError<TransitionError>,
+    ) -> Result<SledPolicy, DieselError> {
+        let sled_id = to_db_typed_uuid(sled_id);
+        let t = SledTransition::Policy(new_sled_policy);
+        let valid_old_policies = t.valid_old_policies();
+        let valid_old_states = t.valid_old_states();
+
+        use nexus_db_schema::schema::sled::dsl;
+        let query = diesel::update(dsl::sled)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(sled_id));
+
+        let query = match check {
+            ValidateTransition::Yes => query
+                .filter(dsl::sled_policy.eq_any(
+                    valid_old_policies.into_iter().map(to_db_sled_policy),
+                ))
+                .filter(
+                    dsl::sled_state.eq_any(valid_old_states.iter().copied()),
+                )
+                .into_boxed(),
+            #[cfg(test)]
+            ValidateTransition::No => query.into_boxed(),
+        };
+
+        let query = query
+            .set((
+                dsl::sled_policy.eq(to_db_sled_policy(new_sled_policy)),
+                dsl::time_modified.eq(Utc::now()),
+            ))
+            .check_if_exists::<Sled>(sled_id);
+
+        let result = query.execute_and_check(conn).await?;
+
+        let old_policy = match (check, result.status) {
+            (ValidateTransition::Yes, UpdateStatus::Updated) => {
+                result.found.policy()
+            }
+            (ValidateTransition::Yes, UpdateStatus::NotUpdatedButExists) => {
+                // Two reasons this can happen:
+                // 1. An idempotent update: this is treated as a
+                //    success.
+                // 2. Invalid state transition: a failure.
+                //
+                // To differentiate between the two, check that the
+                // new policy is the same as the old policy, and
+                // that the old state is valid.
+                if result.found.policy() == new_sled_policy
+                    && valid_old_states.contains(&result.found.state())
+                {
+                    result.found.policy()
+                } else {
+                    return Err(err.bail(TransitionError::InvalidTransition {
+                        current: result.found,
+                        transition: SledTransition::Policy(new_sled_policy),
+                    }));
+                }
+            }
+            #[cfg(test)]
+            (ValidateTransition::No, _) => result.found.policy(),
+        };
+
+        // When a sled is expunged, the associated disks with that
+        // sled should also be implicitly set to expunged.
+        let new_disk_policy = match new_sled_policy {
+            SledPolicy::InService { .. } => None,
+            SledPolicy::Expunged => {
+                Some(nexus_db_model::PhysicalDiskPolicy::Expunged)
+            }
+        };
+        if let Some(new_disk_policy) = new_disk_policy {
+            use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+            diesel::update(physical_disk_dsl::physical_disk)
+                .filter(physical_disk_dsl::time_deleted.is_null())
+                .filter(physical_disk_dsl::sled_id.eq(sled_id))
+                .set(physical_disk_dsl::disk_policy.eq(new_disk_policy))
+                .execute_async(conn)
+                .await?;
+        }
+
+        Ok(old_policy)
     }
 
     /// Marks the state of the sled as decommissioned, as believed by Nexus.
