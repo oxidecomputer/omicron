@@ -46,11 +46,12 @@ fn make_discovered_sleds(rack_idx: u8, count: u8) -> IdOrdMap<DiscoveredSled> {
             sled_agent_start_state: match sled_idx % 3 {
                 0 => SledAgentStartState::Started,
                 1 => SledAgentStartState::InProgress { last_error: None },
-                _ => SledAgentStartState::InProgress {
+                2 => SledAgentStartState::InProgress {
                     last_error: Some(format!(
                         "test error from sled {rack_idx}-{sled_idx}"
                     )),
                 },
+                _ => unreachable!(),
             },
         })
         .collect()
