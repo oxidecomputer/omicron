@@ -199,7 +199,36 @@ struct ValidatedConfig {
     commit_partially_epoch: Option<Epoch>,
 }
 
-// TODO-RAINCLAUDE: the latest trust quorum configuration for a rack, once validate_new_config_conn has checked that it is not preparing.
+// TODO-RAINCLAUDE: the rack's trust quorum configurations that a new configuration builds on; only tq_load_reconfiguration_base_conn builds one, after checking that no reconfiguration is in flight, so holding one means the latest configuration isn't preparing and a committing last committed configuration has at least K + Z commit acks.
+pub(super) struct ReconfigurationBase {
+    rack_id: RackUuid,
+    latest: Option<LatestConfig>,
+}
+
+impl ReconfigurationBase {
+    pub(super) fn latest_epoch(&self) -> Option<Epoch> {
+        match &self.latest {
+            None => None,
+            Some(LatestConfig::Committed(config)) => Some(config.epoch),
+            Some(LatestConfig::Aborted { epoch, .. }) => Some(*epoch),
+        }
+    }
+
+    pub(super) fn last_committed(&self) -> Option<&TrustQuorumConfig> {
+        match &self.latest {
+            None | Some(LatestConfig::Aborted { last_committed: None, .. }) => {
+                None
+            }
+            Some(LatestConfig::Committed(config))
+            | Some(LatestConfig::Aborted {
+                last_committed: Some(config),
+                ..
+            }) => Some(config),
+        }
+    }
+}
+
+// TODO-RAINCLAUDE: the latest trust quorum configuration for a rack, never preparing.
 enum LatestConfig {
     // TODO-RAINCLAUDE: committing, committed, or committed partially, so it is also the last committed configuration.
     Committed(TrustQuorumConfig),
@@ -604,6 +633,20 @@ impl DataStore {
         authz_tq: &authz::TrustQuorumConfig,
         proposed: ProposedTrustQuorumConfig,
     ) -> Result<TrustQuorumConfig, TransactionError<Error>> {
+        let base =
+            Self::tq_load_reconfiguration_base_conn(conn, authz_tq.rack().id())
+                .await?;
+        Self::tq_insert_config_on_base_conn(conn, authz_tq, base, proposed)
+            .await
+    }
+
+    // TODO-RAINCLAUDE: same caller obligations as tq_insert_latest_config_conn, and base must have been loaded in the same transaction; for a caller that builds the proposal from the base, so that the in-flight checks run before the caller's own checks and only once.
+    pub(super) async fn tq_insert_config_on_base_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        authz_tq: &authz::TrustQuorumConfig,
+        base: ReconfigurationBase,
+        proposed: ProposedTrustQuorumConfig,
+    ) -> Result<TrustQuorumConfig, TransactionError<Error>> {
         let rack_id = authz_tq.rack().id();
         if proposed.rack_id != rack_id {
             return Err(TransactionError::CustomError(Error::internal_error(
@@ -615,7 +658,8 @@ impl DataStore {
             )));
         }
 
-        let validated = Self::validate_new_config_conn(conn, proposed).await?;
+        let validated =
+            Self::validate_new_config_conn(conn, &base, proposed).await?;
 
         // Mark the old configuration as committed-partially
         if let Some(epoch) = validated.commit_partially_epoch {
@@ -633,15 +677,14 @@ impl DataStore {
         Ok(validated.config)
     }
 
-    async fn validate_new_config_conn(
+    // TODO-RAINCLAUDE: the in-flight checks read only the rack's configurations, not the proposal, so they run here, before any check of the proposal, and an in-flight reconfiguration is a 409 even when the proposal is also invalid.
+    pub(super) async fn tq_load_reconfiguration_base_conn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        proposed: ProposedTrustQuorumConfig,
-    ) -> Result<ValidatedConfig, TransactionError<Error>> {
+        rack_id: RackUuid,
+    ) -> Result<ReconfigurationBase, TransactionError<Error>> {
         //
         // Check that there is not an in progress reconfiguration:
         //
-        // TODO-RAINCLAUDE: these checks read only the rack's configurations, not the proposal, and run before any check of the proposal, so that an in-flight reconfiguration is a 409 even when the proposal is also invalid.
-        let rack_id = proposed.rack_id;
         let latest = match Self::tq_get_latest_config_with_members_conn(
             conn, rack_id,
         )
@@ -698,18 +741,9 @@ impl DataStore {
             },
         };
 
-        let last_committed_config = match &latest {
-            None | Some(LatestConfig::Aborted { last_committed: None, .. }) => {
-                None
-            }
-            Some(LatestConfig::Committed(config))
-            | Some(LatestConfig::Aborted {
-                last_committed: Some(config),
-                ..
-            }) => Some(config),
-        };
+        let base = ReconfigurationBase { rack_id, latest };
 
-        if let Some(last_committed_config) = last_committed_config {
+        if let Some(last_committed_config) = base.last_committed() {
             bail_unless!(
                 last_committed_config.state.is_committed()
                     || last_committed_config.state.is_committing(),
@@ -737,6 +771,22 @@ impl DataStore {
                 }
             }
         }
+
+        Ok(base)
+    }
+
+    async fn validate_new_config_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        base: &ReconfigurationBase,
+        proposed: ProposedTrustQuorumConfig,
+    ) -> Result<ValidatedConfig, TransactionError<Error>> {
+        bail_unless!(
+            proposed.rack_id == base.rack_id,
+            "Trust quorum proposed configuration is for rack {}, but its \
+            base was loaded for rack {}",
+            proposed.rack_id,
+            base.rack_id
+        );
 
         //
         // Check validity of members in proposed config
@@ -789,11 +839,7 @@ impl DataStore {
         //
         // Check that the proposal builds on the latest configuration:
         //
-        let latest_epoch = match &latest {
-            None => None,
-            Some(LatestConfig::Committed(config)) => Some(config.epoch),
-            Some(LatestConfig::Aborted { epoch, .. }) => Some(*epoch),
-        };
+        let latest_epoch = base.latest_epoch();
         // Check for an outdated epoch.
         //
         // The proposed epoch is computed to be `latest + 1`, so another
@@ -827,7 +873,7 @@ impl DataStore {
             proposed.epoch
         );
 
-        match &latest {
+        match &base.latest {
             None => {
                 if let Some(epoch) = proposed.last_committed_epoch() {
                     return Err(Error::internal_error(&format!(
@@ -891,8 +937,8 @@ impl DataStore {
         // At this point we have either loaded the proposed last committed
         // configuration or there is not one.
         let possible_coordinators: BTreeSet<BaseboardId> =
-            if let Some(last_committed_config) = last_committed_config {
-                // TODO-RAINCLAUDE: the in-flight checks above verified that a committing last committed configuration has at least K + Z commit acks.
+            if let Some(last_committed_config) = base.last_committed() {
+                // TODO-RAINCLAUDE: tq_load_reconfiguration_base_conn verified that a committing last committed configuration has at least K + Z commit acks.
                 if last_committed_config.state.is_committing() {
                     commit_partially_epoch = Some(last_committed_config.epoch);
                 }
