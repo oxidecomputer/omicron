@@ -28,6 +28,8 @@ use nexus_db_model::TrustQuorumMember as DbTrustQuorumMember;
 use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::trust_quorum::IsLrtqUpgrade;
 use nexus_types::trust_quorum::ProposedTrustQuorumConfig;
+use nexus_types::trust_quorum::TRUST_QUORUM_MAX_MEMBERS;
+use nexus_types::trust_quorum::TRUST_QUORUM_MIN_MEMBERS;
 use nexus_types::trust_quorum::{
     TrustQuorumConfig, TrustQuorumConfigState, TrustQuorumMemberData,
     TrustQuorumMemberState,
@@ -579,9 +581,11 @@ impl DataStore {
 
         // Check membership size
         bail_unless!(
-            proposed.members.len() >= 3 && proposed.members.len() <= 32,
+            proposed.members.len() >= TRUST_QUORUM_MIN_MEMBERS
+                && proposed.members.len() <= TRUST_QUORUM_MAX_MEMBERS,
             "Invalid Trust Quorum membership size ({}): \
-            must be between 3 and 32 nodes",
+            must be between {TRUST_QUORUM_MIN_MEMBERS} and \
+            {TRUST_QUORUM_MAX_MEMBERS} nodes",
             proposed.members.len()
         );
 
@@ -1903,6 +1907,48 @@ mod tests {
         assert_ne!(e1, e2);
         assert_ne!(e1, e3);
         assert_ne!(e2, e3);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_tq_insert_latest_refuses_membership_size() {
+        let logctx =
+            test_setup_log("test_tq_insert_latest_refuses_membership_size");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let rack_id = RackUuid::new_v4();
+
+        for num_members in [2, 33] {
+            let members: BTreeSet<_> = (0..num_members)
+                .map(|i| BaseboardId {
+                    part_number: "test-part".to_string(),
+                    serial_number: format!("serial-{i}"),
+                })
+                .collect();
+            let proposed = ProposedTrustQuorumConfig {
+                rack_id,
+                epoch: Epoch(2),
+                is_lrtq_upgrade: IsLrtqUpgrade::No {
+                    last_committed_epoch: Epoch(1),
+                },
+                members,
+            };
+            let error = datastore
+                .tq_insert_latest_config(opctx, proposed)
+                .await
+                .expect_err("a proposal outside 3 to 32 members is refused");
+            assert_eq!(
+                error,
+                Error::InternalError {
+                    internal_message: format!(
+                        "Invalid Trust Quorum membership size \
+                         ({num_members}): must be between 3 and 32 nodes"
+                    ),
+                },
+            );
+        }
 
         db.terminate().await;
         logctx.cleanup_successful();

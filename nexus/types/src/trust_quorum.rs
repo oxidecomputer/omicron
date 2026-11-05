@@ -149,8 +149,8 @@ impl TrustQuorumConfig {
         } else {
             TrustQuorumConfigState::Preparing
         };
-        assert!(num_members >= 3);
-        assert!(num_members <= 32);
+        assert!(usize::from(num_members) >= TRUST_QUORUM_MIN_MEMBERS);
+        assert!(usize::from(num_members) <= TRUST_QUORUM_MAX_MEMBERS);
         TrustQuorumConfig {
             rack_id: proposed.rack_id,
             epoch: proposed.epoch,
@@ -189,8 +189,8 @@ impl TrustQuorumConfig {
         coordinator: BaseboardId,
     ) -> TrustQuorumConfig {
         let num_members = u8::try_from(initial_members.len()).unwrap();
-        assert!(num_members >= 3);
-        assert!(num_members <= 32);
+        assert!(usize::from(num_members) >= TRUST_QUORUM_MIN_MEMBERS);
+        assert!(usize::from(num_members) <= TRUST_QUORUM_MAX_MEMBERS);
         let now = now_db_precision();
         TrustQuorumConfig {
             rack_id,
@@ -303,6 +303,12 @@ impl ProposedTrustQuorumConfig {
         })
     }
 }
+
+/// The minimum number of members in a trust quorum.
+pub const TRUST_QUORUM_MIN_MEMBERS: usize = 3;
+
+/// The maximum number of members in a trust quorum.
+pub const TRUST_QUORUM_MAX_MEMBERS: usize = 32;
 
 /// Given the current trust quorum config returned by
 /// `tq_load_latest_possible_committed_config`, determine whether the provided
