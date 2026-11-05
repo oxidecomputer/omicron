@@ -545,21 +545,18 @@ async fn sis_move_to_starting_undo(
                 .fetch()
                 .await
             {
-                Ok((
-                    _authz_silo,
-                    _authz_project,
-                    _authz_instance,
-                    current_instance,
-                )) => match current_instance.intended_state {
-                    db::model::InstanceIntendedState::Running => {
-                        db::model::InstanceState::SledEvacuating
+                Ok((.., current_instance)) => {
+                    match current_instance.intended_state {
+                        db::model::InstanceIntendedState::Running => {
+                            db::model::InstanceState::SledEvacuating
+                        }
+                        db::model::InstanceIntendedState::Destroyed
+                        | db::model::InstanceIntendedState::GuestShutdown
+                        | db::model::InstanceIntendedState::Stopped => {
+                            db::model::InstanceState::NoVmm
+                        }
                     }
-                    db::model::InstanceIntendedState::Destroyed
-                    | db::model::InstanceIntendedState::GuestShutdown
-                    | db::model::InstanceIntendedState::Stopped => {
-                        db::model::InstanceState::NoVmm
-                    }
-                },
+                }
                 // If the instance cannot be read, we set its state to `NoVmm`
                 // to reduce the possibility of leaving it as `Rebooting`
                 // indefinitely.
@@ -1683,7 +1680,7 @@ mod test {
         cptestctx.teardown().await;
     }
 
-    /// Tests that if a start saga unwinds because sled agent returned failure
+    /// Ensures that if a start saga unwinds because sled agent returned failure
     /// from a call to ensure the instance was running, then the system returns
     /// to the correct state.
     ///
@@ -1691,13 +1688,19 @@ mod test {
     /// test causes saga nodes to "fail" without actually executing anything,
     /// whereas this test injects a failure into the normal operation of the
     /// ensure-running node.
-    #[tokio::test]
-    async fn test_ensure_running_unwind() {
-        let cptestctx = test_helpers::instance_saga_test_builder(
-            "test_ensure_running_unwind",
-        )
-        .start::<crate::Server>()
-        .await;
+    async fn ensure_running_unwind(
+        test_name: &str,
+        case: EnsureRunningUnwindCase,
+    ) {
+        let EnsureRunningUnwindCase {
+            reason,
+            user_stops_during_saga,
+            expected_state,
+        } = case;
+
+        let cptestctx = test_helpers::instance_saga_test_builder(test_name)
+            .start::<crate::Server>()
+            .await;
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
@@ -1714,164 +1717,195 @@ mod test {
 
         let sled_agent = cptestctx.first_sled_agent();
 
-        // The state that the instance returns to when the saga unwinds depends
-        // on the instance's reason for starting, and on whether a user stopped
-        // the instance while the saga was running.
-        //
-        // For any reason other than `SledEvacuation`, the end state will be
-        // `NoVmm` (stopped), so it doesn't really matter if the user stops the
-        // instance while the saga is running. We don't test a user stopping the
-        // instance in those cases.
-        struct Case {
-            reason: Reason,
-            user_stops_during_saga: bool,
-            expected_state: nexus_db_model::InstanceState,
-        }
-        let cases = [
-            Case {
-                reason: Reason::User,
-                user_stops_during_saga: false,
-                expected_state: nexus_db_model::InstanceState::NoVmm,
-            },
-            Case {
-                reason: Reason::AutoRestart,
-                user_stops_during_saga: false,
-                expected_state: nexus_db_model::InstanceState::NoVmm,
-            },
-            Case {
-                reason: Reason::AutoStart,
-                user_stops_during_saga: false,
-                expected_state: nexus_db_model::InstanceState::NoVmm,
-            },
-            Case {
-                reason: Reason::SledEvacuation,
-                user_stops_during_saga: false,
-                expected_state: nexus_db_model::InstanceState::SledEvacuating,
-            },
-            Case {
-                reason: Reason::SledEvacuation,
-                user_stops_during_saga: true,
-                expected_state: nexus_db_model::InstanceState::NoVmm,
-            },
-        ];
+        // The instance's intended state should be `Running` when the saga
+        // starts.
+        datastore
+            .instance_set_intended_state(
+                &opctx,
+                &authz_instance,
+                nexus_db_model::InstanceIntendedState::Running,
+            )
+            .await
+            .expect("intended state should be set");
 
-        for Case { reason, user_stops_during_saga, expected_state } in cases {
-            // The instance's intended state should be `Running` when the saga
-            // starts.
+        let db_instance = test_helpers::instance_fetch(&cptestctx, instance_id)
+            .await
+            .instance()
+            .clone();
+
+        let params = Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+            db_instance,
+            reason,
+        };
+
+        let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
+
+        // The ensure_running node is last in the saga. This should be the node
+        // where the failure ultimately occurs.
+        let last_node_name = dag
+            .get_nodes()
+            .last()
+            .expect("saga should have at least one node")
+            .name()
+            .clone();
+
+        let next_registration = if user_stops_during_saga {
+            // To simulate a user stopping the instance while the saga is
+            // running, pause the saga when it registers the VMM with the sled
+            // agent.
+            Some(sled_agent.pause_next_vmm_registration())
+        } else {
+            None
+        };
+
+        // Inject failure at the simulated sled agent level. This allows the
+        // ensure-running node to attempt to change the instance's state, but
+        // forces this operation to fail and produce whatever side effects
+        // result from that failure. The ensure-running node's request to run
+        // the VMM is the first `vmm_put_state` request the saga sends.
+        let next_put_state = sled_agent.pause_next_vmm_put_state();
+
+        let running_saga = nexus
+            .sagas
+            .saga_prepare(dag)
+            .await
+            .expect("saga should be prepared")
+            .start()
+            .await
+            .expect("saga should start");
+
+        if let Some(next_registration) = next_registration {
+            let paused = next_registration
+                .wait_for_request(Duration::from_secs(60))
+                .await;
             datastore
                 .instance_set_intended_state(
                     &opctx,
                     &authz_instance,
-                    nexus_db_model::InstanceIntendedState::Running,
+                    nexus_db_model::InstanceIntendedState::Stopped,
                 )
                 .await
                 .expect("intended state should be set");
-
-            let db_instance =
-                test_helpers::instance_fetch(&cptestctx, instance_id)
-                    .await
-                    .instance()
-                    .clone();
-
-            let params = Params {
-                serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
-                db_instance,
-                reason,
-            };
-
-            let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
-
-            // The ensure_running node is last in the saga. This should be the
-            // node where the failure ultimately occurs.
-            let last_node_name = dag
-                .get_nodes()
-                .last()
-                .expect("saga should have at least one node")
-                .name()
-                .clone();
-
-            let next_registration = if user_stops_during_saga {
-                // To simulate a user stopping the instance while the saga is
-                // running, pause the saga when it registers the VMM with the
-                // sled agent.
-                Some(sled_agent.pause_next_vmm_registration())
-            } else {
-                None
-            };
-
-            // Inject failure at the simulated sled agent level. This allows the
-            // ensure-running node to attempt to change the instance's state,
-            // but forces this operation to fail and produce whatever side
-            // effects result from that failure. The ensure-running node's
-            // request to run the VMM is the first `vmm_put_state` request the
-            // saga sends.
-            let next_put_state = sled_agent.pause_next_vmm_put_state();
-
-            let running_saga = nexus
-                .sagas
-                .saga_prepare(dag)
-                .await
-                .expect("saga should be prepared")
-                .start()
-                .await
-                .expect("saga should start");
-
-            if let Some(next_registration) = next_registration {
-                let paused = next_registration
-                    .wait_for_request(Duration::from_secs(60))
-                    .await;
-                datastore
-                    .instance_set_intended_state(
-                        &opctx,
-                        &authz_instance,
-                        nexus_db_model::InstanceIntendedState::Stopped,
-                    )
-                    .await
-                    .expect("intended state should be set");
-                paused.resume();
-            }
-
-            next_put_state
-                .wait_for_request(Duration::from_secs(60))
-                .await
-                .fail(Error::internal_error(
-                    "injected by test_ensure_running_unwind",
-                ));
-
-            let saga_error = running_saga
-                .wait_until_stopped()
-                .await
-                .into_raw_result()
-                .kind
-                .expect_err("saga should fail due to injected error");
-
-            assert_eq!(
-                saga_error.error_node_name, last_node_name,
-                "start reason: {reason:?}, user stops during saga: \
-                 {user_stops_during_saga}",
-            );
-
-            let db_instance =
-                test_helpers::instance_fetch(&cptestctx, instance_id).await;
-
-            assert_eq!(
-                db_instance.instance().nexus_state,
-                expected_state,
-                "start reason: {reason:?}, user stops during saga: \
-                 {user_stops_during_saga}",
-            );
-            assert!(db_instance.vmm().is_none());
-
-            assert!(
-                test_helpers::no_virtual_provisioning_resource_records_exist(
-                    &cptestctx
-                )
-                .await
-            );
-            assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(&cptestctx).await);
+            paused.resume();
         }
 
+        next_put_state.wait_for_request(Duration::from_secs(60)).await.fail(
+            Error::internal_error("injected by test_ensure_running_unwind"),
+        );
+
+        let saga_error = running_saga
+            .wait_until_stopped()
+            .await
+            .into_raw_result()
+            .kind
+            .expect_err("saga should fail due to injected error");
+
+        assert_eq!(
+            saga_error.error_node_name, last_node_name,
+            "start reason: {reason:?}, user stops during saga: \
+             {user_stops_during_saga}",
+        );
+
+        let db_instance =
+            test_helpers::instance_fetch(&cptestctx, instance_id).await;
+
+        assert_eq!(
+            db_instance.instance().nexus_state,
+            expected_state,
+            "start reason: {reason:?}, user stops during saga: \
+             {user_stops_during_saga}",
+        );
+        assert!(db_instance.vmm().is_none());
+
+        assert!(
+            test_helpers::no_virtual_provisioning_resource_records_exist(
+                &cptestctx
+            )
+            .await
+        );
+        assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(&cptestctx).await);
+
         cptestctx.teardown().await;
+    }
+
+    // The state that the instance returns to when the saga unwinds depends
+    // on the instance's reason for starting, and on whether a user stopped
+    // the instance while the saga was running.
+    //
+    // For any reason other than `SledEvacuation`, the end state will be
+    // `NoVmm` (stopped), so it doesn't really matter if the user stops the
+    // instance while the saga is running. We don't test a user stopping the
+    // instance in those cases.
+    struct EnsureRunningUnwindCase {
+        reason: Reason,
+        user_stops_during_saga: bool,
+        expected_state: nexus_db_model::InstanceState,
+    }
+
+    #[tokio::test]
+    async fn test_ensure_running_unwind_user() {
+        ensure_running_unwind(
+            "test_ensure_running_unwind_user",
+            EnsureRunningUnwindCase {
+                reason: Reason::User,
+                user_stops_during_saga: false,
+                expected_state: nexus_db_model::InstanceState::NoVmm,
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_ensure_running_unwind_auto_restart() {
+        ensure_running_unwind(
+            "test_ensure_running_unwind_auto_restart",
+            EnsureRunningUnwindCase {
+                reason: Reason::AutoRestart,
+                user_stops_during_saga: false,
+                expected_state: nexus_db_model::InstanceState::NoVmm,
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_ensure_running_unwind_auto_start() {
+        ensure_running_unwind(
+            "test_ensure_running_unwind_auto_start",
+            EnsureRunningUnwindCase {
+                reason: Reason::AutoStart,
+                user_stops_during_saga: false,
+                expected_state: nexus_db_model::InstanceState::NoVmm,
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_ensure_running_unwind_sled_evacuation() {
+        ensure_running_unwind(
+            "test_ensure_running_unwind_sled_evacuation",
+            EnsureRunningUnwindCase {
+                reason: Reason::SledEvacuation,
+                user_stops_during_saga: false,
+                expected_state: nexus_db_model::InstanceState::SledEvacuating,
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_ensure_running_unwind_sled_evacuation_user_stops() {
+        ensure_running_unwind(
+            "test_ensure_running_unwind_sled_evacuation_user_stops",
+            EnsureRunningUnwindCase {
+                reason: Reason::SledEvacuation,
+                user_stops_during_saga: true,
+                expected_state: nexus_db_model::InstanceState::NoVmm,
+            },
+        )
+        .await;
     }
 
     /// Regression test for omicron#11560: if a VMM record is created by a start
