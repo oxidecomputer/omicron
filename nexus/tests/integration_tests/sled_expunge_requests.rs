@@ -54,7 +54,7 @@ type ControlPlaneTestContext =
 // TODO-RAINCLAUDE: a sled_expunge activation powers a sled off through MGS, which can outlast the 10s default on a loaded machine.
 const TASK_ACTIVATION_TIMEOUT: Duration = Duration::from_secs(60);
 
-// TODO-RAINCLAUDE: every periodic activation that could race a test is pushed out an hour; creating a request still activates trust_quorum_manager and sled_expunge, so tests assert on the state those activations converge to, after activating the tasks themselves.
+// TODO-RAINCLAUDE: every periodic activation that could race a test is pushed out an hour; creating a request still activates trust_quorum_manager and sled_expunge, and trust_quorum_manager wakes sled_expunge when a config leaves preparing, so tests assert on the state those activations converge to, after activating the tasks themselves.
 fn builder(test_name: &str) -> ControlPlaneBuilder<'_> {
     ControlPlaneBuilder::new(test_name).customize_nexus_config(&|config| {
         let hour = Duration::from_secs(3600);

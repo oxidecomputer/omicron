@@ -1283,6 +1283,7 @@ impl BackgroundTasksInitializer {
             period: config.trust_quorum.period_secs,
             task_impl: Box::new(trust_quorum::TrustQuorumManager::new(
                 datastore.clone(),
+                task_sled_expunge.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
