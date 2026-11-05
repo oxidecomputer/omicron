@@ -524,6 +524,10 @@ async fn sis_move_to_starting_undo(
     let db_instance =
         sagactx.lookup::<db::model::Instance>("started_record")?;
     let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     // If an instance was being restarted due to its VMM's sled being evacuated,
     // and its intended state is currently `Running` we return it to
@@ -531,82 +535,114 @@ async fn sis_move_to_starting_undo(
     // restart it again. Any other reason returns the instance to `NoVmm`. In
     // this state, the reincarnation task will no longer attempt to reincarnate
     // it, and will remain stopped for the end user.
-    let nexus_state = match params.reason {
-        Reason::SledEvacuation => {
-            // To avoid a race where a user may have stopped the instance while
-            // this saga was running, we check the instance first to make sure
-            // the intended state is still `Running`.
-            let opctx = crate::context::op_context_for_saga_action(
-                &sagactx,
-                &params.serialized_authn,
-            );
-            match LookupPath::new(&opctx, osagactx.datastore())
-                .instance_id(instance_id.into_untyped_uuid())
-                .fetch()
-                .await
-            {
-                Ok((.., current_instance)) => {
-                    match current_instance.intended_state {
-                        db::model::InstanceIntendedState::Running => {
-                            db::model::InstanceState::SledEvacuating
+    retry_notify_ext(
+        retry_policy_internal_service(),
+        || async {
+            let nexus_state = match params.reason {
+                Reason::SledEvacuation => {
+                    // To avoid a race where a user may have stopped the
+                    // instance while this saga was running, we check the
+                    // instance first to make sure the intended state is still
+                    // `Running`.
+                    match LookupPath::new(&opctx, osagactx.datastore())
+                        .instance_id(instance_id.into_untyped_uuid())
+                        .fetch()
+                        .await
+                    {
+                        Ok((.., current_instance)) => {
+                            match current_instance.intended_state {
+                                db::model::InstanceIntendedState::Running => {
+                                    db::model::InstanceState::SledEvacuating
+                                }
+                                db::model::InstanceIntendedState::Destroyed
+                                | db::model::InstanceIntendedState::GuestShutdown
+                                | db::model::InstanceIntendedState::Stopped => {
+                                    db::model::InstanceState::NoVmm
+                                }
+                            }
                         }
-                        db::model::InstanceIntendedState::Destroyed
-                        | db::model::InstanceIntendedState::GuestShutdown
-                        | db::model::InstanceIntendedState::Stopped => {
-                            db::model::InstanceState::NoVmm
+                        // The instance is not there anymore; there is no state
+                        // to reset.
+                        Err(
+                            error @ (Error::ObjectNotFound { .. }
+                            | Error::NotFound { .. }
+                            | Error::Gone),
+                        ) => {
+                            info!(
+                                osagactx.log(),
+                                "start saga failed; instance has been \
+                                 deleted, not resetting its state";
+                                "instance_id" => %instance_id,
+                                "start_reason" => ?params.reason,
+                                "error" => %error,
+                            );
+                            return Ok(());
                         }
+                        Err(error) => return Err(into_backoff_error(error)),
                     }
                 }
-                // If the instance cannot be read, we set its state to `NoVmm`
-                // to reduce the possibility of leaving it as `Rebooting`
-                // indefinitely.
-                Err(error) => {
-                    slog::warn!(
-                        osagactx.log(),
-                        "could not read instance's intended state; \
-                         setting instance state to NoVmm";
-                        "instance_id" => %instance_id,
-                        "error" => %error,
-                    );
+                Reason::AutoStart | Reason::User | Reason::AutoRestart => {
                     db::model::InstanceState::NoVmm
                 }
+            };
+            info!(
+                osagactx.log(),
+                "start saga failed; resetting instance state to {nexus_state};";
+                "instance_id" => %instance_id,
+                "start_reason" => ?params.reason
+            );
+
+            let new_runtime = db::model::InstanceRuntimeState {
+                nexus_state,
+                propolis_id: None,
+                generation: InstanceStateGeneration::from(
+                    db_instance.state_generation,
+                )
+                .next()
+                .into(),
+                ..db_instance.runtime()
+            };
+
+            if !osagactx
+                .datastore()
+                .instance_update_runtime(&instance_id, &new_runtime)
+                .await
+                .map_err(into_backoff_error)?
+            {
+                info!(
+                    osagactx.log(),
+                    "did not reset instance state to {nexus_state}: \
+                     old generation number";
+                    "instance_id" => %instance_id,
+                    "start_reason" => ?params.reason
+                );
             }
-        }
-        Reason::AutoStart | Reason::User | Reason::AutoRestart => {
-            db::model::InstanceState::NoVmm
-        }
-    };
-    info!(
-        osagactx.log(),
-        "start saga failed; resetting instance state to {nexus_state};";
-        "instance_id" => %instance_id,
-        "start_reason" => ?params.reason
-    );
 
-    let new_runtime = db::model::InstanceRuntimeState {
-        nexus_state,
-        propolis_id: None,
-        generation: InstanceStateGeneration::from(db_instance.state_generation)
-            .next()
-            .into(),
-        ..db_instance.runtime()
-    };
-
-    if !osagactx
-        .datastore()
-        .instance_update_runtime(&instance_id, &new_runtime)
-        .await?
-    {
-        info!(
-            osagactx.log(),
-            "did not reset instance state to {nexus_state}: \
-             old generation number";
-            "instance_id" => %instance_id,
-            "start_reason" => ?params.reason
-        );
-    }
+            Ok(())
+        },
+        |error, call_count, total_duration| {
+            warn!(
+                osagactx.log(),
+                "start saga: failed to reset instance state; retrying";
+                "instance_id" => %instance_id,
+                "start_reason" => ?params.reason,
+                "call_count" => call_count,
+                "total_duration" => ?total_duration,
+                InlineErrorChain::new(&error),
+            );
+        },
+    )
+    .await?;
 
     Ok(())
+}
+
+fn into_backoff_error(error: Error) -> BackoffError<Error> {
+    if error.retryable() {
+        BackoffError::transient(error)
+    } else {
+        BackoffError::permanent(error)
+    }
 }
 
 async fn sis_account_virtual_resources(
