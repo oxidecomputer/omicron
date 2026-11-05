@@ -211,6 +211,83 @@ impl DataStore {
             .map_err(|err| err.into_public_ignore_retries())
     }
 
+    /// Load the latest committed trust quorum configuration for `rack_id` and
+    /// return it along with the epoch for the latest configuration.
+    ///
+    /// If the configuration is aborted, then check to see what its latest
+    /// `last_committed_epoch` is and load that configuration.
+    ///
+    /// Note that the configuration that comes back may not actually be
+    /// committed yet if it's the latest configuration. That is ok because we
+    /// will perform validation during insert of the any newly proposed config.
+    pub async fn tq_load_latest_possible_committed_config(
+        &self,
+        opctx: &OpContext,
+        authz_tq: authz::TrustQuorumConfig,
+    ) -> Result<(TrustQuorumConfig, Epoch), Error> {
+        opctx.authorize(authz::Action::Read, &authz_tq).await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+        let rack_id = authz_tq.rack().id();
+
+        Self::tq_load_latest_possible_committed_config_conn(conn, rack_id)
+            .await
+            .map_err(|err| err.into_public_ignore_retries())
+    }
+
+    pub(super) async fn tq_load_latest_possible_committed_config_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        rack_id: RackUuid,
+    ) -> Result<(TrustQuorumConfig, Epoch), TransactionError<Error>> {
+        // First get the latest configuration for this rack.
+        let Some(latest_config) =
+            Self::tq_get_latest_config_with_members_conn(conn, rack_id).await?
+        else {
+            return Err(TransactionError::CustomError(Error::invalid_request(
+                format!(
+                    "Missing trust quorum configurations for rack {rack_id}. \
+                    Upgrade to trust quorum required."
+                ),
+            )));
+        };
+
+        let highest_epoch = latest_config.epoch;
+
+        // We assume this config is committed as long as it is not aborted.
+        //
+        // This assumption will be validated by the datastore code before
+        // insertion of the new configuration.
+        let latest_committed_config = if latest_config.state.is_aborted() {
+            let Some(epoch) = latest_config.last_committed_epoch else {
+                return Err(TransactionError::CustomError(
+                    Error::invalid_request(format!(
+                        "No committed trust quorum configuration for \
+                        rack {rack_id}."
+                    )),
+                ));
+            };
+
+            // Load the configuration for the last commmitted epoch
+            let Some(latest_committed_config) =
+                Self::tq_get_config_with_members_from_epoch_conn(
+                    conn, rack_id, epoch,
+                )
+                .await?
+            else {
+                return Err(TransactionError::CustomError(
+                    Error::invalid_request(format!(
+                        "Missing expected last committed trust quorum \
+                        configuration for rack {rack_id}, epoch {epoch}."
+                    )),
+                ));
+            };
+            latest_committed_config
+        } else {
+            latest_config
+        };
+
+        Ok((latest_committed_config, highest_epoch))
+    }
+
     /// Return the `BaseboardId` of every member that is `Committed` in the
     /// latest configuration for this rack but has no corresponding sled on this
     /// rack that is both present and not expunged.
