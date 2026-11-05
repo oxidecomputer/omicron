@@ -24,6 +24,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::ResourceType;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -33,8 +34,10 @@ use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_client::Client as SledAgentClient;
+use sled_agent_types::inventory::SledRegistrationInfo;
 use sled_agent_types::inventory::SledRole;
 use sled_hardware_types::BaseboardId;
+use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -51,16 +54,98 @@ impl super::Nexus {
 
     // TODO-robustness we should have a limit on how many sled agents there can
     // be (for graceful degradation at large scale).
-    //
-    // TODO-multisled: This should not use the rack_id for the given nexus,
-    // unless the DNS lookups at sled-agent are only for rack-local nexuses.
     pub(crate) async fn upsert_sled(
         &self,
-        _opctx: &OpContext,
+        opctx: &OpContext,
         id: SledUuid,
         info: SledAgentInfo,
     ) -> Result<(), Error> {
-        info!(self.log, "registered sled agent"; "sled_uuid" => id.to_string());
+        let sa_address = info.sa_address;
+        let log = opctx.log.new(o!(
+            "sled_uuid" => id.to_string(),
+            "sa_address" => sa_address.to_string(),
+        ));
+
+        // Fetch additional information via a `sled_registration_info` callback.
+        //
+        // This is a synchronous callback, which puts some fairly tight
+        // requirements on sled_registration_info.
+        let client = nexus_networking::sled_client_from_address_ext(
+            id,
+            sa_address,
+            &log,
+            self.reqwest_client.clone(),
+        );
+        let registration_info: SledRegistrationInfo = client
+            .sled_registration_info()
+            .await
+            .map_err(|error| {
+                match classify_sled_registration_info_fetch_error(
+                    id, sa_address, &error,
+                ) {
+                    SledRegistrationInfoFetchError::Transient(public_error) => {
+                        warn!(
+                            log,
+                            "failed to fetch sled registration info (transient)";
+                            InlineErrorChain::new(&error),
+                        );
+                        public_error
+                    }
+                    SledRegistrationInfoFetchError::Permanent(public_error) => {
+                        error!(
+                            log,
+                            "failed to fetch sled registration info";
+                            InlineErrorChain::new(&error),
+                        );
+                        public_error
+                    }
+                }
+            })?
+            .into_inner();
+
+        if registration_info.sled_id != id {
+            error!(
+                log,
+                "sled agent reported a different sled ID than the request path";
+                "reported_sled_uuid" => %registration_info.sled_id,
+            );
+            return Err(Error::invalid_request(format!(
+                "sled agent at {sa_address} reports sled ID {}, which does \
+                 not match sled ID {id} in the request path; refusing to \
+                 register sled {id} with another sled's information",
+                registration_info.sled_id,
+            )));
+        }
+
+        let rack_id = registration_info.rack_id;
+        match self.rack_lookup(opctx, &rack_id).await {
+            Ok(_) => {}
+            Err(Error::ObjectNotFound {
+                type_name: ResourceType::Rack,
+                lookup_type: _,
+            }) => {
+                // Warn rather than error and 503 rather than 400, since this
+                // state is expected while a rack is being added to the fleet.
+                // Sled Agent is expected to keep retrying until this succeeds.
+                warn!(
+                    log,
+                    "sled agent reported a rack that is not part of the fleet";
+                    "reported_rack_id" => %rack_id,
+                );
+                return Err(Error::unavail(&format!(
+                    "sled agent at {sa_address} reports rack ID {rack_id} for \
+                     sled {id}, but that rack is not part of the fleet (it \
+                     may not have been adopted yet); not registering the sled \
+                     until it is",
+                )));
+            }
+            Err(error) => {
+                return Err(error.internal_context(format!(
+                    "checking that rack {rack_id} reported for sled {id} by \
+                     the sled agent at {sa_address} is part of the fleet",
+                )));
+            }
+        }
 
         let is_scrimlet = match info.role {
             SledRole::Gimlet => false,
@@ -83,10 +168,11 @@ impl super::Nexus {
                 reservoir_size: info.reservoir_size.into(),
                 cpu_family: info.cpu_family.into(),
             },
-            self.rack_id,
+            rack_id,
             info.generation,
         );
         self.db_datastore.sled_upsert(sled).await?;
+        info!(log, "registered sled agent"; "rack_id" => %rack_id);
 
         // If a new sled-agent just came online we want to trigger inventory
         // collection.
@@ -465,5 +551,102 @@ impl super::Nexus {
         let dataset = db::model::CrucibleDataset::new(id, zpool_id, address);
         self.db_datastore.crucible_dataset_upsert(dataset).await?;
         Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum SledRegistrationInfoFetchError {
+    Transient(Error),
+    Permanent(Error),
+}
+
+fn classify_sled_registration_info_fetch_error(
+    sled_id: SledUuid,
+    sa_address: SocketAddrV6,
+    error: &sled_agent_client::Error<sled_agent_client::types::Error>,
+) -> SledRegistrationInfoFetchError {
+    let message = format!(
+        "failed to fetch registration info for sled {sled_id} from its sled \
+         agent at {sa_address}: {}",
+        InlineErrorChain::new(error),
+    );
+    let is_transient = match error {
+        sled_agent_client::Error::CommunicationError(_)
+        | sled_agent_client::Error::ResponseBodyError(_) => true,
+        sled_agent_client::Error::ErrorResponse(_)
+        | sled_agent_client::Error::UnexpectedResponse(_)
+        | sled_agent_client::Error::InvalidUpgrade(_) => error.is_retryable(),
+        sled_agent_client::Error::InvalidRequest(_)
+        | sled_agent_client::Error::InvalidResponsePayload(..)
+        | sled_agent_client::Error::Custom(_) => false,
+    };
+    if is_transient {
+        SledRegistrationInfoFetchError::Transient(Error::unavail(&message))
+    } else {
+        SledRegistrationInfoFetchError::Permanent(Error::internal_error(
+            &message,
+        ))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn error_response(
+        status: reqwest::StatusCode,
+    ) -> sled_agent_client::Error<sled_agent_client::types::Error> {
+        sled_agent_client::Error::ErrorResponse(
+            progenitor_client::ResponseValue::new(
+                sled_agent_client::types::Error {
+                    error_code: None,
+                    message: "stub sled agent failure".to_string(),
+                    request_id: "stub-request".to_string(),
+                },
+                status,
+                reqwest::header::HeaderMap::new(),
+            ),
+        )
+    }
+
+    #[test]
+    fn sled_registration_info_fetch_error_response_status() {
+        let sled_id = SledUuid::new_v4();
+        let sa_address: SocketAddrV6 =
+            "[::1]:12345".parse().expect("parsed a socket address");
+        let message = |error: &sled_agent_client::Error<
+            sled_agent_client::types::Error,
+        >| {
+            format!(
+                "failed to fetch registration info for sled {sled_id} from \
+                 its sled agent at {sa_address}: {error}",
+            )
+        };
+
+        let unavailable =
+            error_response(reqwest::StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            classify_sled_registration_info_fetch_error(
+                sled_id,
+                sa_address,
+                &unavailable,
+            ),
+            SledRegistrationInfoFetchError::Transient(
+                Error::ServiceUnavailable {
+                    internal_message: message(&unavailable),
+                }
+            ),
+        );
+
+        let internal =
+            error_response(reqwest::StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            classify_sled_registration_info_fetch_error(
+                sled_id, sa_address, &internal,
+            ),
+            SledRegistrationInfoFetchError::Permanent(Error::InternalError {
+                internal_message: message(&internal),
+            }),
+        );
     }
 }
