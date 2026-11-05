@@ -21,8 +21,12 @@ use bootstrap_agent_lockstep_types::{
 };
 use nexus_types::trust_quorum::TrustQuorumConfig;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::RACK_PREFIX_LENGTH;
+use omicron_common::address::get_64_subnet;
 use omicron_ledger::{self as ledger};
 use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SledUuid;
 use sled_agent_bootstrap_common::sprockets::SprocketsClient;
 use sled_agent_bootstrap_common::{RssContext, RunRssError};
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
@@ -35,6 +39,7 @@ use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_hardware_types::BaseboardId;
 use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
+use std::iter::once;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -417,7 +422,7 @@ impl MultirackJoinServiceTask {
         // `changed()` wouldn't fire.
         let req = self.input_rx.borrow().clone();
         let tq_members = req.trust_quorum_peers.clone();
-        let status = StartSledAgentsStatus::assign_ids_and_subnets(
+        let status = assign_ids_and_subnets(
             self.ctx.trust_quorum_handle.baseboard_id(),
             rack_id,
             req,
@@ -1076,6 +1081,59 @@ impl MultirackJoinServiceTask {
     }
 }
 
+// Create the allocations necessary to start all sled-agents in this rack
+// and return a preliminary state.
+//
+// This is specific to the multirack join service and therefore lives in
+// this module. It should only be called once.
+fn assign_ids_and_subnets(
+    this_nodes_baseboard_id: &BaseboardId,
+    rack_id: RackUuid,
+    req: MultirackJoinRequest,
+) -> StartSledAgentsStatus {
+    let rack_subnet = Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
+        req.rack_network_config.rack_subnet.addr(),
+    );
+
+    let this_nodes_sled_id = SledUuid::new_v4();
+
+    let sleds = once(SledAgentInfo {
+        baseboard_id: this_nodes_baseboard_id.to_owned(),
+        sled_id: this_nodes_sled_id,
+        // Ensure that this node gets the first /64 prefix, which is
+        // why we start at index 2 in the loop below. Doing this allows
+        // us to deterministically find the sled-agent running this code.
+        // Specifically, we want to find the sled-agent hosting the multirack
+        // join service.
+        sled_subnet: get_64_subnet(rack_subnet, 1),
+        start_state: SledAgentStartState::InProgress { last_error: None },
+    })
+    .chain(
+        req.trust_quorum_peers
+            .into_iter()
+            .filter(|baseboard_id| baseboard_id != this_nodes_baseboard_id)
+            .enumerate()
+            .map(|(idx, baseboard_id)| {
+                let sled_id = SledUuid::new_v4();
+                // We always start numbering prefixes from 1. But we already
+                // reserved that for this node, so start at 2.
+                let idx =
+                    u8::try_from(idx + 2).expect("sled index should fit in u8");
+
+                SledAgentInfo {
+                    baseboard_id,
+                    sled_id,
+                    sled_subnet: get_64_subnet(rack_subnet, idx),
+                    start_state: SledAgentStartState::InProgress {
+                        last_error: None,
+                    },
+                }
+            }),
+    )
+    .collect();
+
+    StartSledAgentsStatus { this_nodes_sled_id, rack_id, sleds }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1103,7 +1161,7 @@ mod tests {
         }];
 
         RackNetworkConfig {
-            rack_subnet: "fd00:abcd:ffff::/56".parse().unwrap(),
+            rack_subnet: "fd00:abcd:ffff:100::/56".parse().unwrap(),
             infra_ip_first: "10.0.0.1".parse().unwrap(),
             infra_ip_last: "10.0.0.100".parse().unwrap(),
             ports: UplinkPorts::new(ports).unwrap(),
@@ -1130,7 +1188,7 @@ mod tests {
         };
 
         let coordinator = req.trust_quorum_peers.first().unwrap();
-        let status = StartSledAgentsStatus::assign_ids_and_subnets(
+        let status = assign_ids_and_subnets(
             coordinator,
             RackUuid::new_v4(),
             req.clone(),
@@ -1142,9 +1200,28 @@ mod tests {
         let expected_sled_subnets: BTreeSet<_> =
             (0..req.trust_quorum_peers.len())
                 .into_iter()
-                .map(|i| format!("fd00:abcd:ffff:{:x}::/64", i + 1))
+                .map(|i| format!("fd00:abcd:ffff:1{:02x}::/64", i + 1))
                 .collect();
 
         assert_eq!(actual_sled_subnets, expected_sled_subnets);
+    }
+
+    #[test]
+    fn first_subnet_assigned_to_this_node() {
+        let req = MultirackJoinRequest {
+            trust_quorum_peers: trust_quorum_peers(),
+            rack_network_config: rack_network_config(),
+        };
+
+        let this_node = req.trust_quorum_peers.iter().nth(5).unwrap().clone();
+        let status =
+            assign_ids_and_subnets(&this_node, RackUuid::new_v4(), req);
+
+        let this_nodes_assignment =
+            status.sleds.iter().find(|s| s.baseboard_id == this_node).unwrap();
+        assert_eq!(
+            this_nodes_assignment.sled_subnet.to_string(),
+            "fd00:abcd:ffff:101::/64"
+        );
     }
 }
