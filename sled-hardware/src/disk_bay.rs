@@ -7,7 +7,7 @@
 //! On an Oxide sled the hardware topology (libtopo) is the source of truth
 //! for which bays exist and what sits behind each one. The pieces that need the
 //! platform (walking the topology, asking libnvme about a controller) live in
-//! the illumos module; the join between them, `classify_bay`, is plain data
+//! the illumos module; the join between them, `describe_bay`, is plain data
 //! manipulation and is kept here so it can be tested anywhere.
 
 // The observed types below are only produced on illumos.
@@ -184,7 +184,7 @@ pub(crate) struct NvmeFacts {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum ClassifyError {
+pub(crate) enum DescribeError {
     #[error(transparent)]
     Unreadable { problem: BayProblem },
 
@@ -210,11 +210,11 @@ pub(crate) enum ClassifyError {
 ///
 /// `nvme` must be `Some` when the observed occupant is an NVMe controller.
 /// `is_boot_disk` is the caller's answer for this bay's PCIe slot.
-pub(crate) fn classify_bay(
+pub(crate) fn describe_bay(
     bay: &ObservedBay,
     nvme: Option<&NvmeFacts>,
     is_boot_disk: bool,
-) -> Result<(DiskBay, Option<UnparsedDisk>), ClassifyError> {
+) -> Result<(DiskBay, Option<UnparsedDisk>), DescribeError> {
     let describe = |occupant| DiskBay {
         location: bay.location.clone(),
         kind: bay.kind,
@@ -224,7 +224,7 @@ pub(crate) fn classify_bay(
     let contents = match &bay.contents {
         Ok(contents) => contents,
         Err(problem) => {
-            return Err(ClassifyError::Unreadable { problem: problem.clone() });
+            return Err(DescribeError::Unreadable { problem: problem.clone() });
         }
     };
 
@@ -251,7 +251,7 @@ pub(crate) fn classify_bay(
     };
 
     let Some(nvme) = nvme else {
-        return Err(ClassifyError::MissingNvmeFacts {
+        return Err(DescribeError::MissingNvmeFacts {
             nvme_instance: instance,
         });
     };
@@ -268,7 +268,7 @@ pub(crate) fn classify_bay(
             return Ok((describe(device), None));
         }
         [] => {
-            return Err(ClassifyError::MissingNamespace {
+            return Err(DescribeError::MissingNamespace {
                 nvme_instance: instance,
                 usable_namespaces: nvme.usable_namespaces,
             });
@@ -290,7 +290,7 @@ pub(crate) fn classify_bay(
     // libdevinfo reports this path as absolute from the kernel's point of
     // view; userspace sees it under "/devices".
     if !namespace.devfs_path.starts_with('/') {
-        return Err(ClassifyError::RelativeDevfsPath {
+        return Err(DescribeError::RelativeDevfsPath {
             path: namespace.devfs_path.clone(),
         });
     }
@@ -525,7 +525,7 @@ mod tests {
     #[test]
     fn empty_bay() {
         let (described, disk) =
-            classify_bay(&bay(ObservedOccupant::Empty), None, false).unwrap();
+            describe_bay(&bay(ObservedOccupant::Empty), None, false).unwrap();
         assert_eq!(described.location.as_str(), "N3");
         assert_eq!(described.kind, DiskVariant::U2);
         assert_eq!(described.occupant, DiskBayOccupant::Empty);
@@ -540,7 +540,7 @@ mod tests {
                 "/pci@0,0/pci1de,fff9@1,1/pci8086,1234@0".to_string(),
             ),
         });
-        let (described, disk) = classify_bay(&observed, None, false).unwrap();
+        let (described, disk) = describe_bay(&observed, None, false).unwrap();
         assert_eq!(
             described.occupant,
             DiskBayOccupant::UnusableDevice {
@@ -559,7 +559,7 @@ mod tests {
     fn device_without_driver() {
         let observed =
             bay(ObservedOccupant::Other { driver: None, devfs_path: None });
-        let (described, disk) = classify_bay(&observed, None, false).unwrap();
+        let (described, disk) = describe_bay(&observed, None, false).unwrap();
         assert_eq!(
             described.occupant,
             DiskBayOccupant::UnusableDevice {
@@ -578,7 +578,7 @@ mod tests {
         observed.contents.as_mut().unwrap().pcie_slot = 18;
 
         let (described, disk) =
-            classify_bay(&observed, Some(&facts(1)), true).unwrap();
+            describe_bay(&observed, Some(&facts(1)), true).unwrap();
         let disk = disk.expect("an NVMe disk with a namespace is a disk");
 
         let identity = DiskIdentity {
@@ -612,7 +612,7 @@ mod tests {
         ns.manufacturer = "Samsung".to_string();
         ns.model = "MZWLR3T8HBLS-00007".to_string();
         let (_, disk) =
-            classify_bay(&nvme_bay(vec![ns]), Some(&facts(1)), false).unwrap();
+            describe_bay(&nvme_bay(vec![ns]), Some(&facts(1)), false).unwrap();
         assert_eq!(
             disk.unwrap().identity().model,
             "Samsung MZWLR3T8HBLS-00007"
@@ -625,7 +625,7 @@ mod tests {
     #[test]
     fn controller_without_namespace_is_unusable() {
         let (described, disk) =
-            classify_bay(&nvme_bay(vec![]), Some(&facts(0)), false).unwrap();
+            describe_bay(&nvme_bay(vec![]), Some(&facts(0)), false).unwrap();
         assert_eq!(
             described.occupant,
             DiskBayOccupant::UnusableDevice {
@@ -640,12 +640,12 @@ mod tests {
 
     #[test]
     fn namespace_missing_from_topology_is_an_error() {
-        let err = classify_bay(&nvme_bay(vec![]), Some(&facts(1)), false)
+        let err = describe_bay(&nvme_bay(vec![]), Some(&facts(1)), false)
             .unwrap_err();
         assert!(
             matches!(
                 err,
-                ClassifyError::MissingNamespace { usable_namespaces: 1, .. }
+                DescribeError::MissingNamespace { usable_namespaces: 1, .. }
             ),
             "{err}"
         );
@@ -653,14 +653,14 @@ mod tests {
 
     #[test]
     fn nvme_needs_libnvme_facts() {
-        let err = classify_bay(&nvme_bay(vec![namespace()]), None, false)
+        let err = describe_bay(&nvme_bay(vec![namespace()]), None, false)
             .unwrap_err();
-        assert!(matches!(err, ClassifyError::MissingNvmeFacts { .. }), "{err}");
+        assert!(matches!(err, DescribeError::MissingNvmeFacts { .. }), "{err}");
     }
 
     #[test]
     fn multiple_namespaces_are_unusable() {
-        let (described, disk) = classify_bay(
+        let (described, disk) = describe_bay(
             &nvme_bay(vec![namespace(), namespace()]),
             Some(&facts(2)),
             false,
@@ -682,10 +682,10 @@ mod tests {
     fn relative_devfs_path_is_rejected() {
         let mut ns = namespace();
         ns.devfs_path = "pci@0,0/oops".to_string();
-        let err = classify_bay(&nvme_bay(vec![ns]), Some(&facts(1)), false)
+        let err = describe_bay(&nvme_bay(vec![ns]), Some(&facts(1)), false)
             .unwrap_err();
         assert!(
-            matches!(err, ClassifyError::RelativeDevfsPath { .. }),
+            matches!(err, DescribeError::RelativeDevfsPath { .. }),
             "{err}"
         );
     }
@@ -695,7 +695,7 @@ mod tests {
         let mut ns = namespace();
         ns.logical_disk = None;
         let (_, disk) =
-            classify_bay(&nvme_bay(vec![ns]), Some(&facts(1)), false).unwrap();
+            describe_bay(&nvme_bay(vec![ns]), Some(&facts(1)), false).unwrap();
         assert_eq!(disk.unwrap().paths().dev_path, None);
     }
 
@@ -711,11 +711,11 @@ mod tests {
         ];
         for problem in problems {
             let observed = unreadable_bay(problem.clone());
-            let err = classify_bay(&observed, None, false).unwrap_err();
+            let err = describe_bay(&observed, None, false).unwrap_err();
             assert!(
                 matches!(
                     &err,
-                    ClassifyError::Unreadable { problem: p } if *p == problem
+                    DescribeError::Unreadable { problem: p } if *p == problem
                 ),
                 "{err}"
             );
@@ -738,7 +738,7 @@ mod tests {
         observed: &ObservedBay,
         facts: Option<&NvmeFacts>,
     ) -> PolledBay {
-        let (bay, disk) = classify_bay(observed, facts, false).unwrap();
+        let (bay, disk) = describe_bay(observed, facts, false).unwrap();
         PolledBay::Described { bay, disk: disk.map(Box::new) }
     }
 
