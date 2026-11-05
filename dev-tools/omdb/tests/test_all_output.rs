@@ -309,6 +309,7 @@ async fn test_omdb_success_cases() {
         &["db", "instances"],
         &["db", "sleds"],
         &["db", "sleds", "-F", "discretionary"],
+        &["db", "sled-expunge-requests", "list"],
         &["mgs", "inventory"],
         &["nexus", "background-tasks", "doc"],
         // Hide "currently executing" to avoid a test flake in case a task is

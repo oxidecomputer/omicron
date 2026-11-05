@@ -163,6 +163,16 @@ stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
 =============================================
+EXECUTING COMMAND: omdb ["db", "sled-expunge-requests", "list"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+ID RACK_ID SLED_ID SERIAL STATE TQ_EPOCH TQ_SEND LAST_ERROR FAILURE_REASON TIME_CREATED TIME_MODIFIED 
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
 EXECUTING COMMAND: omdb ["mgs", "inventory"]
 termination: Exited(0)
 ---------------------------------------------
