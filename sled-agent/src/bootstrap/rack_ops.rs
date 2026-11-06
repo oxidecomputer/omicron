@@ -293,6 +293,7 @@ impl RssAccess {
     pub(crate) async fn complete_multirack_join(
         &self,
     ) -> Result<u64, RssAccessError> {
+        // The guard is dropped at the end of this statement
         let result_rx = match &mut *self.status.lock().unwrap() {
             RssStatus::Uninitialized => {
                 Err(RssAccessError::MultirackJoinNotYetStarted)
@@ -852,7 +853,7 @@ mod tests {
 
         // The task has only written an earlier generation. Its request is
         // the same, as when an update is reverted.
-        task.written_bootstore_generation_tx.send_replace(1);
+        task.written_bootstore_generation_tx.send(1).unwrap();
         assert_matches!(
             rss.complete_multirack_join().now_or_never(),
             Some(Err(RssAccessError::MultirackJoinPendingConfigUpdate))
@@ -863,7 +864,7 @@ mod tests {
         );
 
         // The task hasn't written anything yet
-        task.written_bootstore_generation_tx.send_replace(0);
+        task.written_bootstore_generation_tx.send(0).unwrap();
         assert_matches!(
             rss.complete_multirack_join().now_or_never(),
             Some(Err(RssAccessError::MultirackJoinPendingConfigUpdate))
@@ -874,7 +875,7 @@ mod tests {
         );
 
         // Once the latest generation is written, the join can complete
-        task.written_bootstore_generation_tx.send_replace(2);
+        task.written_bootstore_generation_tx.send(2).unwrap();
         let mut caller = Box::pin(rss.complete_multirack_join());
         assert!(caller.as_mut().now_or_never().is_none());
         task.rack_join_successful_rx.try_recv().unwrap();

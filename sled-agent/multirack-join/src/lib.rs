@@ -164,7 +164,7 @@ impl StartSledAgentInfo {
 #[derive(Clone, Debug)]
 pub struct MultirackJoinInput {
     pub request: MultirackJoinRequest,
-    // The bootstore generation, decided when the input is accepted.
+    /// The bootstore generation, decided when the input is accepted.
     pub bootstore_generation: u64,
 }
 
