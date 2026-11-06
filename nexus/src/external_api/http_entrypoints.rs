@@ -7180,7 +7180,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 result_list,
-                &|_, rack: &multirack::UnadoptedRack| rack.rack_id,
+                &|_, rack: &multirack::UnadoptedRack| {
+                    rack.rack_id.into_untyped_uuid()
+                },
             )?))
         };
         apictx

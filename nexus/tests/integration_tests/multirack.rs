@@ -14,7 +14,6 @@ use nexus_types::external_api::multirack::UnadoptedRack;
 use nexus_types::inventory::DiscoveredRack;
 use nexus_types::inventory::DiscoveredSled;
 use omicron_common::address::Ipv6Subnet;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types_versions::latest::multirack::SledAgentStartState;
@@ -152,8 +151,7 @@ async fn test_rack_list_unadopted(cptestctx: &ControlPlaneTestContext) {
         );
         for (actual, expected) in racks.iter().zip(&expected) {
             assert_eq!(
-                actual.rack_id,
-                expected.rack_id.into_untyped_uuid(),
+                actual.rack_id, expected.rack_id,
                 "racks out of order or unexpected with page size {page_size}"
             );
             assert_eq!(actual.rack_subnet, expected.rack_subnet.net());
@@ -167,10 +165,7 @@ async fn test_rack_list_unadopted(cptestctx: &ControlPlaneTestContext) {
             for (actual_sled, expected_sled) in
                 actual.unadopted_sleds.iter().zip(&expected.discovered_sleds)
             {
-                assert_eq!(
-                    actual_sled.sled_id,
-                    expected_sled.sled_id.into_untyped_uuid()
-                );
+                assert_eq!(actual_sled.sled_id, expected_sled.sled_id);
                 assert_eq!(
                     actual_sled.baseboard_id,
                     expected_sled.baseboard_id
@@ -188,9 +183,7 @@ async fn test_rack_list_unadopted(cptestctx: &ControlPlaneTestContext) {
             }
         }
         assert!(
-            racks
-                .iter()
-                .all(|r| r.rack_id != adopted_rack_id.into_untyped_uuid()),
+            racks.iter().all(|r| r.rack_id != adopted_rack_id),
             "adopted rack should not be listed: {racks:#?}"
         );
     }

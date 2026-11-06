@@ -4,6 +4,7 @@
 
 //! Nexus types for external APIs related to multirack.
 
+use omicron_uuid_kinds::{RackUuid, SledUuid};
 use oxnet::Ipv6Net;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -14,7 +15,8 @@ use uuid::Uuid;
 /// into the regional cluster yet
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct UnadoptedRack {
-    pub rack_id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub rack_id: RackUuid,
     pub rack_subnet: Ipv6Net,
     pub unadopted_sleds: Vec<UnadoptedSled>,
 }
@@ -26,7 +28,8 @@ pub struct UnadoptedRack {
 /// in a rack that hasn't been adopted yet.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct UnadoptedSled {
-    pub sled_id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub sled_id: SledUuid,
     pub baseboard_id: BaseboardId,
 
     pub sled_agent_started: bool,

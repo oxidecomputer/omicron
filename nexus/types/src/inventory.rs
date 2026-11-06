@@ -24,7 +24,6 @@ pub use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use newtype_uuid::GenericUuid;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::{RACK_PREFIX_LENGTH, SLED_PREFIX_LENGTH};
 use omicron_common::api::external::ByteCount;
@@ -1317,7 +1316,7 @@ impl IdOrdItem for DiscoveredRack {
 impl From<DiscoveredRack> for UnadoptedRack {
     fn from(value: DiscoveredRack) -> Self {
         Self {
-            rack_id: value.rack_id.into_untyped_uuid(),
+            rack_id: value.rack_id,
             rack_subnet: value.rack_subnet.net(),
             unadopted_sleds: value
                 .discovered_sleds
@@ -1360,7 +1359,7 @@ impl From<DiscoveredSled> for UnadoptedSled {
                 }
             };
         Self {
-            sled_id: value.sled_id.into_untyped_uuid(),
+            sled_id: value.sled_id,
             baseboard_id: value.baseboard_id,
             sled_agent_started,
             last_start_err,
