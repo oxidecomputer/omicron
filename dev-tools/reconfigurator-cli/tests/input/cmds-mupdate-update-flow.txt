@@ -63,7 +63,6 @@ blueprint-plan latest latest
 # * the target release's minimum generation bumped from 1 to 3
 #   (the 3 is because generation 2 is repo-1.0.0.zip)
 blueprint-diff latest
-blueprint-show latest
 
 # Hide sled 0 from inventory temporarily -- this does two things:
 # 1. Tests that mupdate/update state transitions don't happen when

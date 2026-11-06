@@ -1084,6 +1084,7 @@ impl PlanningMgsUpdatesStepReport {
         if let Some(change) = available {
             return Some(OperatorStatus::WaitingForUpdate(
                 UpdateWait::SledAvailable {
+                    sled_id: change.sled_id,
                     baseboard_id: (*change.baseboard_id).clone(),
                 },
             ));
@@ -1545,7 +1546,6 @@ pub enum AddUpdateBlockedReason {
 impl AddUpdateBlockedReason {
     /// Returns true if this reason results from a MUPdate.  For this purpose,
     /// initial installation counts as a MUPdate.
-    ///
     // This is used in messaging to the user about what the system is waiting
     // on.
     //
@@ -1796,11 +1796,9 @@ impl PlanningZoneUpdatesStepReport {
         if let Some(waiting) = &self.waiting_on {
             match waiting {
                 ZoneUpdatesWaitingOn::InventoryPropagation { kinds } => {
-                    // Note that although other types of zone-related activities
-                    // can be waiting on inventory propagation, the specific
-                    // thing we're checking here only applies to zone updates,
-                    // so we can say with confidence that this is part of an
-                    // update.
+                    // Note that we can see this during an update or when zones
+                    // are being added or expunged for other reasons (e.g., when
+                    // a sled has been expunged).
                     return Some(OperatorStatus::WaitingForUpdate(
                         UpdateWait::for_zones(kinds.iter().copied()),
                     ));

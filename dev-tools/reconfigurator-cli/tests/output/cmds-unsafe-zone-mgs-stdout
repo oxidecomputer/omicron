@@ -2532,7 +2532,7 @@ INFO ran out of boards for MGS-driven update
 generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 blueprint source: planner with report:
 planning report:
-status for operators: Waiting for sled to be return to service after update (913-0000019:serial1)
+status for operators: Waiting for sled to be returned to service after update (sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, baseboard 913-0000019:serial1)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate

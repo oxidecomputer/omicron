@@ -147,7 +147,7 @@ pub enum UpdateWait {
         progress: SledEvacuationProgress,
     },
     /// The system is waiting for a sled to be put back into service
-    SledAvailable { baseboard_id: BaseboardId },
+    SledAvailable { sled_id: SledUuid, baseboard_id: BaseboardId },
     /// The system is waiting for a board update to finish
     Mgs { baseboard_id: BaseboardId, component: String },
     /// The system is waiting for zone updates to finish

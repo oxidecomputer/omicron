@@ -50,12 +50,13 @@ impl fmt::Display for OperatorStatus {
                 )
             }
             OperatorStatus::WaitingForUpdate(UpdateWait::SledAvailable {
+                sled_id,
                 baseboard_id,
             }) => {
                 write!(
                     f,
-                    "Waiting for sled to be return to service after \
-                     update ({baseboard_id})",
+                    "Waiting for sled to be returned to service after \
+                     update (sled {sled_id}, baseboard {baseboard_id})",
                 )
             }
             OperatorStatus::WaitingForUpdate(UpdateWait::Mgs {

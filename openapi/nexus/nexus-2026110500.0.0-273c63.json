@@ -30940,6 +30940,9 @@
               "baseboard_id": {
                 "$ref": "#/components/schemas/BaseboardId"
               },
+              "sled_id": {
+                "$ref": "#/components/schemas/SledUuid"
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -30949,6 +30952,7 @@
             },
             "required": [
               "baseboard_id",
+              "sled_id",
               "type"
             ]
           },
