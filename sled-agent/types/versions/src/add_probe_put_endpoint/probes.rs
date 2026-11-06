@@ -4,7 +4,6 @@
 
 use crate::v1::inventory::NetworkInterface;
 use iddqd::IdHashItem;
-use iddqd::IdHashMap;
 use iddqd::id_upcast;
 use omicron_uuid_kinds::ProbeUuid;
 use schemars::JsonSchema;
@@ -53,11 +52,4 @@ pub enum IpKind {
     Snat,
     Ephemeral,
     Floating,
-}
-
-/// A set of probes that the target sled should run.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct ProbeSet {
-    /// The exact set of probes to run.
-    pub probes: IdHashMap<ProbeCreate>,
 }

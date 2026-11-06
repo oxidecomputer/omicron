@@ -63,6 +63,7 @@ omicron-common.workspace = true
 omicron-generation-kinds.workspace = true
 omicron-ledger.workspace = true
 omicron-ddm-admin-client.workspace = true
+omicron-sush-proxy.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 oxide-tokio-rt.workspace = true
@@ -118,7 +119,7 @@ thiserror.workspace = true
 tofino.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-stream.workspace = true
-tokio-util.workspace = true
+tokio-util = { workspace = true, features = ["rt"] }
 toml.workspace = true
 trust-quorum.workspace = true
 trust-quorum-protocol.workspace = true
@@ -184,6 +185,3 @@ doc = false
 
 [features]
 image-trampoline = []
-switch-asic = []
-switch-stub = []
-switch-softnpu = []

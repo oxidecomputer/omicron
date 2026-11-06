@@ -29,6 +29,7 @@ const PFEXEC: &str = "/usr/bin/pfexec";
 const PFILES: &str = "/usr/bin/pfiles";
 const PSTACK: &str = "/usr/bin/pstack";
 const PARGS: &str = "/usr/bin/pargs";
+const SH: &str = "/bin/sh";
 const SVCS: &str = "/usr/bin/svcs";
 const UPTIME: &str = "/usr/bin/uptime";
 const ZFS: &str = "/usr/sbin/zfs";
@@ -308,7 +309,7 @@ pub fn svcs_enabled_but_not_running() -> Command {
 }
 
 pub fn count_disks() -> Command {
-    let mut cmd = std::process::Command::new("bash");
+    let mut cmd = std::process::Command::new(SH);
     cmd.env_clear().args([
         "-c",
         "(pfexec diskinfo -pH | tee | wc -l | xargs | grep -x '12' > /dev/null) \
@@ -319,7 +320,7 @@ pub fn count_disks() -> Command {
 }
 
 pub fn zfs_list_unmounted() -> Command {
-    let mut cmd = std::process::Command::new("bash");
+    let mut cmd = std::process::Command::new(SH);
     cmd.env_clear().args([
         "-c",
         "pfexec zfs list -r -o name,mounted | grep oxp | grep -v yes$ \
@@ -330,7 +331,7 @@ pub fn zfs_list_unmounted() -> Command {
 }
 
 pub fn count_crucibles() -> Command {
-    let mut cmd = std::process::Command::new("bash");
+    let mut cmd = std::process::Command::new(SH);
     cmd.env_clear()
         .args([
             "-c",
@@ -342,7 +343,7 @@ pub fn count_crucibles() -> Command {
 }
 
 pub fn identify_datasets_close_to_quota() -> Command {
-    let mut cmd = std::process::Command::new("bash");
+    let mut cmd = std::process::Command::new(SH);
     cmd.env_clear()
         .args([
             "-c",
@@ -357,7 +358,7 @@ pub fn identify_datasets_close_to_quota() -> Command {
 }
 
 pub fn identify_datasets_with_less_than_300_gib_avail() -> Command {
-    let mut cmd = std::process::Command::new("bash");
+    let mut cmd = std::process::Command::new(SH);
     cmd.env_clear().args([
         "-c",
         "zfs list -Hp -o used,quota,name,avail,mountpoint | \
@@ -371,7 +372,7 @@ pub fn identify_datasets_with_less_than_300_gib_avail() -> Command {
 }
 
 pub fn dimm_check() -> Command {
-    let mut cmd = std::process::Command::new("bash");
+    let mut cmd = std::process::Command::new(SH);
     cmd.env_clear().args([
         "-c",
         "prtconf -m | \
@@ -431,7 +432,7 @@ mod test {
 
     #[tokio::test]
     async fn test_command_stderr_is_correct() {
-        let mut command = Command::new("bash");
+        let mut command = Command::new(SH);
         command.env_clear().args(["-c", "echo oxide computer > /dev/stderr"]);
 
         let res = execute_command_with_timeout(command, Duration::from_secs(5))
@@ -443,7 +444,7 @@ mod test {
 
     #[tokio::test]
     async fn test_command_stdout_stderr_are_interleaved() {
-        let mut command = Command::new("bash");
+        let mut command = Command::new(SH);
         command.env_clear().args([
             "-c",
             "echo one > /dev/stdout \

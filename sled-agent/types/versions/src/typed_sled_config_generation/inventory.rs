@@ -15,16 +15,18 @@ use omicron_uuid_kinds::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_hardware_types::{BaseboardId, SledCpuFamily};
+use sled_hardware_types::BaseboardId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddrV6;
 use std::time::Duration;
 
 use crate::v1::disk::{DatasetConfig, OmicronPhysicalDiskConfig};
+use crate::v1::inventory::SledCpuFamily;
+use crate::v1::inventory::SledRole;
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, OrphanedDataset,
-    RemoveMupdateOverrideInventory, SledRole,
+    RemoveMupdateOverrideInventory,
 };
 use crate::v11::inventory::OmicronZoneConfig;
 use crate::v14::inventory::{

@@ -92,7 +92,7 @@ WITH
       UPDATE
         ip_pool_range
       SET
-        time_modified = $20, rcgen = rcgen + 1
+        rcgen = rcgen + 1
       WHERE
         id = (SELECT ip_pool_range_id FROM next_external_ip) AND time_deleted IS NULL
       RETURNING
@@ -105,19 +105,19 @@ WITH
           CASE
           WHEN ip.ip_version = 'v4' AND nic.has_ipv4_stack THEN 'TRUE'
           WHEN ip.ip_version = 'v6' AND nic.has_ipv6_stack THEN 'TRUE'
-          ELSE $21
+          ELSE $20
           END
             AS BOOL
         )
       FROM
-        (SELECT ip_version FROM ip_pool WHERE id = $22 AND time_deleted IS NULL) AS ip
+        (SELECT ip_version FROM ip_pool WHERE id = $21 AND time_deleted IS NULL) AS ip
         CROSS JOIN (
             SELECT
               ip IS NOT NULL AS has_ipv4_stack, ipv6 IS NOT NULL AS has_ipv6_stack
             FROM
               network_interface
             WHERE
-              parent_id = $23 AND time_deleted IS NULL AND is_primary
+              parent_id = $22 AND time_deleted IS NULL AND is_primary
           )
             AS nic
     ),
@@ -126,10 +126,10 @@ WITH
       SELECT
         CAST(
           CASE
-          WHEN (SELECT assignment FROM ip_pool WHERE id = $24 AND time_deleted IS NULL)
+          WHEN (SELECT assignment FROM ip_pool WHERE id = $23 AND time_deleted IS NULL)
           = 'system_services'
           THEN 'TRUE'
-          ELSE $25
+          ELSE $24
           END
             AS BOOL
         )

@@ -216,6 +216,7 @@ mod test {
                 history_pruning_threshold: Setting::new(
                     NonZeroU32::new(400).unwrap(),
                 ),
+                certificate_expiry_warning_days: Setting::Default,
             },
         };
         datastore

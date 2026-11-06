@@ -23,19 +23,19 @@ use crate::latest::disk::M2Slot;
 use crate::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-    ExternalDnsAddrs, FmdHostCase, FmdInventory, FmdInventoryError,
-    FmdResource, HostPhase2DesiredContents, HostPhase2DesiredSlots,
-    ManifestBootInventory, ManifestInventory, ManifestNonBootInventory,
-    MupdateOverrideBootInventory, MupdateOverrideInventory,
-    MupdateOverrideNonBootInventory, NetworkInterface, NexusExternalIps,
-    OmicronFileSourceResolverInventory, OmicronSledConfig,
-    OmicronSledUpdateDisposition, OmicronZoneConfig, OmicronZoneImageSource,
-    OmicronZoneType, OmicronZonesConfig,
+    CurrentUpdateDisposition, ExternalDnsAddrs, FmdHostCase, FmdInventory,
+    FmdInventoryError, FmdResource, HostPhase2DesiredContents,
+    HostPhase2DesiredSlots, InstanceManagerStatus, ManifestBootInventory,
+    ManifestInventory, ManifestNonBootInventory, MupdateOverrideBootInventory,
+    MupdateOverrideInventory, MupdateOverrideNonBootInventory,
+    NetworkInterface, NexusExternalIps, OmicronFileSourceResolverInventory,
+    OmicronSledConfig, OmicronSledUpdateDisposition, OmicronZoneConfig,
+    OmicronZoneImageSource, OmicronZoneType, OmicronZonesConfig,
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
-    SingleMeasurementInventory, SourceNatConfig, SourceNatConfigGeneric,
-    SourceNatConfigV4, SourceNatConfigV6, SvcEnabledNotOnlineState, SvcState,
-    SvcsEnabledNotOnline, ZoneArtifactInventory, ZoneKind, ZoneSnatConfig,
-    ZpoolHealth,
+    SingleMeasurementInventory, SledCpuFamily, SourceNatConfig,
+    SourceNatConfigGeneric, SourceNatConfigV4, SourceNatConfigV6,
+    SvcEnabledNotOnlineState, SvcState, SvcsEnabledNotOnline,
+    ZoneArtifactInventory, ZoneKind, ZoneSnatConfig, ZpoolHealth,
 };
 
 impl ZoneKind {
@@ -1047,6 +1047,23 @@ impl fmt::Display for ZpoolHealth {
     }
 }
 
+impl SledCpuFamily {
+    fn as_str(&self) -> &'static str {
+        match self {
+            SledCpuFamily::Unknown => "unknown",
+            SledCpuFamily::AmdMilan => "amd_milan",
+            SledCpuFamily::AmdTurin => "amd_turin",
+            SledCpuFamily::AmdTurinDense => "amd_turin_dense",
+        }
+    }
+}
+
+impl fmt::Display for SledCpuFamily {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 impl From<SvcEnabledNotOnlineState> for SvcState {
     fn from(value: SvcEnabledNotOnlineState) -> Self {
         match value {
@@ -1134,6 +1151,26 @@ impl SourceNatConfigGeneric {
     }
 }
 
+impl From<SourceNatConfigV4> for SourceNatConfigGeneric {
+    fn from(c: SourceNatConfigV4) -> Self {
+        SourceNatConfig {
+            ip: IpAddr::V4(c.ip),
+            first_port: c.first_port,
+            last_port: c.last_port,
+        }
+    }
+}
+
+impl From<SourceNatConfigV6> for SourceNatConfigGeneric {
+    fn from(c: SourceNatConfigV6) -> Self {
+        SourceNatConfig {
+            ip: IpAddr::V6(c.ip),
+            first_port: c.first_port,
+            last_port: c.last_port,
+        }
+    }
+}
+
 #[cfg(any(test, feature = "testing"))]
 impl<T> proptest::arbitrary::Arbitrary for SourceNatConfig<T>
 where
@@ -1208,18 +1245,6 @@ impl NexusExternalIps {
     /// Iterate over the external IPs.
     pub fn iter(&self) -> impl Iterator<Item = &IpAddr> {
         self.0.iter()
-    }
-
-    /// Return the "primary" address, either IPv4 or IPv6 in that order.
-    ///
-    /// NOTE: This is a temporary method used while we don't fully support
-    /// multiple IP addresses. It should be removed when that support is done.
-    pub fn temporary_primary_address(&self) -> IpAddr {
-        self.iter()
-            .find(|ip| ip.is_ipv4())
-            .or_else(|| self.iter().next())
-            .copied()
-            .expect("NexusExternalIps is non-empty by construction")
     }
 }
 
@@ -1332,6 +1357,21 @@ impl ExternalDnsAddrs {
                     .map(|(ip, port)| SocketAddr::new(*ip, *port))
             })
             .expect("ExternalDnsAddrs is non-empty by construction")
+    }
+}
+
+impl InstanceManagerStatus {
+    /// Helper (primarily for tests) that constructs an
+    /// [`InstanceManagerStatus`] with the
+    /// [`OmicronSledUpdateDisposition::Available`] disposition and the given
+    /// number of registered VMMs.
+    pub fn available(num_registered_vmms: usize) -> Self {
+        Self {
+            update_disposition: CurrentUpdateDisposition::Known(
+                OmicronSledUpdateDisposition::Available,
+            ),
+            num_registered_vmms,
+        }
     }
 }
 
@@ -1449,5 +1489,44 @@ mod tests {
 
         assert_eq!(dual_stack.as_ipv4().unwrap(), &ipv4);
         assert_eq!(dual_stack.as_ipv6().unwrap(), &ipv6);
+    }
+
+    fn next_hardware_cpu_family(
+        family: sled_hardware_types::SledCpuFamily,
+    ) -> Option<sled_hardware_types::SledCpuFamily> {
+        use sled_hardware_types::SledCpuFamily as HardwareFamily;
+        // Exhaustive match ensures new variants are handled.
+        match family {
+            HardwareFamily::Unknown => Some(HardwareFamily::AmdMilan),
+            HardwareFamily::AmdMilan => Some(HardwareFamily::AmdTurin),
+            HardwareFamily::AmdTurin => Some(HardwareFamily::AmdTurinDense),
+            HardwareFamily::AmdTurinDense => None,
+        }
+    }
+
+    #[test]
+    fn sled_cpu_family_matches_sled_hardware_types() {
+        let hardware_families = std::iter::successors(
+            Some(sled_hardware_types::SledCpuFamily::Unknown),
+            |family| next_hardware_cpu_family(*family),
+        );
+        for hardware_family in hardware_families {
+            let hardware_json = serde_json::to_value(hardware_family)
+                .expect("serialized sled_hardware_types::SledCpuFamily");
+            let family = SledCpuFamily::from(hardware_family);
+            let family_json =
+                serde_json::to_value(family).expect("serialized SledCpuFamily");
+
+            assert_eq!(family_json, hardware_json);
+            assert_eq!(family.to_string(), hardware_family.to_string());
+            assert_eq!(
+                family_json,
+                serde_json::Value::String(family.to_string()),
+            );
+            let round_tripped: SledCpuFamily =
+                serde_json::from_value(family_json)
+                    .expect("deserialized SledCpuFamily");
+            assert_eq!(round_tripped, family);
+        }
     }
 }

@@ -106,7 +106,7 @@ WITH
       UPDATE
         ip_pool_range
       SET
-        time_modified = $15, rcgen = rcgen + 1
+        rcgen = rcgen + 1
       WHERE
         id = (SELECT ip_pool_range_id FROM next_external_multicast_group) AND time_deleted IS NULL
       RETURNING

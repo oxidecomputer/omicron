@@ -218,7 +218,9 @@ impl LocalStorage for ConfigReconcilerHandle {
         let sled_config =
             self.ledgered_sled_config().map_err(Error::LedgeredSledConfig)?;
         sled_config
-            .and_then(|mut sled_config| sled_config.datasets.remove(dataset_id))
+            .and_then(|mut sled_config| {
+                sled_config.datasets.remove(*dataset_id)
+            })
             .ok_or(Error::DatasetNotFound)
     }
 
@@ -303,7 +305,7 @@ impl LocalStorage for sim::Storage {
         let mut config = self.lock().omicron_sled_config().ok_or(
             HttpError::for_not_found(None, "No control plane datasets".into()),
         )?;
-        config.datasets.remove(dataset_id).ok_or(Error::DatasetNotFound)
+        config.datasets.remove(*dataset_id).ok_or(Error::DatasetNotFound)
     }
 
     async fn dyn_dataset_get(

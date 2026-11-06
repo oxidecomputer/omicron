@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{Generation, Project};
+use crate::DbTypedUuid;
 use crate::collection::DatastoreCollectionConfig;
 use crate::{DatabaseString, Image, impl_enum_type};
 use db_macros::Resource;
@@ -14,9 +15,10 @@ use nexus_types::external_api::silo::{
 };
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::SiloKind;
+use omicron_uuid_kinds::SiloUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use uuid::Uuid;
 
 impl_enum_type!(
     AuthenticationModeEnum:
@@ -84,6 +86,7 @@ impl From<UserProvisionType> for SharedUserProvisionType {
     Clone, PartialEq, Eq, Queryable, Insertable, Debug, Resource, Selectable,
 )]
 #[diesel(table_name = silo)]
+#[resource(uuid_kind = SiloKind)]
 pub struct Silo {
     #[diesel(embed)]
     identity: SiloIdentity,
@@ -169,13 +172,17 @@ impl<'a> From<&'a BTreeMap<SiloRole, BTreeSet<FleetRole>>>
 
 impl Silo {
     /// Creates a new database Silo object.
-    pub fn new(params: silo_types::SiloCreate) -> Result<Self, Error> {
-        Self::new_with_id(Uuid::new_v4(), params)
+    pub fn new(
+        params: silo_types::SiloCreate,
+        discoverable: bool,
+    ) -> Result<Self, Error> {
+        Self::new_with_id(SiloUuid::new_v4(), params, discoverable)
     }
 
     pub fn new_with_id(
-        id: Uuid,
+        id: SiloUuid,
         params: silo_types::SiloCreate,
+        discoverable: bool,
     ) -> Result<Self, Error> {
         let mapped_fleet_roles = serde_json::to_value(
             &SerializedMappedFleetRoles::from(&params.mapped_fleet_roles).0,
@@ -188,7 +195,7 @@ impl Silo {
         })?;
         Ok(Self {
             identity: SiloIdentity::new(id, params.identity),
-            discoverable: params.discoverable,
+            discoverable,
             authentication_mode: params
                 .identity_mode
                 .authentication_mode()
@@ -256,14 +263,14 @@ impl TryFrom<Silo> for silo_types::Silo {
 }
 
 impl DatastoreCollectionConfig<Project> for Silo {
-    type CollectionId = Uuid;
+    type CollectionId = DbTypedUuid<SiloKind>;
     type GenerationNumberColumn = silo::dsl::rcgen;
     type CollectionTimeDeletedColumn = silo::dsl::time_deleted;
     type CollectionIdColumn = project::dsl::silo_id;
 }
 
 impl DatastoreCollectionConfig<Image> for Silo {
-    type CollectionId = Uuid;
+    type CollectionId = DbTypedUuid<SiloKind>;
     type GenerationNumberColumn = silo::dsl::rcgen;
     type CollectionTimeDeletedColumn = silo::dsl::time_deleted;
     type CollectionIdColumn = image::dsl::silo_id;

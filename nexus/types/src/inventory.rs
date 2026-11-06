@@ -15,17 +15,21 @@ use chrono::Utc;
 use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use daft::Diffable;
 pub use gateway_types::component::PowerState;
+pub use gateway_types::component::SpComponentPresence;
 pub use gateway_types::component::SpType;
 pub use gateway_types::rot::RotImageError;
 pub use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::{RACK_PREFIX_LENGTH, SLED_PREFIX_LENGTH};
 use omicron_common::api::external::ByteCount;
 pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
@@ -38,6 +42,7 @@ use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryResul
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus;
 use sled_agent_types_versions::latest::inventory::FmdInventory;
 use sled_agent_types_versions::latest::inventory::FmdInventoryError;
+use sled_agent_types_versions::latest::inventory::InstanceManagerStatus;
 use sled_agent_types_versions::latest::inventory::InventoryDataset;
 use sled_agent_types_versions::latest::inventory::InventoryDisk;
 use sled_agent_types_versions::latest::inventory::InventoryZpool;
@@ -49,13 +54,18 @@ use sled_agent_types_versions::latest::inventory::SledCpuFamily;
 use sled_agent_types_versions::latest::inventory::SledRole;
 use sled_agent_types_versions::latest::inventory::SvcsEnabledNotOnlineResult;
 pub use sled_agent_types_versions::latest::inventory::ZpoolHealth;
+use sled_agent_types_versions::latest::multirack::SledAgentStartState;
 use sled_hardware_types::BaseboardId;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
+use thiserror::Error;
 use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactVersion;
 
 mod display;
 
@@ -148,8 +158,22 @@ pub struct Collection {
     pub rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
 
+    /// all power shelf PSUs found, keyed by rack ID and PSC slot.
+    ///
+    /// In practice, these will be inserted into the `inv_power_shelf_psu` table.
+    pub power_shelves: IdOrdMap<PowerShelf>,
+
     /// Sled Agent information, by *sled* id
     pub sled_agents: IdOrdMap<SledAgent>,
+
+    /// Other racks we've discovered via DDM that are not *necessarily* part of
+    /// the multirack cluster yet.
+    ///
+    /// This field includes info on both racks and sleds in those racks. Entries
+    /// are not immediately cleared when the racks and sleds are adopted into
+    /// the cluster, so code that makes use of this data must also consult the
+    /// `rack` and `sled` tables to find out what has already been adopted.
+    pub discovered_racks: IdOrdMap<DiscoveredRack>,
 
     /// The raft configuration (cluster membership) of the clickhouse keeper
     /// cluster as returned from each available keeper via `clickhouse-admin` in
@@ -229,6 +253,66 @@ impl Collection {
         self.rot_pages_found
             .get(&which)
             .and_then(|by_bb| by_bb.get(baseboard_id))
+    }
+
+    /// Returns the SP on `baseboard_id`
+    pub fn sp_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Result<&ServiceProcessor, NotInInventory> {
+        self.sps.get(baseboard_id).ok_or(NotInInventory(InventoryItem::Sp))
+    }
+
+    /// Returns caboose `which` on `baseboard_id`, along with the version that
+    /// it contains
+    pub fn caboose_with_version_for(
+        &self,
+        which: CabooseWhich,
+        baseboard_id: &BaseboardId,
+    ) -> Result<CabooseWithVersion<'_>, CabooseVersionError> {
+        let Some(found) = self.caboose_for(which, baseboard_id) else {
+            return Err(CabooseVersionError::NotInInventory(which));
+        };
+        let version = found.caboose.version.parse().map_err(|err| {
+            CabooseVersionError::Parse {
+                caboose: which,
+                err: InlineErrorChain::new(&err).to_string(),
+            }
+        })?;
+        Ok(CabooseWithVersion { caboose: &found.caboose, version })
+    }
+
+    /// Returns the caboose for the active SP image (slot 0) on
+    /// `baseboard_id`, along with the version that it contains
+    pub fn active_sp_caboose_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Result<CabooseWithVersion<'_>, CabooseVersionError> {
+        self.caboose_with_version_for(CabooseWhich::SpSlot0, baseboard_id)
+    }
+
+    /// Returns the caboose for the active RoT bootloader image (stage0) on
+    /// `baseboard_id`, along with the version that it contains
+    pub fn active_rot_bootloader_caboose_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Result<CabooseWithVersion<'_>, CabooseVersionError> {
+        self.caboose_with_version_for(CabooseWhich::Stage0, baseboard_id)
+    }
+
+    /// Returns the hash of the active host phase 1 image on `baseboard_id`
+    pub fn active_host_phase_1_hash_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Result<ArtifactHash, NotInInventory> {
+        let Some(active_slot) =
+            self.host_phase_1_active_slot_for(baseboard_id).map(|s| s.slot)
+        else {
+            return Err(NotInInventory(InventoryItem::HostPhase1ActiveSlot));
+        };
+        self.host_phase_1_flash_hash_for(active_slot, baseboard_id)
+            .map(|h| h.hash)
+            .ok_or(NotInInventory(InventoryItem::HostPhase1Hash(active_slot)))
     }
 
     /// Iterate over all the Omicron zones in the sled-agent ledgers of this
@@ -350,6 +434,89 @@ impl Collection {
     }
 }
 
+/// An item about a particular baseboard that was not found in an inventory
+/// collection
+///
+/// This does not identify the baseboard.  Callers generally report it in the
+/// context of a particular baseboard already.
+///
+/// This type is not used in the planner's failure reasons (e.g.,
+/// `FailedSpUpdateReason`).  Those are part of the planning report's
+/// serialized format, and they have their own variant for each kind of
+/// missing item (e.g., `SpNotInInventory`).  A missing caboose is reported
+/// with `CabooseVersionError::NotInInventory` instead.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[error("{0} is not in inventory")]
+pub struct NotInInventory(pub InventoryItem);
+
+/// Describes an item that inventory collects about a baseboard
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InventoryItem {
+    /// the baseboard's SP
+    Sp,
+    /// the active host phase 1 slot of a sled
+    HostPhase1ActiveSlot,
+    /// the hash of the contents of a sled's host phase 1 slot
+    HostPhase1Hash(M2Slot),
+}
+
+impl std::fmt::Display for InventoryItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InventoryItem::Sp => write!(f, "SP"),
+            InventoryItem::HostPhase1ActiveSlot => {
+                write!(f, "active host phase 1 slot")
+            }
+            InventoryItem::HostPhase1Hash(slot) => {
+                write!(f, "host phase 1 hash for slot {slot:?}")
+            }
+        }
+    }
+}
+
+/// A caboose found in inventory, along with the version parsed from it
+#[derive(Clone, Debug)]
+pub struct CabooseWithVersion<'a> {
+    /// the caboose
+    pub caboose: &'a Caboose,
+    /// the version in the caboose
+    pub version: ArtifactVersion,
+}
+
+/// Reasons that a version could not be determined from a caboose in
+/// inventory
+#[derive(
+    Clone,
+    Debug,
+    Error,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum CabooseVersionError {
+    /// the caboose was not in inventory
+    #[error("caboose for {0:?} is not in inventory")]
+    NotInInventory(CabooseWhich),
+    /// the version in the caboose could not be parsed
+    // The parse error is stored as a string so that this type can be
+    // serialized as part of a planning report.  That is why the message
+    // includes it.
+    #[error("version from caboose {caboose:?} could not be parsed: {err}")]
+    Parse {
+        /// the caboose whose version could not be parsed
+        caboose: CabooseWhich,
+        /// description of the parse error
+        err: String,
+    },
+}
+
 impl IdOrdItem for Collection {
     type Key<'a> = CollectionUuid;
 
@@ -414,6 +581,353 @@ pub struct ServiceProcessor {
     pub baseboard_revision: u32,
     pub hubris_archive: String,
     pub power_state: PowerState,
+
+    /// The rack in which this service processor was found, as determined by
+    /// the rack ID of the MGS instance that reported it.
+    pub rack_id: RackUuid,
+}
+
+/// Describes a power shelf, as reported by its power shelf controller.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct PowerShelf {
+    /// The baseboard identity of the power shelf controller.
+    pub psc_baseboard_id: Arc<BaseboardId>,
+
+    /// The ID of the rack containing this power shelf.
+    ///
+    /// This, along with the slot number, is determined based on the PSC record
+    /// with the provided `psc_baseboard_id`. they are duplicated here since
+    /// they are used as the key to look up the power shelf.
+    pub rack_id: RackUuid,
+
+    /// Which power shelf (0 or 1) this is.
+    ///
+    /// This, along with the rack ID, is determined based on the PSC record
+    /// with the provided `psc_baseboard_id`. they are duplicated here since
+    /// they are used as the key to look up the power shelf.
+    pub slot: u16,
+
+    /// PSU slots reported by the power shelf controller.
+    pub psus: IdOrdMap<Psu>,
+}
+
+impl IdOrdItem for PowerShelf {
+    type Key<'a> = (&'a RackUuid, u16);
+
+    fn key(&self) -> Self::Key<'_> {
+        (&self.rack_id, self.slot)
+    }
+
+    id_upcast!();
+}
+
+/// Identifies a PSU's slot in a power shelf.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Ord,
+    Eq,
+    PartialOrd,
+    PartialEq,
+    Hash,
+    strum::EnumString,
+    strum::Display,
+    strum::IntoStaticStr,
+    strum::VariantArray,
+    strum::FromRepr,
+    serde_with::DeserializeFromStr,
+    serde_with::SerializeDisplay,
+)]
+#[strum(serialize_all = "UPPERCASE")]
+#[repr(u8)]
+pub enum PsuSlot {
+    Psu0 = 0,
+    Psu1 = 1,
+    Psu2 = 2,
+    Psu3 = 3,
+    Psu4 = 4,
+    Psu5 = 5,
+}
+
+impl PsuSlot {
+    pub const ALL: &[Self] = <Self as strum::VariantArray>::VARIANTS;
+
+    /// Returns the SP component ID for the PSU in this slot.
+    pub fn as_component_id(&self) -> &'static str {
+        <&'static str>::from(self)
+    }
+}
+
+/// Describes a power supply unit (PSU) observed in a power shelf.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct Psu {
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub slot: PsuSlot,
+    /// The Hubris device type string in the SP's inventory. This identifies
+    /// which Hubris driver is used to communicate with the PSU, and is a
+    /// property of the SP's Hubris image, not a value reported by the PSU
+    /// itself.
+    ///
+    /// For the model number reported by the PSU, use [`PsuIdentity::mfr_model`]
+    /// instead.
+    pub hubris_device_type: String,
+    /// Data describing the state of the PSU, or `None` if the SP reported that
+    /// no PSU is present in this slot.
+    pub state: Option<PsuState>,
+}
+
+impl Psu {
+    /// Returns the presence of this PSU, as reported by the SP.
+    pub fn presence(&self) -> SpComponentPresence {
+        match &self.state {
+            None => SpComponentPresence::NotPresent,
+            Some(state) => state.status.into(),
+        }
+    }
+
+    /// Returns the result of reading this PSU's identity, or
+    /// [`PsuIdentityResult::NotPresent`] if the SP indicated that no PSU is
+    /// present in this slot.
+    pub fn identity(&self) -> PsuIdentityResult<'_> {
+        match self.state {
+            None => PsuIdentityResult::NotPresent,
+            Some(PsuState { identity: Ok(ref identity), .. }) => {
+                PsuIdentityResult::Present(identity)
+            }
+            Some(PsuState { identity: Err(ref error), .. }) => {
+                PsuIdentityResult::Error(error)
+            }
+        }
+    }
+
+    /// Parses the [`PsuFirmwareRevisions`] from this PSU's VPD identity, if a
+    /// PSU is present in this slot.
+    ///
+    /// # Returns
+    ///
+    /// - [`None`] if no PSU is present in this slot.
+    /// - [`Some`]`(`[`Ok`]`(`[`PsuFirmwareRevisions`]`))` if the `MFR_REVISION`
+    ///   string was read sucessfully and the firmware revisions could be
+    ///   parsed.
+    /// - [`Some`]`(`[`Err`]`(`[`anyhow::Error`]`))` if they could not, either
+    ///   because the PSU's `MFR_REVISION` was not read successfully, or because
+    ///   it did not contain a valid muRata firmware revision string.
+    pub fn firmware_revs(
+        &self,
+    ) -> Option<Result<PsuFirmwareRevisions<'_>, anyhow::Error>> {
+        match self.identity() {
+            PsuIdentityResult::NotPresent => None,
+            PsuIdentityResult::Present(identity) => {
+                Some(identity.firmware_revs())
+            }
+            PsuIdentityResult::Error(err) => Some(Err(anyhow::anyhow!(
+                "no MFR_REVISION was read from this PSU: {err}"
+            ))),
+        }
+    }
+}
+
+impl IdOrdItem for Psu {
+    type Key<'a> = PsuSlot;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.slot
+    }
+
+    id_upcast!();
+}
+
+/// The SP-reported status of a PSU slot which was not reported as empty.
+///
+/// This is [`SpComponentPresence`] without
+/// [`NotPresent`](SpComponentPresence::NotPresent), which is represented by
+/// [`Psu::state`] being `None`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub enum PsuStatus {
+    /// The SP reports that the PSU is present.
+    Present,
+    /// The SP reports that the PSU is present but in a failed or faulty state.
+    Failed,
+    /// The SP was unable to determine whether a PSU is present.
+    PresenceUnavailable,
+    /// The SP's attempt to determine whether a PSU is present timed out.
+    PresenceTimeout,
+    /// The SP encountered an error while determining whether a PSU is present.
+    PresenceError,
+}
+
+impl PsuStatus {
+    /// Converts an SP-reported component presence into a `PsuStatus`.
+    ///
+    /// Returns `None` if the presence is
+    /// [`NotPresent`](SpComponentPresence::NotPresent).
+    pub fn from_presence(presence: SpComponentPresence) -> Option<Self> {
+        match presence {
+            SpComponentPresence::NotPresent => None,
+            SpComponentPresence::Present => Some(Self::Present),
+            SpComponentPresence::Failed => Some(Self::Failed),
+            SpComponentPresence::Unavailable => Some(Self::PresenceUnavailable),
+            SpComponentPresence::Timeout => Some(Self::PresenceTimeout),
+            SpComponentPresence::Error => Some(Self::PresenceError),
+        }
+    }
+}
+
+impl From<PsuStatus> for SpComponentPresence {
+    fn from(status: PsuStatus) -> Self {
+        match status {
+            PsuStatus::Present => Self::Present,
+            PsuStatus::Failed => Self::Failed,
+            PsuStatus::PresenceUnavailable => Self::Unavailable,
+            PsuStatus::PresenceTimeout => Self::Timeout,
+            PsuStatus::PresenceError => Self::Error,
+        }
+    }
+}
+
+/// The state of a PSU slot which the SP did not report as empty.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct PsuState {
+    /// The SP-reported status of this PSU.
+    pub status: PsuStatus,
+    /// The PSU's PMBus identity, or an error describing why it could not be
+    /// read.
+    pub identity: Result<PsuIdentity, String>,
+}
+
+/// Values returned by [`Psu::identity`].
+#[derive(Copy, Clone, Debug, Eq, PartialOrd, PartialEq)]
+pub enum PsuIdentityResult<'psu> {
+    /// The VPD identity of the PSU was not read because no PSU was present in
+    /// this slot.
+    NotPresent,
+    /// The VPD identity of the PSU was successfully read.
+    Present(&'psu PsuIdentity),
+    /// The PSU was not determined to be not present, but an error occurred
+    /// while reading its VPD identity.
+    Error(&'psu str),
+}
+
+impl<'psu> PsuIdentityResult<'psu> {
+    /// Returns [`Some`]`(`[`PsuIdentity`]`)` if the PSU was present and its VPD
+    /// identity was read successfully, or [`None`] if no PSU was present or an
+    /// error occurred while reading its VPD identity.
+    pub fn ok(self) -> Option<&'psu PsuIdentity> {
+        match self {
+            PsuIdentityResult::Present(identity) => Some(identity),
+            _ => None,
+        }
+    }
+
+    pub fn is_present(&self) -> bool {
+        matches!(self, PsuIdentityResult::Present(_))
+    }
+
+    pub fn is_error(&self) -> bool {
+        matches!(self, PsuIdentityResult::Error(_))
+    }
+
+    pub fn is_not_present(&self) -> bool {
+        matches!(self, PsuIdentityResult::NotPresent)
+    }
+}
+
+/// The identity of a muRata PSU in the power shelf, as reported over PMBus.
+///
+/// The combination of `mfr_model` and `mfr_serial` identifies the PSU.
+#[derive(Clone, Debug, Eq, PartialOrd, PartialEq, Deserialize, Serialize)]
+pub struct PsuIdentity {
+    /// `MFR_ID` (PMBus command 0x99).
+    pub mfr_id: String,
+    /// `MFR_MODEL` (PMBus command 0x9A).
+    pub mfr_model: String,
+    /// `MFR_REVISION` (PMBus command 0x9B).
+    ///
+    /// Note that muRata uses this command to represent the *firmware revision*
+    /// of the PSU, rather than a hardware revision.
+    pub mfr_revision: String,
+    /// `MFR_LOCATION` (PMBus command 0x9C).
+    pub mfr_location: String,
+    /// `MFR_DATE` (PMBus command 0x9D).
+    pub mfr_date: String,
+    /// `MFR_SERIAL` (PMBus command 0x9E).
+    pub mfr_serial: String,
+}
+
+impl PsuIdentity {
+    /// Attempt to parse this PSU's [firmware revision
+    /// numbers](PsuFirmwareRevisions) from its [`PsuIdentity::mfr_revision`]
+    /// string.
+    pub fn firmware_revs(
+        &self,
+    ) -> Result<PsuFirmwareRevisions<'_>, anyhow::Error> {
+        PsuFirmwareRevisions::try_from(self.mfr_revision.as_str())
+    }
+}
+
+/// The firmware revisions of a muRata PSU.
+///
+/// These are parsed from the PSU's [`PsuIdentity::mfr_revision`].
+#[derive(Clone, Debug, Eq, PartialOrd, PartialEq, Deserialize, Serialize)]
+pub struct PsuFirmwareRevisions<'rev> {
+    /// The firmware revision on the primary MCU (AC input side).
+    pub primary: &'rev str,
+    /// The firmware revision on the secondary MCU (DC output side).
+    pub secondary: &'rev str,
+}
+
+impl<'rev> TryFrom<&'rev str> for PsuFirmwareRevisions<'rev> {
+    type Error = anyhow::Error;
+
+    fn try_from(s: &'rev str) -> Result<Self, Self::Error> {
+        // Per muRata's documentation in ACAN-114 and ACAN-157, the response to
+        // the PMBus `MFR_REVISION` command is expected to be of the format:
+        //
+        //     XXXX-YYYY-0000
+        //
+        // Where XXXX is the firmware revision on the primary MCU (AC input
+        // side) and YYYY is the firmware revision on the secondary MCU (DC
+        // output side). See also:
+        // https://github.com/oxidecomputer/hubris/blob/929f0d3709025c33cd3ad51c09df6c2fbb55047d/drv/i2c-devices/src/mwocp6x.rs#L202-L209
+        let cx = format_args!(
+            "failed to parse firmware revisions from MFR_REVISION {s:?}:"
+        );
+
+        let mut parts = s.split("-");
+        let primary = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("{cx} missing primary revision"))?;
+        anyhow::ensure!(
+            primary.len() == 4,
+            "{cx} expected primary MCU firmware revision to be 4 characters, \
+             but found: {primary:?}"
+        );
+        let secondary = parts.next().ok_or_else(|| {
+            anyhow::anyhow!("{cx} missing secondary revision")
+        })?;
+        anyhow::ensure!(
+            secondary.len() == 4,
+            "{cx} expected secondary MCU firmware revision to be 4 characters, \
+             but found: {secondary:?}"
+        );
+        let zeroes = parts.next().ok_or_else(|| {
+            anyhow::anyhow!("{cx} expected firmware revision to end with 0000")
+        })?;
+        anyhow::ensure!(
+            zeroes == "0000",
+            "{cx} expected \"0000\" but found: {zeroes:?}"
+        );
+        let rest = parts.collect::<Vec<_>>();
+        anyhow::ensure!(
+            rest.is_empty(),
+            "{cx} expected firmware revision to end after \"0000\", but found \
+             trailing {:?}",
+            rest.join("-"),
+        );
+        Ok(Self { primary, secondary })
+    }
 }
 
 /// Describes the root of trust state found (from a service processor) during
@@ -704,6 +1218,7 @@ pub struct SledAgent {
     pub source: String,
     pub sled_id: SledUuid,
     pub baseboard_id: Option<Arc<BaseboardId>>,
+    pub rack_id: RackUuid,
     pub sled_agent_address: SocketAddrV6,
     pub sled_role: SledRole,
     pub usable_hardware_threads: u32,
@@ -715,6 +1230,7 @@ pub struct SledAgent {
     pub datasets: Vec<Dataset>,
     pub ledgered_sled_config: Option<OmicronSledConfig>,
     pub reconciler_status: ConfigReconcilerInventoryStatus,
+    pub instance_manager_status: InstanceManagerStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub file_source_resolver: OmicronFileSourceResolverInventory,
     pub smf_services_enabled_not_online: SvcsEnabledNotOnlineResult,
@@ -772,4 +1288,81 @@ impl IdOrdItem for InternalDnsGenerationStatus {
         self.zone_id
     }
     id_upcast!();
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DiscoveredRack {
+    /// ID of the rack, which will be the same ID used in the `rack` table
+    /// if/when the discovered rack is adopted into the cluster.
+    pub rack_id: RackUuid,
+    /// Rack subnet prefix on the underlay network.
+    pub rack_subnet: Ipv6Subnet<RACK_PREFIX_LENGTH>,
+    /// Underlay address of the sled running the multirack join service.
+    pub join_service_ip: Ipv6Addr,
+    /// Sleds on this rack that we've discovered via the join service.
+    pub discovered_sleds: IdOrdMap<DiscoveredSled>,
+}
+
+impl IdOrdItem for DiscoveredRack {
+    type Key<'a> = RackUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.rack_id
+    }
+    id_upcast!();
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DiscoveredSled {
+    /// ID of the sled, which will be the same ID used by the sled-agent to
+    /// upsert itself into the `sled` table if/when the sled is adopted:
+    pub sled_id: SledUuid,
+    /// Baseboard ID reported by the join service:
+    pub baseboard_id: BaseboardId,
+    /// Underlay subnet prefix of the sled:
+    pub sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
+    /// Status field indicating whether the sled-agent has started, including
+    /// the most recent error seen, if any:
+    pub sled_agent_start_state: SledAgentStartState,
+}
+
+impl IdOrdItem for DiscoveredSled {
+    type Key<'a> = SledUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.sled_id
+    }
+    id_upcast!();
+}
+
+#[cfg(test)]
+mod test {
+    use super::PsuFirmwareRevisions;
+
+    #[test]
+    fn test_parse_psu_firmware_revisions() {
+        // This is the `MFR_REVISION` value reported by a real MWOCP68.
+        let revs = PsuFirmwareRevisions::try_from("0762-0701-0000").unwrap();
+        assert_eq!(
+            revs,
+            PsuFirmwareRevisions { primary: "0762", secondary: "0701" }
+        );
+
+        // Values that are not of the form `XXXX-YYYY-0000` must be rejected,
+        // rather than producing firmware revisions that misrepresent the PSU.
+        for invalid in [
+            "",
+            "0762",
+            "0762-0701",
+            "0762-0701-",
+            "0762-0701-0001",
+            "0762-0701-0000-0000",
+            "762-0701-0000",
+            "0762-07010-0000",
+            "07620701-0000",
+        ] {
+            assert!(
+                PsuFirmwareRevisions::try_from(invalid).is_err(),
+                "{invalid:?} should not parse as PSU firmware revisions",
+            );
+        }
+    }
 }

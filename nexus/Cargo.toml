@@ -130,14 +130,13 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
 tokio-tungstenite.workspace = true
-tokio-util = { workspace = true, features = ["codec", "rt"] }
+tokio-util = { workspace = true, features = ["codec", "rt", "join-map"] }
 trust-quorum-types.workspace = true
 tufaceous.workspace = true
 tufaceous-artifact.workspace = true
 url.workspace = true
 usdt.workspace = true
 uuid.workspace = true
-
 nexus-auth.workspace = true
 nexus-defaults.workspace = true
 nexus-db-lookup.workspace = true
@@ -145,6 +144,7 @@ nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
 nexus-db-schema.workspace = true
 nexus-fm.workspace = true
+nexus-fm-preparation.workspace = true
 nexus-inventory.workspace = true
 nexus-metrics-producer-gc.workspace = true
 nexus-reconfigurator-execution.workspace = true
@@ -153,7 +153,9 @@ nexus-reconfigurator-preparation.workspace = true
 nexus-reconfigurator-rendezvous.workspace = true
 nexus-types.workspace = true
 nexus-types-versions.workspace = true
+omicron-certificates.workspace = true
 omicron-common.workspace = true
+omicron-git-version.workspace = true
 omicron-passwords.workspace = true
 oxide-tokio-rt.workspace = true
 oximeter.workspace = true
@@ -162,7 +164,6 @@ oximeter-producer.workspace = true
 raw-cpuid = { workspace = true, features = ["std"] }
 rustix = { workspace = true, features = ["fs"] }
 rustls = { workspace = true }
-rustls-pemfile = { workspace = true }
 scim2-rs.workspace = true
 support-bundle-collection.workspace = true
 oxide-update-engine.workspace = true

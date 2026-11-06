@@ -49,16 +49,7 @@ progenitor::generate_api!(
     spec = "../../openapi/gateway/gateway-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
-    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-        slog::debug!(log, "client request";
-            "method" => %request.method(),
-            "uri" => %request.url(),
-            "body" => ?&request.body(),
-        );
-    }),
-    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-        slog::debug!(log, "client response"; "result" => ?result);
-    }),
+    hooks = Expected,
     derives = [schemars::JsonSchema],
     patch = {
         ComponentFirmwareHashStatus = { derives = [PartialEq, Eq, PartialOrd, Ord] },
@@ -71,16 +62,25 @@ progenitor::generate_api!(
         UpdatePreparationProgress = { derives = [PartialEq, Hash, Eq] },
     },
     crates = {
+        "byte-wrapper" = "*",
         "omicron-uuid-kinds" = "*",
     },
 
     replace = {
+        Barcode = gateway_types::component_vpd::Barcode,
+        ComponentVpd = gateway_types::component_vpd::ComponentVpd,
+        Mpn1Barcode = gateway_types::component_vpd::Mpn1Barcode,
+        OxideBarcode = gateway_types::component_vpd::OxideBarcode,
+        PmbusDevice = gateway_types::component_vpd::PmbusDevice,
         RotSlot = gateway_types::rot::RotSlot,
+        SledFanTray = gateway_types::component_vpd::SledFanTray,
+        Tmp11x = gateway_types::component_vpd::Tmp11x,
         RotState = gateway_types::rot::RotState,
         RotImageError = gateway_types::rot::RotImageError,
         Ena = ereport_types::Ena,
         Ereport = ereport_types::Ereport,
         Ereports = ereport_types::Ereports,
+        SpComponentPresence = gateway_types::component::SpComponentPresence,
         SpIdentifier = gateway_types::component::SpIdentifier,
         SpIgnition = gateway_types::ignition::SpIgnition,
         SpIgnitionSystemType = gateway_types::ignition::SpIgnitionSystemType,
@@ -89,6 +89,8 @@ progenitor::generate_api!(
         TaskDump = gateway_types::task_dump::TaskDump,
     },
 );
+
+progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
 
 #[derive(Debug, thiserror::Error)]
 pub enum HostPhase1HashError {

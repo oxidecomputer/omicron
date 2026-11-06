@@ -31,6 +31,7 @@ use nexus_types::deployment::{
 };
 use nexus_types::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
+    OmicronZoneExternalFloatingAddrs, OmicronZoneExternalFloatingIps,
 };
 use omicron_common::FileKv;
 use omicron_common::address::IpRange;
@@ -50,6 +51,8 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
 use rand::seq::IndexedRandom;
@@ -65,6 +68,7 @@ use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use slog::{Drain, Logger, info};
+use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
@@ -81,8 +85,9 @@ const SERVICE_POOL_IPV6_NAME: &str = "oxide-service-pool-v6";
 
 /// How [`Server::start`] handles the sled agent's registration with Nexus.
 ///
-/// A simulated sled agent announces itself to Nexus with `sled_agent_put`,
-/// retrying until Nexus accepts it.
+/// Unless registration is [`NexusRegistration::Manual`], a simulated sled
+/// agent announces itself to Nexus with `sled_agent_put`, retrying until Nexus
+/// accepts it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NexusRegistration {
     /// Wait until Nexus has accepted the registration, so that the sled exists
@@ -98,6 +103,10 @@ pub enum NexusRegistration {
     /// Use this in cases where Nexus might not be reachable (for example, a
     /// sled agent started against a placeholder Nexus address).
     Background,
+    /// Do not automatically register with Nexus. The caller must register with
+    /// Nexus manually; see [`Server::sled_agent_info`] for a body that can be
+    /// used to register with.
+    Manual,
 }
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
@@ -158,86 +167,38 @@ impl Server {
             dropshot::ClientSpecifiesVersionInHeader::new(
                 omicron_common::api::VERSION_HEADER,
                 sled_agent_api::latest_version(),
-            ),
+            )
+            .min_version(sled_agent_api::oldest_version()),
         )))
         .start()
         .map_err(|error| anyhow!("initializing server: {}", error))?;
 
-        // Notify the control plane that we're up, and continue trying this
-        // until it succeeds. We retry with an randomized, capped exponential
-        // backoff.
-        //
-        // TODO-robustness if this returns a 400 error, we probably want to
-        // return a permanent error from the `notify_nexus` closure.
-        let sa_address = http_server.local_addr();
         let repo_depot_address = sled_agent.repo_depot.local_addr();
-        let repo_depot_port = repo_depot_address.port();
-        let config_clone = config.clone();
-        let log_clone = log.clone();
-        let task = tokio::spawn(async move {
-            let config = config_clone;
-            let log = log_clone;
-            let nexus_client = nexus_client.clone();
-            let notify_nexus = || async {
-                debug!(log, "contacting server nexus");
-                nexus_client
-                    .sled_agent_put(
-                        &config.id,
-                        &NexusTypes::SledAgentInfo {
-                            sa_address: sa_address.to_string(),
-                            repo_depot_port,
-                            role: NexusTypes::SledRole::Scrimlet,
-                            baseboard: NexusTypes::Baseboard {
-                                serial: config
-                                    .hardware
-                                    .baseboard
-                                    .identifier()
-                                    .to_string(),
-                                part: config
-                                    .hardware
-                                    .baseboard
-                                    .model()
-                                    .to_string(),
-                                revision: config.hardware.baseboard.revision(),
-                            },
-                            usable_hardware_threads: config
-                                .hardware
-                                .hardware_threads,
-                            usable_physical_ram:
-                                NexusTypes::ByteCount::try_from(
-                                    config.hardware.physical_ram,
-                                )
-                                .unwrap(),
-                            reservoir_size: NexusTypes::ByteCount::try_from(
-                                config.hardware.reservoir_ram,
-                            )
-                            .unwrap(),
-                            cpu_family: config.hardware.cpu_family.convert(),
-                            generation: Generation::new(),
-                            decommissioned: false,
-                        },
-                    )
-                    .await
-                    .map_err(BackoffError::transient)
-            };
-            let log_notification_failure = |error, delay| {
-                warn!(log, "failed to contact nexus, will retry in {:?}", delay;
-                    "error" => ?error);
-            };
-            retry_notify(
-                retry_policy_internal_service_aggressive(),
-                notify_nexus,
-                log_notification_failure,
-            )
-            .await
-            .expect("Expected an infinite retry loop contacting Nexus");
-        });
-
+        let sled_agent_info = sled_agent_info(
+            config,
+            http_server.local_addr(),
+            repo_depot_address.port(),
+        );
         match nexus_registration {
             NexusRegistration::WaitForCompletion => {
-                task.await.context("registering with Nexus")?;
+                tokio::spawn(register_with_nexus(
+                    log.clone(),
+                    nexus_client,
+                    config.id,
+                    sled_agent_info,
+                ))
+                .await
+                .context("registering with Nexus")?;
             }
-            NexusRegistration::Background => {}
+            NexusRegistration::Background => {
+                tokio::spawn(register_with_nexus(
+                    log.clone(),
+                    nexus_client,
+                    config.id,
+                    sled_agent_info,
+                ));
+            }
+            NexusRegistration::Manual => {}
         }
 
         let mut datasets = vec![];
@@ -292,6 +253,20 @@ impl Server {
         })
     }
 
+    /// Return the `SledAgentInfo` that [`Server::start`] uses to register with
+    /// Nexus.
+    ///
+    /// If this simulated Sled Agent was configured with
+    /// [`NexusRegistration::Manual`], callers must register with this or a
+    /// similar body.
+    pub fn sled_agent_info(&self) -> NexusTypes::SledAgentInfo {
+        sled_agent_info(
+            &self.config,
+            self.http_server.local_addr(),
+            self.repo_depot_address.port(),
+        )
+    }
+
     /// Starts the pantry service
     pub async fn start_pantry(&mut self) -> &PantryServer {
         // Create the simulated Pantry
@@ -314,25 +289,89 @@ impl Server {
     }
 }
 
+fn sled_agent_info(
+    config: &Config,
+    sa_address: SocketAddr,
+    repo_depot_port: u16,
+) -> NexusTypes::SledAgentInfo {
+    NexusTypes::SledAgentInfo {
+        sa_address: sa_address.to_string(),
+        repo_depot_port,
+        role: config.sled_role,
+        baseboard: NexusTypes::Baseboard {
+            serial: config.hardware.baseboard.identifier().to_string(),
+            part: config.hardware.baseboard.model().to_string(),
+            revision: config.hardware.baseboard.revision(),
+        },
+        usable_hardware_threads: config.hardware.hardware_threads,
+        usable_physical_ram: NexusTypes::ByteCount::try_from(
+            config.hardware.physical_ram,
+        )
+        .unwrap(),
+        reservoir_size: NexusTypes::ByteCount::try_from(
+            config.hardware.reservoir_ram,
+        )
+        .unwrap(),
+        cpu_family: config.hardware.cpu_family.convert(),
+        generation: Generation::new(),
+        decommissioned: false,
+    }
+}
+
+// Notify the control plane that we're up, and continue trying this until it
+// succeeds. We retry with an randomized, capped exponential backoff.
+//
+// TODO-robustness if this returns a 400 error, we probably want to return a
+// permanent error in the caller.
+async fn register_with_nexus(
+    log: Logger,
+    nexus_client: Arc<NexusClient>,
+    sled_id: SledUuid,
+    sled_agent_info: NexusTypes::SledAgentInfo,
+) {
+    let notify_nexus = || async {
+        debug!(log, "contacting server nexus");
+        nexus_client
+            .sled_agent_put(&sled_id, &sled_agent_info)
+            .await
+            .map_err(BackoffError::transient)
+    };
+    let log_notification_failure = |error, delay| {
+        warn!(log, "failed to contact nexus, will retry in {:?}", delay;
+            "error" => ?error);
+    };
+    retry_notify(
+        retry_policy_internal_service_aggressive(),
+        notify_nexus,
+        log_notification_failure,
+    )
+    .await
+    .expect("Expected an infinite retry loop contacting Nexus");
+}
+
 async fn handoff_to_nexus(
     log: &Logger,
     nexus_lockstep_address: SocketAddr,
+    rack_id: RackUuid,
     request: &RackInitializationRequest,
 ) -> Result<(), anyhow::Error> {
     let nexus_client = nexus_lockstep_client::Client::new(
         &format!("http://{}", nexus_lockstep_address),
         log.new(o!("component" => "NexusLockstepClient")),
     );
-    let rack_id = uuid::uuid!("c19a698f-c6f9-4a17-ae30-20d711b8f7dc");
 
     let notify_nexus = || async {
         nexus_client
-            .rack_initialization_complete(&rack_id, &request)
+            .rack_initialization_complete(
+                &rack_id.into_untyped_uuid(),
+                &request,
+            )
             .await
             .map_err(BackoffError::transient)
     };
     let log_failure = |err, _| {
-        info!(log, "Failed to handoff to nexus: {err}");
+        info!(log, "Failed to handoff to nexus";
+            InlineErrorChain::new(&err));
     };
     retry_notify(
         retry_policy_internal_service_aggressive(),
@@ -500,9 +539,12 @@ pub async fn run_standalone_server(
                             SocketAddr::V6(a) => a,
                         },
                         lockstep_port: nexus_lockstep_port,
-                        external_ip: from_ipaddr_to_external_floating_ip(
-                            external_ip,
-                        ),
+                        external_ips:
+                            OmicronZoneExternalFloatingIps::from_single(
+                                from_ipaddr_to_external_floating_ip(
+                                    external_ip,
+                                ),
+                            ),
                         nic: NetworkInterface {
                             id: Uuid::new_v4(),
                             kind: NetworkInterfaceKind::Service {
@@ -557,9 +599,12 @@ pub async fn run_standalone_server(
                     blueprint_zone_type::ExternalDns {
                         dataset: OmicronZoneDataset { pool_name },
                         http_address: external_dns_internal_addr,
-                        dns_address: from_sockaddr_to_external_floating_addr(
-                            SocketAddr::V6(external_dns_internal_addr),
-                        ),
+                        dns_addresses:
+                            OmicronZoneExternalFloatingAddrs::from_single(
+                                from_sockaddr_to_external_floating_addr(
+                                    SocketAddr::V6(external_dns_internal_addr),
+                                ),
+                            ),
                         nic: NetworkInterface {
                             id: Uuid::new_v4(),
                             kind: NetworkInterfaceKind::Service {
@@ -647,7 +692,8 @@ pub async fn run_standalone_server(
                 .expect("no zones are included in the plan"),
         );
 
-        let inventory = server.sled_agent.inventory(underlay_address.into())?;
+        let inventory =
+            server.sled_agent.inventory(underlay_address.into()).await?;
         let mut all_sleds = IdOrdMap::new();
         all_sleds.insert_overwrite(PlannedSledDescription {
             underlay_address,
@@ -738,7 +784,13 @@ pub async fn run_standalone_server(
 
     let mut nexus_lockstep_address = config.nexus_address;
     nexus_lockstep_address.set_port(nexus_lockstep_port);
-    handoff_to_nexus(&log, nexus_lockstep_address, &rack_init_request).await?;
+    handoff_to_nexus(
+        &log,
+        nexus_lockstep_address,
+        config.rack_id,
+        &rack_init_request,
+    )
+    .await?;
     info!(log, "Handoff to Nexus is complete");
 
     server.wait_for_finish().await

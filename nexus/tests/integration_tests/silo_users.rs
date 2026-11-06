@@ -49,7 +49,7 @@ async fn test_silo_group_users(cptestctx: &ControlPlaneTestContext) {
     let authz_silo = authz::Silo::new(
         authz::FLEET,
         DEFAULT_SILO_ID,
-        LookupType::ById(DEFAULT_SILO_ID),
+        LookupType::by_id(DEFAULT_SILO_ID),
     );
 
     // create a group

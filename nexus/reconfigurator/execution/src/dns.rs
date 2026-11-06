@@ -297,6 +297,7 @@ mod test {
     use crate::Sled;
     use crate::test_utils::overridables_for_test;
     use crate::test_utils::realize_blueprint_and_expect;
+    use anyhow::Context;
     use internal_dns_resolver::Resolver;
     use internal_dns_types::config::Host;
     use internal_dns_types::config::Zone;
@@ -332,7 +333,10 @@ mod test {
     use nexus_types::deployment::ExternalIpPolicy;
     use nexus_types::deployment::LastAllocatedSubnetIpOffset;
     pub use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
+    pub use nexus_types::deployment::OmicronZoneExternalFloatingAddrs;
     pub use nexus_types::deployment::OmicronZoneExternalFloatingIp;
+    pub use nexus_types::deployment::OmicronZoneExternalFloatingIps;
+    pub use nexus_types::deployment::OmicronZoneExternalSnat;
     pub use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::deployment::OximeterReadMode;
     use nexus_types::deployment::PendingMgsUpdates;
@@ -489,10 +493,12 @@ mod test {
                         dns_servers,
                         domain,
                         nic,
-                        external_ip: OmicronZoneExternalSnatIp {
-                            id: external_ip_id,
-                            snat_cfg,
-                        },
+                        external_ip: OmicronZoneExternalSnat::from_single(
+                            OmicronZoneExternalSnatIp {
+                                id: external_ip_id,
+                                snat_cfg,
+                            },
+                        ),
                     },
                 )
             }
@@ -544,10 +550,13 @@ mod test {
                     blueprint_zone_type::ExternalDns {
                         dataset,
                         http_address,
-                        dns_address: OmicronZoneExternalFloatingAddr {
-                            id: external_ip_id,
-                            addr,
-                        },
+                        dns_addresses:
+                            OmicronZoneExternalFloatingAddrs::from_single(
+                                OmicronZoneExternalFloatingAddr {
+                                    id: external_ip_id,
+                                    addr,
+                                },
+                            ),
                         nic,
                     },
                 )
@@ -589,10 +598,12 @@ mod test {
                 BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                     internal_address,
                     lockstep_port,
-                    external_ip: OmicronZoneExternalFloatingIp {
-                        id: external_ip_id,
-                        ip,
-                    },
+                    external_ips: OmicronZoneExternalFloatingIps::from_single(
+                        OmicronZoneExternalFloatingIp {
+                            id: external_ip_id,
+                            ip,
+                        },
+                    ),
                     nic,
                     external_tls,
                     external_dns_servers,
@@ -1071,18 +1082,20 @@ mod test {
         blueprint.internal_dns_version = Generation::new();
         blueprint.external_dns_version = Generation::new();
 
-        let my_silo = Silo::new(silo::SiloCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "my-silo".parse().unwrap(),
-                description: String::new(),
+        let my_silo = Silo::new(
+            silo::SiloCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "my-silo".parse().unwrap(),
+                    description: String::new(),
+                },
+                quotas: silo::SiloQuotasCreate::empty(),
+                identity_mode: silo::SiloIdentityMode::SamlJit,
+                admin_group_name: None,
+                tls_certificates: vec![],
+                mapped_fleet_roles: Default::default(),
             },
-            quotas: silo::SiloQuotasCreate::empty(),
-            discoverable: false,
-            identity_mode: silo::SiloIdentityMode::SamlJit,
-            admin_group_name: None,
-            tls_certificates: vec![],
-            mapped_fleet_roles: Default::default(),
-        })
+            false,
+        )
         .unwrap();
 
         // It shouldn't ever be possible to have no Silos at all, but at least
@@ -1774,40 +1787,23 @@ mod test {
         // Build blueprint B2 from B1, adding a new Oximeter zone.  When B2 is
         // executed, internal DNS will gain a new AAAA record and updated SRV
         // records for that zone.
-        //
-        // We use the same process as in test_silos_external_dns_end_to_end()
-        // above.
-        let mut builder = BlueprintBuilder::new_based_on(
-            &log,
-            &blueprint,
-            "test suite",
-            PlannerRng::from_entropy(),
-        )
-        .unwrap();
         let sled_id =
             blueprint.sleds().next().expect("expected at least one sled");
-        builder
-            .sled_add_zone_oximeter(
-                sled_id,
-                BlueprintZoneImageSource::InstallDataset,
-            )
-            .unwrap();
-        let blueprint2 = builder.build(BlueprintSource::Test);
-        datastore
-            .blueprint_insert(&opctx, &blueprint2)
+        let (_, blueprint2) = cptestctx
+            .blueprint_edit_current_target(|builder| {
+                builder
+                    .sled_add_zone_oximeter(
+                        sled_id,
+                        BlueprintZoneImageSource::InstallDataset,
+                    )
+                    .with_context(|| {
+                        format!("adding Oximeter zone to sled {sled_id}")
+                    })?;
+                builder.comment("add an Oximeter zone");
+                Ok(())
+            })
             .await
-            .expect("failed to save blueprint2");
-        datastore
-            .blueprint_target_set_current(
-                &opctx,
-                BlueprintTarget {
-                    target_id: blueprint2.id,
-                    enabled: false,
-                    time_made_target: chrono::Utc::now(),
-                },
-            )
-            .await
-            .expect("failed to set blueprint2 as target");
+            .expect("edited blueprint to add an Oximeter zone");
 
         // Execute B2.  Internal DNS should now include the new zone.
         _ = realize_blueprint_and_expect(
@@ -1930,7 +1926,6 @@ mod test {
         let silo = create_silo(
             &cptestctx.external_client,
             silo_name,
-            false,
             silo::SiloIdentityMode::SamlJit,
         )
         .await;

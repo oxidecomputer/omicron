@@ -98,8 +98,9 @@ impl RepoDepotStandalone {
                 .load_zip_path(repo_path.clone(), &log)
                 .await
                 .with_context(|| format!("load {:?}", repo_path))?;
-            ctx.load_repo(repo)
-                .context("loading artifacts from repository at {repo_path}")?;
+            ctx.load_repo(repo).with_context(|| {
+                format!("loading artifacts from repository at {repo_path}")
+            })?;
             info!(&log, "loaded Omicron TUF repository"; "path" => %repo_path);
         }
 
@@ -117,7 +118,8 @@ impl RepoDepotStandalone {
                 dropshot::ClientSpecifiesVersionInHeader::new(
                     omicron_common::api::VERSION_HEADER,
                     repo_depot_api::latest_version(),
-                ),
+                )
+                .min_version(repo_depot_api::oldest_version()),
             )))
             .start()
             .context("failed to create server")?;

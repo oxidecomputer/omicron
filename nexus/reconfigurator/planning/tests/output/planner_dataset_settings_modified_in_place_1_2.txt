@@ -84,15 +84,15 @@ to:   blueprint 51701dfe-f3b0-4c65-a26c-64ad929b4e24
     oxp_31ee6f81-908e-4dd9-aaf5-079fc0e2ceb6/crypt/zone/oxz_internal_dns_f16821cb-e1ef-40e5-8ad9-ce6b7f48c5af      e5eb7003-02e7-4146-a774-a775d420a066   in service    none        none          off        
     oxp_2d937ac2-5154-45e9-a759-4174c9fb64d0/crypt/zone/oxz_nexus_a8e815a5-29ae-4113-9b1c-ad097373f6ee             f8084137-6840-4bac-bb05-4d8c730400a5   in service    none        none          off        
     oxp_2d937ac2-5154-45e9-a759-4174c9fb64d0/crypt/zone/oxz_ntp_749b4744-c248-422a-b88a-b598c3a40732               7023f951-6aeb-4795-a630-a94fa2151375   in service    none        none          off        
-    oxp_2d937ac2-5154-45e9-a759-4174c9fb64d0/crypt/debug                                                           e3e69854-3aa3-47ee-b2e9-5b9cbd951a1d   in service    100 GiB     none          gzip-9     
-    oxp_31ee6f81-908e-4dd9-aaf5-079fc0e2ceb6/crypt/debug                                                           7f0a9917-c910-4901-becd-38c8eccca99f   in service    100 GiB     none          gzip-9     
-    oxp_3399ca9b-080d-4c9d-a363-0af36f6cddd5/crypt/debug                                                           6bfcebb4-0191-4d85-ac96-ee10ef6d2eb5   in service    100 GiB     none          gzip-9     
-    oxp_86ffeb43-65ba-454f-b9bc-4dd97dbd9679/crypt/debug                                                           df3a8182-b9eb-4324-9712-650f375d011a   in service    100 GiB     none          gzip-9     
-    oxp_96f95157-d5b0-4c27-b598-1b2c01e4c8ba/crypt/debug                                                           f163cdaa-3d9b-4a20-9ca0-b637779fe3f5   in service    100 GiB     none          gzip-9     
-    oxp_9948e415-9f28-484d-b77c-e2e8139d530f/crypt/debug                                                           9debbff7-4e96-4183-a029-b27e289c4ad9   in service    100 GiB     none          gzip-9     
-    oxp_9eca7a21-5de0-467e-9479-b636d84e8de5/crypt/debug                                                           87d0a04e-2eeb-468e-a436-65a2103edbd6   in service    100 GiB     none          gzip-9     
-    oxp_c8bdaadc-4ab0-4c1c-b3df-f40617b8adc8/crypt/debug                                                           c55ee700-2083-4f02-b69d-40ce1c394275   in service    100 GiB     none          gzip-9     
-    oxp_d21bfaf2-616f-43ed-816b-380a2bdce7d1/crypt/debug                                                           ed72a9f5-40ed-4ba3-a71b-c676f580b008   in service    100 GiB     none          gzip-9     
+    oxp_2d937ac2-5154-45e9-a759-4174c9fb64d0/crypt/debug                                                           e3e69854-3aa3-47ee-b2e9-5b9cbd951a1d   in service    100 GiB     none          lz4        
+    oxp_31ee6f81-908e-4dd9-aaf5-079fc0e2ceb6/crypt/debug                                                           7f0a9917-c910-4901-becd-38c8eccca99f   in service    100 GiB     none          lz4        
+    oxp_3399ca9b-080d-4c9d-a363-0af36f6cddd5/crypt/debug                                                           6bfcebb4-0191-4d85-ac96-ee10ef6d2eb5   in service    100 GiB     none          lz4        
+    oxp_86ffeb43-65ba-454f-b9bc-4dd97dbd9679/crypt/debug                                                           df3a8182-b9eb-4324-9712-650f375d011a   in service    100 GiB     none          lz4        
+    oxp_96f95157-d5b0-4c27-b598-1b2c01e4c8ba/crypt/debug                                                           f163cdaa-3d9b-4a20-9ca0-b637779fe3f5   in service    100 GiB     none          lz4        
+    oxp_9948e415-9f28-484d-b77c-e2e8139d530f/crypt/debug                                                           9debbff7-4e96-4183-a029-b27e289c4ad9   in service    100 GiB     none          lz4        
+    oxp_9eca7a21-5de0-467e-9479-b636d84e8de5/crypt/debug                                                           87d0a04e-2eeb-468e-a436-65a2103edbd6   in service    100 GiB     none          lz4        
+    oxp_c8bdaadc-4ab0-4c1c-b3df-f40617b8adc8/crypt/debug                                                           c55ee700-2083-4f02-b69d-40ce1c394275   in service    100 GiB     none          lz4        
+    oxp_d21bfaf2-616f-43ed-816b-380a2bdce7d1/crypt/debug                                                           ed72a9f5-40ed-4ba3-a71b-c676f580b008   in service    100 GiB     none          lz4        
     oxp_2d937ac2-5154-45e9-a759-4174c9fb64d0/crypt/local_storage                                                   aa511729-91d6-4367-921b-c018ddae9f9a   in service    none        none          off        
     oxp_31ee6f81-908e-4dd9-aaf5-079fc0e2ceb6/crypt/local_storage                                                   0d42a492-6fb8-4b79-a11d-22c31463b4f2   in service    none        none          off        
     oxp_3399ca9b-080d-4c9d-a363-0af36f6cddd5/crypt/local_storage                                                   2560e984-dc4c-4d24-abb8-cc5041394f57   in service    none        none          off        
@@ -113,7 +113,7 @@ to:   blueprint 51701dfe-f3b0-4c65-a26c-64ad929b4e24
     oxp_c02b6927-8e17-4c7b-8873-d27014693c4c/local_storage_unencrypted                                             8ca6ad3c-e7fe-4ac3-92af-f76c63e3fc9d   in service    none        none          off        
     oxp_c8bdaadc-4ab0-4c1c-b3df-f40617b8adc8/local_storage_unencrypted                                             2c0129af-e59b-4940-a917-8283346c6e91   in service    none        none          off        
     oxp_d21bfaf2-616f-43ed-816b-380a2bdce7d1/local_storage_unencrypted                                             5a09124f-4458-4776-961d-251a4fcd01b1   in service    none        none          off        
-*   oxp_c02b6927-8e17-4c7b-8873-d27014693c4c/crypt/debug                                                           3bc2551b-d9d3-47b7-8756-f088baaa2318   in service    - none      - 1 GiB       gzip-9     
+*   oxp_c02b6927-8e17-4c7b-8873-d27014693c4c/crypt/debug                                                           3bc2551b-d9d3-47b7-8756-f088baaa2318   in service    - none      - 1 GiB       lz4        
      └─                                                                                                                                                                 + 100 GiB   + none                   
 
 

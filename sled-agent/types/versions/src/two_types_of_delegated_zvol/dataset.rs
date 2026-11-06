@@ -8,8 +8,6 @@ use omicron_uuid_kinds::ExternalZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::v9;
-
 /// Dataset and Volume details for a Local Storage dataset ensure request.
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LocalStorageDatasetEnsureRequest {
@@ -27,24 +25,6 @@ pub struct LocalStorageDatasetEnsureRequest {
 
     /// Whether or not to use the encrypted dataset
     pub encrypted_at_rest: bool,
-}
-
-impl LocalStorageDatasetEnsureRequest {
-    pub fn from(
-        zpool_id: ExternalZpoolUuid,
-        dataset_id: DatasetUuid,
-        v9: v9::dataset::LocalStorageDatasetEnsureRequest,
-    ) -> LocalStorageDatasetEnsureRequest {
-        LocalStorageDatasetEnsureRequest {
-            zpool_id,
-            dataset_id,
-            dataset_size: v9.dataset_size,
-            volume_size: v9.dataset_size,
-            // This version of the API assumed it would be using the encrypted
-            // dataset.
-            encrypted_at_rest: true,
-        }
-    }
 }
 
 /// Dataset details for a Local Storage dataset delete request.

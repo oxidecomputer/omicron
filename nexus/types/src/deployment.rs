@@ -14,6 +14,8 @@
 
 use crate::external_api::sled::SledState;
 use crate::internal_api::params::DnsConfigParams;
+use crate::inventory::CabooseVersionError;
+use crate::inventory::CabooseWithVersion;
 use crate::inventory::Collection;
 pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
@@ -102,15 +104,21 @@ pub use clickhouse::ClickhouseClusterConfig;
 use gateway_types::rot::RotSlot;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
+pub use network_resources::OmicronZoneExternalFloatingAddrs;
 pub use network_resources::OmicronZoneExternalFloatingIp;
+pub use network_resources::OmicronZoneExternalFloatingIps;
 pub use network_resources::OmicronZoneExternalIp;
 pub use network_resources::OmicronZoneExternalIpEntry;
 pub use network_resources::OmicronZoneExternalIpKey;
+pub use network_resources::OmicronZoneExternalSnat;
 pub use network_resources::OmicronZoneExternalSnatIp;
+pub use network_resources::OmicronZoneExternalSnatIpv4;
+pub use network_resources::OmicronZoneExternalSnatIpv6;
 pub use network_resources::OmicronZoneNetworkResources;
 pub use network_resources::OmicronZoneNic;
 pub use network_resources::OmicronZoneNicEntry;
 pub use network_resources::OmicronZoneNicIp;
+pub use network_resources::ZoneExternalSnatError;
 use omicron_common::api::external::Error;
 pub use planning_input::ClickhouseMode;
 pub use planning_input::ClickhousePolicy;
@@ -170,6 +178,7 @@ pub use reconfigurator_config::ReconfiguratorConfigParam;
 pub use reconfigurator_config::ReconfiguratorConfigView;
 pub use reconfigurator_config::ReconfiguratorConfigViewDisplay;
 pub use reconfigurator_config::ReconfiguratorDisruptionPolicy;
+pub use reconfigurator_config::SledUpdateRebootPolicy;
 use sled_hardware_types::BaseboardId;
 pub use zone_type::BlueprintZoneType;
 pub use zone_type::DurableDataset;
@@ -350,28 +359,37 @@ impl Blueprint {
         let entries = self
             .in_service_zones()
             .filter_map(|(sled_id, zone_config)| {
-                let (nic_mac, vni, kind) = match &zone_config.zone_type {
-                    BlueprintZoneType::BoundaryNtp(ntp) => (
-                        ntp.nic.mac,
-                        ntp.nic.vni,
-                        ServiceZoneNatKind::BoundaryNtp {
-                            snat_cfg: ntp.external_ip.snat_cfg,
-                        },
-                    ),
-                    BlueprintZoneType::ExternalDns(dns) => (
-                        dns.nic.mac,
-                        dns.nic.vni,
-                        ServiceZoneNatKind::ExternalDns {
-                            external_ip: dns.dns_address.addr.ip(),
-                        },
-                    ),
-                    BlueprintZoneType::Nexus(nexus) => (
-                        nexus.nic.mac,
-                        nexus.nic.vni,
-                        ServiceZoneNatKind::Nexus {
-                            external_ip: nexus.external_ip.ip,
-                        },
-                    ),
+                let (nic_mac, vni, kinds) = match &zone_config.zone_type {
+                    BlueprintZoneType::BoundaryNtp(ntp) => {
+                        let kinds = ntp
+                            .external_ip
+                            .iter()
+                            .map(|eip| ServiceZoneNatKind::BoundaryNtp {
+                                snat_cfg: eip.snat_cfg,
+                            })
+                            .collect::<Vec<_>>();
+                        (ntp.nic.mac, ntp.nic.vni, kinds)
+                    }
+                    BlueprintZoneType::ExternalDns(dns) => {
+                        let kinds = dns
+                            .dns_addresses
+                            .iter()
+                            .map(|addr| ServiceZoneNatKind::ExternalDns {
+                                external_ip: addr.addr.ip(),
+                            })
+                            .collect::<Vec<_>>();
+                        (dns.nic.mac, dns.nic.vni, kinds)
+                    }
+                    BlueprintZoneType::Nexus(nexus) => {
+                        let kinds = nexus
+                            .external_ips
+                            .iter()
+                            .map(|ip| ServiceZoneNatKind::Nexus {
+                                external_ip: ip.ip,
+                            })
+                            .collect::<Vec<_>>();
+                        (nexus.nic.mac, nexus.nic.vni, kinds)
+                    }
 
                     // None of these zone types have external NAT.
                     BlueprintZoneType::Clickhouse(_)
@@ -394,14 +412,18 @@ impl Blueprint {
                     .expect("sled must exist if we have in-service zones")
                     .subnet;
 
-                Some(ServiceZoneNatEntry {
-                    zone_id: zone_config.id,
-                    sled_underlay_ip: *get_sled_address(sled_subnet).ip(),
-                    nic_mac,
-                    vni,
-                    kind,
-                })
+                // Return a list of entries for all IPs in the zone.
+                let entries =
+                    kinds.into_iter().map(move |kind| ServiceZoneNatEntry {
+                        zone_id: zone_config.id,
+                        sled_underlay_ip: *get_sled_address(sled_subnet).ip(),
+                        nic_mac,
+                        vni,
+                        kind,
+                    });
+                Some(entries)
             })
+            .flatten()
             .collect::<IdOrdMap<_>>();
 
         entries.try_into()
@@ -729,11 +751,14 @@ impl Blueprint {
         self.all_in_service_and_expunged_zones(
             BlueprintExpungedZoneAccessReason::ExternalDnsExternalIps,
         )
-        .filter_map(|(_id, zone)| match &zone.zone_type {
-            BlueprintZoneType::ExternalDns(dns) => {
-                Some(dns.dns_address.addr.ip())
-            }
-            _ => None,
+        .flat_map(|(_id, zone)| {
+            let addrs = match &zone.zone_type {
+                BlueprintZoneType::ExternalDns(dns) => {
+                    Some(dns.dns_addresses.iter().map(|a| a.addr.ip()))
+                }
+                _ => None,
+            };
+            addrs.into_iter().flatten()
         })
         .collect()
     }
@@ -1723,6 +1748,7 @@ impl From<BlueprintSledUpdateDisposition> for OmicronSledUpdateDisposition {
     JsonSchema,
 )]
 #[serde(tag = "availability", rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum BlueprintSledUpdateDispositionKind {
     /// The sled is available for use for all provisions.
     Available,
@@ -1917,16 +1943,7 @@ fn zone_sort_key<T: ZoneSortKey>(z: &T) -> impl Ord + use<T> {
 ///
 /// Part of [`BlueprintSledConfig`].
 #[derive(
-    Debug,
-    Clone,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    JsonSchema,
-    Deserialize,
-    Serialize,
-    Diffable,
+    Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 pub struct BlueprintZoneConfig {
     /// The disposition (desired state) of this zone recorded in the blueprint.
@@ -2001,8 +2018,6 @@ impl From<BlueprintZoneConfig> for OmicronZoneConfig {
     PartialEq,
     Eq,
     Hash,
-    PartialOrd,
-    Ord,
     JsonSchema,
     Deserialize,
     Serialize,
@@ -2107,8 +2122,6 @@ impl fmt::Display for BlueprintZoneDisposition {
     PartialEq,
     Eq,
     Hash,
-    PartialOrd,
-    Ord,
     JsonSchema,
     Deserialize,
     Serialize,
@@ -2135,14 +2148,7 @@ pub enum BlueprintZoneImageSource {
     /// This originates from TUF repos uploaded to Nexus which are then
     /// replicated out to all sleds.
     #[serde(rename_all = "snake_case")]
-    Artifact {
-        version: BlueprintArtifactVersion,
-        // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
-        // wire-compatible but perceived as different by drift. Continue using
-        // the old schema in this API version.
-        #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
-        hash: ArtifactHash,
-    },
+    Artifact { version: BlueprintArtifactVersion, hash: ArtifactHash },
 }
 
 impl BlueprintZoneImageSource {
@@ -2236,10 +2242,6 @@ impl fmt::Display for BlueprintArtifactVersion {
 )]
 pub struct BlueprintSingleMeasurement {
     pub version: BlueprintArtifactVersion,
-    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
-    // wire-compatible but perceived as different by drift. Continue using the
-    // old schema in this API version.
-    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub hash: ArtifactHash,
 }
 
@@ -2515,14 +2517,7 @@ pub enum BlueprintHostPhase2DesiredContents {
     /// Set the phase 2 slot to the given artifact.
     ///
     /// The artifact will come from an unpacked and distributed TUF repo.
-    Artifact {
-        version: BlueprintArtifactVersion,
-        // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
-        // wire-compatible but perceived as different by drift. Continue using
-        // the old schema in this API version.
-        #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
-        hash: ArtifactHash,
-    },
+    Artifact { version: BlueprintArtifactVersion, hash: ArtifactHash },
 }
 
 impl From<BlueprintHostPhase2DesiredContents> for HostPhase2DesiredContents {
@@ -2566,6 +2561,7 @@ impl fmt::Display for BlueprintHostPhase2DesiredContents {
     Serialize,
     PartialEq,
     Eq,
+    Hash,
     Diffable,
     PartialOrd,
     JsonSchema,
@@ -2591,6 +2587,23 @@ impl Display for MgsUpdateComponent {
             MgsUpdateComponent::Sp => "SP",
         };
         write!(f, "{s}")
+    }
+}
+
+impl MgsUpdateComponent {
+    /// Whether updating this component requires a reboot of the sled.
+    pub fn update_requires_sled_reboot(&self) -> bool {
+        match self {
+            // Updating the SP or host OS always requires a sled reboot.
+            MgsUpdateComponent::Sp | MgsUpdateComponent::HostOs => true,
+
+            // Currently, updating the RoT or RoT bootloader can be done while
+            // the sled is running. This may change in the future with
+            // additional attestation work.
+            MgsUpdateComponent::Rot | MgsUpdateComponent::RotBootloader => {
+                false
+            }
+        }
     }
 }
 
@@ -2692,10 +2705,6 @@ pub struct PendingMgsUpdate {
     pub details: PendingMgsUpdateDetails,
 
     /// which artifact to apply to this device
-    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
-    // wire-compatible but perceived as different by drift. Continue using the
-    // old schema in this API version.
-    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub artifact_hash: ArtifactHash,
     pub artifact_version: ArtifactVersion,
 }
@@ -2998,16 +3007,12 @@ pub struct PendingMgsUpdateHostPhase1Details {
     /// Which slot the host OS most recently booted from.
     pub expected_boot_disk: M2Slot,
 
-    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
-    // wire-compatible but perceived as different by drift. Continue using the
-    // old schema in this API version.
     /// The hash of the phase 1 slot specified by
     /// `expected_active_phase_1_hash`.
     ///
     /// We should always be able to fetch this. Even if the phase 1 contents
     /// themselves have been corrupted (very scary for the active slot!), the SP
     /// can still hash those contents.
-    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub expected_active_phase_1_hash: ArtifactHash,
     /// The hash of the currently-active phase 2 artifact.
     ///
@@ -3015,7 +3020,6 @@ pub struct PendingMgsUpdateHostPhase1Details {
     /// would indicate that we don't know the version currently running. The
     /// planner wouldn't stage an update without knowing the current version, so
     /// if something has gone wrong in the meantime we won't proceede either.
-    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub expected_active_phase_2_hash: ArtifactHash,
     /// The hash of the phase 1 slot specified by toggling
     /// `expected_active_phase_1_slot` to the other slot.
@@ -3023,7 +3027,6 @@ pub struct PendingMgsUpdateHostPhase1Details {
     /// We should always be able to fetch this. Even if the phase 1 contents
     /// of the inactive slot are entirely bogus, the SP can still hash those
     /// contents.
-    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub expected_inactive_phase_1_hash: ArtifactHash,
     /// The hash of the currently-inactive phase 2 artifact.
     ///
@@ -3032,7 +3035,6 @@ pub struct PendingMgsUpdateHostPhase1Details {
     /// a phase 1 update is that `sled-agent` on the target sled has already
     /// written the paired phase 2 artifact to the inactive slot; therefore, we
     /// don't need to be able to represent an invalid inactive slot.
-    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub expected_inactive_phase_2_hash: ArtifactHash,
 
     /// Address for contacting sled-agent to check phase 2 contents.
@@ -3112,6 +3114,33 @@ pub enum ExpectedVersion {
     Version(ArtifactVersion),
 }
 
+impl ExpectedVersion {
+    /// Converts the result of looking up an _inactive_ slot's caboose in
+    /// inventory (e.g., with `Collection::caboose_with_version_for()`) into
+    /// the version that we expect to find in that slot
+    ///
+    /// A missing caboose is not an error.  It means that we expect the slot
+    /// to hold no valid image.  A caboose whose version cannot be parsed is
+    /// an error.
+    ///
+    /// This is not appropriate for an active slot.  A missing caboose for an
+    /// active slot means that inventory is incomplete, not that the slot is
+    /// empty.
+    pub fn for_inactive_caboose(
+        caboose: Result<CabooseWithVersion<'_>, CabooseVersionError>,
+    ) -> Result<ExpectedVersion, CabooseVersionError> {
+        match caboose {
+            Ok(CabooseWithVersion { caboose: _, version }) => {
+                Ok(ExpectedVersion::Version(version))
+            }
+            Err(CabooseVersionError::NotInInventory(_)) => {
+                Ok(ExpectedVersion::NoValidVersion)
+            }
+            Err(error @ CabooseVersionError::Parse { .. }) => Err(error),
+        }
+    }
+}
+
 impl FromStr for ExpectedVersion {
     type Err = ArtifactVersionError;
 
@@ -3161,8 +3190,6 @@ impl ExpectedActiveRotSlot {
     PartialEq,
     Eq,
     Hash,
-    PartialOrd,
-    Ord,
     JsonSchema,
     Deserialize,
     Serialize,
@@ -3303,8 +3330,6 @@ impl IdOrdItem for BlueprintDatasetConfig {
     PartialEq,
     Eq,
     Hash,
-    PartialOrd,
-    Ord,
     JsonSchema,
     Deserialize,
     Serialize,
@@ -3360,16 +3385,7 @@ impl fmt::Display for BlueprintDatasetDisposition {
 
 /// Information about a dataset as recorded in a blueprint
 #[derive(
-    Debug,
-    Clone,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    JsonSchema,
-    Deserialize,
-    Serialize,
-    Diffable,
+    Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 pub struct BlueprintDatasetConfig {
     pub disposition: BlueprintDatasetDisposition,
@@ -3907,10 +3923,52 @@ mod test {
     use super::PendingMgsUpdateDetails;
     use super::PendingMgsUpdateSpDetails;
     use super::PendingMgsUpdates;
+    use crate::inventory::Caboose;
+    use crate::inventory::CabooseVersionError;
+    use crate::inventory::CabooseWhich;
+    use crate::inventory::CabooseWithVersion;
     use gateway_types::component::SpType;
     use sled_hardware_types::BaseboardId;
     use sled_hardware_types::GIMLET_SLED_MODEL;
     use std::sync::Arc;
+    use tufaceous_artifact::ArtifactVersion;
+
+    #[test]
+    fn test_expected_version_for_inactive_caboose() {
+        let version = ArtifactVersion::new_const("1.2.3");
+        let caboose = Caboose {
+            board: "test-board".to_string(),
+            git_commit: "test-commit".to_string(),
+            name: "test-name".to_string(),
+            version: version.to_string(),
+            sign: None,
+        };
+        assert_eq!(
+            ExpectedVersion::for_inactive_caboose(Ok(CabooseWithVersion {
+                caboose: &caboose,
+                version: version.clone(),
+            })),
+            Ok(ExpectedVersion::Version(version)),
+        );
+
+        // A missing caboose means we expect no valid image in the slot.
+        let missing =
+            CabooseVersionError::NotInInventory(CabooseWhich::SpSlot1);
+        assert_eq!(
+            ExpectedVersion::for_inactive_caboose(Err(missing)),
+            Ok(ExpectedVersion::NoValidVersion),
+        );
+
+        // A caboose whose version cannot be parsed is an error.
+        let unparseable = CabooseVersionError::Parse {
+            caboose: CabooseWhich::SpSlot1,
+            err: "bad version".to_string(),
+        };
+        assert_eq!(
+            ExpectedVersion::for_inactive_caboose(Err(unparseable.clone())),
+            Err(unparseable),
+        );
+    }
 
     #[test]
     fn test_serialize_pending_mgs_updates() {

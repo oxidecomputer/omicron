@@ -142,6 +142,7 @@ use gateway_client::types::SpComponentFirmwareSlot;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
 use nexus_types::inventory::SpType;
+use omicron_common::http_client::internal_http_client;
 use sled_agent_client::Client as SledAgentClient;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::BootPartitionContents;
@@ -345,8 +346,11 @@ impl ReconfiguratorHostPhase1Updater {
         log: &Logger,
     ) -> Result<BootPartitionContents, PrecheckError> {
         let address = self.details.sled_agent_address;
-        let sled_agent =
-            SledAgentClient::new(&format!("http://{address}"), log.clone());
+        let sled_agent = SledAgentClient::new_with_client(
+            &format!("http://{address}"),
+            internal_http_client(),
+            log.clone(),
+        );
         let sled_inventory = sled_agent
             .inventory()
             .await

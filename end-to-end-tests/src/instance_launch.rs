@@ -14,7 +14,10 @@ use oxide_client::types::{
     SshKeyCreate,
 };
 use oxide_client::{ClientCurrentUserExt, ClientDisksExt, ClientInstancesExt};
-use russh::keys::{Algorithm, PrivateKey, PrivateKeyWithHashAlg, PublicKey};
+use russh::keys::{
+    Algorithm, PrivateKey, PrivateKeyWithHashAlg, PublicKey,
+    PublicKeyOrCertificate,
+};
 use russh::{ChannelMsg, Disconnect};
 use std::sync::Arc;
 use std::time::Duration;
@@ -317,10 +320,13 @@ impl russh::client::Handler for SshClient {
 
     fn check_server_key(
         &mut self,
-        server_public_key: &PublicKey,
+        server_public_key: &PublicKeyOrCertificate,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
-        futures::future::ready(Ok(
-            self.host_key.key_data() == server_public_key.key_data()
-        ))
+        futures::future::ready(Ok(match server_public_key {
+            PublicKeyOrCertificate::PublicKey { key, .. } => {
+                key.key_data() == self.host_key.key_data()
+            }
+            _ => false,
+        }))
     }
 }

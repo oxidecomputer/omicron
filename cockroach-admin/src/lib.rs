@@ -73,7 +73,8 @@ pub async fn start_server(
         dropshot::ClientSpecifiesVersionInHeader::new(
             omicron_common::api::VERSION_HEADER,
             cockroach_admin_api::latest_version(),
-        ),
+        )
+        .min_version(cockroach_admin_api::oldest_version()),
     )))
     .start()
     .map_err(StartError::InitializeHttpServer)

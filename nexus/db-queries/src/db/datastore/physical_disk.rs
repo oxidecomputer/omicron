@@ -764,6 +764,7 @@ mod test {
     use crate::db::model::{PhysicalDiskKind, Sled};
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use dropshot::PaginationOrder;
     use iddqd::IdOrdMap;
     use nexus_db_lookup::LookupPath;
@@ -774,20 +775,16 @@ mod test {
     use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::disk::DiskVariant;
     use sled_agent_types::inventory::{
-        ConfigReconcilerInventoryStatus, FmdInventory, Inventory,
-        InventoryDisk, OmicronFileSourceResolverInventory, SledCpuFamily,
-        SledRole, SvcsEnabledNotOnlineResult,
+        ConfigReconcilerInventoryStatus, FmdInventory, InstanceManagerStatus,
+        Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
+        SledCpuFamily, SledRole, SvcsEnabledNotOnlineResult,
     };
     use sled_hardware_types::BaseboardId;
     use std::num::NonZeroU32;
 
     async fn create_test_sled(db: &DataStore) -> Sled {
         let sled_update = SledUpdateBuilder::new().build();
-        let (sled, _) = db
-            .sled_upsert(sled_update)
-            .await
-            .expect("Could not upsert sled during test prep");
-        sled
+        sled_upsert_expect_written(db, sled_update).await
     }
 
     fn list_disk_params() -> DataPageParams<'static, Uuid> {
@@ -1123,6 +1120,7 @@ mod test {
                     sled_role: SledRole::Gimlet,
                     sled_agent_address: "[::1]:56792".parse().unwrap(),
                     sled_id: sled.id(),
+                    rack_id: sled.rack_id(),
                     usable_hardware_threads: 10,
                     usable_physical_ram: ByteCount::from(1024 * 1024),
                     cpu_family: SledCpuFamily::AmdMilan,
@@ -1133,6 +1131,9 @@ mod test {
                     reconciler_status:
                         ConfigReconcilerInventoryStatus::NotYetRun,
                     last_reconciliation: None,
+                    instance_manager_status: InstanceManagerStatus::available(
+                        0,
+                    ),
                     file_source_resolver:
                         OmicronFileSourceResolverInventory::new_fake(),
                     smf_services_enabled_not_online:

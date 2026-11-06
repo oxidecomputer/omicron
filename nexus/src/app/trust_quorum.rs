@@ -6,10 +6,12 @@
 
 use nexus_auth::authz;
 use nexus_auth::context::OpContext;
+use nexus_types::external_api::rack::SledAddPrecheckOverrides;
 use nexus_types::trust_quorum::{
     IsLrtqUpgrade, ProposedTrustQuorumConfig, TrustQuorumConfig,
 };
 use omicron_common::api::external::Error;
+use omicron_common::http_client::internal_http_client_builder;
 use omicron_uuid_kinds::RackUuid;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
@@ -27,11 +29,18 @@ impl super::Nexus {
         opctx: &OpContext,
         authz_tq: authz::TrustQuorumConfig,
         new_sleds: BTreeSet<BaseboardId>,
+        override_prechecks: &SledAddPrecheckOverrides,
     ) -> Result<TrustQuorumConfig, Error> {
         let rack_id = authz_tq.rack().id();
         let (latest_committed_config, latest_epoch) = self
+            .db_datastore
             .tq_load_latest_possible_committed_config(opctx, authz_tq.clone())
             .await?;
+
+        // Check the new sleds' software before allowing them to be added to
+        // the system.
+        self.sled_check_versions(opctx, &new_sleds, override_prechecks).await?;
+
         let new_epoch = latest_epoch.next();
         let proposed = self
             .add_sleds_proposed_config(
@@ -96,6 +105,7 @@ impl super::Nexus {
         let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
 
         let (latest_committed_config, latest_epoch) = self
+            .db_datastore
             .tq_load_latest_possible_committed_config(opctx, authz_tq.clone())
             .await?;
         let new_epoch = latest_epoch.next();
@@ -348,7 +358,7 @@ impl super::Nexus {
         let timeout = Duration::from_secs(60);
         let url = format!("http://{}", sled.address());
         let log = self.log.new(o!("SledAgent" => url.clone()));
-        let reqwest_client = reqwest::ClientBuilder::new()
+        let reqwest_client = internal_http_client_builder()
             .connect_timeout(timeout)
             .timeout(timeout)
             .build()
@@ -421,64 +431,5 @@ impl super::Nexus {
             },
             members: new_sleds.union(&existing).cloned().collect(),
         })
-    }
-
-    // Load the latest committed trust quorum configuration for `rack_id` and
-    // return it along with the epoch for the latest configuration.
-    //
-    // If the configuration is aborted, then check to see what its latest
-    // `last_committed_epoch` is and load that configuration.
-    //
-    // Note that the configuration that comes back may not actually be committed
-    // yet if it's the latest configuration. That is ok because we will perform
-    // validation during insert of the any newly proposed config.
-    pub async fn tq_load_latest_possible_committed_config(
-        &self,
-        opctx: &OpContext,
-        authz_tq: authz::TrustQuorumConfig,
-    ) -> Result<(TrustQuorumConfig, Epoch), Error> {
-        let rack_id = authz_tq.rack().id();
-
-        // First get the latest configuration for this rack.
-        let Some(latest_config) = self
-            .db_datastore
-            .tq_get_latest_config(opctx, authz_tq.clone())
-            .await?
-        else {
-            return Err(Error::invalid_request(format!(
-                "Missing trust quorum configurations for rack {rack_id}. \
-                Upgrade to trust quorum required."
-            )));
-        };
-
-        let highest_epoch = latest_config.epoch;
-
-        // We assume this config is committed as long as it is not aborted.
-        //
-        // This assumption will be validated by the datastore code before
-        // insertion of the new configuration.
-        let latest_committed_config = if latest_config.state.is_aborted() {
-            let Some(epoch) = latest_config.last_committed_epoch else {
-                return Err(Error::invalid_request(format!(
-                    "No committed trust quorum configuration for \
-                    rack {rack_id}."
-                )));
-            };
-
-            // Load the configuration for the last commmitted epoch
-            let Some(latest_committed_config) =
-                self.db_datastore.tq_get_config(opctx, authz_tq, epoch).await?
-            else {
-                return Err(Error::invalid_request(format!(
-                    "Missing expected last committed trust quorum \
-                    configuration for rack {rack_id}, epoch {epoch}."
-                )));
-            };
-            latest_committed_config
-        } else {
-            latest_config
-        };
-
-        Ok((latest_committed_config, highest_epoch))
     }
 }

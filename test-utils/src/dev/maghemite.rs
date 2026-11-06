@@ -213,6 +213,10 @@ impl DdmInstance {
         Ok(Self { port, args, child: Some(child), data_dir: Some(temp_dir) })
     }
 
+    pub fn address(&self) -> SocketAddrV6 {
+        SocketAddrV6::new(Ipv6Addr::LOCALHOST, self.port, 0, 0)
+    }
+
     pub async fn cleanup(&mut self) -> Result<(), anyhow::Error> {
         if let Some(mut child) = self.child.take() {
             child.start_kill().context("Sending SIGKILL to child")?;

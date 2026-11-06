@@ -19,21 +19,25 @@ pub use config::{
 
 pub mod fact;
 pub use fact::{
-    DiskFact, FactPayload, SagaAbandonedFactPayload, SagaFact,
-    SagaNotProgressingFactPayload, SagaOwnerNotCurrentFactPayload,
-    ZpoolUnhealthyFactPayload,
+    CertificateExpiryFactPayload, CertificateFact, DiskFact, FactPayload,
+    SagaAbandonedFactPayload, SagaFact, SagaNotProgressingFactPayload,
+    SagaOwnerNotCurrentFactPayload, ZpoolUnhealthyFactPayload,
 };
 pub mod display;
 
 use case::AlertRequest;
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
-use omicron_generation_kinds::{AlertGeneration, SupportBundleGeneration};
+use omicron_generation_kinds::{
+    SitrepAlertGeneration, SitrepSupportBundleGeneration,
+};
 use omicron_uuid_kinds::{
     CaseUuid, CollectionUuid, OmicronZoneUuid, SitrepUuid,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+pub type CurrentSitrep = Arc<(SitrepVersion, Sitrep)>;
 
 /// A fault management situation report, or _sitrep_.
 ///
@@ -182,14 +186,36 @@ pub struct SitrepMetadata {
     /// request set differs from its parent's. Alert creation is guarded on this
     /// value: a rendezvous task working from a sitrep whose generation no
     /// longer matches the current sitrep's has its inserts rejected as stale.
-    pub alert_generation: AlertGeneration,
+    pub alert_generation: SitrepAlertGeneration,
 
     /// `SitrepBuilder` increments this each time it builds a sitrep whose
     /// support bundle request set differs from its parent's. Support bundle
     /// creation is guarded on this value: a rendezvous task working from
     /// a sitrep whose generation no longer matches the current sitrep's has
     /// its inserts rejected as stale.
-    pub support_bundle_generation: SupportBundleGeneration,
+    pub support_bundle_generation: SitrepSupportBundleGeneration,
+}
+
+/// A error indicating that an inventory collection is not new enough to produce
+/// a sitrep descended from the parent sitrep.
+///
+/// A sitrep may be produced from the same inventory collection as its parent,
+/// or from a different collection which started at or after the parent's
+/// [`next_inv_min_time_started`](SitrepMetadata::next_inv_min_time_started).
+#[derive(
+    Clone, Debug, Eq, PartialEq, Deserialize, Serialize, thiserror::Error,
+)]
+#[error(
+    "inventory collection from {input_inv_time_started} is not new \
+     enough: must have started at {next_inv_min_time_started} or later"
+)]
+pub struct InventoryStale {
+    /// The ID of the parent sitrep's inventory collection.
+    pub parent_inv_id: CollectionUuid,
+    /// The parent sitrep's `next_inv_min_time_started`.
+    pub next_inv_min_time_started: DateTime<Utc>,
+    /// The start time of the rejected inventory collection.
+    pub input_inv_time_started: DateTime<Utc>,
 }
 
 pub struct SitrepStateComparison<'sitrep> {
@@ -252,4 +278,5 @@ pub enum DiagnosisEngineKind {
     PowerShelf,
     PhysicalDisk,
     Saga,
+    Certificate,
 }

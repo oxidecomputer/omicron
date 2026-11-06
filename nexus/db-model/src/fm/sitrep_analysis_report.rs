@@ -9,6 +9,7 @@ use crate::DbTypedUuid;
 use anyhow::Context;
 use nexus_db_schema::schema::fm_sitrep_analysis_report;
 use nexus_types::fm::analysis_reports::{AnalysisReport, InputReport};
+use omicron_git_version_types::GitVersion;
 use omicron_uuid_kinds::SitrepKind;
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
@@ -30,6 +31,7 @@ impl SitrepAnalysisReport {
     pub fn new(
         input_report: &InputReport,
         analysis_report: &AnalysisReport,
+        git_commit: &GitVersion,
     ) -> anyhow::Result<Self> {
         let sitrep_id = analysis_report.sitrep_id.into();
         let input_report = serde_json::to_value(input_report)
@@ -37,7 +39,7 @@ impl SitrepAnalysisReport {
         let analysis_report = serde_json::to_value(analysis_report)
             .context("failed to serialize sitrep analysis report")?;
 
-        let git_commit = omicron_git_version::GitVersion::current().to_string();
+        let git_commit = git_commit.to_string();
 
         Ok(Self { sitrep_id, git_commit, input_report, analysis_report })
     }

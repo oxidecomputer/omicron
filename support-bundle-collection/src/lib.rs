@@ -14,6 +14,7 @@
 
 mod cache;
 pub mod collection;
+pub mod output;
 pub mod perfetto;
 mod step;
 mod steps;
@@ -21,3 +22,4 @@ pub mod zip;
 
 pub use collection::BundleCollection;
 pub use collection::BundleInfo;
+pub use collection::SIZE_LIMIT_EXCEEDED_FILE;

@@ -4,69 +4,58 @@
 
 //! The Support Shell (`sush`) server that runs in the global zone.
 //!
-//! See RFD 620. This server runs jobs targeted at this sled on behalf of
-//! Oxide support. A job arrives signed, and this sled runs it only when
-//! the signature chains to one of the root certificates in its config.
-//! The server is deliberately independent of the rest of the control plane,
-//! because it is one of the tools you reach for when the control plane is
-//! the thing that is broken. It therefore starts during bootstrap, before
-//! this sled knows whether it is part of a rack at all.
+//! See [RFD 620]. The server runs jobs targeted at this sled on behalf of
+//! Oxide support. Jobs are authorized by signatures, and the server runs
+//! a job only when its signature validates against one of the trust
+//! anchors in its config; see `trust_anchors` for how those are selected.
 //!
-//! Startup is in two parts, because its inputs become available at different
-//! times:
+//! Jobs are distributed among servers using a gossip network implemented
+//! by the [rumors] library, running over sprockets on the bootstrap network.
+//! _Peers_ (servers) exchange messages that are causally ordered; the set
+//! of causally related messages sent between all peers in a network is
+//! called a _universe_. Various pieces of universe state are persisted
+//! to the M.2s using a [sush locker], described in the _Storage_ section
+//! of [RFD 620]. This is similar to an [`omicron_ledger::Ledger`], which
+//! also holds records across M.2s, but handles disagreements between the
+//! two drives differently.
 //!
-//! * [`spawn_sush_tasks`] builds the job manager as soon as we know our
-//!   baseboard, and is called from `long_running_tasks`. It serves the
-//!   API on the bootstrap network, so the switch zone proxy can reach
-//!   this sled before RSS runs.
-//! * [`SushHandles::start_api`] serves the API again on the underlay,
-//!   and is called from `server` once this sled has been told its
-//!   underlay address.
+//! The gossip network is invisible to clients, which speak only the
+//! `sush` HTTP API; the server relays requests and events. That API is
+//! also served on the bootstrap network only; clients, including those
+//! tunneled through Nexus, reach it through a small proxy in the switch
+//! zone. It is currently served over unencrypted HTTP, pending intra-rack
+//! mTLS support.
 //!
-//! Gossip runs over sprockets on the bootstrap network. A job may be
-//! addressed to a single sled, but the messages carrying jobs,
-//! sessions, and events spread to every sled. The set of causally
-//! related messages is called a _universe_: peers in the same universe
-//! can gossip and converge on its contents; peers in different
-//! universes cannot gossip at all. Every identity in a universe
-//! descends from a single seed. On the first gossip sync, a deterministic
-//! rule decides whose universe wins; the loser joins the winner's
-//! universe and adopts a slice of its identity space. A restarted sled
-//! therefore rejoins the rack's universe and replays what it missed
-//! without re-executing previously run jobs. Each sled stores its identity in
-//! a record called a _bookmark_, which is persisted to disk in order to survive
-//! the sled restarting.
-//!
-//! The bookmark, like every record sush must trust across reboots, lives
-//! in the [sush locker], described in the [storage section of RFD 620].
-//! This is similar to the [`omicron_ledger::Ledger`], which also holds
-//! records across both M.2s, but handles disagreements between the two
-//! drives differently.
-//!
+//! [RFD 620]:
+//!   https://rfd.shared.oxide.computer/rfd/0620
+//! [rumors]:
+//!   https://github.com/oxidecomputer/rumors
 //! [sush locker]:
 //!   https://github.com/oxidecomputer/sush/blob/main/server/src/locker.rs
-//! [storage section of RFD 620]:
-//!   https://rfd.shared.oxide.computer/rfd/0620#_storage
 
 use crate::config::SushConfig;
 use anyhow::{Context, ensure};
 use camino::{Utf8Path, Utf8PathBuf};
+use dice_verifier::verify_cert_chain;
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer, ServerBuilder};
+use futures::StreamExt as _;
+use futures::stream::FuturesUnordered;
 use gateway_client::Client as MgsClient;
-use gateway_types::component::SpType;
 use omicron_common::address::{
     MGS_PORT, SUSH_API_PORT, SUSH_GOSSIP_PORT, get_switch_zone_address,
 };
 use omicron_common::api::external::ByteCount;
 use omicron_ddm_admin_client::Client as DdmClient;
+use omicron_sush_proxy::cubbies::{merge_cubbies, poll_cubbies};
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_hardware_types::BaseboardId;
-use slog::{Logger, debug, error, info, o, warn};
+use slog::{Logger, error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use sprockets_tls::ipcc::Ipcc;
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeSet;
+use std::fs::read;
 use std::io;
 use std::iter::once;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -80,11 +69,11 @@ use tokio::task::spawn_blocking;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use x509_cert::Certificate;
-use x509_cert::der::{Decode as _, Reader as _, SliceReader};
+use x509_cert::der::{Decode as _, DecodePem as _, Reader as _, SliceReader};
 use x509_cert::time::{Time, Validity};
 
 use sush_common::keys::{EphemeralKey, KeyType, pem_cert_chain};
-use sush_common::targets::{Cubbies, MAX_CUBBY};
+use sush_common::targets::Cubbies;
 use sush_server::executor::PathIsolation;
 use sush_server::gossip::{
     GossipConfig, LinkedBaseboards, Universe, spawn_gossip,
@@ -131,7 +120,7 @@ pub struct SushHandles {
 
 impl SushHandles {
     /// Start serving the Support Shell API at `ip`.
-    pub fn start_api(
+    fn start_api(
         &self,
         ip: Ipv6Addr,
     ) -> anyhow::Result<HttpServer<Arc<JobManager>>> {
@@ -221,7 +210,7 @@ pub async fn spawn_sush_tasks(
             );
         }
     }
-    let locker = match Locker::new(&log, slots) {
+    let locker = match Locker::new(&log, own_baseboard.clone(), slots) {
         Ok(locker) => locker,
         Err(err) => {
             error!(
@@ -250,6 +239,7 @@ pub async fn spawn_sush_tasks(
             }
         }
     });
+
     let listen_addr = SocketAddrV6::new(bootstrap_ip, SUSH_GOSSIP_PORT, 0, 0);
     let (universe, linked) = match spawn_gossip(
         &log,
@@ -267,17 +257,18 @@ pub async fn spawn_sush_tasks(
         Err(err) => {
             warn!(
                 log,
-                "gossip disabled, this sled serves local jobs only";
+                "gossip disabled, this sled will run local jobs only";
                 "error" => InlineErrorChain::new(&err),
             );
-            // This seed never reaches a peer, so it is not worth
-            // storing. The null locker stores nothing, leaving the
-            // bookmark on the M.2s untouched for the next boot.
-            let seed = seed_gossip(&log, &Locker::null()).await;
+
+            // Don't persist an isolated identity.
+            let locker = Locker::null();
+            let seed = seed_gossip(&log, &locker).await;
             (Universe::isolated(seed.into_rumors()), LinkedBaseboards::lonely())
         }
     };
 
+    let anchors = trust_anchors(&log, config).await;
     let (tx_cubbies, rx_cubbies) = watch::channel(Cubbies::new());
     let mut manager = match JobManager::new(
         log.clone(),
@@ -288,7 +279,7 @@ pub async fn spawn_sush_tasks(
         universe,
         linked,
         &locker,
-        &config.roots,
+        &anchors,
         shutdown.clone(),
     )
     .await
@@ -299,10 +290,7 @@ pub async fn spawn_sush_tasks(
             return None;
         }
     };
-    spawn(poll_mgs_for_cubbies(
-        log.new(o!("component" => "cubby map")),
-        tx_cubbies,
-    ));
+    spawn(update_cubbies(log.new(o!("component" => "cubby map")), tx_cubbies));
 
     // The state manager runs until shutdown and nothing waits on it,
     // so all we can usefully do with its handle is notice when it stops.
@@ -362,7 +350,7 @@ async fn promote_output_dir(
         if let Some(dataset) =
             available_datasets_rx.all_mounted_debug_datasets().first()
         {
-            let dir = dataset.path.join(SUSH_OUTPUT_SUBDIR);
+            let dir = dataset.path().join(SUSH_OUTPUT_SUBDIR);
             match create_dir_all(&dir).await {
                 Ok(()) => {
                     output_dirs_tx.send_modify(|dirs| {
@@ -395,37 +383,32 @@ async fn promote_output_dir(
     }
 }
 
-/// Discovers the baseboard identity in each cubby in the rack and publishes the
-/// map over the provided watch channel.
-///
-/// This map is used to resolve the sled identity when a job specifies its
-/// target sled cubby number.
-///
-/// This function may start while one or more MGS services are not available,
-/// and must handle failures of both the MGS service or the entire scrimlet
-/// gracefully. Therefore, on every poll, this function will attempt to use the
-/// fixed MGS address on every subnet currently known to `ddmd`, and accepts any
-/// responses it receives. If a response that contains at least one sled is
-/// received, the previously-discovered map is overwritten to avoid leaving
-/// behind stale entries for sleds that are no longer present. Multiple
-/// responses received within the same poll are merged to produce a single map.
-/// If we cannot contact any MGS instance during a poll, the map does not change
-/// until a subsequent poll receives a response.
-async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
-    let clients = || -> anyhow::Result<(DdmClient, reqwest::Client)> {
-        let ddm = DdmClient::localhost(&log)?;
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(MGS_PROBE_TIMEOUT)
-            .timeout(MGS_PROBE_TIMEOUT)
-            .build()?;
-        Ok((ddm, client))
-    };
-    let (ddm, client) = match clients() {
-        Ok(clients) => clients,
+/// Periodically poll each MGS for the sled in each cubby, and merge the
+/// answer from the first MGS to respond into the cubby map. Look for MGS
+/// at the switch zone address in every underlay subnet that DDM knows.
+/// Try every address at once, because most subnets have no switch zone,
+/// and a request to an address with no MGS hangs until it times out.
+async fn update_cubbies(log: Logger, tx_cubbies: watch::Sender<Cubbies>) {
+    let ddm = match DdmClient::localhost(&log) {
+        Ok(ddm) => ddm,
         Err(error) => {
             error!(
-                log, "not polling MGS, cubby-targeted jobs will not run here";
-                "error" => #%error,
+                log, "not polling MGS: cannot build a DDM client";
+                "error" => InlineErrorChain::new(&error),
+            );
+            return;
+        }
+    };
+    let client = match reqwest::ClientBuilder::new()
+        .connect_timeout(MGS_PROBE_TIMEOUT)
+        .timeout(MGS_PROBE_TIMEOUT)
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            error!(
+                log, "not polling MGS: cannot build an HTTP client";
+                "error" => InlineErrorChain::new(&error),
             );
             return;
         }
@@ -433,54 +416,34 @@ async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
     loop {
         match ddm.derive_underlay_subnets_from_prefixes().await {
             Ok(subnets) => {
-                let mut map = Cubbies::new();
-                for subnet in subnets {
-                    let addr = SocketAddrV6::new(
-                        get_switch_zone_address(subnet),
-                        MGS_PORT,
-                        0,
-                        0,
-                    );
-                    let mgs = MgsClient::new_with_client(
-                        &format!("http://{addr}"),
-                        client.clone(),
-                        log.clone(),
-                    );
-                    if mgs.sp_local_switch_id().await.is_err() {
-                        continue;
+                let mgs_clients: Vec<_> = subnets
+                    .into_iter()
+                    .map(|subnet| {
+                        let ip = get_switch_zone_address(subnet);
+                        MgsClient::new_with_client(
+                            &format!("http://[{ip}]:{MGS_PORT}"),
+                            client.clone(),
+                            log.clone(),
+                        )
+                    })
+                    .collect();
+                let mut polls: FuturesUnordered<_> = mgs_clients
+                    .iter()
+                    .map(|mgs| poll_cubbies(&log, mgs))
+                    .collect();
+                while let Some(poll) = polls.next().await {
+                    if let Some(states) = poll {
+                        tx_cubbies.send_modify(|cubbies| {
+                            merge_cubbies(cubbies, states)
+                        });
+                        break;
                     }
-                    for cubby in 0..=MAX_CUBBY {
-                        match mgs.sp_get(&SpType::Sled, cubby.into()).await {
-                            Ok(state) => {
-                                let state = state.into_inner();
-                                map.insert(
-                                    cubby,
-                                    BaseboardId {
-                                        part_number: state.model,
-                                        serial_number: state.serial_number,
-                                    },
-                                );
-                            }
-                            Err(err) => {
-                                debug!(
-                                    log, "no SP state for cubby";
-                                    "cubby" => cubby, "error" => %err,
-                                );
-                            }
-                        }
-                    }
-                }
-                // If this code is running, there must be at least one sled in
-                // the rack, so we reject any response that does not have at
-                // least one sled.
-                if !map.is_empty() {
-                    cubbies.send_replace(map);
                 }
             }
-            Err(err) => {
+            Err(error) => {
                 warn!(
-                    log, "unable to fetch prefixes";
-                    "error" => InlineErrorChain::new(&err),
+                    log, "cannot fetch underlay prefixes from DDM";
+                    "error" => InlineErrorChain::new(&error),
                 );
             }
         }
@@ -543,6 +506,91 @@ fn generate_proxy_pems() -> anyhow::Result<(String, String)> {
         once(vouched.cert().clone()).chain(platform).collect::<Vec<_>>();
     let chain_pem = pem_cert_chain(chain).context("encoding the chain")?;
     Ok((key_pem, chain_pem))
+}
+
+/// Choose the certificates this sled will trust to sign sush jobs.
+/// Every sled trusts the production anchors, and sleds whose platform
+/// identity (fetched here) chains to the staging root trust the staging
+/// anchors as well. This allows, e.g., support to run production-signed
+/// jobs on lab systems, but does not allow engineers to run staging-signed
+/// jobs on production systems.
+async fn trust_anchors(log: &Logger, config: &SushConfig) -> Vec<Utf8PathBuf> {
+    let SushConfig {
+        production_platform_root,
+        staging_platform_root,
+        production_trust_anchors,
+        staging_trust_anchors,
+        ramdisk_dir: _,
+        ramdisk_max_output_mb: _,
+        max_output_mb: _,
+    } = config.clone();
+    let mut anchors = production_trust_anchors;
+    match spawn_blocking(move || {
+        is_sled_staging_signed(
+            &production_platform_root,
+            &staging_platform_root,
+        )
+    })
+    .await
+    .context("fetching the platform identity")
+    .and_then(|result| result)
+    {
+        Ok(false) => info!(
+            log,
+            "production platform identity, trusting only production job signers"
+        ),
+        Ok(true) => {
+            info!(
+                log,
+                "staging platform identity, trusting staging job signers too"
+            );
+            anchors.extend(staging_trust_anchors);
+        }
+        Err(err) => warn!(
+            log, "unknown platform identity, trusting only production job signers";
+            "error" => InlineErrorChain::new(err.as_ref()),
+        ),
+    }
+    anchors
+}
+
+/// Whether this sled's platform identity, read from the RoT, chains to
+/// the `staging` root rather than the `production` one. Uses IPCC, so
+/// performs blocking I/O.
+fn is_sled_staging_signed(
+    production: &Utf8Path,
+    staging: &Utf8Path,
+) -> anyhow::Result<bool> {
+    let ipcc = Ipcc::new().context("opening IPCC")?;
+    let chain_der =
+        ipcc.rot_get_tq_cert_chain().context("fetching the TQ cert chain")?;
+    let chain = der_cert_chain(&chain_der)?;
+    let production_root = read_cert(production)?;
+    let staging_root = read_cert(staging)?;
+    ensure!(is_staging_cert(&staging_root), "{staging} is not a staging root");
+    ensure!(
+        !is_staging_cert(&production_root),
+        "{production} is a staging root, not production"
+    );
+    let roots = [production_root, staging_root.clone()];
+    let root = verify_cert_chain(&chain, Some(&roots))
+        .context("verifying the platform identity")?;
+    Ok(*root == staging_root)
+}
+
+/// Whether a platform identity root's subject includes "Staging", e.g.,
+/// "Platform Identity Staging Root A". (Production roots' subjects do
+/// not include "Production"). This is used only to fail closed in case
+/// roots are accidentally swapped in the config file; it is not used as
+/// a verification criterion.
+fn is_staging_cert(root: &Certificate) -> bool {
+    root.tbs_certificate.subject.to_string().contains("Staging")
+}
+
+/// Read a PEM file holding one certificate.
+fn read_cert(path: &Utf8Path) -> anyhow::Result<Certificate> {
+    let pem = read(path).with_context(|| format!("reading {path}"))?;
+    Certificate::from_pem(&pem).with_context(|| format!("parsing {path}"))
 }
 
 /// Parse a concatenated series of DER certs, as the RoT returns.

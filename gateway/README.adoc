@@ -1,4 +1,4 @@
-## Management Gateway Service
+# Management Gateway Service
 
 The Management Gateway Service (MGS) is the unimaginatively named gateway
 between the control plane and entities on the management network. In

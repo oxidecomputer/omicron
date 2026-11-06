@@ -35,11 +35,17 @@ impl InstanceCpuPlatform {
         match self {
             // Turin-based sleds have a superset of the features made available
             // in a guest's Milan CPU platform
-            Self::AmdMilan => {
-                &[SledCpuFamily::AmdMilan, SledCpuFamily::AmdTurin]
+            Self::AmdMilan => &[
+                SledCpuFamily::AmdMilan,
+                SledCpuFamily::AmdTurin,
+                SledCpuFamily::AmdTurinDense,
+            ],
+            Self::AmdTurin => {
+                &[SledCpuFamily::AmdTurin, SledCpuFamily::AmdTurinDense]
             }
-            Self::AmdTurin => &[SledCpuFamily::AmdTurin],
-            Self::AmdTurinV2 => &[SledCpuFamily::AmdTurin],
+            Self::AmdTurinV2 => {
+                &[SledCpuFamily::AmdTurin, SledCpuFamily::AmdTurinDense]
+            }
         }
     }
 }

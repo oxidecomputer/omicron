@@ -1,10 +1,10 @@
-## SP Simulator
+# SP Simulator
 
 `sp-sim` is a simulator for the various kinds of service processors that exist
 on the management network. It exists to aid in the testing and development of
 the Management Gateway Service (MGS).
 
-### Running the simulator
+## Running the simulator
 
 TODO Flesh this out once we can simulate more than just a single sidecar SP. For
 now, the quick and dirty instructions.

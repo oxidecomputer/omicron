@@ -215,11 +215,6 @@ pub async fn spawn_all_longrunning_tasks(
 
     let health_monitor = spawn_health_monitor_tasks(log).await;
 
-    // Because sush must work even when the control plane doesn't, we start it
-    // before waiting for rack membership. Initially, the sush API is served on
-    // the bootstrap network. Once the sled is told its underlay address,
-    // `crate::server::Server::start` will also serve the sush API on the
-    // underlay network.
     let sush = match &config.sush {
         Some(sush_config) => {
             info!(log, "Starting sush tasks");

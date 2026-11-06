@@ -24,7 +24,7 @@ use nexus_types::fm::{
 use nexus_types::observed_saga::{OrphanedReason, SagaProgressState};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{CaseKind, FactKind, OmicronZoneKind, SitrepKind};
-use uuid::Uuid;
+use steno::SagaIdKind;
 
 impl_enum_type!(
     FmFactSagaKindEnum:
@@ -113,7 +113,7 @@ pub struct FmFactSaga {
     pub comment: String,
 
     /// The saga this fact is about.
-    pub saga_id: Uuid,
+    pub saga_id: DbTypedUuid<SagaIdKind>,
     pub kind: FmFactSagaKind,
 
     // Columns for the `NotProgressing` kind.
@@ -141,7 +141,7 @@ impl FmFactSaga {
             case_id: case_id.into(),
             created_sitrep_id: (*created_sitrep_id).into(),
             comment: comment.clone(),
-            saga_id: saga_fact.saga_id().0,
+            saga_id: saga_fact.saga_id().into(),
             kind: FmFactSagaKind::NotProgressing,
             saga_state: None,
             last_event_time: None,
@@ -170,7 +170,7 @@ impl FmFactSaga {
     /// Reconstruct an in-memory fact from a row.
     pub fn into_fact(self) -> Result<fm::case::Fact, Error> {
         let kind = self.kind;
-        let saga_id = steno::SagaId(self.saga_id);
+        let saga_id = steno::SagaId::from(self.saga_id);
         let payload = match kind {
             FmFactSagaKind::NotProgressing => FactPayload::Saga(
                 SagaFact::NotProgressing(SagaNotProgressingFactPayload {

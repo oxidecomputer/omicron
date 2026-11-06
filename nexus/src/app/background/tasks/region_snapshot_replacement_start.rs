@@ -334,6 +334,8 @@ mod test {
     use omicron_common::api::external;
     use omicron_uuid_kinds::DatasetUuid;
 
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::ProjectUuid;
     use omicron_uuid_kinds::VolumeUuid;
     use sled_agent_client::CrucibleOpts;
     use sled_agent_client::VolumeConstructionRequest;
@@ -429,7 +431,7 @@ mod test {
 
         let client = &cptestctx.external_client;
         let project = create_project(&client, "testing").await;
-        let project_id = project.identity.id;
+        let project_id = ProjectUuid::from_untyped_uuid(project.identity.id);
 
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
@@ -513,7 +515,7 @@ mod test {
                         time_deleted: None,
                     },
 
-                    project_id,
+                    project_id: project_id.into(),
                     disk_id: Uuid::new_v4(),
 
                     volume_id: volume_id.into(),

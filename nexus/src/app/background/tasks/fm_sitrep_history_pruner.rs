@@ -217,6 +217,7 @@ mod tests {
             sitrep_limit: Setting::new(
                 NonZeroU32::new(history_pruning_threshold + 1).unwrap(),
             ),
+            certificate_expiry_warning_days: Setting::Default,
         };
         let view = FmConfigView { config, source: Default::default() };
         // The sender is dropped here; watch receivers continue to yield the
