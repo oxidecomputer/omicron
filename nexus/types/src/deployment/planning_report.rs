@@ -1072,25 +1072,29 @@ impl PlanningMgsUpdatesStepReport {
             });
         }
 
-        // If we're looking at a blueprint in which the planner is bringing a
-        // sled back into service, then it's fair to say that the planner is
-        // waiting for that to happen, in that it won't plan anything else in
-        // this blueprint.  There is no analogous case to the blocked update
-        // above for later blueprints.  The planner doesn't wait for the change
-        // to be propagated anywhere else.  If we ran it again, it would
-        // immediately plan the next step.
-        if let Some(change) = available {
-            return Some(UpdateWait::SledAvailable {
-                sled_id: change.sled_id,
-                baseboard_id: (*change.baseboard_id).clone(),
-            });
-        }
-
-        // Check whether we're waiting for a pending MGS update.
+        // Check whether we're waiting for a pending MGS update.  This takes
+        // priority over a sled returning to service (below) because the same
+        // blueprint can bring one sled back into service and start an update
+        // on another board.  In that case, the system is really waiting on the
+        // update.
         if let Some(update) = self.pending_mgs_updates.iter().next() {
             return Some(UpdateWait::Mgs {
                 baseboard_id: (*update.baseboard_id).clone(),
                 component: MgsUpdateComponent::from(&update.details),
+            });
+        }
+
+        // If we're looking at a blueprint in which the planner is bringing a
+        // sled back into service and isn't starting any other MGS update, then
+        // it's fair to say that the planner is waiting for that to happen.
+        // There is no analogous case to the blocked update above for later
+        // blueprints.  The planner doesn't wait for the change to be propagated
+        // anywhere else.  If we ran it again, it would immediately plan the
+        // next step.
+        if let Some(change) = available {
+            return Some(UpdateWait::SledAvailable {
+                sled_id: change.sled_id,
+                baseboard_id: (*change.baseboard_id).clone(),
             });
         }
 
