@@ -629,7 +629,7 @@ mod tests {
                 number: ProblemRevNum::from_u32(number),
                 created_sitrep_id: sitrep_id,
                 time_resolved: None,
-                code: ProblemCode::NotARealProblem,
+                code: ProblemCode::UnhealthyZpool,
                 summary: format!("revision {number}"),
                 description: format!("description of revision {number}"),
                 action_required: "none, it's not a real problem".to_string(),
