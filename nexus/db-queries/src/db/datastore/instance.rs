@@ -1016,10 +1016,15 @@ impl DataStore {
             .filter(sled_dsl::time_deleted.is_null())
             .filter(vmm_dsl::time_deleted.is_null())
             // Ignore VMMs which are in states that are not known to exist on a
-            // sled. Since this query drives instance-watcher health checking,
-            // it is not necessary to perform health checks for VMMs that don't
-            // actually exist in real life.
-            .filter(vmm_dsl::state.ne_all(VmmState::NONEXISTENT_STATES))
+            // sled. This includes both states where the VMM *definitely* does
+            // not exist and those where it may or may not exist depending on
+            // the progress of an ongoing start or migrate saga. Since this
+            // query drives instance-watcher health checking, it is not
+            // necessary to perform health checks for VMMs that may not actually
+            // exist in real life.
+            .filter(
+                vmm_dsl::state.ne_all(VmmState::POTENTIALLY_NONEXISTENT_STATES),
+            )
             // Also ignore VMMs in terminal states, which will never
             // transition to another state, so a health check can learn
             // nothing further about them.

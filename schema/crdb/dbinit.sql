@@ -1317,7 +1317,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_state_v2 AS ENUM (
     /* The instance has been destroyed. */
     'destroyed',
 
-    /* 
+    /*
      * The instance has no active VMM due to a sled being evacutated.
      * Corresponds to the "rebooting" external state.
      */
@@ -1341,7 +1341,29 @@ CREATE TYPE IF NOT EXISTS omicron.public.vmm_state AS ENUM (
     'migrating',
     'failed',
     'destroyed',
-    'saga_unwound'
+    'saga_unwound',
+
+    /*
+     * The start or migrate saga that created this VMM either is unwinding or
+     * *should* be unwinding, and the VMM either has not yet been registered
+     * with the sled-agent or be unregistered shortly by the unwinding saga
+     * that created it.
+     *
+     * When a VMM is in this state, it is not guaranteed to be registered with
+     * the sled-agent. Attempting to act on an instance with a "cancelling"
+     * active VMM should not result in a request to the sled-agent, and the VMM
+     * should not be health-checked, because it either does not exist or will
+     * not exist shortly.
+     *
+     * An in-progress `instance_start` saga which has not yet transitioned the
+     * VMM's state from "creating" to "starting" may be cancelled by changing
+     * the state from "creating" to "cancelling",  provided the state generation
+     * has not changed since the VMM was observed to be "creating".
+     *
+     * Instances whose active VMMs are "cancelling" will appear as "stopping" in
+     * the external API.
+     */
+    'cancelling'
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart AS ENUM (
@@ -9882,7 +9904,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '312.0.0', NULL)
+    (TRUE, NOW(), NOW(), '313.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -626,7 +626,8 @@ async fn check_from_previous_propolis_step(
             | VmmState::Stopped
             | VmmState::Failed
             | VmmState::Destroyed
-            | VmmState::SagaUnwound => {
+            | VmmState::SagaUnwound
+            | VmmState::Cancelling => {
                 // The VMM we sent the replacement request to is probably not
                 // operating on the request anymore. Wait to see where to send
                 // the next action: if the instance is migrating, eventually
@@ -953,7 +954,8 @@ async fn srrd_drive_region_replacement_prepare(
                             | VmmState::Failed
                             | VmmState::Destroyed
                             | VmmState::SagaUnwound
-                            | VmmState::Creating => {
+                            | VmmState::Creating
+                            | VmmState::Cancelling => {
                                 // Propolis server is not ok to receive volume
                                 // replacement requests, bail out
                                 return Err(saga_action_failed(
