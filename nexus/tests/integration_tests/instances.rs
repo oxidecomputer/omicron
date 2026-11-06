@@ -10570,6 +10570,13 @@ async fn setup_shutdown_test_instance_and_mock_propolis(
     // sending further instance state monitor requests.
     assert_eq!(state.state, PropolisState::Running);
 
+    // advance the sled-agent too, so we can send reboots.
+    // FIXME: this hangs indefinitely, actually - why doesn't sim_ensure actually
+    // transition us from Starting to Running when there's a mock propolis?
+    // let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    // instance_simulate(&cptestctx.server.server_context().nexus, &instance_id).await;
+    // instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+
     (instance, propolis_addr)
 }
 
