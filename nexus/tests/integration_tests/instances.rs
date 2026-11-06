@@ -8052,6 +8052,7 @@ async fn test_can_start_turin_dense_instance_with_cpu_platform(
         anti_affinity_groups: Vec::new(),
         multicast_groups: vec![],
         enable_jumbo_frames: false,
+        shutdown_policy: Default::default(),
     };
     let url_instances = get_instances_url();
 
@@ -8079,7 +8080,7 @@ async fn test_can_start_turin_dense_instance_with_cpu_platform(
     // Great, now let's update the instance to require Turin and start it again.
     // This will fail because there is no Turin in our simulated environment
     // (yet!)
-    expect_instance_stop_ok(client, instance.identity.name.as_str()).await;
+    expect_instance_stop_ok(client, instance.identity.name.as_str(), true).await;
     instance_simulate(nexus, &instance_id).await;
     instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
@@ -8121,7 +8122,7 @@ async fn test_can_start_turin_dense_instance_with_cpu_platform(
 
     // We're free to switch this instance from the initial AmdTurin to AmdTurinV2, which has
     // identical placement constraints and should land on the same simulated Turin sled.
-    expect_instance_stop_ok(client, instance.identity.name.as_str()).await;
+    expect_instance_stop_ok(client, instance.identity.name.as_str(), true).await;
     instance_simulate(nexus, &instance_id).await;
     instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 

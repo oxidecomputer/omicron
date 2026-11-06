@@ -1361,14 +1361,14 @@ impl super::Nexus {
                         // run instances in this state; these requests are fine
                         // and require no work on our part.
                         InstanceStateChangeRequest::Run
-                        | InstanceStateChangeRequest::Reboot => {
+                        | InstanceStateChangeRequest::Reboot { skip_os_shutdown: _ } => {
                             return Ok(
                                 InstanceStateChangeRequestAction::AlreadyDone,
                             );
                         }
                         // Stopping an instance in this state is fine; we'll
                         // stop trying to reincarnate it.
-                        InstanceStateChangeRequest::Stop => {
+                        InstanceStateChangeRequest::Stop { skip_os_shutdown: _ } => {
                             return Ok(
                                 InstanceStateChangeRequestAction::UpdateRuntime(
                                     instance_state
@@ -3510,7 +3510,7 @@ mod tests {
             &logctx.log,
             &instance,
             &None,
-            &InstanceStateChangeRequest::Stop,
+            &InstanceStateChangeRequest::Stop { skip_os_shutdown: true },
         )
         .expect("stopping a SledEvacuating instance should be allowed");
         let InstanceStateChangeRequestAction::UpdateRuntime(rt) = action else {
@@ -3532,7 +3532,7 @@ mod tests {
         let (mut instance, _vmm) = make_instance_and_vmm();
         instance.nexus_state = DbInstanceState::SledEvacuating;
         for requested in [
-            InstanceStateChangeRequest::Reboot,
+            InstanceStateChangeRequest::Reboot { skip_os_shutdown: true },
             InstanceStateChangeRequest::Run,
         ] {
             let action = Nexus::select_runtime_change_action(
@@ -3589,7 +3589,7 @@ mod tests {
             &logctx.log,
             &instance,
             &Some(vmm),
-            &InstanceStateChangeRequest::Stop,
+            &InstanceStateChangeRequest::Stop { skip_os_shutdown: true },
         )
         .expect("stopping a rebooting instance with a VMM should be allowed");
         match action {
@@ -3614,7 +3614,7 @@ mod tests {
             &logctx.log,
             &instance,
             &None,
-            &InstanceStateChangeRequest::Stop,
+            &InstanceStateChangeRequest::Stop { skip_os_shutdown: true },
         )
         .expect("stopping a Failed instance should be allowed");
         let InstanceStateChangeRequestAction::UpdateRuntime(rt) = action else {
@@ -3639,7 +3639,7 @@ mod tests {
             &logctx.log,
             &instance,
             &None,
-            &InstanceStateChangeRequest::Stop,
+            &InstanceStateChangeRequest::Stop { skip_os_shutdown: true },
         )
         .expect("stopping a stopped instance should succeed");
         assert!(
@@ -3658,7 +3658,7 @@ mod tests {
         instance.nexus_state = DbInstanceState::NoVmm;
         for requested in [
             InstanceStateChangeRequest::Run,
-            InstanceStateChangeRequest::Reboot,
+            InstanceStateChangeRequest::Reboot { skip_os_shutdown: true },
             InstanceStateChangeRequest::Migrate(
                 InstanceMigrationTargetParams {
                     src_propolis_addr: "[::1]:12400".parse().unwrap(),
@@ -3693,7 +3693,7 @@ mod tests {
             &logctx.log,
             &instance,
             &None,
-            &InstanceStateChangeRequest::Stop,
+            &InstanceStateChangeRequest::Stop { skip_os_shutdown: true },
         )
         .expect_err("changing state of a Creating instance should fail");
         assert!(
