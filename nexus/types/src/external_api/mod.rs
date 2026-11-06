@@ -28,6 +28,7 @@ pub mod internet_gateway;
 pub mod ip_pool;
 pub mod metrics;
 pub mod multicast;
+pub mod multirack;
 pub mod networking;
 pub mod oxql;
 pub mod path_params;

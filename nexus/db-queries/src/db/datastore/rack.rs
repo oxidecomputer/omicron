@@ -208,6 +208,23 @@ pub enum SledUnderlayAllocationResult {
 }
 
 impl DataStore {
+    pub async fn rack_id_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<RackUuid> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use nexus_db_schema::schema::rack::dsl;
+        paginated(dsl::rack, dsl::id, pagparams)
+            .select(dsl::id)
+            .load_async::<Uuid>(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map(|vec| {
+                vec.into_iter().map(RackUuid::from_untyped_uuid).collect()
+            })
+    }
+
     pub async fn rack_list(
         &self,
         opctx: &OpContext,
