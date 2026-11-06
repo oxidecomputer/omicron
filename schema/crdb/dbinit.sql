@@ -1344,9 +1344,24 @@ CREATE TYPE IF NOT EXISTS omicron.public.vmm_state AS ENUM (
     'saga_unwound',
 
     /*
-     * The instance was stopped *before* the VMM was registered with the
-     * sled-agent (i.e. when the VMM record was 'creating'). In this case, the
-     * start saga will unwind, transitioning the instance back to stopped.
+     * The start or migrate saga that created this VMM either is unwinding or
+     * *should* be unwinding, and the VMM either has not yet been registered
+     * with the sled-agent or be unregistered shortly by the unwinding saga
+     * that created it.
+     *
+     * When a VMM is in this state, it is not guaranteed to be registered with
+     * the sled-agent. Attempting to act on an instance with a "cancelling"
+     * active VMM should not result in a request to the sled-agent, and the VMM
+     * should not be health-checked, because it either does not exist or will
+     * not exist shortly.
+     *
+     * An in-progress `instance_start` saga which has not yet transitioned the
+     * VMM's state from "creating" to "starting" may be cancelled by changing
+     * the state from "creating" to "cancelling",  provided the state generation
+     * has not changed since the VMM was observed to be "creating".
+     *
+     * Instances whose active VMMs are "cancelling" will appear as "stopping" in
+     * the external API.
      */
     'cancelling'
 );
