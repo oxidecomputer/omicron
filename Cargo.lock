@@ -708,7 +708,7 @@ dependencies = [
  "bitflags 2.11.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -10110,6 +10110,7 @@ dependencies = [
  "omicron-generation-kinds",
  "omicron-ledger",
  "omicron-rpaths",
+ "omicron-sush-proxy",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -10192,6 +10193,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-sush-proxy"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "clap",
+ "futures",
+ "gateway-client",
+ "gateway-types",
+ "omicron-common",
+ "omicron-ddm-admin-client",
+ "omicron-workspace-hack",
+ "oxide-tokio-rt",
+ "reqwest",
+ "sled-hardware-types",
+ "slog",
+ "slog-async",
+ "slog-dtrace",
+ "slog-term",
+ "sush-common",
+ "sush-proxy",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
@@ -10271,6 +10298,7 @@ dependencies = [
  "cc",
  "chacha20 0.10.0",
  "chrono",
+ "cipher 0.4.4",
  "cipher 0.5.2",
  "clap",
  "clap_builder",
@@ -10295,6 +10323,7 @@ dependencies = [
  "dof 0.3.0",
  "dof 0.4.0",
  "dropshot 0.17.1",
+ "ed25519 2.2.3",
  "ed25519-dalek 2.2.0",
  "either",
  "elliptic-curve 0.13.8",
@@ -10334,8 +10363,6 @@ dependencies = [
  "inout 0.2.2",
  "ipnet",
  "ipnetwork",
- "itertools 0.13.0",
- "itertools 0.15.0",
  "jiff",
  "lalrpop-util",
  "lazy_static",
@@ -11650,7 +11677,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cd31dcfdbbd7431a807ef4df6edd6473228e94d5c805e8cf671227a21bad068"
 dependencies = [
  "anyhow",
- "itertools 0.15.0",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "rand 0.8.6",
@@ -12705,7 +12732,7 @@ dependencies = [
  "once_cell",
  "socket2 0.6.3",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -15469,7 +15496,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -16099,6 +16126,31 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.28.0",
  "x509-cert",
+]
+
+[[package]]
+name = "sush-proxy"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/sush?rev=26854d1b85ee3664eac26e73833b2c70161ccd52#26854d1b85ee3664eac26e73833b2c70161ccd52"
+dependencies = [
+ "camino",
+ "chrono",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "lru 0.18.5",
+ "percent-encoding",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sled-hardware-types",
+ "slog",
+ "sush-common",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
 ]
 
 [[package]]

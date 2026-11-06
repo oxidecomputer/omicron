@@ -63,6 +63,7 @@ omicron-common.workspace = true
 omicron-generation-kinds.workspace = true
 omicron-ledger.workspace = true
 omicron-ddm-admin-client.workspace = true
+omicron-sush-proxy.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 oxide-tokio-rt.workspace = true
@@ -129,7 +130,7 @@ tufaceous-brand-metadata.workspace = true
 usdt.workspace = true
 uuid.workspace = true
 walkdir.workspace = true
-x509-cert.workspace = true
+x509-cert = { workspace = true, features = ["std"] }
 zeroize.workspace = true
 zip.workspace = true
 zone.workspace = true

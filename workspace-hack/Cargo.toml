@@ -36,7 +36,8 @@ bytes = { version = "1.11.1", features = ["serde"] }
 camino = { version = "1.2.6", default-features = false, features = ["serde1"] }
 chacha20 = { version = "0.10.0", default-features = false, features = ["legacy", "rng", "zeroize"] }
 chrono = { version = "0.4.45", features = ["serde"] }
-cipher = { version = "0.5.2", default-features = false, features = ["block-padding", "rand_core", "stream-wrapper"] }
+cipher-9fbad63c4bcf4a8f = { package = "cipher", version = "0.4.4", default-features = false, features = ["zeroize"] }
+cipher-d8f496e17d97b5cb = { package = "cipher", version = "0.5.2", default-features = false, features = ["block-padding", "rand_core", "stream-wrapper"] }
 clap = { version = "4.6.1", features = ["cargo", "derive", "env", "wrap_help"] }
 clap_builder = { version = "4.6.0", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 const-oid = { version = "0.9.6", default-features = false, features = ["db", "std"] }
@@ -56,6 +57,7 @@ dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", rev = "4a3
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10.7", features = ["mac", "oid", "std"] }
 digest-a6292c17cd707f01 = { package = "digest", version = "0.11.3", features = ["alloc", "mac", "oid", "rand_core"] }
 dropshot = { version = "0.17.1", default-features = false, features = ["usdt-probes"] }
+ed25519 = { version = "2.2.3", default-features = false, features = ["pem", "std"] }
 ed25519-dalek = { version = "2.2.0", features = ["digest", "pem", "rand_core"] }
 either = { version = "1.15.0", features = ["use_std"] }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
@@ -91,8 +93,6 @@ indexmap = { version = "2.14.0", features = ["serde"] }
 inout = { version = "0.2.2", default-features = false, features = ["block-padding"] }
 ipnet = { version = "2.12.0", features = ["serde"] }
 ipnetwork = { version = "0.21.1", features = ["schemars", "serde"] }
-itertools-3575ec1268b04181 = { package = "itertools", version = "0.15.0" }
-itertools-594e8ee84c453af0 = { package = "itertools", version = "0.13.0" }
 jiff = { version = "0.2.34", features = ["serde"] }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
@@ -211,7 +211,8 @@ camino = { version = "1.2.6", default-features = false, features = ["serde1"] }
 cc = { version = "1.2.56", default-features = false, features = ["parallel"] }
 chacha20 = { version = "0.10.0", default-features = false, features = ["legacy", "rng", "zeroize"] }
 chrono = { version = "0.4.45", features = ["serde"] }
-cipher = { version = "0.5.2", default-features = false, features = ["block-padding", "rand_core", "stream-wrapper"] }
+cipher-9fbad63c4bcf4a8f = { package = "cipher", version = "0.4.4", default-features = false, features = ["zeroize"] }
+cipher-d8f496e17d97b5cb = { package = "cipher", version = "0.5.2", default-features = false, features = ["block-padding", "rand_core", "stream-wrapper"] }
 clap = { version = "4.6.1", features = ["cargo", "derive", "env", "wrap_help"] }
 clap_builder = { version = "4.6.0", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 const-oid = { version = "0.9.6", default-features = false, features = ["db", "std"] }
@@ -232,6 +233,7 @@ dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", rev = "4a3
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10.7", features = ["mac", "oid", "std"] }
 digest-a6292c17cd707f01 = { package = "digest", version = "0.11.3", features = ["alloc", "mac", "oid", "rand_core"] }
 dropshot = { version = "0.17.1", default-features = false, features = ["usdt-probes"] }
+ed25519 = { version = "2.2.3", default-features = false, features = ["pem", "std"] }
 ed25519-dalek = { version = "2.2.0", features = ["digest", "pem", "rand_core"] }
 either = { version = "1.15.0", features = ["use_std"] }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
@@ -268,8 +270,6 @@ indexmap = { version = "2.14.0", features = ["serde"] }
 inout = { version = "0.2.2", default-features = false, features = ["block-padding"] }
 ipnet = { version = "2.12.0", features = ["serde"] }
 ipnetwork = { version = "0.21.1", features = ["schemars", "serde"] }
-itertools-3575ec1268b04181 = { package = "itertools", version = "0.15.0" }
-itertools-594e8ee84c453af0 = { package = "itertools", version = "0.13.0" }
 jiff = { version = "0.2.34", features = ["serde"] }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
