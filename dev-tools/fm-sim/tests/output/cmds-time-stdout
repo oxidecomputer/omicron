@@ -1,0 +1,43 @@
+> # The simulated clock starts at the epoch, and moves only when told to.
+> time show
+1970-01-01T00:00:00Z
+
+> time advance 90s
+advanced time by 1m 30s to 1970-01-01T00:01:30Z
+
+> time show
+1970-01-01T00:01:30Z
+
+
+> # A duration with a space in it has to be quoted.
+> time advance '1h 30m'
+advanced time by 1h 30m to 1970-01-01T01:31:30Z
+
+> time advance 1h 30m
+
+
+> # Fractions of a second show up only when there are some.
+> time advance 250ms
+advanced time by 250ms to 1970-01-01T01:31:30.250Z
+
+> time advance 750ms
+advanced time by 750ms to 1970-01-01T01:31:31Z
+
+
+> # Durations that don't parse, and a quote that never closes.
+> time advance
+
+> time advance soon
+
+> time advance '1h
+error: missing closing quote
+
+
+> # A duration that parses, but that the clock can't reach. The clock stays
+> # where it was.
+> time advance 1000000years
+error: the simulated clock cannot go that far
+
+> time show
+1970-01-01T01:31:31Z
+

@@ -1,0 +1,22 @@
+# The simulated clock starts at the epoch, and moves only when told to.
+time show
+time advance 90s
+time show
+
+# A duration with a space in it has to be quoted.
+time advance '1h 30m'
+time advance 1h 30m
+
+# Fractions of a second show up only when there are some.
+time advance 250ms
+time advance 750ms
+
+# Durations that don't parse, and a quote that never closes.
+time advance
+time advance soon
+time advance '1h
+
+# A duration that parses, but that the clock can't reach. The clock stays
+# where it was.
+time advance 1000000years
+time show
