@@ -216,6 +216,8 @@ pub mod inventory {
 
     pub use crate::v57::inventory::Inventory;
 
+    pub use crate::v62::inventory::SledRegistrationInfo;
+
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;
     pub use crate::impls::inventory::FmdInventoryResultDisplay;

@@ -66,7 +66,8 @@ use sled_agent_types::inventory::{
     ConfigReconcilerInventoryStatus, CurrentUpdateDisposition, FmdInventory,
     InstanceManagerStatus, Inventory, InventoryDataset, InventoryDisk,
     InventoryZpool, OmicronFileSourceResolverInventory, OmicronSledConfig,
-    OmicronSledUpdateDisposition, SingleMeasurementInventory, ZpoolHealth,
+    OmicronSledUpdateDisposition, SingleMeasurementInventory,
+    SledRegistrationInfo, ZpoolHealth,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
@@ -1270,6 +1271,11 @@ impl SledAgent {
         let client = propolis_client::Client::new(&format!("http://{}", addr));
         *mock_lock = Some((srv, client));
         Ok(addr)
+    }
+
+    /// Return the sled's registration identity.
+    pub fn sled_registration_info(&self) -> SledRegistrationInfo {
+        SledRegistrationInfo { sled_id: self.id, rack_id: self.config.rack_id }
     }
 
     pub async fn inventory(

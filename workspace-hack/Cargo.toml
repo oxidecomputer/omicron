@@ -33,7 +33,7 @@ bstr = { version = "1.12.1" }
 buf-list = { version = "1.1.2", default-features = false, features = ["tokio1"] }
 byte-wrapper = { version = "0.2.1", features = ["schemars08", "serde"] }
 bytes = { version = "1.11.1", features = ["serde"] }
-camino = { version = "1.2.5", default-features = false, features = ["serde1"] }
+camino = { version = "1.2.6", default-features = false, features = ["serde1"] }
 chacha20 = { version = "0.10.0", default-features = false, features = ["legacy", "rng", "zeroize"] }
 chrono = { version = "0.4.45", features = ["serde"] }
 cipher = { version = "0.5.2", default-features = false, features = ["block-padding", "rand_core", "stream-wrapper"] }
@@ -83,6 +83,8 @@ hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hybrid-array = { version = "0.4.13", default-features = false, features = ["alloc", "ctutils", "extra-sizes", "subtle", "zeroize"] }
 hyper = { version = "1.10.1", features = ["full"] }
+icu_locale_core = { version = "2.4.0", default-features = false, features = ["alloc", "zerovec"] }
+icu_provider = { version = "2.4.0", default-features = false, features = ["alloc", "baked"] }
 iddqd = { version = "0.5.0", features = ["daft", "proptest", "schemars08"] }
 idna = { version = "1.1.0" }
 indexmap = { version = "2.14.0", features = ["serde"] }
@@ -95,6 +97,7 @@ jiff = { version = "0.2.34", features = ["serde"] }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2.185", features = ["extra_traits"] }
+litemap = { version = "0.8.1", default-features = false, features = ["alloc"] }
 log = { version = "0.4.33", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.8.0" }
@@ -113,6 +116,7 @@ percent-encoding = { version = "2.3.2" }
 petgraph = { version = "0.8.3", features = ["serde-1"] }
 portable-atomic = { version = "1.13.1" }
 postgres-types = { version = "0.2.14", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
+potential_utf = { version = "0.1.4", default-features = false, features = ["alloc", "zerovec"] }
 ppv-lite86 = { version = "0.2.21", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.1.4" }
 proc-macro2 = { version = "1.0.106" }
@@ -148,14 +152,16 @@ smallvec = { version = "1.15.1", default-features = false, features = ["const_ne
 spin = { version = "0.9.8" }
 spki = { version = "0.7.3", default-features = false, features = ["pem", "std"] }
 sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "02c7e5414d97c0c85d629cb76d1f6beab73d960e", default-features = false, features = ["ipcc"] }
+stable_deref_trait = { version = "1.2.1", default-features = false, features = ["alloc"] }
 string_cache = { version = "0.8.9" }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 strum-754bda37e0fb3874 = { package = "strum", version = "0.27.2", features = ["derive"] }
 subtle = { version = "2.6.1", features = ["const-generics"] }
-syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3.0.3", features = ["extra-traits", "full", "visit"] }
+syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3.0.3", features = ["extra-traits", "fold", "full", "visit"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.117", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
-textwrap = { version = "0.16.2", features = ["terminal_size"] }
+textwrap = { version = "0.16.4", features = ["terminal_size"] }
 time = { version = "0.3.47", features = ["formatting", "local-offset", "macros", "parsing"] }
+tinystr = { version = "0.8.5", default-features = false, features = ["alloc", "zerovec"] }
 tokio = { version = "1.52.1", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.18", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-rustls = { version = "0.26.4" }
@@ -165,7 +171,6 @@ toml = { version = "1.1.2" }
 toml_datetime-3b31131e45eafb45 = { package = "toml_datetime", version = "0.6.11", default-features = false, features = ["serde"] }
 toml_datetime-dff4ba8e3ae991db = { package = "toml_datetime", version = "1.1.1", default-features = false, features = ["serde", "std"] }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", features = ["serde"] }
-toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 toml_parser = { version = "1.1.2" }
 tracing = { version = "0.1.44", features = ["log"] }
 tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", default-features = false, features = ["hubtools", "proptest", "schemars"] }
@@ -175,9 +180,14 @@ usdt = { version = "0.6.0" }
 usdt-impl-3b31131e45eafb45 = { package = "usdt-impl", version = "0.6.0", default-features = false, features = ["des"] }
 usdt-impl-d8f496e17d97b5cb = { package = "usdt-impl", version = "0.5.0", default-features = false, features = ["asm", "des"] }
 uuid = { version = "1.23.4", features = ["serde", "v4"] }
+writeable = { version = "0.6.4", default-features = false, features = ["alloc"] }
 x509-cert = { version = "0.2.5" }
+yoke = { version = "0.8.4", default-features = false, features = ["alloc", "derive"] }
 zerocopy = { version = "0.8.55", default-features = false, features = ["derive", "simd"] }
+zerofrom = { version = "0.1.6", default-features = false, features = ["alloc", "derive"] }
 zeroize = { version = "1.9.0", features = ["aarch64", "serde", "std", "zeroize_derive"] }
+zerotrie = { version = "0.2.5", default-features = false, features = ["alloc", "yoke", "zerofrom"] }
+zerovec = { version = "0.11.9", default-features = false, features = ["alloc", "derive", "yoke"] }
 zip-164d15cefe24d7eb = { package = "zip", version = "4.6.1", default-features = false, features = ["bzip2", "deflate", "jiff-02"] }
 zip-181b0d20215bb231 = { package = "zip", version = "8.6.0", default-features = false, features = ["bzip2", "deflate"] }
 
@@ -197,7 +207,7 @@ bstr = { version = "1.12.1" }
 buf-list = { version = "1.1.2", default-features = false, features = ["tokio1"] }
 byte-wrapper = { version = "0.2.1", features = ["schemars08", "serde"] }
 bytes = { version = "1.11.1", features = ["serde"] }
-camino = { version = "1.2.5", default-features = false, features = ["serde1"] }
+camino = { version = "1.2.6", default-features = false, features = ["serde1"] }
 cc = { version = "1.2.56", default-features = false, features = ["parallel"] }
 chacha20 = { version = "0.10.0", default-features = false, features = ["legacy", "rng", "zeroize"] }
 chrono = { version = "0.4.45", features = ["serde"] }
@@ -250,6 +260,8 @@ hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hybrid-array = { version = "0.4.13", default-features = false, features = ["alloc", "ctutils", "extra-sizes", "subtle", "zeroize"] }
 hyper = { version = "1.10.1", features = ["full"] }
+icu_locale_core = { version = "2.4.0", default-features = false, features = ["alloc", "zerovec"] }
+icu_provider = { version = "2.4.0", default-features = false, features = ["alloc", "baked"] }
 iddqd = { version = "0.5.0", features = ["daft", "proptest", "schemars08"] }
 idna = { version = "1.1.0" }
 indexmap = { version = "2.14.0", features = ["serde"] }
@@ -262,6 +274,7 @@ jiff = { version = "0.2.34", features = ["serde"] }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2.185", features = ["extra_traits"] }
+litemap = { version = "0.8.1", default-features = false, features = ["alloc"] }
 log = { version = "0.4.33", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.8.0" }
@@ -280,6 +293,7 @@ percent-encoding = { version = "2.3.2" }
 petgraph = { version = "0.8.3", features = ["serde-1"] }
 portable-atomic = { version = "1.13.1" }
 postgres-types = { version = "0.2.14", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
+potential_utf = { version = "0.1.4", default-features = false, features = ["alloc", "zerovec"] }
 ppv-lite86 = { version = "0.2.21", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.1.4" }
 proc-macro2 = { version = "1.0.106" }
@@ -316,16 +330,18 @@ smallvec = { version = "1.15.1", default-features = false, features = ["const_ne
 spin = { version = "0.9.8" }
 spki = { version = "0.7.3", default-features = false, features = ["pem", "std"] }
 sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "02c7e5414d97c0c85d629cb76d1f6beab73d960e", default-features = false, features = ["ipcc"] }
+stable_deref_trait = { version = "1.2.1", default-features = false, features = ["alloc"] }
 string_cache = { version = "0.8.9" }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 strum-754bda37e0fb3874 = { package = "strum", version = "0.27.2", features = ["derive"] }
 subtle = { version = "2.6.1", features = ["const-generics"] }
-syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3.0.3", features = ["extra-traits", "full", "visit"] }
+syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3.0.3", features = ["extra-traits", "fold", "full", "visit"] }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "full"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.117", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
-textwrap = { version = "0.16.2", features = ["terminal_size"] }
+textwrap = { version = "0.16.4", features = ["terminal_size"] }
 time = { version = "0.3.47", features = ["formatting", "local-offset", "macros", "parsing"] }
 time-macros = { version = "0.2.27", default-features = false, features = ["formatting", "parsing"] }
+tinystr = { version = "0.8.5", default-features = false, features = ["alloc", "zerovec"] }
 tokio = { version = "1.52.1", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.18", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-rustls = { version = "0.26.4" }
@@ -335,7 +351,6 @@ toml = { version = "1.1.2" }
 toml_datetime-3b31131e45eafb45 = { package = "toml_datetime", version = "0.6.11", default-features = false, features = ["serde"] }
 toml_datetime-dff4ba8e3ae991db = { package = "toml_datetime", version = "1.1.1", default-features = false, features = ["serde", "std"] }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", features = ["serde"] }
-toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 toml_parser = { version = "1.1.2" }
 tracing = { version = "0.1.44", features = ["log"] }
 tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", default-features = false, features = ["hubtools", "proptest", "schemars"] }
@@ -347,9 +362,14 @@ usdt-impl-d8f496e17d97b5cb = { package = "usdt-impl", version = "0.5.0", default
 uuid = { version = "1.23.4", features = ["serde", "v4"] }
 vergen = { version = "9.1.0", features = ["cargo", "rustc"] }
 vergen-lib = { version = "9.1.0", features = ["cargo", "git", "rustc"] }
+writeable = { version = "0.6.4", default-features = false, features = ["alloc"] }
 x509-cert = { version = "0.2.5" }
+yoke = { version = "0.8.4", default-features = false, features = ["alloc", "derive"] }
 zerocopy = { version = "0.8.55", default-features = false, features = ["derive", "simd"] }
+zerofrom = { version = "0.1.6", default-features = false, features = ["alloc", "derive"] }
 zeroize = { version = "1.9.0", features = ["aarch64", "serde", "std", "zeroize_derive"] }
+zerotrie = { version = "0.2.5", default-features = false, features = ["alloc", "yoke", "zerofrom"] }
+zerovec = { version = "0.11.9", default-features = false, features = ["alloc", "derive", "yoke"] }
 zip-164d15cefe24d7eb = { package = "zip", version = "4.6.1", default-features = false, features = ["bzip2", "deflate", "jiff-02"] }
 zip-181b0d20215bb231 = { package = "zip", version = "8.6.0", default-features = false, features = ["bzip2", "deflate"] }
 
@@ -451,6 +471,7 @@ object = { version = "0.37.3", default-features = false, features = ["read", "st
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.44", features = ["fs", "stdio", "system", "termios"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.4", default-features = false, features = ["stdio"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs"] }
+toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 winnow = { version = "1.0.3" }
 
 [target.x86_64-unknown-illumos.build-dependencies]
@@ -467,6 +488,7 @@ object = { version = "0.37.3", default-features = false, features = ["read", "st
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.44", features = ["fs", "stdio", "system", "termios"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.4", default-features = false, features = ["stdio"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs"] }
+toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 winnow = { version = "1.0.3" }
 
 ### END HAKARI SECTION
