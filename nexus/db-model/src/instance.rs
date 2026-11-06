@@ -397,7 +397,7 @@ impl InstanceRuntimeState {
     ///
     /// # Warning
     ///
-    /// This function does **not** change the value of the `propolis_id` field`.
+    /// This function does **not** change the value of the `propolis_id` field.
     /// This means that if the state is being advanced to `NoVmm` from a state
     /// that had an active VMM, or to a state with an active VMM from one which
     /// does not have an active VMM, the active VMM ID must also be set or unset

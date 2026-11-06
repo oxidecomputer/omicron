@@ -290,7 +290,7 @@ enum InstanceStateChangeRequestAction {
     /// The instance has a VMM record, but the VMM record has not yet been
     /// ensured on a sled, so attempt to update the VMM state to interact with
     /// an ongoing saga, conditionally on the VMM state not changing to one in
-    /// which it is encarnated on the sled.
+    /// which it is incarnated on the sled.
     DoGoofyVmmStateCasLoopDance {
         vmm_id: PropolisUuid,
         next_state: VmmRuntimeState,
@@ -1290,7 +1290,7 @@ impl super::Nexus {
             // Every other VMM state for which `exists_on_sled()` is false
             // (Cancelling, SagaUnwound, and Destroyed) should *not* be sent to
             // the sled-agent, because the sled-agent will not know what VMM
-            // we're talking about.These states should behave as though the
+            // we're talking about. These states should behave as though the
             // instance is in the `Stopping` state.
             Some(vmm) => {
                 return match requested {
@@ -1301,7 +1301,7 @@ impl super::Nexus {
                         )))
                     }
 
-                    // Since SagaUnwound is a a Failed-like state, we will let
+                    // Since SagaUnwound is a Failed-like state, we will let
                     // you move the instance to `Stopped` now by setting the
                     // state to `NoVmm` and unlinking the `propolis_id`.
                     InstanceStateChangeRequest::Stop
@@ -1598,7 +1598,7 @@ impl super::Nexus {
         // This is a bit weird: in order to implement the goofy CAS-and-retry
         // dance necessary to stop a VMM that's in the `Creating` state, we may
         // retry exactly one attempt to request a state change, if and only if
-        // it is necessary to attempt a dctabase compare-and-swap to cancel a
+        // it is necessary to attempt a database compare-and-swap to cancel a
         // start saga, and then attempt to send the requested state to the sled
         // if the VMM process starts before we can cancel it. All other state
         // changes will not require a second iteration, and should always return
@@ -1726,7 +1726,7 @@ impl super::Nexus {
         // than looping forever.
         Err(InstanceStateChangeError::Other(Error::InternalError {
             internal_message: format!(
-                "attempting to change instance {}'s state required more than
+                "attempting to change instance {}'s state required more than \
                  {iters} retries, this is a bug! the final instance state was: \
                  {prev_instance_state:?} and the VMM state was: \
                  {prev_vmm_state:?}",
