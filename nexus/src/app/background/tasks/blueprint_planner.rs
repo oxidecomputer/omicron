@@ -27,7 +27,6 @@ use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::PlanningReport;
 use nexus_types::internal_api::background::BlueprintPlannerLatest;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
-use nexus_types::internal_api::background::TimestampedPlanningReport;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
@@ -158,53 +157,13 @@ impl BlueprintPlanner {
 
     /// Publishes the outcome of a planning activation for other parts of
     /// Nexus
-    ///
-    /// If the activation failed, this keeps the last report that the planner
-    /// produced (if any) alongside the error.
     fn publish_latest(
         &self,
         time_planned: DateTime<Utc>,
         status: &BlueprintPlannerStatus,
     ) {
-        let timestamped =
-            |report: &Arc<PlanningReport>| TimestampedPlanningReport {
-                time_planned,
-                report: Arc::clone(report),
-            };
-
-        self.tx_latest.send_modify(|latest| match status {
-            BlueprintPlannerStatus::Disabled => latest
-                .record_error(String::from("blueprint planning is disabled")),
-            BlueprintPlannerStatus::ConfigNotYetLoaded => latest.record_error(
-                String::from("reconfigurator config not yet loaded"),
-            ),
-            BlueprintPlannerStatus::Error(error) => {
-                latest.record_error(error.clone())
-            }
-            BlueprintPlannerStatus::LimitReached { limit, report } => {
-                *latest = BlueprintPlannerLatest::Failed {
-                    last_report: timestamped(report),
-                    error: format!(
-                        "blueprint planning stopped because the system \
-                         has reached its limit of {limit} blueprints"
-                    ),
-                }
-            }
-            BlueprintPlannerStatus::Planned { error, report, .. } => {
-                *latest = BlueprintPlannerLatest::Failed {
-                    last_report: timestamped(report),
-                    error: format!(
-                        "failed to make new blueprint the current \
-                         target: {error}"
-                    ),
-                }
-            }
-            BlueprintPlannerStatus::Unchanged { report, .. }
-            | BlueprintPlannerStatus::Targeted { report, .. } => {
-                *latest = BlueprintPlannerLatest::Succeeded {
-                    report: timestamped(report),
-                }
-            }
+        self.tx_latest.send_modify(|latest| {
+            latest.record_activation(time_planned, status)
         });
     }
 

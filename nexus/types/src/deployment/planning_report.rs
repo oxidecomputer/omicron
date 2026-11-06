@@ -2292,8 +2292,11 @@ mod tests {
     use super::*;
 
     use crate::deployment::ReconfiguratorDisruptionPolicy;
+    use chrono::Utc;
     use omicron_uuid_kinds::GenericUuid;
     use proptest::prelude::*;
+    use std::time::Duration;
+    use std::time::Instant;
     use test_strategy::proptest;
     use uuid::Uuid;
 
@@ -2377,5 +2380,73 @@ mod tests {
             WaitingOnSledEvacuationDetails::MissingFromInventory,
         );
         assert_eq!(progress.to_string(), "sled is missing from inventory");
+    }
+
+    // The operator status reports a handoff only when the caller knows that
+    // Nexus is quiescing.  This uses a report like the one from the planning
+    // run that bumps the Nexus generation, after all other zones are updated.
+    #[test]
+    fn operator_status_during_handoff() {
+        let mut report = PlanningReport::new();
+        report
+            .nexus_generation_bump
+            .set_next_generation(NexusGeneration::new().next());
+
+        // Without knowing the quiesce state, the status can't mention the
+        // handoff.
+        let without_handoff = report.operator_status(QuiesceInfo::Unknown);
+        assert_eq!(without_handoff, OperatorStatus::Busy);
+
+        let time_requested = Utc::now();
+        let instant = Instant::now();
+        let duration = Duration::from_secs(1);
+        let cases = [
+            (QuiesceState::Undetermined, without_handoff.clone()),
+            (QuiesceState::Running, without_handoff.clone()),
+            (
+                QuiesceState::DrainingSagas {
+                    time_requested,
+                    time_draining_sagas: instant,
+                },
+                OperatorStatus::WaitingForUpdate(UpdateWait::HandoffSagas),
+            ),
+            (
+                QuiesceState::DrainingDb {
+                    time_requested,
+                    time_draining_sagas: instant,
+                    duration_draining_sagas: duration,
+                    time_draining_db: instant,
+                },
+                OperatorStatus::WaitingForUpdate(UpdateWait::HandoffFinal),
+            ),
+            (
+                QuiesceState::RecordingQuiesce {
+                    time_requested,
+                    time_draining_sagas: instant,
+                    duration_draining_sagas: duration,
+                    duration_draining_db: duration,
+                    time_recording_quiesce: instant,
+                },
+                OperatorStatus::WaitingForUpdate(UpdateWait::HandoffFinal),
+            ),
+            (
+                QuiesceState::Quiesced {
+                    time_requested,
+                    time_quiesced: time_requested,
+                    duration_draining_sagas: duration,
+                    duration_draining_db: duration,
+                    duration_recording_quiesce: duration,
+                    duration_total: duration,
+                },
+                OperatorStatus::WaitingForUpdate(UpdateWait::HandoffFinal),
+            ),
+        ];
+        for (quiesce_state, expected) in cases {
+            assert_eq!(
+                report.operator_status(QuiesceInfo::Known(&quiesce_state)),
+                expected,
+                "quiesce state: {quiesce_state:?}"
+            );
+        }
     }
 }
