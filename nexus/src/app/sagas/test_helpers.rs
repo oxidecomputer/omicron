@@ -94,7 +94,12 @@ pub(crate) async fn instance_stop(
     let instance_lookup =
         nexus.instance_lookup(&opctx, instance_selector).unwrap();
     nexus
-        .instance_stop(&opctx, &instance_lookup)
+        .instance_stop(
+            &opctx,
+            &instance_lookup,
+            // always hard stop instances for tests (ignoring shutdown policy)
+            true,
+        )
         .await
         .expect("Failed to stop instance");
 }
@@ -115,7 +120,12 @@ pub(crate) async fn instance_stop_by_name(
     let instance_lookup =
         nexus.instance_lookup(&opctx, instance_selector).unwrap();
     nexus
-        .instance_stop(&opctx, &instance_lookup)
+        .instance_stop(
+            &opctx,
+            &instance_lookup,
+            // always hard stop instances for tests (ignoring shutdown policy)
+            true,
+        )
         .await
         .expect("Failed to stop instance");
 }

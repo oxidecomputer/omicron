@@ -20,7 +20,8 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::floating_ip;
 use nexus_types::external_api::instance::{
     ExternalIpCreate, InstanceNetworkInterfaceAttachment,
-    InstanceNetworkInterfaceCreate, PrivateIpStackCreate,
+    InstanceNetworkInterfaceCreate, InstanceShutdownPolicy,
+    PrivateIpStackCreate,
 };
 use nexus_types::external_api::internet_gateway::{
     InternetGateway, InternetGatewayIpAddress, InternetGatewayIpPool,
@@ -686,6 +687,7 @@ async fn test_setup(c: &ClientTestContext) {
         None,
         None,
         Vec::new(),
+        InstanceShutdownPolicy::default(),
     )
     .await;
 

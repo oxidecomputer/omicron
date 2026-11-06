@@ -306,9 +306,8 @@ impl InstanceManager {
                 tokio::spawn(rx);
                 Ok(VmmPutStateResponse { updated_runtime: None })
             }
-            VmmStateRequested::Stopped | VmmStateRequested::Reboot => {
-                rx.await?
-            }
+            VmmStateRequested::Stopped { .. }
+            | VmmStateRequested::Reboot { .. } => rx.await?,
         }
     }
 

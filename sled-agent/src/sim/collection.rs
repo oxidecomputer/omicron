@@ -418,7 +418,9 @@ mod test {
         // Stopping an instance that was never started synchronously destroys
         // its VMM.
         let rprev = r1;
-        let dropped = instance.transition(VmmStateRequested::Stopped).unwrap();
+        let dropped = instance
+            .transition(VmmStateRequested::Stopped { acpi_timeout_secs: None })
+            .unwrap();
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_none());
         let rnext = instance.object.current();
@@ -503,7 +505,9 @@ mod test {
         // If we go back to any stopped state, we go through the async process
         // again.
         assert!(rx.try_recv().is_err());
-        let dropped = instance.transition(VmmStateRequested::Stopped).unwrap();
+        let dropped = instance
+            .transition(VmmStateRequested::Stopped { acpi_timeout_secs: None })
+            .unwrap();
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_some());
         let rnext = instance.object.current();
@@ -575,7 +579,12 @@ mod test {
         // Now reboot the instance. This is dispatched to Propolis, which will
         // move to the Rebooting state and then back to Running.
         assert!(
-            instance.transition(VmmStateRequested::Reboot).unwrap().is_none()
+            instance
+                .transition(VmmStateRequested::Reboot {
+                    acpi_timeout_secs: None
+                })
+                .unwrap()
+                .is_none()
         );
         let (rprev, rnext) = (rnext, instance.object.current());
         assert!(rnext.vmm_state.generation > rprev.vmm_state.generation);

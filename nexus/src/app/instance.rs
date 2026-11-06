@@ -251,22 +251,32 @@ impl From<InstanceStateChangeError> for dropshot::HttpError {
 #[derive(Debug)]
 pub(crate) enum InstanceStateChangeRequest {
     Run,
-    Reboot,
-    Stop,
+    Reboot { skip_os_shutdown: bool },
+    Stop { skip_os_shutdown: bool },
     Migrate(InstanceMigrationTargetParams),
 }
 
-impl From<InstanceStateChangeRequest>
-    for sled_agent_client::types::VmmStateRequested
-{
-    fn from(value: InstanceStateChangeRequest) -> Self {
-        match value {
-            InstanceStateChangeRequest::Run => Self::Running,
-            InstanceStateChangeRequest::Reboot => Self::Reboot,
-            InstanceStateChangeRequest::Stop => Self::Stopped,
-            InstanceStateChangeRequest::Migrate(params) => {
-                Self::MigrationTarget(params)
+impl InstanceStateChangeRequest {
+    fn to_vmm(
+        self,
+        acpi_timeout_secs: Option<u64>,
+    ) -> sled_agent_client::types::VmmStateRequested {
+        use sled_agent_client::types::VmmStateRequested as VmmState;
+        match self {
+            Self::Run => VmmState::Running,
+            Self::Reboot { skip_os_shutdown: true } => {
+                VmmState::Reboot { acpi_timeout_secs: None }
             }
+            Self::Reboot { skip_os_shutdown: false } => {
+                VmmState::Reboot { acpi_timeout_secs: None }
+            }
+            Self::Stop { skip_os_shutdown: true } => {
+                VmmState::Stopped { acpi_timeout_secs }
+            }
+            Self::Stop { skip_os_shutdown: false } => {
+                VmmState::Stopped { acpi_timeout_secs }
+            }
+            Self::Migrate(params) => VmmState::MigrationTarget(params),
         }
     }
 }
@@ -582,6 +592,7 @@ impl super::Nexus {
             cpu_platform,
             multicast_groups,
             enable_jumbo_frames,
+            shutdown_policy,
         } = params;
 
         check_instance_cpu_memory_sizes(*ncpus, *memory)?;
@@ -623,19 +634,15 @@ impl super::Nexus {
             None => None,
         };
 
-        let auto_restart_policy = auto_restart_policy.map(Into::into);
-        let ncpus = (*ncpus).into();
-        let memory = (*memory).into();
-        let cpu_platform = cpu_platform.map(Into::into);
-
-        let update = InstanceUpdate {
+        let update = InstanceUpdate::new(
             boot_disk_id,
-            auto_restart_policy,
-            ncpus,
-            memory,
-            cpu_platform,
-            enable_jumbo_frames: *enable_jumbo_frames,
-        };
+            **auto_restart_policy,
+            *ncpus,
+            *memory,
+            **cpu_platform,
+            *enable_jumbo_frames,
+            *shutdown_policy,
+        );
 
         // Update the instance configuration
         let result = self
@@ -1041,6 +1048,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
+        skip_os_shutdown: bool,
     ) -> Result<InstanceAndActiveVmm, InstanceStateChangeError> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
@@ -1063,7 +1071,7 @@ impl super::Nexus {
                 opctx,
                 state.instance(),
                 state.vmm(),
-                InstanceStateChangeRequest::Reboot,
+                InstanceStateChangeRequest::Reboot { skip_os_shutdown },
             )
             .await
         {
@@ -1148,6 +1156,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
+        skip_os_shutdown: bool,
     ) -> Result<InstanceAndActiveVmm, InstanceStateChangeError> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
@@ -1170,7 +1179,7 @@ impl super::Nexus {
                 opctx,
                 state.instance(),
                 state.vmm(),
-                InstanceStateChangeRequest::Stop,
+                InstanceStateChangeRequest::Stop { skip_os_shutdown },
             )
             .await
         {
@@ -1247,12 +1256,12 @@ impl super::Nexus {
                             effective_state
                         )));
                     }
-                    InstanceStateChangeRequest::Stop => {
+                    InstanceStateChangeRequest::Stop { .. } => {
                         return Ok(
                             InstanceStateChangeRequestAction::AlreadyDone,
                         );
                     }
-                    InstanceStateChangeRequest::Reboot => {
+                    InstanceStateChangeRequest::Reboot { .. } => {
                         return Err(Error::invalid_request(&format!(
                             "cannot reboot an instance in state {} with no VMM",
                             effective_state
@@ -1291,7 +1300,7 @@ impl super::Nexus {
                 InstanceState::Failed
                     if matches!(
                         requested,
-                        InstanceStateChangeRequest::Stop
+                        InstanceStateChangeRequest::Stop { .. }
                     ) =>
                 {
                     // As discussed above, this shouldn't happen, so return an
@@ -1362,14 +1371,18 @@ impl super::Nexus {
                         // run instances in this state; these requests are fine
                         // and require no work on our part.
                         InstanceStateChangeRequest::Run
-                        | InstanceStateChangeRequest::Reboot => {
+                        | InstanceStateChangeRequest::Reboot {
+                            skip_os_shutdown: _,
+                        } => {
                             return Ok(
                                 InstanceStateChangeRequestAction::AlreadyDone,
                             );
                         }
                         // Stopping an instance in this state is fine; we'll
                         // stop trying to reincarnate it.
-                        InstanceStateChangeRequest::Stop => {
+                        InstanceStateChangeRequest::Stop {
+                            skip_os_shutdown: _,
+                        } => {
                             return Ok(
                                 InstanceStateChangeRequestAction::UpdateRuntime(
                                     instance_state
@@ -1413,18 +1426,20 @@ impl super::Nexus {
         // TODO(#2825): Failed instances should be allowed to stop. See above.
         let allowed = match requested {
             InstanceStateChangeRequest::Run
-            | InstanceStateChangeRequest::Reboot
-            | InstanceStateChangeRequest::Stop => match effective_state {
-                InstanceState::Creating
-                | InstanceState::Starting
-                | InstanceState::Running
-                | InstanceState::Stopping
-                | InstanceState::Stopped
-                | InstanceState::Rebooting
-                | InstanceState::Migrating => true,
-                InstanceState::Repairing | InstanceState::Failed => false,
-                InstanceState::Destroyed => false,
-            },
+            | InstanceStateChangeRequest::Reboot { .. }
+            | InstanceStateChangeRequest::Stop { .. } => {
+                match effective_state {
+                    InstanceState::Creating
+                    | InstanceState::Starting
+                    | InstanceState::Running
+                    | InstanceState::Stopping
+                    | InstanceState::Stopped
+                    | InstanceState::Rebooting
+                    | InstanceState::Migrating => true,
+                    InstanceState::Repairing | InstanceState::Failed => false,
+                    InstanceState::Destroyed => false,
+                }
+            }
             InstanceStateChangeRequest::Migrate(_) => match effective_state {
                 InstanceState::Running
                 | InstanceState::Rebooting
@@ -1493,10 +1508,31 @@ impl super::Nexus {
                 propolis_id,
             } => {
                 let sa = self.sled_client(&sled_id).await?;
+                let acpi_timeout_secs = match requested {
+                    InstanceStateChangeRequest::Reboot { skip_os_shutdown }
+                    | InstanceStateChangeRequest::Stop { skip_os_shutdown }
+                        if !skip_os_shutdown =>
+                    {
+                        // TODO can sled-agent take the shutdown policy directly
+                        // instead of an option?
+                        match prev_instance_state
+                            .shutdown_policy()
+                            .map_err(InstanceStateChangeError::Other)?
+                        {
+                            instance::InstanceShutdownPolicy::HardOff => None,
+                            instance::InstanceShutdownPolicy::PowerButton {
+                                timeout_secs,
+                            } => Some(u64::from(timeout_secs)),
+                        }
+                    }
+                    _ => None,
+                };
                 let instance_put_result = sa
                     .vmm_put_state(
                         &propolis_id,
-                        &VmmPutStateBody { state: requested.into() },
+                        &VmmPutStateBody {
+                            state: requested.to_vmm(acpi_timeout_secs),
+                        },
                     )
                     .await
                     .map(|res| res.into_inner().updated_runtime.map(Into::into))
@@ -3212,6 +3248,7 @@ mod tests {
     use core::time::Duration;
     use futures::{SinkExt, StreamExt};
     use instance::InstanceNetworkInterfaceAttachment;
+    use instance::InstanceShutdownPolicy;
     use nexus_db_model::{
         Instance as DbInstance, InstanceState as DbInstanceState,
         VmmCpuPlatform, VmmState as DbVmmState,
@@ -3344,6 +3381,7 @@ mod tests {
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
             enable_jumbo_frames: false,
+            shutdown_policy: InstanceShutdownPolicy::default(),
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
@@ -3485,7 +3523,7 @@ mod tests {
             &logctx.log,
             &instance,
             &None,
-            &InstanceStateChangeRequest::Stop,
+            &InstanceStateChangeRequest::Stop { skip_os_shutdown: true },
         )
         .expect("stopping a SledEvacuating instance should be allowed");
         let InstanceStateChangeRequestAction::UpdateRuntime(rt) = action else {
@@ -3507,7 +3545,7 @@ mod tests {
         let (mut instance, _vmm) = make_instance_and_vmm();
         instance.nexus_state = DbInstanceState::SledEvacuating;
         for requested in [
-            InstanceStateChangeRequest::Reboot,
+            InstanceStateChangeRequest::Reboot { skip_os_shutdown: true },
             InstanceStateChangeRequest::Run,
         ] {
             let action = Nexus::select_runtime_change_action(
@@ -3564,7 +3602,7 @@ mod tests {
             &logctx.log,
             &instance,
             &Some(vmm),
-            &InstanceStateChangeRequest::Stop,
+            &InstanceStateChangeRequest::Stop { skip_os_shutdown: true },
         )
         .expect("stopping a rebooting instance with a VMM should be allowed");
         match action {
@@ -3589,7 +3627,7 @@ mod tests {
             &logctx.log,
             &instance,
             &None,
-            &InstanceStateChangeRequest::Stop,
+            &InstanceStateChangeRequest::Stop { skip_os_shutdown: true },
         )
         .expect("stopping a Failed instance should be allowed");
         let InstanceStateChangeRequestAction::UpdateRuntime(rt) = action else {
@@ -3614,7 +3652,7 @@ mod tests {
             &logctx.log,
             &instance,
             &None,
-            &InstanceStateChangeRequest::Stop,
+            &InstanceStateChangeRequest::Stop { skip_os_shutdown: true },
         )
         .expect("stopping a stopped instance should succeed");
         assert!(
@@ -3633,7 +3671,7 @@ mod tests {
         instance.nexus_state = DbInstanceState::NoVmm;
         for requested in [
             InstanceStateChangeRequest::Run,
-            InstanceStateChangeRequest::Reboot,
+            InstanceStateChangeRequest::Reboot { skip_os_shutdown: true },
             InstanceStateChangeRequest::Migrate(
                 InstanceMigrationTargetParams {
                     src_propolis_addr: "[::1]:12400".parse().unwrap(),
@@ -3668,7 +3706,7 @@ mod tests {
             &logctx.log,
             &instance,
             &None,
-            &InstanceStateChangeRequest::Stop,
+            &InstanceStateChangeRequest::Stop { skip_os_shutdown: true },
         )
         .expect_err("changing state of a Creating instance should fail");
         assert!(
@@ -3703,6 +3741,7 @@ mod tests {
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
             enable_jumbo_frames,
+            shutdown_policy: InstanceShutdownPolicy::default(),
         };
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
         let project_id = ProjectUuid::new_v4();

@@ -20,6 +20,8 @@ use diesel::prelude::*;
 use diesel::sql_types::{Bool, Nullable};
 use nexus_db_schema::schema::{disk, external_ip, external_subnet, instance};
 use nexus_types::external_api::instance as instance_types;
+use omicron_common::api::external;
+use omicron_common::api::external::Error;
 use omicron_generation_kinds::{
     InstanceStateGeneration, InstanceStateGenerationKind,
     InstanceUpdaterGeneration, InstanceUpdaterGenerationKind,
@@ -29,6 +31,7 @@ use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
 use serde::Serialize;
+use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
 
 /// An Instance (VM).
@@ -151,6 +154,18 @@ pub struct Instance {
     /// the OPTE port is created with the default MTU regardless of this field.
     /// Changes to this field only take effect on the next instance restart.
     pub enable_jumbo_frames: bool,
+
+    // The `shutdown_policy_*` fields are private to avoid leaking the db
+    // representation of a stronger type; callers should use `shutdown_policy()`
+    // to get the reconstructed value from these db columns.
+    /// When `shutdown_policy_action` is `PowerButton`, this represents the time
+    /// propolis will wait for the guest to power itself down after sending it
+    /// the power button event, before forcefully terminating it.
+    /// Must be None if the action is `HardOff`.
+    shutdown_policy_timeout: Option<TimeDelta>,
+
+    /// The means by which to stop the instance.
+    shutdown_policy_action: InstanceShutdownAction,
 }
 
 impl Instance {
@@ -178,6 +193,9 @@ impl Instance {
             IntendedState::Stopped
         };
 
+        let (shutdown_policy_action, shutdown_policy_timeout) =
+            shutdown_policy_to_db_columns(params.shutdown_policy);
+
         Self {
             identity,
             project_id: project_id.into(),
@@ -201,6 +219,8 @@ impl Instance {
             intended_state,
             cpu_platform: params.cpu_platform.map(Into::into),
             enable_jumbo_frames: params.enable_jumbo_frames,
+            shutdown_policy_action,
+            shutdown_policy_timeout,
         }
     }
 
@@ -281,6 +301,25 @@ impl Instance {
             can_reincarnate: self.auto_restart.can_reincarnate(&runtime),
         }
     }
+
+    /// Reconstruct the [`instance_types::InstanceShutdownPolicy`] of this
+    /// instance from its database representation.
+    ///
+    /// # Errors
+    ///
+    /// Fails only if reconstruction fails, which should be impossible as long
+    /// as this conversion stays consistent with the constraints on the table in
+    /// CRDB.
+    pub fn shutdown_policy(
+        &self,
+    ) -> Result<instance_types::InstanceShutdownPolicy, Error> {
+        InstanceShutdownPolicyColumns {
+            id: self.identity.id,
+            shutdown_policy_timeout: self.shutdown_policy_timeout,
+            shutdown_policy_action: self.shutdown_policy_action,
+        }
+        .shutdown_policy()
+    }
 }
 
 impl DatastoreAttachTargetConfig<Disk> for Instance {
@@ -316,6 +355,73 @@ impl DatastoreAttachTargetConfig<ExternalSubnet> for Instance {
     type ResourceIdColumn = external_subnet::dsl::id;
     type ResourceCollectionIdColumn = external_subnet::dsl::instance_id;
     type ResourceTimeDeletedColumn = external_subnet::dsl::time_deleted;
+}
+
+/// Just the columns needed to decode an instance's shutdown policy.
+///
+/// Used by queries that join against `instance` but only care about the
+/// shutdown policy.
+#[derive(Queryable, Selectable, Clone, Debug)]
+#[diesel(table_name = instance)]
+pub struct InstanceShutdownPolicyColumns {
+    id: Uuid,
+    shutdown_policy_timeout: Option<TimeDelta>,
+    shutdown_policy_action: InstanceShutdownAction,
+}
+
+impl InstanceShutdownPolicyColumns {
+    /// Reconstruct the [`instance_types::InstanceShutdownPolicy`] of this
+    /// instance from its database representation.
+    ///
+    /// # Errors
+    ///
+    /// Fails only if reconstruction fails, which should be impossible as long
+    /// as this conversion stays consistent with the constraints on the table in
+    /// CRDB.
+    pub fn shutdown_policy(
+        &self,
+    ) -> Result<instance_types::InstanceShutdownPolicy, Error> {
+        use instance_types::AcpiTimeoutSecs;
+        use instance_types::InstanceShutdownPolicy;
+        match self.shutdown_policy_action {
+            InstanceShutdownAction::HardOff => {
+                Ok(InstanceShutdownPolicy::HardOff)
+            }
+            InstanceShutdownAction::PowerButton => {
+                // DB constraints require `shutdown_policy_timeout` to be
+                // present and in a valid range if the action is `PowerButton`.
+                let timeout =
+                    self.shutdown_policy_timeout.ok_or_else(|| {
+                        Error::internal_error(format!(
+                            "db constraint violated: shutdown_policy_timeout \
+                             is NULL when action is PowerButton \
+                             (instance {})",
+                            self.id
+                        ))
+                    })?;
+                let timeout_secs: u64 =
+                    timeout.num_seconds().try_into().map_err(|_| {
+                        Error::internal_error(format!(
+                            "db constraint violated: shutdown_policy_timeout \
+                             has invalid value {timeout} \
+                             (instance {})",
+                            self.id
+                        ))
+                    })?;
+                let timeout_secs = AcpiTimeoutSecs::try_from(timeout_secs)
+                    .map_err(|err| {
+                        Error::internal_error(format!(
+                            "db constraint violated or out of sync with API: \
+                             db timeout of {timeout_secs} is invalid: {} \
+                             (instance {})",
+                            InlineErrorChain::new(&*err),
+                            self.id,
+                        ))
+                    })?;
+                Ok(InstanceShutdownPolicy::PowerButton { timeout_secs })
+            }
+        }
+    }
 }
 
 /// Runtime state of the Instance, including the actual running state and minimal
@@ -605,6 +711,37 @@ impl InstanceAutoRestart {
         .and(dsl::updater_id.is_null())
     }
 }
+
+crate::impl_enum_type!(
+    InstanceShutdownActionEnum:
+
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        AsExpression,
+        FromSqlRow,
+        PartialEq,
+        Eq,
+        Hash,
+        PartialOrd,
+        Ord,
+        Serialize,
+        Deserialize,
+    )]
+    pub enum InstanceShutdownAction;
+
+    HardOff => b"hard_off"
+    PowerButton => b"power_button"
+);
+
+#[allow(clippy::derivable_impls)] // impl_enum_type doesn't afford #[default]
+impl Default for InstanceShutdownAction {
+    fn default() -> Self {
+        Self::HardOff
+    }
+}
+
 /// The parts of an Instance that can be directly updated after creation.
 #[derive(Clone, Debug, AsChangeset, Serialize, Deserialize)]
 #[diesel(table_name = instance, treat_none_as_null = true)]
@@ -624,4 +761,122 @@ pub struct InstanceUpdate {
     pub cpu_platform: Option<InstanceCpuPlatform>,
 
     pub enable_jumbo_frames: bool,
+
+    /// If this is `None`, the instance's shutdown policy will be unchanged by
+    /// this update request.
+    ///
+    /// Unlike `Instance` above, these fields are `pub` because we need direct
+    /// access to them in the datastore crate. Consumers outside that crate
+    /// should *not* access these; construction should go through the stronger
+    /// types available via [`InstanceUpdate::new()`].
+    #[diesel(treat_none_as_null = false)]
+    pub shutdown_policy_action: Option<InstanceShutdownAction>,
+    pub shutdown_policy_timeout: Option<TimeDelta>,
+}
+
+impl InstanceUpdate {
+    pub fn new(
+        boot_disk_id: Option<Uuid>,
+        auto_restart_policy: Option<instance_types::InstanceAutoRestartPolicy>,
+        ncpus: instance_types::InstanceCpuCount,
+        memory: external::ByteCount,
+        cpu_platform: Option<instance_types::InstanceCpuPlatform>,
+        enable_jumbo_frames: bool,
+        shutdown_policy: Option<instance_types::InstanceShutdownPolicy>,
+    ) -> Self {
+        let (shutdown_policy_action, shutdown_policy_timeout) =
+            if let Some(shutdown_policy) = shutdown_policy {
+                let (action, timeout) =
+                    shutdown_policy_to_db_columns(shutdown_policy);
+                (Some(action), timeout)
+            } else {
+                (None, None)
+            };
+        Self {
+            boot_disk_id,
+            auto_restart_policy: auto_restart_policy.map(From::from),
+            ncpus: ncpus.into(),
+            memory: memory.into(),
+            cpu_platform: cpu_platform.map(From::from),
+            enable_jumbo_frames,
+            shutdown_policy_action,
+            shutdown_policy_timeout,
+        }
+    }
+}
+
+// convert the API `InstanceShutdownPolicy` into its raw db column
+// representation
+fn shutdown_policy_to_db_columns(
+    shutdown_policy: instance_types::InstanceShutdownPolicy,
+) -> (InstanceShutdownAction, Option<TimeDelta>) {
+    use instance_types::InstanceShutdownPolicy;
+    match shutdown_policy {
+        InstanceShutdownPolicy::HardOff => {
+            (InstanceShutdownAction::HardOff, None)
+        }
+        InstanceShutdownPolicy::PowerButton { timeout_secs } => (
+            InstanceShutdownAction::PowerButton,
+            Some(TimeDelta::seconds(i64::from(timeout_secs))),
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_instance_shutdown_policy() {
+        let mut params = instance_types::InstanceCreate {
+            identity: external::IdentityMetadataCreateParams {
+                name: external::Name::try_from("acpi".to_owned()).unwrap(),
+                description: "instance under acpi shutdown policy test"
+                    .to_owned(),
+            },
+            ncpus: instance_types::InstanceCpuCount(1),
+            memory: external::ByteCount::from_gibibytes_u32(1),
+            hostname: external::Hostname::try_from("jumbo").unwrap(),
+            user_data: vec![],
+            network_interfaces:
+                instance_types::InstanceNetworkInterfaceAttachment::None,
+            external_ips: vec![],
+            disks: vec![],
+            boot_disk: None,
+            cpu_platform: None,
+            ssh_public_keys: None,
+            start: false,
+            auto_restart_policy: Default::default(),
+            anti_affinity_groups: Vec::new(),
+            multicast_groups: Vec::new(),
+            enable_jumbo_frames: false,
+            // explicitly set hard-off
+            shutdown_policy: instance_types::InstanceShutdownPolicy::HardOff,
+        };
+        let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
+        let project_id = ProjectUuid::from_untyped_uuid(Uuid::new_v4());
+
+        // confirm expected columns for hard-off
+        let db_instance = Instance::new(instance_id, project_id, &params);
+        assert_eq!(
+            db_instance.shutdown_policy_action,
+            InstanceShutdownAction::HardOff
+        );
+        assert_eq!(db_instance.shutdown_policy_timeout, None);
+
+        // set power button with timeout
+        params.shutdown_policy =
+            instance_types::InstanceShutdownPolicy::PowerButton {
+                timeout_secs: 42.try_into().expect("42 is a valid timeout"),
+            };
+        let db_instance = Instance::new(instance_id, project_id, &params);
+        assert_eq!(
+            db_instance.shutdown_policy_action,
+            InstanceShutdownAction::PowerButton
+        );
+        assert_eq!(
+            db_instance.shutdown_policy_timeout.unwrap().num_seconds(),
+            42
+        );
+    }
 }
