@@ -10018,6 +10018,76 @@ CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_problem_created (
     created_at_generation INT8 NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_revision (
+    -- UUID of the problem.
+    problem_id UUID NOT NULL,
+    -- The revision number of this revision.
+    --
+    -- This is referenced by the `current_revision` field in the
+    -- `problem` table.
+    revision INT8 NOT NULL,
+
+    -- UUID of the current sitrep that this record is part of.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the original sitrep in which this revision of the problem was
+    -- first created.
+    created_sitrep_id UUID NOT NULL,
+
+    -- If this is NULL, the problem is in the "active" state, and if it is
+    -- non-NULL, the problem is in the "resolved" state.
+    time_resolved TIMESTAMPTZ,
+
+    -- The problem's problem code as of this revision.
+    --
+    -- This determines the problem class as well as the problem's
+    -- documentation.
+    code INT8 NOT NULL,
+
+    -- A human-readable summary (one sentence) describing this problem at this
+    -- revision.
+    summary STRING NOT NULL,
+
+    -- A human-readable description (one or more paragraphs) describing the
+    -- problem at this revision.
+    description STRING NOT NULL,
+
+    -- A human-readable description (one or more paragraphs) of any operator
+    -- actions required to address this problem.
+    action_required STRING NOT NULL,
+
+    -- A human-readable comment explaining why the diagnosis engine requested
+    -- this revision to the problem. This is *not* part of the externally
+    -- visible problem revision, and is only used for debugging the sitrep
+    -- itself.
+    comment TEXT NOT NULL,
+
+    CONSTRAINT revision_is_non_zero CHECK (revision > 0),
+    CONSTRAINT problem_code_is_non_negative CHECK (code >= 0),
+
+    PRIMARY KEY (sitrep_id, problem_id, revision)
+);
+
+-- Associations (many-to-many) between cases and problems.
+--
+-- These are tracked for internal use by diagnosis engines, such as to determine
+-- which of their open cases have existing problems.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_case_problem (
+    -- The ID of the case associated with this problem.
+    case_id UUID NOT NULL,
+    -- The ID of the problem associated with this case.
+    problem_id UUID NOT NULL,
+    -- The ID of the current sitrep in which this association exists.
+    sitrep_id UUID NOT NULL,
+    -- The ID of the *first* sitrep in which this association was created.
+    created_sitrep_id UUID NOT NULL,
+
+    -- A human-readable comment explaining why the problem is related to the
+    -- case.
+    comment TEXT NOT NULL,
+
+    PRIMARY KEY (sitrep_id, case_id, problem_id)
+);
+
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
