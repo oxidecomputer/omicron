@@ -288,13 +288,12 @@ enum InstanceStateChangeRequestAction {
     UpdateRuntime(db::model::InstanceRuntimeState),
 
     /// The instance has a VMM record, but the VMM record has not yet been
-    /// ensured on a sled, so attempt to update the VMM state to interact with
+    /// ensured on a sled. So, first attempt to update the VMM state to cancel
     /// an ongoing saga, conditionally on the VMM state not changing to one in
-    /// which it is incarnated on the sled.
-    DoGoofyVmmStateCasLoopDance {
-        vmm_id: PropolisUuid,
-        next_state: VmmRuntimeState,
-    },
+    /// which it is incarnated on the sled. If the update fails because the
+    /// VMM's state has advanced, the required state change action should be
+    /// re-selected based on the new state.
+    CancelIfStillCreating { vmm_id: PropolisUuid, next_state: VmmRuntimeState },
 }
 
 /// What is the higher level operation that is calling
@@ -1267,7 +1266,7 @@ impl super::Nexus {
                         let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
                         let next_state =
                             vmm.runtime().transition(VmmState::Cancelling);
-                        Ok(InstanceStateChangeRequestAction::DoGoofyVmmStateCasLoopDance {
+                        Ok(InstanceStateChangeRequestAction::CancelIfStillCreating {
                             vmm_id,
                             next_state,
                         })
@@ -1621,9 +1620,12 @@ impl super::Nexus {
             )? {
                 InstanceStateChangeRequestAction::AlreadyDone => return Ok(()),
 
-                InstanceStateChangeRequestAction::UpdateRuntime(new_runtime) => {
-                    let instance_id =
-                        InstanceUuid::from_untyped_uuid(prev_instance_state.id());
+                InstanceStateChangeRequestAction::UpdateRuntime(
+                    new_runtime,
+                ) => {
+                    let instance_id = InstanceUuid::from_untyped_uuid(
+                        prev_instance_state.id(),
+                    );
                     let changed = self
                         .datastore()
                         .instance_update_runtime(&instance_id, &new_runtime)
@@ -1639,7 +1641,7 @@ impl super::Nexus {
                         )))
                     } else {
                         Ok(())
-                    }
+                    };
                 }
 
                 InstanceStateChangeRequestAction::SendToSled {
@@ -1653,7 +1655,9 @@ impl super::Nexus {
                             &VmmPutStateBody { state: requested.into() },
                         )
                         .await
-                        .map(|res| res.into_inner().updated_runtime.map(Into::into))
+                        .map(|res| {
+                            res.into_inner().updated_runtime.map(Into::into)
+                        })
                         .map_err(|e| SledAgentInstanceError(e));
 
                     // If the operation succeeded, write the instance state back,
@@ -1678,7 +1682,7 @@ impl super::Nexus {
                             .map(|_| ()),
                         Ok(None) => Ok(()),
                         Err(e) => Err(InstanceStateChangeError::SledAgent(e)),
-                    }
+                    };
                 }
 
                 // The instance has an active VMM *record* in the database, but
@@ -1695,7 +1699,7 @@ impl super::Nexus {
                 // the instance and VMM records and try again: the instance may
                 // now exist on the sled and we can therefore attempt the state
                 // change by communicating with the sled-agent.
-                InstanceStateChangeRequestAction::DoGoofyVmmStateCasLoopDance {
+                InstanceStateChangeRequestAction::CancelIfStillCreating {
                     vmm_id,
                     next_state,
                 } => {
@@ -1712,11 +1716,13 @@ impl super::Nexus {
                     } else {
                         // if at first you don't succeed,
                         // `select_runtime_change_action` and try again!
-                        let current = self.datastore().instance_fetch_with_vmm(&opctx, &authz_instance).await
+                        let current = self
+                            .datastore()
+                            .instance_fetch_with_vmm(&opctx, &authz_instance)
+                            .await
                             .map_err(InstanceStateChangeError::Other)?;
                         *prev_instance_state = current.instance;
                         *prev_vmm_state = current.vmm;
-
                     }
                 }
             }
