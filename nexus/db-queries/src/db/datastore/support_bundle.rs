@@ -1011,7 +1011,8 @@ mod test {
     use omicron_common::api::external::LookupType;
     use omicron_common::api::internal::shared::DatasetKind::Debug as DebugDatasetKind;
     use omicron_generation_kinds::{
-        SitrepAlertGeneration, SledConfigGeneration, SledRegistrationGeneration,
+        SitrepAlertGeneration, SitrepProblemGeneration, SledConfigGeneration,
+        SledRegistrationGeneration,
     };
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
@@ -2348,9 +2349,11 @@ mod test {
                 next_inv_min_time_started: chrono::Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation,
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         }
     }
 

@@ -19,10 +19,6 @@ pub use oxide_generation::{
 
 use oxide_generation_macros::impl_typed_generation_kinds;
 
-// Renaming export, since this is a bit shorter and we often refer to these as
-// "revision numbers" rather than "revision generation numbers".
-pub type ProblemRevNum = ProblemRevGeneration;
-
 // NOTE:
 //
 // This should generally be an append-only list. Removing items from this list
@@ -43,15 +39,18 @@ impl_typed_generation_kinds! {
         },
     },
     kinds = {
-
         ArtifactConfig = {},
         InstanceState = {},
         InstanceUpdater = {},
         Nexus = {},
-        ProblemRev = {},
+        ProblemRev = {
+            type_name = ProblemRevKind,
+            alias = ProblemRevNum,
+        },
         SagaAdopt = {},
         SagaReassignment = {},
         SitrepAlert = {},
+        SitrepProblem = {},
         SitrepSupportBundle = {},
         SledConfig = {},
         SledRegistration = {},

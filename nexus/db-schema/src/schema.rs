@@ -3345,6 +3345,7 @@ table! {
         next_inv_min_time_started -> Timestamptz,
         alert_generation -> Int8,
         support_bundle_generation -> Int8,
+        problem_generation -> Int8,
     }
 }
 
@@ -3538,6 +3539,14 @@ table! {
     }
 }
 
+table! {
+    fm_problem (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        requested_sitrep_id -> Uuid,
+    }
+}
+
 // Child data selection tables owned by `fm_support_bundle_request`. Each table
 // corresponds to a `BundleData` variant. Row existence means "include this
 // category in the referenced bundle."
@@ -3599,6 +3608,13 @@ allow_tables_to_appear_in_same_query!(alert, rendezvous_alert_created);
 table! {
     rendezvous_support_bundle_created (support_bundle_id) {
         support_bundle_id -> Uuid,
+        created_at_generation -> Int8,
+    }
+}
+
+table! {
+    rendezvous_problem_created (problem_id) {
+        problem_id -> Uuid,
         created_at_generation -> Int8,
     }
 }
