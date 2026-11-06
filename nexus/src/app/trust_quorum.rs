@@ -109,13 +109,11 @@ impl super::Nexus {
             .tq_load_latest_possible_committed_config(opctx, authz_tq.clone())
             .await?;
         let new_epoch = latest_epoch.next();
-        let proposed = self
-            .remove_sled_proposed_config(
-                latest_committed_config,
-                new_epoch,
-                sled_to_remove,
-            )
-            .await?;
+        let proposed = ProposedTrustQuorumConfig::remove_sled(
+            &latest_committed_config,
+            new_epoch,
+            &sled_to_remove,
+        )?;
         self.db_datastore.tq_insert_latest_config(opctx, proposed).await?;
 
         // Read back the real configuration from the database. Importantly this
@@ -369,36 +367,6 @@ impl super::Nexus {
             reqwest_client,
             log,
         ))
-    }
-
-    // Create a new `ProposedTrustQuorumConfig` with `sled_to_remove` removed
-    // from the membership. Return an error if the sled is not a member of the
-    // `latest_committed_config`.
-    async fn remove_sled_proposed_config(
-        &self,
-        latest_committed_config: TrustQuorumConfig,
-        new_epoch: Epoch,
-        sled_to_remove: BaseboardId,
-    ) -> Result<ProposedTrustQuorumConfig, Error> {
-        let rack_id = latest_committed_config.rack_id;
-        let mut members: BTreeSet<_> =
-            latest_committed_config.members.keys().cloned().collect();
-
-        if !members.remove(&sled_to_remove) {
-            return Err(Error::invalid_request(format!(
-                "Sled {} is not a member of the trust quorum.",
-                sled_to_remove
-            )));
-        }
-
-        Ok(ProposedTrustQuorumConfig {
-            rack_id,
-            epoch: new_epoch,
-            is_lrtq_upgrade: IsLrtqUpgrade::No {
-                last_committed_epoch: latest_committed_config.epoch,
-            },
-            members,
-        })
     }
 
     // Create a new `ProposedTrustQuorumConfig` including `new_sleds` in
