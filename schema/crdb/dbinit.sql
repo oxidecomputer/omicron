@@ -3758,30 +3758,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port (
 
 CREATE INDEX IF NOT EXISTS lookup_switch_port_by_port_settings ON omicron.public.switch_port (port_settings_id);
 
-/* port settings groups included from port settings objects */
-CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_groups (
-    port_settings_id UUID,
-    port_settings_group_id UUID,
-
-    PRIMARY KEY (port_settings_id, port_settings_group_id)
-);
-
-CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_group (
-    id UUID PRIMARY KEY,
-    /* port settings in this group */
-    port_settings_id UUID NOT NULL,
-    name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-    time_deleted TIMESTAMPTZ
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_switch_port_settings_group_by_name ON omicron.public.switch_port_settings_group (
-    name
-) WHERE
-    time_deleted IS NULL;
-
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -9882,7 +9858,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '312.0.0', NULL)
+    (TRUE, NOW(), NOW(), '313.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

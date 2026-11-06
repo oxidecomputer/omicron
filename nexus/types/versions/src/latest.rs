@@ -336,10 +336,11 @@ pub mod networking {
 
     pub use crate::v2026_08_14_01::networking::BgpPeer;
     pub use crate::v2026_08_14_01::networking::BgpPeerConfig;
-    pub use crate::v2026_08_14_01::networking::SwitchPortSettings;
-    pub use crate::v2026_08_14_01::networking::SwitchPortSettingsCreate;
 
     pub use crate::v2026_06_10_00::networking::BgpConfigUpdate;
+
+    pub use crate::v2026_11_05_00::networking::SwitchPortSettings;
+    pub use crate::v2026_11_05_00::networking::SwitchPortSettingsCreate;
 }
 
 pub mod oxql {
