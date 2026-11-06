@@ -43,6 +43,7 @@ use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
 use nexus_db_schema::schema::fm_fact_certificate::dsl as fact_cert_dsl;
 use nexus_db_schema::schema::fm_fact_physical_disk::dsl as fact_pd_dsl;
 use nexus_db_schema::schema::fm_fact_saga::dsl as fact_saga_dsl;
+use nexus_db_schema::schema::fm_fact_smf_service::dsl as fact_smf_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
 use nexus_db_schema::schema::fm_sitrep_analysis_report::dsl as analysis_report_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
@@ -139,6 +140,7 @@ sitrep_child_tables! {
     FmFactPhysicalDisk => { table: "fm_fact_physical_disk" },
     FmFactSaga => { table: "fm_fact_saga" },
     FmFactCertificate => { table: "fm_fact_certificate" },
+    FmFactSmfService => { table: "fm_fact_smf_service" },
     AnalysisReport => { table: "fm_sitrep_analysis_report" },
 }
 
@@ -669,6 +671,31 @@ impl DataStore {
             }
         }
 
+        // --- SMF service diagnosis engine facts ---
+        let mut paginator: Paginator<DbTypedUuid<FactKind>> =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated(
+                fact_smf_dsl::fm_fact_smf_service,
+                fact_smf_dsl::id,
+                &p.current_pagparams(),
+            )
+            .filter(fact_smf_dsl::sitrep_id.eq(id.into_untyped_uuid()))
+            .select(model::fm::FmFactSmfService::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to load SMF service case facts")
+            })?;
+
+            paginator = p.found_batch(&batch, &|f| f.id);
+            for row in batch {
+                let case_id: CaseUuid = row.case_id.into();
+                insert_fact_for_case(&mut by_case, case_id, row.into_fact())?;
+            }
+        }
+
         Ok(by_case)
     }
 
@@ -930,6 +957,7 @@ impl DataStore {
         let mut physical_disk_facts = Vec::new();
         let mut saga_facts = Vec::new();
         let mut certificate_facts = Vec::new();
+        let mut smf_service_facts = Vec::new();
         for case in sitrep.cases {
             let case_id = case.id;
             cases.push(model::fm::CaseMetadata::from_sitrep(sitrep_id, &case));
@@ -981,6 +1009,16 @@ impl DataStore {
                                 case_id,
                                 &fact.metadata,
                                 cert_fact,
+                            ),
+                        );
+                    }
+                    fm::FactPayload::SmfService(smf_fact) => {
+                        smf_service_facts.push(
+                            model::fm::FmFactSmfService::from_sitrep(
+                                sitrep_id,
+                                case_id,
+                                &fact.metadata,
+                                smf_fact,
                             ),
                         );
                     }
@@ -1077,6 +1115,19 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                         .internal_context(
                             "failed to insert certificate case facts",
+                        )
+                })?;
+        }
+
+        if !smf_service_facts.is_empty() {
+            diesel::insert_into(fact_smf_dsl::fm_fact_smf_service)
+                .values(smf_service_facts)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to insert SMF service case facts",
                         )
                 })?;
         }
@@ -3137,6 +3188,49 @@ mod tests {
             "best certificate has expired",
         );
 
+        // An SMF service case, exercising the fm_fact_smf_service
+        // read/write/GC paths.
+        let case7 = {
+            let mut facts = iddqd::IdOrdMap::new();
+            facts
+                .insert_unique(fm::case::Fact {
+                    metadata: fm::case::FactMetadata {
+                        id: FactUuid::new_v4(),
+                        created_sitrep_id: sitrep_id,
+                        comment: "a representative in-maintenance fact"
+                            .to_string(),
+                    },
+                    payload: fm::FactPayload::SmfService(
+                        fm::SmfServiceFact::InMaintenance(
+                            fm::SmfServiceFactPayload {
+                                sled_id: omicron_uuid_kinds::SledUuid::new_v4(),
+                                zone_name: "oxz_ntp".to_string(),
+                                fmri: "svc:/oxide/ntp:default".to_string(),
+                                observed_in_inv:
+                                    omicron_uuid_kinds::CollectionUuid::new_v4(
+                                    ),
+                                time_observed: omicron_common::now_db_precision(
+                                ),
+                            },
+                        ),
+                    ),
+                })
+                .unwrap();
+            fm::Case {
+                id: omicron_uuid_kinds::CaseUuid::new_v4(),
+                metadata: fm::case::Metadata {
+                    created_sitrep_id: sitrep_id,
+                    closed_sitrep_id: None,
+                    de: fm::DiagnosisEngineKind::SmfService,
+                    comment: "an SMF service in maintenance".to_string(),
+                },
+                ereports: iddqd::IdOrdMap::new(),
+                alerts_requested: iddqd::IdOrdMap::new(),
+                support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts,
+            }
+        };
+
         let mut cases = iddqd::IdOrdMap::new();
         cases.insert_unique(case1.clone()).expect("failed to insert case 1");
         cases.insert_unique(case2.clone()).expect("failed to insert case 2");
@@ -3144,6 +3238,7 @@ mod tests {
         cases.insert_unique(case4).expect("failed to insert case 4");
         cases.insert_unique(case5).expect("failed to insert case 5");
         cases.insert_unique(case6).expect("failed to insert case 6");
+        cases.insert_unique(case7).expect("failed to insert case 7");
         let mut ereports_by_id = iddqd::IdOrdMap::new();
         for case in cases.iter() {
             ereports_by_id
@@ -3193,6 +3288,7 @@ mod tests {
             open_cases: Default::default(),
             closed_cases_copied_forward: Default::default(),
             in_service_disks: Default::default(),
+            in_service_sleds: Default::default(),
             observed_sagas: Default::default(),
             observed_silo_certificates: Default::default(),
             config: None,
@@ -3453,7 +3549,7 @@ mod tests {
             .get_result_async::<i64>(&*conn)
             .await
             .expect("failed to count cases before deletion");
-        assert_eq!(cases_before, 6, "six cases should exist before deletion");
+        assert_eq!(cases_before, 7, "seven cases should exist before deletion");
 
         let case_ereports_before: i64 = case_ereport_dsl::fm_ereport_in_case
             .filter(
@@ -3836,6 +3932,7 @@ mod tests {
                 num_ereporter_restarts: 0,
                 unknown_restart_ereport_ids: Default::default(),
                 in_service_disks: Default::default(),
+                in_service_sleds: Default::default(),
                 observed_sagas: Default::default(),
                 observed_silo_certificates: Default::default(),
                 config: None,

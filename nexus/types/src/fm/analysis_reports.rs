@@ -15,7 +15,7 @@ use iddqd::IdOrdMap;
 use omicron_uuid_kinds::SiloUuid;
 use omicron_uuid_kinds::{
     AlertUuid, CaseUuid, CollectionUuid, PhysicalDiskUuid, SitrepUuid,
-    SupportBundleUuid,
+    SledUuid, SupportBundleUuid,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -537,6 +537,10 @@ pub struct InputReport {
     /// engines for this analysis pass.
     #[serde(default)]
     pub in_service_disks: BTreeSet<PhysicalDiskUuid>,
+    /// All in-service sleds visible to the diagnosis engines for this
+    /// analysis pass.
+    #[serde(default)]
+    pub in_service_sleds: BTreeSet<SledUuid>,
     /// All non-terminal sagas visible to the diagnosis engines for this
     /// analysis pass.
     #[serde(default)]
@@ -667,6 +671,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     num_ereporter_restarts,
                     unknown_restart_ereport_ids,
                     in_service_disks,
+                    in_service_sleds,
                     observed_sagas,
                     observed_silo_certificates,
                     config,
@@ -985,6 +990,27 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
             }
         }
 
+        if in_service_sleds.is_empty() {
+            writeln!(
+                f,
+                "\n{:indent$}{}",
+                "",
+                styles.heading().style("no in-service sleds"),
+            )?;
+        } else {
+            writeln!(
+                f,
+                "\n{:indent$}{} ({} total):",
+                "",
+                heading.style("in-service sleds"),
+                in_service_sleds.len()
+            )?;
+            let indent = indent + 2;
+            for sled_id in in_service_sleds {
+                writeln!(f, "{:indent$}* sled {sled_id}", "")?;
+            }
+        }
+
         if observed_sagas.is_empty() {
             writeln!(f, "\n{:indent$}no non-terminal sagas observed", "")?;
         } else {
@@ -1186,6 +1212,11 @@ mod tests {
                 .unwrap(),
         );
 
+        let in_service_sleds = BTreeSet::from([SledUuid::from_str(
+            "33333333-3333-3333-3333-333333333333",
+        )
+        .unwrap()]);
+
         let observed_sagas = example_observed_sagas();
         let observed_silo_certificates = example_observed_silo_certificates();
 
@@ -1206,6 +1237,7 @@ mod tests {
             open_cases,
             closed_cases_copied_forward,
             in_service_disks,
+            in_service_sleds,
             observed_sagas,
             observed_silo_certificates,
             config: Some(ConfigReport {
@@ -1283,6 +1315,7 @@ mod tests {
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
             in_service_disks: BTreeSet::new(),
+            in_service_sleds: BTreeSet::new(),
             observed_sagas: BTreeMap::new(),
             observed_silo_certificates: BTreeMap::new(),
             config: None,
@@ -1308,6 +1341,7 @@ mod tests {
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
             in_service_disks: BTreeSet::new(),
+            in_service_sleds: BTreeSet::new(),
             observed_sagas: BTreeMap::new(),
             observed_silo_certificates: BTreeMap::new(),
             config: Some(ConfigReport {

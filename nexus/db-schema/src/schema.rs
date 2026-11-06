@@ -3493,6 +3493,22 @@ table! {
 }
 
 table! {
+    fm_fact_smf_service (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        case_id -> Uuid,
+        created_sitrep_id -> Uuid,
+        comment -> Text,
+        sled_id -> Uuid,
+        zone_name -> Text,
+        fmri -> Text,
+        kind -> crate::enums::FmFactSmfServiceKindEnum,
+        observed_in_inv -> Uuid,
+        time_observed -> Timestamptz,
+    }
+}
+
+table! {
     fm_ereport_in_case (sitrep_id, id) {
         id -> Uuid,
         restart_id -> Uuid,
@@ -3513,6 +3529,8 @@ allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_saga);
 allow_tables_to_appear_in_same_query!(fm_case, fm_fact_saga);
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_certificate);
 allow_tables_to_appear_in_same_query!(fm_case, fm_fact_certificate);
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_smf_service);
+allow_tables_to_appear_in_same_query!(fm_case, fm_fact_smf_service);
 
 table! {
     fm_alert_request (sitrep_id, id) {

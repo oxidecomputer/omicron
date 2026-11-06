@@ -21,7 +21,8 @@ pub mod fact;
 pub use fact::{
     CertificateExpiryFactPayload, CertificateFact, DiskFact, FactPayload,
     SagaAbandonedFactPayload, SagaFact, SagaNotProgressingFactPayload,
-    SagaOwnerNotCurrentFactPayload, ZpoolUnhealthyFactPayload,
+    SagaOwnerNotCurrentFactPayload, SmfServiceFact, SmfServiceFactPayload,
+    ZpoolUnhealthyFactPayload,
 };
 pub mod display;
 
@@ -279,4 +280,5 @@ pub enum DiagnosisEngineKind {
     PhysicalDisk,
     Saga,
     Certificate,
+    SmfService,
 }
