@@ -1015,7 +1015,9 @@ impl PlanningMgsUpdatesStepReport {
             && update_disposition_changes.is_empty()
     }
 
-    pub fn is_waiting(&self) -> Option<OperatorStatus> {
+    /// Returns what an automated update is waiting for, if this step is
+    /// waiting on anything
+    pub fn is_update_waiting(&self) -> Option<UpdateWait> {
         // A single blueprint can both mark one sled for evacuation and bring
         // another sled back into service.  In that case, report the
         // evacuation, since that's what the planner is actually waiting for.
@@ -1038,13 +1040,11 @@ impl PlanningMgsUpdatesStepReport {
         // blueprint in which we wait for a particular sled.  See the next
         // block.
         if let Some(change) = evacuating {
-            return Some(OperatorStatus::WaitingForUpdate(
-                UpdateWait::SledEvacuation {
-                    sled_id: change.sled_id,
-                    baseboard_id: (*change.baseboard_id).clone(),
-                    progress: SledEvacuationProgress::Starting,
-                },
-            ));
+            return Some(UpdateWait::SledEvacuation {
+                sled_id: change.sled_id,
+                baseboard_id: (*change.baseboard_id).clone(),
+                progress: SledEvacuationProgress::Starting,
+            });
         }
 
         // We can also be waiting for sled evacuation if there's an MGS update
@@ -1065,13 +1065,11 @@ impl PlanningMgsUpdatesStepReport {
                 | FailedMgsUpdateReason::Sp(..) => None,
             });
         if let Some((blocked, sled_id, details)) = blocked_on_evacuation {
-            return Some(OperatorStatus::WaitingForUpdate(
-                UpdateWait::SledEvacuation {
-                    sled_id,
-                    baseboard_id: (*blocked.baseboard_id).clone(),
-                    progress: SledEvacuationProgress::from(details),
-                },
-            ));
+            return Some(UpdateWait::SledEvacuation {
+                sled_id,
+                baseboard_id: (*blocked.baseboard_id).clone(),
+                progress: SledEvacuationProgress::Waiting(details.clone()),
+            });
         }
 
         // If we're looking at a blueprint in which the planner is bringing a
@@ -1082,22 +1080,18 @@ impl PlanningMgsUpdatesStepReport {
         // to be propagated anywhere else.  If we ran it again, it would
         // immediately plan the next step.
         if let Some(change) = available {
-            return Some(OperatorStatus::WaitingForUpdate(
-                UpdateWait::SledAvailable {
-                    sled_id: change.sled_id,
-                    baseboard_id: (*change.baseboard_id).clone(),
-                },
-            ));
+            return Some(UpdateWait::SledAvailable {
+                sled_id: change.sled_id,
+                baseboard_id: (*change.baseboard_id).clone(),
+            });
         }
 
         // Check whether we're waiting for a pending MGS update.
         if let Some(update) = self.pending_mgs_updates.iter().next() {
-            let baseboard_id = (*update.baseboard_id).clone();
-            let component = MgsUpdateComponent::from(&update.details);
-            return Some(OperatorStatus::WaitingForUpdate(UpdateWait::Mgs {
-                baseboard_id,
-                component: component.to_string(),
-            }));
+            return Some(UpdateWait::Mgs {
+                baseboard_id: (*update.baseboard_id).clone(),
+                component: MgsUpdateComponent::from(&update.details),
+            });
         }
 
         None
@@ -1778,7 +1772,9 @@ impl PlanningZoneUpdatesStepReport {
         self.waiting_zones.insert(zone.id, reason);
     }
 
-    pub fn is_waiting(&self) -> Option<OperatorStatus> {
+    /// Returns what an automated update is waiting for, if this step is
+    /// waiting on anything
+    pub fn is_update_waiting(&self) -> Option<UpdateWait> {
         // Check for pending zone updates and expungements.
         let mut changed_zone_kinds = self
             .updated_zones
@@ -1788,9 +1784,7 @@ impl PlanningZoneUpdatesStepReport {
             .chain(self.expunged_zones.values().flatten().map(|z| z.kind))
             .peekable();
         if changed_zone_kinds.peek().is_some() {
-            return Some(OperatorStatus::WaitingForUpdate(
-                UpdateWait::for_zones(changed_zone_kinds),
-            ));
+            return Some(UpdateWait::for_zones(changed_zone_kinds));
         }
 
         if let Some(waiting) = &self.waiting_on {
@@ -1799,9 +1793,7 @@ impl PlanningZoneUpdatesStepReport {
                     // Note that we can see this during an update or when zones
                     // are being added or expunged for other reasons (e.g., when
                     // a sled has been expunged).
-                    return Some(OperatorStatus::WaitingForUpdate(
-                        UpdateWait::for_zones(kinds.iter().copied()),
-                    ));
+                    return Some(UpdateWait::for_zones(kinds.iter().copied()));
                 }
                 ZoneUpdatesWaitingOn::PendingMgsUpdates
                 | ZoneUpdatesWaitingOn::BlockedMgsUpdates
@@ -1813,22 +1805,9 @@ impl PlanningZoneUpdatesStepReport {
         }
 
         if let Some((_zone_id, why)) = self.unsafe_zones.first_key_value() {
-            return Some(OperatorStatus::WaitingForUpdate(
-                UpdateWait::ServiceRecovery {
-                    service: match why {
-                        ZoneUnsafeToShutdown::Cockroachdb { .. } => {
-                            "CockroachDB"
-                        }
-                        ZoneUnsafeToShutdown::BoundaryNtp { .. } => {
-                            "Boundary NTP"
-                        }
-                        ZoneUnsafeToShutdown::InternalDns { .. } => {
-                            "Internal DNS"
-                        }
-                    }
-                    .to_string(),
-                },
-            ));
+            return Some(UpdateWait::ServiceRecovery {
+                service: why.zone_kind(),
+            });
         }
 
         None
@@ -1989,6 +1968,17 @@ pub enum ZoneUnsafeToShutdown {
     Cockroachdb { reason: CockroachdbUnsafeToShutdown },
     BoundaryNtp { total_boundary_ntp_zones: usize, synchronized_count: usize },
     InternalDns { total_internal_dns_zones: usize, synchronized_count: usize },
+}
+
+impl ZoneUnsafeToShutdown {
+    /// Returns the kind of zone that this reason applies to
+    pub fn zone_kind(&self) -> ZoneKind {
+        match self {
+            ZoneUnsafeToShutdown::Cockroachdb { .. } => ZoneKind::CockroachDb,
+            ZoneUnsafeToShutdown::BoundaryNtp { .. } => ZoneKind::BoundaryNtp,
+            ZoneUnsafeToShutdown::InternalDns { .. } => ZoneKind::InternalDns,
+        }
+    }
 }
 
 impl fmt::Display for ZoneUnsafeToShutdown {
@@ -2250,13 +2240,13 @@ impl PlanningReport {
             return OperatorStatus::WaitingForMupdateResolution;
         }
 
-        if let Some(status) = self.mgs_updates.is_waiting() {
-            return status;
+        if let Some(wait) = self.mgs_updates.is_update_waiting() {
+            return OperatorStatus::WaitingForUpdate(wait);
         }
 
         // Check for pending zone updates.
-        if let Some(status) = self.zone_updates.is_waiting() {
-            return status;
+        if let Some(wait) = self.zone_updates.is_update_waiting() {
+            return OperatorStatus::WaitingForUpdate(wait);
         }
 
         // Check if we're in the middle of handoff.  If we don't know the
@@ -2289,29 +2279,6 @@ impl PlanningReport {
             OperatorStatus::AtRest
         } else {
             OperatorStatus::Busy
-        }
-    }
-}
-
-impl From<&WaitingOnSledEvacuationDetails> for SledEvacuationProgress {
-    fn from(details: &WaitingOnSledEvacuationDetails) -> Self {
-        match details {
-            WaitingOnSledEvacuationDetails::InstanceManagerRegisteredVmms {
-                num_registered_vmms,
-            } => SledEvacuationProgress::RegisteredVmms {
-                count: *num_registered_vmms,
-            },
-            WaitingOnSledEvacuationDetails::MissingFromInventory
-            | WaitingOnSledEvacuationDetails::MissingLedgeredSledConfig
-            | WaitingOnSledEvacuationDetails::WaitingForSledConfigGeneration {
-                ..
-            }
-            | WaitingOnSledEvacuationDetails::InstanceManagerNoConfig
-            | WaitingOnSledEvacuationDetails::InstanceManagerAvailable => {
-                SledEvacuationProgress::Other {
-                    message: InlineErrorChain::new(details).to_string(),
-                }
-            }
         }
     }
 }
@@ -2376,43 +2343,35 @@ mod tests {
             })
             .expect("sled ids are unique");
 
-        match report.is_waiting() {
-            Some(OperatorStatus::WaitingForUpdate(
-                UpdateWait::SledEvacuation { sled_id, baseboard_id, progress },
-            )) => {
+        match report.is_update_waiting() {
+            Some(UpdateWait::SledEvacuation {
+                sled_id,
+                baseboard_id,
+                progress,
+            }) => {
                 assert_eq!(sled_id, evacuating_sled_id);
                 assert_eq!(baseboard_id, *evacuating_board);
                 assert!(matches!(progress, SledEvacuationProgress::Starting));
             }
-            Some(other) => panic!("unexpected operator status: {other}"),
+            Some(other) => panic!("unexpected update wait: {other:?}"),
             None => panic!("expected an operator status, found none"),
         }
     }
 
-    // Evacuation details about remaining VMMs become a VMM count, and all
-    // other details become a message.
+    // Evacuation progress describes remaining VMMs as a count, and all other
+    // details with their own message.
     #[test]
-    fn sled_evacuation_progress_from_details() {
-        let details =
+    fn sled_evacuation_progress_display() {
+        let progress = SledEvacuationProgress::Waiting(
             WaitingOnSledEvacuationDetails::InstanceManagerRegisteredVmms {
                 num_registered_vmms: NonZeroUsize::new(3).unwrap(),
-            };
-        let progress = SledEvacuationProgress::from(&details);
-        match &progress {
-            SledEvacuationProgress::RegisteredVmms { count } => {
-                assert_eq!(count.get(), 3);
-            }
-            other => panic!("unexpected progress: {other}"),
-        }
+            },
+        );
         assert_eq!(progress.to_string(), "3 VMMs remaining");
 
-        let details = WaitingOnSledEvacuationDetails::MissingFromInventory;
-        let progress = SledEvacuationProgress::from(&details);
-        match &progress {
-            SledEvacuationProgress::Other { message } => {
-                assert_eq!(message, "sled is missing from inventory");
-            }
-            other => panic!("unexpected progress: {other}"),
-        }
+        let progress = SledEvacuationProgress::Waiting(
+            WaitingOnSledEvacuationDetails::MissingFromInventory,
+        );
+        assert_eq!(progress.to_string(), "sled is missing from inventory");
     }
 }

@@ -9,13 +9,15 @@
 //! [`crate::external_api::update::OperatorStatus`]) plus the message produced
 //! by this module's `Display` impls.
 
+use crate::deployment::MgsUpdateComponent;
+use crate::deployment::planning_report::WaitingOnSledEvacuationDetails;
 use crate::external_api::update as external_api_update;
+use itertools::Itertools;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::inventory::ZoneKind;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
 use std::fmt;
-use std::num::NonZeroUsize;
 
 /// What the system is doing, as summarized for operators
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -47,7 +49,8 @@ impl fmt::Display for OperatorStatus {
                 write!(
                     f,
                     "Waiting for internal services to recover after recent \
-                     changes ({service})",
+                     changes ({})",
+                    service.report_str(),
                 )
             }
             OperatorStatus::WaitingForUpdate(UpdateWait::SledEvacuation {
@@ -86,8 +89,7 @@ impl fmt::Display for OperatorStatus {
                          (details unavailable)"
                     )
                 } else {
-                    let kinds =
-                        kinds.iter().cloned().collect::<Vec<_>>().join(", ");
+                    let kinds = kinds.iter().map(|k| k.report_str()).join(", ");
                     write!(f, "Waiting for a zone update to finish ({kinds})")
                 }
             }
@@ -138,7 +140,10 @@ pub enum UnknownReason {
 pub enum UpdateWait {
     /// The system is waiting for internal services to recover before proceeding
     /// with next steps
-    ServiceRecovery { service: String },
+    ServiceRecovery {
+        /// kind of zone providing the service
+        service: ZoneKind,
+    },
     /// The system is waiting for a sled to be evacuated so it can be updated
     SledEvacuation {
         sled_id: SledUuid,
@@ -148,11 +153,11 @@ pub enum UpdateWait {
     /// The system is waiting for a sled to be put back into service
     SledAvailable { sled_id: SledUuid, baseboard_id: BaseboardId },
     /// The system is waiting for a board update to finish
-    Mgs { baseboard_id: BaseboardId, component: String },
+    Mgs { baseboard_id: BaseboardId, component: MgsUpdateComponent },
     /// The system is waiting for zone updates to finish
     Zones {
         /// Kinds of the zones being updated
-        kinds: BTreeSet<String>,
+        kinds: BTreeSet<ZoneKind>,
     },
     /// The system is waiting for sagas to finish running
     HandoffSagas,
@@ -163,9 +168,7 @@ pub enum UpdateWait {
 impl UpdateWait {
     /// Returns an `UpdateWait::Zones` for zones of the given kinds
     pub fn for_zones(kinds: impl IntoIterator<Item = ZoneKind>) -> Self {
-        UpdateWait::Zones {
-            kinds: kinds.into_iter().map(|k| format!("{k:?}")).collect(),
-        }
+        UpdateWait::Zones { kinds: kinds.into_iter().collect() }
     }
 }
 
@@ -177,11 +180,8 @@ pub enum SledEvacuationProgress {
     /// The planner has not yet checked on the evacuation's progress, so it
     /// doesn't know how many VMMs are on the sled.
     Starting,
-    /// The sled still has this many VMMs registered.
-    RegisteredVmms { count: NonZeroUsize },
-    /// The planner is waiting for something other than VMMs to leave the
-    /// sled (e.g., for inventory to report the sled's latest config).
-    Other { message: String },
+    /// The planner is waiting for the sled's evacuation to finish.
+    Waiting(WaitingOnSledEvacuationDetails),
 }
 
 impl fmt::Display for SledEvacuationProgress {
@@ -190,13 +190,23 @@ impl fmt::Display for SledEvacuationProgress {
             SledEvacuationProgress::Starting => {
                 write!(f, "marking sled for evacuation")
             }
-            SledEvacuationProgress::RegisteredVmms { count } => {
-                let s = if count.get() == 1 { "" } else { "s" };
-                write!(f, "{count} VMM{s} remaining")
+            SledEvacuationProgress::Waiting(
+                WaitingOnSledEvacuationDetails::InstanceManagerRegisteredVmms {
+                    num_registered_vmms,
+                },
+            ) => {
+                let s = if num_registered_vmms.get() == 1 { "" } else { "s" };
+                write!(f, "{num_registered_vmms} VMM{s} remaining")
             }
-            SledEvacuationProgress::Other { message } => {
-                write!(f, "{message}")
-            }
+            SledEvacuationProgress::Waiting(
+                details @ (WaitingOnSledEvacuationDetails::MissingFromInventory
+                | WaitingOnSledEvacuationDetails::MissingLedgeredSledConfig
+                | WaitingOnSledEvacuationDetails::WaitingForSledConfigGeneration {
+                    ..
+                }
+                | WaitingOnSledEvacuationDetails::InstanceManagerNoConfig
+                | WaitingOnSledEvacuationDetails::InstanceManagerAvailable),
+            ) => write!(f, "{details}"),
         }
     }
 }

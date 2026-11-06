@@ -75,12 +75,24 @@ pub struct UpdateStatus {
 // Response-only type: convert from new to old.
 impl From<UpdateStatus> for v2026_05_20_00::update::UpdateStatus {
     fn from(new: UpdateStatus) -> Self {
+        // Destructure the whole struct so that adding a field causes a compile
+        // error here.  The older version has no place for the operator notes
+        // or the planner error, so those are dropped.
+        let UpdateStatus {
+            target_release,
+            components_by_release_version,
+            time_last_step_planned,
+            suspended,
+            contact_support,
+            operator_notes: _,
+            planner_error: _,
+        } = new;
         Self {
-            target_release: new.target_release,
-            components_by_release_version: new.components_by_release_version,
-            time_last_step_planned: new.time_last_step_planned,
-            suspended: new.suspended,
-            contact_support: new.contact_support,
+            target_release,
+            components_by_release_version,
+            time_last_step_planned,
+            suspended,
+            contact_support,
         }
     }
 }
