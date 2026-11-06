@@ -86,12 +86,47 @@ impl VmmState {
     pub const TERMINAL_STATES: &'static [Self] =
         &[Self::Destroyed, Self::Failed];
 
-    /// States in which a VMM record is present in the database but is not
-    /// resident on a sled, either because it does not yet exist, was produced
-    /// by an unwound update saga and will never exist, or has already been
-    /// destroyed.
-    pub const NONEXISTENT_STATES: &'static [Self] =
-        &[Self::Creating, Self::Cancelling, Self::SagaUnwound, Self::Destroyed];
+    /// States in which the VMM record exists in the database, but the VMM
+    /// process may not be resident on a sled.
+    ///
+    /// In these states, the VMM either *definitely* does not exist (either
+    /// because it has been `Destroyed` or was never started because its
+    /// `SagaUnwound`), or it may or may not exist because it is undergoing an
+    /// existence transition (it is `Creating` or `Cancelling`). Regardless of
+    /// whether its nonexistence is certain or dubious, if a VMM is in one of
+    /// these states and a sled-agent indicates it does not know of a VMM with
+    /// this VMM's ID, it should not be marked as having `Failed`, because it is
+    /// not expected to exist on the sled.
+    ///
+    /// This is expected to contain only the states for which
+    /// [`Self::may_not_exist`] returns `true`.
+    pub const POTENTIALLY_NONEXISTENT_STATES: &'static [Self] = &[
+        // A `Creating` VMM may not yet be registered with the sled-agent.
+        // This is the initial state for newly-created VMM records in the
+        // database. VMMs in this state *may* exist, if they have just been
+        // registered and the result of doing so has not yet been written
+        // back to the database, but existence is not guaranteed, so they
+        // should not be health checked.
+        Self::Creating,
+        // The start saga that created this instance has been asked to
+        // cancel itself before the VMM record advanced to `Starting`.
+        // Depending on when the saga was cancelled, the VMM process may or
+        // may not yet have been registered with the sled-agent. Regardless,
+        // it is the responsibility of the unwinding saga to ensure it is
+        // unregistered. It should not be marked as `Failed` if the
+        // sled-agent does not know of it, because it either does not exist
+        // or we are about to make sure it doesn't exist.
+        Self::Cancelling,
+        // The VMM was produced by an instance-start or instance-migrate
+        // saga that has unwound. If it was created, the saga will have
+        // ensured it no longer exists prior to moving the VMM record to
+        // `SagaUnwound`. Or, the saga may have unwound before the VMM was
+        // ever registered with the sled-agent. Either way, it definitely
+        // doesn't exist.
+        Self::SagaUnwound,
+        // The VMM process has exited and its zone has been destroyed.
+        Self::Destroyed,
+    ];
 
     pub fn is_terminal(&self) -> bool {
         self.to_nexus_state().is_terminal()
@@ -103,10 +138,10 @@ impl VmmState {
         self.to_nexus_state().is_destroyable()
     }
 
-    /// Returns `true` if the VMM is in a state in which it exists on a
-    /// sled.
-    pub fn exists_on_sled(&self) -> bool {
-        self.to_nexus_state().exists_on_sled()
+    /// Returns `true` if the VMM is in a state in which it may not exist on a
+    /// sled. See [`Self::POTENTIALLY_NONEXISTENT_STATES`] for details.
+    pub fn may_not_exist(&self) -> bool {
+        self.to_nexus_state().may_not_exist()
     }
 
     /// The states in which a VMM should be marked to be stopped during sled
@@ -475,14 +510,14 @@ mod tests {
     }
 
     #[test]
-    fn test_nonexistent_states_consistent() {
+    fn test_potentially_nonexistent_states_consistent() {
         for &state in VmmState::ALL_STATES {
             assert_eq!(
-                VmmState::NONEXISTENT_STATES.contains(&state),
-                !state.exists_on_sled(),
+                VmmState::POTENTIALLY_NONEXISTENT_STATES.contains(&state),
+                state.may_not_exist(),
                 "inconsistency between nexus_db_model::VmmState::{state:?} \
                 and nexus_types::instance::VmmState::{state:?}: if the \
-                exists_on_sled() method in nexus_types returns false, the \
+                may_not_exist() method in nexus_types returns true, the \
                 state should be in NONEXISTENT_STATES, and vice versa",
             );
         }

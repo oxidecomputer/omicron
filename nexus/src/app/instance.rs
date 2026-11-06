@@ -1245,11 +1245,6 @@ impl super::Nexus {
         // instance's current sled agent. If there is none, the request needs to
         // be handled specially based on its type.
         let (sled_id, propolis_id) = match vmm_state {
-            // The VMM record not only exists, but has actually been ensured on
-            // the sled, so the request must be directed to the sled-agent.
-            Some(vmm) if vmm.state.exists_on_sled() => {
-                (vmm.sled_id(), PropolisUuid::from_untyped_uuid(vmm.id))
-            }
             // GUYS IT'S TIME FOR THE FUNNY ONE: a VMM record exists in the
             // database, but it is in a state in which it may not yet have been
             // registered with the sled-agent, and whether or not it exists on
@@ -1286,12 +1281,12 @@ impl super::Nexus {
                     }
                 };
             }
-            // Every other VMM state for which `exists_on_sled()` is false
+            // Every other VMM state for which the VMM may not exist
             // (Cancelling, SagaUnwound, and Destroyed) should *not* be sent to
             // the sled-agent, because the sled-agent will not know what VMM
             // we're talking about. These states should behave as though the
             // instance is in the `Stopping` state.
-            Some(vmm) => {
+            Some(vmm) if vmm.state.may_not_exist() => {
                 return match requested {
                     InstanceStateChangeRequest::Run => {
                         Err(Error::invalid_request(&format!(
@@ -1343,6 +1338,11 @@ impl super::Nexus {
                         )))
                     }
                 };
+            }
+            // The VMM record is in a state where thee VMM is expected to exist
+            // on the sled, so the request must be directed to the sled-agent.
+            Some(vmm) => {
+                (vmm.sled_id(), PropolisUuid::from_untyped_uuid(vmm.id))
             }
             // The instance hath no active VMM.
             None => match effective_state {

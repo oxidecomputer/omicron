@@ -535,10 +535,12 @@ impl DataStore {
         diesel::update(dsl::vmm)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
-            // if the VMM record is already in a non-existent state, then we
-            // need not munge it now; the entire purpose of this thingy is to
-            // make sure it is considered "nonexistent".
-            .filter(dsl::state.ne_all(DbVmmState::NONEXISTENT_STATES))
+            // if the VMM record is already in a potentially non-existent state,
+            // then we need not munge it now; the entire purpose of this thingy
+            // is to make sure it is considered q
+            .filter(
+                dsl::state.ne_all(DbVmmState::POTENTIALLY_NONEXISTENT_STATES),
+            )
             .set((
                 dsl::state.eq(DbVmmState::Cancelling),
                 // We deliberately do not alter or unset the failure reason here
