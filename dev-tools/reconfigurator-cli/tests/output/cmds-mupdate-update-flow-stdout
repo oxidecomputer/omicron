@@ -2823,7 +2823,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839 based on parent blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
 blueprint source: planner with report:
 planning report:
-status for operators: Waiting for update of RoT bootloader on 913-0000019:serial0
+status for operators: Waiting for update of RoT Bootloader on 913-0000019:serial0
 * 1 pending MGS update:
   * 913-0000019:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * only placed 0/1 desired nexus zones
@@ -3058,7 +3058,7 @@ parent:    12d602a6-5ab4-487a-b94e-eb30cdf30300
 
 blueprint source: planner with report:
 planning report:
-status for operators: Waiting for update of RoT bootloader on 913-0000019:serial0
+status for operators: Waiting for update of RoT Bootloader on 913-0000019:serial0
 * 1 pending MGS update:
   * 913-0000019:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * only placed 0/1 desired nexus zones

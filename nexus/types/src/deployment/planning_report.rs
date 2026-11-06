@@ -15,7 +15,6 @@ use crate::deployment::MgsUpdateComponent;
 use crate::inventory::CabooseVersionError;
 use crate::inventory::CabooseWhich;
 
-use crate::deployment::PendingMgsUpdateDetails;
 use crate::external_api::update::OperatorStatus;
 use crate::external_api::update::SledEvacuationProgress;
 use crate::external_api::update::UpdateWait;
@@ -1093,13 +1092,7 @@ impl PlanningMgsUpdatesStepReport {
         // Check whether we're waiting for a pending MGS update.
         if let Some(update) = self.pending_mgs_updates.iter().next() {
             let baseboard_id = (*update.baseboard_id).clone();
-            let component = match update.details {
-                // XXX-dap
-                PendingMgsUpdateDetails::Sp(..) => "SP",
-                PendingMgsUpdateDetails::Rot(..) => "RoT",
-                PendingMgsUpdateDetails::RotBootloader(..) => "RoT bootloader",
-                PendingMgsUpdateDetails::HostPhase1(..) => "Host OS",
-            };
+            let component = MgsUpdateComponent::from(&update.details);
             return Some(OperatorStatus::WaitingForUpdate(UpdateWait::Mgs {
                 baseboard_id,
                 component: component.to_string(),

@@ -386,7 +386,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 blueprint source: planner with report:
 planning report:
-status for operators: Waiting for update of RoT bootloader on 913-0000019:serial0
+status for operators: Waiting for update of RoT Bootloader on 913-0000019:serial0
 * 1 pending MGS update:
   * 913-0000019:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -613,7 +613,7 @@ parent:    58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
 blueprint source: planner with report:
 planning report:
-status for operators: Waiting for update of RoT bootloader on 913-0000019:serial0
+status for operators: Waiting for update of RoT Bootloader on 913-0000019:serial0
 * 1 pending MGS update:
   * 913-0000019:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)

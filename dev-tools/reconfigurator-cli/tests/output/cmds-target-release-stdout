@@ -1647,7 +1647,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
 blueprint source: planner with report:
 planning report:
-status for operators: Waiting for update of RoT bootloader on 913-0000019:serial0
+status for operators: Waiting for update of RoT Bootloader on 913-0000019:serial0
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -1713,7 +1713,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba based on parent blueprint df06bb57-ad42-4431-9206-abff322896c7
 blueprint source: planner with report:
 planning report:
-status for operators: Waiting for update of RoT bootloader on 913-0000019:serial0
+status for operators: Waiting for update of RoT Bootloader on 913-0000019:serial0
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -2647,7 +2647,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839 based on parent blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
 blueprint source: planner with report:
 planning report:
-status for operators: Waiting for update of RoT bootloader on 913-0000019:serial1
+status for operators: Waiting for update of RoT Bootloader on 913-0000019:serial1
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
