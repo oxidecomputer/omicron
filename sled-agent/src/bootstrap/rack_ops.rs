@@ -942,7 +942,7 @@ mod tests {
         let err = HttpError::from(crate::sled_agent::Error::from(
             RssAccessError::MultirackJoinGenerationUnavailable,
         ));
-        assert_eq!(err.status_code, ErrorStatusCode::CONFLICT);
+        assert_eq!(err.status_code, ErrorStatusCode::GONE);
         assert_eq!(
             err.error_code.as_deref(),
             Some("MultirackJoinGenerationUnavailable")

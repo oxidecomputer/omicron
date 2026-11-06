@@ -380,7 +380,7 @@
     "/multirack-join-complete": {
       "put": {
         "summary": "Report that this sled's multirack join is complete.",
-        "description": "Sent by Nexus once it has observed this sled on the underlay network. Returns the final bootstore generation written by the multirack join service. Repeated requests return the same generation.\n\nReturns 409 Conflict if this request arrives while a new networking configuration was accepted but not written. Also returns 409 Conflict if sled-agent restarted after a completed join.",
+        "description": "Sent by Nexus once it has observed this sled on the underlay network. Returns the final bootstore generation written by the multirack join service. Repeated requests return the same generation.\n\nReturns 409 Conflict if this request arrives while a new networking configuration was accepted but not written. Returns 410 Gone if sled-agent restarted after a completed join.",
         "operationId": "multirack_join_complete",
         "responses": {
           "200": {

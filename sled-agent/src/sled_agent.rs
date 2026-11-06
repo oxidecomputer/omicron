@@ -406,8 +406,14 @@ impl From<Error> for dropshot::HttpError {
                 err.into()
             }
             Error::MultirackJoin(
-                err @ (RssAccessError::MultirackJoinGenerationUnavailable
-                | RssAccessError::MultirackJoinPendingConfigUpdate),
+                err @ RssAccessError::MultirackJoinGenerationUnavailable,
+            ) => HttpError::for_client_error(
+                Some(err.error_code().to_string()),
+                ClientErrorStatusCode::GONE,
+                err.to_string(),
+            ),
+            Error::MultirackJoin(
+                err @ RssAccessError::MultirackJoinPendingConfigUpdate,
             ) => HttpError::for_client_error(
                 Some(err.error_code().to_string()),
                 ClientErrorStatusCode::CONFLICT,

@@ -1849,8 +1849,8 @@ pub trait SledAgentApi {
     /// service. Repeated requests return the same generation.
     ///
     /// Returns 409 Conflict if this request arrives while a new networking
-    /// configuration was accepted but not written. Also returns 409 Conflict
-    /// if sled-agent restarted after a completed join.
+    /// configuration was accepted but not written. Returns 410 Gone if
+    /// sled-agent restarted after a completed join.
     #[endpoint {
         method = PUT,
         path = "/multirack-join-complete",
