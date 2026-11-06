@@ -20,7 +20,6 @@ use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use sush_server::JobManager;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
 /// server wired up to the sled agent
@@ -28,8 +27,8 @@ pub struct Server {
     /// Dropshot server for the API.
     http_server: dropshot::HttpServer<SledAgent>,
 
-    /// The Support Shell's task handles and API server, if it is running.
-    sush: Option<(SushHandles, dropshot::HttpServer<Arc<JobManager>>)>,
+    /// The Support Shell's task handles, if it is running.
+    sush: Option<SushHandles>,
 }
 
 impl Server {
@@ -64,7 +63,7 @@ impl Server {
 
         let nexus_client = make_nexus_client(&log, resolver);
 
-        let sush_handles = long_running_tasks_handles.sush.clone();
+        let sush = long_running_tasks_handles.sush.clone();
         let sled_agent = SledAgent::new(
             &config,
             log.clone(),
@@ -97,18 +96,6 @@ impl Server {
                 .start()
                 .map_err(|error| format!("initializing server: {}", error))?;
 
-        // Now that this sled knows its underlay address, sush can serve
-        // its API there, too.
-        let sush = sush_handles.and_then(|handles| {
-            match handles.start_api(*sled_address.ip()) {
-                Ok(server) => Some((handles, server)),
-                Err(error) => {
-                    warn!(log, "failed to start sush server"; "error" => #%error);
-                    None
-                }
-            }
-        });
-
         Ok(Server { http_server, sush })
     }
 
@@ -126,13 +113,9 @@ impl Server {
     }
 
     pub async fn close(self) -> Result<(), String> {
-        let sush = match self.sush {
-            Some((handles, server)) => {
-                handles.shutdown();
-                server.close().await
-            }
-            None => Ok(()),
-        };
-        self.http_server.close().await.and(sush)
+        if let Some(sush) = &self.sush {
+            sush.shutdown();
+        }
+        self.http_server.close().await
     }
 }

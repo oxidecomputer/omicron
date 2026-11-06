@@ -4,50 +4,34 @@
 
 //! The Support Shell (`sush`) server that runs in the global zone.
 //!
-//! See RFD 620. This server runs jobs targeted at this sled on behalf of
-//! Oxide support. A job arrives signed, and this sled runs it only when
-//! the signature chains to one of the trust anchors in its config; see
-//! `trust_anchors` for which ones.
-//! The server is deliberately independent of the rest of the control plane,
-//! because it is one of the tools you reach for when the control plane is
-//! the thing that is broken. It therefore starts during bootstrap, before
-//! this sled knows whether it is part of a rack at all.
+//! See [RFD 620]. The server runs jobs targeted at this sled on behalf of
+//! Oxide support. Jobs are authorized by signatures, and the server runs
+//! a job only when its signature validates against one of the trust
+//! anchors in its config; see `trust_anchors` for how those are selected.
 //!
-//! Startup is in two parts, because its inputs become available at different
-//! times:
+//! Jobs are distributed among servers using a gossip network implemented
+//! by the [rumors] library, running over sprockets on the bootstrap network.
+//! _Peers_ (servers) exchange messages that are causally ordered; the set
+//! of causally related messages sent between all peers in a network is
+//! called a _universe_. Various pieces of universe state are persisted
+//! to the M.2s using a [sush locker], described in the _Storage_ section
+//! of [RFD 620]. This is similar to an [`omicron_ledger::Ledger`], which
+//! also holds records across M.2s, but handles disagreements between the
+//! two drives differently.
 //!
-//! * [`spawn_sush_tasks`] builds the job manager as soon as we know our
-//!   baseboard, and is called from `long_running_tasks`. It serves the
-//!   API on the bootstrap network, so the switch zone proxy can reach
-//!   this sled before RSS runs.
-//! * [`SushHandles::start_api`] serves the API again on the underlay,
-//!   and is called from `server` once this sled has been told its
-//!   underlay address.
+//! The gossip network is invisible to clients, which speak only the
+//! `sush` HTTP API; the server relays requests and events. That API is
+//! also served on the bootstrap network only; clients, including those
+//! tunneled through Nexus, reach it through a small proxy in the switch
+//! zone. It is currently served over unencrypted HTTP, pending intra-rack
+//! mTLS support.
 //!
-//! Gossip runs over sprockets on the bootstrap network. A job may be
-//! addressed to a single sled, but the messages carrying jobs,
-//! sessions, and events spread to every sled. The set of causally
-//! related messages is called a _universe_: peers in the same universe
-//! can gossip and converge on its contents; peers in different
-//! universes cannot gossip at all. Every identity in a universe
-//! descends from a single seed. On the first gossip sync, a deterministic
-//! rule decides whose universe wins; the loser joins the winner's
-//! universe and adopts a slice of its identity space. A restarted sled
-//! therefore rejoins the rack's universe and replays what it missed
-//! without re-executing previously run jobs. Each sled stores its identity in
-//! a record called a _bookmark_, which is persisted to disk in order to survive
-//! the sled restarting.
-//!
-//! The bookmark, like every record sush must trust across reboots, lives
-//! in the [sush locker], described in the [storage section of RFD 620].
-//! This is similar to the [`omicron_ledger::Ledger`], which also holds
-//! records across both M.2s, but handles disagreements between the two
-//! drives differently.
-//!
+//! [RFD 620]:
+//!   https://rfd.shared.oxide.computer/rfd/0620
+//! [rumors]:
+//!   https://github.com/oxidecomputer/rumors
 //! [sush locker]:
 //!   https://github.com/oxidecomputer/sush/blob/main/server/src/locker.rs
-//! [storage section of RFD 620]:
-//!   https://rfd.shared.oxide.computer/rfd/0620#_storage
 
 use crate::config::SushConfig;
 use anyhow::{Context, ensure};
@@ -136,7 +120,7 @@ pub struct SushHandles {
 
 impl SushHandles {
     /// Start serving the Support Shell API at `ip`.
-    pub fn start_api(
+    fn start_api(
         &self,
         ip: Ipv6Addr,
     ) -> anyhow::Result<HttpServer<Arc<JobManager>>> {
@@ -255,6 +239,7 @@ pub async fn spawn_sush_tasks(
             }
         }
     });
+
     let listen_addr = SocketAddrV6::new(bootstrap_ip, SUSH_GOSSIP_PORT, 0, 0);
     let (universe, linked) = match spawn_gossip(
         &log,
@@ -272,13 +257,13 @@ pub async fn spawn_sush_tasks(
         Err(err) => {
             warn!(
                 log,
-                "gossip disabled, this sled serves local jobs only";
+                "gossip disabled, this sled will run local jobs only";
                 "error" => InlineErrorChain::new(&err),
             );
-            // This seed never reaches a peer, so it is not worth
-            // storing. The null locker stores nothing, leaving the
-            // bookmark on the M.2s untouched for the next boot.
-            let seed = seed_gossip(&log, &Locker::null()).await;
+
+            // Don't persist an isolated identity.
+            let locker = Locker::null();
+            let seed = seed_gossip(&log, &locker).await;
             (Universe::isolated(seed.into_rumors()), LinkedBaseboards::lonely())
         }
     };
