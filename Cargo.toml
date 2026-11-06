@@ -532,8 +532,8 @@ dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "e577a94678bf0a8d64d719acd3e19edd965f66a3" }
 dropshot = { version = "0.18.0", features = [ "usdt-probes" ] }
-dropshot-api-manager = "0.9.0"
-dropshot-api-manager-types = "0.9.0"
+dropshot-api-manager = "0.9.1"
+dropshot-api-manager-types = "0.9.1"
 dyn-clone = "1.0.20"
 either = "1.15.0"
 erebor = { git = "https://github.com/oxidecomputer/erebor", rev = "48512bf970474ff0fd0868c833fd504c8d169064" }
