@@ -792,10 +792,17 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         state: VmmStateRequested,
     ) -> Result<VmmPutStateResponse, HttpError> {
+        use propolis_client::types::InstanceStateRequested as PropolisStateRequested;
+
         self.vmm_put_state_pauses.hold_request(&self.log, propolis_id).await?;
 
         let current =
             self.get_sim_instance(propolis_id).await?.current().clone();
+
+        let vmms = Arc::clone(&self.vmms);
+        let fut = async move {
+            vmms.sim_ensure(&propolis_id, current, Some(state)).await
+        };
 
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
@@ -807,15 +814,12 @@ impl SledAgent {
                     .into());
                 }
                 VmmStateRequested::Running => {
-                    let vmms = self.vmms.clone();
                     let log = self.log.new(
                         o!("component" => "SledAgent-insure_instance_state"),
                     );
                     tokio::spawn(async move {
                         tokio::time::sleep(Duration::from_secs(10)).await;
-                        match vmms
-                            .sim_ensure(&propolis_id, current, Some(state))
-                            .await
+                        match fut.await
                         {
                             Ok(state) => {
                                 let vmm_state: nexus_client::types::SledVmmState = state.into();
@@ -830,16 +834,16 @@ impl SledAgent {
                 }
                 VmmStateRequested::Stopped { acpi_timeout_secs } => {
                     if let Some(timeout_secs) = acpi_timeout_secs {
-                        propolis_client::types::InstanceStateRequested::AcpiStop {timeout_secs }
+                        PropolisStateRequested::AcpiStop { timeout_secs }
                     } else {
-                        propolis_client::types::InstanceStateRequested::Stop
+                        PropolisStateRequested::Stop
                     }
                 }
                 VmmStateRequested::Reboot { acpi_timeout_secs } => {
                     if let Some(timeout_secs) = acpi_timeout_secs {
-                        propolis_client::types::InstanceStateRequested::AcpiReboot { timeout_secs}
+                        PropolisStateRequested::AcpiReboot { timeout_secs }
                     } else {
-                        propolis_client::types::InstanceStateRequested::Reboot
+                        PropolisStateRequested::Reboot
                     }
                 }
             };
@@ -853,11 +857,6 @@ impl SledAgent {
                 },
             )?;
         }
-
-        let vmms = Arc::clone(&self.vmms);
-        let fut = async move {
-            vmms.sim_ensure(&propolis_id, current, Some(state)).await
-        };
 
         // don't immediately "terminate" the "vmm" for soft-shutdown requests.
         let nexus_client = Arc::clone(&self.nexus_client);
