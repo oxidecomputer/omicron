@@ -9325,7 +9325,7 @@ dependencies = [
  "toml 0.8.23",
  "tufaceous-artifact 0.2.0",
  "uuid",
- "zip 4.6.1",
+ "zip 9.0.0",
 ]
 
 [[package]]
@@ -9623,7 +9623,7 @@ dependencies = [
  "url",
  "usdt 0.5.0",
  "uuid",
- "zip 4.6.1",
+ "zip 9.0.0",
 ]
 
 [[package]]
@@ -9773,7 +9773,7 @@ dependencies = [
  "unicode-width 0.1.14",
  "url",
  "uuid",
- "zip 4.6.1",
+ "zip 9.0.0",
 ]
 
 [[package]]
@@ -10097,7 +10097,7 @@ dependencies = [
  "x509-cert",
  "zeroize",
  "zfs-test-harness",
- "zip 4.6.1",
+ "zip 9.0.0",
  "zone",
 ]
 
@@ -10351,6 +10351,7 @@ dependencies = [
  "zerovec",
  "zip 4.6.1",
  "zip 8.6.0",
+ "zip 9.0.0",
 ]
 
 [[package]]
@@ -14973,7 +14974,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "zfs-test-harness",
- "zip 4.6.1",
+ "zip 9.0.0",
  "zstd",
 ]
 
@@ -15758,7 +15759,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "uuid",
- "zip 4.6.1",
+ "zip 9.0.0",
  "zstd",
 ]
 
@@ -19232,7 +19233,6 @@ dependencies = [
  "crc32fast",
  "flate2",
  "indexmap 2.14.0",
- "jiff",
  "memchr",
  "zopfli",
 ]
@@ -19247,6 +19247,22 @@ dependencies = [
  "crc32fast",
  "flate2",
  "indexmap 2.14.0",
+ "memchr",
+ "typed-path 0.12.3",
+ "zopfli",
+]
+
+[[package]]
+name = "zip"
+version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "711e8c9646791c49b7eb799a19c4ae70a9b8372ddc6a1fa4778defd1e2aa5d5e"
+dependencies = [
+ "bzip2 0.6.1",
+ "crc32fast",
+ "flate2",
+ "indexmap 2.14.0",
+ "jiff",
  "memchr",
  "typed-path 0.12.3",
  "zopfli",
