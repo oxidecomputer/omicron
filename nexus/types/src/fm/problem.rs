@@ -51,9 +51,8 @@ use std::sync::Arc;
 )]
 #[repr(u32)]
 pub enum ProblemCode {
-    // Unfortunately necessary because you can't have a `repr(...)` attribute on
-    // an enum with no variants! Sigh.
-    NotARealProblem = 0,
+    UnhealthyZpool = 1,
+    SmfSvcsInMaintainance = 2,
 }
 
 macro_rules! problem_descriptions {
@@ -88,11 +87,17 @@ macro_rules! problem_descriptions {
 }
 
 problem_descriptions! {
-    NotARealProblem {
-        title: "Not a Real Problem",
-        class: System,
+    UnhealthyZpool {
+        title: "Unhealthy Zpool",
+        class: PhysicalDisk,
         added_in: semver::Version::new(24, 0, 0),
-        retired_in: Some(semver::Version::new(24, 0, 0)),
+        retired_in: None,
+    },
+    SmfSvcsInMaintainance {
+        title: "Unhealthy Zpool",
+        class: PhysicalDisk,
+        added_in: semver::Version::new(24, 0, 0),
+        retired_in: None,
     }
 }
 

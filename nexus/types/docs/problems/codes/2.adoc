@@ -23,13 +23,22 @@ ifdef::problem-version-retired[**Retired in**: {problem-version-retired}]
 
 == Description
 
-This is not a real problem. It exists only for testing purposes.
+One or more control plane services on the impacted sled have failed and will
+not be automatically restarted.
+
+== Impact
+
+The unavailability of the impacted services may degrade some or all control
+plane functionality.
+
+The precise nature of the impact depends on the services that have failed. Some
+services may have sufficient redundancy to prevent any user- or operator-visible
+degradation, while others may prevent some or all control plane operation until
+the active problem is repaired.
 
 == Action Required
 
-If you encounter this problem in real life, this is a bug.
-Please contact Oxide support.
-But, everything is fine and no other action is required.
+Contact Oxide support.
 
 == Automated Response
 
