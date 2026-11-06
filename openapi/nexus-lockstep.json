@@ -1624,6 +1624,138 @@
           "dependency"
         ]
       },
+      "AddUpdateBlockedReason": {
+        "description": "Reason why the planner is not adding or updating zones",
+        "oneOf": [
+          {
+            "description": "The current target release generation is lower than the minimum required by the blueprint.",
+            "type": "object",
+            "properties": {
+              "current": {
+                "description": "current target release generation",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TargetReleaseGeneration"
+                  }
+                ]
+              },
+              "minimum": {
+                "description": "minimum target release generation required by the blueprint",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TargetReleaseGeneration"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "target_release_generation_too_low"
+                ]
+              }
+            },
+            "required": [
+              "current",
+              "minimum",
+              "type"
+            ]
+          },
+          {
+            "description": "Some sleds have `remove_mupdate_override` set in the blueprint.",
+            "type": "object",
+            "properties": {
+              "sled_ids": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SledUuid"
+                },
+                "uniqueItems": true
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sleds_with_mupdate_override"
+                ]
+              }
+            },
+            "required": [
+              "sled_ids",
+              "type"
+            ]
+          },
+          {
+            "description": "Some sleds had errors fetching their MUPdate override information.",
+            "type": "object",
+            "properties": {
+              "sled_ids": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SledUuid"
+                },
+                "uniqueItems": true
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sleds_with_mupdate_override_errors"
+                ]
+              }
+            },
+            "required": [
+              "sled_ids",
+              "type"
+            ]
+          },
+          {
+            "description": "Some sleds have zones whose image source is not an artifact.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "zones_not_from_artifacts"
+                ]
+              },
+              "zone_counts_by_sled": {
+                "description": "number of such zones on each affected sled",
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer",
+                  "format": "uint",
+                  "minimum": 0
+                }
+              }
+            },
+            "required": [
+              "type",
+              "zone_counts_by_sled"
+            ]
+          },
+          {
+            "description": "Some sleds have measurements set to the install dataset rather than artifacts.",
+            "type": "object",
+            "properties": {
+              "sled_ids": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SledUuid"
+                },
+                "uniqueItems": true
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "measurements_not_from_artifacts"
+                ]
+              }
+            },
+            "required": [
+              "sled_ids",
+              "type"
+            ]
+          }
+        ]
+      },
       "AllowedSourceIps": {
         "description": "Description of source IPs allowed to reach rack services.",
         "oneOf": [
@@ -7677,10 +7809,10 @@
         "type": "object",
         "properties": {
           "add_update_blocked_reasons": {
-            "description": "Reasons why zone adds and any updates are blocked.\n\nThis is typically a list of MUPdate-related reasons.",
+            "description": "Reasons why zone adds and any updates are blocked.",
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/AddUpdateBlockedReason"
             }
           },
           "discretionary_zones_placed": {

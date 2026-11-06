@@ -25,11 +25,13 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use indent_write::fmt::IndentWriter;
+use itertools::Itertools;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_generation_kinds::NexusGeneration;
 use omicron_generation_kinds::SledConfigGeneration;
+use omicron_generation_kinds::TargetReleaseGeneration;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -1213,10 +1215,8 @@ pub struct PlanningAddStepReport {
     pub waiting_on: Option<ZoneAddWaitingOn>,
 
     /// Reasons why zone adds and any updates are blocked.
-    ///
-    /// This is typically a list of MUPdate-related reasons.
     #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
-    pub add_update_blocked_reasons: Vec<String>,
+    pub add_update_blocked_reasons: Vec<AddUpdateBlockedReason>,
 
     /// Set to true if the target release generation is 1, which would allow
     /// zones to be added.
@@ -1367,10 +1367,9 @@ impl PlanningAddStepReport {
     }
 
     pub fn is_blocked_on_mupdate(&self) -> bool {
-        // XXX-dap Currently, the only reasons in this list are MUPdate-related.
-        // We should do something so that if that changes, we'll notice this
-        // needs to change.
-        !self.add_update_blocked_reasons.is_empty()
+        self.add_update_blocked_reasons
+            .iter()
+            .any(|reason| reason.is_mupdate_related())
     }
 }
 
@@ -1501,6 +1500,135 @@ impl fmt::Display for PlanningAddStepReport {
         }
 
         Ok(())
+    }
+}
+
+/// Reason why the planner is not adding or updating zones
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum AddUpdateBlockedReason {
+    /// The current target release generation is lower than the minimum
+    /// required by the blueprint.
+    TargetReleaseGenerationTooLow {
+        /// current target release generation
+        current: TargetReleaseGeneration,
+        /// minimum target release generation required by the blueprint
+        minimum: TargetReleaseGeneration,
+    },
+
+    /// Some sleds have `remove_mupdate_override` set in the blueprint.
+    SledsWithMupdateOverride {
+        #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+        sled_ids: BTreeSet<SledUuid>,
+    },
+
+    /// Some sleds had errors fetching their MUPdate override information.
+    SledsWithMupdateOverrideErrors {
+        #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+        sled_ids: BTreeSet<SledUuid>,
+    },
+
+    /// Some sleds have zones whose image source is not an artifact.
+    ZonesNotFromArtifacts {
+        /// number of such zones on each affected sled
+        #[cfg_attr(
+            test,
+            any(((0, 16).into(), Default::default(), Default::default()))
+        )]
+        zone_counts_by_sled: BTreeMap<SledUuid, usize>,
+    },
+
+    /// Some sleds have measurements set to the install dataset rather than
+    /// artifacts.
+    MeasurementsNotFromArtifacts {
+        #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+        sled_ids: BTreeSet<SledUuid>,
+    },
+}
+
+impl AddUpdateBlockedReason {
+    /// Returns true if this reason results from a MUPdate.  For this purpose,
+    /// initial installation counts as a MUPdate.
+    ///
+    // This is used in messaging to the user about what the system is waiting
+    // on.
+    //
+    // Currently, all `AddUpdateBlockedReason`s are MUPdate-related.  This
+    // helper exists so that callers don't have to assume that.  Instead, if you
+    // add a new reason, you need to determine if it's MUPdate-related.
+    fn is_mupdate_related(&self) -> bool {
+        match self {
+            AddUpdateBlockedReason::TargetReleaseGenerationTooLow {
+                ..
+            }
+            | AddUpdateBlockedReason::SledsWithMupdateOverride { .. }
+            | AddUpdateBlockedReason::SledsWithMupdateOverrideErrors {
+                ..
+            }
+            | AddUpdateBlockedReason::ZonesNotFromArtifacts { .. }
+            | AddUpdateBlockedReason::MeasurementsNotFromArtifacts { .. } => {
+                true
+            }
+        }
+    }
+}
+
+impl fmt::Display for AddUpdateBlockedReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AddUpdateBlockedReason::TargetReleaseGenerationTooLow {
+                current,
+                minimum,
+            } => write!(
+                f,
+                "current target release generation ({current}) is lower \
+                 than minimum required by blueprint ({minimum})",
+            ),
+            AddUpdateBlockedReason::SledsWithMupdateOverride { sled_ids } => {
+                write!(
+                    f,
+                    "sleds have remove mupdate override set in blueprint: {}",
+                    sled_ids.iter().join(", ")
+                )
+            }
+            AddUpdateBlockedReason::SledsWithMupdateOverrideErrors {
+                sled_ids,
+            } => write!(
+                f,
+                "sleds have mupdate override errors: {}",
+                sled_ids.iter().join(", ")
+            ),
+            AddUpdateBlockedReason::ZonesNotFromArtifacts {
+                zone_counts_by_sled,
+            } => {
+                writeln!(
+                    f,
+                    "sleds have deployment units with image sources \
+                     not set to Artifact:"
+                )?;
+                for (sled_id, count) in zone_counts_by_sled {
+                    let zones = if *count == 1 { "zone" } else { "zones" };
+                    writeln!(f, "- sled {sled_id}: {count} {zones}")?;
+                }
+                Ok(())
+            }
+            AddUpdateBlockedReason::MeasurementsNotFromArtifacts {
+                sled_ids,
+            } => {
+                writeln!(
+                    f,
+                    "sleds have measurements with image sources \
+                     not set to Artifact:"
+                )?;
+                for sled_id in sled_ids {
+                    writeln!(f, "- sled {sled_id} set to install dataset")?;
+                }
+                Ok(())
+            }
+        }
     }
 }
 
