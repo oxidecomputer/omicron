@@ -9,10 +9,12 @@ use super::DiagnosisEngine;
 use super::SupportBundleRequest;
 use crate::DbTypedUuid;
 use crate::ereport;
-use nexus_db_schema::schema::{fm_case, fm_ereport_in_case};
+use nexus_db_schema::schema::fm_case;
+use nexus_db_schema::schema::fm_case_problem;
+use nexus_db_schema::schema::fm_ereport_in_case;
 use nexus_types::fm;
 use omicron_uuid_kinds::{
-    CaseEreportKind, CaseKind, EreporterRestartKind, SitrepKind,
+    CaseEreportKind, CaseKind, EreporterRestartKind, ProblemKind, SitrepKind,
 };
 
 /// Metadata describing a fault management case.
@@ -137,6 +139,19 @@ impl CaseEreport {
     }
 }
 
+/// An association between a case and a problem.
+///
+/// This corresponds to a record in the `fm_case_problem` table.
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[diesel(table_name = fm_case_problem)]
+pub struct CaseProblem {
+    pub case_id: DbTypedUuid<CaseKind>,
+    pub problem_id: DbTypedUuid<ProblemKind>,
+    pub sitrep_id: DbTypedUuid<SitrepKind>,
+    pub created_sitrep_id: DbTypedUuid<SitrepKind>,
+    pub comment: String,
+}
+
 /// The complete state of a case in a particular sitrep, consisting of the
 /// [`CaseMetadata`] record and any other records belonging to the case.
 #[derive(Clone, Debug)]
@@ -145,4 +160,5 @@ pub struct Case {
     pub ereports: Vec<CaseEreport>,
     pub alerts_requested: Vec<AlertRequest>,
     pub support_bundles_requested: Vec<SupportBundleRequest>,
+    pub problems: Vec<CaseProblem>,
 }
