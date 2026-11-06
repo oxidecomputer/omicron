@@ -187,6 +187,8 @@ inventory collection ID:     ..........<REDACTED_UUID>...........
 rendezvous resource generation numbers:
   alert generation:          1
   support bundle generation: 1
+  problem generation:        1
+problems in this sitrep:     0
 ereports in this sitrep:     0
 ---------------------------------------------
 stderr:
@@ -217,6 +219,8 @@ inventory collection ID:     ..........<REDACTED_UUID>...........
 rendezvous resource generation numbers:
   alert generation:          1
   support bundle generation: 1
+  problem generation:        1
+problems in this sitrep:     0
 ereports in this sitrep:     0
 ---------------------------------------------
 stderr:
@@ -2766,6 +2770,8 @@ inventory collection ID:     00000000-0000-0000-0000-00000000001e
 rendezvous resource generation numbers:
   alert generation:          1
   support bundle generation: 1
+  problem generation:        1
+problems in this sitrep:     0
 ereports in this sitrep:     3
 
 == CASES =======================================================================
@@ -2811,6 +2817,8 @@ inventory collection ID:     00000000-0000-0000-0000-00000000001e
 rendezvous resource generation numbers:
   alert generation:          1
   support bundle generation: 1
+  problem generation:        1
+problems in this sitrep:     0
 ereports in this sitrep:     3
 
 == CASES =======================================================================

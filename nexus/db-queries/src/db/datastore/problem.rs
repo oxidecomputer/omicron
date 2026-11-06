@@ -18,6 +18,8 @@ use crate::db::model::ProblemIdentity;
 use crate::db::model::ProblemRevision;
 use crate::db::model::ProblemView;
 use crate::db::pagination::paginated_multicolumn;
+use crate::db::sitrep_guard::SitrepGuardedInsert;
+use crate::db::sitrep_guard::SitrepGuardedInsertOutcome;
 use crate::db::update_and_check::UpdateAndCheck;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
@@ -36,10 +38,31 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
 use omicron_generation_kinds::ProblemRevNum;
+use omicron_generation_kinds::SitrepProblemGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::ProblemUuid;
 use std::cmp::Ordering;
 use uuid::Uuid;
+
+/// Error returned by [`DataStore::problem_create`].
+#[derive(Debug, thiserror::Error)]
+pub enum CreateError {
+    /// A problem with this ID was already created by an earlier rendezvous
+    /// activation; the `rendezvous_problem_created` marker short-circuited the
+    /// insert.
+    ///
+    /// This does *not* imply that the problem still exists. It may have been
+    /// deleted since it was created.
+    #[error("problem was already created by a previous rendezvous activation")]
+    AlreadyCreated,
+    /// The sitrep being executed is stale: its `problem_generation` is behind
+    /// the current sitrep in the database, so no problem was created.
+    #[error("cannot create problem for a stale sitrep")]
+    StaleSitrep,
+    /// An error occurred while accessing the database.
+    #[error(transparent)]
+    Database(#[from] Error),
+}
 
 impl DataStore {
     /// Fetches the current revision of an already-fetched problem record,
@@ -149,7 +172,8 @@ impl DataStore {
         query
     }
 
-    /// Creates the metadata record for a new problem.
+    /// Creates the metadata record for a new problem, returning the inserted
+    /// record.
     ///
     /// The inserted problem is created *without* a current revision (i.e. at
     /// revision 0). Problems without a current revision are excluded from
@@ -158,6 +182,15 @@ impl DataStore {
     /// with [`DataStore::problem_revision_insert`] and set as the current
     /// revision by [`DataStore::problem_set_current_revision`]. Until then,
     /// the problem will not be visible in the external API.
+    ///
+    /// Problems are created during FM rendezvous, based on requested problems
+    /// in the sitrep being executed. Therefore, this insertion is a
+    /// [`SitrepGuardedInsert`], which succeeds if and only if the
+    /// `expected_generation` (the problem generation number of the sitrep
+    /// being executed) is equal to that of the current sitrep in the database,
+    /// and no `rendezvous_problem_created` marker already exists for this
+    /// problem. This way, previously created problems are not re-created, even
+    /// if they have since been hard-deleted.
     ///
     /// ## Atomicity and Idempotency
     ///
@@ -172,28 +205,68 @@ impl DataStore {
     /// visible to the outside world until then.
     ///
     /// Because creating problems and revisions may be performed by multiple
-    /// rendezvous tasks, creating a problem *is* idempotent: if a problem with
-    /// the provided ID already exists, it is left unchanged and this function
-    /// returns `Ok(false)`.
+    /// rendezvous tasks, creating a problem is idempotent: if this problem was
+    /// already created, the existing record is left unchanged and this returns
+    /// [`CreateError::AlreadyCreated`]. A rendezvous task should treat that
+    /// error as permission to proceed to inserting revisions, bearing in mind
+    /// that the problem may since have been deleted, in which case those
+    /// operations fail with a not-found error.
+    ///
+    /// # Errors
+    ///
+    /// - [`CreateError::StaleSitrep`] if the latest sitrep's
+    ///   `problem_generation` is not `expected_generation`.
+    /// - [`CreateError::AlreadyCreated`] if a problem with this ID was already
+    ///   created.
+    /// - [`CreateError::Database`] if authorization fails or the database
+    ///   cannot be accessed.
     pub async fn problem_create(
         &self,
         opctx: &OpContext,
         identity: ProblemIdentity,
-    ) -> CreateResult<bool> {
+        expected_generation: SitrepProblemGeneration,
+    ) -> Result<Problem, CreateError> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        let inserted = diesel::insert_into(problem_dsl::problem)
+        // Taking the guard's resource ID from the inserted record ensures that
+        // the marker is written for the same ID as the problem itself.
+        let id = ProblemUuid::from(identity.id);
+        let insert = diesel::insert_into(problem_dsl::problem)
             .values(Problem {
                 identity,
                 time_deleted: None,
-                current_revision: ProblemRevNum::from_u32(0).into(),
+                current_revision: ProblemRevNum::ZERO.into(),
             })
             .on_conflict(problem_dsl::id)
             .do_nothing()
-            .execute_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Ok(inserted > 0)
+            .returning(Problem::as_returning());
+        let guarded = SitrepGuardedInsert::<Problem, _>::new(
+            id.into_untyped_uuid(),
+            expected_generation,
+            insert,
+        );
+        let problem =
+            match guarded.execute_async(&conn).await.map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+            })? {
+                SitrepGuardedInsertOutcome::Created(problem) => problem,
+                SitrepGuardedInsertOutcome::AlreadyExists => {
+                    return Err(CreateError::AlreadyCreated);
+                }
+                SitrepGuardedInsertOutcome::StaleSitrep => {
+                    return Err(CreateError::StaleSitrep);
+                }
+            };
+
+        slog::debug!(
+            &opctx.log,
+            "created problem";
+            "problem_id" => %id,
+            "time_created" => ?problem.identity.time_created,
+            "problem_generation" => %expected_generation,
+        );
+
+        Ok(problem)
     }
 
     /// Inserts a revision of a problem.
@@ -388,14 +461,73 @@ mod revision_tests {
     use assert_matches::assert_matches;
     use dropshot::PaginationOrder;
     use nexus_db_lookup::LookupPath;
+    use nexus_db_model::fm::RendezvousProblemCreated;
+    use nexus_db_schema::schema::rendezvous_problem_created::dsl as marker_dsl;
+    use nexus_types::fm::Sitrep;
+    use nexus_types::fm::SitrepMetadata;
     use nexus_types::fm::problem::ProblemCode;
     use nexus_types::identity::Asset;
     use omicron_common::api::external::LookupType;
+    use omicron_generation_kinds::SitrepAlertGeneration;
+    use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::CollectionUuid;
+    use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::SitrepUuid;
     use std::num::NonZeroU32;
 
     fn rev(revision: u32) -> ProblemRevNum {
         ProblemRevNum::from_u32(revision)
+    }
+
+    /// Inserts a parentless sitrep with the given `problem_generation`, which
+    /// becomes the current sitrep if no sitrep is current yet.
+    ///
+    /// Creating a problem requires a current sitrep whose `problem_generation`
+    /// matches the one the creator expects.
+    async fn insert_current_sitrep(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        problem_generation: SitrepProblemGeneration,
+    ) {
+        let sitrep = Sitrep {
+            metadata: SitrepMetadata {
+                id: SitrepUuid::new_v4(),
+                parent_sitrep_id: None,
+                inv_collection_id: CollectionUuid::new_v4(),
+                next_inv_min_time_started: Utc::now(),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "problem test sitrep".to_string(),
+                time_created: Utc::now(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation,
+            },
+            cases: Default::default(),
+            ereports_by_id: Default::default(),
+            problems: Default::default(),
+        };
+        datastore
+            .fm_sitrep_insert(opctx, sitrep, None)
+            .await
+            .expect("inserting a sitrep should succeed");
+    }
+
+    /// Returns the `created_at_generation` of the creation marker for the
+    /// problem `id`, or `None` if there is no marker.
+    async fn load_marker_generation(
+        datastore: &DataStore,
+        id: ProblemUuid,
+    ) -> Option<SitrepProblemGeneration> {
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        marker_dsl::rendezvous_problem_created
+            .filter(marker_dsl::problem_id.eq(id.into_untyped_uuid()))
+            .select(RendezvousProblemCreated::as_select())
+            .first_async::<RendezvousProblemCreated>(&*conn)
+            .await
+            .optional()
+            .expect("loading the creation marker should succeed")
+            .map(|marker| marker.created_at_generation())
     }
 
     /// Returns revision `revision` of the problem `id`.
@@ -480,11 +612,14 @@ mod revision_tests {
         revisions: u32,
     ) -> (authz::Problem, Vec<ProblemRevision>) {
         let id = ProblemUuid::new_v4();
-        let created = datastore
-            .problem_create(opctx, ProblemIdentity::new(id))
+        datastore
+            .problem_create(
+                opctx,
+                ProblemIdentity::new(id),
+                SitrepProblemGeneration::new(),
+            )
             .await
             .expect("creating a problem should succeed");
-        assert!(created, "a new problem should be inserted");
 
         let time_base = omicron_common::now_db_precision();
         let (authz_problem,) = LookupPath::new(opctx, datastore)
@@ -527,19 +662,37 @@ mod revision_tests {
         let logctx = dev::test_setup_log("test_problem_create");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
+        insert_current_sitrep(opctx, datastore, SitrepProblemGeneration::new())
+            .await;
 
         let id = ProblemUuid::new_v4();
         let identity = ProblemIdentity::new(id);
         let created = datastore
-            .problem_create(opctx, identity.clone())
+            .problem_create(
+                opctx,
+                identity.clone(),
+                SitrepProblemGeneration::new(),
+            )
             .await
             .expect("creating a problem should succeed");
-        assert!(created);
-        let created_again = datastore
-            .problem_create(opctx, ProblemIdentity::new(id))
+        assert_eq!(created.identity, identity);
+        assert_eq!(created.current_revision(), ProblemRevNum::ZERO);
+        assert_eq!(
+            load_marker_generation(datastore, id).await,
+            Some(SitrepProblemGeneration::new()),
+            "creating a problem should write a creation marker at the \
+             expected generation"
+        );
+
+        let err = datastore
+            .problem_create(
+                opctx,
+                ProblemIdentity::new(id),
+                SitrepProblemGeneration::new(),
+            )
             .await
-            .expect("creating a problem again should succeed");
-        assert!(!created_again);
+            .expect_err("creating a problem again should not create it");
+        assert_matches!(err, CreateError::AlreadyCreated);
 
         let (authz_problem, problem) = LookupPath::new(opctx, datastore)
             .problem_id(id)
@@ -578,6 +731,107 @@ mod revision_tests {
         logctx.cleanup_successful();
     }
 
+    /// A rendezvous task executing a sitrep whose `problem_generation` is
+    /// behind the current sitrep's cannot create a problem.
+    #[tokio::test]
+    async fn test_problem_create_stale_sitrep() {
+        let logctx = dev::test_setup_log("test_problem_create_stale_sitrep");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let current_generation = SitrepProblemGeneration::new().next();
+        insert_current_sitrep(opctx, datastore, current_generation).await;
+
+        let id = ProblemUuid::new_v4();
+        let err = datastore
+            .problem_create(
+                opctx,
+                ProblemIdentity::new(id),
+                SitrepProblemGeneration::new(),
+            )
+            .await
+            .expect_err("creating a problem from a stale sitrep fails");
+        assert_matches!(err, CreateError::StaleSitrep);
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let problems: i64 = problem_dsl::problem
+            .filter(problem_dsl::id.eq(id.into_untyped_uuid()))
+            .count()
+            .get_result_async(&*conn)
+            .await
+            .unwrap();
+        assert_eq!(problems, 0, "a stale sitrep should not create a problem");
+        assert_eq!(
+            load_marker_generation(datastore, id).await,
+            None,
+            "a stale sitrep should not write a creation marker"
+        );
+
+        // At the current generation, the same problem can be created.
+        datastore
+            .problem_create(opctx, ProblemIdentity::new(id), current_generation)
+            .await
+            .expect("creating a problem at the current generation");
+        assert_eq!(
+            load_marker_generation(datastore, id).await,
+            Some(current_generation),
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Once a problem has been created and then deleted, it is not re-created
+    /// by a sitrep that still requests it.
+    #[tokio::test]
+    async fn test_problem_create_does_not_resurrect() {
+        let logctx =
+            dev::test_setup_log("test_problem_create_does_not_resurrect");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        insert_current_sitrep(opctx, datastore, SitrepProblemGeneration::new())
+            .await;
+
+        let id = ProblemUuid::new_v4();
+        datastore
+            .problem_create(
+                opctx,
+                ProblemIdentity::new(id),
+                SitrepProblemGeneration::new(),
+            )
+            .await
+            .expect("creating a problem should succeed");
+
+        // Hard-delete the record, so that only the creation marker remains to
+        // prevent the problem from being re-created.
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        diesel::delete(problem_dsl::problem)
+            .filter(problem_dsl::id.eq(id.into_untyped_uuid()))
+            .execute_async(&*conn)
+            .await
+            .expect("deleting the problem should succeed");
+
+        let err = datastore
+            .problem_create(
+                opctx,
+                ProblemIdentity::new(id),
+                SitrepProblemGeneration::new(),
+            )
+            .await
+            .expect_err("a deleted problem should not be re-created");
+        assert_matches!(err, CreateError::AlreadyCreated);
+
+        let problems: i64 = problem_dsl::problem
+            .filter(problem_dsl::id.eq(id.into_untyped_uuid()))
+            .count()
+            .get_result_async(&*conn)
+            .await
+            .unwrap();
+        assert_eq!(problems, 0, "the deleted problem should not be re-created");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     /// Tests that making a new revision current updates the problem record,
     /// and that doing it a second time is idempotent.
     #[tokio::test]
@@ -585,6 +839,8 @@ mod revision_tests {
         let logctx = dev::test_setup_log("test_problem_set_current_revision");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
+        insert_current_sitrep(opctx, datastore, SitrepProblemGeneration::new())
+            .await;
 
         let (authz_problem, revisions) =
             create_with_revisions(opctx, datastore, 2).await;
@@ -633,6 +889,8 @@ mod revision_tests {
             dev::test_setup_log("test_problem_current_revision_monotonicity");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
+        insert_current_sitrep(opctx, datastore, SitrepProblemGeneration::new())
+            .await;
 
         let (authz_problem, revisions) =
             create_with_revisions(opctx, datastore, 2).await;
@@ -668,6 +926,8 @@ mod revision_tests {
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
+        insert_current_sitrep(opctx, datastore, SitrepProblemGeneration::new())
+            .await;
 
         let (authz_problem, _) =
             create_with_revisions(opctx, datastore, 1).await;
@@ -693,6 +953,8 @@ mod revision_tests {
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
+        insert_current_sitrep(opctx, datastore, SitrepProblemGeneration::new())
+            .await;
 
         let authz_problem = {
             // Cheat a little bit here: `LookupPath` would return `NotFound` for
@@ -747,6 +1009,8 @@ mod revision_tests {
             dev::test_setup_log("test_problem_revision_insert_is_idempotent");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
+        insert_current_sitrep(opctx, datastore, SitrepProblemGeneration::new())
+            .await;
 
         let (authz_problem, revisions) =
             create_with_revisions(opctx, datastore, 1).await;
@@ -786,6 +1050,8 @@ mod revision_tests {
             dev::test_setup_log("test_problem_concurrent_set_current_revision");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
+        insert_current_sitrep(opctx, datastore, SitrepProblemGeneration::new())
+            .await;
 
         let (authz_problem, revisions) =
             create_with_revisions(opctx, datastore, REVISIONS).await;
@@ -833,7 +1099,7 @@ mod revision_tests {
             time_modified: time_created,
         };
         datastore
-            .problem_create(opctx, identity)
+            .problem_create(opctx, identity, SitrepProblemGeneration::new())
             .await
             .expect("creating a problem should succeed");
         let (authz_problem,) = LookupPath::new(opctx, datastore)
@@ -901,6 +1167,8 @@ mod revision_tests {
         let logctx = dev::test_setup_log("test_problem_list_state_filter");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
+        insert_current_sitrep(opctx, datastore, SitrepProblemGeneration::new())
+            .await;
         let now = omicron_common::now_db_precision();
 
         let active = create_current_problem(opctx, datastore, now, false).await;
@@ -926,7 +1194,11 @@ mod revision_tests {
 
         // A problem with no current revision.
         datastore
-            .problem_create(opctx, ProblemIdentity::new(ProblemUuid::new_v4()))
+            .problem_create(
+                opctx,
+                ProblemIdentity::new(ProblemUuid::new_v4()),
+                SitrepProblemGeneration::new(),
+            )
             .await
             .expect("creating a problem should succeed");
 
@@ -995,6 +1267,8 @@ mod revision_tests {
         let logctx = dev::test_setup_log("test_active_problem_list_pagination");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
+        insert_current_sitrep(opctx, datastore, SitrepProblemGeneration::new())
+            .await;
 
         // Several problems share a `time_created`, so that their order is
         // decided by their IDs. Every third problem is resolved.

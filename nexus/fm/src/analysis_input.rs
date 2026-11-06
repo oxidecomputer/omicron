@@ -627,6 +627,7 @@ mod tests {
     use nexus_types::inventory::SpType;
     use nexus_types::support_bundle::BundleDataSelection;
     use omicron_generation_kinds::SitrepAlertGeneration;
+    use omicron_generation_kinds::SitrepProblemGeneration;
     use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_uuid_kinds::{
         CaseEreportUuid, CaseUuid, OmicronZoneUuid, SitrepUuid,
@@ -832,9 +833,11 @@ mod tests {
                     alert_generation: SitrepAlertGeneration::new(),
                     support_bundle_generation:
                         SitrepSupportBundleGeneration::new(),
+                    problem_generation: SitrepProblemGeneration::new(),
                 },
                 cases,
                 ereports_by_id,
+                problems: IdOrdMap::new(),
             };
             Arc::new((
                 SitrepVersion {
@@ -1115,11 +1118,13 @@ mod tests {
                 time_created: chrono::Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: IdOrdMap::new(),
             ereports_by_id: [Arc::new(unknown_seen.clone())]
                 .into_iter()
                 .collect(),
+            problems: IdOrdMap::new(),
         };
         let parent_version = SitrepVersion {
             id: parent_sitrep_id,
@@ -1182,9 +1187,11 @@ mod tests {
                 time_created: chrono::Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: [case].into_iter().collect(),
             ereports_by_id: IdOrdMap::new(),
+            problems: IdOrdMap::new(),
         };
         let parent_version = SitrepVersion {
             id: parent_sitrep_id,
