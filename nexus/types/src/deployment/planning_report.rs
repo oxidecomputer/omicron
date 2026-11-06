@@ -15,9 +15,9 @@ use crate::deployment::MgsUpdateComponent;
 use crate::inventory::CabooseVersionError;
 use crate::inventory::CabooseWhich;
 
-use crate::external_api::update::OperatorStatus;
-use crate::external_api::update::SledEvacuationProgress;
-use crate::external_api::update::UpdateWait;
+use crate::deployment::operator_status::OperatorStatus;
+use crate::deployment::operator_status::SledEvacuationProgress;
+use crate::deployment::operator_status::UpdateWait;
 use crate::internal_api::views::QuiesceState;
 use daft::Diffable;
 use iddqd::IdOrdItem;

@@ -461,10 +461,7 @@ pub mod update {
 
     pub use crate::v2026_11_05_00::update::OperatorNotes;
     pub use crate::v2026_11_05_00::update::OperatorStatus;
-    pub use crate::v2026_11_05_00::update::SledEvacuationProgress;
-    pub use crate::v2026_11_05_00::update::UnknownReason;
     pub use crate::v2026_11_05_00::update::UpdateStatus;
-    pub use crate::v2026_11_05_00::update::UpdateWait;
 }
 
 pub mod vpc {

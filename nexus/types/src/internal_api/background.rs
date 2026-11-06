@@ -3,10 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::deployment::PlanningReport;
+use crate::deployment::operator_status::OperatorStatus;
+use crate::deployment::operator_status::UnknownReason;
 use crate::deployment::planning_report::QuiesceInfo;
 use crate::external_api::alert;
-use crate::external_api::update::OperatorStatus;
-use crate::external_api::update::UnknownReason;
 use chrono::DateTime;
 use chrono::Utc;
 use gateway_types::component::SpType;

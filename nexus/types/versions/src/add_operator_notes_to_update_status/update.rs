@@ -7,13 +7,9 @@ use crate::v2026_05_20_00;
 
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::Nullable;
-use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-use std::num::NonZeroUsize;
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UpdateStatus {
@@ -104,8 +100,13 @@ pub struct OperatorNotes {
 }
 
 /// What the system is doing, as summarized for operators
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", content = "details", rename_all = "snake_case")]
+///
+/// The `status_message` field of `OperatorNotes` describes the status in more
+/// detail.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum OperatorStatus {
     /// The reconfiguration system is at rest because no changes are required
     AtRest,
@@ -115,64 +116,10 @@ pub enum OperatorStatus {
     /// The system is waiting for resolution after having detected MUPdates
     WaitingForMupdateResolution,
     /// The system is working on an automated software update
-    WaitingForUpdate(UpdateWait),
+    WaitingForUpdate,
     /// Unable to determine the current status
-    Unknown(UnknownReason),
-}
-
-/// Why the current status could not be determined
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum UnknownReason {
-    /// The planner has not yet run
-    PlannerNotYetRun,
-    /// The planner has run, but it has never succeeded
-    PlannerFailed {
-        /// Error from the most recent planning run
-        error: String,
-    },
-}
-
-/// What an automated software update is waiting for
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum UpdateWait {
-    /// The system is waiting for internal services to recover before proceeding
-    /// with next steps
-    ServiceRecovery { service: String },
-    /// The system is waiting for a sled to be evacuated so it can be updated
-    SledEvacuation {
-        sled_id: SledUuid,
-        baseboard_id: BaseboardId,
-        progress: SledEvacuationProgress,
-    },
-    /// The system is waiting for a sled to be put back into service
-    SledAvailable { sled_id: SledUuid, baseboard_id: BaseboardId },
-    /// The system is waiting for a board update to finish
-    Mgs { baseboard_id: BaseboardId, component: String },
-    /// The system is waiting for zone updates to finish
-    Zones {
-        /// Kinds of the zones being updated
-        kinds: BTreeSet<String>,
-    },
-    /// The system is waiting for sagas to finish running
-    HandoffSagas,
-    /// The system is waiting for the final handoff to the new Nexus instances
-    HandoffFinal,
-}
-
-/// How far along a sled's evacuation is, as far as the planner knows
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum SledEvacuationProgress {
-    /// The planner is marking the sled for evacuation in this blueprint.
     ///
-    /// The planner has not yet checked on the evacuation's progress, so it
-    /// doesn't know how many VMMs are on the sled.
-    Starting,
-    /// The sled still has this many VMMs registered.
-    RegisteredVmms { count: NonZeroUsize },
-    /// The planner is waiting for something other than VMMs to leave the
-    /// sled (e.g., for inventory to report the sled's latest config).
-    Other { message: String },
+    /// If the most recent planning run failed, `planner_error` in
+    /// `UpdateStatus` describes the error.
+    Unknown,
 }

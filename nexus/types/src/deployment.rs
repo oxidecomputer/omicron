@@ -90,6 +90,7 @@ mod blueprint_display;
 mod clickhouse;
 pub mod execution;
 mod network_resources;
+pub mod operator_status;
 mod planning_input;
 pub mod planning_report;
 mod reconfigurator_config;

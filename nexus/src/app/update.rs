@@ -710,7 +710,7 @@ impl super::Nexus {
         let status_message = status.to_string();
         let notes = update::OperatorNotes {
             time_planned: Nullable(time_planned),
-            status,
+            status: update::OperatorStatus::from(&status),
             status_message,
         };
         (notes, latest.last_error().map(String::from))

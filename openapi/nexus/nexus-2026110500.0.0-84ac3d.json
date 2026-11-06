@@ -25812,89 +25812,41 @@
         ]
       },
       "OperatorStatus": {
-        "description": "What the system is doing, as summarized for operators",
+        "description": "What the system is doing, as summarized for operators\n\nThe `status_message` field of `OperatorNotes` describes the status in more detail.",
         "oneOf": [
           {
             "description": "The reconfiguration system is at rest because no changes are required",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "at_rest"
-                ]
-              }
-            },
-            "required": [
-              "type"
+            "type": "string",
+            "enum": [
+              "at_rest"
             ]
           },
           {
             "description": "The system is busy with reconfigurations that don't have a more specific description",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "busy"
-                ]
-              }
-            },
-            "required": [
-              "type"
+            "type": "string",
+            "enum": [
+              "busy"
             ]
           },
           {
             "description": "The system is waiting for resolution after having detected MUPdates",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "waiting_for_mupdate_resolution"
-                ]
-              }
-            },
-            "required": [
-              "type"
+            "type": "string",
+            "enum": [
+              "waiting_for_mupdate_resolution"
             ]
           },
           {
             "description": "The system is working on an automated software update",
-            "type": "object",
-            "properties": {
-              "details": {
-                "$ref": "#/components/schemas/UpdateWait"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "waiting_for_update"
-                ]
-              }
-            },
-            "required": [
-              "details",
-              "type"
+            "type": "string",
+            "enum": [
+              "waiting_for_update"
             ]
           },
           {
-            "description": "Unable to determine the current status",
-            "type": "object",
-            "properties": {
-              "details": {
-                "$ref": "#/components/schemas/UnknownReason"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "unknown"
-                ]
-              }
-            },
-            "required": [
-              "details",
-              "type"
+            "description": "Unable to determine the current status\n\nIf the most recent planning run failed, `planner_error` in `UpdateStatus` describes the error.",
+            "type": "string",
+            "enum": [
+              "unknown"
             ]
           }
         ]
@@ -28615,66 +28567,6 @@
           }
         }
       },
-      "SledEvacuationProgress": {
-        "description": "How far along a sled's evacuation is, as far as the planner knows",
-        "oneOf": [
-          {
-            "description": "The planner is marking the sled for evacuation in this blueprint.\n\nThe planner has not yet checked on the evacuation's progress, so it doesn't know how many VMMs are on the sled.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "starting"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "description": "The sled still has this many VMMs registered.",
-            "type": "object",
-            "properties": {
-              "count": {
-                "type": "integer",
-                "format": "uint",
-                "minimum": 1
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "registered_vmms"
-                ]
-              }
-            },
-            "required": [
-              "count",
-              "type"
-            ]
-          },
-          {
-            "description": "The planner is waiting for something other than VMMs to leave the sled (e.g., for inventory to report the sled's latest config).",
-            "type": "object",
-            "properties": {
-              "message": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "other"
-                ]
-              }
-            },
-            "required": [
-              "message",
-              "type"
-            ]
-          }
-        ]
-      },
       "SledInstance": {
         "description": "An operator's view of an instance running on a given sled",
         "type": "object",
@@ -30786,46 +30678,6 @@
           }
         ]
       },
-      "UnknownReason": {
-        "description": "Why the current status could not be determined",
-        "oneOf": [
-          {
-            "description": "The planner has not yet run",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "planner_not_yet_run"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "description": "The planner has run, but it has never succeeded",
-            "type": "object",
-            "properties": {
-              "error": {
-                "description": "Error from the most recent planning run",
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "planner_failed"
-                ]
-              }
-            },
-            "required": [
-              "error",
-              "type"
-            ]
-          }
-        ]
-      },
       "UpdateStatus": {
         "type": "object",
         "properties": {
@@ -30882,157 +30734,6 @@
           "suspended",
           "target_release",
           "time_last_step_planned"
-        ]
-      },
-      "UpdateWait": {
-        "description": "What an automated software update is waiting for",
-        "oneOf": [
-          {
-            "description": "The system is waiting for internal services to recover before proceeding with next steps",
-            "type": "object",
-            "properties": {
-              "service": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "service_recovery"
-                ]
-              }
-            },
-            "required": [
-              "service",
-              "type"
-            ]
-          },
-          {
-            "description": "The system is waiting for a sled to be evacuated so it can be updated",
-            "type": "object",
-            "properties": {
-              "baseboard_id": {
-                "$ref": "#/components/schemas/BaseboardId"
-              },
-              "progress": {
-                "$ref": "#/components/schemas/SledEvacuationProgress"
-              },
-              "sled_id": {
-                "$ref": "#/components/schemas/SledUuid"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "sled_evacuation"
-                ]
-              }
-            },
-            "required": [
-              "baseboard_id",
-              "progress",
-              "sled_id",
-              "type"
-            ]
-          },
-          {
-            "description": "The system is waiting for a sled to be put back into service",
-            "type": "object",
-            "properties": {
-              "baseboard_id": {
-                "$ref": "#/components/schemas/BaseboardId"
-              },
-              "sled_id": {
-                "$ref": "#/components/schemas/SledUuid"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "sled_available"
-                ]
-              }
-            },
-            "required": [
-              "baseboard_id",
-              "sled_id",
-              "type"
-            ]
-          },
-          {
-            "description": "The system is waiting for a board update to finish",
-            "type": "object",
-            "properties": {
-              "baseboard_id": {
-                "$ref": "#/components/schemas/BaseboardId"
-              },
-              "component": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "mgs"
-                ]
-              }
-            },
-            "required": [
-              "baseboard_id",
-              "component",
-              "type"
-            ]
-          },
-          {
-            "description": "The system is waiting for zone updates to finish",
-            "type": "object",
-            "properties": {
-              "kinds": {
-                "description": "Kinds of the zones being updated",
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "uniqueItems": true
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "zones"
-                ]
-              }
-            },
-            "required": [
-              "kinds",
-              "type"
-            ]
-          },
-          {
-            "description": "The system is waiting for sagas to finish running",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "handoff_sagas"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "description": "The system is waiting for the final handoff to the new Nexus instances",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "handoff_final"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          }
         ]
       },
       "UpdatesTrustRoot": {

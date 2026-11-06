@@ -729,12 +729,7 @@ async fn test_update_status() -> Result<()> {
     let expected_error = "blueprint planning is disabled";
     assert_eq!(status.planner_error.0.as_deref(), Some(expected_error));
     assert_eq!(status.operator_notes.time_planned.0, None);
-    assert_eq!(
-        status.operator_notes.status,
-        update::OperatorStatus::Unknown(update::UnknownReason::PlannerFailed {
-            error: expected_error.to_string(),
-        })
-    );
+    assert_eq!(status.operator_notes.status, update::OperatorStatus::Unknown);
     assert_eq!(
         status.operator_notes.status_message,
         format!("Unknown: planner produced error: {expected_error}")
@@ -849,7 +844,8 @@ async fn test_update_status() -> Result<()> {
     .await
     .expect("operator notes should have appeared within 60s");
     assert!(time_planned >= time_enabled);
-    assert_eq!(notes.status_message, notes.status.to_string());
+    assert_ne!(notes.status, update::OperatorStatus::Unknown);
+    assert!(!notes.status_message.is_empty());
 
     cptestctx.teardown().await;
     Ok(())
