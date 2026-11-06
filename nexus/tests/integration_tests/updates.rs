@@ -706,11 +706,24 @@ async fn test_update_status() -> Result<()> {
     let time_last_step_planned = status.time_last_step_planned;
 
     // The planner is disabled by default in the test context.  Once it has
-    // run, the operator notes should say that the status is unknown because
-    // the planner has never succeeded.
-    let planner_status =
-        run_blueprint_planner(&cptestctx.lockstep_client).await;
-    assert_matches!(planner_status, BlueprintPlannerStatus::Disabled);
+    // run with its config loaded, the operator notes should say that the
+    // status is unknown because the planner has never succeeded.  (Until the
+    // config is loaded, the planner reports a different status, so keep
+    // activating it until it reports that it is disabled.)
+    wait_for_condition(
+        || async {
+            match run_blueprint_planner(&cptestctx.lockstep_client).await {
+                BlueprintPlannerStatus::Disabled => Ok(()),
+                other => Err(CondCheckError::<()>::NotYet {
+                    status: Some(format!("planner status: {other:?}")),
+                }),
+            }
+        },
+        &std::time::Duration::from_millis(500),
+        &std::time::Duration::from_secs(60),
+    )
+    .await
+    .expect("planner should have reported being disabled within 60s");
     let status: update::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;
     let expected_error = "blueprint planning is disabled";

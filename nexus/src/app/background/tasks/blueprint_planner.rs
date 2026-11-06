@@ -175,6 +175,9 @@ impl BlueprintPlanner {
         self.tx_latest.send_modify(|latest| match status {
             BlueprintPlannerStatus::Disabled => latest
                 .record_error(String::from("blueprint planning is disabled")),
+            BlueprintPlannerStatus::ConfigNotYetLoaded => latest.record_error(
+                String::from("reconfigurator config not yet loaded"),
+            ),
             BlueprintPlannerStatus::Error(error) => {
                 latest.record_error(error.clone())
             }
@@ -251,7 +254,7 @@ impl BlueprintPlanner {
                     opctx.log,
                     "reconfigurator config not yet loaded; doing nothing"
                 );
-                return Ok(BlueprintPlannerStatus::Disabled);
+                return Ok(BlueprintPlannerStatus::ConfigNotYetLoaded);
             }
             ReconfiguratorConfigLoaderState::Loaded(config) => config.clone(),
         };
