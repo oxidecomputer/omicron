@@ -6,8 +6,8 @@
 //!
 //! The proxy terminates technician-port connections and routes each
 //! request to a `sush` server running in some sled's global zone.
-//! It discovers servers by probing the address prefixes advertised
-//! by DDM, and learns the cubby map (cubby number → baseboard ID)
+//! It discovers servers by probing the bootstrap address prefixes
+//! advertised by DDM, and learns the cubby map (cubby number → baseboard ID)
 //! from the local MGS, using the same polling code as the servers.
 //!
 //! The code that verifies the proxy's TLS identity lives in sush's
@@ -100,10 +100,8 @@ pub async fn run(log: &Logger, config: Config) -> Result<()> {
     }
 }
 
-/// Keep `Targets::sleds` current. Every DDM-advertised address that
-/// answers `/target` is routable. Sleds answer on their bootstrap
-/// addresses from boot and on their underlay addresses once RSS
-/// assigns them. We probe both, and underlay wins. Each round's
+/// Keep `Targets::sleds` current. Every DDM-advertised bootstrap
+/// address that answers `/target` is a sled's server. Each round's
 /// answers merge into the existing map, so a missed probe never
 /// evicts a sled; a stale address fails at forwarding time instead.
 async fn update_sleds(
@@ -113,7 +111,6 @@ async fn update_sleds(
     tx_sleds: watch::Sender<Sleds>,
 ) {
     loop {
-        let mut answers = BTreeMap::new();
         match ddm
             .derive_bootstrap_addrs_from_prefixes(&[
                 BootstrapInterface::GlobalZone,
@@ -123,35 +120,24 @@ async fn update_sleds(
             Ok(addrs) => {
                 let addrs =
                     addrs.map(|ip| SocketAddrV6::new(ip, SUSH_API_PORT, 0, 0));
-                probe_sleds(&log, &probe, addrs, &mut answers).await;
+                let answers = probe_sleds(&log, &probe, addrs).await;
+                tx_sleds.send_modify(|sleds| sleds.extend(answers));
             }
             Err(err) => {
                 warn!(log, "unable to fetch bootstrap prefixes"; "error" => %err)
             }
         }
-        match ddm.derive_sled_addrs_from_prefixes().await {
-            Ok(addrs) => {
-                let addrs = addrs
-                    .map(|a| SocketAddrV6::new(*a.ip(), SUSH_API_PORT, 0, 0));
-                probe_sleds(&log, &probe, addrs, &mut answers).await;
-            }
-            Err(err) => {
-                warn!(log, "unable to fetch underlay prefixes"; "error" => %err)
-            }
-        }
-        tx_sleds.send_modify(|sleds| sleds.extend(answers));
         sleep(POLL_INTERVAL).await;
     }
 }
 
-/// Probe candidate addresses concurrently and record the sleds that
+/// Probe candidate addresses concurrently and return the sleds that
 /// answer. The `/target` endpoint just returns the sled's baseboard ID.
 async fn probe_sleds(
     log: &Logger,
     probe: &reqwest::Client,
     addrs: impl Iterator<Item = SocketAddrV6>,
-    sleds: &mut BTreeMap<BaseboardId, SocketAddr>,
-) {
+) -> BTreeMap<BaseboardId, SocketAddr> {
     let probes = addrs.map(|addr| async move {
         let probe_result = async {
             probe
@@ -165,6 +151,7 @@ async fn probe_sleds(
         .await;
         (addr, probe_result)
     });
+    let mut sleds = BTreeMap::new();
     for (addr, result) in join_all(probes).await {
         match result {
             Ok(baseboard) => {
@@ -175,6 +162,7 @@ async fn probe_sleds(
             }
         }
     }
+    sleds
 }
 
 /// Keep `Targets::cubbies` current from MGS's view of the SPs.
