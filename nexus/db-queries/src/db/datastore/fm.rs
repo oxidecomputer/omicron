@@ -136,6 +136,7 @@ sitrep_child_tables! {
     SupportBundleRequestDataSelectionEreports => { table: "fm_support_bundle_request_data_selection_ereports" },
     SupportBundleRequestDataSelectionTimeRange => { table: "fm_support_bundle_request_data_selection_time_range" },
     SupportBundleRequest => { table: "fm_support_bundle_request" },
+    Problem => { table: "fm_problem" },
     Case => { table: "fm_case" },
     FmFactPhysicalDisk => { table: "fm_fact_physical_disk" },
     FmFactSaga => { table: "fm_fact_saga" },
@@ -507,7 +508,14 @@ impl DataStore {
         let metadata =
             self.fm_sitrep_metadata_read_on_conn(id, &conn).await?.into();
 
-        Ok(Sitrep { metadata, cases, ereports_by_id: ereports })
+        // TODO-completeness: read problems from `fm_problem`
+        // once `fm_sitrep_insert` writes them.
+        Ok(Sitrep {
+            metadata,
+            cases,
+            ereports_by_id: ereports,
+            problems: Default::default(),
+        })
     }
 
     /// Fetch all alert requests belonging to cases in the given sitrep.
@@ -2233,6 +2241,7 @@ mod tests {
     use nexus_types::fm;
     use nexus_types::fm::ereport::{EreportData, Reporter};
     use omicron_generation_kinds::SitrepAlertGeneration;
+    use omicron_generation_kinds::SitrepProblemGeneration;
     use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CaseEreportUuid;
@@ -2453,9 +2462,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
 
         datastore.fm_sitrep_insert(&opctx, sitrep.clone(), None).await.unwrap();
@@ -2506,9 +2517,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep1.clone(), None)
@@ -2527,9 +2540,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         datastore.fm_sitrep_insert(&opctx, sitrep2.clone(), None).await.expect(
             "inserting a sitrep whose parent is current should succeed",
@@ -2572,9 +2587,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep1.clone(), None)
@@ -2594,9 +2611,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
 
         let result = datastore.fm_sitrep_insert(&opctx, sitrep2, None).await;
@@ -2633,9 +2652,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep1.clone(), None)
@@ -2654,9 +2675,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep2.clone(), None)
@@ -2676,9 +2699,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         let result =
             datastore.fm_sitrep_insert(&opctx, sitrep3.clone(), None).await;
@@ -3257,9 +3282,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases,
             ereports_by_id,
+            problems: Default::default(),
         }
     }
 
@@ -3465,9 +3492,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases,
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
 
         datastore
@@ -3524,9 +3553,11 @@ mod tests {
                         alert_generation: SitrepAlertGeneration::new(),
                         support_bundle_generation:
                             SitrepSupportBundleGeneration::new(),
+                        problem_generation: SitrepProblemGeneration::new(),
                     },
                     cases: Default::default(),
                     ereports_by_id: Default::default(),
+                    problems: Default::default(),
                 },
                 None,
             )
@@ -3682,9 +3713,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         let child_report = make_test_analysis_report(&child);
         datastore
@@ -3820,9 +3853,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         let sitrep1_id = sitrep1.id();
         let sitrep1_report = make_test_analysis_report(&sitrep1);
@@ -4139,9 +4174,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         let sitrep1_report = make_test_analysis_report(&sitrep1);
         datastore
@@ -4269,9 +4306,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         let sitrep1_report = make_test_analysis_report(&sitrep1);
         datastore
@@ -4409,6 +4448,23 @@ mod tests {
             .await
             .expect("failed to insert sitrep");
 
+        // TODO(eliza): this is just here so that the test can pass temporarily.
+        // Eventually, the set of problems needs to actually come from
+        // the sitrep struct n stuff.
+        {
+            use nexus_db_schema::schema::fm_problem::dsl as fm_problem_dsl;
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            diesel::insert_into(fm_problem_dsl::fm_problem)
+                .values(model::fm::FmProblem {
+                    id: omicron_uuid_kinds::ProblemUuid::new_v4().into(),
+                    sitrep_id: sitrep_id.into(),
+                    requested_sitrep_id: sitrep_id.into(),
+                })
+                .execute_async(&*conn)
+                .await
+                .expect("failed to insert fm_problem row");
+        }
+
         // Verify every child table has ≥1 row, AND that every fm_*
         // child table in the schema is covered by SitrepChildTable.
         ensure_sitrep_fully_populated(&datastore, sitrep_id).await;
@@ -4426,9 +4482,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         let child_report = make_test_analysis_report(&child);
         datastore
