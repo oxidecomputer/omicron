@@ -649,12 +649,7 @@ impl SledAgentApi for SledAgentImpl {
         sa.latencies()
             .instrument_dropshot_handler(&rqctx, async {
                 Ok(HttpResponseOk(
-                    sa.instance_ensure_state(
-                        id,
-                        body_args.state,
-                        body_args.acpi_timeout_secs,
-                    )
-                    .await?,
+                    sa.instance_ensure_state(id, body_args.state).await?,
                 ))
             })
             .await

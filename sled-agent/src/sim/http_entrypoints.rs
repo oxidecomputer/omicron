@@ -154,14 +154,7 @@ impl SledAgentApi for SledAgentSimImpl {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
-        Ok(HttpResponseOk(
-            sa.instance_ensure_state(
-                id,
-                body_args.state,
-                body_args.acpi_timeout_secs,
-            )
-            .await?,
-        ))
+        Ok(HttpResponseOk(sa.instance_ensure_state(id, body_args.state).await?))
     }
 
     async fn vmm_get_state(

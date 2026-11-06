@@ -791,7 +791,6 @@ impl SledAgent {
         self: &Arc<Self>,
         propolis_id: PropolisUuid,
         state: VmmStateRequested,
-        acpi_timeout_secs: Option<u64>,
     ) -> Result<VmmPutStateResponse, HttpError> {
         self.vmm_put_state_pauses.hold_request(&self.log, propolis_id).await?;
 
@@ -829,26 +828,22 @@ impl SledAgent {
                     });
                     return Ok(VmmPutStateResponse { updated_runtime: None });
                 }
-                VmmStateRequested::Stopped => {
-                    if acpi_timeout_secs.is_some() {
-                        propolis_client::types::InstanceStateRequested::AcpiStop
+                VmmStateRequested::Stopped { acpi_timeout_secs } => {
+                    if let Some(timeout_secs) = acpi_timeout_secs {
+                        propolis_client::types::InstanceStateRequested::AcpiStop {timeout_secs }
                     } else {
                         propolis_client::types::InstanceStateRequested::Stop
                     }
                 }
-                VmmStateRequested::Reboot => {
-                    if acpi_timeout_secs.is_some() {
-                        propolis_client::types::InstanceStateRequested::AcpiReboot
+                VmmStateRequested::Reboot { acpi_timeout_secs } => {
+                    if let Some(timeout_secs) = acpi_timeout_secs {
+                        propolis_client::types::InstanceStateRequested::AcpiReboot { timeout_secs}
                     } else {
                         propolis_client::types::InstanceStateRequested::Reboot
                     }
                 }
             };
-            let body = propolis_client::types::InstanceStateChange {
-                state: p_state,
-                acpi_timeout_secs,
-            };
-            client.instance_state_put().body(body).send().await.map_err(
+            client.instance_state_put().body(p_state).send().await.map_err(
                 |e| {
                     crate::sled_agent::Error::Instance(
                         crate::instance_manager::Error::Instance(
@@ -866,19 +861,26 @@ impl SledAgent {
 
         // don't immediately "terminate" the "vmm" for soft-shutdown requests.
         let nexus_client = Arc::clone(&self.nexus_client);
-        if let Some(timeout) = acpi_timeout_secs {
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(timeout)).await;
-                if let Ok(new_state) = fut.await {
-                    let _: Result<_, _> = nexus_client
-                        .cpapi_instances_put(&propolis_id, &new_state.into())
-                        .await;
-                }
-            });
-            Ok(VmmPutStateResponse { updated_runtime: None })
-        } else {
-            let new_state = fut.await?;
-            Ok(VmmPutStateResponse { updated_runtime: Some(new_state) })
+        match state {
+            VmmStateRequested::Stopped { acpi_timeout_secs: Some(timeout) }
+            | VmmStateRequested::Reboot { acpi_timeout_secs: Some(timeout) } => {
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(timeout)).await;
+                    if let Ok(new_state) = fut.await {
+                        let _: Result<_, _> = nexus_client
+                            .cpapi_instances_put(
+                                &propolis_id,
+                                &new_state.into(),
+                            )
+                            .await;
+                    }
+                });
+                Ok(VmmPutStateResponse { updated_runtime: None })
+            }
+            _ => {
+                let new_state = fut.await?;
+                Ok(VmmPutStateResponse { updated_runtime: Some(new_state) })
+            }
         }
     }
 

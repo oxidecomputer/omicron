@@ -1099,11 +1099,10 @@ impl SledAgent {
         &self,
         propolis_id: PropolisUuid,
         target: VmmStateRequested,
-        acpi_timeout_secs: Option<u64>,
     ) -> Result<VmmPutStateResponse, Error> {
         self.inner
             .instances
-            .ensure_state(propolis_id, target, acpi_timeout_secs)
+            .ensure_state(propolis_id, target)
             .await
             .map_err(|e| Error::Instance(e))
     }

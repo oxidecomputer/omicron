@@ -8080,7 +8080,8 @@ async fn test_can_start_turin_dense_instance_with_cpu_platform(
     // Great, now let's update the instance to require Turin and start it again.
     // This will fail because there is no Turin in our simulated environment
     // (yet!)
-    expect_instance_stop_ok(client, instance.identity.name.as_str(), true).await;
+    expect_instance_stop_ok(client, instance.identity.name.as_str(), true)
+        .await;
     instance_simulate(nexus, &instance_id).await;
     instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
@@ -8122,7 +8123,8 @@ async fn test_can_start_turin_dense_instance_with_cpu_platform(
 
     // We're free to switch this instance from the initial AmdTurin to AmdTurinV2, which has
     // identical placement constraints and should land on the same simulated Turin sled.
-    expect_instance_stop_ok(client, instance.identity.name.as_str(), true).await;
+    expect_instance_stop_ok(client, instance.identity.name.as_str(), true)
+        .await;
     instance_simulate(nexus, &instance_id).await;
     instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
@@ -10548,10 +10550,7 @@ async fn setup_shutdown_test_instance_and_mock_propolis(
     async fn propolis_state_put_run(propolis_client: &propolis_client::Client) {
         propolis_client
             .instance_state_put()
-            .body(propolis_client::types::InstanceStateChange {
-                acpi_timeout_secs: None,
-                state: PropolisStateRequested::Run,
-            })
+            .body(PropolisStateRequested::Run)
             .send()
             .await
             .expect("instance state put to mock server failed");
@@ -10580,7 +10579,7 @@ async fn setup_shutdown_test_instance_and_mock_propolis(
 // include the timeout that was(n't) sent in the propolis state PUT request.
 async fn mock_get_last_state_requested(
     propolis_addr: std::net::SocketAddr,
-) -> propolis_client::types::InstanceStateChange {
+) -> propolis_client::types::InstanceStateRequested {
     let url = format!("http://{}/mock/last_state_requested", propolis_addr);
     reqwest::Client::new()
         .get(url)
@@ -10622,20 +10621,14 @@ async fn test_instances_shutdown_policy_force_hardstop_during_soft(
     expect_instance_stop_ok(client, instance_name, false).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
-        propolis_client::types::InstanceStateChange {
-            acpi_timeout_secs: Some(TIMEOUT_SECS),
-            state: PropolisStateRequested::AcpiStop
-        }
+        PropolisStateRequested::AcpiStop { timeout_secs: TIMEOUT_SECS }
     );
 
     // stop with skip_os_shutdown=true param.
     expect_instance_stop_ok(client, instance_name, true).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
-        propolis_client::types::InstanceStateChange {
-            acpi_timeout_secs: None,
-            state: PropolisStateRequested::Stop
-        }
+        PropolisStateRequested::Stop
     );
 }
 
@@ -10665,10 +10658,7 @@ async fn test_instances_shutdown_policy_force_hardstop(
     expect_instance_stop_ok(client, instance_name, true).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
-        propolis_client::types::InstanceStateChange {
-            acpi_timeout_secs: None,
-            state: PropolisStateRequested::Stop
-        }
+        PropolisStateRequested::Stop
     );
 }
 
@@ -10696,10 +10686,7 @@ async fn test_instances_shutdown_policy_change_policy_and_send_hardstop_during_s
     expect_instance_stop_ok(client, instance_name, false).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
-        propolis_client::types::InstanceStateChange {
-            acpi_timeout_secs: Some(TIMEOUT_SECS),
-            state: PropolisStateRequested::AcpiStop
-        }
+        PropolisStateRequested::AcpiStop { timeout_secs: TIMEOUT_SECS }
     );
 
     let instance_hard = expect_instance_reconfigure_ok(
@@ -10727,10 +10714,7 @@ async fn test_instances_shutdown_policy_change_policy_and_send_hardstop_during_s
     expect_instance_stop_ok(client, instance_name, false).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
-        propolis_client::types::InstanceStateChange {
-            acpi_timeout_secs: None,
-            state: PropolisStateRequested::Stop
-        }
+        PropolisStateRequested::Stop
     );
 }
 
@@ -10758,10 +10742,7 @@ async fn test_instances_shutdown_policy_change_timeout_and_resend(
     expect_instance_stop_ok(client, instance_name, false).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
-        propolis_client::types::InstanceStateChange {
-            acpi_timeout_secs: Some(TIMEOUT_SECS),
-            state: PropolisStateRequested::AcpiStop
-        }
+        PropolisStateRequested::AcpiStop { timeout_secs: TIMEOUT_SECS }
     );
 
     const NEW_TIMEOUT_SECS: u64 = 76;
@@ -10796,10 +10777,7 @@ async fn test_instances_shutdown_policy_change_timeout_and_resend(
     expect_instance_stop_ok(client, instance_name, false).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
-        propolis_client::types::InstanceStateChange {
-            acpi_timeout_secs: Some(NEW_TIMEOUT_SECS),
-            state: PropolisStateRequested::AcpiStop
-        }
+        PropolisStateRequested::AcpiStop { timeout_secs: NEW_TIMEOUT_SECS }
     );
 }
 
@@ -10847,10 +10825,7 @@ async fn test_instances_shutdown_policy_unchanged_when_omitted_in_update(
     expect_instance_stop_ok(client, instance_name, false).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
-        propolis_client::types::InstanceStateChange {
-            acpi_timeout_secs: Some(TIMEOUT_SECS),
-            state: PropolisStateRequested::AcpiStop
-        }
+        PropolisStateRequested::AcpiStop { timeout_secs: TIMEOUT_SECS }
     );
 }
 
@@ -10878,9 +10853,8 @@ async fn test_instances_shutdown_policy_reboot(
     expect_instance_reboot_ok(client, instance_name).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
-        propolis_client::types::InstanceStateChange {
-            acpi_timeout_secs: Some(CUSTOM_TIMEOUT_SECS),
-            state: PropolisStateRequested::AcpiReboot
+        PropolisStateRequested::AcpiReboot {
+            timeout_secs: CUSTOM_TIMEOUT_SECS
         }
     );
 }
@@ -10909,18 +10883,14 @@ async fn test_instances_shutdown_policy_reboot_after_stop(
     expect_instance_stop_ok(client, instance_name, false).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
-        propolis_client::types::InstanceStateChange {
-            acpi_timeout_secs: Some(CUSTOM_TIMEOUT_SECS),
-            state: PropolisStateRequested::AcpiStop
-        }
+        PropolisStateRequested::AcpiStop { timeout_secs: CUSTOM_TIMEOUT_SECS }
     );
 
     expect_instance_reboot_ok(client, instance_name).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
-        propolis_client::types::InstanceStateChange {
-            acpi_timeout_secs: Some(CUSTOM_TIMEOUT_SECS),
-            state: PropolisStateRequested::AcpiReboot
+        PropolisStateRequested::AcpiReboot {
+            timeout_secs: CUSTOM_TIMEOUT_SECS
         }
     );
 }

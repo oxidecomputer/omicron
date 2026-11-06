@@ -113,7 +113,6 @@ pub mod instance {
     pub use crate::v1::instance::VmmPutStateResponse;
     pub use crate::v1::instance::VmmRuntimeState;
     pub use crate::v1::instance::VmmState;
-    pub use crate::v1::instance::VmmStateRequested;
     pub use crate::v1::instance::VmmUnregisterResponse;
     pub use crate::v1::instance::VpcPathParam;
 
@@ -132,6 +131,7 @@ pub mod instance {
     pub use crate::v59::instance::InstanceSledLocalConfig;
 
     pub use crate::v63::instance::VmmPutStateBody;
+    pub use crate::v63::instance::VmmStateRequested;
 }
 
 pub mod inventory {
