@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use anyhow::bail;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::Error;
+use omicron_common::now_db_precision;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
@@ -174,7 +175,7 @@ impl TrustQuorumConfig {
                     )
                 })
                 .collect(),
-            time_created: Utc::now(),
+            time_created: now_db_precision(),
             time_committing: None,
             time_committed: None,
             time_aborted: None,
@@ -190,7 +191,7 @@ impl TrustQuorumConfig {
         let num_members = u8::try_from(initial_members.len()).unwrap();
         assert!(num_members >= 3);
         assert!(num_members <= 32);
-        let now = Utc::now();
+        let now = now_db_precision();
         TrustQuorumConfig {
             rack_id,
             epoch: Epoch(1),

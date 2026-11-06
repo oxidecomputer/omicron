@@ -13,7 +13,6 @@ use crate::context::OpContext;
 use crate::db::model::to_db_sled_policy;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
@@ -38,6 +37,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::OptionalLookupResult;
 use omicron_common::bail_unless;
+use omicron_common::now_db_precision;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackKind;
 use omicron_uuid_kinds::RackUuid;
@@ -1253,7 +1253,7 @@ impl DataStore {
             .filter(dsl::share_digest.is_not_null())
             .set((
                 dsl::state.eq(DbTrustQuorumMemberState::Committed),
-                dsl::time_committed.eq(Some(Utc::now())),
+                dsl::time_committed.eq(Some(now_db_precision())),
             ))
             .execute_async(conn)
             .await?;
@@ -1311,7 +1311,7 @@ impl DataStore {
             .filter(dsl::state.eq(DbTrustQuorumMemberState::Unacked))
             .set((
                 dsl::state.eq(DbTrustQuorumMemberState::Prepared),
-                dsl::time_prepared.eq(Some(Utc::now())),
+                dsl::time_prepared.eq(Some(now_db_precision())),
             ))
             .execute_async(conn)
             .await?;
@@ -1379,7 +1379,7 @@ impl DataStore {
             ]))
             .set((
                 dsl::state.eq(DbTrustQuorumConfigurationState::Committing),
-                dsl::time_committing.eq(Some(Utc::now())),
+                dsl::time_committing.eq(Some(now_db_precision())),
             ))
             .execute_async(conn)
             .await?;
@@ -1409,7 +1409,7 @@ impl DataStore {
             .filter(dsl::state.eq(DbTrustQuorumConfigurationState::Committing))
             .set((
                 dsl::state.eq(DbTrustQuorumConfigurationState::Committed),
-                dsl::time_committed.eq(Some(Utc::now())),
+                dsl::time_committed.eq(Some(now_db_precision())),
             ))
             .execute_async(conn)
             .await?;
@@ -1442,7 +1442,7 @@ impl DataStore {
             .set((
                 dsl::state
                     .eq(DbTrustQuorumConfigurationState::CommittedPartially),
-                dsl::time_committed.eq(Some(Utc::now())),
+                dsl::time_committed.eq(Some(now_db_precision())),
             ))
             .execute_async(conn)
             .await?;
@@ -1475,7 +1475,7 @@ impl DataStore {
             ]))
             .set((
                 dsl::state.eq(DbTrustQuorumConfigurationState::Aborted),
-                dsl::time_aborted.eq(Some(Utc::now())),
+                dsl::time_aborted.eq(Some(now_db_precision())),
                 dsl::abort_reason.eq(Some(abort_reason)),
             ))
             .execute_async(conn)
@@ -2826,7 +2826,7 @@ mod tests {
         // So does soft-deleting one.
         diesel::update(sled_dsl::sled)
             .filter(sled_dsl::id.eq(sled_ids[1].into_untyped_uuid()))
-            .set(sled_dsl::time_deleted.eq(Some(Utc::now())))
+            .set(sled_dsl::time_deleted.eq(Some(now_db_precision())))
             .execute_async(&*conn)
             .await
             .unwrap();
@@ -2858,7 +2858,7 @@ mod tests {
             .filter(sled_dsl::id.eq(sled_ids[1].into_untyped_uuid()))
             .set(
                 sled_dsl::time_deleted
-                    .eq(Option::<chrono::DateTime<Utc>>::None),
+                    .eq(Option::<chrono::DateTime<chrono::Utc>>::None),
             )
             .execute_async(&*conn)
             .await
