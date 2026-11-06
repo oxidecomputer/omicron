@@ -23,6 +23,8 @@ ifdef::problem-version-retired[**Retired in**: {problem-version-retired}]
 
 == Description
 
+== Impact
+
 == Action Required
 
 == Automated Response
