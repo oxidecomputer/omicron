@@ -1,11 +1,20 @@
 [
   {
-    "code": 0,
+    "code": 1,
+    "description": {
+      "class": "hardware.disk",
+      "title": "Unhealthy Zpool",
+      "added_in": "24.0.0",
+      "retired_in": null
+    }
+  },
+  {
+    "code": 2,
     "description": {
       "class": "system",
-      "title": "Not a Real Problem",
+      "title": "Service in Maintainence",
       "added_in": "24.0.0",
-      "retired_in": "24.0.0"
+      "retired_in": null
     }
   }
 ]
