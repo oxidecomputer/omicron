@@ -256,17 +256,27 @@ pub(crate) enum InstanceStateChangeRequest {
     Migrate(InstanceMigrationTargetParams),
 }
 
-impl From<InstanceStateChangeRequest>
-    for sled_agent_client::types::VmmStateRequested
-{
-    fn from(value: InstanceStateChangeRequest) -> Self {
-        match value {
-            InstanceStateChangeRequest::Run => Self::Running,
-            InstanceStateChangeRequest::Reboot { .. } => Self::Reboot,
-            InstanceStateChangeRequest::Stop { .. } => Self::Stopped,
-            InstanceStateChangeRequest::Migrate(params) => {
-                Self::MigrationTarget(params)
+impl InstanceStateChangeRequest {
+    fn to_vmm(
+        self,
+        acpi_timeout_secs: Option<u64>,
+    ) -> sled_agent_client::types::VmmStateRequested {
+        use sled_agent_client::types::VmmStateRequested as VmmState;
+        match self {
+            Self::Run => VmmState::Running,
+            Self::Reboot { skip_os_shutdown: true } => {
+                VmmState::Reboot { acpi_timeout_secs: None }
             }
+            Self::Reboot { skip_os_shutdown: false } => {
+                VmmState::Reboot { acpi_timeout_secs: None }
+            }
+            Self::Stop { skip_os_shutdown: true } => {
+                VmmState::Stopped { acpi_timeout_secs }
+            }
+            Self::Stop { skip_os_shutdown: false } => {
+                VmmState::Stopped { acpi_timeout_secs }
+            }
+            Self::Migrate(params) => VmmState::MigrationTarget(params),
         }
     }
 }
@@ -1361,14 +1371,18 @@ impl super::Nexus {
                         // run instances in this state; these requests are fine
                         // and require no work on our part.
                         InstanceStateChangeRequest::Run
-                        | InstanceStateChangeRequest::Reboot { skip_os_shutdown: _ } => {
+                        | InstanceStateChangeRequest::Reboot {
+                            skip_os_shutdown: _,
+                        } => {
                             return Ok(
                                 InstanceStateChangeRequestAction::AlreadyDone,
                             );
                         }
                         // Stopping an instance in this state is fine; we'll
                         // stop trying to reincarnate it.
-                        InstanceStateChangeRequest::Stop { skip_os_shutdown: _ } => {
+                        InstanceStateChangeRequest::Stop {
+                            skip_os_shutdown: _,
+                        } => {
                             return Ok(
                                 InstanceStateChangeRequestAction::UpdateRuntime(
                                     instance_state
@@ -1517,8 +1531,7 @@ impl super::Nexus {
                     .vmm_put_state(
                         &propolis_id,
                         &VmmPutStateBody {
-                            state: requested.into(),
-                            acpi_timeout_secs,
+                            state: requested.to_vmm(acpi_timeout_secs),
                         },
                     )
                     .await

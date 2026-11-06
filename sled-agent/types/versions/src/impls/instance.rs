@@ -43,8 +43,14 @@ impl VmmStateRequested {
         match self {
             VmmStateRequested::MigrationTarget(_) => "migrating in",
             VmmStateRequested::Running => "running",
-            VmmStateRequested::Stopped => "stopped",
-            VmmStateRequested::Reboot => "reboot",
+            VmmStateRequested::Stopped { acpi_timeout_secs: None } => "stopped",
+            VmmStateRequested::Reboot { acpi_timeout_secs: None } => "reboot",
+            VmmStateRequested::Stopped { acpi_timeout_secs: Some(_) } => {
+                "acpi-stopped"
+            }
+            VmmStateRequested::Reboot { acpi_timeout_secs: Some(_) } => {
+                "acpi-reboot"
+            }
         }
     }
 }
@@ -90,8 +96,8 @@ impl VmmStateRequested {
         match self {
             VmmStateRequested::MigrationTarget(_) => false,
             VmmStateRequested::Running => false,
-            VmmStateRequested::Stopped => true,
-            VmmStateRequested::Reboot => false,
+            VmmStateRequested::Stopped { acpi_timeout_secs: _ } => true,
+            VmmStateRequested::Reboot { acpi_timeout_secs: _ } => false,
         }
     }
 }

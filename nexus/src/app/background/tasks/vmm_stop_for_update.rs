@@ -292,14 +292,13 @@ impl VmmStopForUpdate {
                 .vmm_put_state(
                     &vmm_id,
                     &VmmPutStateBody {
-                        state: VmmStateRequested::Stopped,
-                        // TODO can sled-agent take the shutdown policy directly
-                        // instead of an option?
-                        acpi_timeout_secs: match shutdown_policy {
-                            InstanceShutdownPolicy::HardOff => None,
-                            InstanceShutdownPolicy::PowerButton {
-                                timeout_secs,
-                            } => Some(u64::from(timeout_secs)),
+                        state: VmmStateRequested::Stopped {
+                            acpi_timeout_secs: match shutdown_policy {
+                                InstanceShutdownPolicy::HardOff => None,
+                                InstanceShutdownPolicy::PowerButton {
+                                    timeout_secs,
+                                } => Some(u64::from(timeout_secs)),
+                            },
                         },
                     },
                 )

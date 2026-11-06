@@ -235,7 +235,7 @@ impl SimInstanceInner {
                     }
                 }
             }
-            VmmStateRequested::Stopped => {
+            VmmStateRequested::Stopped { acpi_timeout_secs: _ } => {
                 match self.next_resting_state() {
                     VmmState::Starting => {
                         self.state.force_state_to_destroyed();
@@ -256,34 +256,36 @@ impl SimInstanceInner {
                     }
                 }
             }
-            VmmStateRequested::Reboot => match self.next_resting_state() {
-                VmmState::Running => {
-                    // Further requests to reboot are ignored if the instance
-                    // is currently rebooting or about to reboot.
-                    if self.state.vmm().state != VmmState::Rebooting
-                        && !self.reboot_pending()
-                    {
-                        self.state.transition_vmm(
-                            PublishedVmmState::Rebooting,
-                            Utc::now(),
-                        );
-                        self.queue_propolis_state(
-                            PropolisInstanceState::Rebooting,
-                        );
-                        self.queue_propolis_state(
-                            PropolisInstanceState::Running,
-                        );
+            VmmStateRequested::Reboot { acpi_timeout_secs: _ } => {
+                match self.next_resting_state() {
+                    VmmState::Running => {
+                        // Further requests to reboot are ignored if the instance
+                        // is currently rebooting or about to reboot.
+                        if self.state.vmm().state != VmmState::Rebooting
+                            && !self.reboot_pending()
+                        {
+                            self.state.transition_vmm(
+                                PublishedVmmState::Rebooting,
+                                Utc::now(),
+                            );
+                            self.queue_propolis_state(
+                                PropolisInstanceState::Rebooting,
+                            );
+                            self.queue_propolis_state(
+                                PropolisInstanceState::Running,
+                            );
+                        }
+                    }
+                    _ => {
+                        return Err(Error::invalid_request(&format!(
+                            "can't request Reboot with pending resting state {:?} \
+                        (current state: {:?})",
+                            self.next_resting_state(),
+                            self
+                        )));
                     }
                 }
-                _ => {
-                    return Err(Error::invalid_request(&format!(
-                        "can't request Reboot with pending resting state {:?} \
-                        (current state: {:?})",
-                        self.next_resting_state(),
-                        self
-                    )));
-                }
-            },
+            }
         }
 
         Ok(None)
@@ -336,8 +338,12 @@ impl SimInstanceInner {
             PropolisInstanceState::Running => VmmStateRequested::Running,
             PropolisInstanceState::Stopping
             | PropolisInstanceState::Stopped
-            | PropolisInstanceState::Destroyed => VmmStateRequested::Stopped,
-            PropolisInstanceState::Rebooting => VmmStateRequested::Reboot,
+            | PropolisInstanceState::Destroyed => {
+                VmmStateRequested::Stopped { acpi_timeout_secs: None }
+            }
+            PropolisInstanceState::Rebooting => {
+                VmmStateRequested::Reboot { acpi_timeout_secs: None }
+            }
         })
     }
 

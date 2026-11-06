@@ -10816,13 +10816,6 @@
         "description": "The body of a request to move a previously-ensured instance into a specific runtime state.",
         "type": "object",
         "properties": {
-          "acpi_timeout_secs": {
-            "nullable": true,
-            "description": "The number of seconds to wait between sending the VM guest a power button signal and forcefully terminating it, if it does not power itself down by then after receiving the signal.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
           "state": {
             "description": "The state into which the instance should be driven.",
             "allOf": [
@@ -10998,10 +10991,23 @@
                 "enum": [
                   "stopped"
                 ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "acpi_timeout_secs": {
+                    "nullable": true,
+                    "description": "The number of seconds to wait between sending the VM guest a power button signal and forcefully terminating it, if it does not power itself down by then after receiving the signal. If none, it is stopped with no prior power button signal.",
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0
+                  }
+                }
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
             ]
           },
           {
@@ -11013,10 +11019,23 @@
                 "enum": [
                   "reboot"
                 ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "acpi_timeout_secs": {
+                    "nullable": true,
+                    "description": "The number of seconds to wait between sending the VM guest a power button signal and forcefully rebooting it, if it does not power itself down by then after receiving the signal. If none, it is rebooted with no prior power button signal.",
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0
+                  }
+                }
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
             ]
           }
         ]
