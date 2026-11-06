@@ -819,8 +819,7 @@ impl SledAgent {
                     );
                     tokio::spawn(async move {
                         tokio::time::sleep(Duration::from_secs(10)).await;
-                        match fut.await
-                        {
+                        match fut.await {
                             Ok(state) => {
                                 let vmm_state: nexus_client::types::SledVmmState = state.into();
                                 info!(log, "sim_ensure success"; "vmm_state" => #?vmm_state);
