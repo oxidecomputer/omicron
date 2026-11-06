@@ -52,7 +52,7 @@ use std::sync::Arc;
 #[repr(u32)]
 pub enum ProblemCode {
     UnhealthyZpool = 1,
-    SmfSvcsInMaintainance = 2,
+    SmfSvcsInMaintainence = 2,
 }
 
 macro_rules! problem_descriptions {
@@ -93,9 +93,9 @@ problem_descriptions! {
         added_in: semver::Version::new(24, 0, 0),
         retired_in: None,
     },
-    SmfSvcsInMaintainance {
-        title: "Unhealthy Zpool",
-        class: PhysicalDisk,
+    SmfSvcsInMaintainence {
+        title: "Service in Maintainence",
+        class: System,
         added_in: semver::Version::new(24, 0, 0),
         retired_in: None,
     }
