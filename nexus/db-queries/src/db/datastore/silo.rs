@@ -562,9 +562,7 @@ impl DataStore {
             "deleted {} password hashes for silo {}", updated_rows, id
         );
 
-        // delete role assignments held by the silo's users (on any resource,
-        // including the fleet, which outlives the silo). This must run before
-        // the users are marked deleted, since the subquery filters on that.
+        // delete role assignments held by the silo's users
         let updated_rows =
             diesel::delete(role_assignment::dsl::role_assignment)
                 .filter(
