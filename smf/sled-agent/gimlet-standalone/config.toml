@@ -74,3 +74,10 @@ resolve = { which = "ipcc" }
 attest = { which = "ipcc" }
 roots = ["/usr/share/oxide/idcerts/staging.pem", "/usr/share/oxide/idcerts/production.pem"]
 enforce = "Enforced"
+
+# Support Shell (RFD 620).
+[sush]
+production_platform_root = "/usr/share/oxide/idcerts/production.pem"
+staging_platform_root = "/usr/share/oxide/idcerts/staging.pem"
+production_trust_anchors = ["/opt/oxide/sled-agent/pkg/support-shell-production-a1.pem"]
+staging_trust_anchors = ["/opt/oxide/sled-agent/pkg/support-shell-lab-a1.pem"]
