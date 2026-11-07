@@ -10,8 +10,6 @@ pub mod instance {
     use crate::v1::instance::VmmStateRequested as VmmStateRequestedV1;
 
     /// Requestable running state of an Instance.
-    ///
-    /// A subset of [`omicron_common::api::external::InstanceState`].
     #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
     #[serde(rename_all = "snake_case", tag = "type", content = "value")]
     pub enum VmmStateRequested {

@@ -10531,10 +10531,12 @@ async fn setup_shutdown_test_instance_and_mock_propolis(
 
     // sled-agent-sim is a little *too* sim. it doesn't send mock propolis
     // the instance_state_monitor calls it needs to advance through
-    // requested states (nor does it send it the 'run' requested state.)
+    // requested states.
     // TODO(?) enhance sled-agent-sim accordingly, if that makes sense.
     // for now we have to probe the mock server's instance state monitor
     // endpoint ourself.
+    // (aspirationally, we would abolish sled-agent-sim and test the real
+    // sled-agent against a more convincing mock-propolis.)
     async fn propolis_state_monitor(
         propolis_client: &propolis_client::Client,
         gen_: u64,
@@ -10547,16 +10549,7 @@ async fn setup_shutdown_test_instance_and_mock_propolis(
             .expect("instance state monitor response to mock server failed")
             .into_inner()
     }
-    async fn propolis_state_put_run(propolis_client: &propolis_client::Client) {
-        propolis_client
-            .instance_state_put()
-            .body(PropolisStateRequested::Run)
-            .send()
-            .await
-            .expect("instance state put to mock server failed");
-    }
 
-    propolis_state_put_run(&propolis_client).await;
     let mut generation = 0;
     let state = propolis_state_monitor(&propolis_client, generation).await;
     assert_eq!(state.gen_, generation);
@@ -10571,11 +10564,10 @@ async fn setup_shutdown_test_instance_and_mock_propolis(
     assert_eq!(state.state, PropolisState::Running);
 
     // advance the sled-agent too, so we can send reboots.
-    // FIXME: this hangs indefinitely, actually - why doesn't sim_ensure actually
-    // transition us from Starting to Running when there's a mock propolis?
-    // let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
-    // instance_simulate(&cptestctx.server.server_context().nexus, &instance_id).await;
-    // instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    instance_simulate(&cptestctx.server.server_context().nexus, &instance_id)
+        .await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
 
     (instance, propolis_addr)
 }
@@ -10842,27 +10834,25 @@ async fn test_instances_shutdown_policy_reboot(
 ) {
     let client = &cptestctx.external_client;
     let instance_name = "resonance-cascade";
-    const CUSTOM_TIMEOUT_SECS: u64 = 531;
-    let custom_policy = instance::InstanceShutdownPolicy::PowerButton {
-        timeout_secs: CUSTOM_TIMEOUT_SECS.try_into().unwrap(),
+    const TIMEOUT_SECS: u64 = 531;
+    let policy = instance::InstanceShutdownPolicy::PowerButton {
+        timeout_secs: TIMEOUT_SECS.try_into().unwrap(),
     };
 
     let (instance, propolis_addr) =
         setup_shutdown_test_instance_and_mock_propolis(
             &cptestctx,
             instance_name,
-            custom_policy,
+            policy,
         )
         .await;
 
-    assert_eq!(instance.shutdown_policy, custom_policy);
+    assert_eq!(instance.shutdown_policy, policy);
 
     expect_instance_reboot_ok(client, instance_name).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
-        PropolisStateRequested::AcpiReboot {
-            timeout_secs: CUSTOM_TIMEOUT_SECS
-        }
+        PropolisStateRequested::AcpiReboot { timeout_secs: TIMEOUT_SECS }
     );
 }
 
@@ -10872,32 +10862,30 @@ async fn test_instances_shutdown_policy_reboot_after_stop(
 ) {
     let client = &cptestctx.external_client;
     let instance_name = "resonance-cascade";
-    const CUSTOM_TIMEOUT_SECS: u64 = 531;
-    let custom_policy = instance::InstanceShutdownPolicy::PowerButton {
-        timeout_secs: CUSTOM_TIMEOUT_SECS.try_into().unwrap(),
+    const TIMEOUT_SECS: u64 = 531;
+    let policy = instance::InstanceShutdownPolicy::PowerButton {
+        timeout_secs: TIMEOUT_SECS.try_into().unwrap(),
     };
 
     let (instance, propolis_addr) =
         setup_shutdown_test_instance_and_mock_propolis(
             &cptestctx,
             instance_name,
-            custom_policy,
+            policy,
         )
         .await;
 
-    assert_eq!(instance.shutdown_policy, custom_policy);
+    assert_eq!(instance.shutdown_policy, policy);
 
     expect_instance_stop_ok(client, instance_name, false).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
-        PropolisStateRequested::AcpiStop { timeout_secs: CUSTOM_TIMEOUT_SECS }
+        PropolisStateRequested::AcpiStop { timeout_secs: TIMEOUT_SECS }
     );
 
     expect_instance_reboot_ok(client, instance_name).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
-        PropolisStateRequested::AcpiReboot {
-            timeout_secs: CUSTOM_TIMEOUT_SECS
-        }
+        PropolisStateRequested::AcpiReboot { timeout_secs: TIMEOUT_SECS }
     );
 }

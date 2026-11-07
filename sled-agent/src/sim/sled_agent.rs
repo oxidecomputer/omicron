@@ -799,11 +799,6 @@ impl SledAgent {
         let current =
             self.get_sim_instance(propolis_id).await?.current().clone();
 
-        let vmms = Arc::clone(&self.vmms);
-        let fut = async move {
-            vmms.sim_ensure(&propolis_id, current, Some(state)).await
-        };
-
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
             let p_state = match state {
@@ -813,24 +808,7 @@ impl SledAgent {
                     )
                     .into());
                 }
-                VmmStateRequested::Running => {
-                    let log = self.log.new(
-                        o!("component" => "SledAgent-insure_instance_state"),
-                    );
-                    tokio::spawn(async move {
-                        tokio::time::sleep(Duration::from_secs(10)).await;
-                        match fut.await {
-                            Ok(state) => {
-                                let vmm_state: nexus_client::types::SledVmmState = state.into();
-                                info!(log, "sim_ensure success"; "vmm_state" => #?vmm_state);
-                            }
-                            Err(instance_put_error) => {
-                                error!(log, "sim_ensure failure"; "error" => #?instance_put_error);
-                            }
-                        }
-                    });
-                    return Ok(VmmPutStateResponse { updated_runtime: None });
-                }
+                VmmStateRequested::Running => PropolisStateRequested::Run,
                 VmmStateRequested::Stopped { acpi_timeout_secs } => {
                     if let Some(timeout_secs) = acpi_timeout_secs {
                         PropolisStateRequested::AcpiStop { timeout_secs }
@@ -857,28 +835,40 @@ impl SledAgent {
             )?;
         }
 
-        // don't immediately "terminate" the "vmm" for soft-shutdown requests.
-        let nexus_client = Arc::clone(&self.nexus_client);
-        match state {
-            VmmStateRequested::Stopped { acpi_timeout_secs: Some(timeout) }
-            | VmmStateRequested::Reboot { acpi_timeout_secs: Some(timeout) } => {
-                tokio::spawn(async move {
-                    tokio::time::sleep(Duration::from_secs(timeout)).await;
-                    if let Ok(new_state) = fut.await {
-                        let _: Result<_, _> = nexus_client
-                            .cpapi_instances_put(
-                                &propolis_id,
-                                &new_state.into(),
-                            )
-                            .await;
+        let vmms = Arc::clone(&self.vmms);
+        let fut = async move {
+            // sim_ensure calls cpapi_instances_put (via .notify()) as well
+            vmms.sim_ensure(&propolis_id, current, Some(state)).await
+        };
+        let delay = match state {
+            // don't immediately stop/reboot for soft-shutdown requests.
+            VmmStateRequested::Stopped { acpi_timeout_secs }
+            | VmmStateRequested::Reboot { acpi_timeout_secs } => {
+                acpi_timeout_secs.map(Duration::from_secs)
+            }
+            _ => None,
+        };
+        if let Some(timeout) = delay {
+            let log = self
+                .log
+                .new(o!("component" => "SledAgent-instance_ensure_state"));
+            tokio::spawn(async move {
+                tokio::time::sleep(timeout).await;
+                match fut.await {
+                    Ok(state) => {
+                        let vmm_state: nexus_client::types::SledVmmState =
+                            state.into();
+                        info!(log, "sim_ensure success"; "vmm_state" => #?vmm_state);
                     }
-                });
-                Ok(VmmPutStateResponse { updated_runtime: None })
-            }
-            _ => {
-                let new_state = fut.await?;
-                Ok(VmmPutStateResponse { updated_runtime: Some(new_state) })
-            }
+                    Err(instance_put_error) => {
+                        error!(log, "sim_ensure failure"; "error" => #?instance_put_error);
+                    }
+                }
+            });
+            Ok(VmmPutStateResponse { updated_runtime: None })
+        } else {
+            let new_state = fut.await?;
+            Ok(VmmPutStateResponse { updated_runtime: Some(new_state) })
         }
     }
 
