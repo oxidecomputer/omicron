@@ -929,7 +929,7 @@ xshell = "0.2.7"
 zerocopy = "0.8.26"
 zeroize = { version = "1.8.1", features = ["zeroize_derive", "serde", "std"] }
 zfs-test-harness = { path = "sled-storage/zfs-test-harness" }
-zip = { version = "4.2.0", default-features = false, features = ["deflate","bzip2"] }
+zip = { version = "9.0.0", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3.1", default-features = false, features = ["async"] }
 zstd = { version = "0.13.3", default-features = false }
 
