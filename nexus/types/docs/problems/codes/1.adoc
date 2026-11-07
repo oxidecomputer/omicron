@@ -1,7 +1,7 @@
 == Description
 
-A compute sled has reported that the ZFS pool on an in-service U.2 SSDs is in an
-unhealthy state.
+A compute sled has reported that the ZFS pool on an in-service physical disk
+(i.e. a U.2 SSD) is in an unhealthy state.
 
 This generally occurs because the physical disk storing the ZFS pool has failed.
 
@@ -11,9 +11,9 @@ Reading and writing data stored on the unhealthy physical disk will fail.
 
 Depending on what data is stored on the unhealthy physical disk, distributed
 virtual disks, local virtual disks, and/or control plane services may be
-impacted. Data backing distributed disks is replicated on other SSDs, so
-distributed disk data is not lost. Local disks stored on the impacted SSD may be
-unrecoverable.
+impacted. Data backing distributed disks is replicated on other physical disks,
+so distributed disk data is not lost. Local disks stored on the impacted
+physical disk may be unrecoverable.
 
 == Action Required
 
