@@ -58,6 +58,7 @@ use nexus_db_schema::schema::fm_support_bundle_request::dsl as support_bundle_re
 use nexus_types::fm;
 use nexus_types::fm::Sitrep;
 use nexus_types::fm::case::CaseProblem;
+use nexus_types::fm::problem::AllProblems;
 use nexus_types::fm::problem::SitrepProblem;
 use nexus_types::fm::problem::SitrepRevision;
 use nexus_types::support_bundle::{BundleData, BundleDataSelection};
@@ -545,7 +546,7 @@ impl DataStore {
         &self,
         sitrep_id: SitrepUuid,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<IdOrdMap<fm::problem::SitrepProblem>, Error> {
+    ) -> Result<AllProblems, Error> {
         use nexus_db_schema::schema::fm_problem::dsl;
         use nexus_db_schema::schema::fm_problem_revision::dsl as rev_dsl;
 
@@ -682,7 +683,13 @@ impl DataStore {
             return Err(Error::InternalError { internal_message });
         }
 
-        Ok(problems)
+        AllProblems::try_from_iter(problems).map_err(|e| {
+            let internal_message = format!(
+                "failed to construct problem index for sitrep \
+                 {sitrep_id}: {e:#}"
+            );
+            Error::InternalError { internal_message }
+        })
     }
 
     /// Fetch all links between problems and alerts in the given sitrep,
@@ -3752,7 +3759,14 @@ mod tests {
             },
             cases,
             ereports_by_id,
-            problems: [resolved_problem, shared_problem].into_iter().collect(),
+            problems: AllProblems::try_from_iter([
+                resolved_problem,
+                shared_problem,
+            ])
+            .expect(
+                "test problems have distinct IDs and at least one revision \
+                 each",
+            ),
         }
     }
 
