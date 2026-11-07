@@ -35,6 +35,7 @@ pub mod path_params;
 pub mod physical_disk;
 pub mod policy;
 pub mod probe;
+pub mod problem;
 pub mod project;
 pub mod rack;
 pub mod saml;
