@@ -553,12 +553,29 @@ impl DataStore {
         )
         .await?;
 
+        let latest_epoch = latest_config.as_ref().map(|c| c.epoch);
+        // Check for an outdated epoch.
+        //
+        // The proposed epoch is computed to be `latest + 1`, so another
+        // reconfiguration could race with this one. In this case, the caller
+        // should retry.
+        if let Some(latest_epoch) = latest_epoch
+            && proposed.epoch <= latest_epoch
+        {
+            return Err(Error::conflict(format!(
+                "Trust quorum reconfiguration in progress: a configuration \
+                at epoch {latest_epoch} was proposed concurrently with this \
+                one (proposed epoch {}). Retry the request.",
+                proposed.epoch
+            ))
+            .into());
+        }
+
         // Ensure that epochs are sequential or this is the inital attempt at an
         // LRTQ upgrade.
         //
         // In the latter case the proposed epoch will be 2, as LRTQ has an epoch
         // of 1 that is encoded as a ZFS dataset property.
-        let latest_epoch = latest_config.as_ref().map(|c| c.epoch);
         bail_unless!(
             latest_epoch == proposed.epoch.previous()
                 || (latest_epoch.is_none()
@@ -578,12 +595,15 @@ impl DataStore {
         if let Some(latest_config) = latest_config {
             // If the configuration is being prepared then it must be aborted
             // before a reconfiguration can occur.
-            bail_unless!(
-                !latest_config.state.is_preparing(),
-                "Trust Quorum reconfiguration in progress: still preparing \
-                in epoch {}. Configuration must be aborted to reconfigure.",
-                latest_config.epoch
-            );
+            if latest_config.state.is_preparing() {
+                return Err(Error::conflict(format!(
+                    "Trust quorum reconfiguration in progress: still \
+                    preparing in epoch {}. Wait for it to finish and retry, \
+                    or abort it to reconfigure now.",
+                    latest_config.epoch
+                ))
+                .into());
+            }
 
             // If the latest configuration is at least committing, then the
             // proposed configuration must have the last committed configuration
@@ -604,6 +624,18 @@ impl DataStore {
 
                 last_committed_config = Some(latest_config);
             } else if latest_config.state.is_aborted() {
+                // In this case, the caller should retry.
+                if proposed.last_committed_epoch() == Some(latest_config.epoch)
+                {
+                    return Err(Error::conflict(format!(
+                        "Trust quorum reconfiguration in progress: the \
+                        configuration at epoch {} that this one builds on was \
+                        aborted concurrently. Retry the request.",
+                        latest_config.epoch
+                    ))
+                    .into());
+                }
+
                 // Inductively,the latest configuration should not have
                 // been written to the database unless its last committed
                 // configuration was valid.
@@ -667,16 +699,16 @@ impl DataStore {
                     // K + Z
                     let min = last_committed_config.threshold.0 as usize
                         + last_committed_config.commit_crash_tolerance as usize;
-                    bail_unless!(
-                        acked >= min,
-                        "Trust quorum reconfiguration in progress: not enough \
-                         nodes have acked commit in epoch {}. Expected at \
-                         least {} acks, Got {} acks. If this persists please \
-                         contact Oxide support.",
-                        last_committed_config.epoch,
-                        min,
-                        acked
-                    );
+                    if acked < min {
+                        return Err(Error::conflict(format!(
+                            "Trust quorum reconfiguration in progress: not \
+                            enough nodes have acked commit in epoch {}. \
+                            Expected at least {} acks, Got {} acks. If this \
+                            persists please contact Oxide support.",
+                            last_committed_config.epoch, min, acked
+                        ))
+                        .into());
+                    }
                     should_commit_partially = true;
                 }
 
@@ -1770,6 +1802,97 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    #[track_caller]
+    fn assert_conflict(result: Result<(), Error>, expected: &str) {
+        match result {
+            Err(Error::Conflict { message }) => {
+                assert_eq!(message.external_message(), expected);
+            }
+            other => panic!("expected Conflict {expected:?}, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_tq_insert_latest_conflicts_while_reconfiguring() {
+        let logctx = test_setup_log(
+            "test_tq_insert_latest_conflicts_while_reconfiguring",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let hw_ids = insert_hw_baseboard_ids(&db).await;
+        let rack_id = RackUuid::new_v4();
+        let members: BTreeSet<_> =
+            hw_ids.iter().cloned().map(BaseboardId::from).collect();
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        DataStore::tq_insert_rss_config_after_handoff(
+            opctx,
+            &conn,
+            make_authz_tq(rack_id),
+            members.clone(),
+            members.first().unwrap().clone(),
+        )
+        .await
+        .unwrap();
+
+        let proposal =
+            |epoch: u64, last_committed_epoch: u64| ProposedTrustQuorumConfig {
+                rack_id,
+                epoch: Epoch(epoch),
+                is_lrtq_upgrade: IsLrtqUpgrade::No {
+                    last_committed_epoch: Epoch(last_committed_epoch),
+                },
+                members: members.clone(),
+            };
+
+        datastore.tq_insert_latest_config(opctx, proposal(2, 1)).await.unwrap();
+
+        assert_conflict(
+            datastore.tq_insert_latest_config(opctx, proposal(3, 1)).await,
+            "Trust quorum reconfiguration in progress: still preparing in \
+             epoch 2. Wait for it to finish and retry, or abort it to \
+             reconfigure now.",
+        );
+        assert_conflict(
+            datastore.tq_insert_latest_config(opctx, proposal(2, 1)).await,
+            "Trust quorum reconfiguration in progress: a configuration at \
+             epoch 2 was proposed concurrently with this one (proposed epoch \
+             2). Retry the request.",
+        );
+        match datastore.tq_insert_latest_config(opctx, proposal(4, 1)).await {
+            Err(Error::InternalError { internal_message }) => assert!(
+                internal_message.starts_with(
+                    "Epochs for trust quorum configurations must be \
+                     sequential."
+                ),
+                "unexpected message {internal_message:?}",
+            ),
+            other => panic!("expected InternalError, got {other:?}"),
+        }
+
+        // If epoch 2 is aborted before the insert, that's a lost race too.
+        datastore
+            .tq_abort_config(
+                opctx,
+                make_authz_tq(rack_id),
+                Epoch(2),
+                "test".into(),
+            )
+            .await
+            .unwrap();
+        assert_conflict(
+            datastore.tq_insert_latest_config(opctx, proposal(3, 2)).await,
+            "Trust quorum reconfiguration in progress: the configuration at \
+             epoch 2 that this one builds on was aborted concurrently. Retry \
+             the request.",
+        );
+        datastore.tq_insert_latest_config(opctx, proposal(3, 1)).await.unwrap();
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     #[tokio::test]
     async fn test_tq_insert_initial_lrtq_upgrade() {
         let logctx = test_setup_log("test_tq_insert_initial_lrtq_upgrade");
@@ -1876,11 +1999,12 @@ mod tests {
             },
             members: members.clone(),
         };
-        let e = datastore
-            .tq_insert_latest_config(opctx, bad_config)
-            .await
-            .unwrap_err();
-        println!("{e}");
+        assert_conflict(
+            datastore.tq_insert_latest_config(opctx, bad_config).await,
+            "Trust quorum reconfiguration in progress: still preparing in \
+             epoch 2. Wait for it to finish and retry, or abort it to \
+             reconfigure now.",
+        );
 
         // Trying to ack commits should fail since we are currently preparing
         let acked_commits = members.clone();
@@ -2178,11 +2302,16 @@ mod tests {
             },
             members: members.clone(),
         };
-        let e = datastore
-            .tq_insert_latest_config(opctx, next_config.clone())
-            .await
-            .unwrap_err();
-        println!("{e}");
+        assert_conflict(
+            datastore.tq_insert_latest_config(opctx, next_config.clone()).await,
+            &format!(
+                "Trust quorum reconfiguration in progress: not enough nodes \
+                 have acked commit in epoch 2. Expected at least {min_acks} \
+                 acks, Got {} acks. If this persists please contact Oxide \
+                 support.",
+                0
+            ),
+        );
 
         // Commit at K + Z - 1 nodes
         datastore
@@ -2223,11 +2352,16 @@ mod tests {
         // Insert should fail since again, there is not enough nodes:
         //
         // We have acked K+Z - 1 and not K+Z
-        let e = datastore
-            .tq_insert_latest_config(opctx, next_config.clone())
-            .await
-            .unwrap_err();
-        println!("{e}");
+        assert_conflict(
+            datastore.tq_insert_latest_config(opctx, next_config.clone()).await,
+            &format!(
+                "Trust quorum reconfiguration in progress: not enough nodes \
+                 have acked commit in epoch 2. Expected at least {min_acks} \
+                 acks, Got {} acks. If this persists please contact Oxide \
+                 support.",
+                min_acks - 1
+            ),
+        );
 
         // Commit at K + Z
         datastore
