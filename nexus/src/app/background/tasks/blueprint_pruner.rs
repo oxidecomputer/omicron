@@ -747,6 +747,7 @@ mod test {
     use nexus_types::deployment::ReconfiguratorConfig;
     use nexus_types::deployment::ReconfiguratorConfigParam;
     use nexus_types::deployment::ReconfiguratorConfigView;
+    use nexus_types::deployment::ReflectsCollection;
     use nexus_types::internal_api::background::BlueprintPrunerDetails;
     use nexus_types::internal_api::background::BlueprintPrunerStatus;
     use omicron_test_utils::dev;
@@ -920,6 +921,7 @@ mod test {
             let builder = BlueprintBuilder::new_based_on(
                 &opctx.log,
                 &parent_blueprint,
+                ReflectsCollection::Indeterminate,
                 "test-suite",
                 planner_rng,
             )

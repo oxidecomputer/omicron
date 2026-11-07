@@ -57,7 +57,9 @@ use nexus_types::deployment::{
 use nexus_types::deployment::{
     BlueprintHostPhase2DesiredSlots, PlanningReport,
 };
-use nexus_types::deployment::{BlueprintPhysicalDiskConfig, BlueprintSource};
+use nexus_types::deployment::{
+    BlueprintPhysicalDiskConfig, BlueprintSource, ReflectsCollection,
+};
 use nexus_types::deployment::{BlueprintZoneImageSource, blueprint_zone_type};
 use nexus_types::deployment::{
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingAddrs,
@@ -73,9 +75,10 @@ use omicron_generation_kinds::{
 };
 use omicron_git_version_types::GitVersion;
 use omicron_uuid_kinds::{
-    BlueprintKind, BlueprintUuid, DatasetKind, ExternalIpKind, GenericUuid,
-    MupdateOverrideKind, OmicronZoneKind, OmicronZoneUuid, PhysicalDiskKind,
-    SledKind, SledUuid, ZpoolKind, ZpoolUuid,
+    BlueprintKind, BlueprintUuid, CollectionKind, CollectionUuid, DatasetKind,
+    ExternalIpKind, GenericUuid, MupdateOverrideKind, OmicronZoneKind,
+    OmicronZoneUuid, PhysicalDiskKind, SledKind, SledUuid, ZpoolKind,
+    ZpoolUuid,
 };
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::inventory::NetworkInterface;
@@ -104,6 +107,140 @@ pub struct Blueprint {
     pub nexus_generation: DbTypedGeneration<NexusGenerationKind>,
     pub source: DbBpSource,
     pub external_networking_generation: Generation,
+    #[diesel(embed)]
+    reflects_collection: DbReflectsCollection,
+}
+
+impl Blueprint {
+    /// Returns which inventory collection this blueprint reflects
+    pub fn reflects_collection(&self) -> ReflectsCollection {
+        self.reflects_collection.0
+    }
+}
+
+/// Database representation of [`ReflectsCollection`]
+///
+/// This is stored in three nullable columns of the `blueprint` table.  The
+/// database requires these to be either all NULL or all non-NULL.  Loading a
+/// row fails if that is not the case, so a value of this type is always valid.
+#[derive(Clone, Copy, Debug)]
+pub struct DbReflectsCollection(ReflectsCollection);
+
+/// Values of the columns that store a [`DbReflectsCollection`]
+type ReflectsCollectionRow = (
+    Option<DbTypedUuid<CollectionKind>>,
+    Option<DateTime<Utc>>,
+    Option<DateTime<Utc>>,
+);
+
+impl diesel::Selectable<diesel::pg::Pg> for DbReflectsCollection {
+    type SelectExpression = (
+        blueprint::reflects_collection_id,
+        blueprint::reflects_collection_time_started,
+        blueprint::reflects_collection_time_done,
+    );
+
+    fn construct_selection() -> Self::SelectExpression {
+        (
+            blueprint::reflects_collection_id,
+            blueprint::reflects_collection_time_started,
+            blueprint::reflects_collection_time_done,
+        )
+    }
+}
+
+impl<ST> diesel::deserialize::Queryable<ST, diesel::pg::Pg>
+    for DbReflectsCollection
+where
+    ReflectsCollectionRow:
+        diesel::deserialize::FromStaticSqlRow<ST, diesel::pg::Pg>,
+{
+    type Row = ReflectsCollectionRow;
+
+    fn build(row: Self::Row) -> diesel::deserialize::Result<Self> {
+        match row {
+            (Some(collection_id), Some(time_started), Some(time_done)) => {
+                Ok(DbReflectsCollection(ReflectsCollection::Collection {
+                    collection_id: collection_id.into(),
+                    time_started,
+                    time_done,
+                }))
+            }
+            (None, None, None) => {
+                Ok(DbReflectsCollection(ReflectsCollection::Indeterminate))
+            }
+            (collection_id, time_started, time_done) => {
+                Err(Box::new(InvalidReflectsCollection {
+                    collection_id: collection_id.map(From::from),
+                    time_started,
+                    time_done,
+                }))
+            }
+        }
+    }
+}
+
+/// Error returned when a blueprint row's `reflects_collection_*` columns are
+/// neither all NULL nor all non-NULL
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "columns describing the reflected inventory collection are only \
+     partially set (collection_id = {collection_id:?}, \
+     time_started = {time_started:?}, time_done = {time_done:?})"
+)]
+pub struct InvalidReflectsCollection {
+    collection_id: Option<CollectionUuid>,
+    time_started: Option<DateTime<Utc>>,
+    time_done: Option<DateTime<Utc>>,
+}
+
+impl diesel::Insertable<blueprint::table> for DbReflectsCollection {
+    type Values = <ReflectsCollectionColumns as diesel::Insertable<
+        blueprint::table,
+    >>::Values;
+
+    fn values(self) -> Self::Values {
+        ReflectsCollectionColumns::from(self).values()
+    }
+}
+
+impl diesel::Insertable<blueprint::table> for &'_ DbReflectsCollection {
+    type Values =
+        <DbReflectsCollection as diesel::Insertable<blueprint::table>>::Values;
+
+    fn values(self) -> Self::Values {
+        (*self).values()
+    }
+}
+
+/// Columns used to insert a [`DbReflectsCollection`]
+#[derive(Insertable)]
+#[diesel(table_name = blueprint)]
+pub struct ReflectsCollectionColumns {
+    reflects_collection_id: Option<DbTypedUuid<CollectionKind>>,
+    reflects_collection_time_started: Option<DateTime<Utc>>,
+    reflects_collection_time_done: Option<DateTime<Utc>>,
+}
+
+impl From<DbReflectsCollection> for ReflectsCollectionColumns {
+    fn from(value: DbReflectsCollection) -> Self {
+        match value.0 {
+            ReflectsCollection::Collection {
+                collection_id,
+                time_started,
+                time_done,
+            } => ReflectsCollectionColumns {
+                reflects_collection_id: Some(collection_id.into()),
+                reflects_collection_time_started: Some(time_started),
+                reflects_collection_time_done: Some(time_done),
+            },
+            ReflectsCollection::Indeterminate => ReflectsCollectionColumns {
+                reflects_collection_id: None,
+                reflects_collection_time_started: None,
+                reflects_collection_time_done: None,
+            },
+        }
+    }
 }
 
 impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
@@ -128,6 +265,7 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
             external_networking_generation: Generation(
                 bp.external_networking_generation,
             ),
+            reflects_collection: DbReflectsCollection(bp.reflects_collection),
         }
     }
 }
@@ -137,6 +275,7 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
         Self {
             id: value.id.into(),
             parent_blueprint_id: value.parent_blueprint_id.map(From::from),
+            reflects_collection: value.reflects_collection(),
             internal_dns_version: *value.internal_dns_version,
             external_dns_version: *value.external_dns_version,
             target_release_minimum_generation: value

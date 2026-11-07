@@ -63,6 +63,7 @@ use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::ReconfiguratorConfig;
+use nexus_types::deployment::ReflectsCollection;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::sled::SledState;
 use nexus_types::internal_api::params::DnsConfigParams;
@@ -852,6 +853,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             sleds,
             pending_mgs_updates: PendingMgsUpdates::new(),
             parent_blueprint_id: None,
+            reflects_collection: ReflectsCollection::Indeterminate,
             internal_dns_version: dns_config.generation,
             external_dns_version: Generation::new(),
             target_release_minimum_generation: TargetReleaseGeneration::new(),

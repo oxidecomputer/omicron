@@ -24,6 +24,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::ReflectsCollection;
 use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
@@ -270,6 +271,7 @@ impl ReconfiguratorCliTestState {
             let mut builder = BlueprintBuilder::new_based_on(
                 &log,
                 blueprint,
+                ReflectsCollection::Indeterminate,
                 "ReconfiguratorCliTestState",
                 rng,
             )?;

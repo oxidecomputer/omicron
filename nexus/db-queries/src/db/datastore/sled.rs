@@ -2567,6 +2567,7 @@ pub(in crate::db::datastore) mod test {
     use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
     use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+    use nexus_types::deployment::ReflectsCollection;
     use nexus_types::external_api::{affinity, disk, instance};
     use nexus_types::identity::Asset;
     use nexus_types::identity::Resource;
@@ -3221,6 +3222,7 @@ pub(in crate::db::datastore) mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &opctx.log,
             parent,
+            ReflectsCollection::Indeterminate,
             "sled_reservation_tests",
             PlannerRng::from_entropy(),
         )
@@ -5396,6 +5398,7 @@ pub(in crate::db::datastore) mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &opctx.log,
             &empty,
+            ReflectsCollection::Indeterminate,
             "local storage tests",
             PlannerRng::from_entropy(),
         )
