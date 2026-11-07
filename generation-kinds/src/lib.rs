@@ -19,6 +19,8 @@ pub use oxide_generation::{
 
 use oxide_generation_macros::impl_typed_generation_kinds;
 
+pub use self::ProblemGeneration as ProblemRevNum;
+
 // NOTE:
 //
 // This should generally be an append-only list. Removing items from this list
