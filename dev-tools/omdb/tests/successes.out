@@ -909,6 +909,8 @@ task: "fm_sitrep_gc"
       batches:                                                                    1
     orphaned fm_case rows deleted:                                                0
       batches:                                                                    1
+    orphaned fm_case_problem rows deleted:                                        0
+      batches:                                                                    1
     orphaned fm_ereport_in_case rows deleted:                                     0
       batches:                                                                    1
     orphaned fm_fact_certificate rows deleted:                                    0
@@ -916,6 +918,14 @@ task: "fm_sitrep_gc"
     orphaned fm_fact_physical_disk rows deleted:                                  0
       batches:                                                                    1
     orphaned fm_fact_saga rows deleted:                                           0
+      batches:                                                                    1
+    orphaned fm_problem rows deleted:                                             0
+      batches:                                                                    1
+    orphaned fm_problem_alert rows deleted:                                       0
+      batches:                                                                    1
+    orphaned fm_problem_revision rows deleted:                                    0
+      batches:                                                                    1
+    orphaned fm_problem_support_bundle rows deleted:                              0
       batches:                                                                    1
     orphaned fm_sitrep_analysis_report rows deleted:                              <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
       batches:                                                                    1
@@ -1672,6 +1682,8 @@ task: "fm_sitrep_gc"
       batches:                                                                    1
     orphaned fm_case rows deleted:                                                0
       batches:                                                                    1
+    orphaned fm_case_problem rows deleted:                                        0
+      batches:                                                                    1
     orphaned fm_ereport_in_case rows deleted:                                     0
       batches:                                                                    1
     orphaned fm_fact_certificate rows deleted:                                    0
@@ -1679,6 +1691,14 @@ task: "fm_sitrep_gc"
     orphaned fm_fact_physical_disk rows deleted:                                  0
       batches:                                                                    1
     orphaned fm_fact_saga rows deleted:                                           0
+      batches:                                                                    1
+    orphaned fm_problem rows deleted:                                             0
+      batches:                                                                    1
+    orphaned fm_problem_alert rows deleted:                                       0
+      batches:                                                                    1
+    orphaned fm_problem_revision rows deleted:                                    0
+      batches:                                                                    1
+    orphaned fm_problem_support_bundle rows deleted:                              0
       batches:                                                                    1
     orphaned fm_sitrep_analysis_report rows deleted:                              <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
       batches:                                                                    1

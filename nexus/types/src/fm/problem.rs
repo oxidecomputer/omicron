@@ -7,7 +7,15 @@
 //! These are *not* part of the external API; for that, see the
 //! [`crate::external_api::problem`] module.
 
+use chrono::{DateTime, Utc};
+use iddqd::IdOrdMap;
 use omicron_common::api::external::Error;
+use omicron_generation_kinds::ProblemRevNum;
+use omicron_uuid_kinds::AlertUuid;
+use omicron_uuid_kinds::ProblemUuid;
+use omicron_uuid_kinds::SitrepUuid;
+use omicron_uuid_kinds::SupportBundleUuid;
+use serde::{Deserialize, Serialize};
 
 /// A structured internal representation of problem codes.
 ///
@@ -27,7 +35,15 @@ use omicron_common::api::external::Error;
 ///
 /// [§7.2 RFD 699]: https://rfd.shared.oxide.computer/rfd/0699#problem-codes
 #[derive(
-    Copy, Clone, Debug, PartialEq, Eq, strum::VariantArray, strum::FromRepr,
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    strum::VariantArray,
+    strum::FromRepr,
+    Serialize,
+    Deserialize,
 )]
 #[repr(u32)]
 pub enum ProblemCode {
@@ -169,6 +185,161 @@ impl ProblemCodeDescription {
     pub fn is_retired(&self) -> bool {
         self.retired_in.is_some()
     }
+}
+
+/// The sitrep internal representation of a problem.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct SitrepProblem {
+    pub id: ProblemUuid,
+    /// The sitrep in which the diagnosis engine first created this problem.
+    ///
+    /// This remains the same as the problem is carried forward into
+    /// subsequent sitreps.
+    pub created_sitrep_id: SitrepUuid,
+    /// A human-readable comment explaining why the diagnosis engine created
+    /// this problem.
+    ///
+    /// This is used for debugging the sitrep, and is not part of the
+    /// externally visible problem.
+    pub comment: String,
+    pub revisions: IdOrdMap<SitrepRevision>,
+    /// Alerts linked to this problem, indexed by alert ID.
+    ///
+    /// See [`AlertLink`] for details.
+    pub alerts: IdOrdMap<AlertLink>,
+    /// Support bundles linked to this problem, indexed by support
+    /// bundle ID.
+    ///
+    /// See [`SupportBundleLink`] for details.
+    pub support_bundles: IdOrdMap<SupportBundleLink>,
+}
+
+impl iddqd::IdOrdItem for SitrepProblem {
+    type Key<'a> = &'a ProblemUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
+    }
+
+    iddqd::id_upcast!();
+}
+
+impl SitrepProblem {
+    pub fn current_revision(&self) -> &SitrepRevision {
+        self.revisions.last().expect(
+            "a problem in the sitrep must always have at least one \
+            revision!",
+        )
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct SitrepRevision {
+    pub number: ProblemRevNum,
+    /// The sitrep in which this revision was first created.
+    pub created_sitrep_id: SitrepUuid,
+    /// The time at which the problem was resolved, if it should be
+    /// resolved as of this revision.
+    ///
+    /// If this is `None`, the problem will remain active when this
+    /// revision is created.
+    pub time_resolved: Option<DateTime<Utc>>,
+    pub code: ProblemCode,
+    pub summary: String,
+    pub description: String,
+    pub action_required: String,
+    /// A human-readable comment explaining why the diagnosis engine requested
+    /// this revision.
+    ///
+    /// This is used for debugging the sitrep, and is not part of the
+    /// externally visible problem revision.
+    pub comment: String,
+}
+
+impl iddqd::IdOrdItem for SitrepRevision {
+    type Key<'a> = &'a ProblemRevNum;
+    fn key(&self) -> Self::Key<'_> {
+        &self.number
+    }
+
+    iddqd::id_upcast!();
+}
+
+/// A link between a problem and an alert.
+///
+/// Linked alerts form a timeline of events over the course of a problem
+/// (see [RFD 699][rfd]). An alert may be linked to a problem in the
+/// same sitrep that requests the alert, or in any later sitrep, including after
+/// the request has been removed from the sitrep. This may occur even if the
+/// alert was created prior to the problem. Therefore, a link refers to
+/// the alert only by its ID, and does not require that a corresponding
+/// [`AlertRequest`](super::case::AlertRequest) exist in the sitrep. The same
+/// alert may be linked to multiple problems.
+///
+/// A link exists for as long as the problem it belongs to remains in the
+/// sitrep, and is never removed from or modified problem once created.
+/// Therefore, rendezvous can create link records without needing a separate
+/// generation counter: as long as the problem itself exists, its links
+/// may be created during execution.
+///
+/// [rfd]: https://rfd.shared.oxide.computer/rfd/0699#alerts-as-timeline
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct AlertLink {
+    /// The ID of the linked alert.
+    pub alert_id: AlertUuid,
+    /// The problem revision with which the alert is associated.
+    ///
+    /// This is used to order a problem's alerts by revision.
+    pub revision: ProblemRevNum,
+    /// The sitrep in which this link was first created.
+    ///
+    /// This is *not* the sitrep that requested the alert, which may be an
+    /// earlier one.
+    pub linked_sitrep_id: SitrepUuid,
+    /// A human-readable comment explaining why the alert is linked to the
+    /// problem, for debugging purposes.
+    pub comment: String,
+}
+
+impl iddqd::IdOrdItem for AlertLink {
+    type Key<'a> = &'a AlertUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.alert_id
+    }
+
+    iddqd::id_upcast!();
+}
+
+/// A link between a problem and a support bundle.
+///
+/// Like [`AlertLink`]s, support bundle links may be created in the same sitrep
+/// that requests the support bundle or in any later sitrep, refer to the
+/// support bundle only by its ID, and are never removed or modified while
+/// the problem remains in the sitrep. The same support bundle may be
+/// linked to multiple problems.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct SupportBundleLink {
+    /// The ID of the linked support bundle.
+    pub support_bundle_id: SupportBundleUuid,
+    /// The problem revision with which the support bundle is
+    /// associated.
+    pub revision: ProblemRevNum,
+    /// The sitrep in which this link was first created.
+    ///
+    /// This is *not* the sitrep that requested the support bundle, which may be
+    /// an earlier one.
+    pub linked_sitrep_id: SitrepUuid,
+    /// A human-readable comment explaining why the support bundle is linked
+    /// to the problem, for debugging purposes.
+    pub comment: String,
+}
+
+impl iddqd::IdOrdItem for SupportBundleLink {
+    type Key<'a> = &'a SupportBundleUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.support_bundle_id
+    }
+
+    iddqd::id_upcast!();
 }
 
 #[cfg(test)]

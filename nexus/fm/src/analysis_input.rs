@@ -605,6 +605,7 @@ mod tests {
     use nexus_types::inventory::SpType;
     use nexus_types::support_bundle::BundleDataSelection;
     use omicron_generation_kinds::SitrepAlertGeneration;
+    use omicron_generation_kinds::SitrepProblemGeneration;
     use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_uuid_kinds::{
         CaseEreportUuid, CaseUuid, OmicronZoneUuid, SitrepUuid,
@@ -703,6 +704,7 @@ mod tests {
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
                     facts: Default::default(),
+                    problems: Default::default(),
                 }
             };
             let open_case2 = {
@@ -724,6 +726,7 @@ mod tests {
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
                     facts: Default::default(),
+                    problems: Default::default(),
                 }
             };
             let closed_case_with_unmarked = {
@@ -752,6 +755,7 @@ mod tests {
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
                     facts: Default::default(),
+                    problems: Default::default(),
                 }
             };
             let closed_case_without_unmarked = {
@@ -774,6 +778,7 @@ mod tests {
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
                     facts: Default::default(),
+                    problems: Default::default(),
                 }
             };
 
@@ -810,9 +815,11 @@ mod tests {
                     alert_generation: SitrepAlertGeneration::new(),
                     support_bundle_generation:
                         SitrepSupportBundleGeneration::new(),
+                    problem_generation: SitrepProblemGeneration::new(),
                 },
                 cases,
                 ereports_by_id,
+                problems: IdOrdMap::new(),
             };
             Arc::new((
                 SitrepVersion {
@@ -1093,11 +1100,13 @@ mod tests {
                 time_created: chrono::Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: IdOrdMap::new(),
             ereports_by_id: [Arc::new(unknown_seen.clone())]
                 .into_iter()
                 .collect(),
+            problems: IdOrdMap::new(),
         };
         let parent_version = SitrepVersion {
             id: parent_sitrep_id,
@@ -1160,9 +1169,11 @@ mod tests {
                 time_created: chrono::Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: [case].into_iter().collect(),
             ereports_by_id: IdOrdMap::new(),
+            problems: IdOrdMap::new(),
         };
         let parent_version = SitrepVersion {
             id: parent_sitrep_id,
@@ -1205,6 +1216,7 @@ mod tests {
             .collect(),
             support_bundles_requested: IdOrdMap::new(),
             facts: IdOrdMap::new(),
+            problems: IdOrdMap::new(),
         };
 
         let mut builder = builder_with_closed_case(closed_case);
@@ -1257,6 +1269,7 @@ mod tests {
             .collect(),
             support_bundles_requested: IdOrdMap::new(),
             facts: IdOrdMap::new(),
+            problems: IdOrdMap::new(),
         };
 
         let mut builder = builder_with_closed_case(closed_case);
@@ -1309,6 +1322,7 @@ mod tests {
             .into_iter()
             .collect(),
             facts: IdOrdMap::new(),
+            problems: IdOrdMap::new(),
         };
 
         let mut builder = builder_with_closed_case(closed_case);
@@ -1357,6 +1371,7 @@ mod tests {
             .into_iter()
             .collect(),
             facts: IdOrdMap::new(),
+            problems: IdOrdMap::new(),
         };
 
         let mut builder = builder_with_closed_case(closed_case);
