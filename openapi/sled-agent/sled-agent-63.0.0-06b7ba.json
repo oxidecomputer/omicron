@@ -10946,7 +10946,7 @@
         ]
       },
       "VmmStateRequested": {
-        "description": "Requestable running state of an Instance.\n\nA subset of [`omicron_common::api::external::InstanceState`].",
+        "description": "Requestable running state of an Instance.",
         "oneOf": [
           {
             "description": "Run this instance by migrating in from a previous running incarnation of the instance.",
