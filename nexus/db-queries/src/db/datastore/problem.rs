@@ -545,7 +545,7 @@ mod test {
             time_created: time_base
                 + chrono::TimeDelta::seconds(i64::from(revision)),
             time_resolved: None,
-            code: SqlU32::new(ProblemCode::NotARealProblem.into()),
+            code: SqlU32::new(ProblemCode::UnhealthyZpool.into()),
             summary: format!("My Cool Problem (rev {revision})"),
             description: format!(
                 "This is a bunch of interesting information about revision \
