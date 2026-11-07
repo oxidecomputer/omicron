@@ -16,6 +16,7 @@ use crate::db::model::IdentityType;
 use crate::db::model::RoleAssignment;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use diesel::result::Error as DieselError;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
@@ -25,6 +26,7 @@ use nexus_types::external_api::policy;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::bail_unless;
+use uuid::Uuid;
 
 impl DataStore {
     /// Load role assignments for built-in users and built-in roles into the
@@ -101,6 +103,29 @@ impl DataStore {
             .load_async::<RoleAssignment>(conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Delete all role assignments held by the given identity, on any
+    /// resource. Used when deleting users and groups so that deleted
+    /// identities don't linger in policies.
+    ///
+    /// Returns the raw diesel error so this can run inside a transaction;
+    /// callers outside one should map it with `public_error_from_diesel`.
+    pub(super) async fn role_assignment_delete_by_identity(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        identity_type: IdentityType,
+        identity_id: Uuid,
+    ) -> Result<(), DieselError> {
+        use nexus_db_schema::schema::role_assignment::dsl;
+
+        diesel::delete(dsl::role_assignment)
+            .filter(dsl::identity_type.eq(identity_type))
+            .filter(dsl::identity_id.eq(identity_id))
+            .execute_async(conn)
+            .await?;
+
+        Ok(())
     }
 
     /// Removes all existing externally-visble role assignments on
