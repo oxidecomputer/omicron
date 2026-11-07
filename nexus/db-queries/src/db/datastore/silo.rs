@@ -643,8 +643,7 @@ impl DataStore {
             "deleted {} silo group memberships for silo {}", updated_rows, id
         );
 
-        // delete role assignments held by the silo's groups, before the groups
-        // are marked deleted (same reasoning as for users above)
+        // delete role assignments held by the silo's groups
         let updated_rows =
             diesel::delete(role_assignment::dsl::role_assignment)
                 .filter(

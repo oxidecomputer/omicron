@@ -1740,7 +1740,9 @@ async fn test_silo_delete_clean_up_role_assignments(
     assert!(!fleet_ids.contains(&group_id));
 
     // The silo's policy can no longer be fetched through the API, so check
-    // the database directly.
+    // the database directly. This is empty only because every assignment on
+    // the silo was held by one of its own users or groups: silo deletion does
+    // not remove assignments on the silo held by identities from other silos.
     let silo_assignments = datastore
         .role_assignment_fetch_visible(&opctx, &authz_silo)
         .await

@@ -111,21 +111,21 @@ impl DataStore {
     ///
     /// Returns the raw diesel error so this can run inside a transaction;
     /// callers outside one should map it with `public_error_from_diesel`.
-    ///
-    /// Returns the number of rows deleted.
     pub(super) async fn role_assignment_delete_by_identity(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         identity_type: IdentityType,
         identity_id: Uuid,
-    ) -> Result<usize, DieselError> {
+    ) -> Result<(), DieselError> {
         use nexus_db_schema::schema::role_assignment::dsl;
 
         diesel::delete(dsl::role_assignment)
             .filter(dsl::identity_type.eq(identity_type))
             .filter(dsl::identity_id.eq(identity_id))
             .execute_async(conn)
-            .await
+            .await?;
+
+        Ok(())
     }
 
     /// Removes all existing externally-visble role assignments on
