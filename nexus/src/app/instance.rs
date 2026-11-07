@@ -268,10 +268,10 @@ impl InstanceStateChangeRequest {
                 VmmState::Reboot { acpi_timeout_secs: None }
             }
             Self::Reboot { skip_os_shutdown: false } => {
-                VmmState::Reboot { acpi_timeout_secs: None }
+                VmmState::Reboot { acpi_timeout_secs }
             }
             Self::Stop { skip_os_shutdown: true } => {
-                VmmState::Stopped { acpi_timeout_secs }
+                VmmState::Stopped { acpi_timeout_secs: None }
             }
             Self::Stop { skip_os_shutdown: false } => {
                 VmmState::Stopped { acpi_timeout_secs }
@@ -1509,12 +1509,14 @@ impl super::Nexus {
             } => {
                 let sa = self.sled_client(&sled_id).await?;
                 let acpi_timeout_secs = match requested {
-                    InstanceStateChangeRequest::Reboot { skip_os_shutdown }
-                    | InstanceStateChangeRequest::Stop { skip_os_shutdown }
-                        if !skip_os_shutdown =>
-                    {
-                        // TODO can sled-agent take the shutdown policy directly
-                        // instead of an option?
+                    InstanceStateChangeRequest::Reboot {
+                        skip_os_shutdown: false,
+                    }
+                    | InstanceStateChangeRequest::Stop {
+                        skip_os_shutdown: false,
+                    } => {
+                        // TODO can(/should) sled-agent take the shutdown policy
+                        // directly instead of an option?
                         match prev_instance_state
                             .shutdown_policy()
                             .map_err(InstanceStateChangeError::Other)?
