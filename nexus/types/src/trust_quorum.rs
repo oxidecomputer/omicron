@@ -272,6 +272,35 @@ impl ProposedTrustQuorumConfig {
             }
         }
     }
+
+    // Create a new `ProposedTrustQuorumConfig` with `sled_to_remove` removed
+    // from the membership. Return an error if the sled is not a member of the
+    // `latest_committed_config`.
+    pub fn remove_sled(
+        latest_committed_config: &TrustQuorumConfig,
+        new_epoch: Epoch,
+        sled_to_remove: &BaseboardId,
+    ) -> Result<Self, Error> {
+        let rack_id = latest_committed_config.rack_id;
+        let mut members: BTreeSet<_> =
+            latest_committed_config.members.keys().cloned().collect();
+
+        if !members.remove(sled_to_remove) {
+            return Err(Error::invalid_request(format!(
+                "Sled {} is not a member of the trust quorum.",
+                sled_to_remove
+            )));
+        }
+
+        Ok(ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: new_epoch,
+            is_lrtq_upgrade: IsLrtqUpgrade::No {
+                last_committed_epoch: latest_committed_config.epoch,
+            },
+            members,
+        })
+    }
 }
 
 /// Given the current trust quorum config returned by
@@ -461,5 +490,74 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn test_baseboard(serial: &str) -> BaseboardId {
+        BaseboardId {
+            part_number: "test-part".to_string(),
+            serial_number: serial.to_string(),
+        }
+    }
+
+    fn test_config(
+        num_members: usize,
+        epoch: Epoch,
+        state: TrustQuorumConfigState,
+    ) -> TrustQuorumConfig {
+        let members: BTreeSet<BaseboardId> = (0..num_members)
+            .map(|i| test_baseboard(&format!("member-{i}")))
+            .collect();
+        let coordinator = members.first().expect("at least one member").clone();
+        let mut config = TrustQuorumConfig::new_rss_committed_config(
+            RackUuid::new_v4(),
+            members,
+            coordinator,
+        );
+        config.epoch = epoch;
+        config.state = state;
+        config
+    }
+
+    #[test]
+    fn test_proposed_config_remove_sled() {
+        let config =
+            test_config(4, Epoch(5), TrustQuorumConfigState::Committed);
+        let sled_to_remove = test_baseboard("member-2");
+
+        let proposed = ProposedTrustQuorumConfig::remove_sled(
+            &config,
+            Epoch(6),
+            &sled_to_remove,
+        )
+        .expect("member sled is removed");
+        assert_eq!(
+            proposed,
+            ProposedTrustQuorumConfig {
+                rack_id: config.rack_id,
+                epoch: Epoch(6),
+                is_lrtq_upgrade: IsLrtqUpgrade::No {
+                    last_committed_epoch: Epoch(5),
+                },
+                members: [
+                    test_baseboard("member-0"),
+                    test_baseboard("member-1"),
+                    test_baseboard("member-3"),
+                ]
+                .into_iter()
+                .collect(),
+            }
+        );
+
+        let non_member = test_baseboard("not-a-member");
+        assert_eq!(
+            ProposedTrustQuorumConfig::remove_sled(
+                &config,
+                Epoch(6),
+                &non_member,
+            ),
+            Err(Error::invalid_request(format!(
+                "Sled {non_member} is not a member of the trust quorum."
+            ))),
+        );
     }
 }
