@@ -1095,6 +1095,7 @@ async fn insert_example_sitrep(
         }]
         .into_iter()
         .collect(),
+        problems: Default::default(),
     };
 
     // A case from an earlier sitrep. In this sitrep, an ereport was added and
@@ -1111,6 +1112,7 @@ async fn insert_example_sitrep(
         facts: Default::default(),
         alerts_requested: Default::default(),
         support_bundles_requested: Default::default(),
+        problems: Default::default(),
     };
 
     let empty_case = |n: u128,
@@ -1129,6 +1131,7 @@ async fn insert_example_sitrep(
         facts: Default::default(),
         alerts_requested: Default::default(),
         support_bundles_requested: Default::default(),
+        problems: Default::default(),
     };
     let unchanged_case = empty_case(
         40,

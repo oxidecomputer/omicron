@@ -84,7 +84,7 @@ impl Case {
                 // that would require passing in the whole sitrep...and, I'm on
                 // the fence as to whether that should be considered a change to
                 // the *case* or not...
-                p.created_sitrep_id == sitrep_id
+                p.linked_sitrep_id == sitrep_id
             })
     }
 }
