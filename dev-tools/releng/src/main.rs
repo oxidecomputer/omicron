@@ -28,6 +28,7 @@ use clap::Parser;
 use dev_tools_common::XtaskConfig;
 use dev_tools_common::verify_executable_libraries;
 use fs_err::tokio as fs;
+use omicron_pins::Pins;
 use omicron_zone_package::config::Config;
 use omicron_zone_package::config::PackageName;
 use omicron_zone_package::package::PackageSource;
@@ -45,16 +46,6 @@ use tufaceous_artifact::OsVariant;
 
 use crate::cmd::Command;
 use crate::job::Jobs;
-
-/// The base version we're currently building. Build information is appended to
-/// this later on.
-///
-/// Under current policy, each new release is a major version bump, and
-/// generally referred to only by the major version (e.g. 8.0.0 is referred
-/// to as "v8", "version 8", or "release 8" to customers). The use of semantic
-/// versioning is mostly to hedge for perhaps wanting something more granular in
-/// the future.
-const BASE_VERSION: Version = Version::new(24, 0, 0);
 
 const RETRY_ATTEMPTS: usize = 3;
 
@@ -263,7 +254,7 @@ async fn main() -> Result<()> {
         .trim()
         .to_owned();
 
-    let version = generate_version(&commit)?;
+    let version = generate_version(&pins, &commit)?;
     info!(logger, "version: {}", version);
 
     let xtask_config: Arc<XtaskConfig> = Arc::new(
@@ -1160,10 +1151,10 @@ async fn host_add_root_profile(host_proto_root: Utf8PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn generate_version(commit: &str) -> Result<Version> {
+fn generate_version(pins: &Pins, commit: &str) -> Result<Version> {
     const PADDED_WIDTH: usize = 8;
 
-    let mut version = BASE_VERSION.clone();
+    let mut version = pins.system_version.clone();
     // Differentiate between CI and local builds. We use `0.word` as the
     // prerelease field because it comes before `alpha`.
     version.pre =
