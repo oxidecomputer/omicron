@@ -5,13 +5,20 @@ not be automatically restarted.
 
 == Impact
 
-The unavailability of the impacted services may degrade some or all control
-plane functionality.
+The unavailability of the impacted services may degrade a variety of aspects of
+system functionality.
 
-The precise nature of the impact depends on the services that have failed. Some
-services may have sufficient redundancy to prevent any user- or operator-visible
-degradation, while others may prevent some or all control plane operation until
-the active problem is repaired.
+The precise nature of the impact depends on the services that have failed.
+Running instances, distributed disks, networking, and control plane functionality
+may all be degraded or unavailable.
+
+Some services may have sufficient redundancy to prevent any user- or
+operator-visible impact. Other services may impact the availability of resources
+on a particular sled, while resources on other sleds may remain remain
+unaffected. The failure of networking services may result in complete or partial
+loss of external network connectivity.
+
+Typically, this active problem does not cause unrecoverable data loss.
 
 == Action Required
 
