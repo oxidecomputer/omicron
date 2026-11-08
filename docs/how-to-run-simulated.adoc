@@ -341,3 +341,81 @@ $ curl -i --resolve test-suite-silo.sys.oxide-dev.test:12220:127.0.0.1 --cacert 
 ----
 +
 The Oxide CLI supports identical flags.
+
+== Running with a mock Oxide RoT
+
+`sled-agent-sim` can be run with support for the RoT endpoints by using a mock backend for the Oxide RoT. Currently this can only be accomplished by running `sled-agent-sim` by hand. Configuring the mock Oxide RoT requires three parameters that are all paths to files:
+
+- `--rot-alias-key`: a PKCS#8, PEM encoded signing key used to sign attestations
+- `--rot-cert-chain`: an x509, PEM encoded cert chain that begins with a cert for the alias-key
+- `--rot-log`: a hubpack encoded measurement log
+
+These artifacts can be generated from the specs provided in the `dice-util` repo. To generate them you must install a few tools and clone this repo locally:
+
+[source,text]
+----
+$ cargo install --git https://github.com/oxidecomputer/pki-playground
+$ cargo install --git https://github.com/oxidecomputer/dice-util attest-mock
+$ git clone https://github.com/oxidecomputer/dice-util
+----
+
+Then generate the artifacts in a dedicated directory:
+
+[source,text]
+----
+$ mkdir test-pki
+$ pki-playground --out-dir test-pki --config dice-util/verifier/test-pki.kdl
+$ attest-mock dice-util/oxide-rot/log.kdl log > test-pki/log.bin
+----
+
+Then pass the required artifacts to `sled-agent-sim` when launched:
+
+[source,text]
+----
+$ cargo run --binsled-agent-sim -- \
+    $(uuidgen) '[::1]:12345' '[::1]:12221' 12232 \
+    --rss-nexus-external-addr 127.0.0.1:12220 \
+    --rss-external-dns-internal-addr '[::1]:5353' \
+    --rss-internal-dns-dns-addr '[::1]:3535' \
+    --rot-alias-key test-pki/alias.key.pem \
+    --rot-cert-chain test-pki/alias.certlist.pem \
+    --rot-log test-pki/log.bin
+----
+
+You can then talk to the mock Oxide RoT hosted within `sled-agent-sim` by first installing the `verifier-cli` tool:
+
+[source,text]
+----
+$ cargo install --git https://github.com/oxidecomputer/dice-util verifier-cli --locked --features sled-agent
+----
+
+Get the cert chain from the mock Oxide RoT by way of `sled-agent-sim`:
+
+[source,text]
+------
+$ verifier-cli oxide sled-agent --addr '[::1]:12345' cert-chain
+-----BEGIN CERTIFICATE-----
+...
+------
+
+Same for the measurement log:
+
+[source,text]
+----
+$ verifier-cli oxide sled-agent --addr '[::1]:12345' log
+{"index":1,"measurements":[{"Sha3_256":[
+...
+----
+
+Finally get an attestation from the RoT w/ a nonce as the initial qualifying data:
+
+[source,text]
+----
+$ dd if=/dev/urandom of=nonce32.bin count=1 bs=32
+1+0 records in
+1+0 records out
+32 bytes copied, 0.000183113 s, 175 kB/s
+$ verifier-cli oxide sled-agent --addr '[::1]:12345' attest nonce32.bin
+{"Ed25519":[
+...
+----

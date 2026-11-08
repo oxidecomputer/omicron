@@ -154,7 +154,7 @@ impl Server {
             simulated_upstairs.clone(),
             sled_index,
         )
-        .await;
+        .await?;
 
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let http_server = dropshot::ServerBuilder::new(
