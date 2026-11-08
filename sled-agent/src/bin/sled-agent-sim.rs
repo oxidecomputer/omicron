@@ -15,8 +15,8 @@ use omicron_common::cmd::CmdError;
 use omicron_common::cmd::fatal;
 use omicron_sled_agent::sim::RssArgs;
 use omicron_sled_agent::sim::{
-    Config, ConfigHardware, ConfigStorage, ConfigZpool, SimMode, ZpoolConfig,
-    run_standalone_server,
+    Config, ConfigHardware, ConfigRot, ConfigStorage, ConfigZpool, SimMode,
+    ZpoolConfig, run_standalone_server,
 };
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -98,6 +98,21 @@ struct Args {
     /// agent initializes the rack, the specified certificate and private keys
     /// will be provided for the initial TLS certificates for the recovery silo.
     rss_tls_key: Option<Utf8PathBuf>,
+
+    #[clap(long, name = "ROT_ALIAS_KEY_PEM_FILE", action)]
+    /// PKCS#8 PEM encoded Ed25519 private key used by the mock RoT to sign
+    /// attestations. The `--rot-*` arguments must be provided together. If
+    /// none are provided the RoT endpoints are unimplemented.
+    rot_alias_key: Option<Utf8PathBuf>,
+
+    #[clap(long, name = "ROT_CERT_CHAIN_PEM_FILE", action)]
+    /// PEM encoded certificate chain for the mock RoT, starting with the leaf
+    /// certificate for ROT_ALIAS_KEY_PEM_FILE.
+    rot_cert_chain: Option<Utf8PathBuf>,
+
+    #[clap(long, name = "ROT_LOG_FILE", action)]
+    /// hubpack serialized measurement log for the mock RoT.
+    rot_log: Option<Utf8PathBuf>,
 }
 
 fn main() {
@@ -108,6 +123,18 @@ fn main() {
 
 async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
+
+    let rot = match (args.rot_alias_key, args.rot_cert_chain, args.rot_log) {
+        (None, None, None) => None,
+        (Some(alias_key), Some(cert_chain), Some(log)) => {
+            Some(ConfigRot { alias_key, cert_chain, log })
+        }
+        _ => {
+            return Err(CmdError::Usage(String::from(
+                "the --rot-* parameters must be provided together",
+            )));
+        }
+    };
 
     let config = Config {
         dropshot: ConfigDropshot {
@@ -136,6 +163,7 @@ async fn do_run() -> Result<(), CmdError> {
                 revision: 3,
             },
         },
+        rot,
         ..Config::for_testing(
             args.uuid,
             args.rack_id,
