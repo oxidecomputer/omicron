@@ -86,7 +86,7 @@ struct ValidatedConfig {
     config: TrustQuorumConfig,
     // The last committed configuration should have its state changed from
     // committing to committed-partially.
-    commit_partially: bool,
+    commit_partially_epoch: Option<Epoch>,
 }
 
 impl DataStore {
@@ -470,15 +470,11 @@ impl DataStore {
                             .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
                     // Mark the old configuration as committed-partially
-                    //
-                    // Safe to unwrap because we validated that there is a last
-                    // committed configuration and that it needs to be committed
-                    // partially.
-                    if validated.commit_partially {
+                    if let Some(epoch) = validated.commit_partially_epoch {
                         Self::updated_tq_state_committed_partially_conn(
                             &c,
                             validated.config.rack_id,
-                            validated.config.last_committed_epoch.unwrap(),
+                            epoch,
                         )
                         .await
                         .map_err(|txn_error| txn_error.into_diesel(&err))?;
@@ -679,7 +675,7 @@ impl DataStore {
         // all nodes, but it may have received enough nodes to allow a new
         // configuration to be installed. If the latter is true then we must
         // mark the old configuration `CommittedPartially` in the DB.
-        let mut should_commit_partially = false;
+        let mut commit_partially_epoch = None;
 
         // At this point we have either loaded the proposed last committed
         // configuration or there is not one.
@@ -709,7 +705,7 @@ impl DataStore {
                         ))
                         .into());
                     }
-                    should_commit_partially = true;
+                    commit_partially_epoch = Some(last_committed_config.epoch);
                 }
 
                 // A coordinator must have acked a commit in the prior configuration
@@ -751,7 +747,7 @@ impl DataStore {
         // Convert proposal to a new `TrustQuorumConfig`
         Ok(ValidatedConfig {
             config: TrustQuorumConfig::new(proposed, coordinator),
-            commit_partially: should_commit_partially,
+            commit_partially_epoch,
         })
     }
 
