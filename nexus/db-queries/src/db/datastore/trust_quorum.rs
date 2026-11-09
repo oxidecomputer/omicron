@@ -2503,13 +2503,7 @@ mod tests {
             .await
             .expect("no error")
             .expect("returned config");
-        assert_eq!(
-            TrustQuorumConfig {
-                time_created: stored_config.time_created,
-                ..inserted_config.clone()
-            },
-            stored_config,
-        );
+        assert_eq!(inserted_config, stored_config);
 
         let read_config = datastore
             .tq_get_config(opctx, make_authz_tq(rack_id), Epoch(2))
