@@ -719,7 +719,7 @@ oxide-update-engine = "0.1.2"
 oxide-update-engine-types = { version = "0.1.2", features = ["schemars08"] }
 oxide-update-engine-display = "0.1.2"
 oxide-versioned-envelope = { version = "0.1.1", features = ["schemars08"] }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "09edd038e55769693312c454895634f7fc324dde", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "0a096fa455c1c2136b9090550c5002297d759a5b", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.7"
 once_cell = "1.21.3"
@@ -728,7 +728,7 @@ openapiv3 = "2.2.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "09edd038e55769693312c454895634f7fc324dde" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "0a096fa455c1c2136b9090550c5002297d759a5" }
 oso = "0.27"
 owo-colors = "4.2.2"
 oximeter = { path = "oximeter/oximeter" }
@@ -773,11 +773,11 @@ progenitor-extras = "0.3.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "3e46887a3a9628af7f05353c719905e59927ed63" }
-propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "3e46887a3a9628af7f05353c719905e59927ed63" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "3e46887a3a9628af7f05353c719905e59927ed63" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "3e46887a3a9628af7f05353c719905e59927ed63" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "3e46887a3a9628af7f05353c719905e59927ed63" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "1658a5d2378ee6979b5b888a44db3b8ca6570a65" }
+propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "1658a5d2378ee6979b5b888a44db3b8ca6570a65" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "1658a5d2378ee6979b5b888a44db3b8ca6570a65" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "1658a5d2378ee6979b5b888a44db3b8ca6570a65" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "1658a5d2378ee6979b5b888a44db3b8ca6570a65" }
 # NOTE: see above!
 proptest = "1.11.0"
 qorb = "0.4.1"
