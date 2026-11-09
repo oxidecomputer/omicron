@@ -15069,6 +15069,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxnet",
  "schemars 0.8.22",
  "semver 1.0.28",
  "serde",
