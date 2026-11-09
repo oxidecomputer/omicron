@@ -172,13 +172,14 @@ impl From<ProblemView> for api::Problem {
             action_required,
         } = view;
         let state = match time_resolved {
-            Some(_) => api::ProblemState::Resolved,
+            Some(time_resolved) => {
+                api::ProblemState::Resolved { time_resolved }
+            }
             None => api::ProblemState::Active,
         };
         Self {
             identity,
             revision: revision.as_u64(),
-            time_resolved,
             state,
             code: code.into(),
             class: code.description().class.to_string(),

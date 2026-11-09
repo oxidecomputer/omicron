@@ -53,11 +53,6 @@ use crate::v2025_11_20_00::asset::AssetIdentityMetadata;
 pub struct Problem {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
-    /// If this problem is in the "resolved" state, the time at which the
-    /// problem was resolved.
-    ///
-    /// This field is non-null if, and only if, the `state` field is "resolved".
-    pub time_resolved: Option<DateTime<Utc>>,
     /// The current state of this problem.
     pub state: ProblemState,
     /// The current revision number of this problem.
@@ -106,8 +101,20 @@ pub struct Problem {
 }
 
 /// The state of a problem.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    strum::EnumDiscriminants,
+)]
+#[strum_discriminants(name(ProblemStateFilter))]
+#[strum_discriminants(derive(Serialize, Deserialize, JsonSchema))]
+#[strum_discriminants(serde(rename_all = "snake_case"))]
+#[serde(tag = "state", rename_all = "snake_case")]
 pub enum ProblemState {
     /// The condition represented by the problem is still ongoing.
     Active,
@@ -117,7 +124,10 @@ pub enum ProblemState {
     /// detected again, a new problem with a new ID is created.
     ///
     /// Resolved problems are retained for historical purposes.
-    Resolved,
+    Resolved {
+        /// The time at which the problem was determined to be resolved.
+        time_resolved: DateTime<Utc>,
+    },
 }
 
 /// Query parameters for listing problems
@@ -127,7 +137,7 @@ pub struct ProblemListParams {
     ///
     /// If this is included, only problems in the specified state will
     /// be returned. Otherwise, problems in all states will be returned.
-    pub state: Option<ProblemState>,
+    pub state: Option<ProblemStateFilter>,
 }
 
 /// A problem that is a cause or consequence of another problem
@@ -227,7 +237,19 @@ pub enum ImpactedResource {
 
 /// Describes whether a resource impacted by an active problem is currently
 /// impacted by that problem, or why it is no longer impacted.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    strum::EnumDiscriminants,
+)]
+#[strum_discriminants(name(ImpactStateFilter))]
+#[strum_discriminants(derive(Serialize, Deserialize, JsonSchema))]
+#[strum_discriminants(serde(rename_all = "snake_case"))]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum ImpactState {
     /// The resource is currently impacted by the active problem.
@@ -248,13 +270,8 @@ pub enum ImpactState {
 /// Query parameters for listing resources impacted by an active problem.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ImpactListParams {
-    /// Optional filter to determine whether to include only resources which are
-    /// actively impacted, or resources which are no longer impacted.
-    ///
-    /// If this is `true`, only resources which are actively impacted will be
-    /// returned. If this is `false`, only resources which are no longer
-    /// impacted will be returned. If this is not included, all resources which
-    /// have ever been impacted by this problem will be returned, regardless of
-    /// whether or not they are currently impacted.
-    pub active: Option<bool>,
+    /// Optional filter to determine whether to include only impacts with the
+    /// specified `ImpactState`. If this is not included, all impacts will be
+    /// returned, regardless of their `ImpactState`.
+    pub state: Option<ImpactStateFilter>,
 }
