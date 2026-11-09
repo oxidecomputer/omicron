@@ -36,7 +36,7 @@
 use crate::config::SushConfig;
 use anyhow::{Context, ensure};
 use camino::{Utf8Path, Utf8PathBuf};
-use dice_verifier::verify_cert_chain;
+use dice_verifier::verify_cert_chain as verify_platform_cert_chain;
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer, ServerBuilder};
 use futures::StreamExt as _;
 use futures::stream::FuturesUnordered;
@@ -533,7 +533,7 @@ async fn trust_anchors(log: &Logger, config: &SushConfig) -> Vec<Utf8PathBuf> {
     })
     .await
     .context("fetching the platform identity")
-    .and_then(|result| result)
+    .flatten()
     {
         Ok(false) => info!(
             log,
@@ -573,7 +573,7 @@ fn is_sled_staging_signed(
         "{production} is a staging root, not production"
     );
     let roots = [production_root, staging_root.clone()];
-    let root = verify_cert_chain(&chain, Some(&roots))
+    let root = verify_platform_cert_chain(&chain, Some(&roots))
         .context("verifying the platform identity")?;
     Ok(*root == staging_root)
 }
