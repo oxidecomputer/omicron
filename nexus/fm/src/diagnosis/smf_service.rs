@@ -100,11 +100,11 @@ fn parse_case(case: &fm::Case) -> Result<ParsedCase, UninterpretableCase> {
 }
 
 /// What the current inventory says about one sled's SMF services.
-enum SledObservation {
+enum SledObservation<'a> {
     /// The sled reported its services. `in_maintenance` holds the non-Propolis
     /// services in maintenance, keyed by `(zone_name, fmri)`.
     Observed {
-        in_maintenance: BTreeSet<(String, String)>,
+        in_maintenance: BTreeSet<(&'a str, &'a str)>,
         /// False if some `svcs` output lines could not be parsed.
         complete: bool,
         time_of_status: chrono::DateTime<chrono::Utc>,
@@ -118,7 +118,7 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     let inv = input.inventory();
     let in_service_sleds = input.in_service_sleds();
 
-    let observations: BTreeMap<SledUuid, SledObservation> = inv
+    let observations: BTreeMap<SledUuid, SledObservation<'_>> = inv
         .sled_agents
         .iter()
         .map(|sa| {
@@ -133,7 +133,7 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                                     == SvcEnabledNotOnlineState::Maintenance
                                     && !is_propolis_zone(&svc.zone)
                             })
-                            .map(|svc| (svc.zone.clone(), svc.fmri.clone()))
+                            .map(|svc| (svc.zone.as_str(), svc.fmri.as_str()))
                             .collect(),
                         complete: svcs.errors.is_empty(),
                         time_of_status: svcs.time_of_status,
@@ -210,8 +210,8 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                     complete: true,
                     ..
                 }) if !in_maintenance.contains(&(
-                    service.zone_name.clone(),
-                    service.fmri.clone(),
+                    service.zone_name.as_str(),
+                    service.fmri.as_str(),
                 )) =>
                 {
                     format!("{service} no longer reported in maintenance")
@@ -242,8 +242,8 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         for (zone_name, fmri) in in_maintenance {
             let service = ServiceKey {
                 sled_id: *sled_id,
-                zone_name: zone_name.clone(),
-                fmri: fmri.clone(),
+                zone_name: zone_name.to_string(),
+                fmri: fmri.to_string(),
             };
             if cases.contains_key2(&&service) {
                 continue;
@@ -255,8 +255,8 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             case.add_fact(
                 SmfServiceFact::InMaintenance(SmfServiceFactPayload {
                     sled_id: *sled_id,
-                    zone_name: zone_name.clone(),
-                    fmri: fmri.clone(),
+                    zone_name: zone_name.to_string(),
+                    fmri: fmri.to_string(),
                     observed_in_inv: inv.id,
                     time_observed: *time_of_status,
                 }),
