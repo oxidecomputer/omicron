@@ -751,7 +751,10 @@ impl UpdatesRequired {
             // We no longer have a VMM.
             new_runtime.nexus_state = if active_vmm_failed {
                 InstanceState::Failed
-            } else if let Some(g) = active_vmm_update_disposition_gen {
+            } else if let Some(g) = active_vmm_update_disposition_gen
+                && snapshot.instance.intended_state
+                    == InstanceIntendedState::Running
+            {
                 info!(
                     log,
                     "instance update: VMM was stopped due to its sled being \
@@ -1622,19 +1625,14 @@ async fn siu_chain_successor_saga(
 }
 
 fn reincarnate_if_needed(osagactx: &SagaContext, state: &InstanceGestalt) {
-    // If the instance has transitioned to the `Failed` state and no
-    // additional update saga is required, check if the instance's
-    // auto-restart policy allows it to be automatically restarted. If
-    // it does, activate the instance-reincarnation background task to
-    // automatically restart it.
     let karmic_state =
         state.instance.auto_restart_status(state.active_vmm.as_ref());
     if karmic_state.should_reincarnate() {
         info!(
             &osagactx.log(),
-            "instance update: instance transitioned to Failed, \
+            "instance update: instance transitioned to {}, \
              but can be automatically restarted; activating \
-             reincarnation.";
+             reincarnation.", state.instance.nexus_state;
             "instance_id" => %state.instance.id(),
             "auto_restart_config" => ?state.instance.auto_restart,
             "runtime_state" => ?state.instance.runtime(),
@@ -2061,6 +2059,85 @@ mod test {
             PROJECT_NAME,
         )
         .await;
+    }
+
+    #[test]
+    fn test_ensure_sled_evacuating_only_if_intended_state_running() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_ensure_sled_evacuating_only_if_intended_state_running",
+        );
+
+        let params = instance_types::InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: INSTANCE_NAME.parse().unwrap(),
+                description: format!("instance {:?}", INSTANCE_NAME),
+            },
+            ncpus: InstanceCpuCount(1),
+            memory: ByteCount::from_gibibytes_u32(1),
+            hostname: INSTANCE_NAME.parse().unwrap(),
+            user_data: Vec::new(),
+            ssh_public_keys: None,
+            network_interfaces:
+                instance_types::InstanceNetworkInterfaceAttachment::None,
+            external_ips: Vec::new(),
+            disks: Vec::new(),
+            boot_disk: None,
+            cpu_platform: None,
+            start: true,
+            auto_restart_policy: None,
+            anti_affinity_groups: Vec::new(),
+            multicast_groups: Vec::new(),
+            enable_jumbo_frames: false,
+        };
+
+        // Check the instance state changes to `SledEvacuating` only if it's
+        // intended to be running. Otherwise, it should change to `NoVmm`
+        for (intended_state, expected_instance_state) in [
+            (InstanceIntendedState::Running, InstanceState::SledEvacuating),
+            (InstanceIntendedState::Stopped, InstanceState::NoVmm),
+            (InstanceIntendedState::GuestShutdown, InstanceState::NoVmm),
+            (InstanceIntendedState::Destroyed, InstanceState::NoVmm),
+        ] {
+            let instance_id = InstanceUuid::new_v4();
+            let vmm_id = PropolisUuid::new_v4();
+
+            let mut instance =
+                Instance::new(instance_id, ProjectUuid::new_v4(), &params);
+            instance.nexus_state = InstanceState::Vmm;
+            instance.propolis_id = Some(vmm_id.into_untyped_uuid());
+            instance.intended_state = intended_state;
+
+            let mut vmm = Vmm::new(
+                vmm_id,
+                instance_id,
+                SledUuid::new_v4(),
+                "10.1.9.42".parse().unwrap(),
+                420,
+                db::model::VmmCpuPlatform::SledDefault,
+            );
+            vmm.state = VmmState::Destroyed;
+            vmm.stop_for_update_disposition_generation = Some(
+                omicron_generation_kinds::UpdateDispositionGeneration::from(1)
+                    .into(),
+            );
+
+            let snapshot = InstanceGestalt {
+                instance,
+                active_vmm: Some(vmm),
+                target_vmm: None,
+                migration: None,
+            };
+            let update = UpdatesRequired::for_instance(&logctx.log, &snapshot)
+                .expect("the destroyed active VMM requires an update");
+
+            let found_instance_state = update.new_runtime.nexus_state;
+            assert_eq!(
+                found_instance_state, expected_instance_state,
+                "unexpected instance state when the intended state is {intended_state:?}",
+            );
+        }
+
+        logctx.cleanup_successful();
     }
 
     // === Active VMM destroyed tests ===

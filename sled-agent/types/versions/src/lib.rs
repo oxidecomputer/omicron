@@ -127,8 +127,10 @@ pub mod v60;
 pub mod v61;
 #[path = "add_sled_registration_info/mod.rs"]
 pub mod v62;
-#[path = "add_acpi_shutdown_timeout/mod.rs"]
+#[path = "multirack_join_complete_generation/mod.rs"]
 pub mod v63;
+#[path = "add_acpi_shutdown_timeout/mod.rs"]
+pub mod v64;
 #[path = "multicast_support/mod.rs"]
 pub mod v7;
 #[path = "delegate_zvol_to_propolis/mod.rs"]

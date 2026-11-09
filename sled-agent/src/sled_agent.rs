@@ -405,6 +405,20 @@ impl From<Error> for dropshot::HttpError {
                 let err = omicron_common::api::external::Error::from(err);
                 err.into()
             }
+            Error::MultirackJoin(
+                err @ RssAccessError::MultirackJoinGenerationUnavailable,
+            ) => HttpError::for_client_error(
+                Some(err.error_code().to_string()),
+                ClientErrorStatusCode::GONE,
+                err.to_string(),
+            ),
+            Error::MultirackJoin(
+                err @ RssAccessError::MultirackJoinPendingConfigUpdate,
+            ) => HttpError::for_client_error(
+                Some(err.error_code().to_string()),
+                ClientErrorStatusCode::CONFLICT,
+                err.to_string(),
+            ),
             err @ (Error::BootDiskNotFound
             | Error::Config(_)
             | Error::BackingFs(_)
@@ -1743,10 +1757,15 @@ impl SledAgent {
             .map_err(|e| Error::Instance(e))
     }
 
-    /// Complete a multirack join operation
-    pub(crate) fn complete_multirack_join(&self) -> Result<(), Error> {
-        self.inner.multirack_join_accessor.complete_multirack_join()?;
-        Ok(())
+    /// Complete a multirack join operation and return the final bootstore
+    /// generation
+    pub(crate) async fn complete_multirack_join(&self) -> Result<u64, Error> {
+        let generation = self
+            .inner
+            .multirack_join_accessor
+            .complete_multirack_join()
+            .await?;
+        Ok(generation)
     }
 
     pub(crate) fn multirack_join_service_status(
