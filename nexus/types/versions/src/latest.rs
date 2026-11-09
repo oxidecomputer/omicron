@@ -374,6 +374,8 @@ pub mod probe {
 }
 
 pub mod problem {
+    pub use crate::v2026_11_05_00::problem::ImpactListParams;
+    pub use crate::v2026_11_05_00::problem::ImpactState;
     pub use crate::v2026_11_05_00::problem::ImpactedResource;
     pub use crate::v2026_11_05_00::problem::Problem;
     pub use crate::v2026_11_05_00::problem::ProblemImpact;

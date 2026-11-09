@@ -9173,7 +9173,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn problem_impact_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<problem::ProblemSelector>,
-        query_params: Query<PaginatedById>,
+        query_params: Query<PaginatedById<problem::ImpactListParams>>,
     ) -> Result<HttpResponseOk<ResultsPage<problem::ProblemImpact>>, HttpError>
     {
         let apictx = rqctx.context();
@@ -9182,11 +9182,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let query = query_params.into_inner();
+            let scan_params = ScanById::from_query(&query)?;
             let pag_params = data_page_params_for(&rqctx, &query)?;
             let problem_lookup =
                 nexus.problem_lookup(&opctx, path_params.into_inner())?;
-            let impacts =
-                nexus.problem_impact_list(&problem_lookup, &pag_params).await?;
+            let impacts = nexus
+                .problem_impact_list(
+                    &problem_lookup,
+                    &scan_params.selector,
+                    &pag_params,
+                )
+                .await?;
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 impacts,

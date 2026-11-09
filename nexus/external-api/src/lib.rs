@@ -9676,7 +9676,7 @@ pub trait NexusExternalApi {
     async fn problem_impact_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::problem::ProblemSelector>,
-        pagination: Query<PaginatedById>,
+        pagination: Query<PaginatedById<latest::problem::ImpactListParams>>,
     ) -> Result<
         HttpResponseOk<ResultsPage<latest::problem::ProblemImpact>>,
         HttpError,

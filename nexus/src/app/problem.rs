@@ -88,6 +88,7 @@ impl Nexus {
     pub async fn problem_impact_list(
         &self,
         problem_lookup: &lookup::Problem<'_>,
+        _selector: &api::ImpactListParams,
         _pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<api::ProblemImpact> {
         let (.., _authz_problem) =

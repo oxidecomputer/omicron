@@ -11890,6 +11890,15 @@
           },
           {
             "in": "query",
+            "name": "active",
+            "description": "Optional filter to determine whether to include only resources which are actively impacted, or resources which are no longer impacted.\n\nIf this is `true`, only resources which are actively impacted will be returned. If this is `false`, only resources which are no longer impacted will be returned. If this is not included, all resources which have ever been impacted by this problem will be returned, regardless of whether or not they are currently impacted.",
+            "schema": {
+              "nullable": true,
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "description": "Maximum number of items returned by a single call",
             "schema": {
@@ -23581,6 +23590,66 @@
           }
         ]
       },
+      "ImpactState": {
+        "description": "Describes whether a resource impacted by an active problem is currently impacted by that problem, or why it is no longer impacted.",
+        "oneOf": [
+          {
+            "description": "The resource is currently impacted by the active problem.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "active"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The resource has returned to a healthy state due to automated response or operator actions. It is no longer impacted by this problem, even if the problem remains active.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "recovered"
+                ]
+              },
+              "time_recovered": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "state",
+              "time_recovered"
+            ]
+          },
+          {
+            "description": "The resource is no longer impacted by the problem because the resource has been removed from service by an operator action.\n\nThis occurs when an operator (or Oxide support) expunges a hardware resource (such as a physical disk or compute sled), or when a virtual resource (such as an instance or virtual disk) is deleted.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "out_of_service"
+                ]
+              },
+              "time_removed_from_service": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "state",
+              "time_removed_from_service"
+            ]
+          }
+        ]
+      },
       "ImpactedResource": {
         "description": "API resource types which may be impacted by a problem.",
         "oneOf": [
@@ -27552,13 +27621,28 @@
             "type": "integer",
             "format": "uint64",
             "minimum": 0
+          },
+          "state": {
+            "description": "Whether or not the resource remains impacted by the problem.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImpactState"
+              }
+            ]
+          },
+          "time_detected": {
+            "description": "The time at which the system first determined this resource to be impacted by the problem.\n\nNote: impact to this resource may predate this timestamp. This represents the first time at which the system detected the impact to this resource and determine that it was due to this problem.",
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
           "problem_id",
           "reason",
           "resource",
-          "revision_added"
+          "revision_added",
+          "state",
+          "time_detected"
         ]
       },
       "ProblemImpactResultsPage": {

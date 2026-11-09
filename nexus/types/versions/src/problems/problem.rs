@@ -161,6 +161,15 @@ pub struct ProblemImpact {
     pub problem_id: ProblemUuid,
     /// The impacted resource's type and ID.
     pub resource: ImpactedResource,
+    /// The time at which the system first determined this resource to be
+    /// impacted by the problem.
+    ///
+    /// Note: impact to this resource may predate this timestamp. This
+    /// represents the first time at which the system detected the
+    /// impact to this resource and determine that it was due to this problem.
+    pub time_detected: DateTime<Utc>,
+    /// Whether or not the resource remains impacted by the problem.
+    pub state: ImpactState,
     /// The revision of the problem in which this impact was added.
     pub revision_added: u64,
     /// A human-readable summary of how this resource is impacted by the
@@ -214,4 +223,38 @@ pub enum ImpactedResource {
     /// A silo.
     Silo { id: Uuid },
     // TODO: This list is incomplete! You can help by expanding it.
+}
+
+/// Describes whether a resource impacted by an active problem is currently
+/// impacted by that problem, or why it is no longer impacted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum ImpactState {
+    /// The resource is currently impacted by the active problem.
+    Active,
+    /// The resource has returned to a healthy state due to automated response
+    /// or operator actions. It is no longer impacted by this problem, even if
+    /// the problem remains active.
+    Recovered { time_recovered: DateTime<Utc> },
+    /// The resource is no longer impacted by the problem because the resource
+    /// has been removed from service by an operator action.
+    ///
+    /// This occurs when an operator (or Oxide support) expunges a hardware
+    /// resource (such as a physical disk or compute sled), or when a virtual
+    /// resource (such as an instance or virtual disk) is deleted.
+    OutOfService { time_removed_from_service: DateTime<Utc> },
+}
+
+/// Query parameters for listing resources impacted by an active problem.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ImpactListParams {
+    /// Optional filter to determine whether to include only resources which are
+    /// actively impacted, or resources which are no longer impacted.
+    ///
+    /// If this is `true`, only resources which are actively impacted will be
+    /// returned. If this is `false`, only resources which are no longer
+    /// impacted will be returned. If this is not included, all resources which
+    /// have ever been impacted by this problem will be returned, regardless of
+    /// whether or not they are currently impacted.
+    pub active: Option<bool>,
 }
